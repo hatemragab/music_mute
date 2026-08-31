@@ -1,0 +1,45 @@
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# IDE & editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Code review / analysis artifacts
+.code-review-graph/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+vocal_remover_mobile/build/
+*.lock

@@ -1,0 +1,99 @@
+# Cloud Build: build → push → deploy (api Service + worker Job)
+# Replaces docker-compose + nginx + VPS deploy.
+#
+# Required substitutions (pass via --substitutions or triggers):
+#   _GCP_PROJECT_ID  e.g. my-project-123
+#   _IMAGE_TAG       e.g. git-sha or v1.2.3 (default: latest)
+#   _GCP_REGION      e.g. us-central1
+#   _S3_BUCKET       e.g. my-vocal-remover-bucket
+#   _MONGODB_URI     Atlas SRV URI (secret; prefer Secret Manager in prod)
+#   _AR_REPO         Artifact Registry repo name (default: vocal-remover)
+#
+# Env vars for the deployed services are set explicitly so Cloud Build
+# does not need to read a .env file. Extend --set-env-vars / --update-env-vars
+# as needed. Secrets should be wired via --set-secrets in production
+# (see deploy/deploy.sh for the Secret Manager variant).
+#
+# Usage:
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --substitutions=_GCP_PROJECT_ID=my-project,_IMAGE_TAG=$(git rev-parse --short HEAD),_GCP_REGION=us-central1,_S3_BUCKET=my-bucket,_MONGODB_URI="mongodb+srv://..."
+
+substitutions:
+  _GCP_PROJECT_ID: "<GCP_PROJECT_ID>"
+  _GCP_REGION: "us-central1"
+  _IMAGE_TAG: "latest"
+  _S3_BUCKET: "<S3_BUCKET>"
+  _MONGODB_URI: "<MONGODB_URI>"
+  _AR_REPO: "vocal-remover"
+
+images:
+  - "${_GCP_REGION}-docker.pkg.dev/${_GCP_PROJECT_ID}/${_AR_REPO}/api:${_IMAGE_TAG}"
+
+steps:
+  # 1) Build single image (api + worker share it; worker overrides CMD)
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-t"
+      - "${_GCP_REGION}-docker.pkg.dev/${_GCP_PROJECT_ID}/${_AR_REPO}/api:${_IMAGE_TAG}"
+      - "."
+
+  # 2) Push to Artifact Registry
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "${_GCP_REGION}-docker.pkg.dev/${_GCP_PROJECT_ID}/${_AR_REPO}/api:${_IMAGE_TAG}"
+
+  # 3) Deploy Cloud Run Service (api)
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      - "run"
+      - "deploy"
+      - "vocal-remover-api"
+      - "--image=${_GCP_REGION}-docker.pkg.dev/${_GCP_PROJECT_ID}/${_AR_REPO}/api:${_IMAGE_TAG}"
+      - "--region=${_GCP_REGION}"
+      - "--allow-unauthenticated"
+      - "--memory=2Gi"
+      - "--cpu=2"
+      - "--min-instances=0"
+      - "--max-instances=5"
+      - "--set-env-vars=S3_BUCKET=${_S3_BUCKET},MONGODB_URI=${_MONGODB_URI},GCP_PROJECT_ID=${_GCP_PROJECT_ID},GCP_REGION=${_GCP_REGION},MODEL_DIR=/app/models,DEFAULT_MODEL=UVR-MDX-NET-Inst_HQ_3"
+
+  # 4) Create-or-update Cloud Run Job (workers)
+  #    gcloud run jobs update fails if the job does not exist yet, so we
+  #    try update and fall back to create. The script below is the
+  #    idiomatic Cloud Build pattern for idempotent job deploy.
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: bash
+    args:
+      - "-c"
+      - |
+        set -e
+        IMAGE="${_GCP_REGION}-docker.pkg.dev/${_GCP_PROJECT_ID}/${_AR_REPO}/api:${_IMAGE_TAG}"
+        if gcloud run jobs describe vocal-remover-worker --region=${_GCP_REGION} --project=${_GCP_PROJECT_ID} >/dev/null 2>&1; then
+          echo "Updating existing Cloud Run Job: vocal-remover-worker"
+          gcloud run jobs update vocal-remover-worker \
+            --image="$$IMAGE" \
+            --region=${_GCP_REGION} \
+            --project=${_GCP_PROJECT_ID} \
+            --memory=8Gi \
+            --cpu=4 \
+            --task-timeout=900 \
+            --set-env-vars=S3_BUCKET=${_S3_BUCKET},MONGODB_URI=${_MONGODB_URI},GCP_PROJECT_ID=${_GCP_PROJECT_ID},GCP_REGION=${_GCP_REGION},MODEL_DIR=/app/models,DEFAULT_MODEL=UVR-MDX-NET-Inst_HQ_3
+        else
+          echo "Creating Cloud Run Job: vocal-remover-worker"
+          gcloud run jobs create vocal-remover-worker \
+            --image="$$IMAGE" \
+            --region=${_GCP_REGION} \
+            --project=${_GCP_PROJECT_ID} \
+            --memory=8Gi \
+            --cpu=4 \
+            --task-timeout=900 \
+            --set-env-vars=S3_BUCKET=${_S3_BUCKET},MONGODB_URI=${_MONGODB_URI},GCP_PROJECT_ID=${_GCP_PROJECT_ID},GCP_REGION=${_GCP_REGION},MODEL_DIR=/app/models,DEFAULT_MODEL=UVR-MDX-NET-Inst_HQ_3 \
+            --command="python,-m,app.workers.separation"
+        fi
+
+timeout: 1200s
+options:
+  logging: CLOUD_LOGGING_ONLY
