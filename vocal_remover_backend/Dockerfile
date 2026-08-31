@@ -4,8 +4,11 @@
 # System deps + Python deps. Reused by both api and worker (single image).
 FROM python:3.11-slim AS base
 
-# ffmpeg + runtime libs required by python-magic / libsndfile / curl (HEALTHCHECK)
+# ffmpeg + build tools + runtime libs required by diffq / python-magic / libsndfile / curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        gcc \
+        g++ \
         ffmpeg \
         libsndfile1 \
         libmagic1 \
@@ -44,6 +47,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8000}/api/v1/health || exit 1
 
-# Default entrypoint is the API. Workers override the command via
-# Cloud Run Jobs:  --command "python,-m,app.workers.separation"
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default entrypoint is the API. Cloud Run injects $PORT (default 8080).
+# Workers override the command via Cloud Run Jobs: --command "python,-m,app.workers.separation"
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

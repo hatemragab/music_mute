@@ -6,7 +6,7 @@ import re
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional, Union
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -321,8 +321,8 @@ async def list_models():
 @limiter.limit("10/minute")
 async def separate(
     request: Request,
-    file: UploadFile | None = File(default=None),
-    youtube_url: str | None = Form(default=None),
+    file: Optional[UploadFile] = File(default=None),
+    youtube_url: Optional[str] = Form(default=None),
     model: str = Form(default=""),
     stems: str = Form(default="2stems"),
 ):
