@@ -110,7 +110,7 @@ export type UserDocument = HydratedDocument<User>;
 export const UserSchema = SchemaFactory.createForClass(User);
 UserSchema.index(
   { status: 1, deletionRecoverUntil: 1, deletionNextAt: 1 },
-  { name: 'users_deletion_due' },
+  { name: 'users_deletion_recovery_due' },
 );
 UserSchema.index(
   { firebaseUid: 1 },

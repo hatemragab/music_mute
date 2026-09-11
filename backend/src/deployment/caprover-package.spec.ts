@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,7 +16,9 @@ describe('CapRover dashboard package', () => {
   let archivePath: string | undefined;
 
   afterEach(() => {
-    if (archivePath) rmSync(dirname(archivePath), { recursive: true });
+    if (archivePath)
+      rmSync(dirname(archivePath), { recursive: true, force: true });
+    archivePath = undefined;
   });
 
   it('creates a plain tar with the repository-root build context', () => {
@@ -37,6 +39,7 @@ describe('CapRover dashboard package', () => {
         'backend/Dockerfile',
         'backend/package.json',
         'backend/package-lock.json',
+        'backend/scripts/install-apk-verifier.sh',
         'backend/src/main.ts',
       ]),
     );
@@ -47,5 +50,21 @@ describe('CapRover dashboard package', () => {
         ),
       ),
     ).toEqual([]);
+  });
+
+  it('keeps the APK verifier installer in the Docker allowlist', () => {
+    const rules = readFileSync(join(backendRoot, '..', '.dockerignore'), 'utf8')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'));
+    const backendExclusion = rules.indexOf('backend/*');
+    const scriptsDirectory = rules.indexOf('!backend/scripts/');
+    const scriptsContents = rules.indexOf('backend/scripts/*');
+    const installer = rules.indexOf('!backend/scripts/install-apk-verifier.sh');
+
+    expect(backendExclusion).toBeGreaterThanOrEqual(0);
+    expect(scriptsDirectory).toBeGreaterThan(backendExclusion);
+    expect(scriptsContents).toBeGreaterThan(scriptsDirectory);
+    expect(installer).toBeGreaterThan(scriptsContents);
   });
 });

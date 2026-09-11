@@ -87,6 +87,43 @@ describe('startupFailureReason', () => {
     ).toBe('Unexpected startup error');
   });
 
+  it.each([
+    ['code', 'EACCES', 'listen permission denied'],
+    ['code', 'EADDRINUSE', 'listen address already in use'],
+    ['name', 'MongoServerSelectionError', 'private MongoDB topology details'],
+  ])(
+    'reports an allowlisted raw startup %s without its message: %s',
+    (field, value, message) => {
+      const error = new Error(message) as Error & { code?: string };
+      error[field as 'name' | 'code'] = value;
+
+      expect(startupFailureReason(error)).toBe(value);
+    },
+  );
+
+  it('reports a numeric MongoDB code without the raw server message', () => {
+    const error = Object.assign(new Error('private MongoDB server details'), {
+      name: 'MongoServerError',
+      code: 85,
+    });
+
+    expect(startupFailureReason(error)).toBe('MongoServerError, code 85');
+  });
+
+  it('reports a validated MongoDB index name for an index-key conflict', () => {
+    const error = Object.assign(new Error('private MongoDB server details'), {
+      name: 'MongoServerError',
+      code: 86,
+      indexName: 'users_deletion_due',
+    });
+
+    expect(startupFailureReason(error)).toBe(
+      'MongoServerError, code 86, index users_deletion_due',
+    );
+    error.indexName = 'mongodb://admin:secret@example.com';
+    expect(startupFailureReason(error)).toBe('MongoServerError, code 86');
+  });
+
   it('does not trust a mutable error name', () => {
     const error = new Error('safe message');
     error.name = 'private-secret';

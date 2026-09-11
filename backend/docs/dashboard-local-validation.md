@@ -62,6 +62,11 @@ Configure these non-secret settings explicitly for APK verification:
 | `APK_TRUSTED_SIGNER_SHA256` | One to ten lowercase 64-character certificate SHA-256 fingerprints, comma-separated; configure from approved release certificates. |
 | `APK_MAX_MIN_SDK`           | Highest accepted APK minimum SDK, default 26, integer 1–100. Raising it is an explicit compatibility decision.                     |
 
+The standard production image supplies the documented `aapt2` and `apksigner`
+paths from Android Build Tools 35.0.0 and retains a compatible Java runtime.
+CapRover must still configure the maintained package ID and approved signer
+allowlist explicitly.
+
 Absent verifier tools, package ID, or signer configuration fails verification
 closed. Tool stdout/stderr is capped at 1 MiB combined. Child process groups are
 killed on timeout; temporary APK files are cleaned on success or failure. ZIP64,

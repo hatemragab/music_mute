@@ -29,6 +29,10 @@ const SAFE_ENVIRONMENT_FAILURE =
 const SAFE_DEPENDENCY_STAGES = new Set([
   'Audio processing MongoDB capability check failed',
   'Audio processing schema initialization failed',
+  'User schema initialization failed',
+  'Device schema initialization failed',
+  'Device installation owner schema initialization failed',
+  'User identity fence schema initialization failed',
   ...[
     'GetBucketLocation',
     'GetBucketVersioning',
@@ -70,17 +74,17 @@ const SAFE_PROVIDER_CODES = new Set([
   'MongooseServerSelectionError',
   'MongoTopologyClosedError',
   'ECONNREFUSED',
+  'EACCES',
+  'EADDRINUSE',
   'ENOTFOUND',
   'EAI_AGAIN',
   'ETIMEDOUT',
   'ECONNRESET',
 ]);
 
-function providerSummary(error: unknown): string {
-  if (!(error instanceof Error)) return 'unclassified provider error';
+function safeProviderCodes(error: Error): string[] {
   const provider = error as Error & {
     code?: unknown;
-    $metadata?: { httpStatusCode?: unknown };
   };
   const parts: string[] = [];
   if (SAFE_PROVIDER_CODES.has(provider.name)) parts.push(provider.name);
@@ -90,6 +94,17 @@ function providerSummary(error: unknown): string {
     !parts.includes(provider.code)
   )
     parts.push(provider.code);
+  return parts;
+}
+
+function providerSummary(error: unknown): string {
+  if (!(error instanceof Error)) return 'unclassified provider error';
+  const provider = error as Error & {
+    code?: unknown;
+    indexName?: unknown;
+    $metadata?: { httpStatusCode?: unknown };
+  };
+  const parts = safeProviderCodes(error);
   if (
     typeof provider.code === 'number' &&
     Number.isSafeInteger(provider.code) &&
@@ -97,6 +112,12 @@ function providerSummary(error: unknown): string {
     provider.code <= 2_147_483_647
   )
     parts.push(`code ${provider.code}`);
+  if (
+    provider.code === 86 &&
+    typeof provider.indexName === 'string' &&
+    /^[A-Za-z0-9_.-]{1,128}$/.test(provider.indexName)
+  )
+    parts.push(`index ${provider.indexName}`);
   const status = provider.$metadata?.httpStatusCode;
   if (
     typeof status === 'number' &&
@@ -132,5 +153,7 @@ export function startupFailureReason(error: unknown): string {
     SAFE_ENVIRONMENT_FAILURE.test(error.message)
   )
     return error.message;
+  const safeCodes = safeProviderCodes(error);
+  if (safeCodes.length > 0) return providerSummary(error);
   return 'Unexpected startup error';
 }

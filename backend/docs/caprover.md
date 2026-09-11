@@ -5,8 +5,13 @@ Definition Path. It points to `backend/Dockerfile`; CapRover keeps the repositor
 root as Docker's build context. The root `.dockerignore` allows only backend build
 inputs, excluding mobile projects, dotenv files, credentials and local outputs.
 
-The image builds with Node.js 24, installs only production dependencies in the
-runtime stage, runs as the non-root `node` user and starts `node dist/main.js`.
+The image builds with pinned Node.js 24 on Debian Bookworm, installs only
+production dependencies in the runtime stage, runs as the non-root `node` user
+and starts `node dist/main.js`. A separate build stage downloads Google's Android
+Build Tools 35.0.0 archive directly and verifies its repository-pinned SHA-256
+before extraction. Production retains that Build Tools directory and a compatible
+Java runtime. Google's Linux Build Tools are AMD64-only, so the CapRover builder
+must target Linux AMD64.
 
 To build locally from the repository root on a machine with Docker:
 
@@ -82,6 +87,17 @@ untracked files are not included. Use the packaging command for a local upload.
 
    Paste the clipboard value into the CapRover environment variable, save the App
    Configs and do not keep the JSON file in the deployment directory.
+
+7. Direct APK verification requires these maintained non-secret values in App
+   Configs:
+
+   ```text
+   APK_EXPECTED_PACKAGE_ID=com.hatem.musicmute
+   APK_TRUSTED_SIGNER_SHA256=<approved lowercase certificate SHA-256>
+   ```
+
+   The standard image supplies `APK_AAPT2_PATH`, `APK_APKSIGNER_PATH` and
+   `APK_MAX_MIN_SDK=26`. Do not derive the package or signer from an upload.
 
 Native clients can leave `CORS_ORIGINS` empty. Browser clients need exact HTTPS
 origins. Never set production emulator variables.

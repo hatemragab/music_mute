@@ -188,19 +188,46 @@ describe('AuthIndexesStartup', () => {
 
   it('rejects startup when a schema index cannot be initialized', async () => {
     const users = {
-      init: vi.fn().mockRejectedValue(new Error('INDEX_BUILD_FAILED')),
+      init: vi.fn().mockRejectedValue(
+        Object.assign(new Error('private index definition'), {
+          name: 'MongoServerError',
+          code: 86,
+        }),
+      ),
+      schema: {
+        indexes: () => [
+          [
+            { status: 1, deletionRecoverUntil: 1, deletionNextAt: 1 },
+            { name: 'users_deletion_due' },
+          ],
+        ],
+      },
+      collection: {
+        listIndexes: () => ({
+          toArray: async () => [
+            {
+              name: 'users_deletion_due',
+              key: { status: 1, deletionNextAt: 1 },
+            },
+          ],
+        }),
+      },
     };
     const devices = { init: vi.fn().mockResolvedValue(undefined) };
     const installationOwners = { init: vi.fn().mockResolvedValue(undefined) };
+    const identities = { init: vi.fn().mockResolvedValue(undefined) };
     const startup = new AuthIndexesStartup(
       users as unknown as Model<User>,
       devices as unknown as Model<Device>,
       installationOwners as unknown as Model<DeviceInstallationOwner>,
-      {
-        init: vi.fn().mockResolvedValue(undefined),
-      } as unknown as Model<UserIdentityFence>,
+      identities as unknown as Model<UserIdentityFence>,
     );
 
-    await expect(startup.onModuleInit()).rejects.toThrow('INDEX_BUILD_FAILED');
+    await expect(startup.onModuleInit()).rejects.toThrow(
+      'User schema initialization failed (MongoServerError, code 86, index users_deletion_due)',
+    );
+    expect(devices.init).not.toHaveBeenCalled();
+    expect(installationOwners.init).not.toHaveBeenCalled();
+    expect(identities.init).not.toHaveBeenCalled();
   });
 });
