@@ -1,0 +1,213 @@
+# MusicMute backend
+
+NestJS backend for the MusicMute native apps. Includes Firebase authentication,
+profiles, installation/version tracking, voluntary verification, password recovery,
+shared Redis limits, processing-access policy and logout-all. MongoDB, external
+Redis and S3 provide the infrastructure foundation. Opt-in audio processing adds
+private direct uploads/downloads, durable FIFO jobs, one external Z440 assignment,
+shutdown recovery, cancellation, voice-only MP3 results, and an FCM outbox.
+The backend coordinates processing; separation runs on the external Windows PC.
+
+- [Audio user/worker API](docs/api/audio-processing.md)
+- [Audio operations and Windows handoff](docs/operations/audio-processing.md)
+- [Worker fleet ownership, protocol and migration audit](docs/worker-fleet.md)
+- [Implementation and validation tracker](docs/tasks/audio-processing.md)
+- [Dashboard API](docs/dashboard-api.md)
+- [Dashboard permission matrix](docs/dashboard-permissions.md)
+- [Dashboard local validation](docs/dashboard-local-validation.md)
+
+## Requirements and local run
+
+- Node.js 24 LTS, npm 11. The lockfile defines reproducible dependency versions.
+- Independently running MongoDB 8 and Redis 7.4 or later.
+- Run all commands from this directory. Scripts target macOS/Linux and the VPS.
+
+```sh
+npm ci
+cp -n .env.local.example .env.local
+cp -n .env.production.example .env.production
+chmod 600 .env.local .env.production
+# Configure MONGODB_URI and REDIS_URL in .env.local before starting.
+npm run start:dev
+```
+
+The API connects to existing MongoDB and Redis services; it does not start either
+server. Production Compose also runs only the API.
+
+- Liveness: `GET http://127.0.0.1:3000/api/v1/health/live`.
+- Readiness: `GET http://127.0.0.1:3000/api/v1/health/ready` (MongoDB and Redis).
+- Health endpoints do not claim AWS connectivity. Enabled audio processing
+  separately checks S3 privacy, versioning and retention prerequisites at startup.
+- Readiness also does not validate Firebase credentials or provider settings.
+
+## Environments
+
+For CapRover, use the repository-root `captain-definition` and set Container HTTP
+Port to **80**. See [CapRover deployment](docs/caprover.md) for build commands,
+environment variables, credentials and external Redis setup.
+
+`APP_ENV=local` loads `.env.local`. Production and test ignore dotenv files, so
+CapRover's process environment is the only production configuration source.
+`NODE_ENV=production` must match `APP_ENV=production`. Actual environment files
+and service-account JSON files are ignored by Git; only safe examples are tracked.
+The production example intentionally contains invalid placeholders, not credentials.
+
+MongoDB uses `MONGODB_URI`: a database-specific local URI in development and an
+Atlas `mongodb+srv` URI with certificate verification in production. Configure
+Atlas network access for the VPS IP and a database-scoped user.
+Local authentication/device/deletion writes now require a MongoDB replica set too,
+because account fencing and associated writes commit in transactions. Production
+Atlas already provides transaction support; standalone local MongoDB is insufficient.
+
+After connecting, startup awaits Mongoose model initialization so collections and missing schema
+indexes are created before the API accepts traffic. The database user therefore
+needs index-management permission. The explicit
+[index operations](docs/auth-operations.md) remain available for audits.
+
+`AWS_REGION` and `S3_BUCKET` prepare the S3 integration. `StorageClient` uses the
+AWS SDK v3 standard credential chain. Locally use an AWS profile; on the VPS use
+a least-privilege identity with access to only the required bucket/prefix.
+If using environment credentials, supply `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY` and, for temporary credentials, `AWS_SESSION_TOKEN` through
+the ignored production environment or secret manager. Never use root keys.
+Keep the bucket private, enable public access blocking, encryption and lifecycle
+rules for temporary media. Bucket creation and live AWS checks are not performed
+by this starter. The presigner package is installed for future authorized uploads.
+
+## Architecture and external Redis
+
+```text
+Native apps -> TLS reverse proxy -> API (main.ts)
+                                      | MongoDB / Atlas
+                                      | private S3 bucket
+                                      | external Redis (REDIS_URL)
+```
+
+- `src/config/`: environment selection and validation.
+- `src/http/`: shared HTTP policies and health endpoints.
+- `src/auth/`, `src/users/`, `src/devices/`: identity and owner-scoped APIs.
+- `src/admin/`: verified Google administrator admission and role permissions.
+- `src/rate-limits/`: persistent counters and atomic mail reservations.
+- `src/app-policy/`: live verification and minimum-build policy.
+- `src/infrastructure/`: MongoDB and S3 Nest modules.
+- `src/jobs/`, `src/worker/`, `src/processing/`: durable audio lifecycle and Z440 protocol.
+- `src/storage/`: restricted transfers and bucket preflight.
+- `src/notifications/`, `src/job-errors/`: durable push delivery and safe error records.
+- `src/app.module.ts`: HTTP composition.
+- `deploy/` and Compose files: API-only VPS deployment preparation.
+- `AGENTS.md`: commands, conventions and boundaries for AI-assisted development.
+
+Set the required `REDIS_URL`, just as you set `MONGODB_URI`:
+
+```dotenv
+REDIS_URL=rediss://default:ENCODED_PASSWORD@redis.example.com:6379/0
+```
+
+Use `redis://` for a trusted private connection or `rediss://` for TLS. URLs
+support an optional ACL username, percent-encoded password, port and database
+number. Query parameters and fragments are rejected. Production requires a
+password of at least 16 decoded characters. Use TLS over untrusted networks;
+certificate verification remains enabled.
+
+One shared ioredis client handles request limits, atomic mail budgets and readiness
+PINGs. Connection and command timeouts are five seconds, with bounded request
+retries and automatic reconnect. Redis failures produce sanitized 503 responses;
+liveness stays available. Configure persistence and `noeviction` on the external
+service to preserve security counters across API restarts. Use separate databases
+or instances for environments, monitor capacity and test backups/restores.
+
+Migration: replace `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` and `REDIS_TLS`
+with `REDIS_URL` in your environment. `QUEUE_PREFIX`, BullMQ and the old in-process worker are
+removed. Existing dotenv files and deployed services are not changed by this
+update. Keep any existing Redis data/volumes when switching deployment config.
+
+## HTTP security
+
+Helmet, a 64 KiB JSON limit, request/header timeouts, strict DTO validation,
+generic errors and shared 60 requests/IP/minute are configured centrally. Redis
+counters persist across API processes and restarts. Liveness is exempt; readiness
+is throttled. Protected routes and mail fail closed when security storage is
+unavailable. Firebase and edge abuse protections still matter.
+
+Browser cross-origin access is denied unless `CORS_ORIGINS` lists exact origins;
+production origins require HTTPS. Native apps do not need CORS. CORS does not
+authenticate requests. Health, app policy and password recovery are public;
+owner routes require checked Firebase tokens and local authorization.
+Administrator routes also require a current active `admin_access` record whose
+UID and normalized verified email match the current Firebase Google profile;
+they never require or create a mobile user profile. Configure the documented
+`ADMIN_*` request ceilings to tune the shared Redis-backed administrator limits.
+Cookie-based authentication will also require a deliberate CSRF policy.
+
+`TRUST_PROXY=false` is the local default. Production `TRUST_PROXY=1` assumes
+exactly one host reverse proxy and a loopback-only published API port. Keep that
+topology or revise proxy trust before exposing the API. Never trust arbitrary
+client-supplied forwarding headers. Do not log request bodies, tokens or SDK
+exceptions containing secrets.
+
+## Verify
+
+```sh
+npm run verify
+npm run test:integration
+npm run test:auth:integration
+npm run test:processing:integration
+npm audit --omit=dev
+```
+
+The worker fleet cutover is always explicit. With the production runtime
+environment and the legacy worker stopped at verified idle, use
+`npm run worker:fleet:migrate -- --dry-run`, then `--apply`, and finally
+`npm run worker:fleet:audit` before changing `PROCESSING_WORKER_AUTH_MODE` to
+`fleet`. See [worker fleet operations](docs/worker-fleet.md) for the guarded
+sequence and rollback boundary.
+
+`verify` runs formatting checks, lint, TypeScript checks, unit and HTTP security
+tests, then compiles the API. Tests use SWC decorator metadata so Nest
+dependency injection and DTO validation execute as in the TypeScript build.
+
+The opt-in integration test requires `mongod` and `redis-server` on PATH (or
+`MONGOD_BINARY`/`REDIS_BINARY`). It allocates isolated ports and temporary data,
+starts an actual API process, verifies URL authentication and database selection,
+forces API and Redis restarts, and checks outage responses and reconnect. It never connects
+to configured Atlas/S3 accounts or existing local databases. Temporary test data
+and owned child processes are cleaned up afterward.
+
+See [VPS operations](docs/vps.md) and [starter design/checklist](docs/starter-plan.md).
+
+The implemented feature follows the
+[auth/users/devices specification](docs/superpowers/specs/2026-09-08-auth-users-devices.md),
+[implementation plan](docs/superpowers/plans/2026-09-08-auth-users-devices.md), and
+[task tracker](docs/tasks/auth-users-devices.md).
+
+See the [auth API](docs/auth-api.md) for client contracts and
+[auth operations](docs/auth-operations.md) for index/policy management.
+Configure `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY` and a stable random
+`RATE_LIMIT_HASH_SECRET` of at least 32 UTF-8 bytes. On CapRover, provide Firebase
+Admin credentials through `FIREBASE_SERVICE_ACCOUNT_BASE64`, or use Application
+Default Credentials with an externally mounted credential file. Never commit or
+bake a service-account key into the image. Changing the HMAC secret resets the
+derived budget namespace and requires operational coordination. Auth emulator
+configuration is accepted only in test mode with a loopback host and a `demo-*`
+project.
+
+`npm run test:auth:integration` uses the pinned Firebase CLI, isolated MongoDB and
+Redis, synthetic accounts and emulator-only email actions. It checks compiled API
+behavior without touching the real Firebase project, Atlas, S3 or a mailbox.
+
+The runtime audit on 2026-09-09 reports ten package findings: six moderate and
+four high, with no critical findings. Removing BullMQ does not resolve these
+remaining dependency advisories. No forced dependency downgrade or major-version
+override has been applied. Recheck and address the audit before release.
+
+## Sources and version choice
+
+The official CLI scaffold was adapted to NestJS 11.2.3 because the current
+`@nestjs/throttler` 6.5.0 peer range does not support NestJS 12. Integration packages
+whose major is 12 explicitly support NestJS 11; npm resolves without peer bypasses.
+
+- [Nest configuration](https://docs.nestjs.com/techniques/configuration)
+- [Nest MongoDB](https://docs.nestjs.com/techniques/mongodb)
+- [Nest rate limiting](https://docs.nestjs.com/security/rate-limiting)
+- [AWS SDK credential chain](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-credentials-node.html)
+- [Caddy reverse proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)

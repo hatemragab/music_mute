@@ -1,0 +1,15 @@
+# Only backend build inputs may enter the Docker build context.
+*
+!backend/
+backend/*
+!backend/package.json
+!backend/package-lock.json
+!backend/.npmrc
+!backend/nest-cli.json
+!backend/tsconfig*.json
+!backend/scripts/
+backend/scripts/*
+!backend/scripts/install-apk-verifier.sh
+!backend/src/
+!backend/src/**
+backend/src/**/*.spec.ts

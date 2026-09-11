@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">MusicMute Auth Test</string>
+    <string name="auth_login_description">Isolated auth test build. Accounts and Google identities here are synthetic.</string>
+    <string name="auth_test_choose_google_account">Choose a synthetic Google test account</string>
+</resources>

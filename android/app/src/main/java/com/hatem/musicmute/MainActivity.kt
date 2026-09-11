@@ -1,0 +1,200 @@
+package com.hatem.musicmute
+
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import androidx.activity.SystemBarStyle
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.core.os.LocaleListCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.hatem.musicmute.data.LanguageChoice
+import com.hatem.musicmute.data.ThemeChoice
+import com.hatem.musicmute.playback.AudioPlaybackController
+import com.hatem.musicmute.state.DownloadsViewModel
+import com.hatem.musicmute.state.VocalViewModel
+import com.hatem.musicmute.state.ProcessingViewModel
+import com.hatem.musicmute.processing.processingNotificationData
+import com.hatem.musicmute.processing.audioTaskNotificationTarget
+import com.hatem.musicmute.ui.VocalApp
+import com.hatem.musicmute.ui.VocalTheme
+import com.hatem.musicmute.ui.auth.AuthGate
+import kotlinx.coroutines.flow.MutableStateFlow
+
+class MainActivity : AppCompatActivity() {
+    private val openHistory = MutableStateFlow(false)
+    private val openProcessing = MutableStateFlow(false)
+    private val processingJob = MutableStateFlow<String?>(null)
+    private val processingOperation = MutableStateFlow<String?>(null)
+    private val audioTaskIntent = MutableStateFlow<Intent?>(null)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        openHistory.value = intent.getBooleanExtra(OPEN_HISTORY, false)
+        openProcessing.value = intent.getBooleanExtra(OPEN_PROCESSING, false)
+        audioTaskIntent.value = intent
+        (application as VocalApplication).processingPush.rememberTap(processingNotificationData(intent))
+        enableEdgeToEdge()
+        setContent {
+            val app = application as VocalApplication
+            val model: VocalViewModel =
+                viewModel(
+                    factory =
+                        viewModelFactory {
+                            initializer {
+                                VocalViewModel(
+                                    app.workflowRepository,
+                                    app.preferencesRepository,
+                                    createSavedStateHandle(),
+                                )
+                            }
+                        }
+                )
+            val state by model.state.collectAsStateWithLifecycle()
+            val processingSession by app.processingSessions.collectAsStateWithLifecycle()
+            val authState by app.authSession.state.collectAsStateWithLifecycle()
+            val pushTap by app.processingPush.pendingTap.collectAsStateWithLifecycle()
+            val requestedProcessing by openProcessing.collectAsStateWithLifecycle()
+            val requestedJob by processingJob.collectAsStateWithLifecycle()
+            val artifacts by app.processingArtifacts.progress.collectAsStateWithLifecycle()
+            val processing: ProcessingViewModel = viewModel(factory = viewModelFactory {
+                initializer {
+                    ProcessingViewModel(app.jobsApi, app.processingRepository, app.audioPipelineCoordinator,
+                        app::processingSession, app.contentResolver, AudioPlaybackController(app),
+                        app.processingArtifacts::ensureOutput,
+                        app.processedAudioShare,
+                        app.processingArtifacts::evict,
+                        app.clientErrorOutbox)
+                }
+            })
+            LaunchedEffect(processingSession) { processing.bindSession(processingSession) }
+            val taskIntent by audioTaskIntent.collectAsStateWithLifecycle()
+            LaunchedEffect(taskIntent, processingSession) {
+                audioTaskNotificationTarget(taskIntent, processingSession)?.let { target ->
+                    openProcessing.value = true
+                    processingOperation.value = target.operationId
+                    processingJob.value = target.jobId
+                    audioTaskIntent.value = null
+                }
+            }
+            LaunchedEffect(pushTap, processingSession, authState.offline) {
+                app.processingPush.resolvePendingTap()?.let { processingJob.value = it.id }
+            }
+            LaunchedEffect(app) {
+                app.processingPush.refreshHints.collect { processing.history.refresh() }
+            }
+            val requestedHistory by openHistory.collectAsStateWithLifecycle()
+            val requestedOperation by processingOperation.collectAsStateWithLifecycle()
+            val downloads: DownloadsViewModel =
+                viewModel(
+                    factory =
+                        viewModelFactory {
+                            initializer {
+                                DownloadsViewModel(
+                                    app.downloadRepository,
+                                    AudioPlaybackController(app),
+                                )
+                            }
+                        }
+                )
+            val dark =
+                when (state.preferences.theme) {
+                    ThemeChoice.SYSTEM -> isSystemInDarkTheme()
+                    ThemeChoice.LIGHT -> false
+                    ThemeChoice.DARK -> true
+                }
+            LaunchedEffect(dark) {
+                val style =
+                    if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    else
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT,
+                        )
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            }
+            LaunchedEffect(
+                state.preferences.language,
+                state.preferencesLoading,
+                state.preferencesError,
+            ) {
+                if (!state.preferencesLoading && !state.preferencesError) {
+                    val locales = LocaleListCompat.forLanguageTags(state.preferences.language.tag)
+                    if (AppCompatDelegate.getApplicationLocales() != locales) {
+                        AppCompatDelegate.setApplicationLocales(locales)
+                    }
+                }
+            }
+            VocalTheme(dark = dark) {
+                val language = LocalConfiguration.current.locales[0].language
+                AuthGate(
+                    app.authSession,
+                    app.googleCredentials,
+                    this@MainActivity,
+                    onToggleLanguage = {
+                        model.setLanguage(
+                            if (language == "ar") LanguageChoice.ENGLISH else LanguageChoice.ARABIC
+                        )
+                    },
+                ) { onAccount ->
+                    VocalApp(state, model, downloads, processing, processingSession, artifacts,
+                        app.downloadRepository.audioRoot, requestedHistory,
+                        openProcessing = requestedProcessing, openProcessingJob = requestedJob,
+                        openProcessingOperation = requestedOperation,
+                        onProcessingOpened = { openProcessing.value = false; processingJob.value = null; processingOperation.value = null; intent.removeExtra(OPEN_PROCESSING) },
+                        onProcessingNotifications = { app.processingPush.onForeground() },
+                        onAccount = onAccount) {
+                        openHistory.value = false
+                        intent.removeExtra(OPEN_HISTORY)
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openHistory.value = intent.getBooleanExtra(OPEN_HISTORY, false)
+        openProcessing.value = intent.getBooleanExtra(OPEN_PROCESSING, false)
+        audioTaskIntent.value = intent
+        (application as VocalApplication).processingPush.rememberTap(processingNotificationData(intent))
+    }
+
+    override fun onStart() {
+        super.onStart()
+        (application as VocalApplication).processingPush.onForeground()
+    }
+
+    companion object {
+        private const val OPEN_HISTORY = "open_download_history"
+        private const val OPEN_PROCESSING = "open_processing"
+
+        fun processingPendingIntent(context: Context): PendingIntent = PendingIntent.getActivity(
+            context, 1, Intent(context, MainActivity::class.java).putExtra(OPEN_PROCESSING, true)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        fun historyPendingIntent(context: Context): PendingIntent =
+            PendingIntent.getActivity(
+                context,
+                0,
+                Intent(context, MainActivity::class.java)
+                    .putExtra(OPEN_HISTORY, true)
+                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+    }
+}
