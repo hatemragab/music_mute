@@ -1,0 +1,101 @@
+{
+  "createUrl": {
+    "requestId": "c21a2eaa-7e73-4f08-89da-6ac35baa83e1",
+    "sourceTitle": "Interview",
+    "sourceKind": "url",
+    "clientStartedAt": "2026-09-10T12:00:00.000Z",
+    "input": {
+      "extension": "mp3",
+      "contentType": "audio/mpeg",
+      "bytes": 1024,
+      "durationSeconds": 30,
+      "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    }
+  },
+  "createFile": {
+    "requestId": "3b053c0f-81d4-4fb8-bd5b-4d1b70f9eb72",
+    "sourceTitle": "لقاء صوتي",
+    "sourceKind": "file",
+    "clientStartedAt": "2026-09-10T12:00:00.000Z",
+    "input": {
+      "extension": "m4a",
+      "contentType": "audio/mp4",
+      "bytes": 1024,
+      "durationSeconds": 30,
+      "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    }
+  },
+  "legacyJob": {
+    "id": "68c000000000000000000001",
+    "status": "ready",
+    "createdAt": "2026-09-10T12:00:00.000Z",
+    "updatedAt": "2026-09-10T12:01:00.000Z",
+    "queuedAt": "2026-09-10T12:00:10.000Z",
+    "finishedAt": "2026-09-10T12:01:00.000Z",
+    "retryOfJobId": null,
+    "input": { "extension": "mp3", "bytes": 1024, "durationSeconds": 30 },
+    "error": null,
+    "canDownloadInput": true,
+    "canDownloadOutput": true,
+    "workerAvailable": true
+  },
+  "renamedJob": {
+    "id": "68c000000000000000000002",
+    "requestId": "c21a2eaa-7e73-4f08-89da-6ac35baa83e1",
+    "sourceTitle": "Interview",
+    "displayName": "My interview",
+    "sourceKind": "url",
+    "status": "ready",
+    "serverTime": "2026-09-10T12:01:10.000Z",
+    "createdAt": "2026-09-10T12:00:10.000Z",
+    "updatedAt": "2026-09-10T12:01:10.000Z",
+    "queuedAt": "2026-09-10T12:00:20.000Z",
+    "finishedAt": "2026-09-10T12:01:10.000Z",
+    "retryOfJobId": null,
+    "input": { "extension": "mp3", "bytes": 1024, "durationSeconds": 30 },
+    "timing": {
+      "processingElapsedMs": 20000,
+      "processingElapsedApproximate": false,
+      "totalElapsedMs": 70000,
+      "totalElapsedApproximate": true
+    },
+    "stages": {
+      "validatingAt": "2026-09-10T12:00:40.000Z",
+      "processingStartedAt": "2026-09-10T12:00:45.000Z",
+      "processingFinishedAt": "2026-09-10T12:01:05.000Z",
+      "uploadingResultAt": "2026-09-10T12:01:05.000Z"
+    },
+    "error": null,
+    "canDownloadInput": true,
+    "canDownloadOutput": true,
+    "workerAvailable": true
+  },
+  "retryResponse": {
+    "id": "68c000000000000000000003",
+    "status": "queued",
+    "retryOfJobId": "68c000000000000000000002"
+  },
+  "deleteResponse": { "status": 204 },
+  "deletedDetail": {
+    "statusCode": 404,
+    "code": "JOB_NOT_FOUND",
+    "message": "Job not found"
+  },
+  "activeDeleteError": {
+    "statusCode": 409,
+    "code": "JOB_ACTIVE",
+    "message": "Cancel this job before deleting it"
+  },
+  "clientError": {
+    "eventId": "bba62714-ab09-4c79-9453-ccae688c092c",
+    "operationId": "c21a2eaa-7e73-4f08-89da-6ac35baa83e1",
+    "stage": "DOWNLOADING_SOURCE",
+    "code": "NETWORK",
+    "retryable": true,
+    "platform": "android",
+    "appVersion": "1.0.0",
+    "osVersion": "15",
+    "occurredAt": "2026-09-10T12:00:00.000Z",
+    "httpStatus": 503
+  }
+}

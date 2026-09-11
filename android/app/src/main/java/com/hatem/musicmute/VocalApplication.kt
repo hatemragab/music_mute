@@ -1,0 +1,206 @@
+package com.hatem.musicmute
+
+import android.app.Application
+import android.content.Context
+import android.os.Build
+import androidx.datastore.core.DataStoreFactory
+import androidx.datastore.dataStoreFile
+import androidx.datastore.preferences.preferencesDataStore
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
+import com.google.firebase.auth.FirebaseAuth
+import com.hatem.musicmute.auth.*
+import com.hatem.musicmute.data.DataStorePreferencesRepository
+import com.hatem.musicmute.data.DemoWorkflowRepository
+import com.hatem.musicmute.download.DownloadRepository
+import com.hatem.musicmute.download.HistorySerializer
+import com.hatem.musicmute.download.HistoryStore
+import com.hatem.musicmute.download.YoutubeAudioDownloader
+import com.hatem.musicmute.processing.*
+import java.io.File
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+private val Context.preferencesStore by preferencesDataStore(name = "vocal_preferences")
+
+class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost {
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var processingEpoch = System.currentTimeMillis()
+    private val mutableProcessingSession = MutableStateFlow<ProcessingSession?>(null)
+    val processingSessions = mutableProcessingSession.asStateFlow()
+    fun processingSession(): ProcessingSession? = mutableProcessingSession.value
+    val googleCredentials by lazy { GoogleCredentialProvider(this) }
+    private val firebaseIdentity by lazy {
+        val firebase =
+            if (BuildConfig.DEBUG && BuildConfig.AUTH_EMULATOR_HOST.isNotBlank()) {
+                require(
+                    BuildConfig.AUTH_EMULATOR_HOST in setOf("127.0.0.1", "localhost", "10.0.2.2")
+                )
+                require(BuildConfig.AUTH_EMULATOR_PORT in 1..65535)
+                val options =
+                    FirebaseOptions.Builder()
+                        .setProjectId("demo-musicmute")
+                        .setApplicationId("1:1234567890:android:0000000000000000")
+                        .setApiKey("fake-api-key")
+                        .build()
+                val app =
+                    FirebaseApp.getApps(this).firstOrNull { it.name == "auth-emulator" }
+                        ?: FirebaseApp.initializeApp(this, options, "auth-emulator")
+                FirebaseAuth.getInstance(app).also {
+                    it.useEmulator(BuildConfig.AUTH_EMULATOR_HOST, BuildConfig.AUTH_EMULATOR_PORT)
+                }
+            } else FirebaseAuth.getInstance()
+        FirebaseAuthGateway(firebase)
+    }
+    private val installations by lazy {
+            InstallationStore(noBackupFilesDir) {
+                InstallationMetadata(
+                    appVersion = BuildConfig.VERSION_NAME,
+                    buildNumber = BuildConfig.VERSION_CODE,
+                    osVersion = Build.VERSION.RELEASE,
+                    deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".take(100),
+                )
+            }
+    }
+    val authApi by lazy {
+            AuthApiClient(
+                AuthConfiguration(BuildConfig.AUTH_API_URL, BuildConfig.DEBUG),
+                { firebaseIdentity.identity()?.uid },
+                { firebaseIdentity.token(it) },
+            )
+    }
+    val authSession: AuthSessionCoordinator by lazy {
+        AuthSessionCoordinator(firebaseIdentity, authApi, installations, googleCredentials,
+            sessionInvalidated = { uid ->
+                try { deletionJournal.invalidated(uid) } finally { scheduleOwnerPurge(uid) }
+            },
+            deletionRejected = { uid -> deletionJournal.rejected(uid) },
+            deletionRequested = { uid -> deletionJournal.requested(uid) },
+            deletionAccepted = { uid ->
+                try { deletionJournal.accepted(uid) } finally { scheduleOwnerPurge(uid) }
+            },
+            hasUnconfirmedDeletion = { deletionJournal.all().any { !it.requiresPurge } },
+            afterSignOut = { deletionJournal.all().filter { it.requiresPurge }.forEach { purgeDeletedAccount(it.uid) } },
+            beforeSignOut = { uid, installation -> processingPush.beforeSignOut(uid, installation) })
+    }
+    val processingRoot by lazy { File(noBackupFilesDir, "processing") }
+    val processingStore by lazy { ProcessingStore(File(processingRoot, "metadata")) }
+    val processingStagingRoot by lazy { File(processingRoot, "staging") }
+    val jobsApi: JobsApiClient by lazy { JobsApiClient(authApi) { authSession.state.value.installationId.orEmpty() } }
+    val audioInputPreparer by lazy { AudioInputPreparer(processingStagingRoot, inspect = ::inspectProcessingAudio) }
+    override val processingRepository by lazy {
+        ProcessingRepository(processingStore, processingStagingRoot, jobsApi, ::processingSession, WorkManagerProcessingScheduler(this))
+    }
+    val audioPipelineCoordinator by lazy {
+        AudioPipelineCoordinator(processingRepository, audioInputPreparer, ::processingSession, downloadRepository)
+    }
+    val clientErrorOutbox by lazy {
+        val scheduler = WorkManagerClientErrorScheduler(this)
+        ClientErrorOutbox(processingStore, ::processingSession, jobsApi, schedule = scheduler::enqueue)
+    }
+    val processingArtifacts by lazy {
+        JobArtifactRepository(File(processingRoot, "artifacts"), jobsApi, ::processingSession)
+    }
+    val processedAudioShare by lazy {
+        ProcessedAudioShare(this, File(filesDir, "processed_audio_share"))
+    }
+    private fun pushSession(): PushSession? {
+        val state = authSession.state.value
+        val current = processingSession() ?: return null
+        val installation = state.installationId ?: return null
+        return if (state.phase == AuthPhase.AUTHENTICATED && !state.offline)
+            PushSession(current.uid, current.epoch, installation) else null
+    }
+    override val processingPush: PushRegistrationCoordinator by lazy {
+        PushRegistrationCoordinator(AuthPushRegistrationApi(authApi), jobsApi, ::pushSession,
+            { firebaseIdentity.identity()?.uid }, ::firebaseProcessingToken,
+            { processingNotificationsPermitted(this) }, processingPushEnabled())
+    }
+
+    private val deletionJournal by lazy { AccountDeletionJournal(File(noBackupFilesDir, "pending-account-deletion")) }
+
+    private val privateCleanupLock = Mutex()
+
+    private fun scheduleOwnerPurge(uid: String) {
+        applicationScope.launch {
+            try { purgeDeletedAccount(uid) }
+            catch (_: Exception) { /* Durable marker retries on restart. */ }
+        }
+    }
+
+    private suspend fun purgeDeletedAccount(uid: String) = privateCleanupLock.withLock {
+        require(uid.isNotBlank())
+        if (mutableProcessingSession.value?.uid == uid) {
+            mutableProcessingSession.value = null
+            stopService(android.content.Intent(this, com.hatem.musicmute.playback.AudioPlaybackService::class.java))
+        }
+        processingRepository.purgeOwner(uid)
+        audioPipelineCoordinator.onSessionChanged(uid)
+        processingArtifacts.purgeOwner(uid)
+        downloadRepository.purgeOwner(uid)
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            listOf(processingStagingRoot, File(filesDir, "processed_audio_share")).forEach { root ->
+                purgePrivateOwnerDirectory(root, uid)
+            }
+        }
+        processingStore.clearOwner(uid)
+        val notifications = getSystemService(android.app.NotificationManager::class.java)
+        notifications.activeNotifications.filter { it.notification.group == audioTaskNotificationGroup(uid) }
+            .forEach { notifications.cancel(it.tag, it.id) }
+        deletionJournal.completed(uid)
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        createProcessingNotificationChannel(this, getString(R.string.cloud_processing_title))
+        applicationScope.launch {
+            recoverAccountPrivateData(
+                deletionJournal.all(),
+                { firebaseIdentity.identity()?.uid },
+                { firebaseIdentity.signOut() },
+                ::purgeDeletedAccount,
+            )
+            var lastPushSession: PushSession? = null
+            authSession.state.collect { state ->
+                val uid = state.identity?.uid?.takeIf { state.phase == AuthPhase.AUTHENTICATED }
+                if (uid != mutableProcessingSession.value?.uid) {
+                    val previousUid = mutableProcessingSession.value?.uid
+                    mutableProcessingSession.value = uid?.let { ProcessingSession(it, ++processingEpoch) }
+                    processingArtifacts.onSessionChanged()
+                    try {
+                        processingRepository.onSessionChanged()
+                        audioPipelineCoordinator.onSessionChanged(previousUid)
+                        if (uid != null) {
+                            processingRepository.resumePending()
+                            audioPipelineCoordinator.resumePendingSources()
+                        }
+                    } catch (error: CancellationException) { throw error }
+                    catch (_: Exception) { /* The processing screen surfaces retained operation errors. */ }
+                }
+                val updatedPushSession = pushSession()
+                if (updatedPushSession != lastPushSession) {
+                    lastPushSession = updatedPushSession
+                    processingPush.onSessionChanged()
+                }
+            }
+        }
+    }
+    val preferencesRepository by lazy { DataStorePreferencesRepository(preferencesStore) }
+    val workflowRepository by lazy { DemoWorkflowRepository() }
+    private val historyStore by lazy {
+        HistoryStore(
+            DataStoreFactory.create(HistorySerializer) { dataStoreFile("download_history.json") }
+        )
+    }
+    val downloadRepository by lazy {
+        DownloadRepository(this, historyStore, File(filesDir, "audio_downloads"), processingStore)
+    }
+    val audioDownloader by lazy { YoutubeAudioDownloader(this) }
+}

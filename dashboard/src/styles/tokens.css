@@ -1,0 +1,59 @@
+:root {
+  --radius: 0.65rem;
+  --background: oklch(0.985 0.006 150);
+  --foreground: oklch(0.18 0.018 155);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.018 155);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.018 155);
+  --primary: oklch(0.48 0.15 150);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.95 0.018 150);
+  --secondary-foreground: oklch(0.25 0.04 150);
+  --muted: oklch(0.955 0.008 150);
+  --muted-foreground: oklch(0.47 0.024 155);
+  --accent: oklch(0.92 0.04 150);
+  --accent-foreground: oklch(0.23 0.05 150);
+  --destructive: oklch(0.56 0.22 27);
+  --border: oklch(0.89 0.014 150);
+  --input: oklch(0.89 0.014 150);
+  --ring: oklch(0.52 0.15 150);
+  --chart-1: oklch(0.52 0.15 150);
+  --chart-2: oklch(0.58 0.14 230);
+  --chart-3: oklch(0.58 0.2 28);
+  --chart-4: oklch(0.66 0.15 76);
+  --chart-5: oklch(0.58 0.14 300);
+  --sidebar: oklch(0.97 0.01 150);
+  --sidebar-foreground: oklch(0.2 0.02 155);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --brand-glow: color-mix(in oklab, var(--primary) 20%, transparent);
+  --brand-glow-soft: color-mix(in oklab, var(--chart-2) 14%, transparent);
+}
+
+.dark {
+  --background: oklch(0.145 0.012 155);
+  --foreground: oklch(0.94 0.01 150);
+  --card: oklch(0.19 0.016 155);
+  --card-foreground: oklch(0.94 0.01 150);
+  --popover: oklch(0.19 0.016 155);
+  --popover-foreground: oklch(0.94 0.01 150);
+  --primary: oklch(0.72 0.18 150);
+  --primary-foreground: oklch(0.15 0.02 155);
+  --secondary: oklch(0.25 0.018 155);
+  --secondary-foreground: oklch(0.94 0.01 150);
+  --muted: oklch(0.245 0.014 155);
+  --muted-foreground: oklch(0.7 0.02 150);
+  --accent: oklch(0.29 0.04 150);
+  --accent-foreground: oklch(0.94 0.01 150);
+  --destructive: oklch(0.66 0.2 27);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.72 0.18 150);
+  --sidebar: oklch(0.17 0.014 155);
+  --sidebar-foreground: oklch(0.94 0.01 150);
+}

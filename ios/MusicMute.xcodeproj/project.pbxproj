@@ -1,0 +1,994 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		04CB9864038DB8AAAB77C750 /* AudioPipelineRestoration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3376C9B5D89E6AF347576762 /* AudioPipelineRestoration.swift */; };
+		06C778F0C7CDB463650D6F4C /* DownloadModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DCAD66CE5A591A780CD4B7 /* DownloadModelTests.swift */; };
+		091BE4787F47833074B90287 /* ArtifactDownloadTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 137030C54983FB5C883D4390 /* ArtifactDownloadTransportTests.swift */; };
+		118A8461E200119EE6BD5254 /* AuthPushCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5290F32CC7405B078EB9EBE6 /* AuthPushCleanupTests.swift */; };
+		13194C9FC6692C84B0579FAE /* DevicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 607F7C8EAF0CADB10866A904 /* DevicesView.swift */; };
+		13E61BEC8B36FAD67C01F04E /* FirebaseAuthGateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D1684431998FB6296662D7 /* FirebaseAuthGateway.swift */; };
+		16752085083F81AE3C3B7FF8 /* JobsAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FA3F1D8A9DFDD9080314470 /* JobsAPIClient.swift */; };
+		197115672DC97E47BE00DDC1 /* HistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ED9B35BC2C9352F075A30E0 /* HistoryStore.swift */; };
+		1AEFE931C5907B1F585A14FC /* PushRegistrationAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93035634DAB8A8315FD9C73F /* PushRegistrationAPIClientTests.swift */; };
+		25F8AAF25127CA985F70F329 /* ArtifactNativeValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A9C17836C4018211E6992FC /* ArtifactNativeValidationTests.swift */; };
+		2679C4B9CAB61E2C7A612301 /* UploadRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4FEB45786DF3B7CEE312B4D /* UploadRecoveryTests.swift */; };
+		274C13639D53CD838EF88E59 /* AccountDeletionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338642359BC137704D29D7D7 /* AccountDeletionStore.swift */; };
+		285AB584E3E816B35E743464 /* NotificationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C35DCC712695C754017068BD /* NotificationDelegate.swift */; };
+		2CD482465DEF4E70210CD1F7 /* YouTubeKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6765669812F3A0845906D4A0 /* YouTubeKit */; };
+		30E618B394992ED5D5D26414 /* AudioTaskPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D3B92B4629A86C8986E7D34 /* AudioTaskPresentationTests.swift */; };
+		34573EFAD5D1A1153C8BEF3E /* AuthAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C8B7242BD7B24BB55ED579 /* AuthAPIClient.swift */; };
+		348439B221D0710BA7EBAC53 /* CoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34F6702F528D11A1DC3F44F8 /* CoreTests.swift */; };
+		34E3B713515725618FC2DA79 /* VocalUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2420DA338C2E407F1F449181 /* VocalUITests.swift */; };
+		388494B8EB333DD90C3F07F5 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 3278CCB9EA77606685ADF38B /* PrivacyInfo.xcprivacy */; };
+		3A5D27E161D3A13271E3B2BD /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 91D2B83FD4CFD80CE6B8C6DA /* Localizable.strings */; };
+		3C09CAAA7AEE660E624405AD /* JobModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B3A5AF9D67799A1735839F /* JobModels.swift */; };
+		44F8AF4F0CD144B4E377F6C9 /* AuthConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B162C6D7DCD82DD1D9F45FD1 /* AuthConfiguration.swift */; };
+		452B6629B884CB1569ED1A2A /* UnavailableJobsAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76376826C31F15253D9E8C69 /* UnavailableJobsAPI.swift */; };
+		58696552B87E210C46905E87 /* JobsAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C980C7A93C7540A94BFD96F0 /* JobsAPIClientTests.swift */; };
+		5ACED8F52E24922235AD549B /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E2D4DD79571B4E4F2C9DFA /* AuthView.swift */; };
+		5AFF7BE4188AE12697D2F6E2 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 31C78A77C5C83F416D4BE1B8 /* FirebaseMessaging */; };
+		5E3A872860C6FEDF1ED57DB8 /* AudioPipelineRestorationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E58260A399AEC4582C7D6113 /* AudioPipelineRestorationTests.swift */; };
+		5EDBEDB487B17AFEC1249A54 /* PushRegistrationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A092C9DF86849A843297BED /* PushRegistrationCoordinator.swift */; };
+		5F041C56FF06E0B0F21086BF /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8582DEF2DE554DF342D78C20 /* FirebaseCore */; };
+		650EF9DA8DE6EDE58BD9AEE7 /* AudioStepTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3537EE14A480B17D9A14F6B /* AudioStepTimeline.swift */; };
+		683BFF56CD5D355AD2424717 /* AudioInputPreparerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31F5E38EC5FE5AC9FAC3ECF2 /* AudioInputPreparerTests.swift */; };
+		6B05E6473EF1FA607E9673F0 /* PushRegistrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8E0316BB30B676B6B9863EB /* PushRegistrationTests.swift */; };
+		6ECF35AE8B34433D254BCD97 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570C88482CBC22BA1CBCF0A2 /* SettingsView.swift */; };
+		7338537559CB74D9F5C982CE /* AudioFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C0FDBD7BC9B26255E9D042 /* AudioFiles.swift */; };
+		77232A8FFDFB228155DB78E8 /* AccountDeletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BDC3C8EBC1538C44AA7E3A0 /* AccountDeletionTests.swift */; };
+		787A180A3173723D7095C8AF /* Previews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E9E5C9EC10CD8456BA6AD69 /* Previews.swift */; };
+		7B76E31FBC4907A85B3C45DB /* LinkedMethodsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE05CE5B39A105849B604CB0 /* LinkedMethodsView.swift */; };
+		7C1589B508F4353504AF264E /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BA22436E9B199E6A917A2CA /* Design.swift */; };
+		7F8447D285D4440BE64D2DC8 /* AuthGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 286617BE19D541594512484E /* AuthGate.swift */; };
+		8203D8E25F42858B4E20781D /* ProcessingModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F339EF5BDC8C77D36A07977 /* ProcessingModel.swift */; };
+		8396DCCDB855587017D3130C /* AudioModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC952AECE6537C703DC33135 /* AudioModels.swift */; };
+		850168031F88A3D626A47BB4 /* PersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 090B752712F13C3505D78A5E /* PersistenceTests.swift */; };
+		898F1DE01E1DA8C578345DFD /* BackgroundTransferCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26B543C68B6E90EF7C466A79 /* BackgroundTransferCoordinator.swift */; };
+		8B6FB8E167E4460C1EDA829C /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473549C7D7F5FD12B15834A7 /* HomeView.swift */; };
+		8D38CF90FD8FA942A401DCE9 /* ProcessingRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A6F407449B25F154EAA256B /* ProcessingRepository.swift */; };
+		8DA09E23E1C1A24C698EF9F3 /* ProcessingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9F08D74DB32AB3481DC056F /* ProcessingHistoryView.swift */; };
+		92E5DD127C5D3A62AF165E45 /* PreparedInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59CC9D22C50AB1BB5B8C0503 /* PreparedInput.swift */; };
+		9428AE27F344521B329D66FA /* AudioPipelineCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C946370B980DC93897FE0633 /* AudioPipelineCoordinatorTests.swift */; };
+		95AD5A55F0BFED4AAD3474D7 /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 503B9D863AB927F748F7B40C /* AccountView.swift */; };
+		98E3557FCDCF80EB34902C98 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 085EF6C969DEB2694B4A640A /* AppPreferences.swift */; };
+		9CCB23ED317978675875F423 /* JobArtifactTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B81AB703DDF99EDEE557757 /* JobArtifactTests.swift */; };
+		9FE3A27B63CCFB273A717DB3 /* ProcessingRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B78136212F986011BB7050C3 /* ProcessingRootView.swift */; };
+		A29C7569EF790B8E81821EEF /* ProcessingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC2CC3E64664E062C0ED4E9D /* ProcessingDetailView.swift */; };
+		A373CDB8F81642E508BD712D /* AudioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69D5D602750F0D9EA916F5A3 /* AudioPlayer.swift */; };
+		A813B1355DA9CAB75BED8467 /* AuthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FBF687D2C109DB9598F47DA /* AuthModels.swift */; };
+		A865BB5A025B249CA9C9523C /* YouTubeAudioService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B911B6A671806660717F423A /* YouTubeAudioService.swift */; };
+		AB470B9008BD3A374D32E294 /* ProcessedAudioShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 660B23C25F82DB727CE4A181 /* ProcessedAudioShareSheet.swift */; };
+		ABAC876F26CD8EBF548725E1 /* JobActionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51CCBDCF585514BE0A44E115 /* JobActionsTests.swift */; };
+		B4CD68EA9DEB2DFB0FB55900 /* JobArtifactRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 815A50EDA19CBF1308AF8F67 /* JobArtifactRepository.swift */; };
+		B61BB3F6EE8AEA6B0D6CBE32 /* ClientErrorOutbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 759FA4CFE70388F34934B289 /* ClientErrorOutbox.swift */; };
+		BB060074C0DDAA7F8FAD6D64 /* AudioPipelineCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70591739DBFFDD36AA63F5B4 /* AudioPipelineCoordinator.swift */; };
+		BE4669CE51159FD7BEE65FB2 /* AppleCredentialProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72CC2088B44D9567BC3F3910 /* AppleCredentialProvider.swift */; };
+		BE472D7FEEDCEAB0D5F83E9C /* ArtifactDownloadTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75185DC91480E7C2759D176B /* ArtifactDownloadTransport.swift */; };
+		C26A2E3219390B3CC103FA1B /* DownloadModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73890F4D1B48862F4F1A11B1 /* DownloadModel.swift */; };
+		C5DA95F71D04FE6C1037C414 /* InstallationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFD4BE9A9D7E74A9769D0047 /* InstallationStore.swift */; };
+		C98A88C16EF8318CC72744B5 /* ProcessingHistoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A136CA71F7E1F4B758D6BA76 /* ProcessingHistoryModel.swift */; };
+		CEE8FF959604183568D7BDBC /* AuthSessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23328842D2992A6AE71E1989 /* AuthSessionModel.swift */; };
+		D0D2244EF23F5A123A468B97 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9937A0FABD63B8E70E398F6 /* HistoryView.swift */; };
+		D21B422E0E3EF259E323EEC0 /* AudioImportReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2B3AE5A5024BDEBCF5D2D57 /* AudioImportReview.swift */; };
+		D95EF16EED3D0B45129C923A /* ProcessingAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2295DDCB883FDCD273D94AA3 /* ProcessingAppDelegate.swift */; };
+		DF2DE31503AB15DEC2C9D4FB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C84E9ED822652D2409ECA1A3 /* Assets.xcassets */; };
+		E10F2D2654E89156064DA38E /* VocalApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D63078CD230292193F890DCD /* VocalApp.swift */; };
+		E46AA067382EB694F2685932 /* ProcessingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3E7E389E57CA1F2F39CFDDF /* ProcessingUITests.swift */; };
+		E7CB62336ACEAFA3EC9A88E1 /* ProcessingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D3B46976552B6DC3124085E /* ProcessingStore.swift */; };
+		EA831F744456BD4B61F3F511 /* S3MultipartFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 326664D9C4E33E9F647E5414 /* S3MultipartFile.swift */; };
+		EC2B1ADE7E3E3FB261A0C095 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 23FA53994AE59BE9C2307305 /* GoogleService-Info.plist */; };
+		ED2D46D59795BD55D63C8A5F /* AudioInputPreparer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7C1E16DD3FDBEC754CCF00 /* AudioInputPreparer.swift */; };
+		ED73E7172B5765ADBE1EA042 /* ClientErrorOutboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFCB20A0300F96084C683D0 /* ClientErrorOutboxTests.swift */; };
+		F3944753E2713C455F49A6E8 /* AudioTaskCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B691A016F2DF435B5F5167BD /* AudioTaskCard.swift */; };
+		F476FAAF706ED7DFD535BFE5 /* ProcessingStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234253D2BF54690E24EB9F62 /* ProcessingStoreTests.swift */; };
+		F4F21F435BAEA7CD4EF15FB7 /* ProcessingHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA110C830CEB54B7ED80050 /* ProcessingHistoryTests.swift */; };
+		F5A8E4F3416721A80A5E33B9 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A66AF9F84988186228BB4AFF /* FirebaseAuth */; };
+		FAEAE8CA381FF35631B6A41A /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 092C3D6D4464FA4AE53CF5B3 /* ThirdPartyNotices.txt */; };
+		FC7C0D2D2B94ECD576D2FFF8 /* AudioTaskPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E75D11882FD72544A5DB293 /* AudioTaskPresentation.swift */; };
+		FD29A044C971F769EAAFA9AE /* ProcessingUITestHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1662A8163614331AA561E8C9 /* ProcessingUITestHarness.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1286C639463C3071E3759BCD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8E68226DD1EA0DA68F5D7938 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 34B02A5F2FC0CBFB4E405482;
+			remoteInfo = MusicMute;
+		};
+		23481FD0633E8A5D7506D75F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8E68226DD1EA0DA68F5D7938 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 34B02A5F2FC0CBFB4E405482;
+			remoteInfo = MusicMute;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		085EF6C969DEB2694B4A640A /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
+		090B752712F13C3505D78A5E /* PersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceTests.swift; sourceTree = "<group>"; };
+		092C3D6D4464FA4AE53CF5B3 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
+		127FE247DC0F78A7D875FD1C /* ar */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ar; path = ar.lproj/Localizable.strings; sourceTree = "<group>"; };
+		137030C54983FB5C883D4390 /* ArtifactDownloadTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactDownloadTransportTests.swift; sourceTree = "<group>"; };
+		1662A8163614331AA561E8C9 /* ProcessingUITestHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingUITestHarness.swift; sourceTree = "<group>"; };
+		2295DDCB883FDCD273D94AA3 /* ProcessingAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingAppDelegate.swift; sourceTree = "<group>"; };
+		23328842D2992A6AE71E1989 /* AuthSessionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSessionModel.swift; sourceTree = "<group>"; };
+		234253D2BF54690E24EB9F62 /* ProcessingStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingStoreTests.swift; sourceTree = "<group>"; };
+		23FA53994AE59BE9C2307305 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		2420DA338C2E407F1F449181 /* VocalUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VocalUITests.swift; sourceTree = "<group>"; };
+		26B543C68B6E90EF7C466A79 /* BackgroundTransferCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTransferCoordinator.swift; sourceTree = "<group>"; };
+		286617BE19D541594512484E /* AuthGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthGate.swift; sourceTree = "<group>"; };
+		31F5E38EC5FE5AC9FAC3ECF2 /* AudioInputPreparerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioInputPreparerTests.swift; sourceTree = "<group>"; };
+		326664D9C4E33E9F647E5414 /* S3MultipartFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = S3MultipartFile.swift; sourceTree = "<group>"; };
+		3278CCB9EA77606685ADF38B /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		3376C9B5D89E6AF347576762 /* AudioPipelineRestoration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPipelineRestoration.swift; sourceTree = "<group>"; };
+		338642359BC137704D29D7D7 /* AccountDeletionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountDeletionStore.swift; sourceTree = "<group>"; };
+		34F6702F528D11A1DC3F44F8 /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
+		3EFCB20A0300F96084C683D0 /* ClientErrorOutboxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientErrorOutboxTests.swift; sourceTree = "<group>"; };
+		473549C7D7F5FD12B15834A7 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		47DCAD66CE5A591A780CD4B7 /* DownloadModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadModelTests.swift; sourceTree = "<group>"; };
+		4BDC3C8EBC1538C44AA7E3A0 /* AccountDeletionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountDeletionTests.swift; sourceTree = "<group>"; };
+		4E75D11882FD72544A5DB293 /* AudioTaskPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTaskPresentation.swift; sourceTree = "<group>"; };
+		503B9D863AB927F748F7B40C /* AccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountView.swift; sourceTree = "<group>"; };
+		51CCBDCF585514BE0A44E115 /* JobActionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobActionsTests.swift; sourceTree = "<group>"; };
+		5290F32CC7405B078EB9EBE6 /* AuthPushCleanupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthPushCleanupTests.swift; sourceTree = "<group>"; };
+		570C88482CBC22BA1CBCF0A2 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		59CC9D22C50AB1BB5B8C0503 /* PreparedInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreparedInput.swift; sourceTree = "<group>"; };
+		5A45D3D33E71AE46C4E4C7D1 /* Vocal.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Vocal.entitlements; sourceTree = "<group>"; };
+		5A9C17836C4018211E6992FC /* ArtifactNativeValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactNativeValidationTests.swift; sourceTree = "<group>"; };
+		5D3B92B4629A86C8986E7D34 /* AudioTaskPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTaskPresentationTests.swift; sourceTree = "<group>"; };
+		5FBF687D2C109DB9598F47DA /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
+		607F7C8EAF0CADB10866A904 /* DevicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicesView.swift; sourceTree = "<group>"; };
+		660B23C25F82DB727CE4A181 /* ProcessedAudioShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessedAudioShareSheet.swift; sourceTree = "<group>"; };
+		68AAAA6193E31D32189D0E3F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		69D5D602750F0D9EA916F5A3 /* AudioPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayer.swift; sourceTree = "<group>"; };
+		6D3B46976552B6DC3124085E /* ProcessingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingStore.swift; sourceTree = "<group>"; };
+		6ED9B35BC2C9352F075A30E0 /* HistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryStore.swift; sourceTree = "<group>"; };
+		70591739DBFFDD36AA63F5B4 /* AudioPipelineCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPipelineCoordinator.swift; sourceTree = "<group>"; };
+		72CC2088B44D9567BC3F3910 /* AppleCredentialProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleCredentialProvider.swift; sourceTree = "<group>"; };
+		73890F4D1B48862F4F1A11B1 /* DownloadModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadModel.swift; sourceTree = "<group>"; };
+		75185DC91480E7C2759D176B /* ArtifactDownloadTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactDownloadTransport.swift; sourceTree = "<group>"; };
+		759FA4CFE70388F34934B289 /* ClientErrorOutbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientErrorOutbox.swift; sourceTree = "<group>"; };
+		76376826C31F15253D9E8C69 /* UnavailableJobsAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnavailableJobsAPI.swift; sourceTree = "<group>"; };
+		7A6F407449B25F154EAA256B /* ProcessingRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingRepository.swift; sourceTree = "<group>"; };
+		7BA22436E9B199E6A917A2CA /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
+		7F339EF5BDC8C77D36A07977 /* ProcessingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingModel.swift; sourceTree = "<group>"; };
+		815A50EDA19CBF1308AF8F67 /* JobArtifactRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobArtifactRepository.swift; sourceTree = "<group>"; };
+		8AA110C830CEB54B7ED80050 /* ProcessingHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingHistoryTests.swift; sourceTree = "<group>"; };
+		8B81AB703DDF99EDEE557757 /* JobArtifactTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobArtifactTests.swift; sourceTree = "<group>"; };
+		93035634DAB8A8315FD9C73F /* PushRegistrationAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistrationAPIClientTests.swift; sourceTree = "<group>"; };
+		94B3A5AF9D67799A1735839F /* JobModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobModels.swift; sourceTree = "<group>"; };
+		9A092C9DF86849A843297BED /* PushRegistrationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistrationCoordinator.swift; sourceTree = "<group>"; };
+		9E9E5C9EC10CD8456BA6AD69 /* Previews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Previews.swift; sourceTree = "<group>"; };
+		9FA3F1D8A9DFDD9080314470 /* JobsAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobsAPIClient.swift; sourceTree = "<group>"; };
+		A136CA71F7E1F4B758D6BA76 /* ProcessingHistoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingHistoryModel.swift; sourceTree = "<group>"; };
+		A18A4869478A6E4337540293 /* MusicMute.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MusicMute.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A3537EE14A480B17D9A14F6B /* AudioStepTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioStepTimeline.swift; sourceTree = "<group>"; };
+		A7C0FDBD7BC9B26255E9D042 /* AudioFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioFiles.swift; sourceTree = "<group>"; };
+		AE7C1E16DD3FDBEC754CCF00 /* AudioInputPreparer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioInputPreparer.swift; sourceTree = "<group>"; };
+		AED7AD4BDD893B3E10E3793C /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		B162C6D7DCD82DD1D9F45FD1 /* AuthConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthConfiguration.swift; sourceTree = "<group>"; };
+		B2B3AE5A5024BDEBCF5D2D57 /* AudioImportReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioImportReview.swift; sourceTree = "<group>"; };
+		B691A016F2DF435B5F5167BD /* AudioTaskCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTaskCard.swift; sourceTree = "<group>"; };
+		B78136212F986011BB7050C3 /* ProcessingRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingRootView.swift; sourceTree = "<group>"; };
+		B911B6A671806660717F423A /* YouTubeAudioService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeAudioService.swift; sourceTree = "<group>"; };
+		BFD4BE9A9D7E74A9769D0047 /* InstallationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallationStore.swift; sourceTree = "<group>"; };
+		C1D1684431998FB6296662D7 /* FirebaseAuthGateway.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseAuthGateway.swift; sourceTree = "<group>"; };
+		C35DCC712695C754017068BD /* NotificationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDelegate.swift; sourceTree = "<group>"; };
+		C4C8B7242BD7B24BB55ED579 /* AuthAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthAPIClient.swift; sourceTree = "<group>"; };
+		C7E2D4DD79571B4E4F2C9DFA /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
+		C84E9ED822652D2409ECA1A3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C946370B980DC93897FE0633 /* AudioPipelineCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPipelineCoordinatorTests.swift; sourceTree = "<group>"; };
+		C980C7A93C7540A94BFD96F0 /* JobsAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobsAPIClientTests.swift; sourceTree = "<group>"; };
+		CE05CE5B39A105849B604CB0 /* LinkedMethodsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkedMethodsView.swift; sourceTree = "<group>"; };
+		D3E7E389E57CA1F2F39CFDDF /* ProcessingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingUITests.swift; sourceTree = "<group>"; };
+		D4FEB45786DF3B7CEE312B4D /* UploadRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadRecoveryTests.swift; sourceTree = "<group>"; };
+		D63078CD230292193F890DCD /* VocalApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VocalApp.swift; sourceTree = "<group>"; };
+		D8E0316BB30B676B6B9863EB /* PushRegistrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistrationTests.swift; sourceTree = "<group>"; };
+		D9F08D74DB32AB3481DC056F /* ProcessingHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingHistoryView.swift; sourceTree = "<group>"; };
+		DB2DD56D05DE5DDD890099EE /* VocalTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VocalTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DE5C6B7E6BA4A0B46AA79342 /* VocalUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VocalUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E58260A399AEC4582C7D6113 /* AudioPipelineRestorationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPipelineRestorationTests.swift; sourceTree = "<group>"; };
+		E9937A0FABD63B8E70E398F6 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		FC2CC3E64664E062C0ED4E9D /* ProcessingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingDetailView.swift; sourceTree = "<group>"; };
+		FC952AECE6537C703DC33135 /* AudioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioModels.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9C963054F4EE76DDEEEBC48C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2CD482465DEF4E70210CD1F7 /* YouTubeKit in Frameworks */,
+				5F041C56FF06E0B0F21086BF /* FirebaseCore in Frameworks */,
+				F5A8E4F3416721A80A5E33B9 /* FirebaseAuth in Frameworks */,
+				5AFF7BE4188AE12697D2F6E2 /* FirebaseMessaging in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		014313F23A9B48128387D4B8 = {
+			isa = PBXGroup;
+			children = (
+				83515AECF7704E1867149CBC /* Vocal */,
+				A6B3568CDC6A9BB64FACA84A /* VocalTests */,
+				14322699CB4C9B85BF383462 /* VocalUITests */,
+				5BA865A44AE41DB88EA4DD28 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		14322699CB4C9B85BF383462 /* VocalUITests */ = {
+			isa = PBXGroup;
+			children = (
+				D3E7E389E57CA1F2F39CFDDF /* ProcessingUITests.swift */,
+				2420DA338C2E407F1F449181 /* VocalUITests.swift */,
+			);
+			path = VocalUITests;
+			sourceTree = "<group>";
+		};
+		1537FB4E6F82A8D131650382 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				C84E9ED822652D2409ECA1A3 /* Assets.xcassets */,
+				3278CCB9EA77606685ADF38B /* PrivacyInfo.xcprivacy */,
+				092C3D6D4464FA4AE53CF5B3 /* ThirdPartyNotices.txt */,
+				91D2B83FD4CFD80CE6B8C6DA /* Localizable.strings */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		4466121E88377D8BE702BDFE /* Processing */ = {
+			isa = PBXGroup;
+			children = (
+				75185DC91480E7C2759D176B /* ArtifactDownloadTransport.swift */,
+				AE7C1E16DD3FDBEC754CCF00 /* AudioInputPreparer.swift */,
+				70591739DBFFDD36AA63F5B4 /* AudioPipelineCoordinator.swift */,
+				3376C9B5D89E6AF347576762 /* AudioPipelineRestoration.swift */,
+				4E75D11882FD72544A5DB293 /* AudioTaskPresentation.swift */,
+				26B543C68B6E90EF7C466A79 /* BackgroundTransferCoordinator.swift */,
+				759FA4CFE70388F34934B289 /* ClientErrorOutbox.swift */,
+				815A50EDA19CBF1308AF8F67 /* JobArtifactRepository.swift */,
+				94B3A5AF9D67799A1735839F /* JobModels.swift */,
+				9FA3F1D8A9DFDD9080314470 /* JobsAPIClient.swift */,
+				C35DCC712695C754017068BD /* NotificationDelegate.swift */,
+				59CC9D22C50AB1BB5B8C0503 /* PreparedInput.swift */,
+				2295DDCB883FDCD273D94AA3 /* ProcessingAppDelegate.swift */,
+				7A6F407449B25F154EAA256B /* ProcessingRepository.swift */,
+				6D3B46976552B6DC3124085E /* ProcessingStore.swift */,
+				9A092C9DF86849A843297BED /* PushRegistrationCoordinator.swift */,
+				326664D9C4E33E9F647E5414 /* S3MultipartFile.swift */,
+				76376826C31F15253D9E8C69 /* UnavailableJobsAPI.swift */,
+			);
+			path = Processing;
+			sourceTree = "<group>";
+		};
+		5BA865A44AE41DB88EA4DD28 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A18A4869478A6E4337540293 /* MusicMute.app */,
+				DB2DD56D05DE5DDD890099EE /* VocalTests.xctest */,
+				DE5C6B7E6BA4A0B46AA79342 /* VocalUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		83515AECF7704E1867149CBC /* Vocal */ = {
+			isa = PBXGroup;
+			children = (
+				23FA53994AE59BE9C2307305 /* GoogleService-Info.plist */,
+				68AAAA6193E31D32189D0E3F /* Info.plist */,
+				5A45D3D33E71AE46C4E4C7D1 /* Vocal.entitlements */,
+				D63078CD230292193F890DCD /* VocalApp.swift */,
+				ECDFFE6BBDA5663DB492228B /* Auth */,
+				999DF3CF8008EB2DA0F54EB9 /* Core */,
+				B4B654086FF00C25077F90D8 /* Data */,
+				CE203F564B8B0323EA8BEA1C /* Playback */,
+				4466121E88377D8BE702BDFE /* Processing */,
+				1537FB4E6F82A8D131650382 /* Resources */,
+				E42240EEDEB06C92C8F43BDD /* State */,
+				D5114DBC5B70B83A2635789B /* UI */,
+			);
+			path = Vocal;
+			sourceTree = "<group>";
+		};
+		999DF3CF8008EB2DA0F54EB9 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				FC952AECE6537C703DC33135 /* AudioModels.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		A6B3568CDC6A9BB64FACA84A /* VocalTests */ = {
+			isa = PBXGroup;
+			children = (
+				4BDC3C8EBC1538C44AA7E3A0 /* AccountDeletionTests.swift */,
+				137030C54983FB5C883D4390 /* ArtifactDownloadTransportTests.swift */,
+				5A9C17836C4018211E6992FC /* ArtifactNativeValidationTests.swift */,
+				31F5E38EC5FE5AC9FAC3ECF2 /* AudioInputPreparerTests.swift */,
+				C946370B980DC93897FE0633 /* AudioPipelineCoordinatorTests.swift */,
+				E58260A399AEC4582C7D6113 /* AudioPipelineRestorationTests.swift */,
+				5D3B92B4629A86C8986E7D34 /* AudioTaskPresentationTests.swift */,
+				5290F32CC7405B078EB9EBE6 /* AuthPushCleanupTests.swift */,
+				3EFCB20A0300F96084C683D0 /* ClientErrorOutboxTests.swift */,
+				34F6702F528D11A1DC3F44F8 /* CoreTests.swift */,
+				47DCAD66CE5A591A780CD4B7 /* DownloadModelTests.swift */,
+				51CCBDCF585514BE0A44E115 /* JobActionsTests.swift */,
+				8B81AB703DDF99EDEE557757 /* JobArtifactTests.swift */,
+				C980C7A93C7540A94BFD96F0 /* JobsAPIClientTests.swift */,
+				090B752712F13C3505D78A5E /* PersistenceTests.swift */,
+				8AA110C830CEB54B7ED80050 /* ProcessingHistoryTests.swift */,
+				234253D2BF54690E24EB9F62 /* ProcessingStoreTests.swift */,
+				93035634DAB8A8315FD9C73F /* PushRegistrationAPIClientTests.swift */,
+				D8E0316BB30B676B6B9863EB /* PushRegistrationTests.swift */,
+				D4FEB45786DF3B7CEE312B4D /* UploadRecoveryTests.swift */,
+			);
+			path = VocalTests;
+			sourceTree = "<group>";
+		};
+		B4B654086FF00C25077F90D8 /* Data */ = {
+			isa = PBXGroup;
+			children = (
+				A7C0FDBD7BC9B26255E9D042 /* AudioFiles.swift */,
+				6ED9B35BC2C9352F075A30E0 /* HistoryStore.swift */,
+				B911B6A671806660717F423A /* YouTubeAudioService.swift */,
+			);
+			path = Data;
+			sourceTree = "<group>";
+		};
+		BD8E71DBFE791D401E21BCC0 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				503B9D863AB927F748F7B40C /* AccountView.swift */,
+				286617BE19D541594512484E /* AuthGate.swift */,
+				C7E2D4DD79571B4E4F2C9DFA /* AuthView.swift */,
+				607F7C8EAF0CADB10866A904 /* DevicesView.swift */,
+				CE05CE5B39A105849B604CB0 /* LinkedMethodsView.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		CE203F564B8B0323EA8BEA1C /* Playback */ = {
+			isa = PBXGroup;
+			children = (
+				69D5D602750F0D9EA916F5A3 /* AudioPlayer.swift */,
+			);
+			path = Playback;
+			sourceTree = "<group>";
+		};
+		D5114DBC5B70B83A2635789B /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				B2B3AE5A5024BDEBCF5D2D57 /* AudioImportReview.swift */,
+				A3537EE14A480B17D9A14F6B /* AudioStepTimeline.swift */,
+				B691A016F2DF435B5F5167BD /* AudioTaskCard.swift */,
+				7BA22436E9B199E6A917A2CA /* Design.swift */,
+				E9937A0FABD63B8E70E398F6 /* HistoryView.swift */,
+				473549C7D7F5FD12B15834A7 /* HomeView.swift */,
+				9E9E5C9EC10CD8456BA6AD69 /* Previews.swift */,
+				660B23C25F82DB727CE4A181 /* ProcessedAudioShareSheet.swift */,
+				FC2CC3E64664E062C0ED4E9D /* ProcessingDetailView.swift */,
+				D9F08D74DB32AB3481DC056F /* ProcessingHistoryView.swift */,
+				B78136212F986011BB7050C3 /* ProcessingRootView.swift */,
+				1662A8163614331AA561E8C9 /* ProcessingUITestHarness.swift */,
+				570C88482CBC22BA1CBCF0A2 /* SettingsView.swift */,
+				BD8E71DBFE791D401E21BCC0 /* Auth */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		E42240EEDEB06C92C8F43BDD /* State */ = {
+			isa = PBXGroup;
+			children = (
+				085EF6C969DEB2694B4A640A /* AppPreferences.swift */,
+				73890F4D1B48862F4F1A11B1 /* DownloadModel.swift */,
+				A136CA71F7E1F4B758D6BA76 /* ProcessingHistoryModel.swift */,
+				7F339EF5BDC8C77D36A07977 /* ProcessingModel.swift */,
+			);
+			path = State;
+			sourceTree = "<group>";
+		};
+		ECDFFE6BBDA5663DB492228B /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				338642359BC137704D29D7D7 /* AccountDeletionStore.swift */,
+				72CC2088B44D9567BC3F3910 /* AppleCredentialProvider.swift */,
+				C4C8B7242BD7B24BB55ED579 /* AuthAPIClient.swift */,
+				B162C6D7DCD82DD1D9F45FD1 /* AuthConfiguration.swift */,
+				5FBF687D2C109DB9598F47DA /* AuthModels.swift */,
+				23328842D2992A6AE71E1989 /* AuthSessionModel.swift */,
+				C1D1684431998FB6296662D7 /* FirebaseAuthGateway.swift */,
+				BFD4BE9A9D7E74A9769D0047 /* InstallationStore.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		34B02A5F2FC0CBFB4E405482 /* MusicMute */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F83F8AC843384E142F947852 /* Build configuration list for PBXNativeTarget "MusicMute" */;
+			buildPhases = (
+				7DEF88198037557C3E7D686E /* Sources */,
+				F440633BE11255A4AA70ABB1 /* Resources */,
+				9C963054F4EE76DDEEEBC48C /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MusicMute;
+			packageProductDependencies = (
+				6765669812F3A0845906D4A0 /* YouTubeKit */,
+				8582DEF2DE554DF342D78C20 /* FirebaseCore */,
+				A66AF9F84988186228BB4AFF /* FirebaseAuth */,
+				31C78A77C5C83F416D4BE1B8 /* FirebaseMessaging */,
+			);
+			productName = MusicMute;
+			productReference = A18A4869478A6E4337540293 /* MusicMute.app */;
+			productType = "com.apple.product-type.application";
+		};
+		7B77C0E27A50A30B28BDD5B5 /* VocalTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0087C553EF3E605B7DECFAEA /* Build configuration list for PBXNativeTarget "VocalTests" */;
+			buildPhases = (
+				505DA98A97E3395E0BDEFC35 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				45697C68E8F6944D800C34BF /* PBXTargetDependency */,
+			);
+			name = VocalTests;
+			packageProductDependencies = (
+			);
+			productName = VocalTests;
+			productReference = DB2DD56D05DE5DDD890099EE /* VocalTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		98E3903E7F40FCA6387E5F97 /* VocalUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9595680B70B723788152BA49 /* Build configuration list for PBXNativeTarget "VocalUITests" */;
+			buildPhases = (
+				EC1857286B5ED31E8D29E510 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				413047A80CED107C40C3FA00 /* PBXTargetDependency */,
+			);
+			name = VocalUITests;
+			packageProductDependencies = (
+			);
+			productName = VocalUITests;
+			productReference = DE5C6B7E6BA4A0B46AA79342 /* VocalUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		8E68226DD1EA0DA68F5D7938 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					34B02A5F2FC0CBFB4E405482 = {
+						ProvisioningStyle = Automatic;
+					};
+					7B77C0E27A50A30B28BDD5B5 = {
+						ProvisioningStyle = Automatic;
+					};
+					98E3903E7F40FCA6387E5F97 = {
+						ProvisioningStyle = Automatic;
+						TestTargetID = 34B02A5F2FC0CBFB4E405482;
+					};
+				};
+			};
+			buildConfigurationList = 181805BD15D4371521AD103D /* Build configuration list for PBXProject "MusicMute" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				ar,
+				en,
+			);
+			mainGroup = 014313F23A9B48128387D4B8;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D0F59215FBD0E11156C3F7F7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				0298020805395E9EBC74D812 /* XCRemoteSwiftPackageReference "YouTubeKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 5BA865A44AE41DB88EA4DD28 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				34B02A5F2FC0CBFB4E405482 /* MusicMute */,
+				7B77C0E27A50A30B28BDD5B5 /* VocalTests */,
+				98E3903E7F40FCA6387E5F97 /* VocalUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F440633BE11255A4AA70ABB1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DF2DE31503AB15DEC2C9D4FB /* Assets.xcassets in Resources */,
+				EC2B1ADE7E3E3FB261A0C095 /* GoogleService-Info.plist in Resources */,
+				3A5D27E161D3A13271E3B2BD /* Localizable.strings in Resources */,
+				388494B8EB333DD90C3F07F5 /* PrivacyInfo.xcprivacy in Resources */,
+				FAEAE8CA381FF35631B6A41A /* ThirdPartyNotices.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		505DA98A97E3395E0BDEFC35 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				77232A8FFDFB228155DB78E8 /* AccountDeletionTests.swift in Sources */,
+				091BE4787F47833074B90287 /* ArtifactDownloadTransportTests.swift in Sources */,
+				25F8AAF25127CA985F70F329 /* ArtifactNativeValidationTests.swift in Sources */,
+				683BFF56CD5D355AD2424717 /* AudioInputPreparerTests.swift in Sources */,
+				9428AE27F344521B329D66FA /* AudioPipelineCoordinatorTests.swift in Sources */,
+				5E3A872860C6FEDF1ED57DB8 /* AudioPipelineRestorationTests.swift in Sources */,
+				30E618B394992ED5D5D26414 /* AudioTaskPresentationTests.swift in Sources */,
+				118A8461E200119EE6BD5254 /* AuthPushCleanupTests.swift in Sources */,
+				ED73E7172B5765ADBE1EA042 /* ClientErrorOutboxTests.swift in Sources */,
+				348439B221D0710BA7EBAC53 /* CoreTests.swift in Sources */,
+				06C778F0C7CDB463650D6F4C /* DownloadModelTests.swift in Sources */,
+				ABAC876F26CD8EBF548725E1 /* JobActionsTests.swift in Sources */,
+				9CCB23ED317978675875F423 /* JobArtifactTests.swift in Sources */,
+				58696552B87E210C46905E87 /* JobsAPIClientTests.swift in Sources */,
+				850168031F88A3D626A47BB4 /* PersistenceTests.swift in Sources */,
+				F4F21F435BAEA7CD4EF15FB7 /* ProcessingHistoryTests.swift in Sources */,
+				F476FAAF706ED7DFD535BFE5 /* ProcessingStoreTests.swift in Sources */,
+				1AEFE931C5907B1F585A14FC /* PushRegistrationAPIClientTests.swift in Sources */,
+				6B05E6473EF1FA607E9673F0 /* PushRegistrationTests.swift in Sources */,
+				2679C4B9CAB61E2C7A612301 /* UploadRecoveryTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7DEF88198037557C3E7D686E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				274C13639D53CD838EF88E59 /* AccountDeletionStore.swift in Sources */,
+				95AD5A55F0BFED4AAD3474D7 /* AccountView.swift in Sources */,
+				98E3557FCDCF80EB34902C98 /* AppPreferences.swift in Sources */,
+				BE4669CE51159FD7BEE65FB2 /* AppleCredentialProvider.swift in Sources */,
+				BE472D7FEEDCEAB0D5F83E9C /* ArtifactDownloadTransport.swift in Sources */,
+				7338537559CB74D9F5C982CE /* AudioFiles.swift in Sources */,
+				D21B422E0E3EF259E323EEC0 /* AudioImportReview.swift in Sources */,
+				ED2D46D59795BD55D63C8A5F /* AudioInputPreparer.swift in Sources */,
+				8396DCCDB855587017D3130C /* AudioModels.swift in Sources */,
+				BB060074C0DDAA7F8FAD6D64 /* AudioPipelineCoordinator.swift in Sources */,
+				04CB9864038DB8AAAB77C750 /* AudioPipelineRestoration.swift in Sources */,
+				A373CDB8F81642E508BD712D /* AudioPlayer.swift in Sources */,
+				650EF9DA8DE6EDE58BD9AEE7 /* AudioStepTimeline.swift in Sources */,
+				F3944753E2713C455F49A6E8 /* AudioTaskCard.swift in Sources */,
+				FC7C0D2D2B94ECD576D2FFF8 /* AudioTaskPresentation.swift in Sources */,
+				34573EFAD5D1A1153C8BEF3E /* AuthAPIClient.swift in Sources */,
+				44F8AF4F0CD144B4E377F6C9 /* AuthConfiguration.swift in Sources */,
+				7F8447D285D4440BE64D2DC8 /* AuthGate.swift in Sources */,
+				A813B1355DA9CAB75BED8467 /* AuthModels.swift in Sources */,
+				CEE8FF959604183568D7BDBC /* AuthSessionModel.swift in Sources */,
+				5ACED8F52E24922235AD549B /* AuthView.swift in Sources */,
+				898F1DE01E1DA8C578345DFD /* BackgroundTransferCoordinator.swift in Sources */,
+				B61BB3F6EE8AEA6B0D6CBE32 /* ClientErrorOutbox.swift in Sources */,
+				7C1589B508F4353504AF264E /* Design.swift in Sources */,
+				13194C9FC6692C84B0579FAE /* DevicesView.swift in Sources */,
+				C26A2E3219390B3CC103FA1B /* DownloadModel.swift in Sources */,
+				13E61BEC8B36FAD67C01F04E /* FirebaseAuthGateway.swift in Sources */,
+				197115672DC97E47BE00DDC1 /* HistoryStore.swift in Sources */,
+				D0D2244EF23F5A123A468B97 /* HistoryView.swift in Sources */,
+				8B6FB8E167E4460C1EDA829C /* HomeView.swift in Sources */,
+				C5DA95F71D04FE6C1037C414 /* InstallationStore.swift in Sources */,
+				B4CD68EA9DEB2DFB0FB55900 /* JobArtifactRepository.swift in Sources */,
+				3C09CAAA7AEE660E624405AD /* JobModels.swift in Sources */,
+				16752085083F81AE3C3B7FF8 /* JobsAPIClient.swift in Sources */,
+				7B76E31FBC4907A85B3C45DB /* LinkedMethodsView.swift in Sources */,
+				285AB584E3E816B35E743464 /* NotificationDelegate.swift in Sources */,
+				92E5DD127C5D3A62AF165E45 /* PreparedInput.swift in Sources */,
+				787A180A3173723D7095C8AF /* Previews.swift in Sources */,
+				AB470B9008BD3A374D32E294 /* ProcessedAudioShareSheet.swift in Sources */,
+				D95EF16EED3D0B45129C923A /* ProcessingAppDelegate.swift in Sources */,
+				A29C7569EF790B8E81821EEF /* ProcessingDetailView.swift in Sources */,
+				C98A88C16EF8318CC72744B5 /* ProcessingHistoryModel.swift in Sources */,
+				8DA09E23E1C1A24C698EF9F3 /* ProcessingHistoryView.swift in Sources */,
+				8203D8E25F42858B4E20781D /* ProcessingModel.swift in Sources */,
+				8D38CF90FD8FA942A401DCE9 /* ProcessingRepository.swift in Sources */,
+				9FE3A27B63CCFB273A717DB3 /* ProcessingRootView.swift in Sources */,
+				E7CB62336ACEAFA3EC9A88E1 /* ProcessingStore.swift in Sources */,
+				FD29A044C971F769EAAFA9AE /* ProcessingUITestHarness.swift in Sources */,
+				5EDBEDB487B17AFEC1249A54 /* PushRegistrationCoordinator.swift in Sources */,
+				EA831F744456BD4B61F3F511 /* S3MultipartFile.swift in Sources */,
+				6ECF35AE8B34433D254BCD97 /* SettingsView.swift in Sources */,
+				452B6629B884CB1569ED1A2A /* UnavailableJobsAPI.swift in Sources */,
+				E10F2D2654E89156064DA38E /* VocalApp.swift in Sources */,
+				A865BB5A025B249CA9C9523C /* YouTubeAudioService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EC1857286B5ED31E8D29E510 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E46AA067382EB694F2685932 /* ProcessingUITests.swift in Sources */,
+				34E3B713515725618FC2DA79 /* VocalUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		413047A80CED107C40C3FA00 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 34B02A5F2FC0CBFB4E405482 /* MusicMute */;
+			targetProxy = 23481FD0633E8A5D7506D75F /* PBXContainerItemProxy */;
+		};
+		45697C68E8F6944D800C34BF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 34B02A5F2FC0CBFB4E405482 /* MusicMute */;
+			targetProxy = 1286C639463C3071E3759BCD /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		91D2B83FD4CFD80CE6B8C6DA /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				127FE247DC0F78A7D875FD1C /* ar */,
+				AED7AD4BDD893B3E10E3793C /* en */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		05966360819435E9907D4074 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Vocal/Vocal.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Vocal/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hatem.musicmute;
+				PRODUCT_MODULE_NAME = Vocal;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		58543C065B4B7804ECCBF369 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				APS_ENVIRONMENT = production;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				MUSICMUTE_ACCOUNT_DELETION_URL = "";
+				MUSICMUTE_API_BASE_URL = "";
+				MUSICMUTE_PRIVACY_URL = "";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				VOCAL_LIVE_TEST = 0;
+			};
+			name = Release;
+		};
+		5D7E65C0E485728D2994EC2F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hatem.musicmute.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MusicMute.app/MusicMute";
+			};
+			name = Release;
+		};
+		741261F9913872C5AAB7E340 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hatem.musicmute.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = MusicMute;
+			};
+			name = Debug;
+		};
+		798C927597A07AD2D24CA77A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hatem.musicmute.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = MusicMute;
+			};
+			name = Release;
+		};
+		8D9AD43E293130EA2B8B10F6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Vocal/Vocal.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Vocal/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hatem.musicmute;
+				PRODUCT_MODULE_NAME = Vocal;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A434FB19EA01B8EF779D315D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				APS_ENVIRONMENT = development;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				MUSICMUTE_ACCOUNT_DELETION_URL = "";
+				MUSICMUTE_API_BASE_URL = "http://127.0.0.1:3000";
+				MUSICMUTE_PRIVACY_URL = "";
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				VOCAL_LIVE_TEST = 0;
+			};
+			name = Debug;
+		};
+		E668A6B2730D6DA82E6AE4AE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hatem.musicmute.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MusicMute.app/MusicMute";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0087C553EF3E605B7DECFAEA /* Build configuration list for PBXNativeTarget "VocalTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E668A6B2730D6DA82E6AE4AE /* Debug */,
+				5D7E65C0E485728D2994EC2F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		181805BD15D4371521AD103D /* Build configuration list for PBXProject "MusicMute" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A434FB19EA01B8EF779D315D /* Debug */,
+				58543C065B4B7804ECCBF369 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9595680B70B723788152BA49 /* Build configuration list for PBXNativeTarget "VocalUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				741261F9913872C5AAB7E340 /* Debug */,
+				798C927597A07AD2D24CA77A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F83F8AC843384E142F947852 /* Build configuration list for PBXNativeTarget "MusicMute" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8D9AD43E293130EA2B8B10F6 /* Debug */,
+				05966360819435E9907D4074 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		0298020805395E9EBC74D812 /* XCRemoteSwiftPackageReference "YouTubeKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/alexeichhorn/YouTubeKit.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.4.9;
+			};
+		};
+		D0F59215FBD0E11156C3F7F7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = exactVersion;
+				version = 12.18.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		31C78A77C5C83F416D4BE1B8 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D0F59215FBD0E11156C3F7F7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
+		6765669812F3A0845906D4A0 /* YouTubeKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0298020805395E9EBC74D812 /* XCRemoteSwiftPackageReference "YouTubeKit" */;
+			productName = YouTubeKit;
+		};
+		8582DEF2DE554DF342D78C20 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D0F59215FBD0E11156C3F7F7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		A66AF9F84988186228BB4AFF /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D0F59215FBD0E11156C3F7F7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 8E68226DD1EA0DA68F5D7938 /* Project object */;
+}

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-worker/
+coverage/
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.local.example
+!.env.production.example
+firebase-admin.json
+*firebase-adminsdk*.json
+*service-account*.json
+.runtime/

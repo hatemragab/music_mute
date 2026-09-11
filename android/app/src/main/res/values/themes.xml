@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Vocal" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">#F7F8F4</item>
+    </style>
+</resources>

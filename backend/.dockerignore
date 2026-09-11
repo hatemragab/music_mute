@@ -1,0 +1,9 @@
+*
+!package.json
+!package-lock.json
+!.npmrc
+!nest-cli.json
+!tsconfig*.json
+!src/
+!src/**
+src/**/*.spec.ts

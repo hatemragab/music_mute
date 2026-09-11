@@ -4,6 +4,20 @@
 !.env.example
 *.pem
 *.key
+*.p8
+*.p12
+*.pfx
+*.mobileprovision
+firebase-admin.json
+*firebase-adminsdk*.json
+*service-account*.json
+
+# Firebase client SDK configuration is downloaded per developer/CI environment.
+# The authE2e file is a deliberately synthetic emulator-only fixture.
+google-services.json
+!android/app/src/authE2e/google-services.json
+GoogleService-Info.plist
+.firebase/
 
 # OS artifacts
 .DS_Store
@@ -17,6 +31,9 @@ Thumbs.db
 
 # Code review / analysis artifacts
 .code-review-graph/
+
+# Generated release packages
+/artifacts/
 
 # Python
 __pycache__/
@@ -43,3 +60,28 @@ build/
 .packages
 vocal_remover_mobile/build/
 *.lock
+
+# Native Android
+.gradle/
+.kotlin/
+local.properties
+*.jks
+*.keystore
+key.properties
+captures/
+hs_err_pid*.log
+replay_pid*.log
+*.apk
+*.aab
+
+# Firebase CLI diagnostic logs
+firebase-debug.log*
+
+# Native iOS
+ios/.build/
+ios/DerivedData*/
+*.xcarchive/
+*.ipa
+*.xcuserstate
+xcuserdata/
+*.xcresult/

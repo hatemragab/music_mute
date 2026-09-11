@@ -1,0 +1,4 @@
+<resources>
+    <string name="auth_login_description">نسخة اختبار معزولة. الحسابات وهويات Google هنا تجريبية.</string>
+    <string name="auth_test_choose_google_account">اختر حساب Google تجريبيًا</string>
+</resources>
