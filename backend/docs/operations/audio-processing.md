@@ -31,24 +31,28 @@ Dependency diagnostics include the failed S3 operation and an allowlisted provid
 code/HTTP status, or a MongoDB numeric error code. For example:
 `Storage bucket preflight failed: GetBucketVersioning (AccessDenied, HTTP 403)`.
 Successful S3 inspection with an invalid setting instead identifies the requirement,
-such as `versioning must be Enabled` or `lifecycle expiration rules are not allowed`.
+such as `versioning must be Enabled` or `unsafe lifecycle actions are not allowed`.
 Raw provider messages, connection strings, credentials and bucket identifiers are
 not logged. Unrecognized provider codes remain classified as an unknown provider
 error rather than being copied into logs.
 
 Other settings:
 
-| Setting                       | Default  | Meaning                                                                 |
-| ----------------------------- | -------- | ----------------------------------------------------------------------- |
-| `PROCESSING_LEASE_SECONDS`    | 90       | Lease duration, configurable from 60 through 600 seconds                |
-| `PROCESSING_URL_SECONDS`      | 900      | Presigned grant lifetime, 60 through 900 seconds                        |
-| `PROCESSING_OUTPUT_MAX_BYTES` | 30000000 | Exclusive output byte ceiling; configurable from 1024 through 100000000 |
+| Setting                              | Default  | Meaning                                                                 |
+| ------------------------------------ | -------- | ----------------------------------------------------------------------- |
+| `PROCESSING_LEASE_SECONDS`           | 90       | Lease duration, configurable from 60 through 600 seconds                |
+| `PROCESSING_URL_SECONDS`             | 900      | Presigned grant lifetime, 60 through 900 seconds                        |
+| `PROCESSING_OUTPUT_MAX_BYTES`        | 30000000 | Exclusive output byte ceiling; configurable from 1024 through 100000000 |
+| `PROCESSING_CREATE_UID_PER_MINUTE`   | 30       | Per-user reservation/retry burst budget; resets continuously            |
+| `PROCESSING_GRANT_UID_PER_MINUTE`    | 60       | Per-user grant and confirmation burst budget                            |
+| `PROCESSING_MUTATION_UID_PER_MINUTE` | 60       | Per-user cancel, rename and deletion burst budget                       |
 
 Input bytes must be strictly below 30,000,000 and actual audio duration strictly
-below 600 seconds. There are no daily/outstanding-job quotas. Ordinary request
-abuse limits still apply. S3 objects, jobs, attempts, receipts, errors, and
-notification records have no automatic TTL. Explicit user deletion now schedules
-scoped artifact cleanup; it does not enable age-based deletion of other media.
+below 600 seconds. There are no daily, monthly, lifetime, token, song-count, or
+outstanding-job quotas. The per-minute counters above only bound bursts and reset
+continuously. S3 objects, jobs, attempts, receipts, errors, and notification records
+have no age-based TTL. Explicit deletion and abandoned upload reservations schedule
+scoped artifact cleanup; confirmed media is not deleted merely because it is old.
 
 ## MongoDB prerequisites and rollout
 
@@ -73,8 +77,10 @@ Multiple API instances contend on the same singleton `z440` control document.
 ## S3 prerequisites
 
 The configured bucket must match `AWS_REGION`, have versioning enabled, all four
-public-access-block settings enabled, private ACL/policy state, and no configured
-current/noncurrent expiration rules. Preflight fails closed on missing permissions,
+public-access-block settings enabled, private ACL/policy state, and no unsafe
+lifecycle action. Only aborting incomplete multipart uploads and removing expired
+delete markers are accepted; current/noncurrent expiration and storage transitions
+are rejected. Preflight fails closed on missing permissions,
 ambiguous state, or outages. A successful preflight is cached briefly, which bounds
 how quickly the API rechecks bucket configuration before issuing new grants.
 
@@ -86,11 +92,11 @@ object prefixes. With SSE-KMS, checksum HEAD requests also require the applicabl
 KMS decrypt/data-key permissions. Workers receive presigned capabilities, never
 AWS credentials or bucket listing/deletion privileges.
 
-Clients upload directly through the returned POST URL and fields. Policies bind
-the server-selected key, exact byte length, content type, SHA-256 algorithm and
-checksum. The API HEADs the object, pins its version ID, and verifies that version
-before enqueueing or publishing it. An ETag alone is not verification. Reusing a
-POST can create another retained version but cannot change an accepted input.
+Clients upload directly with the returned `PUT` URL and exact required headers.
+The signature binds the server-selected key, exact byte length, content type,
+SHA-256 checksum and `If-None-Match: *`, so an existing key cannot be overwritten.
+The API HEADs the object, pins its version ID, and verifies that version before
+enqueueing or publishing it. An ETag alone is not verification.
 The API also rejects S3's literal `null` version, which can be overwritten while
 versioning is suspended. See [AWS suspended-version behavior](https://docs.aws.amazon.com/AmazonS3/latest/userguide/AddingObjectstoVersionSuspendedBuckets.html).
 
@@ -98,7 +104,9 @@ Download links always name the accepted version. Logout/cancellation does not
 revoke issued capabilities; they expire at their deadline unless AWS authorization
 or credential changes invalidate them sooner. HTTP grant responses and S3 GET
 responses use `no-store`. Configure bucket CORS for the actual authorized web
-client origins separately; the backend does not mutate bucket configuration.
+client origins separately, allowing `PUT` plus the `Content-Type`,
+`x-amz-checksum-sha256`, and `If-None-Match` request headers. The backend does
+not mutate bucket configuration.
 
 ## Windows supervisor obligations
 
@@ -167,9 +175,13 @@ events drive processing timing.
 User DELETE creates a tombstone immediately and disables pending outcome notifications.
 Cleanup begins no earlier than `PROCESSING_URL_SECONDS + 300` seconds after deletion,
 allowing previously issued upload grants a grace period. The existing API maintenance
-tick leases one job and at most ten attempt records per sweep. Transient cleanup failures
-back off from 30 seconds up to one hour; state survives restarts. `cleanupAttempts`,
-`cleanupNextAt`, and `cleanupCompletedAt` distinguish pending/retrying/completed cleanup.
+tick leases one job and at most ten attempt records per sweep. Transient cleanup
+failures back off from 30 seconds up to one hour; state survives restarts. A separate
+replica-leased `storage_cleanup_tasks` queue repeatedly sweeps every version and delete
+marker for one exact key through a settlement window. It covers expired unconfirmed
+inputs, orphaned attempt outputs and abandoned APK uploads. `cleanupAttempts`,
+`cleanupNextAt`, and `cleanupCompletedAt` distinguish pending/retrying/completed job
+deletion.
 
 The API identity additionally needs `s3:ListBucketVersions` scoped by managed prefixes
 and `s3:DeleteObjectVersion` scoped to managed objects. The API lists by the exact

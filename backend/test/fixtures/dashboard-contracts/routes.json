@@ -663,8 +663,8 @@
       "path": "/admin/releases/:id/uploads",
       "permissions": ["releases.manage"],
       "roles": ["owner", "release_manager"],
-      "freshAuth": false,
-      "rateClass": "write",
+      "freshAuth": true,
+      "rateClass": "sensitive",
       "requestBody": {
         "bytes": 100,
         "sha256Hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -681,8 +681,8 @@
       "path": "/admin/releases/:id/uploads/:uploadId/complete",
       "permissions": ["releases.manage"],
       "roles": ["owner", "release_manager"],
-      "freshAuth": false,
-      "rateClass": "write",
+      "freshAuth": true,
+      "rateClass": "sensitive",
       "requestBody": {
         "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29"
       },

@@ -455,7 +455,7 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
           let builder = Task.detached(priority: .utility) {
             try S3MultipartFile.build(
               inputURL: inputURL, declaration: operation.input,
-              grant: currentGrant, destination: destination)
+              destination: destination)
           }
           let multipart = try await withTaskCancellationHandler(
             operation: { try await builder.value }, onCancel: { builder.cancel() })

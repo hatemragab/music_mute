@@ -162,8 +162,9 @@ environment and the legacy worker stopped at verified idle, use
 `fleet`. See [worker fleet operations](docs/worker-fleet.md) for the guarded
 sequence and rollback boundary.
 
-`verify` runs formatting checks, lint, TypeScript checks, unit and HTTP security
-tests, then compiles the API. Tests use SWC decorator metadata so Nest
+`verify` runs formatting checks, lint, TypeScript checks, a tracked-file credential
+scan, unit and HTTP security tests, then compiles the API. The scan reports only
+file and rule names; explicit example placeholders remain allowed. Tests use SWC decorator metadata so Nest
 dependency injection and DTO validation execute as in the TypeScript build.
 
 The opt-in integration test requires `mongod` and `redis-server` on PATH (or

@@ -65,12 +65,6 @@ function fixture() {
   return { service, client, send, preflight };
 }
 
-function decodePolicy(fields: Record<string, string>) {
-  return JSON.parse(Buffer.from(fields.Policy, 'base64').toString()) as {
-    conditions: unknown[];
-  };
-}
-
 async function expectUploadNotReady(action: Promise<unknown>) {
   const error = (await action.catch(
     (caught: unknown) => caught,
@@ -106,7 +100,7 @@ describe('StorageTransfersService grants', () => {
     vi.useRealTimers();
   });
 
-  it('signs an input POST for the exact reserved key, bytes, content type and checksum', async () => {
+  it('signs an immutable input PUT for the exact reserved key, bytes, content type and checksum', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-09T00:00:00.000Z'));
     const { service, client, preflight } = fixture();
@@ -114,33 +108,28 @@ describe('StorageTransfersService grants', () => {
     const before = JSON.stringify(job);
 
     const grant = await service.createInputGrant(job);
-    const policy = decodePolicy(grant.fields);
-
     expect(preflight.assertReady).toHaveBeenCalledOnce();
-    expect(policy.conditions).toContainEqual([
-      'content-length-range',
-      1024,
-      1024,
-    ]);
-    expect(policy.conditions).toContainEqual({ key: inputReservation.key });
-    expect(policy.conditions).toContainEqual({
-      bucket: 'private-fixture-bucket',
+    expect(grant).toMatchObject({
+      method: 'PUT',
+      headers: {
+        'Content-Type': inputReservation.contentType,
+        'x-amz-checksum-sha256': inputSha256,
+        'If-None-Match': '*',
+      },
     });
-    expect(policy.conditions).toContainEqual({
-      'Content-Type': inputReservation.contentType,
-    });
-    expect(policy.conditions).toContainEqual({
-      'x-amz-checksum-algorithm': 'SHA256',
-    });
-    expect(policy.conditions).toContainEqual({
-      'x-amz-checksum-sha256': inputSha256,
-    });
-    expect(grant.fields).toMatchObject({
-      key: inputReservation.key,
-      'Content-Type': inputReservation.contentType,
-      'x-amz-checksum-algorithm': 'SHA256',
-      'x-amz-checksum-sha256': inputSha256,
-    });
+    const url = new URL(grant.url);
+    expect(decodeURIComponent(url.pathname)).toBe(`/${inputReservation.key}`);
+    const signedHeaders = url.searchParams.get('X-Amz-SignedHeaders');
+    expect(signedHeaders?.split(';')).toEqual(
+      expect.arrayContaining([
+        'content-length',
+        'content-type',
+        'host',
+        'if-none-match',
+        'x-amz-checksum-sha256',
+      ]),
+    );
+    expect(url.searchParams.has('x-amz-checksum-sha256')).toBe(false);
     expect(grant.expiresAt).toBe('2026-09-09T00:15:00.000Z');
     expect(JSON.stringify(job)).toBe(before);
     expect(JSON.stringify(job)).not.toContain('X-Amz-Signature');
@@ -168,15 +157,18 @@ describe('StorageTransfersService grants', () => {
     client.destroy();
   });
 
-  it('signs output POSTs against the independent configured output limit', async () => {
+  it('signs output PUTs against the independent configured output limit', async () => {
     const { service, client } = fixture();
 
     const grant = await service.createOutputGrant(transferJob());
-    expect(decodePolicy(grant.fields).conditions).toContainEqual([
-      'content-length-range',
-      2048,
-      2048,
-    ]);
+    expect(grant).toMatchObject({
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'audio/mpeg',
+        'x-amz-checksum-sha256': outputSha256,
+        'If-None-Match': '*',
+      },
+    });
 
     await expect(
       service.createOutputGrant(
@@ -257,7 +249,12 @@ describe('StorageTransfersService object verification', () => {
         IsTruncated: false,
       } as never)
       .mockResolvedValueOnce({} as never);
-    expect(await service.deleteVersionsForKey(inputReservation.key)).toBe(true);
+    await expect(
+      service.sweepVersionsForKey(inputReservation.key),
+    ).resolves.toEqual({
+      complete: true,
+      deleted: 2,
+    });
     expect(
       (send.mock.calls[1][0] as DeleteObjectsCommand).input.Delete?.Objects,
     ).toEqual([
@@ -287,7 +284,12 @@ describe('StorageTransfersService object verification', () => {
       IsTruncated: true,
       NextKeyMarker: `${inputReservation.key}-other`,
     } as never);
-    expect(await service.deleteVersionsForKey(inputReservation.key)).toBe(true);
+    await expect(
+      service.sweepVersionsForKey(inputReservation.key),
+    ).resolves.toEqual({
+      complete: true,
+      deleted: 0,
+    });
     expect(send).toHaveBeenCalledTimes(1);
     client.destroy();
   });

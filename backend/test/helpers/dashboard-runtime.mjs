@@ -164,7 +164,15 @@ const builder = Test.createTestingModule({ imports: [AppModule] })
   .useValue(storage)
   .overrideProvider(ReleaseArtifactStorageService)
   .useValue({
-    grant: async () => ({ ...grant(), fields: { fixture: 'synthetic' } }),
+    grant: async () => ({
+      ...grant(),
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/vnd.android.package-archive',
+        'x-amz-checksum-sha256': 'A'.repeat(43) + '=',
+        'If-None-Match': '*',
+      },
+    }),
     pin: async () => 'fixture-apk-version',
     download: async () => undefined,
   })

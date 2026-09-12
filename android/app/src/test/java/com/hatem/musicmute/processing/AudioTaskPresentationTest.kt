@@ -23,6 +23,8 @@ class AudioTaskPresentationTest {
         assertEquals("INVALID_AUDIO", task.errorCode)
         assertEquals(com.hatem.musicmute.R.string.processing_reason_invalid,
             com.hatem.musicmute.ui.audioTaskFailureLabel(task))
+        assertEquals(com.hatem.musicmute.R.string.processing_reason_upload_expired,
+            com.hatem.musicmute.ui.audioTaskFailureLabel(task.copy(errorCode = "UPLOAD_EXPIRED")))
         assertEquals(com.hatem.musicmute.R.string.processing_error_failed,
             com.hatem.musicmute.ui.audioTaskFailureLabel(task.copy(errorCode = "FUTURE_ERROR")))
     }

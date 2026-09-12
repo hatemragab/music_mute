@@ -52,8 +52,9 @@ struct ProcessingDetailView: View {
             if let error = job.error {
               Text(
                 LocalizedStringKey(
-                  ["INVALID_AUDIO", "INPUT_TOO_LONG", "INPUT_CHECKSUM_MISMATCH"].contains(
-                    error.code)
+                  ["UPLOAD_EXPIRED", "INVALID_AUDIO", "INPUT_TOO_LONG", "INPUT_CHECKSUM_MISMATCH"]
+                    .contains(
+                      error.code)
                     ? "processing_error_retry_input" : "processing_error_failed")
               ).foregroundStyle(.red)
             }

@@ -117,7 +117,12 @@ export const reserveReleaseUpload = (
 ) =>
   submitWithReceiptReadBack<{
     uploadId: string;
-    grant: { url: string; fields: Record<string, string>; expiresAt: string };
+    grant: {
+      method: "PUT";
+      url: string;
+      headers: Record<string, string>;
+      expiresAt: string;
+    };
     expectedBytes: number;
     expectedSha256: string;
   }>({
@@ -127,8 +132,9 @@ export const reserveReleaseUpload = (
       client.post<{
         uploadId: string;
         grant: {
+          method: "PUT";
           url: string;
-          fields: Record<string, string>;
+          headers: Record<string, string>;
           expiresAt: string;
         };
         expectedBytes: number;

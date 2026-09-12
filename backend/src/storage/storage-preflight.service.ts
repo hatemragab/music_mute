@@ -19,6 +19,37 @@ const PUBLIC_ACL_GROUPS = new Set([
   'http://acs.amazonaws.com/groups/global/AllUsers',
   'http://acs.amazonaws.com/groups/global/AuthenticatedUsers',
 ]);
+const LIFECYCLE_RULE_KEYS = new Set([
+  'ID',
+  'Prefix',
+  'Filter',
+  'Status',
+  'AbortIncompleteMultipartUpload',
+  'Expiration',
+]);
+
+function safeLifecycleRule(
+  rule: NonNullable<
+    GetBucketLifecycleConfigurationCommandOutput['Rules']
+  >[number],
+): boolean {
+  if (Object.keys(rule).some((key) => !LIFECYCLE_RULE_KEYS.has(key)))
+    return false;
+  const abort = rule.AbortIncompleteMultipartUpload;
+  if (
+    abort &&
+    (Object.keys(abort).some((key) => key !== 'DaysAfterInitiation') ||
+      !Number.isSafeInteger(abort.DaysAfterInitiation) ||
+      Number(abort.DaysAfterInitiation) < 1)
+  )
+    return false;
+  const expiration = rule.Expiration;
+  return (
+    !expiration ||
+    (Object.keys(expiration).length === 1 &&
+      expiration.ExpiredObjectDeleteMarker === true)
+  );
+}
 
 function confirmedAbsent(error: unknown, expectedName: string): boolean {
   if (!(error instanceof Error) || error.name !== expectedName) return false;
@@ -101,10 +132,8 @@ export class StoragePreflightService {
       const aclVerified = Array.isArray(acl.Grants);
       const lifecycleVerified =
         lifecycle === undefined || Array.isArray(lifecycle.Rules);
-      const hasExpiration = lifecycle?.Rules?.some(
-        (rule) =>
-          rule.Expiration !== undefined ||
-          rule.NoncurrentVersionExpiration !== undefined,
+      const unsafeLifecycle = lifecycle?.Rules?.some(
+        (rule) => !safeLifecycleRule(rule),
       );
 
       const fail = (reason: string): never => {
@@ -127,7 +156,7 @@ export class StoragePreflightService {
         fail('bucket ACL must be confirmed private');
       if (!lifecycleVerified)
         fail('lifecycle configuration could not be verified');
-      if (hasExpiration) fail('lifecycle expiration rules are not allowed');
+      if (unsafeLifecycle) fail('unsafe lifecycle actions are not allowed');
     } catch (error) {
       if (error instanceof StartupDependencyError) throw error;
       throw new StartupDependencyError(

@@ -52,6 +52,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(204)
             self.end_headers()
 
+    def do_PUT(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        self.requests.append((self.path, dict(self.headers), body))
+        self.send_response(204)
+        self.end_headers()
+
     def do_GET(self):
         self.requests.append((self.path, dict(self.headers), b""))
         if self.path == "/busy":
@@ -139,23 +145,32 @@ class TransportTests(unittest.TestCase):
                     {"url": self.url}, path, len(Handler.data), "wrong", lambda: None
                 )
 
-    def test_upload_preserves_fields_and_file(self):
+    def test_upload_sends_raw_file_with_signed_headers(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "vocals.mp3"
             path.write_bytes(Handler.data)
+            checksum = base64.b64encode(hashlib.sha256(Handler.data).digest()).decode()
             Transfers(allow_http=True).upload(
                 {
+                    "method": "PUT",
                     "url": self.url,
-                    "fields": {"key": "assigned/key", "x-amz-checksum-sha256": "test="},
+                    "headers": {
+                        "Content-Type": "audio/mpeg",
+                        "x-amz-checksum-sha256": checksum,
+                        "If-None-Match": "*",
+                    },
                 },
                 path,
                 lambda: None,
             )
         _, headers, body = Handler.requests[0]
+        lower_headers = {name.lower(): value for name, value in headers.items()}
         self.assertNotIn("Authorization", headers)
         self.assertEqual(int(headers["Content-Length"]), len(body))
-        self.assertIn(b"assigned/key", body)
-        self.assertIn(Handler.data, body)
+        self.assertEqual(headers["Content-Type"], "audio/mpeg")
+        self.assertEqual(lower_headers["x-amz-checksum-sha256"], checksum)
+        self.assertEqual(lower_headers["if-none-match"], "*")
+        self.assertEqual(Handler.data, body)
 
     def test_download_errors_preserve_retry_classification_and_server_delay(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -30,6 +30,7 @@ export class JobAttempt {
   processingElapsedApproximate!: boolean;
   @Prop({ type: Date, default: null }) localDataDeletedAt!: Date | null;
   @Prop({ type: Date, default: null }) endedAt!: Date | null;
+  @Prop({ type: Date, default: null }) cleanupScheduledAt!: Date | null;
   @Prop({ type: Date, default: null }) releasedAt!: Date | null;
   @Prop({ type: Date, default: null }) interruptedAt!: Date | null;
   @Prop({ type: String, default: null, maxlength: 36 }) replacementAttemptId!:
@@ -55,4 +56,8 @@ JobAttemptSchema.index(
 JobAttemptSchema.index(
   { jobId: 1, startedAt: 1 },
   { name: 'attempt_job_history' },
+);
+JobAttemptSchema.index(
+  { cleanupScheduledAt: 1, outcome: 1, endedAt: 1 },
+  { name: 'attempt_orphan_cleanup' },
 );

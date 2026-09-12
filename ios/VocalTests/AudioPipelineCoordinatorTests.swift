@@ -239,13 +239,19 @@ import XCTest
       return CreateReservation(
         id: id, status: "awaiting_upload",
         upload: UploadGrant(
-          url: URL(string: "https://storage.fixture.invalid")!, fields: ["key": "input"],
+          method: .put, url: URL(string: "https://storage.fixture.invalid")!,
+          headers: [
+            "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
+          ],
           expiresAt: Date().addingTimeInterval(60)),
         requestId: requestId.uuidString.lowercased())
     }
     func renewUpload(id: String) async throws -> UploadGrant {
       UploadGrant(
-        url: URL(string: "https://storage.fixture.invalid")!, fields: ["key": "input"],
+        method: .put, url: URL(string: "https://storage.fixture.invalid")!,
+        headers: [
+          "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
+        ],
         expiresAt: Date().addingTimeInterval(60))
     }
     func confirmUpload(id: String) async throws -> JobMutation {

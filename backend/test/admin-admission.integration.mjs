@@ -120,8 +120,9 @@ test(
       const transactions = new ProcessingTransactions(connection);
       const storage = {
         createInputGrant: async (job) => ({
+          method: 'PUT',
           url: 'https://storage.invalid/upload',
-          fields: {},
+          headers: {},
           expiresAt: job.admissionSnapshot.reservationExpiresAt.toISOString(),
         }),
         verifyInput: async (job) => ({

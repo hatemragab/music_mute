@@ -31,8 +31,9 @@ test('verified upload ordering, owner idempotency and cancellation race persist 
   };
   const storage = {
     createInputGrant: async () => ({
+      method: 'PUT',
       url: 'https://storage.invalid/upload',
-      fields: {},
+      headers: {},
       expiresAt: new Date().toISOString(),
     }),
     verifyInput: async (job) => ({

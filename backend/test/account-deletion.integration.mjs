@@ -86,6 +86,7 @@ test(
         connection,
         {},
         {},
+        { hasPendingForOwner: async () => false },
         firebase,
         identities,
       );

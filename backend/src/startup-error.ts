@@ -47,6 +47,7 @@ const SAFE_DEPENDENCY_STAGES = new Set([
     'bucket ACL must be confirmed private',
     'lifecycle configuration could not be verified',
     'lifecycle expiration rules are not allowed',
+    'unsafe lifecycle actions are not allowed',
   ].map((step) => `Storage bucket preflight failed: ${step}`),
 ]);
 

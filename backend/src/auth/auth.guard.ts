@@ -119,6 +119,35 @@ export class AuthGuard implements CanActivate {
         limit: this.config.get<number>('LOGOUT_UID_PER_HOUR', 3),
         windowMs: 3600000,
       });
+    const processingBudget = {
+      'processing-create': {
+        scope: 'processing-create-uid',
+        config: 'PROCESSING_CREATE_UID_PER_MINUTE',
+        defaultLimit: 30,
+      },
+      'processing-grant': {
+        scope: 'processing-grant-uid',
+        config: 'PROCESSING_GRANT_UID_PER_MINUTE',
+        defaultLimit: 60,
+      },
+      'processing-mutation': {
+        scope: 'processing-mutation-uid',
+        config: 'PROCESSING_MUTATION_UID_PER_MINUTE',
+        defaultLimit: 60,
+      },
+    } as const;
+    if (operation && operation in processingBudget) {
+      const definition =
+        processingBudget[operation as keyof typeof processingBudget];
+      buckets.push({
+        key: this.keys.bucket(definition.scope, signed.uid),
+        limit: this.config.get<number>(
+          definition.config,
+          definition.defaultLimit,
+        ),
+        windowMs: 60_000,
+      });
+    }
     const decision = await this.budgets.reserve(buckets);
     if (!decision.allowed) {
       response.setHeader('Retry-After', decision.retryAfterSeconds);

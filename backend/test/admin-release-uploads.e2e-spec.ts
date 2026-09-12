@@ -22,8 +22,9 @@ describe('release upload HTTP permissions', () => {
           return {
             uploadId: '507f1f77bcf86cd799439012',
             grant: {
+              method: 'PUT',
               url: 'https://example.invalid',
-              fields: {},
+              headers: {},
               expiresAt: new Date().toISOString(),
             },
           };

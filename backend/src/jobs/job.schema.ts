@@ -159,6 +159,8 @@ export class Job {
   sourceUrl!: string | null;
   @Prop({ type: Date, default: null }) clientStartedAt!: Date | null;
   @Prop({ type: Date, default: null }) deletedAt!: Date | null;
+  @Prop({ type: Date, default: null })
+  reservationCleanupScheduledAt!: Date | null;
   @Prop({ type: Date, default: null }) cleanupNextAt!: Date | null;
   @Prop({ type: Date, default: null }) cleanupLeaseUntil!: Date | null;
   @Prop({ type: String, default: null, maxlength: 36 }) cleanupToken!:
@@ -300,6 +302,14 @@ JobSchema.index(
   { name: 'jobs_owner_history' },
 );
 JobSchema.index({ status: 1, queueOrder: 1 }, { name: 'jobs_fifo' });
+JobSchema.index(
+  {
+    status: 1,
+    reservationCleanupScheduledAt: 1,
+    'admissionSnapshot.reservationExpiresAt': 1,
+  },
+  { name: 'jobs_expired_upload_cleanup' },
+);
 JobSchema.index(
   { cleanupNextAt: 1, cleanupLeaseUntil: 1 },
   {

@@ -48,6 +48,7 @@ import type {
   DeviceReport,
   VerifiedIdentity,
 } from '../../src/auth/auth.types.js';
+import { StorageCleanupTask } from '../../src/storage/storage-cleanup-task.schema.js';
 
 // AppModule's infrastructure is replaced below. Prevent its eager configuration
 // import from consulting any developer dotenv file before that override applies.
@@ -332,6 +333,7 @@ export async function authFixture() {
     AdminAlertObservation.name,
     ProcessingSettings.name,
     ProcessingAdmissionFence.name,
+    StorageCleanupTask.name,
     ...PROCESSING_MODELS.map(({ name }) => name),
   ])
     builder.overrideProvider(getModelToken(name)).useValue({

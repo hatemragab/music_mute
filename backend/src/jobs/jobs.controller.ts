@@ -13,7 +13,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { AuthRequest } from '../auth/auth-request.js';
-import { RequireProcessingAccess } from '../auth/auth.decorators.js';
+import {
+  LimitOperation,
+  RequireProcessingAccess,
+} from '../auth/auth.decorators.js';
 import { EmptyBodyPipe } from '../auth/dto/empty-body.pipe.js';
 import { ProcessingEnabledGuard } from '../processing/processing-enabled.guard.js';
 import { CreateJobDto } from './dto/create-job.dto.js';
@@ -38,6 +41,7 @@ export class JobsController {
   ) {}
 
   @Delete(':id')
+  @LimitOperation('processing-mutation')
   @HttpCode(204)
   async delete(
     @Req() req: AuthRequest,
@@ -48,6 +52,7 @@ export class JobsController {
   }
 
   @Patch(':id')
+  @LimitOperation('processing-mutation')
   @Header('Cache-Control', 'no-store')
   rename(
     @Req() req: AuthRequest,
@@ -62,6 +67,7 @@ export class JobsController {
   }
 
   @Post(':id/cancel')
+  @LimitOperation('processing-mutation')
   @HttpCode(200)
   cancel(
     @Req() req: AuthRequest,
@@ -72,6 +78,7 @@ export class JobsController {
   }
 
   @Post(':id/retry')
+  @LimitOperation('processing-create')
   @RequireProcessingAccess()
   retry(
     @Req() req: AuthRequest,
@@ -97,6 +104,7 @@ export class JobsController {
   }
 
   @Post(':id/download-url')
+  @LimitOperation('processing-grant')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   download(
@@ -108,6 +116,7 @@ export class JobsController {
   }
 
   @Post()
+  @LimitOperation('processing-create')
   @RequireProcessingAccess()
   @Header('Cache-Control', 'no-store')
   create(@Req() req: AuthRequest, @Body() dto: CreateJobDto) {
@@ -125,6 +134,7 @@ export class JobsController {
   }
 
   @Post(':id/upload-url')
+  @LimitOperation('processing-grant')
   @HttpCode(200)
   @RequireProcessingAccess()
   @Header('Cache-Control', 'no-store')
@@ -137,6 +147,7 @@ export class JobsController {
   }
 
   @Post(':id/upload-complete')
+  @LimitOperation('processing-grant')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   confirm(

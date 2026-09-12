@@ -35,6 +35,7 @@ function fixture(jobList: unknown[] = []) {
   };
   const actions = { cancelForAccountDeletion: vi.fn() };
   const deletion = { delete: vi.fn(), cleanupDue: vi.fn() };
+  const storageCleanup = { hasPendingForOwner: vi.fn(async () => false) };
   const collection = {
     findOne: vi.fn(async () => null),
     find: vi.fn(() => ({
@@ -49,10 +50,21 @@ function fixture(jobList: unknown[] = []) {
     connection as never,
     actions as never,
     deletion as never,
+    storageCleanup as never,
     auth as never,
     { complete: vi.fn(async () => undefined) } as never,
   );
-  return { service, user, users, jobs, auth, actions, deletion, collection };
+  return {
+    service,
+    user,
+    users,
+    jobs,
+    auth,
+    actions,
+    deletion,
+    storageCleanup,
+    collection,
+  };
 }
 
 describe('account deletion cleanup', () => {
@@ -114,6 +126,19 @@ describe('account deletion cleanup', () => {
     const f = fixture();
     f.jobs.exists.mockResolvedValue({ _id: new Types.ObjectId() } as never);
     await f.service.advanceDeletion();
+    expect(f.auth.deleteUser).not.toHaveBeenCalled();
+    expect(f.users.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('keeps the profile while an exact-key storage cleanup task is pending', async () => {
+    const f = fixture();
+    f.storageCleanup.hasPendingForOwner.mockResolvedValue(true);
+
+    await f.service.advanceDeletion();
+
+    expect(f.storageCleanup.hasPendingForOwner).toHaveBeenCalledWith(
+      f.user._id,
+    );
     expect(f.auth.deleteUser).not.toHaveBeenCalled();
     expect(f.users.deleteOne).not.toHaveBeenCalled();
   });

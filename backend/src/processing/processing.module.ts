@@ -18,6 +18,7 @@ import { WorkerOutputService } from '../worker/worker-output.service.js';
 import { WorkerTerminalService } from '../worker/worker-terminal.service.js';
 import { WorkerRecoveryService } from '../worker/worker-recovery.service.js';
 import { ProcessingMaintenanceService } from './processing-maintenance.service.js';
+import { ProcessingStorageCleanupService } from './processing-storage-cleanup.service.js';
 import { JobsController } from '../jobs/jobs.controller.js';
 import { JobsService } from '../jobs/jobs.service.js';
 import { JobActionsService } from '../jobs/job-actions.service.js';
@@ -71,6 +72,7 @@ import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js'
     WorkerOutputService,
     WorkerTerminalService,
     WorkerRecoveryService,
+    ProcessingStorageCleanupService,
     ProcessingMaintenanceService,
     PushRegistrationsService,
     NotificationDispatcherService,

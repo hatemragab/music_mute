@@ -242,7 +242,10 @@ import XCTest
   }
   func renewUpload(id: String) async throws -> UploadGrant {
     UploadGrant(
-      url: URL(string: "https://storage.example")!, fields: ["key": "exact"],
+      method: .put, url: URL(string: "https://storage.example")!,
+      headers: [
+        "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
+      ],
       expiresAt: Date().addingTimeInterval(600))
   }
   func confirmUpload(id: String) async throws -> JobMutation {

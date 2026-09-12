@@ -8,7 +8,13 @@ export const ACCOUNT_DELETION = Symbol('ACCOUNT_DELETION');
 export const ACCOUNT_RECOVERY = Symbol('ACCOUNT_RECOVERY');
 export const AllowDeletionRetry = () => SetMetadata(ACCOUNT_DELETION, true);
 export const AllowAccountRecovery = () => SetMetadata(ACCOUNT_RECOVERY, true);
-export type AuthOperation = 'profile' | 'device' | 'logout';
+export type AuthOperation =
+  | 'profile'
+  | 'device'
+  | 'logout'
+  | 'processing-create'
+  | 'processing-grant'
+  | 'processing-mutation';
 export const Public = () => SetMetadata(PUBLIC_ROUTE, true);
 export const AllowUnprovisioned = () => SetMetadata(ALLOW_UNPROVISIONED, true);
 export const LimitOperation = (operation: AuthOperation) =>

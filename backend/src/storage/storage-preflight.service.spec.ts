@@ -90,6 +90,27 @@ describe('StoragePreflightService', () => {
       expect(command.input).toEqual({ Bucket: 'private-fixture-bucket' });
   });
 
+  it('allows only incomplete-multipart abort and expired delete-marker cleanup', async () => {
+    const { service } = fixture({
+      GetBucketLifecycleConfigurationCommand: {
+        Rules: [
+          {
+            ID: 'abort-stale-parts',
+            Status: 'Enabled',
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
+          },
+          {
+            ID: 'remove-expired-markers',
+            Status: 'Enabled',
+            Expiration: { ExpiredObjectDeleteMarker: true },
+          },
+        ],
+      },
+    });
+
+    await expect(service.assertReady()).resolves.toBeUndefined();
+  });
+
   it('accepts only confirmed absent policy and lifecycle configurations', async () => {
     const { service } = fixture({
       GetBucketPolicyStatusCommand: awsError('NoSuchBucketPolicy', 404),
@@ -171,6 +192,23 @@ describe('StoragePreflightService', () => {
           {
             Status: 'Enabled',
             NoncurrentVersionExpiration: { NoncurrentDays: 30 },
+          },
+        ],
+      },
+    ],
+    [
+      'current-version transition',
+      'GetBucketLifecycleConfigurationCommand',
+      { Rules: [{ Status: 'Enabled', Transitions: [{ Days: 30 }] }] },
+    ],
+    [
+      'noncurrent-version transition',
+      'GetBucketLifecycleConfigurationCommand',
+      {
+        Rules: [
+          {
+            Status: 'Enabled',
+            NoncurrentVersionTransitions: [{ NoncurrentDays: 30 }],
           },
         ],
       },

@@ -10,6 +10,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import { Public } from '../auth/auth.decorators.js';
 import { adminError } from '../admin/admin-errors.js';
 import { ReleasePolicyService } from './release-policy.service.js';
@@ -33,6 +34,7 @@ export class AppUpdatesController {
   }
   @Post('releases/:id/download')
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   download(@Param('id') id: string, @Body() body: unknown) {
@@ -49,6 +51,7 @@ export class AppUpdatesController {
   }
   @Post('releases/:id/open')
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Header('Cache-Control', 'no-store')
   async open(
     @Param('id') id: string,

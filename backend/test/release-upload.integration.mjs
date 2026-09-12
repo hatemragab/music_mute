@@ -67,8 +67,13 @@ test(
       const downloads = [];
       const storage = {
         grant: async () => ({
+          method: 'PUT',
           url: 'https://example.invalid/private-fixture-grant',
-          fields: { signature: 'fixture-ephemeral-signature' },
+          headers: {
+            'Content-Type': 'application/vnd.android.package-archive',
+            'x-amz-checksum-sha256': 'A'.repeat(43) + '=',
+            'If-None-Match': '*',
+          },
           expiresAt: new Date(Date.now() + 900000).toISOString(),
         }),
         pin: async (_reservation, pinned) => {

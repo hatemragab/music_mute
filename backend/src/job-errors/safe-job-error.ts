@@ -1,6 +1,7 @@
 import type { JobFailureCode } from '../jobs/job.types.js';
 
 const messages: Record<JobFailureCode, string> = {
+  UPLOAD_EXPIRED: 'The upload reservation expired before it was completed.',
   INVALID_AUDIO: 'The file does not contain supported playable audio.',
   INPUT_TOO_LONG: 'Audio must be shorter than 10 minutes.',
   INPUT_CHECKSUM_MISMATCH: 'The audio file failed its integrity check.',

@@ -281,6 +281,7 @@
     <string name="audio_task_intake_description">Paste a supported link or import an audio file. Processing starts immediately.</string>
     <string name="audio_task_duration">Audio duration: %1$s</string>
     <string name="processing_reason_invalid">The media is invalid, unsupported, or unreadable. Choose another audio file.</string>
+    <string name="processing_reason_upload_expired">The upload expired before it finished. Import the audio again.</string>
     <string name="processing_reason_too_long">The audio exceeds the 10-minute limit. Choose a shorter file.</string>
     <string name="processing_reason_checksum">The uploaded audio does not match the original file. Import it again.</string>
     <string name="processing_reason_download">The source audio could not be downloaded. Check that it is available and try again.</string>

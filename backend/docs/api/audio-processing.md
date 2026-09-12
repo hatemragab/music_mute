@@ -63,20 +63,20 @@ An upload grant has this shape:
 
 ```json
 {
-  "url": "https://private-bucket.example/",
-  "fields": {
-    "key": "server-owned-object-key",
+  "method": "PUT",
+  "url": "https://private-bucket.example/server-owned-object-key",
+  "headers": {
     "Content-Type": "audio/mpeg",
-    "x-amz-checksum-algorithm": "SHA256",
-    "x-amz-checksum-sha256": "base64-sha256"
+    "x-amz-checksum-sha256": "base64-sha256",
+    "If-None-Match": "*"
   },
   "expiresAt": "2026-09-09T12:15:00.000Z"
 }
 ```
 
-Submit a multipart form directly to `url`, preserving every returned field and
-adding the file. The signed policy fixes the exact byte count, content type,
-checksum, and server-owned key. A download grant contains only `url` and
+Submit the raw file with the returned method and headers directly to `url`.
+The signature fixes the exact byte count, content type, checksum, conditional
+create and server-owned key. A download grant contains only `url` and
 `expiresAt`. Grants are temporary and must not be stored as durable identifiers.
 
 ## User job routes

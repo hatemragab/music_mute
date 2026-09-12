@@ -48,6 +48,7 @@ describe('environment boundary', () => {
       APP_ANDROID_CURRENT_BUILD_NUMBER: 1,
       APP_IOS_CURRENT_VERSION_NAME: '0.1.0',
       APP_IOS_CURRENT_BUILD_NUMBER: 1,
+      APP_RELEASE_DOWNLOAD_SECONDS: 300,
       ...AUTH_RATE_LIMIT_DEFAULTS,
       ...ADMIN_RATE_LIMIT_DEFAULTS,
     });
@@ -62,6 +63,14 @@ describe('environment boundary', () => {
       `Invalid environment: ${key}`,
     );
   });
+  it.each([59, 901, 120.5])(
+    'rejects invalid APK download lifetime %s',
+    (APP_RELEASE_DOWNLOAD_SECONDS) => {
+      expect(() =>
+        validateEnvironment({ ...local, APP_RELEASE_DOWNLOAD_SECONDS }),
+      ).toThrow('Invalid environment: APP_RELEASE_DOWNLOAD_SECONDS');
+    },
+  );
   it.each(Object.keys(AUTH_RATE_LIMIT_DEFAULTS))(
     'rejects an invalid %s allowance',
     (key) => {
