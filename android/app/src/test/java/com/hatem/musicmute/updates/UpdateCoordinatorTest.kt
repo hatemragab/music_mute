@@ -1,8 +1,11 @@
 package com.hatem.musicmute.updates
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -204,5 +207,48 @@ class UpdateCoordinatorTest {
         repeat(5) { coordinator.requestCheck(UpdateTrigger.RECONNECT) }
         advanceUntilIdle()
         assertTrue(api.calls - before <= 1)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun cancellingAForegroundRefreshAlwaysClearsCheckingState() = runTest {
+        val entered = CompletableDeferred<Unit>()
+        val api =
+            object : UpdatePolicyApi {
+                var block = false
+
+                override suspend fun policy(): UpdatePolicySnapshot {
+                    if (block) {
+                        entered.complete(Unit)
+                        awaitCancellation()
+                    }
+                    return policy(minimum = null)
+                }
+
+                override suspend fun downloadGrant(releaseId: String): ReleaseDownloadGrant =
+                    error("unused")
+            }
+        var now = 1_000L
+        val coordinator =
+            UpdateCoordinator(
+                this,
+                api,
+                MemoryStore(),
+                installedBuild = { 1 },
+                distribution = "direct",
+                now = { now },
+            )
+        coordinator.initialize()
+        now += UpdateCoordinator.CHECK_INTERVAL_MS
+        api.block = true
+
+        coordinator.setForeground(true)
+        entered.await()
+        assertTrue(coordinator.state.value.checking)
+
+        coordinator.setForeground(false)
+        runCurrent()
+
+        assertFalse(coordinator.state.value.checking)
     }
 }

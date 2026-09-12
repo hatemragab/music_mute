@@ -7,20 +7,22 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import com.azhon.appupdate.base.bean.DownloadStatus
-import com.azhon.appupdate.manager.HttpDownloadManager
 import com.azhon.appupdate.util.ApkUtil
 import com.hatem.musicmute.BuildConfig
 import java.io.File
+import java.net.URL
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicLong
+import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -122,12 +124,20 @@ class DirectUpdateInstaller(
                 if (generation.get() != ticket) throw CancellationException("Update cancelled")
                 when (event) {
                     is UpdateDownloadEvent.Progress -> {
+                        if (
+                            event.bytes > grant.bytes ||
+                                (event.totalBytes > 0 && event.totalBytes != grant.bytes)
+                        ) throw UpdateFailure(UpdateProblem.APK_SIZE_MISMATCH)
                         val percent =
                             if (event.totalBytes <= 0) 0
                             else ((event.bytes * 100) / event.totalBytes).toInt().coerceIn(0, 100)
                         mutableState.value = UpdateInstallState.Downloading(percent)
                     }
-                    is UpdateDownloadEvent.Complete -> downloaded = event.file
+                    is UpdateDownloadEvent.Complete -> {
+                        if (!event.file.isFile || event.file.length() != grant.bytes)
+                            throw UpdateFailure(UpdateProblem.APK_SIZE_MISMATCH)
+                        downloaded = event.file
+                    }
                 }
             }
             val apk = downloaded ?: throw UpdateFailure(UpdateProblem.DOWNLOAD_FAILED)
@@ -234,29 +244,67 @@ class DirectUpdateInstaller(
     }
 }
 
-private class AzhonUpdateDownloadClient : UpdateDownloadClient {
-    @Volatile private var active: HttpDownloadManager? = null
+private class HttpsUpdateDownloadClient : UpdateDownloadClient {
+    @Volatile private var active: HttpsURLConnection? = null
+    @Volatile private var cancelled = false
+
     override fun download(url: String, destination: File): Flow<UpdateDownloadEvent> = flow {
-        val manager = HttpDownloadManager(destination.parentFile!!.absolutePath)
-        active = manager
+        cancelled = false
+        val connection = URL(url).openConnection() as? HttpsURLConnection
+            ?: throw UpdateFailure(UpdateProblem.INVALID_POLICY)
+        active = connection
+        var complete = false
         try {
-            manager.download(url, destination.name).collect { status ->
-                when (status) {
-                    is DownloadStatus.Downloading ->
-                        emit(UpdateDownloadEvent.Progress(status.progress.toLong(), status.max.toLong()))
-                    is DownloadStatus.Done -> emit(UpdateDownloadEvent.Complete(status.apk))
-                    is DownloadStatus.Error -> throw UpdateFailure(UpdateProblem.DOWNLOAD_FAILED)
-                    is DownloadStatus.Cancel -> throw CancellationException("Update cancelled")
-                    is DownloadStatus.Start -> Unit
+            connection.instanceFollowRedirects = false
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("Accept-Encoding", "identity")
+            if (connection.responseCode !in 200..299)
+                throw UpdateFailure(UpdateProblem.DOWNLOAD_FAILED)
+            val totalBytes = connection.contentLengthLong
+            connection.inputStream.buffered().use { input ->
+                destination.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(BUFFER_BYTES)
+                    var downloaded = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        val next = downloaded + count
+                        emit(UpdateDownloadEvent.Progress(next, totalBytes))
+                        output.write(buffer, 0, count)
+                        downloaded = next
+                    }
                 }
             }
+            emit(UpdateDownloadEvent.Complete(destination))
+            complete = true
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (cancelled) throw CancellationException("Update cancelled")
+            if (error is UpdateFailure) throw error
+            throw UpdateFailure(UpdateProblem.DOWNLOAD_FAILED)
         } finally {
-            manager.release()
-            if (active === manager) active = null
+            connection.disconnect()
+            if (active === connection) active = null
+            if (!complete) destination.delete()
         }
+    }.flowOn(Dispatchers.IO)
+
+    override fun cancel() {
+        cancelled = true
+        active?.disconnect()
     }
-    override fun cancel() { active?.cancel() }
+
+    companion object {
+        private const val CONNECT_TIMEOUT_MS = 15_000
+        private const val READ_TIMEOUT_MS = 30_000
+        private const val BUFFER_BYTES = 64 * 1024
+    }
 }
+
+internal fun createUpdateDownloadClient(): UpdateDownloadClient = HttpsUpdateDownloadClient()
 
 private class AndroidApkInstallPlatform(private val context: Context) : ApkInstallPlatform {
     override fun canRequestPackageInstalls(): Boolean = context.packageManager.canRequestPackageInstalls()
@@ -369,7 +417,7 @@ fun createUpdateInstaller(
     DirectUpdateInstaller(
         api = api,
         downloadRoot = File(context.externalCacheDir ?: context.cacheDir, "app-updates"),
-        downloader = AzhonUpdateDownloadClient(),
+        downloader = createUpdateDownloadClient(),
         verifier = AndroidApkVerifier(context, installedBuild),
         platform = AndroidApkInstallPlatform(context),
         installedBuild = installedBuild,

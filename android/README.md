@@ -117,15 +117,19 @@ simulator or device for runtime proof.
 ## App updates
 
 Android has separate `direct` and `play` distribution variants with the same
-production application ID and signing configuration. Version `0.1.2` is build 3.
-The direct variant uses
-[azhon/AppUpdate 4.3.6](https://github.com/azhon/AppUpdate) (Apache-2.0) for the
-download transport. Before Android's installer is opened, MusicMute obtains a
-fresh public download grant and independently verifies the complete APK size and
-SHA-256, package ID, higher build number, and signing-certificate SHA-256. The
-`REQUEST_INSTALL_PACKAGES` permission and azhon provider/service exist only in
-the direct variant. The Play variant has no self-install permission or direct APK
-dependency; its current safe fallback opens the verified MusicMute Play listing.
+production application ID and signing configuration. Version `0.1.3` is build 4.
+The direct variant uses the FileProvider and installer-intent integration from
+[azhon/AppUpdate 4.3.6](https://github.com/azhon/AppUpdate) (Apache-2.0). Its APK
+stream uses the platform HTTPS connection with the default certificate and host
+verification; the dependency's download manager is intentionally not used.
+Before Android's installer is opened, MusicMute obtains a fresh public download
+grant and independently verifies the complete APK size and SHA-256, package ID,
+higher build number, and signing-certificate SHA-256. The
+`REQUEST_INSTALL_PACKAGES` permission and narrowly scoped azhon provider exist
+only in the direct variant; its unused service and dialog activity are removed
+from the merged manifest. The Play variant has no self-install permission or
+direct APK dependency; its current safe fallback opens the verified MusicMute
+Play listing.
 
 The app checks policy at launch, after reconnect, when a foreground check is due,
 and every 15 minutes while foregrounded. Optional updates can be deferred for 24
@@ -137,9 +141,9 @@ cancels or deletes an existing cloud job.
 The public backend policy and download-grant routes require the production
 runtime flag `APP_UPDATES_ENABLED=true`; changing the example file alone does not
 change a running deployment. Build 2 predates this in-app updater, so it cannot be
-retrofitted with the dialog. Build 3 must first be distributed through the
-existing update page; subsequent higher builds can then use the in-app prompt and
-verified download flow.
+retrofitted with the dialog. Build 4 is the reviewed bootstrap distributed
+through the existing update page; subsequent higher builds can then use the
+in-app prompt and verified download flow.
 
 ## Download quality
 

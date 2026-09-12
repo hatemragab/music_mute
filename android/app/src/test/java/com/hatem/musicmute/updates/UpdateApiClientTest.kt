@@ -3,7 +3,9 @@ package com.hatem.musicmute.updates
 import com.hatem.musicmute.auth.AuthConfiguration
 import com.hatem.musicmute.auth.AuthHttpResponse
 import com.hatem.musicmute.auth.AuthHttpTransport
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -52,6 +54,23 @@ class UpdateApiClientTest {
             )
         val failure = runCatching { api.downloadGrant("6aa46ad418983c1bd08b5749") }.exceptionOrNull()
         assertEquals(UpdateProblem.RELEASE_UNAVAILABLE, (failure as UpdateFailure).problem)
+    }
+
+    @Test
+    fun transportTimeoutIsReportedAsServiceUnavailableRatherThanLifecycleCancellation() = runTest {
+        val api =
+            UpdateApiClient(
+                AuthConfiguration("https://api.example.test", false),
+                "direct",
+                AuthHttpTransport { _, _, _, _ ->
+                    withTimeout(1) { awaitCancellation() }
+                },
+            )
+
+        val failure = runCatching { api.policy() }.exceptionOrNull()
+
+        assertTrue(failure is UpdateFailure)
+        assertEquals(UpdateProblem.SERVICE_UNAVAILABLE, (failure as UpdateFailure).problem)
     }
 
     private companion object {

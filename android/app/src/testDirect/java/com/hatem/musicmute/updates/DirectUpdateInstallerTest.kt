@@ -1,10 +1,13 @@
 package com.hatem.musicmute.updates
 
 import java.io.File
+import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -121,6 +124,52 @@ class DirectUpdateInstallerTest {
         installer.cancel()
         assertTrue(downloader.cancelled)
         assertEquals(UpdateInstallState.Idle, installer.state.value)
+    }
+
+    @Test
+    fun productionDownloaderNeverReplacesProcessTlsTrust() = runTest {
+        val original = HttpsURLConnection.getDefaultSSLSocketFactory()
+        try {
+            runCatching {
+                createUpdateDownloadClient()
+                    .download("https://127.0.0.1:1/release.apk", File(root, "tls.apk"))
+                    .collect()
+            }
+
+            assertSame(original, HttpsURLConnection.getDefaultSSLSocketFactory())
+        } finally {
+            HttpsURLConnection.setDefaultSSLSocketFactory(original)
+        }
+    }
+
+    @Test
+    fun streamedBytesBeyondTheSignedGrantAreRejectedBeforeInstall() = runTest {
+        val downloader =
+            object : UpdateDownloadClient {
+                override fun download(url: String, destination: File): Flow<UpdateDownloadEvent> =
+                    flow {
+                        destination.writeBytes(ByteArray(5))
+                        emit(UpdateDownloadEvent.Progress(5, 5))
+                        emit(UpdateDownloadEvent.Complete(destination))
+                    }
+
+                override fun cancel() = Unit
+            }
+        val platform = FakePlatform()
+        val installer =
+            DirectUpdateInstaller(
+                FakeApi(grant),
+                root,
+                downloader,
+                ApkVerifier { _, _, _ -> },
+                platform,
+                { 1 },
+            )
+
+        installer.start(target)
+
+        assertEquals(UpdateInstallState.Failed(UpdateProblem.APK_SIZE_MISMATCH), installer.state.value)
+        assertEquals(0, platform.launches)
     }
 
     @Test

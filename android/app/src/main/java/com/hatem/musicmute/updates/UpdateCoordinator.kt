@@ -135,6 +135,7 @@ class UpdateCoordinator(
             store.save(persisted)
             publish()
         } catch (error: CancellationException) {
+            mutableState.value = mutableState.value.copy(checking = false)
             throw error
         } catch (error: UpdateFailure) {
             persisted =

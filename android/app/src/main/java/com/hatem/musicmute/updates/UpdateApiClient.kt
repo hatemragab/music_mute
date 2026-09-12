@@ -8,6 +8,7 @@ import com.hatem.musicmute.auth.AuthProblem
 import com.hatem.musicmute.auth.UrlConnectionAuthTransport
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
@@ -50,6 +51,8 @@ class UpdateApiClient(
                     mapOf("Cache-Control" to "no-store"),
                     body,
                 )
+            } catch (_: TimeoutCancellationException) {
+                throw UpdateFailure(UpdateProblem.SERVICE_UNAVAILABLE)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: AuthFailure) {

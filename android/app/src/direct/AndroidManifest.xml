@@ -5,5 +5,12 @@
 
     <application
         android:usesCleartextTraffic="false"
-        tools:replace="android:usesCleartextTraffic" />
+        tools:replace="android:usesCleartextTraffic">
+        <service
+            android:name="com.azhon.appupdate.service.DownloadService"
+            tools:node="remove" />
+        <activity
+            android:name="com.azhon.appupdate.view.UpdateDialogActivity"
+            tools:node="remove" />
+    </application>
 </manifest>
