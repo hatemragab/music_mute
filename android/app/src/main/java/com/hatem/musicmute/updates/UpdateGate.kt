@@ -67,7 +67,7 @@ fun UpdateGate(
         return
     }
     val prompt = updatePromptPresentation(state, install)
-    if (prompt.blocksContent) Surface(Modifier.fillMaxSize()) {}
+    if (prompt.blocksContent) RequiredUpdateBackground()
     else content()
     if (!prompt.visible) return
 
