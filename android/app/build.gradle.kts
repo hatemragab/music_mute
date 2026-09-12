@@ -27,6 +27,8 @@ android {
     namespace = "com.hatem.musicmute"
     compileSdk = 36
 
+    flavorDimensions += "distribution"
+
     defaultConfig {
         fun publicPage(property: String): String {
             val value = providers.gradleProperty(property).orElse("").get()
@@ -40,8 +42,8 @@ android {
         applicationId = "com.hatem.musicmute"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
     }
 
@@ -89,6 +91,17 @@ android {
         }
     }
 
+    productFlavors {
+        create("direct") {
+            dimension = "distribution"
+            buildConfigField("String", "UPDATE_DISTRIBUTION", "\"direct\"")
+        }
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("String", "UPDATE_DISTRIBUTION", "\"play\"")
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -132,6 +145,9 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
     implementation(libs.youtubedl)
+    "directImplementation"(libs.azhon.appupdate)
+    "playImplementation"(libs.play.appupdate)
+    "playImplementation"(libs.play.appupdate.ktx)
     debugImplementation(libs.compose.tooling)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)

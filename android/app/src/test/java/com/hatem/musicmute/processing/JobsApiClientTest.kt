@@ -15,8 +15,16 @@ class JobsApiClientTest {
     private val upload get() = grant.dropLast(1) + """, "fields":{"key":"opaque","Content-Type":"audio/mpeg","x-amz-extra":"unchanged + / ="}}"""
     private val mutation get() = """{"id":"$id","status":"queued"}"""
     private fun job(status: String) = """{"id":"$id","status":"$status","createdAt":"2026-09-09T12:00:00Z","updatedAt":"2026-09-09T12:01:00Z","input":{"extension":"mp3","bytes":42,"durationSeconds":1.5},"canDownloadInput":true,"canDownloadOutput":false}"""
-    private fun client(transport: AuthHttpTransport, token: suspend (Boolean) -> String = { "token" }) =
-        JobsApiClient(AuthApiClient(AuthConfiguration("https://api.example.test", false), { "uid" }, token, transport), { requestId })
+    private fun client(
+        transport: AuthHttpTransport,
+        token: suspend (Boolean) -> String = { "token" },
+        onUpdateRequired: () -> Unit = {},
+    ) =
+        JobsApiClient(
+            AuthApiClient(AuthConfiguration("https://api.example.test", false), { "uid" }, token, transport),
+            { requestId },
+            onUpdateRequired,
+        )
 
     @Test fun allRoutesPreserveBodiesAndInstallationHeaders() = runTest {
         val requests = mutableListOf<List<Any?>>()
@@ -96,6 +104,29 @@ class JobsApiClientTest {
             val error = runCatching { client(AuthHttpTransport { _,_,_,_ -> AuthHttpResponse(409, """{"code":"$code"}""") }).detail(id) }.exceptionOrNull() as JobsFailure
             assertEquals(code, error.problem.name)
         }
+    }
+
+    @Test fun onlyTypedAppUpdateRejectionsActivateTheUpdateGateCallback() = runTest {
+        var updateRequired = 0
+        val updateClient = client(
+            AuthHttpTransport { _, _, _, _ ->
+                AuthHttpResponse(403, """{"code":"APP_UPDATE_REQUIRED"}""")
+            },
+            onUpdateRequired = { updateRequired++ },
+        )
+        val updateFailure = runCatching { updateClient.create(requestId, input) }.exceptionOrNull() as JobsFailure
+        assertEquals(JobsProblem.APP_UPDATE_REQUIRED, updateFailure.problem)
+        assertEquals(1, updateRequired)
+
+        val unrelatedClient = client(
+            AuthHttpTransport { _, _, _, _ ->
+                AuthHttpResponse(403, """{"code":"EMAIL_VERIFICATION_REQUIRED"}""")
+            },
+            onUpdateRequired = { updateRequired++ },
+        )
+        val unrelated = runCatching { unrelatedClient.create(requestId, input) }.exceptionOrNull() as JobsFailure
+        assertEquals(JobsProblem.EMAIL_VERIFICATION_REQUIRED, unrelated.problem)
+        assertEquals(1, updateRequired)
     }
 
     @Test fun audioExperienceMetadataMutationsAndDiagnosticsUseExactContract() = runTest {

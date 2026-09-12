@@ -17,6 +17,8 @@ firebase-bom = "34.18.0"
 google-services = "4.5.0"
 credentials = "1.6.0"
 googleid = "1.2.0"
+azhon-appupdate = "4.3.6"
+play-appupdate = "2.1.0"
 
 [libraries]
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebase-bom" }
@@ -26,6 +28,9 @@ firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
 credentials = { module = "androidx.credentials:credentials", version.ref = "credentials" }
 credentials-play-services = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
 googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
+azhon-appupdate = { module = "io.github.azhon:appupdate", version.ref = "azhon-appupdate" }
+play-appupdate = { module = "com.google.android.play:app-update", version.ref = "play-appupdate" }
+play-appupdate-ktx = { module = "com.google.android.play:app-update-ktx", version.ref = "play-appupdate" }
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
 compose-ui = { module = "androidx.compose.ui:ui" }
 compose-material3 = { module = "androidx.compose.material3:material3" }

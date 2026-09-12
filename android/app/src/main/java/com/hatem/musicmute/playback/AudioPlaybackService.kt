@@ -6,6 +6,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.hatem.musicmute.MainActivity
+import com.hatem.musicmute.VocalApplication
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class AudioPlaybackService : MediaSessionService() {
@@ -13,6 +14,10 @@ class AudioPlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        if ((application as? VocalApplication)?.updateAdmission?.isBlocked() == true) {
+            stopSelf()
+            return
+        }
         val player =
             ExoPlayer.Builder(this).build().apply {
                 setAudioAttributes(
@@ -32,7 +37,10 @@ class AudioPlaybackService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
-        session.takeIf { controllerInfo.packageName == packageName || controllerInfo.isTrusted }
+        session.takeIf {
+            (application as? VocalApplication)?.updateAdmission?.isBlocked() != true &&
+                (controllerInfo.packageName == packageName || controllerInfo.isTrusted)
+        }
 
     override fun onDestroy() {
         session?.run {

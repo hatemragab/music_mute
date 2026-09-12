@@ -42,6 +42,7 @@ class ProcessingRepository(
     private val uploader: FormUploader = S3FormUploader(),
     private val now: () -> Long = System::currentTimeMillis,
     private val availableSpace: () -> Long = { stagingRoot.usableSpace },
+    private val updateBlocked: () -> Boolean = { false },
 ) {
     private val submitLock = Mutex()
     private val runLocks = ConcurrentHashMap<String, Mutex>()
@@ -55,6 +56,7 @@ class ProcessingRepository(
         sourceTitle: String,
         sourceUrl: String? = null,
     ): ProcessingOperation = submitLock.withLock {
+        requireUpdateAllowed()
         val owner = requireSession()
         require(UUID.fromString(operationId).toString() == operationId)
         val normalizedTitle = boundedSourceTitle(sourceTitle)
@@ -83,6 +85,7 @@ class ProcessingRepository(
         expectedSourceWorkRequestId: String? = null,
         requireCloudConsent: Boolean = false,
     ): ProcessingOperation = submitLock.withLock {
+        requireUpdateAllowed()
         val owner = requireSession()
         if (prepared.ownerUid != owner.uid) changedSession()
         require(UUID.fromString(prepared.operationId).toString() == prepared.operationId)
@@ -147,6 +150,7 @@ class ProcessingRepository(
     }
 
     suspend fun confirmCloudProcessing(operationId: String, rightsConfirmed: Boolean) {
+        requireUpdateAllowed()
         require(rightsConfirmed)
         val owner = requireSession()
         store.update(owner.uid, operationId) {
@@ -159,6 +163,7 @@ class ProcessingRepository(
     }
 
     suspend fun resume(operationId: String) {
+        requireUpdateAllowed()
         val owner = requireSession()
         val operation = store.get(owner.uid, operationId) ?: return
         checkSession(owner)
@@ -178,6 +183,7 @@ class ProcessingRepository(
      * Explicitly paused/exhausted operations require a user action.
      */
     suspend fun resumePending() {
+        if (updateBlocked()) return
         val owner = requireSession()
         val operations = store.operations(owner.uid).first()
         checkSession(owner)
@@ -203,6 +209,39 @@ class ProcessingRepository(
         }
         checkSession(owner)
         stopRun(owner, operationId)
+    }
+
+    /** Pause only client-side reservation/upload work for a mandatory app update.
+     * Server jobs, staged inputs, request IDs and user cancellation intent are preserved.
+     */
+    suspend fun pauseForUpdate() {
+        val owner = session() ?: return
+        val restartable =
+            setOf(
+                ProcessingPhase.WAITING,
+                ProcessingPhase.RESERVING,
+                ProcessingPhase.UPLOADING,
+                ProcessingPhase.CONFIRMING,
+                ProcessingPhase.RETRY_WAIT,
+                ProcessingPhase.CANCELLING,
+            )
+        val operations = store.operations(owner.uid).first().filter { it.phase in restartable }
+        for (operation in operations) {
+            checkSession(owner)
+            activeRuns[key(owner.uid, operation.operationId)]?.job?.cancelAndJoin()
+            checkSession(owner)
+            store.update(owner.uid, operation.operationId) {
+                if (it.phase !in restartable) it
+                else
+                    it.copy(
+                        phase = ProcessingPhase.WAITING,
+                        runId = null,
+                        problem = JobsProblem.APP_UPDATE_REQUIRED,
+                    )
+            }
+            checkSession(owner)
+            scheduler.cancel(owner.uid, operation.operationId)
+        }
     }
 
     /** Resolve an uncertain reservation with its saved request ID before cancelling it. */
@@ -245,6 +284,7 @@ class ProcessingRepository(
     }
 
     suspend fun retry(jobId: String): ProcessingOperation = submitLock.withLock {
+        requireUpdateAllowed()
         val owner = requireSession()
         val existing = store.operations(owner.uid).first().find { it.retryOfJobId == jobId }
         checkSession(owner)
@@ -289,6 +329,18 @@ class ProcessingRepository(
     suspend fun runUpload(ownerUid: String, operationId: String, epoch: Long, attempt: Int = 0): ProcessingRunResult {
         val owner = ProcessingSession(ownerUid, epoch)
         checkSession(owner)
+        if (updateBlocked()) {
+            store.update(ownerUid, operationId) {
+                if (it.phase == ProcessingPhase.COMPLETE) it
+                else
+                    it.copy(
+                        phase = ProcessingPhase.WAITING,
+                        runId = null,
+                        problem = JobsProblem.APP_UPDATE_REQUIRED,
+                    )
+            }
+            return ProcessingRunResult.PAUSED
+        }
         val key = key(ownerUid, operationId)
         return runLocks.computeIfAbsent(key) { Mutex() }.withLock {
             coroutineScope {
@@ -602,6 +654,9 @@ class ProcessingRepository(
     }
 
     private fun requireSession(): ProcessingSession = session() ?: throw JobsFailure(JobsProblem.UNAUTHENTICATED)
+    fun requireUpdateAllowed() {
+        if (updateBlocked()) throw JobsFailure(JobsProblem.APP_UPDATE_REQUIRED)
+    }
     private fun checkSession(expected: ProcessingSession) { if (session() != expected) changedSession() }
     private fun changedSession(): Nothing = throw CancellationException("Processing session changed")
     private fun key(uid: String, operationId: String) = "$uid:$operationId"

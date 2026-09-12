@@ -14,11 +14,15 @@ Install JDK 17 and Android SDK platform 36. Configure `JAVA_HOME` and
 `ANDROID_HOME`, then open this `android/` folder in Android Studio or run:
 
 ```sh
-./gradlew :app:assembleDebug :app:lintDebug :app:testDebugUnitTest
+./gradlew :app:assembleDirectDebug :app:assemblePlayDebug \
+  :app:lintDirectDebug :app:lintPlayDebug \
+  :app:testDirectDebugUnitTest :app:testPlayDebugUnitTest
 ```
 
 The checked-in Gradle 8.13 wrapper verifies its distribution checksum. The APK is
-`app/build/outputs/apk/debug/app-debug.apk`. Reports are in `app/build/reports/`.
+`app/build/outputs/apk/direct/debug/app-direct-debug.apk` for direct distribution
+and `app/build/outputs/apk/play/debug/app-play-debug.apk` for Play distribution.
+Reports are in `app/build/reports/`.
 Machine-specific configuration and build output are ignored.
 
 The production `app/google-services.json` is also local-only and ignored. Download
@@ -60,9 +64,9 @@ registered before its Debug APK can use Google sign-in.
 
 `node android/e2e/server.mjs` starts disposable MongoDB, Redis, Firebase Auth
 Emulator, and the compiled backend, then prints the owned ports. Build with
-`./gradlew :app:assembleAuthE2e`, forward device ports `48080` and `49099` to the
+`./gradlew :app:assembleDirectAuthE2e`, forward device ports `48080` and `49099` to the
 printed API and Auth Emulator ports, and install
-`app/build/outputs/apk/authE2e/app-authE2e.apk` on the connected device. The separate
+`app/build/outputs/apk/direct/authE2e/app-direct-authE2e.apk` on the connected device. The separate
 `com.hatem.musicmute.authtest` package preserves the normal app's data.
 
 This variant uses only the `demo-musicmute` project and a picker for two synthetic
@@ -85,11 +89,11 @@ directory. Its `storeFile=upload-keystore.jks` path is resolved relative to the
 be backed up securely together. Do not regenerate this key for routine builds.
 
 ```sh
-./gradlew :app:assembleRelease :app:bundleRelease
+./gradlew :app:assembleDirectRelease :app:bundlePlayRelease
 ```
 
-Outputs: `app/build/outputs/apk/release/app-release.apk` and
-`app/build/outputs/bundle/release/app-release.aab`. Missing signing credentials
+Outputs: `app/build/outputs/apk/direct/release/app-direct-release.apk` and
+`app/build/outputs/bundle/playRelease/app-play-release.aab`. Missing signing credentials
 cause release signing validation to fail; releases do not use the debug key.
 Debug builds continue to use the normal Android debug certificate.
 
@@ -109,6 +113,33 @@ that require certificate matching in Play-distributed builds.
 Android runtime and UI execution is currently outside the authorized device
 scope. Local JVM tests, lint, and APK assembly may run; do not substitute another
 simulator or device for runtime proof.
+
+## App updates
+
+Android has separate `direct` and `play` distribution variants with the same
+production application ID and signing configuration. Version `0.1.2` is build 3.
+The direct variant uses
+[azhon/AppUpdate 4.3.6](https://github.com/azhon/AppUpdate) (Apache-2.0) for the
+download transport. Before Android's installer is opened, MusicMute obtains a
+fresh public download grant and independently verifies the complete APK size and
+SHA-256, package ID, higher build number, and signing-certificate SHA-256. The
+`REQUEST_INSTALL_PACKAGES` permission and azhon provider/service exist only in
+the direct variant. The Play variant has no self-install permission or direct APK
+dependency; its current safe fallback opens the verified MusicMute Play listing.
+
+The app checks policy at launch, after reconnect, when a foreground check is due,
+and every 15 minutes while foregrounded. Optional updates can be deferred for 24
+hours. A mandatory policy is stored independently of login and gates the whole
+UI, back navigation, playback, imports, local downloads/uploads, and notification
+actions. Local inputs and cloud job IDs are retained; activating the gate never
+cancels or deletes an existing cloud job.
+
+The public backend policy and download-grant routes require the production
+runtime flag `APP_UPDATES_ENABLED=true`; changing the example file alone does not
+change a running deployment. Build 2 predates this in-app updater, so it cannot be
+retrofitted with the dialog. Build 3 must first be distributed through the
+existing update page; subsequent higher builds can then use the in-app prompt and
+verified download flow.
 
 ## Download quality
 

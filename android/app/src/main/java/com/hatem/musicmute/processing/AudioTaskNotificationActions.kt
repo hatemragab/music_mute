@@ -88,6 +88,7 @@ class AudioTaskNotificationActions : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_CANCEL) return
         val app = context.applicationContext as? VocalApplication ?: return
+        if (app.updateAdmission.isBlocked()) return
         val target = audioTaskNotificationTarget(intent, app.processingSession()) ?: return
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {

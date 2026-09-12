@@ -15,6 +15,7 @@ import kotlinx.coroutines.sync.withPermit
 interface PipelineSourceScheduler {
     suspend fun enqueue(ownerUid: String, operationId: String, url: String, epoch: Long)
     suspend fun cancel(ownerUid: String, operationId: String)
+    suspend fun pause(ownerUid: String, operationId: String) = cancel(ownerUid, operationId)
     suspend fun cancelOwner(ownerUid: String)
 }
 
@@ -30,6 +31,7 @@ class AudioPipelineCoordinator(
     private val activeImports = ConcurrentHashMap<String, ActiveImport>()
 
     suspend fun acceptUrl(operationId: String, rawUrl: String): ProcessingOperation {
+        repository.requireUpdateAllowed()
         val owner = requireSession()
         val url = requireNotNull(YouTubeUrl.canonical(rawUrl))
         repository.store.get(owner.uid, operationId)?.let { existing ->
@@ -55,6 +57,7 @@ class AudioPipelineCoordinator(
         sourceName: String,
         open: () -> InputStream,
     ): ProcessingOperation {
+        repository.requireUpdateAllowed()
         val owner = requireSession()
         val extension = sourceName.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
         if (processingContentType(extension) == null)
@@ -69,12 +72,14 @@ class AudioPipelineCoordinator(
         activeImports[key(owner.uid, operationId)] = active
         return try {
             localSlots.withPermit {
+                repository.requireUpdateAllowed()
                 checkSession(owner)
                 val accepted = repository.store.get(owner.uid, operationId) ?: changedSession()
                 if (accepted.cancellationRequested || accepted.pendingDelete) throw CancellationException(
                     "Import cancelled"
                 )
                 val prepared = preparer.prepare(owner.uid, "$safeTitle.$extension", operationId, open)
+                repository.requireUpdateAllowed()
                 checkSession(owner)
                 repository.submit(prepared, requireCloudConsent = true)
             }
@@ -99,6 +104,7 @@ class AudioPipelineCoordinator(
         downloadedFile: File,
         expectedWorkRequestId: String? = null,
     ): ProcessingOperation {
+        repository.requireUpdateAllowed()
         val owner = ProcessingSession(ownerUid, expectedEpoch)
         checkSession(owner)
         val current = repository.store.get(ownerUid, operationId) ?: changedSession()
@@ -128,6 +134,7 @@ class AudioPipelineCoordinator(
         expectedEpoch: Long,
         block: suspend () -> T,
     ): T = localSlots.withPermit {
+        repository.requireUpdateAllowed()
         val owner = ProcessingSession(ownerUid, expectedEpoch)
         checkSession(owner)
         block().also { checkSession(owner) }
@@ -144,6 +151,7 @@ class AudioPipelineCoordinator(
     }
 
     suspend fun retry(operationId: String) {
+        repository.requireUpdateAllowed()
         val owner = requireSession()
         val operation = repository.store.get(owner.uid, operationId) ?: return
         if (operation.sourceKind != SourceKind.URL || operation.input != null) {
@@ -182,6 +190,7 @@ class AudioPipelineCoordinator(
     }
 
     suspend fun resumePendingSources() {
+        repository.requireUpdateAllowed()
         val owner = requireSession()
         repository.store.operations(owner.uid).first().forEach { operation ->
             if (operation.sourceKind == SourceKind.URL && operation.input == null &&
@@ -192,6 +201,34 @@ class AudioPipelineCoordinator(
                 sourceScheduler.enqueue(owner.uid, operation.operationId, url, owner.epoch)
             }
         }
+    }
+
+    suspend fun pauseForUpdate() {
+        val owner = session() ?: return
+        activeImports.values.filter { it.owner == owner }.forEach { it.job.cancelAndJoin() }
+        val sourceOperations =
+            repository.store.operations(owner.uid).first().filter {
+                it.sourceKind == SourceKind.URL &&
+                    it.input == null &&
+                    !it.cancellationRequested &&
+                    !it.pendingDelete &&
+                    it.phase != ProcessingPhase.COMPLETE
+            }
+        for (operation in sourceOperations) {
+            checkSession(owner)
+            sourceScheduler.pause(owner.uid, operation.operationId)
+            checkSession(owner)
+            repository.store.update(owner.uid, operation.operationId) {
+                if (it.input != null || it.phase == ProcessingPhase.COMPLETE) it
+                else
+                    it.copy(
+                        phase = ProcessingPhase.SOURCE_QUEUED,
+                        sourceWorkRequestId = null,
+                        problem = JobsProblem.APP_UPDATE_REQUIRED,
+                    )
+            }
+        }
+        repository.pauseForUpdate()
     }
 
     private fun requireSession() = session() ?: throw JobsFailure(JobsProblem.UNAUTHENTICATED)

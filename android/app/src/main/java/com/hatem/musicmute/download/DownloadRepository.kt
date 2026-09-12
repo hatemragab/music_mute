@@ -210,6 +210,26 @@ class DownloadRepository(
         }
     }
 
+    override suspend fun pause(ownerUid: String, operationId: String) {
+        val record = store.get(operationId) ?: return
+        if (record.ownerUid != ownerUid) return
+        withContext(Dispatchers.IO) {
+            workManager.cancelAllWorkByTag(sourceOperationTag(ownerUid, operationId)).result.get()
+        }
+        store.update(operationId) {
+            if (it.ownerUid != ownerUid || it.status == DownloadStatus.COMPLETE) it
+            else
+                it.copy(
+                    status = DownloadStatus.QUEUED,
+                    error = DownloadError.NONE,
+                    workRequestId = null,
+                )
+        }
+        processingStore?.update(ownerUid, operationId) {
+            if (it.ownerUid == ownerUid) it.copy(sourceWorkRequestId = null) else it
+        }
+    }
+
     override suspend fun cancelOwner(ownerUid: String) {
         store.records().filter { it.ownerUid == ownerUid && it.status !in setOf(
             DownloadStatus.COMPLETE, DownloadStatus.FAILED, DownloadStatus.CANCELLED
