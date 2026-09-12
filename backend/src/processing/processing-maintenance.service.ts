@@ -42,7 +42,9 @@ export class ProcessingMaintenanceService
   private async maintain(includeRecovery = true): Promise<void> {
     if (includeRecovery && this.config.get<boolean>('AUDIO_PROCESSING_ENABLED'))
       await this.recovery.markExpiredAssignments();
-    await this.storageCleanup.scheduleDue();
+    for (let processed = 0; processed < 100; processed += 1) {
+      if (!(await this.storageCleanup.scheduleDue())) break;
+    }
     await this.deletion.cleanupDue();
   }
   async onModuleDestroy(): Promise<void> {

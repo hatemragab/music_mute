@@ -7,8 +7,9 @@ processing routes return `503` while `AUDIO_PROCESSING_ENABLED` is false.
 The implemented [audio experience additions](audio-experience.md) cover optional
 source metadata, preserved/renamed names, request references, processing timing,
 terminal-job deletion, and authenticated mobile error reports. `/client-errors`
-remains available independently of processing enablement. Existing payloads and
-worker callbacks remain compatible; job projections have additive fields.
+remains available independently of processing enablement. Job projections have
+additive fields, but upload clients must migrate with the API because upload
+grants now use immutable, checksum-bound `PUT` requests instead of form posts.
 
 Requests and responses use JSON unless an S3 grant says otherwise. Unknown body
 fields are rejected. UUIDs are version 4 and are normalized to lowercase. Job

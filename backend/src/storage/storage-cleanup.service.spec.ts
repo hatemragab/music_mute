@@ -22,7 +22,12 @@ class TasksFixture {
   init = vi.fn(async () => this);
 
   async updateOne(
-    filter: { key?: string; _id?: Types.ObjectId; leaseToken?: string },
+    filter: {
+      key?: string;
+      _id?: Types.ObjectId;
+      leaseToken?: string;
+      settleUntil?: Date;
+    },
     update: Record<string, Record<string, unknown>>,
     options: { upsert?: boolean } = {},
   ) {
@@ -31,7 +36,9 @@ class TasksFixture {
         (filter.key === undefined || entry.key === filter.key) &&
         (filter._id === undefined || entry._id.equals(filter._id)) &&
         (filter.leaseToken === undefined ||
-          entry.leaseToken === filter.leaseToken),
+          entry.leaseToken === filter.leaseToken) &&
+        (filter.settleUntil === undefined ||
+          entry.settleUntil.getTime() === filter.settleUntil.getTime()),
     );
     if (!item && options.upsert) {
       item = {
@@ -193,6 +200,38 @@ describe('StorageCleanupService', () => {
     expect(tasks.records[0]?.completedAt).toEqual(
       new Date(due.getTime() + 2_000),
     );
+  });
+
+  it('preserves a concurrent settlement extension while sweeping', async () => {
+    const extendedSettleUntil = new Date(due.getTime() + 60_000);
+    const { service, tasks, sweepVersionsForKey } = setup();
+    await service.schedule({
+      key,
+      ownerUserId: owner,
+      reason: 'AUDIO_INPUT_EXPIRED',
+      nextAt: due,
+      settleUntil: due,
+    });
+    sweepVersionsForKey.mockImplementationOnce(async () => {
+      await service.schedule({
+        key,
+        ownerUserId: owner,
+        reason: 'AUDIO_INPUT_EXPIRED',
+        nextAt: due,
+        settleUntil: extendedSettleUntil,
+      });
+      return { complete: true, deleted: 0 };
+    });
+
+    await expect(service.cleanupDue(due)).resolves.toBe(true);
+
+    expect(tasks.records[0]).toMatchObject({
+      completedAt: null,
+      leaseToken: null,
+      leaseUntil: null,
+      nextAt: due,
+      settleUntil: extendedSettleUntil,
+    });
   });
 
   it('releases failed leases with bounded exponential retry', async () => {

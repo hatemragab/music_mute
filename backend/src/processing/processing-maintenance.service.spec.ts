@@ -45,4 +45,27 @@ describe('ProcessingMaintenanceService', () => {
     expect(storageCleanup.scheduleDue).toHaveBeenCalledOnce();
     expect(deletion.cleanupDue).toHaveBeenCalledOnce();
   });
+
+  it('drains due processing cleanup candidates before deleting jobs', async () => {
+    const { service, deletion, storageCleanup } = fixture(false);
+    storageCleanup.scheduleDue
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    await runMaintenance(service);
+
+    expect(storageCleanup.scheduleDue).toHaveBeenCalledTimes(3);
+    expect(deletion.cleanupDue).toHaveBeenCalledOnce();
+  });
+
+  it('bounds each processing cleanup drain cycle', async () => {
+    const { service, deletion, storageCleanup } = fixture(false);
+    storageCleanup.scheduleDue.mockResolvedValue(true);
+
+    await runMaintenance(service);
+
+    expect(storageCleanup.scheduleDue).toHaveBeenCalledTimes(100);
+    expect(deletion.cleanupDue).toHaveBeenCalledOnce();
+  });
 });

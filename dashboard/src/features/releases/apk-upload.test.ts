@@ -1,12 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MAX_APK_BYTES, validateApk, validateUploadGrant } from "./apk-upload";
+import {
+  MAX_APK_BYTES,
+  uploadApk,
+  validateApk,
+  validateUploadGrant,
+} from "./apk-upload";
 
 const fileWithSize = (name: string, size: number) => {
   const file = new File(["fixture"], name);
   Object.defineProperty(file, "size", { configurable: true, value: size });
   return file;
 };
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("validateApk", () => {
   it("accepts a non-empty APK at the documented 256 MiB ceiling", () => {
@@ -82,5 +89,49 @@ describe("validateUploadGrant", () => {
         },
       }),
     ).toThrow("invalid");
+  });
+});
+
+describe("uploadApk", () => {
+  it("uses a transport that rejects redirects", async () => {
+    class SuccessfulXMLHttpRequest {
+      status = 204;
+      upload = {};
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      open() {}
+      setRequestHeader() {}
+      send() {
+        this.onload?.();
+      }
+      abort() {
+        this.onabort?.();
+      }
+    }
+    const fetch = vi.fn(async () => ({ ok: true }) as Response);
+    vi.stubGlobal("XMLHttpRequest", SuccessfulXMLHttpRequest);
+    vi.stubGlobal("fetch", fetch);
+
+    await uploadApk(
+      {
+        method: "PUT",
+        url: "https://uploads.example.test/release.apk",
+        headers: {
+          "Content-Type": "application/vnd.android.package-archive",
+          "If-None-Match": "*",
+          "x-amz-checksum-sha256":
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        },
+      },
+      new File([new Uint8Array([1])], "release.apk"),
+      () => undefined,
+      new AbortController().signal,
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://uploads.example.test/release.apk",
+      expect.objectContaining({ method: "PUT", redirect: "error" }),
+    );
   });
 });

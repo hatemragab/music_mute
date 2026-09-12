@@ -85,8 +85,12 @@ export class StorageCleanupService implements OnModuleInit {
       const settled = now.getTime() >= task.settleUntil.getTime();
       const completed = sweep.complete && settled && sweep.deleted === 0;
       const retrySoon = !sweep.complete || (settled && sweep.deleted > 0);
-      await this.tasks.updateOne(
-        { _id: task._id, leaseToken: token },
+      const update = await this.tasks.updateOne(
+        {
+          _id: task._id,
+          leaseToken: token,
+          settleUntil: task.settleUntil,
+        },
         {
           $set: {
             leaseToken: null,
@@ -101,10 +105,15 @@ export class StorageCleanupService implements OnModuleInit {
           },
         },
       );
+      if (update.matchedCount !== 1) await this.releaseLease(task._id, token);
     } catch {
       const failures = Math.min(task.attempts + 1, 20);
-      await this.tasks.updateOne(
-        { _id: task._id, leaseToken: token },
+      const update = await this.tasks.updateOne(
+        {
+          _id: task._id,
+          leaseToken: token,
+          settleUntil: task.settleUntil,
+        },
         {
           $set: {
             leaseToken: null,
@@ -116,8 +125,16 @@ export class StorageCleanupService implements OnModuleInit {
           },
         },
       );
+      if (update.matchedCount !== 1) await this.releaseLease(task._id, token);
     }
     return true;
+  }
+
+  private async releaseLease(_id: Types.ObjectId, token: string) {
+    await this.tasks.updateOne(
+      { _id, leaseToken: token },
+      { $set: { leaseToken: null, leaseUntil: null } },
+    );
   }
 
   private validate(task: ScheduleStorageCleanup): void {
