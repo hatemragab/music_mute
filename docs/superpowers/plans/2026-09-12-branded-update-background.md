@@ -13,7 +13,7 @@
 - [x] Add `RequiredUpdateBackground.kt`, English/Arabic resources, and replace the empty Surface. Include light/dark and Arabic/font-scale previews.
 - [x] Extend `UpdateGateTest` across installation states to guard required blocking and optional content access.
 - [x] Run direct/play unit tests, lint, and debug builds; review the diff and native manifest packaging.
-- [ ] Commit the required integration separately from the background fix, push the branch, and open a PR targeting main.
+- [x] Commit the required integration separately from the background fix, push the branch, and open a PR targeting main: https://github.com/hatemragab/music_remover/pull/4.
 
 ## Validation boundaries
 
