@@ -87,6 +87,7 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
     }
 
     override suspend fun doWork(): Result {
+        if (app.updateAdmission.isBlocked()) return Result.retry()
         val recordId = inputData.getString(DownloadRepository.KEY_ID) ?: return Result.failure()
         if (runCatching { UUID.fromString(recordId).toString() == recordId }.getOrDefault(false).not()) return Result.failure()
         val repository = app.downloadRepository
@@ -309,6 +310,7 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
 
     private suspend fun checkPipeline(record: DownloadRecord) {
         val target = pipelineTarget(record) ?: return
+        if (app.updateAdmission.isBlocked()) throw CancellationException("App update required")
         if (!target.matches(app.processingSession()) || isStopped) throw CancellationException("Source task stopped")
         if (app.downloadRepository.store.get(record.id)?.workRequestId != id.toString())
             throw CancellationException("Source task replaced")

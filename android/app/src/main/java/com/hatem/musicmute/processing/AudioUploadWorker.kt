@@ -94,6 +94,11 @@ class AudioUploadWorker(context: Context, parameters: WorkerParameters) : Corout
         val repository = (applicationContext as? ProcessingWorkerHost)?.processingRepository ?: return Result.failure()
         val app = applicationContext as? VocalApplication ?: return Result.failure()
         if (!repository.isCurrentSession(owner, epoch)) return Result.failure()
+        if (app.updateAdmission.isRequired()) {
+            repository.runUpload(owner, operation, epoch)
+            return Result.failure()
+        }
+        if (app.updateAdmission.isBlocked()) return Result.retry()
         return try {
             app.audioPipelineCoordinator.withLocalSlot(owner, epoch) {
                 setForeground(getForegroundInfo())

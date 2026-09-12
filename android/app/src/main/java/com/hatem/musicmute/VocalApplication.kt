@@ -2,6 +2,10 @@ package com.hatem.musicmute
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import androidx.datastore.core.DataStoreFactory
 import androidx.datastore.dataStoreFile
@@ -17,7 +21,10 @@ import com.hatem.musicmute.download.HistorySerializer
 import com.hatem.musicmute.download.HistoryStore
 import com.hatem.musicmute.download.YoutubeAudioDownloader
 import com.hatem.musicmute.processing.*
+import com.hatem.musicmute.playback.AudioPlaybackService
+import com.hatem.musicmute.updates.*
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -76,6 +83,29 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
                 { firebaseIdentity.token(it) },
             )
     }
+    private val updateDataStore by lazy {
+        DataStoreFactory.create(UpdateStateSerializer) { dataStoreFile("app_updates.json") }
+    }
+    val updateApi: UpdatePolicyApi by lazy {
+        UpdateApiClient(
+            AuthConfiguration(BuildConfig.AUTH_API_URL, BuildConfig.DEBUG),
+            BuildConfig.UPDATE_DISTRIBUTION,
+        )
+    }
+    val updateCoordinator by lazy {
+        UpdateCoordinator(
+            applicationScope,
+            updateApi,
+            DataStoreUpdateStateStore(updateDataStore),
+            installedBuild = { installedBuildNumber(this) },
+            distribution = BuildConfig.UPDATE_DISTRIBUTION,
+            online = ::updatesOnline,
+        )
+    }
+    val updateAdmission by lazy { UpdateAdmission(updateCoordinator.state) }
+    val updateInstaller by lazy {
+        createUpdateInstaller(this, updateApi) { installedBuildNumber(this) }
+    }
     val authSession: AuthSessionCoordinator by lazy {
         AuthSessionCoordinator(firebaseIdentity, authApi, installations, googleCredentials,
             sessionInvalidated = { uid ->
@@ -93,10 +123,23 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
     val processingRoot by lazy { File(noBackupFilesDir, "processing") }
     val processingStore by lazy { ProcessingStore(File(processingRoot, "metadata")) }
     val processingStagingRoot by lazy { File(processingRoot, "staging") }
-    val jobsApi: JobsApiClient by lazy { JobsApiClient(authApi) { authSession.state.value.installationId.orEmpty() } }
+    val jobsApi: JobsApiClient by lazy {
+        JobsApiClient(
+            authApi,
+            { authSession.state.value.installationId.orEmpty() },
+            updateCoordinator::reportProcessingRejected,
+        )
+    }
     val audioInputPreparer by lazy { AudioInputPreparer(processingStagingRoot, inspect = ::inspectProcessingAudio) }
     override val processingRepository by lazy {
-        ProcessingRepository(processingStore, processingStagingRoot, jobsApi, ::processingSession, WorkManagerProcessingScheduler(this))
+        ProcessingRepository(
+            processingStore,
+            processingStagingRoot,
+            jobsApi,
+            ::processingSession,
+            WorkManagerProcessingScheduler(this),
+            updateBlocked = updateAdmission::isBlocked,
+        )
     }
     val audioPipelineCoordinator by lazy {
         AudioPipelineCoordinator(processingRepository, audioInputPreparer, ::processingSession, downloadRepository)
@@ -159,6 +202,64 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
 
     override fun onCreate() {
         super.onCreate()
+        val connectivity = getSystemService(ConnectivityManager::class.java)
+        val updateNetworkAvailable = AtomicBoolean(updatesOnline())
+        connectivity.registerDefaultNetworkCallback(
+            object : ConnectivityManager.NetworkCallback() {
+                private fun refreshUpdateConnectivity() {
+                    val current = updatesOnline()
+                    val previous = updateNetworkAvailable.getAndSet(current)
+                    if (current && !previous)
+                        updateCoordinator.requestCheck(UpdateTrigger.RECONNECT)
+                }
+
+                override fun onAvailable(network: Network) {
+                    refreshUpdateConnectivity()
+                }
+
+                override fun onLost(network: Network) {
+                    updateNetworkAvailable.set(false)
+                }
+
+                override fun onCapabilitiesChanged(
+                    network: Network,
+                    capabilities: NetworkCapabilities,
+                ) {
+                    refreshUpdateConnectivity()
+                }
+            }
+        )
+        applicationScope.launch { updateCoordinator.initialize() }
+        applicationScope.launch {
+            var previouslyRequired = false
+            var previouslyBlocked = true
+            updateCoordinator.state.collect { state ->
+                val required = state.decision == UpdateDecision.REQUIRED
+                val blocked = state.restoring || required
+                if (required && !previouslyRequired) {
+                    stopService(Intent(this@VocalApplication, AudioPlaybackService::class.java))
+                    try {
+                        audioPipelineCoordinator.pauseForUpdate()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        // The durable update gate stays authoritative; retained work is retried after update.
+                    }
+                }
+                if (!blocked && previouslyBlocked && processingSession() != null) {
+                    try {
+                        processingRepository.resumePending()
+                        audioPipelineCoordinator.resumePendingSources()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        // Retained operations remain visible and can be resumed explicitly.
+                    }
+                }
+                previouslyRequired = required
+                previouslyBlocked = blocked
+            }
+        }
         createProcessingNotificationChannel(this, getString(R.string.cloud_processing_title))
         applicationScope.launch {
             recoverAccountPrivateData(
@@ -191,6 +292,14 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
                 }
             }
         }
+    }
+
+    private fun updatesOnline(): Boolean {
+        val connectivity = getSystemService(ConnectivityManager::class.java)
+        val network = connectivity.activeNetwork ?: return false
+        val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
     val preferencesRepository by lazy { DataStorePreferencesRepository(preferencesStore) }
     val workflowRepository by lazy { DemoWorkflowRepository() }

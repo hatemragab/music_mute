@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <application
+        android:usesCleartextTraffic="false"
+        tools:replace="android:usesCleartextTraffic">
+        <service
+            android:name="com.azhon.appupdate.service.DownloadService"
+            tools:node="remove" />
+        <activity
+            android:name="com.azhon.appupdate.view.UpdateDialogActivity"
+            tools:node="remove" />
+    </application>
+</manifest>

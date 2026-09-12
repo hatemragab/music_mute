@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -30,7 +31,12 @@ import com.hatem.musicmute.processing.audioTaskNotificationTarget
 import com.hatem.musicmute.ui.VocalApp
 import com.hatem.musicmute.ui.VocalTheme
 import com.hatem.musicmute.ui.auth.AuthGate
+import com.hatem.musicmute.updates.UpdateGate
+import com.hatem.musicmute.updates.UpdateDecision
+import com.hatem.musicmute.updates.UpdateInstallState
+import com.hatem.musicmute.updates.UpdateTrigger
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
     private val openHistory = MutableStateFlow(false)
@@ -48,6 +54,12 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
         setContent {
             val app = application as VocalApplication
+            val updateState by app.updateCoordinator.state.collectAsStateWithLifecycle()
+            val updateInstallState by app.updateInstaller.state.collectAsStateWithLifecycle()
+            val updateBlocked =
+                updateState.restoring ||
+                    updateState.decision == UpdateDecision.REQUIRED
+            val updateScope = androidx.compose.runtime.rememberCoroutineScope()
             val model: VocalViewModel =
                 viewModel(
                     factory =
@@ -80,7 +92,8 @@ class MainActivity : AppCompatActivity() {
             })
             LaunchedEffect(processingSession) { processing.bindSession(processingSession) }
             val taskIntent by audioTaskIntent.collectAsStateWithLifecycle()
-            LaunchedEffect(taskIntent, processingSession) {
+            LaunchedEffect(taskIntent, processingSession, updateBlocked) {
+                if (updateBlocked) return@LaunchedEffect
                 audioTaskNotificationTarget(taskIntent, processingSession)?.let { target ->
                     openProcessing.value = true
                     processingOperation.value = target.operationId
@@ -88,11 +101,14 @@ class MainActivity : AppCompatActivity() {
                     audioTaskIntent.value = null
                 }
             }
-            LaunchedEffect(pushTap, processingSession, authState.offline) {
+            LaunchedEffect(pushTap, processingSession, authState.offline, updateBlocked) {
+                if (updateBlocked) return@LaunchedEffect
                 app.processingPush.resolvePendingTap()?.let { processingJob.value = it.id }
             }
-            LaunchedEffect(app) {
-                app.processingPush.refreshHints.collect { processing.history.refresh() }
+            LaunchedEffect(app, updateBlocked) {
+                if (!updateBlocked) {
+                    app.processingPush.refreshHints.collect { processing.history.refresh() }
+                }
             }
             val requestedHistory by openHistory.collectAsStateWithLifecycle()
             val requestedOperation by processingOperation.collectAsStateWithLifecycle()
@@ -138,25 +154,43 @@ class MainActivity : AppCompatActivity() {
             }
             VocalTheme(dark = dark) {
                 val language = LocalConfiguration.current.locales[0].language
-                AuthGate(
-                    app.authSession,
-                    app.googleCredentials,
-                    this@MainActivity,
-                    onToggleLanguage = {
-                        model.setLanguage(
-                            if (language == "ar") LanguageChoice.ENGLISH else LanguageChoice.ARABIC
-                        )
+                UpdateGate(
+                    state = updateState,
+                    install = updateInstallState,
+                    currentVersion = BuildConfig.VERSION_NAME,
+                    currentBuild = BuildConfig.VERSION_CODE,
+                    onUpdate = {
+                        val target = updateState.snapshot?.target ?: return@UpdateGate
+                        updateScope.launch {
+                            if (updateInstallState == UpdateInstallState.PermissionNeeded)
+                                app.updateInstaller.onForeground()
+                            else app.updateInstaller.start(target)
+                        }
                     },
-                ) { onAccount ->
-                    VocalApp(state, model, downloads, processing, processingSession, artifacts,
-                        app.downloadRepository.audioRoot, requestedHistory,
-                        openProcessing = requestedProcessing, openProcessingJob = requestedJob,
-                        openProcessingOperation = requestedOperation,
-                        onProcessingOpened = { openProcessing.value = false; processingJob.value = null; processingOperation.value = null; intent.removeExtra(OPEN_PROCESSING) },
-                        onProcessingNotifications = { app.processingPush.onForeground() },
-                        onAccount = onAccount) {
-                        openHistory.value = false
-                        intent.removeExtra(OPEN_HISTORY)
+                    onLater = { updateScope.launch { app.updateCoordinator.deferOptional() } },
+                    onRetryPolicy = { app.updateCoordinator.requestCheck(UpdateTrigger.RETRY) },
+                    onCancelInstall = app.updateInstaller::cancel,
+                ) {
+                    AuthGate(
+                        app.authSession,
+                        app.googleCredentials,
+                        this@MainActivity,
+                        onToggleLanguage = {
+                            model.setLanguage(
+                                if (language == "ar") LanguageChoice.ENGLISH else LanguageChoice.ARABIC
+                            )
+                        },
+                    ) { onAccount ->
+                        VocalApp(state, model, downloads, processing, processingSession, artifacts,
+                            app.downloadRepository.audioRoot, requestedHistory,
+                            openProcessing = requestedProcessing, openProcessingJob = requestedJob,
+                            openProcessingOperation = requestedOperation,
+                            onProcessingOpened = { openProcessing.value = false; processingJob.value = null; processingOperation.value = null; intent.removeExtra(OPEN_PROCESSING) },
+                            onProcessingNotifications = { app.processingPush.onForeground() },
+                            onAccount = onAccount) {
+                            openHistory.value = false
+                            intent.removeExtra(OPEN_HISTORY)
+                        }
                     }
                 }
             }
@@ -174,7 +208,19 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        (application as VocalApplication).processingPush.onForeground()
+        val app = application as VocalApplication
+        app.processingPush.onForeground()
+        app.updateCoordinator.setForeground(true)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        lifecycleScope.launch { (application as VocalApplication).updateInstaller.onForeground() }
+    }
+
+    override fun onStop() {
+        (application as VocalApplication).updateCoordinator.setForeground(false)
+        super.onStop()
     }
 
     companion object {

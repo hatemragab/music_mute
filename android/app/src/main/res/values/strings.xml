@@ -314,4 +314,25 @@
     <string name="account_recovery_refresh">Check request status</string>
     <string name="account_recovery_pending">Your high-priority recovery request is awaiting administrator review. This page checks for a decision automatically.</string>
     <string name="account_recovery_rejected">Your recovery request was not approved. The scheduled deletion remains in place.</string>
+    <string name="update_required_title">Update required</string>
+    <string name="update_available_title">Update available</string>
+    <string name="update_version_message">Installed: %1$s (%2$d)\nAvailable: %3$s (%4$d)</string>
+    <string name="update_loading_details">Retrieving the secure update details…</string>
+    <string name="update_now">Update now</string>
+    <string name="update_later">Later</string>
+    <string name="update_check_again">Check again</string>
+    <string name="update_downloading">Downloading… %1$d%%</string>
+    <string name="update_verifying">Verifying the signed update…</string>
+    <string name="update_permission_needed">Allow MusicMute to install this update, then return to the app.</string>
+    <string name="update_installer_waiting">Complete the Android installation to continue.</string>
+    <string name="update_store_opened">Complete the update in Google Play, then return to MusicMute.</string>
+    <string name="update_error_offline">You are offline. Connect to the internet and try again.</string>
+    <string name="update_error_rate_limited">Too many update checks. Wait a moment and try again.</string>
+    <string name="update_error_release_unavailable">This update is not available yet. Try again shortly.</string>
+    <string name="update_error_storage">Free some device storage, then try the update again.</string>
+    <string name="update_error_invalid_apk">The downloaded update could not be verified. It was not opened.</string>
+    <string name="update_error_installer_unavailable">Android could not open the update installer.</string>
+    <string name="update_error_install_cancelled">The update was not installed. Update the app to continue.</string>
+    <string name="update_error_play_unavailable">This update is not currently available in Google Play.</string>
+    <string name="update_error_service">The update service is temporarily unavailable. Try again.</string>
 </resources>

@@ -19,12 +19,14 @@ class AudioPipelineCoordinatorTest {
     private class Sources : PipelineSourceScheduler {
         val enqueued = mutableListOf<Triple<String, String, String>>()
         val cancelled = mutableListOf<String>()
+        val paused = mutableListOf<String>()
         var fail = false
         override suspend fun enqueue(ownerUid: String, operationId: String, url: String, epoch: Long) {
             if (fail) throw java.io.IOException("lost enqueue")
             enqueued += Triple(ownerUid, operationId, url)
         }
         override suspend fun cancel(ownerUid: String, operationId: String) { cancelled += operationId }
+        override suspend fun pause(ownerUid: String, operationId: String) { paused += operationId }
         override suspend fun cancelOwner(ownerUid: String) = Unit
     }
     private class Api : JobsApi {
@@ -131,6 +133,21 @@ class AudioPipelineCoordinatorTest {
         assertEquals(0, retried.transientRetryCount)
         assertEquals(listOf(id), fixture.sources.enqueued.map { it.second })
         assertTrue(fixture.uploads.enqueued.isEmpty())
+    }
+
+    @Test fun appUpdatePauseRetainsUrlIntentAndDoesNotTurnItIntoUserCancellation() = runTest {
+        val fixture = fixture()
+        val id = UUID.randomUUID().toString()
+        fixture.coordinator.acceptUrl(id, "https://youtu.be/abc12345678")
+
+        fixture.coordinator.pauseForUpdate()
+
+        val retained = fixture.store.get("owner", id)!!
+        assertEquals(listOf(id), fixture.sources.paused)
+        assertEquals(ProcessingPhase.SOURCE_QUEUED, retained.phase)
+        assertEquals(JobsProblem.APP_UPDATE_REQUIRED, retained.problem)
+        assertFalse(retained.cancellationRequested)
+        assertEquals("https://www.youtube.com/watch?v=abc12345678", retained.sourceUrl)
     }
 
     @Test fun reviewSurvivesResumeAndWorkerUntilExplicitRightsConfirmation() = runTest {

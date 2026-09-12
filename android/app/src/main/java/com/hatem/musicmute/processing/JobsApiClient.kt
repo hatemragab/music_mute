@@ -38,6 +38,7 @@ interface JobsApi {
 class JobsApiClient(
     private val auth: AuthApiClient,
     private val installationId: () -> String,
+    private val onUpdateRequired: () -> Unit = {},
 ) : JobsApi {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
@@ -172,6 +173,7 @@ class JobsApiClient(
             429 -> JobsProblem.RATE_LIMITED
             else -> JobsProblem.SERVICE_UNAVAILABLE
         }
+        if (problem == JobsProblem.APP_UPDATE_REQUIRED) onUpdateRequired()
         return JobsFailure(problem, if (response.status == 429) response.retryAfter?.toLongOrNull()?.takeIf { it in 1..86_400 } ?: 60 else null)
     }
 

@@ -314,4 +314,25 @@
     <string name="account_recovery_refresh">التحقق من حالة الطلب</string>
     <string name="account_recovery_pending">طلب الاسترداد عالي الأولوية بانتظار مراجعة المسؤول. تتحقق هذه الصفحة من القرار تلقائيًا.</string>
     <string name="account_recovery_rejected">لم تتم الموافقة على طلب الاسترداد. يبقى الحذف المجدول قائمًا.</string>
+    <string name="update_required_title">التحديث مطلوب</string>
+    <string name="update_available_title">يتوفر تحديث</string>
+    <string name="update_version_message">المثبت: %1$s (%2$d)\nالمتاح: %3$s (%4$d)</string>
+    <string name="update_loading_details">جارٍ جلب تفاصيل التحديث الآمن…</string>
+    <string name="update_now">التحديث الآن</string>
+    <string name="update_later">لاحقًا</string>
+    <string name="update_check_again">التحقق مجددًا</string>
+    <string name="update_downloading">جارٍ التنزيل… %1$d%%</string>
+    <string name="update_verifying">جارٍ التحقق من التحديث الموقّع…</string>
+    <string name="update_permission_needed">اسمح لـ MusicMute بتثبيت هذا التحديث ثم ارجع إلى التطبيق.</string>
+    <string name="update_installer_waiting">أكمل تثبيت Android للمتابعة.</string>
+    <string name="update_store_opened">أكمل التحديث في Google Play ثم ارجع إلى MusicMute.</string>
+    <string name="update_error_offline">أنت غير متصل بالإنترنت. اتصل ثم حاول مجددًا.</string>
+    <string name="update_error_rate_limited">تم إجراء محاولات كثيرة للتحقق. انتظر قليلًا ثم حاول مجددًا.</string>
+    <string name="update_error_release_unavailable">هذا التحديث غير متاح بعد. حاول مرة أخرى قريبًا.</string>
+    <string name="update_error_storage">وفّر مساحة تخزين على الجهاز، ثم حاول التحديث مجددًا.</string>
+    <string name="update_error_invalid_apk">تعذر التحقق من ملف التحديث المنزّل، لذلك لم يتم فتحه.</string>
+    <string name="update_error_installer_unavailable">تعذر على Android فتح مثبّت التحديث.</string>
+    <string name="update_error_install_cancelled">لم يتم تثبيت التحديث. حدّث التطبيق للمتابعة.</string>
+    <string name="update_error_play_unavailable">هذا التحديث غير متاح حاليًا في Google Play.</string>
+    <string name="update_error_service">خدمة التحديث غير متاحة مؤقتًا. حاول مجددًا.</string>
 </resources>
