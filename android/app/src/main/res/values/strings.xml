@@ -315,6 +315,8 @@
     <string name="account_recovery_refresh">Check request status</string>
     <string name="account_recovery_pending">Your high-priority recovery request is awaiting administrator review. This page checks for a decision automatically.</string>
     <string name="account_recovery_rejected">Your recovery request was not approved. The scheduled deletion remains in place.</string>
+    <string name="update_background_title">A new version is ready</string>
+    <string name="update_background_message">Update MusicMute to continue.</string>
     <string name="update_required_title">Update required</string>
     <string name="update_available_title">Update available</string>
     <string name="update_version_message">Installed: %1$s (%2$d)\nAvailable: %3$s (%4$d)</string>

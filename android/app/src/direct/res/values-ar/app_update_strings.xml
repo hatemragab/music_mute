@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_update_background_downloading">جارٍ تنزيل التحديث…</string>
+    <string name="app_update_click_hint">اضغط للتثبيت</string>
+    <string name="app_update_close">إغلاق</string>
+    <string name="app_update_continue_downloading">اضغط لإعادة محاولة التنزيل</string>
+    <string name="app_update_dialog_new">تحديث متاح: %1$s</string>
+    <string name="app_update_dialog_new_size">حجم التنزيل: %1$s</string>
+    <string name="app_update_download_completed">تم تنزيل التحديث</string>
+    <string name="app_update_download_error">تعذّر تنزيل التحديث</string>
+    <string name="app_update_latest_version">لديك أحدث إصدار</string>
+    <string name="app_update_start_download">تنزيل التحديث</string>
+    <string name="app_update_start_download_hint">يمكنك متابعة تقدّم التنزيل في التطبيق</string>
+    <string name="app_update_start_downloading">جارٍ تنزيل التحديث</string>
+    <string name="app_update_update">التحديث الآن</string>
+</resources>

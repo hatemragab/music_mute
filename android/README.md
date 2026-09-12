@@ -118,16 +118,25 @@ simulator or device for runtime proof.
 
 Android has separate `direct` and `play` distribution variants with the same
 production application ID and signing configuration. Version `0.1.3` is build 4.
-The direct variant uses the FileProvider and installer-intent integration from
-[azhon/AppUpdate 4.3.6](https://github.com/azhon/AppUpdate) (Apache-2.0). Its APK
-stream uses the platform HTTPS connection with the default certificate and host
-verification; the dependency's download manager is intentionally not used.
+The direct variant uses the built-in version dialog, download service, progress
+callbacks, FileProvider and installer-intent helper from
+[azhon/AppUpdate 4.3.6](https://github.com/azhon/AppUpdate) (Apache-2.0).
+`AppUpdateDownloadClient` supplies the backend version/changelog and required
+update decision. Its `AppUpdateHttpManager` adapter retains the bounded platform
+HTTPS stream with default certificate/host verification and rejects redirects;
+the library's default HTTP implementation is never selected. Verification runs
+off the main thread and must succeed before the library receives `Done`, because
+the library can expose a completed APK in a notification even when progress
+notifications are disabled. Automatic library installation is disabled.
 Before Android's installer is opened, MusicMute obtains a fresh public download
 grant and independently verifies the complete APK size and SHA-256, package ID,
 higher build number, and signing-certificate SHA-256. The
 `REQUEST_INSTALL_PACKAGES` permission and narrowly scoped azhon provider exist
-only in the direct variant; its unused service and dialog activity are removed
-from the merged manifest. The Play variant has no self-install permission or
+only in the direct variant; the service and dialog activity are non-exported.
+The Activity-bound adapter releases the library singleton/listeners when an
+attempt ends, and retries obtain a new grant. The Compose gate still blocks
+required updates and handles localized errors, permission recovery, and optional
+download progress after the library dismisses its dialog. The Play variant has no self-install permission or
 direct APK dependency; its current safe fallback opens the verified MusicMute
 Play listing.
 

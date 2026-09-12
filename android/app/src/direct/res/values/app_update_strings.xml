@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_update_background_downloading">Downloading the update…</string>
+    <string name="app_update_click_hint">Tap to install</string>
+    <string name="app_update_close">Close</string>
+    <string name="app_update_continue_downloading">Tap to retry the download</string>
+    <string name="app_update_dialog_new">Update available: %1$s</string>
+    <string name="app_update_dialog_new_size">Download size: %1$s</string>
+    <string name="app_update_download_completed">Update downloaded</string>
+    <string name="app_update_download_error">Update download failed</string>
+    <string name="app_update_latest_version">You have the latest version</string>
+    <string name="app_update_start_download">Download update</string>
+    <string name="app_update_start_download_hint">You can check download progress in the app</string>
+    <string name="app_update_start_downloading">Downloading the update</string>
+    <string name="app_update_update">Update now</string>
+</resources>

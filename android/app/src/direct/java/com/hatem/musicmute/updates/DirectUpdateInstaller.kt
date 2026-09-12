@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 sealed interface UpdateDownloadEvent {
     data class Progress(val bytes: Long, val totalBytes: Long) : UpdateDownloadEvent
@@ -32,6 +33,7 @@ sealed interface UpdateDownloadEvent {
 }
 
 interface UpdateDownloadClient {
+    fun prepare(target: ReleaseTarget, grant: ReleaseDownloadGrant) = Unit
     fun download(url: String, destination: File): Flow<UpdateDownloadEvent>
     fun cancel()
 }
@@ -69,10 +71,21 @@ class DirectUpdateInstaller(
 
     private var pending: PendingInstall? = null
     private var installerLaunched = false
+    private var starting = false
+
+    internal fun configurePrompt(activity: android.app.Activity, required: Boolean, onLater: () -> Unit) {
+        (downloader as? AppUpdateDownloadClient)?.configurePrompt(activity, required, onLater)
+    }
+
+    internal fun releasePrompt() {
+        if (starting) cancel()
+    }
 
     override suspend fun start(target: ReleaseTarget) = actionLock.withLock {
         val ticket = generation.incrementAndGet()
+        starting = true
         installerLaunched = false
+        mutableState.value = UpdateInstallState.Idle
         try {
             if (target.source == "google_play") {
                 pending = null
@@ -83,6 +96,7 @@ class DirectUpdateInstaller(
             if (target.source != "direct_apk" || artifact == null)
                 throw UpdateFailure(UpdateProblem.INVALID_POLICY)
             val grant = api.downloadGrant(target.id)
+            if (generation.get() != ticket) throw CancellationException("Update cancelled")
             validateDownloadGrant(grant)
             if (
                 grant.releaseId != target.id ||
@@ -120,6 +134,7 @@ class DirectUpdateInstaller(
             if (destination.exists() && !destination.delete())
                 throw UpdateFailure(UpdateProblem.DOWNLOAD_FAILED)
             var downloaded: File? = null
+            downloader.prepare(target, grant)
             downloader.download(grant.url, destination).collect { event ->
                 if (generation.get() != ticket) throw CancellationException("Update cancelled")
                 when (event) {
@@ -157,37 +172,45 @@ class DirectUpdateInstaller(
             mutableState.value = UpdateInstallState.Failed(error.problem)
         } catch (_: Exception) {
             mutableState.value = UpdateInstallState.Failed(UpdateProblem.DOWNLOAD_FAILED)
+        } finally {
+            starting = false
         }
     }
 
-    override suspend fun onForeground() = actionLock.withLock {
-        try {
-            val current = pending ?: return@withLock
-            if (installedBuild() >= current.target.buildNumber) {
-                pending = null
-                installerLaunched = false
-                mutableState.value = UpdateInstallState.Idle
-                return@withLock
-            }
-            if (installerLaunched) {
-                installerLaunched = false
-                mutableState.value = UpdateInstallState.Failed(UpdateProblem.INSTALL_CANCELLED)
-                return@withLock
-            }
-            if (mutableState.value == UpdateInstallState.PermissionNeeded) {
-                if (!platform.canRequestPackageInstalls()) {
-                    mutableState.value =
-                        UpdateInstallState.Failed(UpdateProblem.INSTALL_PERMISSION_REQUIRED)
+    override suspend fun onForeground() {
+        // Closing AppUpdate's optional prompt resumes the host while download is running.
+        // That resume must not queue behind start() and cancel a later installer handoff.
+        val observedPending = pending ?: return
+        actionLock.withLock {
+            if (pending !== observedPending) return@withLock
+            try {
+                val current = pending ?: return@withLock
+                if (installedBuild() >= current.target.buildNumber) {
+                    pending = null
+                    installerLaunched = false
+                    mutableState.value = UpdateInstallState.Idle
                     return@withLock
                 }
-                continueInstall(current.file, current.target, current.grant)
+                if (installerLaunched) {
+                    installerLaunched = false
+                    mutableState.value = UpdateInstallState.Failed(UpdateProblem.INSTALL_CANCELLED)
+                    return@withLock
+                }
+                if (mutableState.value == UpdateInstallState.PermissionNeeded) {
+                    if (!platform.canRequestPackageInstalls()) {
+                        mutableState.value =
+                            UpdateInstallState.Failed(UpdateProblem.INSTALL_PERMISSION_REQUIRED)
+                        return@withLock
+                    }
+                    continueInstall(current.file, current.target, current.grant)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: UpdateFailure) {
+                mutableState.value = UpdateInstallState.Failed(error.problem)
+            } catch (_: Exception) {
+                mutableState.value = UpdateInstallState.Failed(UpdateProblem.INSTALLER_UNAVAILABLE)
             }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: UpdateFailure) {
-            mutableState.value = UpdateInstallState.Failed(error.problem)
-        } catch (_: Exception) {
-            mutableState.value = UpdateInstallState.Failed(UpdateProblem.INSTALLER_UNAVAILABLE)
         }
     }
 
@@ -195,9 +218,11 @@ class DirectUpdateInstaller(
         apk: File,
         target: ReleaseTarget,
         grant: ReleaseDownloadGrant,
+        ticket: Long = generation.get(),
     ) {
         mutableState.value = UpdateInstallState.Verifying
         verifier.verify(apk, target, grant)
+        if (generation.get() != ticket) throw CancellationException("Update cancelled")
         if (!platform.canRequestPackageInstalls()) {
             mutableState.value = UpdateInstallState.PermissionNeeded
             requestInstallPermission()
@@ -332,7 +357,7 @@ private class AndroidApkVerifier(
     private val context: Context,
     private val installedBuild: () -> Int,
 ) : ApkVerifier {
-    override suspend fun verify(file: File, target: ReleaseTarget, grant: ReleaseDownloadGrant) {
+    override suspend fun verify(file: File, target: ReleaseTarget, grant: ReleaseDownloadGrant) = withContext(Dispatchers.IO) {
         verifyApkBytes(file, grant)
 
         val flags =
@@ -417,7 +442,7 @@ fun createUpdateInstaller(
     DirectUpdateInstaller(
         api = api,
         downloadRoot = File(context.externalCacheDir ?: context.cacheDir, "app-updates"),
-        downloader = createUpdateDownloadClient(),
+        downloader = AppUpdateDownloadClient(createUpdateDownloadClient(), AndroidApkVerifier(context, installedBuild)),
         verifier = AndroidApkVerifier(context, installedBuild),
         platform = AndroidApkInstallPlatform(context),
         installedBuild = installedBuild,
