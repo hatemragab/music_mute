@@ -17,6 +17,8 @@ import { AdminReleaseUploadsController } from './admin-release-uploads.controlle
 import { ReleasePublicationService } from './release-publication.service.js';
 import { ReleaseDownloadService } from './release-download.service.js';
 import { AdminUpdatePolicyController } from './admin-update-policy.controller.js';
+import { ReleaseUploadCleanupService } from './release-upload-cleanup.service.js';
+import { ReleaseUploadCleanupMaintenanceService } from './release-upload-cleanup-maintenance.service.js';
 @Module({
   imports: [
     AdminModule,
@@ -36,6 +38,8 @@ import { AdminUpdatePolicyController } from './admin-update-policy.controller.js
     ApkVerifierService,
     ReleasePublicationService,
     ReleaseDownloadService,
+    ReleaseUploadCleanupService,
+    ReleaseUploadCleanupMaintenanceService,
   ],
   controllers: [
     AdminReleasesController,

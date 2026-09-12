@@ -38,8 +38,9 @@ No hosting files, DNS, reverse proxy, Firebase project, S3 bucket, production da
 ## Private APK upload and verification (B12)
 
 The API reserves a private object key below `app-releases/` and an exact byte
-length and SHA-256 checksum. The presigned POST is valid for 15 minutes. Only the
-selected upload for a direct Android draft can be verified. Completion pins an
+length and SHA-256 checksum. The 15-minute HTTPS `PUT` grant signs the length,
+APK content type, checksum, and `If-None-Match: *`; it cannot overwrite the
+reserved key. Only the selected upload for a direct Android draft can be verified. Completion pins an
 S3 object version, downloads that exact version, verifies the file checksum and
 ZIP limits, then invokes the configured Android tools. No APK content executes.
 

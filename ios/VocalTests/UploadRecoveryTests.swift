@@ -197,7 +197,7 @@ import XCTest
     XCTAssertThrowsError(
       try S3MultipartFile.build(
         inputURL: input.fileURL, declaration: input.declaration,
-        grant: api.grant(), destination: destination, availableCapacity: { _ in 0 })
+        destination: destination, availableCapacity: { _ in 0 })
     ) { error in
       XCTAssertEqual(error as? ProcessingTransferFailure, .storage)
     }
@@ -245,24 +245,32 @@ import XCTest
     let stored = try await store.operation(id: input.operationId, ownerUid: input.ownerUid)
     return try XCTUnwrap(stored)
   }
-  func testMultipartPreservesFieldsFileLastAndRejectsChangedOrTruncatedBytes() throws {
+  func testWholeObjectUploadPreservesRawBytesAndSignedHeaders() throws {
     let prepared = try processingPrepared(root: staging)
     let grant = UploadGrant(
+      method: .put,
       url: URL(string: "https://storage.example")!,
-      fields: ["key": "private-key", "X-Amz-Signature": "a+b/="],
+      headers: [
+        "Content-Type": prepared.declaration.contentType,
+        "x-amz-checksum-sha256": prepared.declaration.sha256,
+        "If-None-Match": "*",
+      ],
       expiresAt: Date().addingTimeInterval(300))
     let body = try S3MultipartFile.build(
       inputURL: prepared.fileURL, declaration: prepared.declaration,
-      grant: grant, destination: root.appendingPathComponent("multipart"),
+      destination: root.appendingPathComponent("upload"),
       availableCapacity: { _ in 1_000_000 })
     let bytes = try Data(contentsOf: body.fileURL)
-    let text = String(decoding: bytes, as: UTF8.self)
-    XCTAssertTrue(text.contains("name=\"X-Amz-Signature\"\r\n\r\na+b/=\r\n"))
-    XCTAssertTrue(text.contains("name=\"file\"; filename=\"input.mp3\""))
-    XCTAssertLessThan(
-      text.range(of: "name=\"key\"")!.lowerBound, text.range(of: "name=\"file\"")!.lowerBound)
+    XCTAssertEqual(bytes, try Data(contentsOf: prepared.fileURL))
     XCTAssertEqual(Int64(bytes.count), body.bytes)
     let request = try BackgroundTransferCoordinator.uploadRequest(grant: grant, multipart: body)
+    XCTAssertEqual(request.httpMethod, "PUT")
+    XCTAssertEqual(
+      request.value(forHTTPHeaderField: "Content-Type"), prepared.declaration.contentType)
+    XCTAssertEqual(
+      request.value(forHTTPHeaderField: "x-amz-checksum-sha256"), prepared.declaration.sha256)
+    XCTAssertEqual(request.value(forHTTPHeaderField: "If-None-Match"), "*")
+    XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Length"), String(body.bytes))
     XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
     XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
     XCTAssertFalse(request.httpShouldHandleCookies)
@@ -272,7 +280,30 @@ import XCTest
     XCTAssertThrowsError(
       try S3MultipartFile.build(
         inputURL: prepared.fileURL, declaration: prepared.declaration,
-        grant: grant, destination: root.appendingPathComponent("changed")))
+        destination: root.appendingPathComponent("changed")))
+  }
+
+  func testWholeObjectUploadRejectsCaseInsensitiveDuplicateHeaders() throws {
+    let prepared = try processingPrepared(root: staging)
+    let body = try S3MultipartFile.build(
+      inputURL: prepared.fileURL, declaration: prepared.declaration,
+      destination: root.appendingPathComponent("duplicate-header-upload"),
+      availableCapacity: { _ in 1_000_000 })
+    let grant = UploadGrant(
+      method: .put,
+      url: URL(string: "https://storage.example")!,
+      headers: [
+        "Content-Type": prepared.declaration.contentType,
+        "content-type": prepared.declaration.contentType,
+        "If-None-Match": "*",
+      ],
+      expiresAt: Date().addingTimeInterval(300))
+
+    XCTAssertThrowsError(
+      try BackgroundTransferCoordinator.uploadRequest(grant: grant, multipart: body)
+    ) {
+      XCTAssertEqual($0 as? ProcessingTransferFailure, .invalidGrant)
+    }
   }
 }
 
@@ -287,7 +318,10 @@ import XCTest
   let id = "68c000000000000000000001"
   func grant(expired: Bool = false) -> UploadGrant {
     UploadGrant(
-      url: URL(string: "https://storage.example")!, fields: ["key": "exact-key"],
+      method: .put, url: URL(string: "https://storage.example")!,
+      headers: [
+        "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
+      ],
       expiresAt: Date().addingTimeInterval(expired ? -60 : 600))
   }
   func create(requestId: UUID, input: InputDeclaration) async throws -> CreateReservation {

@@ -88,13 +88,40 @@ struct TransferCompletion: Sendable {
 
   static func uploadRequest(grant: UploadGrant, multipart: S3MultipartFile) throws -> URLRequest {
     guard grant.url.scheme == "https", grant.url.host != nil,
-      grant.url.user == nil, grant.url.password == nil, grant.url.fragment == nil
+      grant.url.user == nil, grant.url.password == nil, grant.url.fragment == nil,
+      grant.method == .put,
+      grant.headers.count == 3,
+      grant.headers.keys.allSatisfy({
+        !$0.contains(where: {
+          guard let ascii = $0.asciiValue else { return false }
+          return ascii < 32 || ascii == 127
+        })
+      }),
+      grant.headers.values.allSatisfy({
+        !$0.contains(where: {
+          guard let ascii = $0.asciiValue else { return false }
+          return ascii < 32 || ascii == 127
+        })
+      })
+    else { throw ProcessingTransferFailure.invalidGrant }
+    var headers: [String: String] = [:]
+    for (name, value) in grant.headers {
+      guard headers.updateValue(value, forKey: name.lowercased()) == nil else {
+        throw ProcessingTransferFailure.invalidGrant
+      }
+    }
+    guard headers.count == 3,
+      headers["content-type"] == multipart.contentType,
+      headers["x-amz-checksum-sha256"] == multipart.checksumSha256,
+      headers["if-none-match"] == "*"
     else { throw ProcessingTransferFailure.invalidGrant }
     var request = URLRequest(
       url: grant.url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
-    request.httpMethod = "POST"
+    request.httpMethod = grant.method.rawValue
     request.httpShouldHandleCookies = false
-    request.setValue(multipart.contentType, forHTTPHeaderField: "Content-Type")
+    for (name, value) in grant.headers {
+      request.setValue(value, forHTTPHeaderField: name)
+    }
     request.setValue(String(multipart.bytes), forHTTPHeaderField: "Content-Length")
     return request
   }

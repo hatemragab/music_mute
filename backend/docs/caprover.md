@@ -102,6 +102,33 @@ untracked files are not included. Use the packaging command for a local upload.
 Native clients can leave `CORS_ORIGINS` empty. Browser clients need exact HTTPS
 origins. Never set production emulator variables.
 
+The S3 bucket needs a separate CORS rule for each deployed dashboard origin.
+Apply an operator-reviewed equivalent of this configuration, replacing the
+placeholder with the exact HTTPS origin:
+
+```json
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": ["https://<dashboard-host>"],
+      "AllowedMethods": ["PUT"],
+      "AllowedHeaders": [
+        "Content-Type",
+        "x-amz-checksum-sha256",
+        "If-None-Match"
+      ],
+      "MaxAgeSeconds": 300
+    }
+  ]
+}
+```
+
+Direct APK download grants are private, version-pinned and short-lived. A future
+CDN/private-origin migration, bucket-policy update, lifecycle edit, and credential
+rotation are operator-owned infrastructure work: validate them in an authorized
+sandbox and deployment change. Application builds and archive packaging do not
+apply any AWS, CDN, DNS, CapRover, Firebase or credential mutation.
+
 ## External Redis
 
 Redis is managed independently from this app and stores shared rate limits and

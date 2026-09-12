@@ -67,8 +67,13 @@ class FakeApi:
         if route == "output-url":
             return {
                 "upload": {
+                    "method": "PUT",
                     "url": "https://storage.example/output",
-                    "fields": {"key": "fixed"},
+                    "headers": {
+                        "Content-Type": "audio/mpeg",
+                        "x-amz-checksum-sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                        "If-None-Match": "*",
+                    },
                 }
             }
         return {

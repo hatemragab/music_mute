@@ -1,5 +1,4 @@
 import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
-import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -8,6 +7,7 @@ import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { StorageClient } from '../infrastructure/storage.module.js';
 import { StoragePreflightService } from '../storage/storage-preflight.service.js';
+import { createImmutableUploadGrant } from '../storage/immutable-upload-grant.js';
 import { ApkVerificationError } from './apk-verifier.service.js';
 
 interface Reservation {
@@ -18,12 +18,17 @@ interface Reservation {
 @Injectable()
 export class ReleaseArtifactStorageService {
   private readonly bucket: string;
+  private readonly downloadSeconds: number;
   constructor(
     private readonly storage: StorageClient,
     config: ConfigService,
     private readonly preflight: StoragePreflightService,
   ) {
     this.bucket = config.getOrThrow<string>('S3_BUCKET');
+    this.downloadSeconds = config.get<number>(
+      'APP_RELEASE_DOWNLOAD_SECONDS',
+      300,
+    );
   }
   async grant(reservation: Reservation, expiresAt: Date) {
     await this.preflight.assertReady();
@@ -34,27 +39,16 @@ export class ReleaseArtifactStorageService {
     const checksum = Buffer.from(reservation.expectedSha256, 'hex').toString(
       'base64',
     );
-    const fields = {
+    return createImmutableUploadGrant({
+      storage: this.storage,
+      bucket: this.bucket,
       key: reservation.key,
-      'Content-Type': 'application/vnd.android.package-archive',
-      'x-amz-checksum-algorithm': 'SHA256',
-      'x-amz-checksum-sha256': checksum,
-    };
-    const result = await createPresignedPost(this.storage, {
-      Bucket: this.bucket,
-      Key: reservation.key,
-      Expires: expires,
-      Fields: fields,
-      Conditions: [
-        ...Object.entries(fields).map(([key, value]) => ({ [key]: value })),
-        [
-          'content-length-range',
-          reservation.expectedBytes,
-          reservation.expectedBytes,
-        ],
-      ],
+      bytes: reservation.expectedBytes,
+      contentType: 'application/vnd.android.package-archive',
+      checksumSha256: checksum,
+      expiresIn: expires,
+      expiresAt,
     });
-    return { ...result, expiresAt: expiresAt.toISOString() };
   }
   async pin(reservation: Reservation, versionId?: string): Promise<string> {
     const latest =
@@ -143,8 +137,13 @@ export class ReleaseArtifactStorageService {
         ResponseCacheControl: 'no-store',
         ResponseContentType: 'application/vnd.android.package-archive',
       }),
-      { expiresIn: 3600 },
+      { expiresIn: this.downloadSeconds },
     );
-    return { url, expiresAt: new Date(Date.now() + 3600000).toISOString() };
+    return {
+      url,
+      expiresAt: new Date(
+        Date.now() + this.downloadSeconds * 1_000,
+      ).toISOString(),
+    };
   }
 }

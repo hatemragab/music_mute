@@ -28,9 +28,14 @@ export class ReleaseUpload {
   @Prop({ type: String, default: null }) completionOperationId!: string | null;
   @Prop({ type: Date, default: null }) verificationDeadline!: Date | null;
   @Prop({ type: Date, default: null }) checkedAt!: Date | null;
+  @Prop({ type: Date, default: null }) cleanupScheduledAt!: Date | null;
   @Prop({ type: String, enum: [...APK_REJECTION_CODES, null], default: null })
   code!: ApkRejectionCode | null;
 }
 export const ReleaseUploadSchema = SchemaFactory.createForClass(ReleaseUpload);
 ReleaseUploadSchema.index({ key: 1 }, { unique: true });
 ReleaseUploadSchema.index({ releaseId: 1 });
+ReleaseUploadSchema.index(
+  { cleanupScheduledAt: 1, artifactState: 1, expiresAt: 1 },
+  { name: 'release_upload_cleanup_due' },
+);

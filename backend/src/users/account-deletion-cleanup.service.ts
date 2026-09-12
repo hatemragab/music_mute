@@ -11,6 +11,7 @@ import { Job } from '../jobs/job.schema.js';
 import { UserIdentityFenceService } from './user-identity-fence.service.js';
 import { User } from './user.schema.js';
 import { accountRecoveryDeadline } from './account-recovery-policy.js';
+import { StorageCleanupService } from '../storage/storage-cleanup.service.js';
 
 const LEASE_MS = 60_000;
 const PAGE_SIZE = 20;
@@ -24,6 +25,7 @@ export class AccountDeletionCleanupService {
     @InjectConnection() private readonly connection: Connection,
     private readonly actions: JobActionsService,
     private readonly deletion: JobDeletionService,
+    private readonly storageCleanup: StorageCleanupService,
     @Inject(FIREBASE_AUTH) private readonly firebase: Auth,
     private readonly identities: UserIdentityFenceService,
   ) {}
@@ -210,6 +212,7 @@ export class AccountDeletionCleanupService {
         await renew();
         if (await this.purgeBatch(name, { userId: user._id })) return true;
       }
+      if (await this.storageCleanup.hasPendingForOwner(user._id)) return true;
       await renew();
       await this.providerCall(() => this.firebase.deleteUser(user.firebaseUid));
       await renew();

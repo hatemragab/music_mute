@@ -281,6 +281,7 @@
     <string name="audio_task_intake_description">الصق رابطًا مدعومًا أو استورد ملفًا صوتيًا. تبدأ المعالجة فورًا.</string>
     <string name="audio_task_duration">مدة الصوت: %1$s</string>
     <string name="processing_reason_invalid">الوسائط غير صالحة أو غير مدعومة أو لا يمكن قراءتها. اختر ملفًا صوتيًا آخر.</string>
+    <string name="processing_reason_upload_expired">انتهت مهلة الرفع قبل اكتماله. استورد الصوت مجددًا.</string>
     <string name="processing_reason_too_long">مدة الصوت تتجاوز الحد المسموح وهو ١٠ دقائق. اختر ملفًا أقصر.</string>
     <string name="processing_reason_checksum">الصوت المرفوع لا يطابق الملف الأصلي. استورده مجددًا.</string>
     <string name="processing_reason_download">تعذر تنزيل الصوت المصدر. تحقق من توفره وحاول مجددًا.</string>

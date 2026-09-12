@@ -118,9 +118,13 @@ data class Job(
 @Serializable data class JobPage(val items: List<Job>, val nextCursor: String? = null)
 
 @Serializable
+enum class UploadMethod { @SerialName("PUT") PUT }
+
+@Serializable
 data class UploadGrant(
+    val method: UploadMethod,
     val url: String,
-    val fields: Map<String, String>,
+    val headers: Map<String, String>,
     @Serializable(with = JobInstantSerializer::class) val expiresAt: Instant,
 )
 

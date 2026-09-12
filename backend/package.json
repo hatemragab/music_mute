@@ -20,7 +20,8 @@
     "start:dev": "APP_ENV=local NODE_ENV=development nest start --watch",
     "start:prod": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run test:e2e && npm run build",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test:secrets && npm test && npm run test:e2e && npm run build",
+    "test:secrets": "node --test scripts/check-tracked-secrets.test.mjs && node scripts/check-tracked-secrets.mjs",
     "test:integration": "npm run build && node --test test/infrastructure.integration.mjs",
     "test:dashboard:integration": "npm run build && node --test --test-concurrency=1 test/admin-*.integration.mjs test/apk-verifier.integration.mjs test/release-upload.integration.mjs test/dashboard-contract.integration.mjs",
     "test:dashboard:curl": "npm run build && node --test test/dashboard-curl.integration.mjs",
@@ -41,7 +42,6 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1127.0",
-    "@aws-sdk/s3-presigned-post": "3.1127.0",
     "@aws-sdk/s3-request-presigner": "3.1127.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "12.0.0",

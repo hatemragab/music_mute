@@ -684,8 +684,14 @@ export class DashboardFixture {
         body: {
           uploadId: FIXTURE_IDS.upload,
           grant: {
+            method: "PUT",
             url: "https://upload.fixture.invalid",
-            fields: { key: "fixture.apk" },
+            headers: {
+              "Content-Type": "application/vnd.android.package-archive",
+              "x-amz-checksum-sha256":
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "If-None-Match": "*",
+            },
             expiresAt: "2026-09-11T00:05:00.000Z",
           },
           expectedBytes: 1024,

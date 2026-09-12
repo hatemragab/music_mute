@@ -234,7 +234,10 @@
     }
     func renewUpload(id: String) async throws -> UploadGrant {
       UploadGrant(
-        url: URL(string: "https://fixture.invalid/upload")!, fields: ["key": "fixture"],
+        method: .put, url: URL(string: "https://fixture.invalid/upload")!,
+        headers: [
+          "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
+        ],
         expiresAt: Date().addingTimeInterval(60))
     }
     func confirmUpload(id: String) async throws -> JobMutation {

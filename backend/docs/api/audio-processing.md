@@ -7,8 +7,9 @@ processing routes return `503` while `AUDIO_PROCESSING_ENABLED` is false.
 The implemented [audio experience additions](audio-experience.md) cover optional
 source metadata, preserved/renamed names, request references, processing timing,
 terminal-job deletion, and authenticated mobile error reports. `/client-errors`
-remains available independently of processing enablement. Existing payloads and
-worker callbacks remain compatible; job projections have additive fields.
+remains available independently of processing enablement. Job projections have
+additive fields, but upload clients must migrate with the API because upload
+grants now use immutable, checksum-bound `PUT` requests instead of form posts.
 
 Requests and responses use JSON unless an S3 grant says otherwise. Unknown body
 fields are rejected. UUIDs are version 4 and are normalized to lowercase. Job
@@ -63,20 +64,20 @@ An upload grant has this shape:
 
 ```json
 {
-  "url": "https://private-bucket.example/",
-  "fields": {
-    "key": "server-owned-object-key",
+  "method": "PUT",
+  "url": "https://private-bucket.example/server-owned-object-key",
+  "headers": {
     "Content-Type": "audio/mpeg",
-    "x-amz-checksum-algorithm": "SHA256",
-    "x-amz-checksum-sha256": "base64-sha256"
+    "x-amz-checksum-sha256": "base64-sha256",
+    "If-None-Match": "*"
   },
   "expiresAt": "2026-09-09T12:15:00.000Z"
 }
 ```
 
-Submit a multipart form directly to `url`, preserving every returned field and
-adding the file. The signed policy fixes the exact byte count, content type,
-checksum, and server-owned key. A download grant contains only `url` and
+Submit the raw file with the returned method and headers directly to `url`.
+The signature fixes the exact byte count, content type, checksum, conditional
+create and server-owned key. A download grant contains only `url` and
 `expiresAt`. Grants are temporary and must not be stored as durable identifiers.
 
 ## User job routes

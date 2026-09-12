@@ -6,7 +6,6 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.security.MessageDigest
 import java.util.Base64
-import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
@@ -35,24 +34,30 @@ class S3FormUploader(
                             val uri = URI(grant.url)
                             if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.rawUserInfo != null || uri.rawFragment != null)
                                 throw IOException("Upload grant is invalid")
-                            val boundary = "vocal-${UUID.randomUUID()}"
-                            val parts = signedFormParts(grant.fields, input.extension, boundary)
                             if (!file.isFile || file.length() != input.bytes)
                                 throw ProcessingTransferException(ProcessingLocalProblem.INPUT_CHANGED)
+                            val expectedHeaders = setOf("content-type", "x-amz-checksum-sha256", "if-none-match")
+                            if (grant.method != UploadMethod.PUT ||
+                                grant.headers.keys.map(String::lowercase).toSet() != expectedHeaders ||
+                                grant.headers.entries.any { (name, value) -> name.any(Char::isISOControl) || value.any(Char::isISOControl) } ||
+                                grant.headers.entries.firstOrNull { it.key.equals("Content-Type", true) }?.value != input.contentType ||
+                                grant.headers.entries.firstOrNull { it.key.equals("x-amz-checksum-sha256", true) }?.value != input.sha256 ||
+                                grant.headers.entries.firstOrNull { it.key.equals("If-None-Match", true) }?.value != "*"
+                            ) throw IOException("Upload grant is invalid")
                             val client = connection(uri)
                             current.set(client)
                             if (!continuation.isActive) return@submit
-                            client.requestMethod = "POST"
+                            client.requestMethod = "PUT"
                             client.instanceFollowRedirects = false
                             client.connectTimeout = 15_000
                             client.readTimeout = 30_000
                             client.useCaches = false
                             client.doOutput = true
-                            client.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-                            client.setFixedLengthStreamingMode(parts.first.size.toLong() + input.bytes + parts.second.size)
+                            grant.headers.forEach(client::setRequestProperty)
+                            client.setRequestProperty("Content-Length", input.bytes.toString())
+                            client.setFixedLengthStreamingMode(input.bytes)
                             val digest = MessageDigest.getInstance("SHA-256")
                             client.outputStream.use { output ->
-                                output.write(parts.first)
                                 var sent = 0L
                                 file.inputStream().use { source ->
                                     val buffer = ByteArray(64 * 1024)
@@ -69,7 +74,6 @@ class S3FormUploader(
                                 }
                                 if (sent != input.bytes || Base64.getEncoder().encodeToString(digest.digest()) != input.sha256)
                                     throw ProcessingTransferException(ProcessingLocalProblem.INPUT_CHANGED)
-                                output.write(parts.second)
                             }
                             if (client.responseCode !in 200..299) throw IOException("Storage did not accept the upload")
                             if (continuation.isActive) continuation.resume(Unit)
@@ -95,22 +99,4 @@ class S3FormUploader(
     companion object {
         private val executor = Executors.newFixedThreadPool(2) { task -> Thread(task, "processing-upload").apply { isDaemon = true } }
     }
-}
-
-/** Signed values are emitted verbatim; the file is always the final form item. */
-internal fun signedFormParts(fields: Map<String, String>, extension: String, boundary: String): Pair<ByteArray, ByteArray> {
-    require(extension.matches(Regex("[a-z0-9]{1,8}")))
-    require(boundary.matches(Regex("[a-zA-Z0-9-]+")))
-    val prefix = buildString {
-        fields.forEach { (name, value) ->
-            require(name.isNotEmpty() && name.none { it.isISOControl() })
-            val escaped = name.replace("\\", "\\\\").replace("\"", "\\\"")
-            append("--$boundary\r\nContent-Disposition: form-data; name=\"$escaped\"\r\n\r\n")
-            append(value)
-            append("\r\n")
-        }
-        append("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"input.$extension\"\r\n")
-        append("Content-Type: application/octet-stream\r\n\r\n")
-    }.toByteArray(Charsets.UTF_8)
-    return prefix to "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
 }

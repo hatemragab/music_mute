@@ -113,9 +113,12 @@ struct JobPage: Codable, Equatable, Sendable {
   let nextCursor: String?
 }
 
+enum UploadMethod: String, Codable, Equatable, Sendable { case put = "PUT" }
+
 struct UploadGrant: Codable, Equatable, Sendable {
+  let method: UploadMethod
   let url: URL
-  let fields: [String: String]
+  let headers: [String: String]
   let expiresAt: Date
 }
 

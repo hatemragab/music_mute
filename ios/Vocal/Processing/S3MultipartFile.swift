@@ -8,6 +8,7 @@ enum ProcessingTransferFailure: Error, Equatable {
 struct S3MultipartFile: Sendable {
   let fileURL: URL
   let contentType: String
+  let checksumSha256: String
   let bytes: Int64
 
   func validate() throws {
@@ -19,37 +20,19 @@ struct S3MultipartFile: Sendable {
   }
 
   static func build(
-    inputURL: URL, declaration: InputDeclaration, grant: UploadGrant,
+    inputURL: URL, declaration: InputDeclaration,
     destination: URL,
     availableCapacity: (URL) throws -> Int64? = {
       try $0.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         .volumeAvailableCapacityForImportantUsage
     }
   ) throws -> S3MultipartFile {
-    let boundary = "Vocal-" + UUID().uuidString.lowercased()
     guard ["m4a", "mp4", "mp3", "aac", "ogg", "opus", "webm"].contains(declaration.extension),
       ["audio/mp4", "audio/mpeg", "audio/aac", "audio/ogg", "audio/webm"].contains(
         declaration.contentType),
       validProcessingInput(bytes: declaration.bytes, duration: declaration.durationSeconds)
     else { throw ProcessingTransferFailure.invalidInput }
-    var prefix = Data()
-    for (name, value) in grant.fields.sorted(by: { $0.key < $1.key }) {
-      guard !name.contains("\r"), !name.contains("\n"), name.lowercased() != "file" else {
-        throw ProcessingTransferFailure.invalidGrant
-      }
-      let quoted = name.replacingOccurrences(of: "\\", with: "\\\\")
-        .replacingOccurrences(of: "\"", with: "\\\"")
-      prefix.append(
-        Data(
-          "--\(boundary)\r\nContent-Disposition: form-data; name=\"\(quoted)\"\r\n\r\n\(value)\r\n"
-            .utf8))
-    }
-    prefix.append(
-      Data(
-        "--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"input.\(declaration.extension)\"\r\nContent-Type: \(declaration.contentType)\r\n\r\n"
-          .utf8))
-    let suffix = Data("\r\n--\(boundary)--\r\n".utf8)
-    let expectedBytes = Int64(prefix.count) + declaration.bytes + Int64(suffix.count)
+    let expectedBytes = declaration.bytes
     let directory = destination.deletingLastPathComponent()
     if let capacity = try availableCapacity(directory), capacity < expectedBytes {
       throw ProcessingTransferFailure.storage
@@ -72,7 +55,6 @@ struct S3MultipartFile: Sendable {
       try? output.close()
       try? input.close()
     }
-    try output.write(contentsOf: prefix)
     var copied: Int64 = 0
     var digest = SHA256()
     while true {
@@ -89,7 +71,6 @@ struct S3MultipartFile: Sendable {
     else {
       throw ProcessingTransferFailure.invalidInput
     }
-    try output.write(contentsOf: suffix)
     try output.synchronize()
     try output.close()
     try FileManager.default.moveItem(at: temporary, to: destination)
@@ -98,7 +79,8 @@ struct S3MultipartFile: Sendable {
     excluded.isExcludedFromBackup = true
     try url.setResourceValues(excluded)
     let result = S3MultipartFile(
-      fileURL: destination, contentType: "multipart/form-data; boundary=\(boundary)",
+      fileURL: destination, contentType: declaration.contentType,
+      checksumSha256: declaration.sha256,
       bytes: expectedBytes)
     try result.validate()
     return result

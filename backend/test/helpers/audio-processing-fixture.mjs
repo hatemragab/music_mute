@@ -36,6 +36,9 @@ const managedEnvironmentKeys = [
   'PROFILE_IP_PER_MINUTE',
   'DEVICE_UID_PER_MINUTE',
   'LOGOUT_UID_PER_HOUR',
+  'PROCESSING_CREATE_UID_PER_MINUTE',
+  'PROCESSING_GRANT_UID_PER_MINUTE',
+  'PROCESSING_MUTATION_UID_PER_MINUTE',
   'BODY_LIMIT_BYTES',
   'FIREBASE_SERVICE_ACCOUNT_BASE64',
   'GOOGLE_APPLICATION_CREDENTIALS',
@@ -113,11 +116,12 @@ function createFakeStorage(jobError) {
     return reservation;
   };
   const grantFor = (reservation) => ({
+    method: 'PUT',
     url: 'https://fixture.invalid/upload',
-    fields: {
-      key: reservation.key,
+    headers: {
       'Content-Type': reservation.contentType,
       'x-amz-checksum-sha256': reservation.sha256,
+      'If-None-Match': '*',
     },
     expiresAt: new Date(Date.now() + 900_000).toISOString(),
   });
@@ -240,6 +244,9 @@ export async function startAudioProcessingFixture(t) {
       PROFILE_IP_PER_MINUTE: 1_000,
       DEVICE_UID_PER_MINUTE: 1_000,
       LOGOUT_UID_PER_HOUR: 1_000,
+      PROCESSING_CREATE_UID_PER_MINUTE: 1_000,
+      PROCESSING_GRANT_UID_PER_MINUTE: 1_000,
+      PROCESSING_MUTATION_UID_PER_MINUTE: 1_000,
       BODY_LIMIT_BYTES: 65_536,
     };
     restoreEnvironment = installFixtureEnvironment(configuration);

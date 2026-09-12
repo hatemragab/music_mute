@@ -66,8 +66,9 @@ export interface WorkerEvent extends WorkerSelector {
   eventId: string;
 }
 export interface UploadGrant {
+  method: 'PUT';
   url: string;
-  fields: Record<string, string>;
+  headers: Record<string, string>;
   expiresAt: string;
 }
 export interface DownloadGrant {
@@ -76,6 +77,7 @@ export interface DownloadGrant {
 }
 
 export const JOB_FAILURE_CODES = [
+  'UPLOAD_EXPIRED',
   'INVALID_AUDIO',
   'INPUT_TOO_LONG',
   'INPUT_CHECKSUM_MISMATCH',
@@ -85,6 +87,16 @@ export const JOB_FAILURE_CODES = [
   'OUTPUT_UPLOAD_FAILED',
 ] as const;
 export type JobFailureCode = (typeof JOB_FAILURE_CODES)[number];
+export const WORKER_FAILURE_CODES = [
+  'INVALID_AUDIO',
+  'INPUT_TOO_LONG',
+  'INPUT_CHECKSUM_MISMATCH',
+  'SEPARATOR_FAILED',
+  'OUTPUT_INVALID',
+  'DOWNLOAD_FAILED',
+  'OUTPUT_UPLOAD_FAILED',
+] as const satisfies readonly JobFailureCode[];
+export type WorkerFailureCode = (typeof WORKER_FAILURE_CODES)[number];
 export interface SafeJobError {
   code: JobFailureCode;
   message: string;

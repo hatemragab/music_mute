@@ -9,8 +9,8 @@ import {
   Min,
 } from 'class-validator';
 import {
-  JOB_FAILURE_CODES,
-  type JobFailureCode,
+  WORKER_FAILURE_CODES,
+  type WorkerFailureCode,
 } from '../../jobs/job.types.js';
 import { WorkerSelectorDto } from './worker-request.dto.js';
 
@@ -25,7 +25,7 @@ export class WorkerStoppedDto extends WorkerEventDto {
   @Equals(true) stopped!: true;
 }
 export class WorkerFailDto extends WorkerStoppedDto {
-  @IsIn(JOB_FAILURE_CODES) code!: JobFailureCode;
+  @IsIn(WORKER_FAILURE_CODES) code!: WorkerFailureCode;
   @IsIn(['validating', 'processing', 'uploading_result']) stage!:
     'validating' | 'processing' | 'uploading_result';
   @IsOptional() @IsInt() @Min(-2147483648) @Max(4294967295) exitCode?: number;

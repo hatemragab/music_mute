@@ -29,7 +29,16 @@ class UploadRecoveryTest {
         var during: (String) -> Unit = {}
         var retried: suspend () -> Unit = {}
         val retryRequests = mutableListOf<String>()
-        private val grant = UploadGrant("https://storage.example/", mapOf("key" to "opaque"), Instant.parse("2026-09-10T12:00:00Z"))
+        private val grant = UploadGrant(
+            UploadMethod.PUT,
+            "https://storage.example/",
+            mapOf(
+                "Content-Type" to "audio/mpeg",
+                "x-amz-checksum-sha256" to "fixture",
+                "If-None-Match" to "*",
+            ),
+            Instant.parse("2026-09-10T12:00:00Z"),
+        )
         override suspend fun create(requestId: String, input: InputDeclaration): CreateReservation { requests += requestId; created(); during("create"); return CreateReservation(id,status,if(status == "awaiting_upload") grant else null) }
         override suspend fun renewUpload(id: String): UploadGrant { renewals++; during("renew"); return grant }
         override suspend fun confirmUpload(id: String): JobMutation { confirms++; during("confirm"); if (!exists) throw JobsFailure(JobsProblem.UPLOAD_NOT_READY); status = "queued"; return JobMutation(id,status) }

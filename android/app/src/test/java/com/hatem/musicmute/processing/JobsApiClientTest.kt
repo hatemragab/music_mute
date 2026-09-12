@@ -12,7 +12,7 @@ class JobsApiClientTest {
     private val requestId = "c21a2eaa-7e73-4f08-89da-6ac35baa83e1"
     private val input = InputDeclaration("mp3", "audio/mpeg", 42, 1.5, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
     private val grant = """{"url":"https://storage.example/file","expiresAt":"2026-09-09T12:15:00.000Z"}"""
-    private val upload get() = grant.dropLast(1) + """, "fields":{"key":"opaque","Content-Type":"audio/mpeg","x-amz-extra":"unchanged + / ="}}"""
+    private val upload get() = grant.dropLast(1) + """, "method":"PUT","headers":{"Content-Type":"audio/mpeg","x-amz-checksum-sha256":"${input.sha256}","If-None-Match":"*"}}"""
     private val mutation get() = """{"id":"$id","status":"queued"}"""
     private fun job(status: String) = """{"id":"$id","status":"$status","createdAt":"2026-09-09T12:00:00Z","updatedAt":"2026-09-09T12:01:00Z","input":{"extension":"mp3","bytes":42,"durationSeconds":1.5},"canDownloadInput":true,"canDownloadOutput":false}"""
     private fun client(
@@ -33,7 +33,7 @@ class JobsApiClientTest {
             requests += listOf(url, method, headers, body)
             AuthHttpResponse(200, replies.removeFirst())
         })
-        assertEquals("unchanged + / =", api.create(requestId, input).upload!!.fields["x-amz-extra"])
+        assertEquals("*", api.create(requestId, input).upload!!.headers["If-None-Match"])
         api.renewUpload(id); api.confirmUpload(id); api.list("a+/=? &", "queued")
         assertEquals(false, api.detail(id).workerAvailable)
         api.cancel(id); api.retry(id, requestId); api.download(id, "output")

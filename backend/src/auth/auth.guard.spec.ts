@@ -10,6 +10,7 @@ import type { RateLimitKeys } from '../rate-limits/rate-limit-keys.js';
 import {
   ACCOUNT_DELETION,
   ACCOUNT_RECOVERY,
+  AUTH_OPERATION,
   PUBLIC_ROUTE,
 } from './auth.decorators.js';
 import { WORKER_ONLY_ROUTE } from '../worker/worker-routes.js';
@@ -129,6 +130,24 @@ describe('private request trust order', () => {
     expect(f.firebase.verifySession).not.toHaveBeenCalled();
     expect(f.response.setHeader).toHaveBeenCalledWith('Retry-After', 12);
   });
+  it.each([
+    ['processing-create', 'processing-create-uid', 30],
+    ['processing-grant', 'processing-grant-uid', 60],
+    ['processing-mutation', 'processing-mutation-uid', 60],
+  ] as const)(
+    'applies the resettable %s burst budget',
+    async (operation, scope, limit) => {
+      const f = setup();
+      Reflect.defineMetadata(AUTH_OPERATION, operation, f.handler);
+
+      await f.guard.canActivate(f.context);
+
+      expect(f.budgets.reserve).toHaveBeenCalledWith([
+        expect.objectContaining({ key: 'private-uid:fixture-owner' }),
+        { key: `${scope}:fixture-owner`, limit, windowMs: 60_000 },
+      ]);
+    },
+  );
   it('rejects both old auth sessions at the cutoff and allows a later sign-in', async () => {
     const f = setup();
     f.users.findByFirebaseUid.mockResolvedValue({

@@ -5,7 +5,6 @@ import {
   HeadObjectCommand,
   type HeadObjectCommandOutput,
 } from '@aws-sdk/client-s3';
-import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -20,6 +19,7 @@ import type {
   UploadGrant,
 } from '../jobs/job.types.js';
 import { StoragePreflightService } from './storage-preflight.service.js';
+import { createImmutableUploadGrant } from './immutable-upload-grant.js';
 
 const REQUEST_TIMEOUT_MILLISECONDS = 5_000;
 const MISSING_OBJECT_NAMES = new Set([
@@ -76,6 +76,13 @@ export class StorageTransfersService {
 
   /** A bounded sweep of versions for one exact reservation key, never a prefix delete. */
   async deleteVersionsForKey(key: string): Promise<boolean> {
+    return (await this.sweepVersionsForKey(key)).complete;
+  }
+
+  /** Also reports whether anything was removed so durable cleanup can prove a final empty pass. */
+  async sweepVersionsForKey(
+    key: string,
+  ): Promise<{ complete: boolean; deleted: number }> {
     const page = await this.storage.send(
       new ListObjectVersionsCommand({
         Bucket: this.bucket,
@@ -104,10 +111,12 @@ export class StorageTransfersService {
     }
     // S3 orders by key: once the next page starts at a longer sibling key,
     // all versions of our exact key have been visited. Never delete siblings.
-    return (
-      !page.IsTruncated ||
-      (page.NextKeyMarker !== undefined && page.NextKeyMarker !== key)
-    );
+    return {
+      complete:
+        !page.IsTruncated ||
+        (page.NextKeyMarker !== undefined && page.NextKeyMarker !== key),
+      deleted: objects.length,
+    };
   }
 
   async verifyInput(job: TransferJob): Promise<ObjectIdentity> {
@@ -224,29 +233,16 @@ export class StorageTransfersService {
         )
       : this.grantSeconds;
     if (expiresIn < 1) throw jobError('UPLOAD_RESERVATION_EXPIRED');
-    const fields = {
+    return createImmutableUploadGrant({
+      storage: this.storage,
+      bucket: this.bucket,
       key: reservation.key,
-      'Content-Type': reservation.contentType,
-      'x-amz-checksum-algorithm': 'SHA256',
-      'x-amz-checksum-sha256': reservation.sha256,
-    };
-    const signed = await createPresignedPost(this.storage, {
-      Bucket: this.bucket,
-      Key: reservation.key,
-      Expires: expiresIn,
-      Fields: fields,
-      Conditions: [
-        { key: reservation.key },
-        { 'Content-Type': reservation.contentType },
-        { 'x-amz-checksum-algorithm': 'SHA256' },
-        { 'x-amz-checksum-sha256': reservation.sha256 },
-        ['content-length-range', reservation.bytes, reservation.bytes],
-      ],
+      bytes: reservation.bytes,
+      contentType: reservation.contentType,
+      checksumSha256: reservation.sha256,
+      expiresIn,
+      expiresAt: new Date(now + expiresIn * 1_000),
     });
-    return {
-      ...signed,
-      expiresAt: new Date(now + expiresIn * 1_000).toISOString(),
-    };
   }
 
   private async inspect(

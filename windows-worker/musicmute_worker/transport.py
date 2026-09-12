@@ -12,7 +12,6 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from uuid import uuid4
 
 from .config import https_url
 
@@ -203,42 +202,50 @@ class Transfers:
             raise TransferError("DOWNLOAD_FAILED", retryable=True) from None
 
     def upload(self, grant: dict, path: Path, check: Callable[[], None]) -> None:
-        boundary = "musicmute-" + uuid4().hex
-        fields = grant.get("fields")
-        if not isinstance(fields, dict) or not fields:
+        headers = grant.get("headers")
+        if grant.get("method") != "PUT" or not isinstance(headers, dict):
             raise TransferError("INVALID_TRANSFER_GRANT")
-        prefix = bytearray()
-        for name, value in fields.items():
+        normalized = {}
+        for name, value in headers.items():
             if (
                 not isinstance(name, str)
-                or not re.fullmatch(r"[A-Za-z0-9_.-]+", name)
+                or not re.fullmatch(r"[A-Za-z0-9-]+", name)
                 or not isinstance(value, str)
+                or any(ord(character) < 32 or ord(character) == 127 for character in value)
             ):
                 raise TransferError("INVALID_TRANSFER_GRANT")
-            prefix.extend(
-                f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+            normalized[name.lower()] = value
+        try:
+            checksum = base64.b64decode(
+                normalized.get("x-amz-checksum-sha256", ""), validate=True
             )
-        prefix.extend(
-            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="vocals.mp3"\r\nContent-Type: audio/mpeg\r\n\r\n'.encode()
-        )
-        suffix = f"\r\n--{boundary}--\r\n".encode()
+        except (ValueError, TypeError):
+            checksum = b""
+        if (
+            len(headers) != 3
+            or len(normalized) != 3
+            or normalized.get("content-type") != "audio/mpeg"
+            or normalized.get("if-none-match") != "*"
+            or len(checksum) != 32
+            or not path.is_file()
+        ):
+            raise TransferError("INVALID_TRANSFER_GRANT")
+        size = path.stat().st_size
 
         def chunks():
             check()
-            yield bytes(prefix)
             with path.open("rb") as source:
                 while block := source.read(65536):
                     check()
                     yield block
-            yield suffix
 
         request = urllib.request.Request(
             self._url(grant),
             data=chunks(),
-            method="POST",
+            method="PUT",
             headers={
-                "Content-Type": "multipart/form-data; boundary=" + boundary,
-                "Content-Length": str(len(prefix) + path.stat().st_size + len(suffix)),
+                **headers,
+                "Content-Length": str(size),
             },
         )
         try:
