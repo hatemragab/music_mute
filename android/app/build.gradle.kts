@@ -42,8 +42,8 @@ android {
         applicationId = "com.hatem.musicmute"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 7
+        versionName = "0.1.6"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
     }
 

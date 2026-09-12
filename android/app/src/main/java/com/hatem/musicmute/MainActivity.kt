@@ -159,6 +159,7 @@ class MainActivity : AppCompatActivity() {
                     install = updateInstallState,
                     currentVersion = BuildConfig.VERSION_NAME,
                     currentBuild = BuildConfig.VERSION_CODE,
+                    installer = app.updateInstaller,
                     onUpdate = {
                         val target = updateState.snapshot?.target ?: return@UpdateGate
                         updateScope.launch {

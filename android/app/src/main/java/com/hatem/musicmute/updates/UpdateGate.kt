@@ -51,6 +51,7 @@ fun UpdateGate(
     install: UpdateInstallState,
     currentVersion: String,
     currentBuild: Int,
+    installer: UpdateInstaller,
     onUpdate: () -> Unit,
     onLater: () -> Unit,
     onRetryPolicy: () -> Unit,
@@ -71,6 +72,7 @@ fun UpdateGate(
     if (!prompt.visible) return
 
     BackHandler(enabled = prompt.blocksContent) {}
+    if (platformUpdatePrompt(state, install, installer, onUpdate, onLater)) return
     val target = state.snapshot?.target
     val busy =
         install is UpdateInstallState.Downloading ||
