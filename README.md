@@ -1,10 +1,79 @@
 # MusicMute
 
-- [android/](android/README.md): native Kotlin Android application (`com.hatem.musicmute`).
-- [ios/](ios/README.md): native Swift/SwiftUI iOS application (`com.hatem.musicmute`).
-- [backend/](backend/README.md): authenticated NestJS API, durable audio-job coordination, private S3 storage, external worker protocol and notification outbox.
-- [dashboard/](dashboard/README.md): private browser operations console and its separate CapRover package.
-- [windows-worker/](windows-worker/README.md): Windows Z440 supervisor, using the proven DirectML separator, with setup scripts and a portable package.
+**Remove background music. Keep the voice.**
+
+MusicMute is an AI-powered audio source separation project with native Android
+and iOS apps. Import audio you have permission to process, submit it for vocal
+isolation, and play, download, or share the voice-only result.
+
+This repository contains the mobile apps, API, administrator dashboard, and
+Windows processing worker. Audio separation runs on an external worker; a mobile
+build alone does not provide offline music removal.
+
+[Getting started](#getting-started) · [Architecture](#architecture) ·
+[Documentation](#documentation) · [Contributing](CONTRIBUTING.md) ·
+[Report a bug](https://github.com/hatemragab/music_mute/issues/new?template=bug_report.md)
+
+## Features
+
+- **Native mobile apps:** Kotlin/Jetpack Compose on Android and Swift/SwiftUI on iOS.
+- **Vocal isolation:** worker-based audio processing with voice-only MP3 output.
+- **Processing library:** track cloud jobs and retrieve results on demand.
+- **Private transfers:** authenticated APIs and short-lived S3 upload/download grants.
+- **Job coordination:** durable processing state, cancellation, and recovery support.
+- **Operations console:** a React dashboard for authorized administrators.
+- **Account controls:** Firebase authentication and coordinated account deletion.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Apps[Android and iOS apps] --> API[NestJS API]
+    Dashboard[React admin dashboard] --> API
+    API --> Firebase[Firebase Authentication]
+    API --> MongoDB[(MongoDB)]
+    API --> Redis[(Redis)]
+    API --> S3[(Private S3 storage)]
+    Apps -->|Signed transfers| S3
+    Worker[Windows audio worker] -->|Claim jobs and report results| API
+    Worker -->|Download input and upload output| S3
+```
+
+| Component       | Technology                             | Setup and details                           |
+| --------------- | -------------------------------------- | ------------------------------------------- |
+| Android app     | Kotlin, Jetpack Compose                | [android/](android/README.md)               |
+| iOS app         | Swift, SwiftUI                         | [ios/](ios/README.md)                       |
+| API             | NestJS, TypeScript, MongoDB, Redis, S3 | [backend/](backend/README.md)               |
+| Admin dashboard | React, TypeScript, Vite, Tailwind CSS  | [dashboard/](dashboard/README.md)           |
+| Audio worker    | Windows, DirectML                      | [windows-worker/](windows-worker/README.md) |
+
+## Getting started
+
+```sh
+git clone https://github.com/hatemragab/music_mute.git
+cd music_mute
+```
+
+Choose the component you want to work on; there is no root-level install command.
+
+1. **API:** install Node.js 24 and npm 11, and provide independently running
+   MongoDB 8 and Redis 7.4 or later. Follow the [backend setup](backend/README.md)
+   to configure an ignored local environment file, then run `npm ci` and
+   `npm run start:dev` from `backend/`.
+2. **Dashboard:** follow the [dashboard setup](dashboard/README.md) for its API
+   origin and Firebase configuration. Administrator access requires backend
+   authorization.
+3. **Mobile apps:** use JDK 17 and Android SDK 36 for Android, or macOS and Xcode
+   for iOS. Configure Firebase and the API endpoint using the platform guides
+   before building.
+4. **Audio processing:** configure private S3 storage and the
+   [Windows worker](windows-worker/README.md) to run the complete processing flow.
+
+Start with the component guides for exact environment variables and verification
+commands. Local builds and fixture tests do not establish that production
+authentication, storage, notifications, or workers are configured.
+
+## Processing and account behavior
 
 Both apps make local audio import the primary flow. Selected audio is reviewed with
 an explicit rights confirmation before upload and processing. YouTube remains a
@@ -25,7 +94,17 @@ private downloads and settings are not migrated automatically.
 
 ## Administrator dashboard
 
-The [dashboard](dashboard/README.md) is a React + TypeScript + Vite web application with Tailwind CSS + shadcn/ui, React Router, TanStack Query and Firebase Web Authentication against the NestJS administration API. Its route-level pages, role boundaries, operational workflows, accessibility checks and compiled-backend browser contract are locally implemented and validated. The dashboard is deployed at [dashboard.music-mute.com](https://dashboard.music-mute.com) from its root-shaped CapRover archive and reads its public browser configuration from CapRover variables at container startup; `.env` files are excluded. Live availability and SPA routing are verified. Authenticated production workflows still require the dashboard domain in Firebase Authentication, the dashboard origin in the API CORS allowlist, and a production backend version that exposes the administration routes. See the [D01–D14 task package](docs/tasks/full-dashboard/dashboard/README.md) and [validation record](docs/validation/full-dashboard-local.md).
+The [dashboard](dashboard/README.md) uses React Router, TanStack Query,
+Tailwind CSS, shadcn/ui, and Firebase Web Authentication against the NestJS
+administration API. It is an operations console, not a public demo.
+
+Its CapRover package reads public browser configuration from environment variables
+at container startup and excludes `.env` files. Production setup requires the
+dashboard domain in Firebase Authentication, its origin in the API CORS allowlist,
+and an API version exposing the administration routes. See the
+[dashboard task package](docs/tasks/full-dashboard/dashboard/README.md) and
+[validation record](docs/validation/full-dashboard-local.md) for recorded evidence
+and remaining integration requirements.
 
 ## Firebase
 
@@ -84,4 +163,47 @@ cd android
 Open `ios/MusicMute.xcodeproj` in Xcode. See [iOS setup and test commands](ios/README.md)
 for the authorized iPhone 17 Pro simulator and the opt-in real download test.
 
-See the backend README for local environments, verification and VPS preparation.
+## Validate the API and dashboard
+
+From `backend/`, run `npm ci` followed by `npm run verify`. Infrastructure
+integration suites have additional requirements documented in the backend guide.
+
+From `dashboard/`, run `npm ci`, then:
+
+```sh
+npm run format:check
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+Browser and deployment checks are documented in the dashboard guide; browser
+integration tests also require local MongoDB, Redis, and Google Chrome.
+
+## Documentation
+
+| Guide                                                              | Contents                                                  |
+| ------------------------------------------------------------------ | --------------------------------------------------------- |
+| [Backend](backend/README.md)                                       | Local environments, API verification, and VPS preparation |
+| [Audio API](backend/docs/api/audio-processing.md)                  | Mobile and worker processing contracts                    |
+| [Audio operations](backend/docs/operations/audio-processing.md)    | Storage setup and worker handoff                          |
+| [Dashboard](dashboard/README.md)                                   | Administrator setup, checks, and packaging                |
+| [Account deletion](backend/docs/account-deletion.md)               | Identity and storage cleanup operations                   |
+| [Mobile processing tracker](docs/tasks/mobile-audio-processing.md) | Implementation status and validation boundaries           |
+| [Contributing](CONTRIBUTING.md)                                    | Change scope, local checks, and pull requests             |
+
+## Contributing and feedback
+
+Use [GitHub issues](https://github.com/hatemragab/music_mute/issues) for reproducible
+bugs and focused feature requests. Include the affected component and sanitized
+diagnostics. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+
+Process only audio you own or have permission to use. YouTube support is a
+secondary download flow and does not grant rights to download or process content.
+
+## License
+
+This repository does not currently include a root license file. The backend
+package is marked `UNLICENSED`; this README does not grant additional permissions.
+Third-party libraries and models retain their respective licenses.
