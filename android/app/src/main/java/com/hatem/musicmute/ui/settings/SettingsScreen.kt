@@ -88,7 +88,7 @@ private fun SettingsRow(icon: ImageVector, title: String, subtitle: String, onCl
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(18.dp))
+            Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(CreativeTokens.SmallIcon))
         }
     }
 }

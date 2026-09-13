@@ -17,7 +17,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.library.LibraryEntry
-import com.hatem.musicmute.library.LibraryKey
 import com.hatem.musicmute.playback.*
 import com.hatem.musicmute.ui.design.*
 import com.hatem.musicmute.ui.library.*
@@ -71,7 +70,7 @@ fun PlayerScreen(state: PlaybackState, entry: LibraryEntry?, actions: PlayerActi
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             IconButton(actions.previous, enabled = state.queue.isNotEmpty()) { Icon(Icons.Outlined.SkipPrevious, stringResource(R.string.creative_library_previous)) }
-            FilledIconButton(actions.toggle, Modifier.size(CreativeTokens.PlayerControl), enabled = !state.buffering) {
+            FilledIconButton(actions.toggle, Modifier.size(CreativeTokens.PlayerControl)) {
                 Icon(if (state.playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
                     stringResource(if (state.playing) R.string.creative_library_pause else R.string.creative_library_play),
                     Modifier.size(CreativeTokens.PlayerIcon))
@@ -116,7 +115,7 @@ fun MiniPlayer(state: PlaybackState, onOpen: () -> Unit, onToggle: () -> Unit, o
                 else LinearProgressIndicator(progress = { playbackProgress(state.positionMs, state.durationMs) }, modifier = Modifier.fillMaxWidth())
                 if (!state.failed) Text(audioTime(state.positionMs), style = MaterialTheme.typography.labelSmall)
             }
-            IconButton(onToggle, enabled = !state.buffering) { Icon(if (state.playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, stringResource(if (state.playing) R.string.creative_library_pause else R.string.creative_library_play)) }
+            IconButton(onToggle) { Icon(if (state.playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, stringResource(if (state.playing) R.string.creative_library_pause else R.string.creative_library_play)) }
             IconButton(onNext, enabled = state.queue.isNotEmpty()) { Icon(Icons.Outlined.SkipNext, stringResource(R.string.creative_library_next)) }
         }
     }

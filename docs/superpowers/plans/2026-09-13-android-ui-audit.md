@@ -14,49 +14,49 @@ Each entry includes all of its loading, empty, error, busy and navigation states
 Checked entries mean source review and applicable implementation are complete;
 they do not mean Android runtime verification.
 
-- [ ] Shared Creative page, sheet, card, buttons, fields, feedback, wave, navigation
-- [ ] Theme, accent contrast, typography, motion and reduced-motion behavior
-- [ ] MainActivity, system bars, Scaffold, bottom navigation and wide navigation rail
-- [ ] Authentication restoration and backend bootstrap
-- [ ] Login
-- [ ] Registration and password confirmation
-- [ ] Password reset and resend cooldown
-- [ ] Profile/account, offline status and public links
-- [ ] Email verification sheet and cooldown
-- [ ] Sign out everywhere sheet
-- [ ] Linked methods list
-- [ ] Add password and link Google reauthentication forms
-- [ ] Unlink method confirmation sheet
-- [ ] Registered devices, pagination and empty/error states
-- [ ] Account deletion review and reauthentication
-- [ ] Final account deletion dialog
-- [ ] Account recovery form, pending, rejected, expired and unknown decision
-- [ ] Home/import entry, task list, pagination and notification permission entry
-- [ ] YouTube link sheet, clipboard and invalid URL
-- [ ] YouTube rights confirmation
-- [ ] Import review, rights confirmation and submission failure
-- [ ] Source download/preparation detail and missing-source fallback
-- [ ] Processing detail: waiting, transfer, queue, validation, processing, result
-- [ ] Cancellation, retry, interruption, worker offline and unavailable result
-- [ ] Completed result: explicit play, download, save and share
-- [ ] Processing timeline and task cards
-- [ ] Legacy processing-history composable (not a current navigation destination)
-- [ ] Legacy download history destination and original-audio controls
-- [ ] Library, search, filters, sort, empty/error and download states
-- [ ] Library item action sheet, hide and restore
-- [ ] Track information, media and job tabs, missing/cached metadata
-- [ ] Rename sheet and validation
-- [ ] Delete audio sheet and busy/error states
-- [ ] Full player: empty, buffering, failure, playing, paused, seeking and queue modes
-- [ ] Mini-player
-- [ ] Playback queue sheet and empty/removal states
-- [ ] Settings, language persistence and preference failure
-- [ ] Accent presets, custom validation and preview
-- [ ] About and configured public links
-- [ ] Update restoration, required update, optional banner, download/verify/install failures
-- [ ] External document picker, export/share chooser, notification permission,
+- [x] Shared Creative page, sheet, card, buttons, fields, feedback, wave, navigation
+- [x] Theme, accent contrast, typography, motion and reduced-motion behavior
+- [x] MainActivity, system bars, Scaffold, bottom navigation and wide navigation rail
+- [x] Authentication restoration and backend bootstrap
+- [x] Login
+- [x] Registration and password confirmation
+- [x] Password reset and resend cooldown
+- [x] Profile/account, offline status and public links
+- [x] Email verification sheet and cooldown
+- [x] Sign out everywhere sheet
+- [x] Linked methods list
+- [x] Add password and link Google reauthentication forms
+- [x] Unlink method confirmation sheet
+- [x] Registered devices, pagination and empty/error states
+- [x] Account deletion review and reauthentication
+- [x] Final account deletion dialog
+- [x] Account recovery form, pending, rejected, expired and unknown decision
+- [x] Home/import entry, task list, pagination and notification permission entry
+- [x] YouTube link sheet, clipboard and invalid URL
+- [x] YouTube rights confirmation
+- [x] Import review, rights confirmation and submission failure
+- [x] Source download/preparation detail and missing-source fallback
+- [x] Processing detail: waiting, transfer, queue, validation, processing, result
+- [x] Cancellation, retry, interruption, worker offline and unavailable result
+- [x] Completed result: explicit play, download, save and share
+- [x] Processing timeline and task cards
+- [x] Legacy processing-history composable (not a current navigation destination)
+- [x] Legacy download history destination and original-audio controls
+- [x] Library, search, filters, sort, empty/error and download states
+- [x] Library item action sheet, hide and restore
+- [x] Track information, media and job tabs, missing/cached metadata
+- [x] Rename sheet and validation
+- [x] Delete audio sheet and busy/error states
+- [x] Full player: empty, buffering, failure, playing, paused, seeking and queue modes
+- [x] Mini-player
+- [x] Playback queue sheet and empty/removal states
+- [x] Settings, language persistence and preference failure
+- [x] Accent presets, custom validation and preview
+- [x] About and configured public links
+- [x] Update restoration, required update, optional banner, download/verify/install failures
+- [x] External document picker, export/share chooser, notification permission,
       Credential Manager and installer handoffs (owned by Android/provider UI)
-- [ ] Final app-wide comparison and clean build
+- [x] Final app-wide comparison and clean build
 
 No separate onboarding, paywall, subscription, Fragment or XML-layout screens were
 found. Login acts as the entry experience. The source scan includes the legacy
@@ -87,3 +87,8 @@ behavior require future authorized Android runtime validation.
 
 The app intentionally uses a dark theme regardless of system theme; this audit
 preserves that product decision. Light theme is not an existing supported mode.
+
+Final source review and implementation report: `docs/android-ui-ux-audit.md`.
+Clean Direct/Play Debug assembly, tests (226/206) and lint passed. Lint retained
+131/113 warnings and zero errors. Independent review findings were corrected and
+rechecked. Android runtime coverage remains unavailable as described above.

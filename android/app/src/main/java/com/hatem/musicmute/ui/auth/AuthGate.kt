@@ -40,7 +40,6 @@ fun AuthGate(
     val state by auth.state.collectAsStateWithLifecycle()
     // This scope survives transitions from login to bootstrap and into the app.
     val scope = rememberCoroutineScope()
-    var page by rememberSaveable(state.identity?.uid) { mutableStateOf(AccountPage.HOME) }
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner, auth) {
         val observer = LifecycleEventObserver { _, event ->
@@ -48,9 +47,6 @@ fun AuthGate(
         }
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer) }
-    }
-    LaunchedEffect(state.phase) {
-        if (state.phase != AuthPhase.AUTHENTICATED) page = AccountPage.HOME
     }
     Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
         when (state.phase) {
@@ -93,6 +89,9 @@ fun AuthGate(
                 AccountRecoveryScreen(auth = auth, state = state, scope = scope)
             AuthPhase.AUTHENTICATED ->
                 key(state.identity?.uid) {
+                    // Consume saved navigation only after the owner is restored. A transient
+                    // null identity during startup must not reset the saved destination.
+                    var page by rememberSaveable { mutableStateOf(AccountPage.HOME) }
                     val savedPages = rememberSaveableStateHolder()
                     BackHandler(enabled = page != AccountPage.HOME) {
                         if (!state.busy)
