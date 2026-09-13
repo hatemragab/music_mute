@@ -311,7 +311,7 @@ fun VocalApp(
         ) { padding ->
             Row(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
                 if (mainDestination && wide)
-                    NavigationRail {
+                    NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0)) {
                         Destination.entries.forEach { destination ->
                             NavigationRailItem(
                                 colors = NavigationRailItemDefaults.colors(

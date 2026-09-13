@@ -16,6 +16,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.ui.design.*
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 
 @Composable
 internal fun AccountHeader(title: String, onBack: () -> Unit, enabled: Boolean = true) {
@@ -23,7 +25,7 @@ internal fun AccountHeader(title: String, onBack: () -> Unit, enabled: Boolean =
         IconButton(onBack, enabled = enabled) {
             Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back))
         }
-        Text(title, style = MaterialTheme.typography.titleLarge)
+        Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
     }
     CreativeWave(Modifier.fillMaxWidth().height(64.dp))
 }
@@ -33,7 +35,8 @@ internal fun AccountActionRow(
     title: String, icon: ImageVector, modifier: Modifier = Modifier,
     enabled: Boolean = true, destructive: Boolean = false, onClick: () -> Unit,
 ) {
-    val color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+    val color = (if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+        .copy(alpha = if (enabled) 1f else CreativeTokens.DisabledAlpha)
     Row(modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = enabled, onClick = onClick)
         .padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)) {

@@ -24,7 +24,7 @@ fun ImportReviewSheet(
 ) {
     // Consent is deliberately not restored after process recreation.
     var rights by remember(title) { mutableStateOf(false) }
-    CreativeSheet(onDismiss = { if (!busy) onDismiss() }) {
+    CreativeSheet(onDismiss, dismissible = !busy) {
         CreativeHeader(stringResource(R.string.audio_review_title))
         Text(title, style = MaterialTheme.typography.titleLarge)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(CreativeTokens.ContentGap)) {

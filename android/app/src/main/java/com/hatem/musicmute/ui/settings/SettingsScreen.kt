@@ -60,12 +60,14 @@ fun CreativeSettingsScreen(
                         ), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        RadioButton(selected = state.preferences.language == choice, onClick = null)
+                        RadioButton(selected = state.preferences.language == choice, onClick = null,
+                            enabled = !state.preferencesLoading && !state.preferencesError)
                         Text(stringResource(when (choice) {
                             LanguageChoice.SYSTEM -> R.string.system_default
                             LanguageChoice.ENGLISH -> R.string.english
                             LanguageChoice.ARABIC -> R.string.arabic
-                        }))
+                        }), Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface.copy(
+                            alpha = if (state.preferencesLoading || state.preferencesError) CreativeTokens.DisabledAlpha else 1f))
                     }
                 }
             }

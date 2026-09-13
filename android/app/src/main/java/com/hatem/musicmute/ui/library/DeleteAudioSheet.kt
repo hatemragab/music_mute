@@ -10,7 +10,7 @@ import com.hatem.musicmute.ui.design.*
 
 @Composable
 fun DeleteAudioSheet(title: String, busy: Boolean, onDismiss: () -> Unit, onDelete: () -> Unit, message: String? = null) {
-    CreativeSheet(onDismiss = { if (!busy) onDismiss() }) {
+    CreativeSheet(onDismiss, dismissible = !busy) {
         Text(stringResource(R.string.creative_library_delete_title), style = MaterialTheme.typography.headlineSmall)
         Text(title, style = MaterialTheme.typography.titleMedium)
         Text(stringResource(R.string.creative_library_delete_body), color = MaterialTheme.colorScheme.onSurfaceVariant)

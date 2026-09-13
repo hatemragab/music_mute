@@ -20,7 +20,7 @@ fun YoutubeLinkSheet(
     onContinue: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    CreativeSheet(onDismiss = { if (!busy) onDismiss() }) {
+    CreativeSheet(onDismiss, dismissible = !busy) {
         CreativeHeader(stringResource(R.string.creative_jobs_bring_audio), stringResource(R.string.creative_jobs_youtube_subtitle))
         CreativeTextField(url, onUrl, stringResource(R.string.link_label), enabled = !busy,
             error = if (invalidUrl) stringResource(R.string.invalid_url) else null,

@@ -40,8 +40,10 @@ fun AccentPickerScreen(initialAccent: Int, onBack: () -> Unit, onApply: (Int) ->
         CreativeHeader(stringResource(R.string.creative_settings_accent), stringResource(R.string.creative_settings_accent_description))
         CreativeCard {
             Text(stringResource(R.string.creative_settings_presets), style = MaterialTheme.typography.titleMedium)
-            Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                presets.chunked(3).forEach { row ->
+            BoxWithConstraints {
+            val columns = if (maxWidth < 280.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale >= 1.3f) 2 else 3
+            Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(CreativeTokens.ContentGap)) {
+                presets.chunked(columns).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         row.forEach { (value, label) ->
                             Column(
@@ -61,6 +63,7 @@ fun AccentPickerScreen(initialAccent: Int, onBack: () -> Unit, onApply: (Int) ->
                     }
                 }
             }
+            }
         }
         CreativeCard {
             Text(stringResource(R.string.creative_settings_custom), style = MaterialTheme.typography.titleMedium)
@@ -71,13 +74,18 @@ fun AccentPickerScreen(initialAccent: Int, onBack: () -> Unit, onApply: (Int) ->
             CreativeCard {
                 Text(stringResource(R.string.creative_settings_preview), style = MaterialTheme.typography.titleMedium)
                 CreativeWave(Modifier.fillMaxWidth())
-                CreativePrimaryButton({}, Modifier.fillMaxWidth()) { Text(stringResource(R.string.creative_settings_preview_action)) }
+                Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
+                    Text(stringResource(R.string.creative_settings_preview_action),
+                        Modifier.padding(CreativeTokens.ContentGap), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        style = MaterialTheme.typography.labelLarge)
+                }
             }
         }
         CreativePrimaryButton(onClick = { parsed?.let(onApply) }, enabled = parsed != null, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.creative_settings_apply))
         }
-        TextButton(onClick = { hex = "#FF814A" }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+        TextButton(onClick = { hex = String.format(Locale.ROOT, "#%06X", AccentPalette.DEFAULT and 0xFFFFFF) }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
             Text(stringResource(R.string.creative_settings_reset))
         }
     }

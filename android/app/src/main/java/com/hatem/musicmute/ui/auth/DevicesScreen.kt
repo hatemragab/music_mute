@@ -40,7 +40,7 @@ internal fun DevicesScreen(
         group.forEachIndexed { index, device ->
             if (index > 0) HorizontalDivider()
             Box(Modifier.fillMaxWidth().testTag("auth-device-${device.installationId}")) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
                     Text(
                         device.deviceModel ?: if (device.platform == "ios") "iOS" else "Android",
                         style = MaterialTheme.typography.titleMedium,

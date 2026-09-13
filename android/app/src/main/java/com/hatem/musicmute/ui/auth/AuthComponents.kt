@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
 import com.hatem.musicmute.ui.design.*
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 
 @Composable
 internal fun AuthPage(content: @Composable ColumnScope.() -> Unit) {
@@ -54,7 +56,7 @@ internal fun PasswordField(
         visualTransformation =
             if (visible) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = {
-            IconButton(onClick = { visible = !visible }) {
+            IconButton(onClick = { visible = !visible }, enabled = enabled) {
                 Icon(
                     if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
                     stringResource(
@@ -73,7 +75,7 @@ internal fun AuthMessages(state: AuthUiState, dismiss: () -> Unit) {
         Card(
             colors =
                 CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-            modifier = Modifier.fillMaxWidth().testTag("auth-error"),
+            modifier = Modifier.fillMaxWidth().testTag("auth-error").semantics { liveRegion = LiveRegionMode.Polite },
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -90,7 +92,7 @@ internal fun AuthMessages(state: AuthUiState, dismiss: () -> Unit) {
                 CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                 ),
-            modifier = Modifier.fillMaxWidth().testTag("auth-notice"),
+            modifier = Modifier.fillMaxWidth().testTag("auth-notice").semantics { liveRegion = LiveRegionMode.Polite },
         ) {
             Text(
                 stringResource(

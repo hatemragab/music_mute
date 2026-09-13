@@ -12,7 +12,7 @@ import com.hatem.musicmute.ui.design.*
 @Composable
 fun YoutubeConfirmationSheet(url: String, busy: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     var rights by remember(url) { mutableStateOf(false) }
-    CreativeSheet(onDismiss = { if (!busy) onDismiss() }) {
+    CreativeSheet(onDismiss, dismissible = !busy) {
         CreativeHeader(stringResource(R.string.youtube_download_action))
         Text(url, style = MaterialTheme.typography.bodySmall)
         Text(stringResource(R.string.youtube_rights_disclosure))
