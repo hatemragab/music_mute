@@ -38,9 +38,9 @@ fun HomeScreen(
 ) {
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         LazyColumn(
-            Modifier.weight(1f).widthIn(max = 680.dp).fillMaxWidth(),
-            contentPadding = PaddingValues(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier.weight(1f).widthIn(max = CreativeTokens.ContentWidth).fillMaxWidth(),
+            contentPadding = PaddingValues(CreativeTokens.PagePadding),
+            verticalArrangement = Arrangement.spacedBy(CreativeTokens.ContentGap),
         ) {
             item {
                 CreativeHeader(stringResource(R.string.app_name))
@@ -70,11 +70,11 @@ fun HomeScreen(
                     Text(stringResource(R.string.creative_jobs_heading), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                     TextButton(onClick = onRefresh, enabled = !history.loading) { Text(stringResource(R.string.processing_refresh)) }
                 }
-                if (history.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (history.loading || busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (busy) CreativeFeedback(stringResource(R.string.processing_preparing))
                 message?.let { CreativeFeedback(it) }
             }
-            if (tasks.isEmpty() && !history.loading) item {
+            if (tasks.isEmpty() && !history.loading && history.failure == null && !busy) item {
                 CreativeCard { CreativeFeedback(stringResource(R.string.creative_jobs_empty)) }
             }
             items(tasks, key = { it.operationId ?: requireNotNull(it.jobId) }) { task ->
@@ -95,6 +95,8 @@ fun HomeScreen(
                     Text(stringResource(R.string.creative_jobs_load_more))
                 }
                 TextButton(onNotifications) { Text(stringResource(R.string.processing_notifications)) }
+                Text(stringResource(R.string.processing_notifications_optional),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         miniPlayer()

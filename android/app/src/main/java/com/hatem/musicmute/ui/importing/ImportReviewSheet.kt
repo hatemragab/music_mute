@@ -27,18 +27,15 @@ fun ImportReviewSheet(
     CreativeSheet(onDismiss = { if (!busy) onDismiss() }) {
         CreativeHeader(stringResource(R.string.audio_review_title))
         Text(title, style = MaterialTheme.typography.titleLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(CreativeTokens.ContentGap)) {
             durationMs?.let { Text(formatElapsed(it)) }
             bytes?.let { Text(Formatter.formatShortFileSize(LocalContext.current, it)) }
         }
         HorizontalDivider()
         Text(stringResource(R.string.audio_cloud_disclosure))
-        Row {
-            Checkbox(rights, { rights = it }, enabled = !busy)
-            Text(stringResource(R.string.audio_rights_confirmation), Modifier.padding(top = 12.dp))
-        }
+        CreativeConsentRow(rights, { rights = it }, stringResource(R.string.audio_rights_confirmation), enabled = !busy)
         error?.let { CreativeFeedback(it, error = true) }
-        CreativePrimaryButton(onConfirm, Modifier.fillMaxWidth(), enabled = rights && error == null, busy = busy) {
+        CreativePrimaryButton(onConfirm, Modifier.fillMaxWidth(), enabled = rights, busy = busy) {
             Text(stringResource(R.string.audio_remove_music))
         }
         OutlinedButton(onDismiss, Modifier.fillMaxWidth(), enabled = !busy) { Text(stringResource(R.string.auth_cancel)) }

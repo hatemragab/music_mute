@@ -8,6 +8,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -46,9 +47,9 @@ fun ProcessingDetailScreen(
     availableOffline: Boolean = false,
 ) {
     val context = LocalContext.current
-    var renaming by remember(task?.jobId, task?.operationId) { mutableStateOf(false) }
-    var deleting by remember(task?.jobId, task?.operationId) { mutableStateOf(false) }
-    var renameFrom by remember { mutableStateOf<String?>(null) }
+    var renaming by rememberSaveable(task?.jobId, task?.operationId) { mutableStateOf(false) }
+    var deleting by rememberSaveable(task?.jobId, task?.operationId) { mutableStateOf(false) }
+    var renameFrom by rememberSaveable(task?.jobId, task?.operationId) { mutableStateOf<String?>(null) }
     LaunchedEffect(task?.displayName) {
         if (renameFrom != null && task?.displayName != renameFrom) {
             renaming = false
@@ -60,7 +61,6 @@ fun ProcessingDetailScreen(
         TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
         CreativeHeader(stringResource(if (task?.stage == com.hatem.musicmute.processing.AudioTaskStage.READY) R.string.creative_jobs_result else R.string.processing_details))
         if (task != null) {
-            if (ready) CreativeCard { AudioStepTimeline(task) }
             CreativeCard {
             Text(task.displayName, style = MaterialTheme.typography.titleLarge)
             task.audioDurationMs?.let {
@@ -87,7 +87,7 @@ fun ProcessingDetailScreen(
                 Text(stringResource(R.string.audio_task_processing_time, formatElapsed(it)) +
                     if (task.processingElapsedApproximate) " · ${stringResource(R.string.audio_task_approximate)}" else "")
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
                 TextButton(onClick = { renaming = true }, enabled = !busy) {
                     Text(stringResource(R.string.audio_task_rename))
                 }
@@ -107,8 +107,9 @@ fun ProcessingDetailScreen(
             }
         }
         val job = state.detail
-        if (state.failure != null) Text(stringResource(processingFailureLabel(state.failure)), color = MaterialTheme.colorScheme.error)
-        if (message != null) Text(stringResource(message))
+        if (state.failure != null) CreativeFeedback(stringResource(processingFailureLabel(state.failure)), error = true)
+        if (message != null) CreativeFeedback(stringResource(message))
+        if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (job != null) {
             if (job.workerAvailable == false && job.status !in setOf("ready", "failed", "cancelled")) Text(stringResource(R.string.processing_worker_offline))
             if (job.status == "cancel_requested") Text(stringResource(R.string.processing_cancel_pending))
@@ -118,17 +119,20 @@ fun ProcessingDetailScreen(
             }
             if (job.status in setOf("awaiting_upload", "queued", "validating", "processing", "uploading_result", "interrupted"))
                 OutlinedButton(onClick = onCancel, enabled = !busy) { Text(stringResource(R.string.auth_cancel)) }
-            if (job.status == "failed") Button(onClick = onRetry, enabled = !busy) { Text(stringResource(R.string.retry)) }
+            if (job.status == "failed") CreativePrimaryButton(onClick = onRetry, busy = busy) { Text(stringResource(R.string.retry)) }
             if (job.status == "ready" && (job.canDownloadOutput || availableOffline)) {
                 CompletedResultScreen(availableOffline, busy, onPlay, onDownload, onSave, onShare)
             }
             if (job.status == "ready" && !job.canDownloadOutput && !availableOffline) CreativeFeedback(stringResource(R.string.creative_jobs_wait_output))
-        } else if (task == null && state.failure == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+        } else if (task == null && state.failure == null && !state.loading) {
+            CreativeFeedback(stringResource(R.string.creative_jobs_details_unavailable))
+        }
         else if (task != null) {
             if (task.canCancel && task.stage != AudioTaskStage.CANCELLING) OutlinedButton(onCancel, enabled = !busy) { Text(stringResource(R.string.auth_cancel)) }
             if (task.canRetry) CreativePrimaryButton(onRetry, busy = busy) { Text(stringResource(R.string.retry)) }
             if (ready && (task.canPlay || availableOffline)) CompletedResultScreen(availableOffline, busy, onPlay, onDownload, onSave, onShare)
         }
+        if (ready && task != null) CreativeCard { AudioStepTimeline(task) }
         TextButton(onClick = onRefresh, enabled = !state.loading) { Text(stringResource(R.string.processing_refresh)) }
     }
     if (renaming) RenameAudioSheet(task?.displayName.orEmpty(), busy, { renaming = false }, {

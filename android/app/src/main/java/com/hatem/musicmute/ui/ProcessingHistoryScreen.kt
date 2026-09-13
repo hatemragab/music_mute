@@ -12,6 +12,8 @@ import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.processing.AudioTaskPresentation
 import com.hatem.musicmute.processing.JobHistoryState
+import com.hatem.musicmute.ui.design.*
+import androidx.compose.ui.Alignment
 
 @Composable
 fun ProcessingHistoryScreen(
@@ -28,16 +30,17 @@ fun ProcessingHistoryScreen(
     onDelete: (AudioTaskPresentation) -> Unit,
     onNotifications: () -> Unit,
 ) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
     LazyColumn(
-        Modifier.fillMaxSize().testTag("processing-history"),
-        contentPadding = PaddingValues(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        Modifier.widthIn(max = CreativeTokens.ContentWidth).fillMaxSize().testTag("processing-history"),
+        contentPadding = PaddingValues(CreativeTokens.PagePadding),
+        verticalArrangement = Arrangement.spacedBy(CreativeTokens.ContentGap),
     ) {
         item {
             Text(stringResource(R.string.audio_task_processed_library), style = MaterialTheme.typography.headlineLarge)
             Text(stringResource(R.string.audio_task_intake_description))
             Text(stringResource(R.string.processing_limits), style = MaterialTheme.typography.bodySmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
                 Button(onClick = onImport, enabled = !preparing, modifier = Modifier.testTag("processing-import")) {
                     Text(stringResource(R.string.processing_import))
                 }
@@ -57,14 +60,15 @@ fun ProcessingHistoryScreen(
             Text(stringResource(processingFailureLabel(state.failure)), color = MaterialTheme.colorScheme.error)
         }
         if (state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        if (!state.loading && tasks.isEmpty()) item { Text(stringResource(R.string.processing_empty)) }
+        if (!state.loading && !preparing && state.failure == null && tasks.isEmpty()) item { Text(stringResource(R.string.processing_empty)) }
         items(tasks, key = { it.operationId ?: it.jobId.orEmpty() }) { task ->
             AudioTaskCard(task, { onOpen(task) }, { onCancel(task) }, { onRetry(task) }, { onDelete(task) })
         }
         if (state.nextCursor != null) item {
-            TextButton(onClick = onMore, enabled = !state.loadingMore) {
+            TextButton(onClick = onMore, enabled = !state.loadingMore && !state.loading) {
                 Text(stringResource(R.string.processing_more))
             }
         }
+    }
     }
 }

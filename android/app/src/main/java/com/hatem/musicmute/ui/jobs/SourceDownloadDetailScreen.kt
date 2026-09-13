@@ -19,6 +19,8 @@ import com.hatem.musicmute.processing.AudioTaskStage
 import com.hatem.musicmute.processing.SourceKind
 import com.hatem.musicmute.ui.*
 import com.hatem.musicmute.ui.design.*
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 
 @Composable
 fun SourceDownloadDetailScreen(
@@ -59,7 +61,10 @@ fun SourceDownloadDetailScreen(
             }
             val rank = if (task.stage == AudioTaskStage.RESERVING_JOB) labels.size else labels.indexOf(currentStep)
             labels.forEachIndexed { index, label ->
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                val status = stringResource(if (index < rank) R.string.ui_step_complete
+                    else if (index == rank) R.string.ui_step_current else R.string.ui_step_pending)
+                Row(Modifier.semantics(mergeDescendants = true) { stateDescription = status },
+                    horizontalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap), verticalAlignment = Alignment.CenterVertically) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(if (index < rank) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
                             null, tint = if (index <= rank) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
