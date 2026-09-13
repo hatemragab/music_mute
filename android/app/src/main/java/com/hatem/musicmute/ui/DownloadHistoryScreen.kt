@@ -25,7 +25,10 @@ import com.hatem.musicmute.state.DownloadsUiState
 import java.util.Date
 import java.util.Locale
 import com.hatem.musicmute.ui.design.CreativeHeader
-import com.hatem.musicmute.ui.design.CreativeCard
+import com.hatem.musicmute.ui.design.CreativeTokens
+import com.hatem.musicmute.ui.design.CreativeFeedback
+import com.hatem.musicmute.ui.player.canSeekAudio
+import com.hatem.musicmute.ui.player.playbackProgress
 
 @Composable
 fun DownloadHistoryScreen(
@@ -43,9 +46,9 @@ fun DownloadHistoryScreen(
 ) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
-            modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(),
-            contentPadding = PaddingValues(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.widthIn(max = CreativeTokens.ContentWidth).fillMaxWidth(),
+            contentPadding = PaddingValues(CreativeTokens.PagePadding),
+            verticalArrangement = Arrangement.spacedBy(CreativeTokens.ContentGap),
         ) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -90,12 +93,7 @@ fun DownloadHistoryScreen(
                     )
                 }
             if (playback.failed)
-                item {
-                    Text(
-                        stringResource(R.string.playback_error),
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                item { CreativeFeedback(stringResource(R.string.playback_error), error = true) }
             if (!state.loading && !state.historyError && state.records.isEmpty())
                 item {
                     Card {
@@ -257,6 +255,7 @@ private fun DownloadRow(
                                     seeking = null
                                 },
                                 valueRange = 0f..duration.toFloat(),
+                                enabled = playback.copy(durationMs = duration).canSeekAudio(),
                                 modifier =
                                     Modifier.fillMaxWidth().semantics {
                                         contentDescription = seekDescription
@@ -286,7 +285,7 @@ private fun DownloadRow(
                     )
                     if (record.totalBytes != null || record.progress > 0) {
                         LinearProgressIndicator(
-                            progress = { record.progress / 100f },
+                            progress = { playbackProgress(record.progress.toLong(), 100) },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Text(stringResource(R.string.progress_percent, record.progress))

@@ -15,6 +15,9 @@ import com.hatem.musicmute.R
 import com.hatem.musicmute.processing.AudioTaskPresentation
 import com.hatem.musicmute.processing.AudioTaskStage
 import com.hatem.musicmute.processing.SourceKind
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import com.hatem.musicmute.ui.design.CreativeTokens
 
 @Composable
 fun AudioStepTimeline(task: AudioTaskPresentation) {
@@ -35,14 +38,17 @@ fun AudioStepTimeline(task: AudioTaskPresentation) {
         ))
     }
     val currentRank = taskStageRank(task.stage)
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
         Text(stringResource(R.string.audio_task_timeline), style = MaterialTheme.typography.titleMedium)
         steps.forEachIndexed { index, (_, label) ->
             val rank = taskStageRank(steps[index].first)
             val completed = rank < currentRank || task.stage == AudioTaskStage.READY
             val current = rank == currentRank && !completed
-            Row(verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val status = stringResource(if (completed) R.string.ui_step_complete
+                else if (current) R.string.ui_step_current else R.string.ui_step_pending)
+            Row(Modifier.semantics(mergeDescendants = true) { stateDescription = status },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(
                     if (completed) Icons.Outlined.CheckCircle

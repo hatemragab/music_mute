@@ -322,7 +322,7 @@ fun VocalApp(
         ) { padding ->
             Row(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
                 if (mainDestination && wide)
-                    NavigationRail {
+                    NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0)) {
                         Destination.entries.forEach { destination ->
                             NavigationRailItem(
                                 colors = NavigationRailItemDefaults.colors(
@@ -443,7 +443,7 @@ fun VocalApp(
                             star = libraryModel::toggleStar, details = openTrackDetails,
                             download = libraryModel::download, hidden = libraryModel::setHidden,
                             home = { navigate(Destination.Home) }, refresh = {
-                                libraryModel.refreshLocal(); processingModel.history.refresh()
+                                libraryModel.clearProblem(); libraryModel.refreshLocal(); processingModel.history.refresh()
                             }, openPlayer = { nav.navigate("player") },
                             togglePlayback = app.audioPlayback::togglePlayback, next = app.audioPlayback::next),
                             miniPlayer = {

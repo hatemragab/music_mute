@@ -12,11 +12,13 @@ import androidx.compose.ui.res.stringResource
 import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
 import com.hatem.musicmute.ui.design.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 @Composable
 internal fun EmailVerificationSheet(state: AuthUiState, email: String, cooldown: Long,
     onDismiss: () -> Unit, onSend: () -> Unit, onCheck: () -> Unit, dismissMessage: () -> Unit) {
-    CreativeSheet(onDismiss) {
+    CreativeSheet(onDismiss, dismissible = !state.busy) {
         CreativeWave(Modifier.fillMaxWidth())
         AccountSymbol(Icons.Outlined.Email, Modifier.align(Alignment.CenterHorizontally))
         Text(stringResource(R.string.creative_account_verify), style = MaterialTheme.typography.headlineSmall)
@@ -33,7 +35,7 @@ internal fun EmailVerificationSheet(state: AuthUiState, email: String, cooldown:
 
 @Composable
 internal fun SignOutAllSheet(state: AuthUiState, onDismiss: () -> Unit, onConfirm: () -> Unit, dismissMessage: () -> Unit) {
-    CreativeSheet(onDismiss) {
+    CreativeSheet(onDismiss, dismissible = !state.busy) {
         CreativeWave(Modifier.fillMaxWidth())
         AccountSymbol(Icons.Outlined.Logout, Modifier.align(Alignment.CenterHorizontally))
         Text(stringResource(R.string.auth_logout_all), style = MaterialTheme.typography.headlineSmall)
@@ -72,7 +74,10 @@ internal fun AccountDeletionReviewScreen(state: AuthUiState, password: String, o
 internal fun AccountDeletionDialog(state: AuthUiState, onDismiss: () -> Unit, onDelete: () -> Unit, dismissMessage: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, icon = { Icon(Icons.Outlined.WarningAmber, null, tint = MaterialTheme.colorScheme.error) },
         title = { Text(stringResource(R.string.account_delete)) },
-        text = { Column { Text(stringResource(R.string.account_delete_final)); AuthMessages(state, dismissMessage) } },
+        text = { Column(Modifier.verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
+            Text(stringResource(R.string.account_delete_final)); AuthMessages(state, dismissMessage)
+        } },
         confirmButton = { CreativePrimaryButton(onDelete, busy = state.busy, destructive = true) { Text(stringResource(R.string.account_delete)) } },
         dismissButton = { TextButton(onDismiss, enabled = !state.busy) { Text(stringResource(R.string.auth_cancel)) } })
 }

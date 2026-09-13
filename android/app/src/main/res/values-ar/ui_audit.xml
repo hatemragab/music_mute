@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_step_complete">مكتملة</string>
+    <string name="ui_step_current">الخطوة الحالية</string>
+    <string name="ui_step_pending">لم تكتمل</string>
+    <string name="ui_player_empty">اختر مقطعًا من مكتبتك لبدء الاستماع.</string>
+</resources>

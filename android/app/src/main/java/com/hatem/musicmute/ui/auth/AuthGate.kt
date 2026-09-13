@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -39,7 +40,6 @@ fun AuthGate(
     val state by auth.state.collectAsStateWithLifecycle()
     // This scope survives transitions from login to bootstrap and into the app.
     val scope = rememberCoroutineScope()
-    var page by remember { mutableStateOf(AccountPage.HOME) }
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner, auth) {
         val observer = LifecycleEventObserver { _, event ->
@@ -48,14 +48,13 @@ fun AuthGate(
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(state.phase) {
-        if (state.phase != AuthPhase.AUTHENTICATED) page = AccountPage.HOME
-    }
     Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
         when (state.phase) {
             AuthPhase.RESTORING ->
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(Modifier.fillMaxSize().safeDrawingPadding(),
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     CircularProgressIndicator(Modifier.testTag("auth-restoring"))
+                    Text(stringResource(R.string.auth_connecting_title), Modifier.padding(CreativeTokens.ContentGap))
                 }
             AuthPhase.SIGNED_OUT ->
                 AuthScreen(auth, state, google, activity, scope, onToggleLanguage)
@@ -72,13 +71,14 @@ fun AuthGate(
                                 else auth.retryBootstrap()
                             }
                         },
-                        enabled = !state.busy,
+                        busy = state.busy,
                         modifier = Modifier.fillMaxWidth().testTag("auth-retry-bootstrap"),
                     ) {
                         Text(stringResource(R.string.retry))
                     }
                     TextButton(
                         onClick = { auth.signOut() },
+                        enabled = !state.busy,
                         modifier = Modifier.testTag("auth-sign-out"),
                     ) {
                         Text(stringResource(R.string.auth_sign_out))
@@ -89,6 +89,9 @@ fun AuthGate(
                 AccountRecoveryScreen(auth = auth, state = state, scope = scope)
             AuthPhase.AUTHENTICATED ->
                 key(state.identity?.uid) {
+                    // Consume saved navigation only after the owner is restored. A transient
+                    // null identity during startup must not reset the saved destination.
+                    var page by rememberSaveable { mutableStateOf(AccountPage.HOME) }
                     val savedPages = rememberSaveableStateHolder()
                     BackHandler(enabled = page != AccountPage.HOME) {
                         if (!state.busy)

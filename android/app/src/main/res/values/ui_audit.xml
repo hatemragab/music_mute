@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_step_complete">Completed</string>
+    <string name="ui_step_current">Current step</string>
+    <string name="ui_step_pending">Not completed</string>
+    <string name="ui_player_empty">Choose a track from your library to start listening.</string>
+</resources>

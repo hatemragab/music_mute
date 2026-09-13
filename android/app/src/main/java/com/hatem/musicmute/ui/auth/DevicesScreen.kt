@@ -6,7 +6,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
 import com.hatem.musicmute.ui.design.*
@@ -40,7 +39,7 @@ internal fun DevicesScreen(
         group.forEachIndexed { index, device ->
             if (index > 0) HorizontalDivider()
             Box(Modifier.fillMaxWidth().testTag("auth-device-${device.installationId}")) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
                     Text(
                         device.deviceModel ?: if (device.platform == "ios") "iOS" else "Android",
                         style = MaterialTheme.typography.titleMedium,

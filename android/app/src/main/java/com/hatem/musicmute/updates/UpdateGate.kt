@@ -9,7 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.WindowInsets
@@ -95,10 +96,12 @@ fun UpdateGate(
             }
         }
     } else {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+        val bannerHeight = maxHeight * 0.45f
         Column(Modifier.fillMaxSize().then(if (prompt.visible)
             Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)) else Modifier)) {
             if (prompt.visible) {
-                Box(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()).padding(12.dp)) {
+                Box(Modifier.fillMaxWidth().heightIn(max = bannerHeight).verticalScroll(rememberScrollState()).padding(CreativeTokens.CompactGap)) {
                     CreativeCard {
                         Text(stringResource(R.string.update_available_title), style = MaterialTheme.typography.titleMedium)
                         UpdateCardContent(state, install, currentVersion, currentBuild, true,
@@ -108,6 +111,7 @@ fun UpdateGate(
             }
             // Keep content at one stable composition location when the optional banner changes.
             Box(Modifier.weight(1f).fillMaxWidth()) { content() }
+        }
         }
     }
 }
@@ -150,7 +154,7 @@ private fun UpdateCardContent(
         when (install) {
             is UpdateInstallState.Downloading -> {
                 LinearProgressIndicator(
-                    progress = { install.percent / 100f },
+                    progress = { (install.percent / 100f).coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(stringResource(R.string.update_downloading, install.percent))
@@ -162,15 +166,15 @@ private fun UpdateCardContent(
             UpdateInstallState.PermissionNeeded -> Text(stringResource(R.string.update_permission_needed))
             UpdateInstallState.AwaitingInstaller -> Text(stringResource(R.string.update_installer_waiting))
             UpdateInstallState.StoreOpened -> Text(stringResource(R.string.update_store_opened))
-            is UpdateInstallState.Failed -> Text(updateProblemText(install.problem))
-            UpdateInstallState.Idle -> state.failure?.let { Text(updateProblemText(it)) }
+            is UpdateInstallState.Failed -> CreativeFeedback(updateProblemText(install.problem), error = true)
+            UpdateInstallState.Idle -> state.failure?.let { CreativeFeedback(updateProblemText(it), error = true) }
         }
         if (state.checking) CircularProgressIndicator(Modifier.padding(top = 4.dp))
     }
     CreativePrimaryButton(onClick = onUpdate, modifier = Modifier.fillMaxWidth(), enabled = !state.checking && !busy && target != null) {
         Text(stringResource(if (state.failure != null || install is UpdateInstallState.Failed) R.string.retry else R.string.update_now))
     }
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
         if (state.failure != null) {
             TextButton(onClick = onRetryPolicy, enabled = !state.checking) {
                 Text(stringResource(R.string.update_check_again))

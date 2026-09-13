@@ -12,7 +12,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
 import com.hatem.musicmute.ui.design.*
@@ -86,13 +85,15 @@ internal fun LinkedMethodsScreen(
             CreativeCard {
                 listOf(PASSWORD_PROVIDER, GOOGLE_PROVIDER, APPLE_PROVIDER).filter { it != APPLE_PROVIDER || it in providers }.forEachIndexed { index, provider ->
                     if (index > 0) HorizontalDivider()
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
                         Icon(Icons.Outlined.Key, null, tint = MaterialTheme.colorScheme.primary)
                         Column(Modifier.weight(1f)) {
                             Text(providerLabel(provider), style = MaterialTheme.typography.titleMedium)
                             Text(stringResource(if (provider in providers) R.string.auth_connected else R.string.auth_not_connected),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                    }
                         if (provider != APPLE_PROVIDER) {
                             val connected = provider in providers
                             TextButton(onClick = { choose(when {
@@ -112,7 +113,7 @@ internal fun LinkedMethodsScreen(
             Text(stringResource(R.string.auth_keep_login_method), color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedButton(onClick = { scope.launch { auth.refreshAccount() } }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.auth_refresh_account)) }
         }
-        if (unlink) CreativeSheet(::dismiss) {
+        if (unlink) CreativeSheet(::dismiss, dismissible = !state.busy) {
             CreativeWave(Modifier.fillMaxWidth())
             Text(stringResource(R.string.creative_account_disconnect, providerLabel(if (action == MethodAction.UNLINK_PASSWORD) PASSWORD_PROVIDER else GOOGLE_PROVIDER)), style = MaterialTheme.typography.titleLarge)
             actionForm()

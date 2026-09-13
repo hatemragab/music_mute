@@ -1,15 +1,12 @@
 package com.hatem.musicmute.ui.auth
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.platform.testTag
@@ -23,6 +20,8 @@ import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
 import com.hatem.musicmute.ui.design.*
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 
 @Composable
 internal fun AuthPage(content: @Composable ColumnScope.() -> Unit) {
@@ -54,7 +53,7 @@ internal fun PasswordField(
         visualTransformation =
             if (visible) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = {
-            IconButton(onClick = { visible = !visible }) {
+            IconButton(onClick = { visible = !visible }, enabled = enabled) {
                 Icon(
                     if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
                     stringResource(
@@ -73,7 +72,7 @@ internal fun AuthMessages(state: AuthUiState, dismiss: () -> Unit) {
         Card(
             colors =
                 CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-            modifier = Modifier.fillMaxWidth().testTag("auth-error"),
+            modifier = Modifier.fillMaxWidth().testTag("auth-error").semantics { liveRegion = LiveRegionMode.Polite },
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -90,7 +89,7 @@ internal fun AuthMessages(state: AuthUiState, dismiss: () -> Unit) {
                 CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                 ),
-            modifier = Modifier.fillMaxWidth().testTag("auth-notice"),
+            modifier = Modifier.fillMaxWidth().testTag("auth-notice").semantics { liveRegion = LiveRegionMode.Polite },
         ) {
             Text(
                 stringResource(

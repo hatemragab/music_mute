@@ -10,7 +10,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import com.hatem.musicmute.ui.design.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Restore
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -20,7 +19,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -92,7 +90,7 @@ internal fun AccountRecoveryScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             // Pending does not prove that an administrator has started reviewing.
                             Text(if (index == 0) "✓" else "○", color = if (index == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                            Column { Text(stringResource(title), style = MaterialTheme.typography.titleMedium)
+                            Column(Modifier.weight(1f)) { Text(stringResource(title), style = MaterialTheme.typography.titleMedium)
                                 if (index > 0) Text(stringResource(R.string.creative_account_no_decision), style = MaterialTheme.typography.bodySmall) }
                         }
                     }
@@ -115,11 +113,14 @@ internal fun AccountRecoveryScreen(
                     label = { Text(stringResource(R.string.account_recovery_reason)) },
                     supportingText = { Text(stringResource(R.string.creative_account_reason_count, reason.length)) },
                     minLines = 3,
+                    maxLines = 6,
+                    shape = androidx.compose.material3.MaterialTheme.shapes.medium,
                     enabled = !state.busy && recovery?.deletion?.recoveryAvailable == true,
                 )
                 CreativePrimaryButton(
                     onClick = { scope.launch { auth.requestAccountRecovery(reason) } },
                     modifier = Modifier.fillMaxWidth().testTag("account-recovery-submit"),
+                    busy = state.busy,
                     enabled = !state.busy && recovery?.deletion?.recoveryAvailable == true,
                 ) {
                     Text(stringResource(R.string.account_recovery_send))

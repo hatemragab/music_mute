@@ -8,7 +8,6 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +22,8 @@ import com.hatem.musicmute.R
 import com.hatem.musicmute.processing.AudioTaskPresentation
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.delay
+import androidx.compose.ui.text.style.TextOverflow
+import com.hatem.musicmute.ui.design.CreativeTokens
 
 @Composable
 fun AudioTaskCard(
@@ -52,7 +53,7 @@ fun AudioTaskCard(
         Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             AudioTaskWaveform(task.active, Modifier.size(40.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(task.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 2)
+                Text(task.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Crossfade(
                     task.stage,
                     animationSpec = if (ValueAnimator.areAnimatorsEnabled()) tween(200) else snap(),
@@ -86,8 +87,8 @@ fun AudioTaskCard(
                 if (task.active && task.workerAvailable == false) {
                     Text(androidx.compose.ui.res.stringResource(R.string.processing_worker_offline))
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (task.canCancel) TextButton(onClick = onCancel) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
+                    if (task.canCancel && task.stage != com.hatem.musicmute.processing.AudioTaskStage.CANCELLING) TextButton(onClick = onCancel) {
                         Text(androidx.compose.ui.res.stringResource(R.string.auth_cancel))
                     }
                     if (task.canRetry) TextButton(onClick = onRetry) {
