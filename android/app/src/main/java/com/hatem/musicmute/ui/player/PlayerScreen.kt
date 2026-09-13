@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
@@ -36,12 +37,19 @@ fun PlayerScreen(state: PlaybackState, entry: LibraryEntry?, actions: PlayerActi
             Text(stringResource(R.string.creative_library_now_playing), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
             IconButton(actions.queue) { Icon(Icons.Outlined.QueueMusic, stringResource(R.string.creative_library_queue)) }
         }
+        if (state.trackId == null) {
+            CreativeFeedback(stringResource(R.string.ui_player_empty),
+                actionLabel = stringResource(R.string.creative_library_back), onAction = actions.back)
+            return@CreativePage
+        }
         CreativeCard {
-            CreativeWave(Modifier.fillMaxWidth().height(220.dp), active = state.playing, intensity = 1f)
+            CreativeWave(Modifier.fillMaxWidth().height(CreativeTokens.PlayerArtwork), active = state.playing, intensity = 1f)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.creative_library_voice), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(entry?.title ?: state.queue.getOrNull(state.currentIndex)?.title.orEmpty(), style = MaterialTheme.typography.headlineSmall)
+                    Text(entry?.title?.takeIf { it.isNotBlank() }
+                        ?: state.queue.getOrNull(state.currentIndex)?.title?.takeIf { it.isNotBlank() }
+                        ?: stringResource(R.string.voice_track), style = MaterialTheme.typography.headlineSmall)
                 }
                 if (entry != null) CreativeStarButton(entry.starred, actions.star, stringResource(if (entry.starred) R.string.creative_library_unstar else R.string.creative_library_star))
                 IconButton(actions.info, enabled = state.trackId != null) { Icon(Icons.Outlined.Info, stringResource(R.string.creative_library_info)) }
@@ -55,18 +63,29 @@ fun PlayerScreen(state: PlaybackState, entry: LibraryEntry?, actions: PlayerActi
         Slider(
             value = seeking ?: state.positionMs.toFloat().coerceIn(0f, state.durationMs.coerceAtLeast(1).toFloat()),
             onValueChange = { seeking = it }, onValueChangeFinished = { seeking?.let { actions.seek(it.toLong()) }; seeking = null },
-            valueRange = 0f..state.durationMs.coerceAtLeast(1).toFloat(), enabled = state.durationMs > 0,
+            valueRange = 0f..state.durationMs.coerceAtLeast(1).toFloat(), enabled = state.canSeekAudio(),
             modifier = Modifier.semantics { contentDescription = seekLabel },
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(audioTime(seeking?.toLong() ?: state.positionMs)); Text(audioTime(state.durationMs))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+            IconButton(actions.previous, enabled = state.queue.isNotEmpty()) { Icon(Icons.Outlined.SkipPrevious, stringResource(R.string.creative_library_previous)) }
+            FilledIconButton(actions.toggle, Modifier.size(CreativeTokens.PlayerControl), enabled = !state.buffering) {
+                Icon(if (state.playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                    stringResource(if (state.playing) R.string.creative_library_pause else R.string.creative_library_play),
+                    Modifier.size(CreativeTokens.PlayerIcon))
+            }
+            IconButton(actions.next, enabled = state.queue.isNotEmpty()) { Icon(Icons.Outlined.SkipNext, stringResource(R.string.creative_library_next)) }
+        }
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             IconToggleButton(state.shuffle, { actions.shuffle(it) }) { Icon(Icons.Outlined.Shuffle, stringResource(R.string.creative_library_shuffle), tint = if (state.shuffle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
-            IconButton(actions.previous) { Icon(Icons.Outlined.SkipPrevious, stringResource(R.string.creative_library_previous)) }
-            FilledIconButton(actions.toggle, Modifier.size(76.dp), enabled = state.trackId != null) { Icon(if (state.playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, stringResource(if (state.playing) R.string.creative_library_pause else R.string.creative_library_play), Modifier.size(38.dp)) }
-            IconButton(actions.next) { Icon(Icons.Outlined.SkipNext, stringResource(R.string.creative_library_next)) }
-            IconButton({ actions.repeat(state.repeatMode.nextMode()) }) { Icon(if (state.repeatMode == RepeatMode.ONE) Icons.Outlined.RepeatOne else Icons.Outlined.Repeat, stringResource(state.repeatMode.label()), tint = if (state.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
+            TextButton({ actions.repeat(state.repeatMode.nextMode()) },
+                modifier = Modifier.semantics { selected = state.repeatMode != RepeatMode.OFF }) {
+                Icon(if (state.repeatMode == RepeatMode.ONE) Icons.Outlined.RepeatOne else Icons.Outlined.Repeat, null)
+                Spacer(Modifier.width(CreativeTokens.CompactGap))
+                Text(stringResource(state.repeatMode.label()))
+            }
         }
         CreativeCard { AutoNextRow(state.autoNext, actions.autoNext) }
         Text(stringResource(R.string.creative_library_up_next), style = MaterialTheme.typography.titleLarge)
@@ -74,7 +93,9 @@ fun PlayerScreen(state: PlaybackState, entry: LibraryEntry?, actions: PlayerActi
             val upcoming = com.hatem.musicmute.playback.upcomingTracks(
                 state.orderedQueue, state.queue.getOrNull(state.currentIndex)?.key, state.repeatMode, state.autoNext)
             if (upcoming.isEmpty()) Text(stringResource(R.string.creative_library_queue_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            upcoming.forEach { track -> Text(track.title, Modifier.fillMaxWidth().clickable(onClick = actions.queue).padding(vertical = 12.dp)) }
+            upcoming.forEach { track -> Text(track.title,
+                Modifier.fillMaxWidth().heightIn(min = CreativeTokens.TouchTarget).clickable(onClick = actions.queue)
+                    .padding(vertical = CreativeTokens.CompactGap), maxLines = 2, overflow = TextOverflow.Ellipsis) }
             TextButton(actions.queue) { Text(stringResource(R.string.creative_library_queue)) }
         }
     }
@@ -87,13 +108,16 @@ fun MiniPlayer(state: PlaybackState, onOpen: () -> Unit, onToggle: () -> Unit, o
         Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             AudioBars(Modifier.size(32.dp))
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(state.queue.getOrNull(state.currentIndex)?.title.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                Text(state.queue.getOrNull(state.currentIndex)?.title?.takeIf { it.isNotBlank() }
+                    ?: stringResource(R.string.voice_track), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                 if (state.buffering) LinearProgressIndicator(Modifier.fillMaxWidth())
-                else LinearProgressIndicator(progress = { if (state.durationMs > 0) (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f) else 0f }, modifier = Modifier.fillMaxWidth())
-                Text(audioTime(state.positionMs), style = MaterialTheme.typography.labelSmall)
+                else if (state.failed) Text(stringResource(R.string.creative_library_failed),
+                    color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                else LinearProgressIndicator(progress = { playbackProgress(state.positionMs, state.durationMs) }, modifier = Modifier.fillMaxWidth())
+                if (!state.failed) Text(audioTime(state.positionMs), style = MaterialTheme.typography.labelSmall)
             }
-            IconButton(onToggle) { Icon(if (state.playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, stringResource(if (state.playing) R.string.creative_library_pause else R.string.creative_library_play)) }
-            IconButton(onNext) { Icon(Icons.Outlined.SkipNext, stringResource(R.string.creative_library_next)) }
+            IconButton(onToggle, enabled = !state.buffering) { Icon(if (state.playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, stringResource(if (state.playing) R.string.creative_library_pause else R.string.creative_library_play)) }
+            IconButton(onNext, enabled = state.queue.isNotEmpty()) { Icon(Icons.Outlined.SkipNext, stringResource(R.string.creative_library_next)) }
         }
     }
 }

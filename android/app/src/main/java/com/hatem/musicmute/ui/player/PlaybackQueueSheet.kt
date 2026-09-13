@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import com.hatem.musicmute.R
 import com.hatem.musicmute.library.*
 import com.hatem.musicmute.playback.*
@@ -35,7 +36,7 @@ fun PlaybackQueueSheet(state: PlaybackState, entries: List<LibraryEntry>, onDism
         if (orderedTracks.isEmpty()) Text(stringResource(R.string.creative_library_queue_empty))
         val byKey = remember(entries) { entries.associateBy { it.key } }
         val listState = rememberLazyListState(initialFirstVisibleItemIndex = orderedTracks.indexOfFirst { it.key == state.queue.getOrNull(state.currentIndex)?.key }.coerceAtLeast(0))
-        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp), state = listState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = CreativeTokens.QueueHeight), state = listState, verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
           items(orderedTracks, key = { "${it.key.ownerUid}/${it.key.jobId}" }) { track ->
             val entry = byKey[track.key]
             val current = state.queue.getOrNull(state.currentIndex)?.key == track.key
@@ -43,10 +44,10 @@ fun PlaybackQueueSheet(state: PlaybackState, entries: List<LibraryEntry>, onDism
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(if (current && state.playing) Icons.Outlined.GraphicEq else Icons.Outlined.PlayArrow, null, tint = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                        Text(track.title, style = MaterialTheme.typography.titleMedium)
+                        Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         if (entry != null) Text(offlineLabel(entry.offlineStatus), style = MaterialTheme.typography.labelSmall)
+                        entry?.durationMs?.let { Text(audioTime(it), style = MaterialTheme.typography.labelSmall) }
                     }
-                    entry?.durationMs?.let { Text(audioTime(it), style = MaterialTheme.typography.labelSmall) }
                     IconButton({ onRemove(track.key) }) { Icon(Icons.Outlined.Close, stringResource(R.string.creative_library_remove_queue)) }
                 }
             }

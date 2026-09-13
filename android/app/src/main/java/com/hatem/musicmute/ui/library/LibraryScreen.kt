@@ -30,7 +30,8 @@ data class LibraryActions(
 @Composable
 fun LibraryScreen(state: LibraryUiState, actions: LibraryActions, miniPlayer: @Composable () -> Unit = {}) {
     var menu by remember { mutableStateOf<LibraryEntry?>(null) }
-    Column(Modifier.fillMaxSize().widthIn(max = CreativeTokens.ContentWidth).padding(horizontal = 20.dp)) {
+    Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.TopCenter) {
+    Column(Modifier.widthIn(max = CreativeTokens.ContentWidth).fillMaxSize().padding(horizontal = CreativeTokens.PagePadding)) {
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 16.dp)) {
             item { CreativeHeader(stringResource(R.string.creative_library_title)) }
             item { CreativeTextField(state.query, actions.query, stringResource(R.string.creative_library_search), trailingIcon = { Icon(Icons.Outlined.Search, null) }) }
@@ -43,7 +44,7 @@ fun LibraryScreen(state: LibraryUiState, actions: LibraryActions, miniPlayer: @C
             }
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    TextButton({ actions.sort(if (state.sort == LibrarySort.NEWEST) LibrarySort.TITLE else LibrarySort.NEWEST) }) {
+                    TextButton({ actions.sort(if (state.sort == LibrarySort.NEWEST) LibrarySort.TITLE else LibrarySort.NEWEST) }, Modifier.weight(1f)) {
                         Icon(Icons.Outlined.Sort, stringResource(R.string.creative_library_sort))
                         Text(stringResource(if (state.sort == LibrarySort.NEWEST) R.string.creative_library_newest else R.string.creative_library_sort_title))
                     }
@@ -54,7 +55,7 @@ fun LibraryScreen(state: LibraryUiState, actions: LibraryActions, miniPlayer: @C
                 CreativeFeedback(stringResource(libraryProblemLabel(state.problem)), error = true,
                     actionLabel = stringResource(R.string.creative_library_refresh), onAction = actions.refresh)
             }
-            if (state.entries.isEmpty()) item {
+            if (state.entries.isEmpty() && !state.loadFailed && state.problem == null) item {
                 CreativeCard {
                     val narrowed = state.query.isNotBlank() || state.filter != LibraryFilter.ALL
                     Text(stringResource(if (narrowed) R.string.creative_library_no_results else R.string.creative_library_empty))
@@ -69,11 +70,13 @@ fun LibraryScreen(state: LibraryUiState, actions: LibraryActions, miniPlayer: @C
         }
         miniPlayer()
     }
+    }
     menu?.let { entry ->
         CreativeSheet({ menu = null }) {
             Text(entry.title, style = MaterialTheme.typography.titleLarge)
             Text(offlineLabel(entry.offlineStatus), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (entry.offlineStatus != OfflineStatus.AVAILABLE) TextButton({ actions.download(entry.key); menu = null }) { Text(stringResource(R.string.creative_library_download)) }
+            if (entry.offlineStatus == OfflineStatus.DOWNLOADING) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (entry.offlineStatus !in setOf(OfflineStatus.AVAILABLE, OfflineStatus.DOWNLOADING)) TextButton({ actions.download(entry.key); menu = null }) { Text(stringResource(R.string.creative_library_download)) }
             TextButton({ actions.details(entry.key); menu = null }) { Text(stringResource(R.string.creative_library_info)) }
             Text(stringResource(R.string.creative_library_hide_body), style = MaterialTheme.typography.bodySmall)
             TextButton({ actions.hidden(entry.key, !entry.hidden); menu = null }) { Text(stringResource(if (entry.hidden) R.string.creative_library_restore else R.string.creative_library_hide)) }
@@ -92,12 +95,12 @@ fun LibraryAudioCard(entry: LibraryEntry, onPlay: () -> Unit, onStar: () -> Unit
                 AudioBars(Modifier.fillMaxWidth().height(20.dp))
             }
             CreativeStarButton(entry.starred, onStar, stringResource(if (entry.starred) R.string.creative_library_unstar else R.string.creative_library_star))
-            IconButton(onInfo) { Icon(Icons.Outlined.Info, stringResource(R.string.creative_library_info)) }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             entry.durationMs?.let { Text(audioTime(it), style = MaterialTheme.typography.labelSmall) }
             Text(offlineLabel(entry.offlineStatus), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            IconButton(onInfo) { Icon(Icons.Outlined.Info, stringResource(R.string.creative_library_info)) }
             IconButton(onMore) { Icon(Icons.Outlined.MoreVert, stringResource(R.string.creative_library_more)) }
         }
         if (entry.offlineStatus == OfflineStatus.DOWNLOADING) {

@@ -14,6 +14,7 @@ import com.hatem.musicmute.R
 import com.hatem.musicmute.library.LibraryEntry
 import com.hatem.musicmute.processing.Job
 import com.hatem.musicmute.ui.design.*
+import com.hatem.musicmute.ui.processingStatusLabel
 
 data class TrackDetailsActions(
     val back: () -> Unit, val play: () -> Unit, val star: () -> Unit, val download: () -> Unit,
@@ -26,6 +27,7 @@ fun TrackDetailsScreen(entry: LibraryEntry?, job: Job?, busy: Boolean, message: 
     var tab by rememberSaveable(entry?.key?.jobId) { mutableIntStateOf(0) }
     var renaming by rememberSaveable(entry?.key?.jobId) { mutableStateOf(false) }
     var deleting by rememberSaveable(entry?.key?.jobId) { mutableStateOf(false) }
+    var renameFrom by rememberSaveable(entry?.key?.jobId) { mutableStateOf<String?>(null) }
     CreativePage {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(actions.back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.creative_library_back)) }
@@ -37,9 +39,9 @@ fun TrackDetailsScreen(entry: LibraryEntry?, job: Job?, busy: Boolean, message: 
             return@CreativePage
         }
         CreativeCard {
+            AudioBars(Modifier.fillMaxWidth().height(40.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AudioBars(Modifier.size(64.dp))
-                Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
+                Column(Modifier.weight(1f)) {
                     Text(entry.title, style = MaterialTheme.typography.titleLarge)
                     Text(entry.durationMs?.let(::audioTime) ?: stringResource(R.string.creative_library_unknown))
                     Text(stringResource(R.string.creative_library_voice), style = MaterialTheme.typography.bodySmall)
@@ -69,7 +71,7 @@ fun TrackDetailsScreen(entry: LibraryEntry?, job: Job?, busy: Boolean, message: 
             CreativeCard {
                 if (job == null) Text(stringResource(R.string.creative_library_job_unavailable))
                 else {
-                    DetailRow(stringResource(R.string.creative_library_status), if (job.status == "ready") stringResource(R.string.processing_ready) else job.status)
+                    DetailRow(stringResource(R.string.creative_library_status), stringResource(processingStatusLabel(job.status)))
                     DetailRow(stringResource(R.string.creative_library_job_id), job.id)
                     DetailRow(stringResource(R.string.creative_library_source), job.sourceTitle ?: stringResource(R.string.creative_library_unknown))
                     DetailRow(stringResource(R.string.creative_library_processing_time), job.timing?.processingElapsedMs?.let { (if (job.timing.processingElapsedApproximate) "≈ " else "") + audioTime(it) } ?: stringResource(R.string.creative_library_unknown))
@@ -79,15 +81,23 @@ fun TrackDetailsScreen(entry: LibraryEntry?, job: Job?, busy: Boolean, message: 
                 TextButton(actions.refresh, enabled = !busy) { Text(stringResource(R.string.creative_library_refresh)) }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CreativePrimaryButton(actions.save, Modifier.weight(1f), busy = busy) { Text(stringResource(R.string.creative_library_save_copy)) }
-            OutlinedButton(actions.share, Modifier.weight(1f), enabled = !busy) { Text(stringResource(R.string.creative_library_share)) }
+        Column(verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
+            CreativePrimaryButton(actions.save, Modifier.fillMaxWidth(), busy = busy) { Text(stringResource(R.string.creative_library_save_copy)) }
+            OutlinedButton(actions.share, Modifier.fillMaxWidth(), enabled = !busy) { Text(stringResource(R.string.creative_library_share)) }
         }
     }
-    if (renaming && entry != null) RenameAudioSheet(entry.title, busy, { renaming = false }, actions.rename, message)
+    if (renaming && entry != null) RenameAudioSheet(entry.title, busy, { renaming = false }, {
+        renameFrom = entry.title
+        actions.rename(it)
+    }, message)
     if (deleting && entry != null) DeleteAudioSheet(entry.title, busy, { deleting = false }, actions.delete, message)
     // Rename changes the catalog title after success; deletion removes the entry after confirmation.
-    LaunchedEffect(entry?.title) { renaming = false }
+    LaunchedEffect(entry?.title) {
+        if (renameFrom != null && entry?.title != renameFrom) {
+            renaming = false
+            renameFrom = null
+        }
+    }
     LaunchedEffect(entry == null) { if (entry == null) deleting = false }
 }
 

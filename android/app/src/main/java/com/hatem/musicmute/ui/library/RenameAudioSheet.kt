@@ -19,7 +19,7 @@ fun RenameAudioSheet(title: String, busy: Boolean, onDismiss: () -> Unit, onRena
         CreativeTextField(value, { value = it }, stringResource(R.string.creative_library_name), enabled = !busy,
             error = if (!valid) stringResource(R.string.creative_library_name_error) else null)
         message?.let { CreativeFeedback(it, error = true) }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
             TextButton(onDismiss, enabled = !busy) { Text(stringResource(R.string.auth_cancel)) }
             CreativePrimaryButton({ onRename(value.trim()) }, busy = busy, enabled = valid && value.trim() != title) {
                 Text(stringResource(R.string.creative_library_save))
