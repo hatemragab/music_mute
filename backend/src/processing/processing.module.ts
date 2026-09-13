@@ -1,3 +1,5 @@
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
+import { ProcessingUsageController } from '../processing-usage/processing-usage.controller.js';
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { FirebaseModule } from '../auth/firebase.module.js';
@@ -47,12 +49,14 @@ import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js'
   ],
   exports: [WorkerRegistryService, WorkerRecoveryService],
   controllers: [
+    ProcessingUsageController,
     JobsController,
     WorkerController,
     PushRegistrationController,
     ClientErrorsController,
   ],
   providers: [
+    ProcessingUsageService,
     AccountDeletionCleanupService,
     AccountDeletionMaintenanceService,
     ProcessingStartupService,

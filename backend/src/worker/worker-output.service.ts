@@ -33,15 +33,14 @@ export class WorkerOutputService {
     if (
       !Number.isInteger(dto.bytes) ||
       dto.bytes < 1 ||
-      dto.bytes >=
-        this.config.getOrThrow<number>('PROCESSING_OUTPUT_MAX_BYTES') ||
+      dto.bytes > 100_000_000 ||
       dto.contentType !== 'audio/mpeg' ||
       dto.playable !== true ||
       dto.voiceOnly !== true ||
       !isSha256(dto.sha256) ||
       !Number.isFinite(dto.durationSeconds) ||
       dto.durationSeconds <= 0 ||
-      dto.durationSeconds >= 600
+      dto.durationSeconds > 1800
     )
       throw authError('INVALID_INPUT');
     const hash = requestHash({ operation: 'output', ...dto });
@@ -53,11 +52,34 @@ export class WorkerOutputService {
         identity,
       );
       await this.accountAccess.assertActive(job.userId, session);
+      if (job.admissionSnapshot?.policyVersion === 2) {
+        if (
+          dto.bytes >
+            (job.admissionSnapshot.qualification?.maxOutputBytes ?? 0) ||
+          dto.durationSeconds > (job.admissionSnapshot.maxDurationSeconds ?? 0)
+        )
+          throw authError('INVALID_INPUT');
+      } else if (
+        dto.bytes >=
+          this.config.getOrThrow<number>('PROCESSING_OUTPUT_MAX_BYTES') ||
+        dto.durationSeconds >= 600
+      )
+        throw authError('INVALID_INPUT');
       const receipt = await this.receipts
         .findOne({ jobId: job._id, eventId: dto.eventId })
         .session(session);
       if (receipt && receipt.requestHash !== hash)
         throw jobError('IDEMPOTENCY_CONFLICT');
+      if (dto.executionEvidence) {
+        if (!dto.executionEvidence.stoppedConfirmed)
+          throw jobError('JOB_STATE_CONFLICT');
+        await this.coordinator.recordExecution(
+          job,
+          dto.eventId,
+          dto.executionEvidence,
+          session,
+        );
+      }
       if (!['processing', 'uploading_result'].includes(job.status))
         throw jobError('JOB_STATE_CONFLICT');
       const reservation = {

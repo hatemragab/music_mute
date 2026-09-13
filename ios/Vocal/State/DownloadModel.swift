@@ -45,7 +45,8 @@ final class DownloadModel: ObservableObject {
 
   @discardableResult func start() async -> Bool {
     guard !loading, !storageError else { return false }
-    guard let id = YouTubeURL.videoID(from: urlText) else {
+    guard YouTubePreflight.isIndividualURL(urlText), let id = YouTubeURL.videoID(from: urlText)
+    else {
       invalidURL = true
       return false
     }

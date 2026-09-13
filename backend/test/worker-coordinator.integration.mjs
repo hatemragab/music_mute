@@ -1,3 +1,4 @@
+import { accountFixture } from './helpers/account-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -70,6 +71,10 @@ test('concurrent claims hold one global slot and expired assignments cannot rene
     status: 'queued',
     queueOrder: 2n,
   });
+  await accountFixture(
+    connection,
+    (await jobs.find().lean()).map((job) => job.userId.toString()),
+  );
   const results = await Promise.allSettled([
     service.claim(randomUUID()),
     service.claim(randomUUID()),

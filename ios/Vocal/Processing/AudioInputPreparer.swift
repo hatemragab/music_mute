@@ -13,6 +13,10 @@ struct AudioInputInspection: Sendable {
 }
 
 actor AudioInputPreparer {
+  private var policy = ProcessingMediaPolicy.legacy
+  func configure(policy: ProcessingMediaPolicy) { self.policy = policy }
+  func currentPolicy() -> ProcessingMediaPolicy { policy }
+
   private var purgedOwners = Set<String>()
   private let root: URL
   private let inspect: @Sendable (URL) async throws -> AudioInputInspection
@@ -44,20 +48,25 @@ actor AudioInputPreparer {
     sourceURL: URL?, ownerUid: String, securityScoped: Bool = true,
     operationId: UUID = UUID(), sourceTitle: String? = nil, sourceKind: JobSourceKind? = nil,
     clientStartedAt: Date? = nil, displayName: String? = nil,
-    canonicalSourceURL: String? = nil
+    canonicalSourceURL: String? = nil,
+    onPreparation: @escaping @Sendable () async throws -> Void = {}
   ) async throws -> PreparedInput {
     guard let source = sourceURL else { throw AudioInputPreparationError.cancelled }
     guard !purgedOwners.contains(ownerUid), source.isFileURL, !ownerUid.isEmpty else {
       throw AudioInputPreparationError.unreadable
     }
-    let ext = source.pathExtension.lowercased()
-    let pair = try Self.declarationPair(ext)
+    let policy = self.policy
+    var ext = source.pathExtension.lowercased()
+    var pair =
+      policy.version == 1
+      ? try Self.declarationPair(ext)
+      : (contentType: "audio/mp4", container: AudioInputInspection.Container.mp4)
     if securityScoped && !startAccess(source) { throw AudioInputPreparationError.accessDenied }
     defer { if securityScoped { stopAccess(source) } }
     let owner = SHA256.hash(data: Data(ownerUid.utf8)).map { String(format: "%02x", $0) }.joined()
     let directory = root.appendingPathComponent(owner, isDirectory: true)
       .appendingPathComponent(operationId.uuidString.lowercased(), isDirectory: true)
-    let destination = directory.appendingPathComponent("input.\(ext)")
+    var destination = directory.appendingPathComponent("input.\(ext)")
     do {
       try Task.checkCancellation()
       do {
@@ -68,13 +77,34 @@ actor AudioInputPreparer {
           try excluded.setResourceValues(values)
         }
       } catch { throw AudioInputPreparationError.storage }
-      let copied = try coordinatedCopy(source: source, destination: destination)
+      let copied: (bytes: Int64, digest: String)
+      if policy.version == 2 {
+        destination = try await AudioPreparationEngine.prepare(
+          source: source, directory: directory,
+          policy: policy, availableCapacity: availableCapacity, onPreparation: onPreparation)
+        ext = destination.pathExtension.lowercased()
+        pair = try Self.declarationPair(ext)
+        let handle = try FileHandle(forReadingFrom: destination)
+        defer { try? handle.close() }
+        var hash = SHA256()
+        var count: Int64 = 0
+        while let chunk = try handle.read(upToCount: 65_536), !chunk.isEmpty {
+          try Task.checkCancellation()
+          count += Int64(chunk.count)
+          guard count <= policy.maxBytes else { throw AudioInputPreparationError.invalidSize }
+          hash.update(data: chunk)
+        }
+        copied = (count, Data(hash.finalize()).base64EncodedString())
+      } else {
+        try await onPreparation()
+        copied = try coordinatedCopy(source: source, destination: destination)
+      }
       let media: AudioInputInspection
       do { media = try await inspect(destination) } catch is CancellationError {
         throw CancellationError()
       } catch { throw AudioInputPreparationError.invalidAudio }
       guard !purgedOwners.contains(ownerUid),
-        validProcessingInput(bytes: copied.bytes, duration: media.duration),
+        policy.accepts(bytes: copied.bytes, duration: media.duration),
         media.hasAudio, !media.hasVideo, media.isPlayable, media.container == pair.container
       else { throw AudioInputPreparationError.invalidAudio }
       try Task.checkCancellation()
@@ -88,7 +118,13 @@ actor AudioInputPreparer {
           extension: ext, contentType: pair.contentType,
           bytes: copied.bytes, durationSeconds: media.duration, sha256: copied.digest),
         sourceTitle: sourceTitle, sourceKind: sourceKind, clientStartedAt: clientStartedAt,
-        displayName: displayName, sourceURL: canonicalSourceURL)
+        displayName: displayName, sourceURL: canonicalSourceURL,
+        policyVersion: policy.version == 2 ? 2 : nil, preparationProfileId: policy.profileID,
+        mediaSource: policy.version == 2
+          ? (sourceKind == .url
+            ? "youtube"
+            : ["mp4", "mov", "m4v"].contains(source.pathExtension.lowercased())
+              ? "video_file" : "audio_file") : nil)
     } catch {
       // Remove only this new, unpublished attempt; retained inputs are never swept.
       try? FileManager.default.removeItem(at: directory)

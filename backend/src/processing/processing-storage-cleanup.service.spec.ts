@@ -23,6 +23,7 @@ const referenceQuery = (value: { _id: Types.ObjectId } | null = null) => ({
 
 function fixture() {
   const jobs = {
+    db: { model: () => ({ findById: () => ({ session: async () => null }) }) },
     findOne: vi.fn(),
     updateOne: vi.fn(async () => ({ matchedCount: 1, modifiedCount: 1 })),
     exists: vi.fn(() => referenceQuery()),

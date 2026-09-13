@@ -3,7 +3,7 @@ import { isSha256 } from '../../jobs/job-state.js';
 import { WorkerEventDto } from './worker-event.dto.js';
 
 export class WorkerOutputDto extends WorkerEventDto {
-  @IsInt() @Min(1) @Max(99_999_999) bytes!: number;
+  @IsInt() @Min(1) @Max(100_000_000) bytes!: number;
   @ValidateBy({
     name: 'audioDuration',
     validator: {
@@ -11,7 +11,7 @@ export class WorkerOutputDto extends WorkerEventDto {
         typeof value === 'number' &&
         Number.isFinite(value) &&
         value > 0 &&
-        value < 600,
+        value <= 1800,
     },
   })
   durationSeconds!: number;

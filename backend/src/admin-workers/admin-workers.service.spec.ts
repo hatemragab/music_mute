@@ -28,7 +28,8 @@ describe('worker administration contracts', () => {
       },
       {
         _id: 'node-a',
-        controlRevision: 4,
+        controlRevision: 99,
+        managementRevision: 4,
         activeJobId: new Types.ObjectId(),
         attemptId: 'attempt',
         sessionId: 'session',

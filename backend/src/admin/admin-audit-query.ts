@@ -1,3 +1,25 @@
+export interface ProcessingChangeMetadata {
+  field: string;
+  before: string | number | boolean | null;
+  after: string | number | boolean | null;
+}
+const processingAuditFields = new Set([
+  'allowanceAudioSeconds',
+  'allowanceExpiresAt',
+  'processingSuspended',
+  'suspensionExpiresAt',
+  'acceptNewJobs',
+  'acceptLongJobs',
+  'maxDurationSeconds',
+  'maxPreparedAudioBytes',
+  'maxActiveJobsPerUser',
+  'allowanceWindowSeconds',
+  'maxOutstandingJobs',
+  'maxOutstandingAudioSeconds',
+  'agingThresholdSeconds',
+  'qualificationEvidenceReference',
+  'qualificationExpiresAt',
+]);
 import { createHash } from 'node:crypto';
 import { Types } from 'mongoose';
 import { adminError } from './admin-errors.js';
@@ -34,6 +56,7 @@ export interface AuditExportMetadata {
 }
 
 export interface AuditEventInput {
+  processingChanges?: ProcessingChangeMetadata[] | null;
   exportMetadata?: AuditExportMetadata | null;
   stopEvidence?: StopEvidenceMetadata | null;
   actorUid: string;
@@ -218,6 +241,7 @@ export function validateAuditEvent(
   if (
     Object.keys(value).some(
       (key) =>
+        key !== 'processingChanges' &&
         key !== 'stopEvidence' &&
         key !== 'exportMetadata' &&
         !keys.includes(key),
@@ -247,6 +271,35 @@ export function validateAuditEvent(
       (!Number.isSafeInteger(value[key]) || Number(value[key]) < 0)
     )
       throw adminError('INVALID_REQUEST');
+  }
+  if (value.processingChanges != null) {
+    if (
+      !Array.isArray(value.processingChanges) ||
+      value.processingChanges.length > 20 ||
+      !['user', 'processing_settings'].includes(String(value.resourceType))
+    )
+      throw adminError('INVALID_REQUEST');
+    for (const change of value.processingChanges as ProcessingChangeMetadata[]) {
+      if (
+        !change ||
+        Object.keys(change).sort().join(',') !== 'after,before,field' ||
+        !processingAuditFields.has(change.field)
+      )
+        throw adminError('INVALID_REQUEST');
+      for (const item of [change.before, change.after])
+        if (
+          item !== null &&
+          !(
+            typeof item === 'boolean' ||
+            (typeof item === 'number' && Number.isFinite(item)) ||
+            (typeof item === 'string' &&
+              item.length <= 200 &&
+              !/[\r\n]/.test(item) &&
+              !item.includes(String.fromCharCode(0)))
+          )
+        )
+          throw adminError('INVALID_REQUEST');
+    }
   }
   if (value.stopEvidence != null) {
     const evidence = value.stopEvidence as StopEvidenceMetadata;

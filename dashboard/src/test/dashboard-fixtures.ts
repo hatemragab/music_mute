@@ -7,6 +7,9 @@ import type {
   JobDetail,
   Permission,
   ProcessingSettings,
+  ProcessingPolicyV2,
+  ProcessingUsage,
+  RevisionCommand,
   ReleaseDetail,
   UpdatePolicy,
   UserDetail,
@@ -127,6 +130,44 @@ export const sessionForRole = (role: AdminRole): AdminSession => ({
 
 export class DashboardFixture {
   readonly requests: FixtureRequest[] = [];
+  mediaPolicy: ProcessingPolicyV2 = {
+    schemaVersion: 2,
+    revision: 1,
+    updatedAt: NOW,
+    acceptNewJobs: true,
+    acceptLongJobs: false,
+    maxDurationSeconds: 1800,
+    maxPreparedAudioBytes: 100_000_000,
+    maxActiveJobsPerUser: 1,
+    allowanceAudioSeconds: 3600,
+    allowanceWindowSeconds: 86400,
+    maxOutstandingJobs: 100,
+    maxOutstandingAudioSeconds: 60000,
+    agingThresholdSeconds: 900,
+    qualification: null,
+    readiness: {
+      evidenceStatus: "unavailable",
+      expandedAdmissionAvailable: false,
+      capableWorkerIds: [],
+      costModelRevision: null,
+      maxOutstandingEstimatedWorkerSeconds: null,
+    },
+  };
+  processingUsage: ProcessingUsage = {
+    revision: 1,
+    policyRevision: 1,
+    allowanceAudioSeconds: 3600,
+    usedAudioSeconds: 900,
+    reservedAudioSeconds: 600,
+    remainingAudioSeconds: 2100,
+    activeJobs: 1,
+    maxActiveJobs: 1,
+    nextReplenishmentAt: null,
+    replenishments: [],
+    availability: "available",
+    checkedAt: NOW,
+    allowanceOverride: null,
+  };
   settings: ProcessingSettings = {
     revision: 1,
     acceptNewJobs: true,
@@ -304,6 +345,125 @@ export class DashboardFixture {
 
     if (method === "GET" && path === "/admin/session")
       return { status: 200, body: sessionForRole(role) };
+    if (path === "/admin/settings/processing-v2") {
+      if (method === "GET") return { status: 200, body: this.mediaPolicy };
+      const body = input.body as Omit<
+        ProcessingPolicyV2,
+        "readiness" | "revision" | "updatedAt"
+      > &
+        RevisionCommand;
+      if (body.expectedRevision !== this.mediaPolicy.revision)
+        return error(
+          409,
+          "REVISION_CONFLICT",
+          "The server revision changed; your draft was not saved.",
+        );
+      if (!body.reason || !body.operationId || body.schemaVersion !== 2)
+        return error(
+          400,
+          "INVALID_REQUEST",
+          "Audited versioned settings are required.",
+        );
+      const fields = { ...body } as Partial<typeof body>;
+      delete fields.expectedRevision;
+      delete fields.operationId;
+      delete fields.reason;
+      this.mediaPolicy = {
+        ...this.mediaPolicy,
+        ...fields,
+        revision: this.mediaPolicy.revision + 1,
+        updatedAt: new Date().toISOString(),
+      };
+      return { status: 200, body: this.mediaPolicy };
+    }
+    if (path === "/admin/jobs/queue-summary" && method === "GET")
+      return {
+        status: 200,
+        body: {
+          outstandingJobs: 3,
+          outstandingAudioSeconds: 1920,
+          queuedJobs: 2,
+          queuedAudioSeconds: 1860,
+          oldestQueuedAt: NOW,
+          limits: {
+            maxOutstandingJobs: 100,
+            maxOutstandingAudioSeconds: 60000,
+          },
+          estimatedWorkerSeconds: null,
+          estimatedWaitRange: null,
+          evidenceStatus: "unavailable",
+          checkedAt: new Date().toISOString(),
+        },
+      };
+    if (
+      path === `/admin/users/${FIXTURE_IDS.user}/processing-usage` &&
+      method === "GET"
+    ) {
+      return {
+        status: 200,
+        body: { ...this.processingUsage, revision: this.user.revision },
+      };
+    }
+    if (
+      (path === `/admin/users/${FIXTURE_IDS.user}/processing-allowance` &&
+        method === "PUT") ||
+      (path === `/admin/users/${FIXTURE_IDS.user}/clear-processing-allowance` &&
+        method === "POST")
+    ) {
+      const body = input.body as RevisionCommand & {
+        allowanceAudioSeconds?: number;
+        expiresAt?: string;
+      };
+      if (body.expectedRevision !== this.user.revision)
+        return error(
+          409,
+          "REVISION_CONFLICT",
+          "Account revision changed; refresh usage and review again.",
+        );
+      if (!body.reason || !body.operationId)
+        return error(
+          400,
+          "INVALID_REQUEST",
+          "Reason and operation ID are required.",
+        );
+      const clear = path.endsWith("clear-processing-allowance");
+      if (
+        !clear &&
+        (!body.allowanceAudioSeconds ||
+          !body.expiresAt ||
+          body.allowanceAudioSeconds < 3600 ||
+          body.allowanceAudioSeconds > 86400 ||
+          Date.parse(body.expiresAt) <= Date.now())
+      )
+        return error(
+          400,
+          "INVALID_REQUEST",
+          "Bounded allowance and future expiry are required.",
+        );
+      this.user = { ...this.user, revision: this.user.revision + 1 };
+      this.processingUsage = {
+        ...this.processingUsage,
+        revision: this.user.revision,
+        allowanceAudioSeconds: clear ? 3600 : body.allowanceAudioSeconds!,
+        remainingAudioSeconds:
+          (clear ? 3600 : body.allowanceAudioSeconds!) -
+          this.processingUsage.usedAudioSeconds -
+          this.processingUsage.reservedAudioSeconds,
+        allowanceOverride: clear
+          ? null
+          : {
+              allowanceAudioSeconds: body.allowanceAudioSeconds!,
+              expiresAt: body.expiresAt!,
+            },
+      };
+      return {
+        status: 200,
+        body: {
+          revision: this.user.revision,
+          allowanceOverride: this.processingUsage.allowanceOverride,
+        },
+      };
+    }
     if (method === "GET" && path === "/admin/overview")
       return {
         status: 200,

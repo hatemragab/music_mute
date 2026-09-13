@@ -4,7 +4,7 @@
     <string name="home">الرئيسية</string>
     <string name="library">السجل</string>
     <string name="settings">الإعدادات</string>
-    <string name="hero_title">استيراد صوت</string>
+    <string name="hero_title">اختر ملف صوت أو فيديو</string>
     <string name="hero_description">اختر ملفاً صوتياً تملكه أو لديك إذن بمعالجته.</string>
     <string name="voice_first">الصوت، مباشرة من يوتيوب</string>
     <string name="demo_badge">عرض تجريبي</string>
@@ -215,7 +215,7 @@
     <string name="auth_error_global_logout">تم خروجك من هذا الجهاز، لكن لم يتأكّد الخروج من الجميع. سجّل دخولك للتحقّق أو لإعادة تنفيذ العملية.</string>
     <string name="cloud_processing_title">معالجة الصوت</string>
     <string name="cloud_processing_description">أزل الموسيقى من ملف صوتي تم تنزيله أو استيراده.</string>
-    <string name="processing_import">استيراد صوت</string>
+    <string name="processing_import">اختر ملف صوت أو فيديو</string>
     <string name="processing_remove">إزالة الموسيقى</string>
     <string name="processing_limits">صوت فقط · أقل من ١٠ دقائق · أقل من ٣٠ ميجابايت</string>
     <string name="processing_empty">ستظهر مهام معالجة الصوت هنا.</string>
@@ -340,4 +340,25 @@
     <string name="update_error_service">خدمة التحديث غير متاحة مؤقتًا. حاول مجددًا.</string>
     <string name="creative_account_full_name">الاسم الكامل</string>
     <string name="creative_account_name_pending">حسابك جاهز. تعذر حفظ اسمك حتى الآن. أعد المحاولة لإكمال ملفك الشخصي.</string>
+    <string name="media_import_photos">اختر فيديو من الصور</string>
+    <string name="media_error_too_long">تتجاوز هذه الوسائط المدة المسموح بها حاليًا. اختر تسجيلًا أقصر.</string>
+    <string name="media_error_too_large">يتجاوز هذا الملف حد الحجم الآمن. اختر ملفًا أصغر.</string>
+    <string name="media_error_no_audio">لا يحتوي هذا الفيديو على مسار صوتي صالح. اختر ملفًا آخر.</string>
+    <string name="media_error_default_track">المسار الصوتي الافتراضي غير متاح أو غير محدد. اختر ملفًا بمسار صوتي واحد صالح.</string>
+    <string name="media_error_unsupported">لا يستطيع هذا الجهاز تجهيز هذا التنسيق بأمان. اختر ملفًا صوتيًا مدعومًا.</string>
+    <string name="media_error_duration">تعذر التحقق من مدة التسجيل. اختر ملفًا آخر.</string>
+    <string name="media_error_playlist">الصق رابط فيديو منفرد دون معلومات قائمة تشغيل.</string>
+    <string name="media_error_live">البث المباشر والفيديوهات القادمة غير مدعومة. اختر تسجيلًا مكتملًا.</string>
+    <string name="processing_error_allowance">رصيد معالجة الصوت مستخدم أو محجوز. تحقق من موعد تجدد الرصيد القادم.</string>
+    <string name="processing_error_queue_full">قائمة انتظار المعالجة ممتلئة. حاول لاحقًا.</string>
+    <string name="processing_error_capacity">المعالجة غير متاحة مؤقتًا. حاول لاحقًا.</string>
+    <string name="processing_error_compatibility">تتطلب سياسة المعالجة هذه تحديثًا متوافقًا للتطبيق.</string>
+    <string name="processing_error_active">أكمل مهمتك الحالية أو ألغها قبل بدء مهمة أخرى.</string>
+    <string name="processing_usage_remaining">متبقٍ %1$d دقيقة صوتية</string>
+    <string name="processing_usage_details">%1$d دقيقة مستخدمة · %2$d دقيقة محجوزة</string>
+    <string name="processing_usage_replenishment">موعد تجدد الرصيد القادم: %1$s</string>
+    <string name="processing_usage_admission">قد تتغير الإتاحة أثناء التجهيز. يتم تأكيد القبول بعد التجهيز.</string>
+    <string name="media_inspecting">فحص الوسائط</string>
+    <string name="media_error_reselect">فُقد الوصول إلى الملف المحدد. اختر الملف مرة أخرى.</string>
+    <string name="processing_fair_wait">قد يتغير ترتيب الانتظار لتوزيع المعالجة بعدل. لا يتوفر تقدير موثوق لمدة الانتظار.</string>
 </resources>

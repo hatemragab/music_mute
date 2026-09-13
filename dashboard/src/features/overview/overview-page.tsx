@@ -1,3 +1,4 @@
+import { QueueSummarySection } from "@/features/jobs/queue-summary-panel";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -72,6 +73,7 @@ export function OverviewPage() {
           </div>
         }
       />
+      <QueueSummarySection />
       {overview.isLoading ? (
         <LoadingState rows={6} />
       ) : overview.isError ? (

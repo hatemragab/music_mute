@@ -12,24 +12,35 @@ test('expired worker holds slot across restart and reconciliation resumes the sa
     durationSeconds: 10,
     sha256: Buffer.alloc(32).toString('base64'),
   };
-  const create = async () => {
-    const response = await f.request('POST', '/jobs', {
-      requestId: randomUUID(),
-      input,
-    });
+  const create = async (identity = 'owner') => {
+    const response = await f.request(
+      'POST',
+      '/jobs',
+      {
+        requestId: randomUUID(),
+        input,
+      },
+      identity,
+    );
     assert.equal(response.status, 201, JSON.stringify(response.body));
     f.fakeStorage.put(
       (await f.jobs.findById(response.body.id)).inputReservation,
     );
     assert.equal(
-      (await f.request('POST', `/jobs/${response.body.id}/upload-complete`, {}))
-        .status,
+      (
+        await f.request(
+          'POST',
+          `/jobs/${response.body.id}/upload-complete`,
+          {},
+          identity,
+        )
+      ).status,
       200,
     );
     return response.body.id;
   };
   const first = await create();
-  await create();
+  await create('other');
   const claim = await f.request(
     'POST',
     '/worker/claim',

@@ -1,4 +1,6 @@
-import { Transform } from 'class-transformer';
+import { IsObject, ValidateIf, ValidateNested } from 'class-validator';
+import { ExecutionEvidenceDto } from './execution-evidence.dto.js';
+import { Transform, Type } from 'class-transformer';
 import {
   Equals,
   IsIn,
@@ -15,6 +17,11 @@ import {
 import { WorkerSelectorDto } from './worker-request.dto.js';
 
 export class WorkerEventDto extends WorkerSelectorDto {
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ExecutionEvidenceDto)
+  executionEvidence?: ExecutionEvidenceDto;
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.toLowerCase() : value,
   )

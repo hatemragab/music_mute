@@ -827,6 +827,110 @@
       "responseCategory": "csv",
       "validationOwner": "service",
       "successStatus": 200
+    },
+    {
+      "controller": "AdminSettingsController",
+      "method": "GET",
+      "path": "/admin/settings/processing-v2",
+      "permissions": ["settings.read"],
+      "roles": ["owner", "worker_manager", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminSettingsController",
+      "method": "PUT",
+      "path": "/admin/settings/processing-v2",
+      "permissions": ["settings.manage"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "write",
+      "requestBody": {
+        "schemaVersion": 2,
+        "acceptNewJobs": true,
+        "acceptLongJobs": false,
+        "maxDurationSeconds": 1800,
+        "maxPreparedAudioBytes": 100000000,
+        "maxActiveJobsPerUser": 1,
+        "allowanceAudioSeconds": 3600,
+        "allowanceWindowSeconds": 86400,
+        "maxOutstandingJobs": 100,
+        "maxOutstandingAudioSeconds": 60000,
+        "agingThresholdSeconds": 900,
+        "expectedRevision": 0,
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "reason": "Synthetic contract fixture",
+        "qualification": null
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminUsersController",
+      "method": "GET",
+      "path": "/admin/users/:id/processing-usage",
+      "permissions": ["users.read"],
+      "roles": ["owner", "support"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "user",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminUsersController",
+      "method": "POST",
+      "path": "/admin/users/:id/clear-processing-allowance",
+      "permissions": ["users.processing.manage"],
+      "roles": ["owner", "support"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "reason": "Synthetic contract fixture",
+        "expectedRevision": 0
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminUsersController",
+      "method": "PUT",
+      "path": "/admin/users/:id/processing-allowance",
+      "permissions": ["users.processing.manage"],
+      "roles": ["owner", "support"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "reason": "Synthetic contract fixture",
+        "expectedRevision": 0,
+        "allowanceAudioSeconds": 7200,
+        "expiresAt": "2026-09-14T12:00:00.000Z"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminJobsController",
+      "method": "GET",
+      "path": "/admin/jobs/queue-summary",
+      "permissions": ["jobs.read"],
+      "roles": ["owner", "worker_manager", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "job",
+      "validationOwner": "service",
+      "successStatus": 200
     }
   ]
 }

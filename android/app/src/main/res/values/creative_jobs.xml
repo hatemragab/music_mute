@@ -1,7 +1,7 @@
 <resources>
     <string name="creative_jobs_details_unavailable">Task details aren’t available yet. Refresh or return to Home.</string>
     <string name="creative_jobs_home_title">Make room for your voice.</string>
-    <string name="creative_jobs_audio_only">Choose an audio file</string>
+    <string name="creative_jobs_audio_only">Only prepared audio is uploaded</string>
     <string name="creative_jobs_heading">Processing jobs</string>
     <string name="creative_jobs_empty">Your jobs will appear here. Import audio to create your first voice result.</string>
     <string name="creative_jobs_load_more">Load more</string>

@@ -99,7 +99,8 @@ private struct ProductionVocalView: View {
       store: repository.store, repository: repository, preparer: preparer,
       download: { videoID, operationID, ownerUid, stage, progress in
         let saved = try await audioService.downloadForProcessing(
-          videoID: videoID, id: operationID, ownerUid: ownerUid, stage: stage, progress: progress)
+          videoID: videoID, id: operationID, ownerUid: ownerUid,
+          policy: await preparer.currentPolicy(), stage: stage, progress: progress)
         guard let url = files.url(for: saved.relativePath) else { throw AudioFailure.storage }
         return PipelineSourceFile(url: url, title: saved.title)
       },
@@ -270,7 +271,9 @@ struct VocalRootView: View {
         HomeView(
           model: downloads, acceptURL: processing.acceptURL,
           beginImport: processing.beginSourceImport,
-          importAudio: processing.importAudio, reportImportFailure: processing.reportImportFailure,
+          importAudio: { processing.importAudio($0) },
+          photoSourceLimit: processing.photoSourceLimit, importPhoto: processing.importPhoto,
+          reportImportFailure: processing.reportImportFailure,
           showProcessing: { tab = 2 }
         ) { tab = 1 }
         .background(

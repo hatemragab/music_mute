@@ -32,9 +32,11 @@ struct ProcessingRootView: View {
       },
       onResume: model.retry, onCancel: model.cancel, onNotifications: requestNotifications
     )
+    .safeAreaInset(edge: .top) { ProcessingUsageView(repository: model.usageRepository) }
     .modifier(PendingAudioReviews(pipeline: model.pipeline))
     .fileImporter(
-      isPresented: $importing, allowedContentTypes: [.audio], allowsMultipleSelection: false
+      isPresented: $importing, allowedContentTypes: [.audio, .movie, .mpeg4Movie, .quickTimeMovie],
+      allowsMultipleSelection: false
     ) { result in
       switch result {
       case .success(let urls): if let url = urls.first { model.importAudio(url) }

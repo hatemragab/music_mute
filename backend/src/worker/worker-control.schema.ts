@@ -8,6 +8,9 @@ import { WORKER_ID_PATTERN } from './worker-registration.schema.js';
   versionKey: false,
 })
 export class WorkerControl {
+  @Prop({ type: Number, default: null, enum: [2, null] }) mediaPolicyVersion?:
+    2 | null;
+  @Prop({ type: Date, default: null }) mediaCapabilitySeenAt?: Date | null;
   @Prop({
     type: String,
     required: true,
@@ -17,6 +20,9 @@ export class WorkerControl {
   _id!: string;
   @Prop({ required: true, min: 0, default: 0, validate: Number.isSafeInteger })
   controlRevision!: number;
+  /** Stable admin CAS; worker polling and heartbeats only advance controlRevision. */
+  @Prop({ required: true, min: 0, default: 0, validate: Number.isSafeInteger })
+  managementRevision!: number;
   @Prop({ type: MongoSchema.Types.ObjectId, default: null })
   activeJobId!: Types.ObjectId | null;
   @Prop({ type: String, default: null, maxlength: 36 }) attemptId!:

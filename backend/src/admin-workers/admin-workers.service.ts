@@ -225,20 +225,31 @@ export class AdminWorkersService {
       async (session) => {
         const { registration, control } = await this.read(id, session);
         if (!control) throw adminError('RECOVERY_PROOF_REQUIRED');
-        if (control.controlRevision !== dto.expectedRevision)
+        if ((control.managementRevision ?? 0) !== dto.expectedRevision)
           throw adminError('REVISION_CONFLICT');
-        const previousRevision = control.controlRevision;
+        const previousRevision = control.managementRevision ?? 0;
+        // The same control-document write remains serialized with worker authority fences.
+        await this.controls.updateOne(
+          { _id: id },
+          { $inc: { managementRevision: 1 } },
+          { session },
+        );
+        control.managementRevision = previousRevision + 1;
         const active = Boolean(
           control.activeJobId || control.attemptId || control.sessionId,
         );
         if (action === 'release-stopped') {
           const proof = dto as ReleaseStoppedWorkerDto;
-          await this.recovery.releaseStopped(id, proof, session);
+          await this.recovery.releaseStopped(
+            id,
+            { ...proof, expectedRevision: control.controlRevision },
+            session,
+          );
           const latest = await this.controls.findById(id).session(session);
           return {
             resourceId: id,
             previousRevision,
-            revision: latest!.controlRevision,
+            revision: latest!.managementRevision ?? 0,
             stopEvidence: {
               attestation: proof.stopEvidence,
               stoppedAt: proof.stoppedAt,
@@ -280,7 +291,7 @@ export class AdminWorkersService {
         return {
           resourceId: id,
           previousRevision,
-          revision: control.controlRevision,
+          revision: control.managementRevision,
           value: { worker: this.present(registration, control), rawKey },
         };
       },

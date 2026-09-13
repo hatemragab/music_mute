@@ -13,6 +13,16 @@ import org.junit.rules.TemporaryFolder
 class AudioInputPreparerTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun expandedInputIsInclusiveAndRecoveryPreservesMetadataWithoutProviderGrant() = runBlocking {
+        val id = java.util.UUID.randomUUID().toString()
+        val preparer = AudioInputPreparer(temporary.root) { AudioInspection(1800.0, true, false, "audio/mp4") }
+        val input = preparer.prepare("owner", "video.m4a", id, expandedMediaPolicy(), "video_file") { ByteArrayInputStream(byteArrayOf(1, 2, 3)) }
+        val recovered = preparer.recover("owner", id, "video.mov", expandedMediaPolicy(), "video_file")
+        assertEquals(input.declaration, recovered?.declaration)
+        assertEquals("video_file", recovered?.mediaSource)
+        assertEquals(2, recovered?.mediaPolicy?.version)
+    }
+
     @Test fun replayUsesCommittedBytesWithoutReopeningTheSource() = runBlocking {
         val id = java.util.UUID.randomUUID().toString()
         val preparer = AudioInputPreparer(temporary.root) { AudioInspection(1.0, true, false, "audio/mpeg") }

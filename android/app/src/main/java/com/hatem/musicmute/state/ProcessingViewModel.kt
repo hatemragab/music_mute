@@ -97,9 +97,9 @@ class ProcessingViewModel(
                 if (cursor.moveToFirst()) cursor.getString(0) else null
             } ?: uri.lastPathSegment.orEmpty()
         }
-        coordinator.acceptImport(operationId, name) {
-            resolver.openInputStream(uri) ?: throw InputPreparationException(InputPreparationError.STORAGE)
-        }
+        try { resolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        catch (_: SecurityException) { /* A provider may give only a temporary grant; lost grants require reselection. */ }
+        coordinator.acceptDocument(operationId, name, uri.toString())
         checkSession(ticket)
         history.refresh()
         }

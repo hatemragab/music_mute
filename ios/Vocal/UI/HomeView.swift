@@ -6,11 +6,14 @@ struct HomeView: View {
   var acceptURL: (String) async -> Bool = { _ in false }
   var beginImport: () -> Void = {}
   var importAudio: (URL) -> Void = { _ in }
+  var photoSourceLimit: Int64 = 29_999_999
+  var importPhoto: (URL) -> Void = { _ in }
   var reportImportFailure: (Error) -> Void = { _ in }
   var showProcessing: () -> Void = {}
   var showHistory: () -> Void
   @State private var emptyClipboard = false
   @State private var importing = false
+  @State private var importingPhoto = false
   @State private var youtubeExpanded = false
   @FocusState private var editing: Bool
   var body: some View {
@@ -44,6 +47,13 @@ struct HomeView: View {
           }
           .buttonStyle(PrimaryButtonStyle())
           .accessibilityIdentifier("homeImportAudio")
+          Button {
+            beginImport()
+            importingPhoto = true
+          } label: {
+            Label("media_import_photos", systemImage: "photo.on.rectangle")
+          }
+          .accessibilityIdentifier("homeImportVideo")
           Text("owned_audio_guidance").foregroundStyle(.secondary)
           DisclosureGroup("youtube_secondary", isExpanded: $youtubeExpanded) {
             Text("source_title").font(.title3.bold())
@@ -93,7 +103,9 @@ struct HomeView: View {
       .navigationBarHidden(true)
 
       .fileImporter(
-        isPresented: $importing, allowedContentTypes: [.audio], allowsMultipleSelection: false
+        isPresented: $importing,
+        allowedContentTypes: [.audio, .movie, .mpeg4Movie, .quickTimeMovie],
+        allowsMultipleSelection: false
       ) { result in
         switch result {
         case .success(let urls):
@@ -102,6 +114,19 @@ struct HomeView: View {
             showProcessing()
           }
         case .failure(let error): reportImportFailure(error)
+        }
+      }
+      .sheet(isPresented: $importingPhoto) {
+        MediaPhotoPicker(maxSourceBytes: photoSourceLimit) { result in
+          importingPhoto = false
+          switch result {
+          case .success(let url):
+            if let url {
+              importPhoto(url)
+              showProcessing()
+            }
+          case .failure(let error): reportImportFailure(error)
+          }
         }
       }
       .alert("clipboard_empty", isPresented: $emptyClipboard) { Button("ok", role: .cancel) {} }

@@ -1,3 +1,4 @@
+import { QueuePolicyService } from '../src/admin-settings/queue-policy.service.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AdminSettingsController,
@@ -43,7 +44,13 @@ describe('processing settings HTTP boundary', () => {
     };
     harness = await createAdminHarness({
       controllers: [AdminSettingsController, ProcessingPolicyController],
-      providers: [{ provide: ProcessingSettingsService, useValue: settings }],
+      providers: [
+        { provide: ProcessingSettingsService, useValue: settings },
+        {
+          provide: QueuePolicyService,
+          useValue: { current: vi.fn(), update: vi.fn() },
+        },
+      ],
     });
     return { harness, settings };
   }

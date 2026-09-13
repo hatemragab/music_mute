@@ -96,6 +96,9 @@ export function presentWorker(
       !control?.leaseExpiresAt ||
       control.leaseExpiresAt <= now);
   return {
+    mediaPolicyVersion: control?.mediaPolicyVersion ?? null,
+    mediaCapabilitySeenAt:
+      control?.mediaCapabilitySeenAt?.toISOString() ?? null,
     id: worker._id,
     label: worker.label,
     state: worker.state,
@@ -104,7 +107,7 @@ export function presentWorker(
     activeJobId: control?.activeJobId?.toString() ?? null,
     activeAttemptId: control?.attemptId ?? null,
     recoveryRequired,
-    revision: control?.controlRevision ?? 0,
+    revision: control?.managementRevision ?? 0,
   };
 }
 

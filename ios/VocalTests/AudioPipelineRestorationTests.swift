@@ -4,6 +4,22 @@ import XCTest
 @testable import Vocal
 
 @MainActor final class AudioPipelineRestorationTests: XCTestCase {
+  func testPersistedSourcePolicyRejectsBytesAboveAcceptedLimit() async throws {
+    let fixture = try RestorationFixture()
+    var context = fixture.context(owner: "owner-a")
+    context.maxDownloadBytes = 3
+    context.maxDownloadSeconds = 60
+    let coordinator = fixture.coordinator()
+    await coordinator.bind(ownerUid: context.ownerUid)
+    try coordinator.claim(context)
+    coordinator.capture(try fixture.temporary(bytes: [1, 2, 3, 4]), task: fixture.task(context))
+    let replacement = fixture.coordinator()
+    await replacement.bind(ownerUid: context.ownerUid)
+    let restored = try await replacement.restoredDownload(
+      ownerUid: context.ownerUid, operationId: context.operationId, progress: { _ in })
+    XCTAssertNil(restored)
+  }
+
   func testCapturedReceiptRestoresAfterCoordinatorReplacementAndConsumes() async throws {
     let fixture = try RestorationFixture()
     let context = fixture.context(owner: "owner-a")

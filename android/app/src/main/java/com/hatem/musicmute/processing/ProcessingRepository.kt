@@ -107,6 +107,7 @@ class ProcessingRepository(
         val candidate = if (existing == null) ProcessingOperation(
             prepared.operationId, owner.uid, prepared.operationId,
             prepared.declaration, relative, prepared.displayName.substringBeforeLast('.'),
+            mediaPolicy = prepared.mediaPolicy, mediaSource = prepared.mediaSource,
             sourceKind = SourceKind.FILE,
             sourceTitle = prepared.displayName.substringBeforeLast('.'),
             clientStartedAtMillis = now(), acceptedAtMillis = now(),
@@ -114,6 +115,7 @@ class ProcessingRepository(
             awaitingCloudConsent = requireCloudConsent,
         ) else existing.copy(
             input = prepared.declaration,
+            mediaPolicy = prepared.mediaPolicy, mediaSource = prepared.mediaSource,
             stagedRelativePath = relative,
             displayName = existing.displayName.ifBlank { prepared.displayName.substringBeforeLast('.') },
             sourceTitle = existing.sourceTitle.ifBlank { prepared.displayName.substringBeforeLast('.') },
@@ -134,6 +136,7 @@ class ProcessingRepository(
                 if (latest.cancellationRequested || latest.pendingDelete) latest
                 else latest.copy(
                     input = prepared.declaration,
+                    mediaPolicy = prepared.mediaPolicy, mediaSource = prepared.mediaSource,
                     stagedRelativePath = relative,
                     displayName = latest.displayName.ifBlank { prepared.displayName.substringBeforeLast('.') },
                     sourceTitle = latest.sourceTitle.ifBlank { prepared.displayName.substringBeforeLast('.') },
@@ -383,6 +386,7 @@ class ProcessingRepository(
                 change(owner, operationId, runId) {
                     it.copy(phase = ProcessingPhase.COMPLETE, serverStatus = "cancelled")
                 }
+                withContext(Dispatchers.IO) { PreparedMediaCleanup(stagingRoot).abandonedBeforeReservation(operation) }
                 return ProcessingRunResult.COMPLETE
             }
             if (operation.retryOfJobId == null && !operation.cancellationRequested) verifyInput(operation)
@@ -401,6 +405,9 @@ class ProcessingRepository(
                         operation.sourceKind,
                         operation.clientStartedAtMillis.takeIf { it > 0 }?.let(java.time.Instant::ofEpochMilli),
                         operation.sourceUrl,
+                        operation.mediaPolicy.version.takeIf { it == 2 },
+                        operation.mediaPolicy.profileId,
+                        operation.mediaSource.takeIf { operation.mediaPolicy.version == 2 },
                     ),
                 )
                 if (result.requestId != null && result.requestId != operation.requestId)
@@ -493,6 +500,10 @@ class ProcessingRepository(
             it.copy(phase = if (known) ProcessingPhase.COMPLETE else ProcessingPhase.PAUSED,
                 localProblem = if (known) null else ProcessingLocalProblem.UNKNOWN_STATE)
         }
+        if (known) {
+            val confirmed = current(owner, operationId, runId).copy(serverStatus = status)
+            withContext(Dispatchers.IO) { runCatching { PreparedMediaCleanup(stagingRoot).afterConfirmedUpload(confirmed) } }
+        }
         return if (known) ProcessingRunResult.COMPLETE else ProcessingRunResult.PAUSED
     }
 
@@ -518,7 +529,7 @@ class ProcessingRepository(
         val file = File(stagingRoot, relative).canonicalFile
         val owner = processingOwnerDirectory(stagingRoot, operation.ownerUid).canonicalFile
         if (!file.toPath().startsWith(owner.toPath()) || !file.isFile || !file.canRead() ||
-            file.length() != input.bytes || !validProcessingInput(input.bytes, input.durationSeconds)
+            file.length() != input.bytes || !operation.mediaPolicy.acceptsPrepared(input.bytes, input.durationSeconds)
         ) throw ProcessingTransferException(ProcessingLocalProblem.INPUT_CHANGED)
         if (availableSpace() < 1_048_576) throw ProcessingTransferException(ProcessingLocalProblem.STORAGE)
         val digest = MessageDigest.getInstance("SHA-256")

@@ -26,12 +26,12 @@ data class ProcessingSession(val uid: String, val epoch: Long)
 
 @Serializable
 enum class ProcessingPhase {
-    SOURCE_INTAKE, SOURCE_QUEUED, DOWNLOADING_SOURCE, PREPARING_INPUT,
+    SOURCE_INTAKE, SOURCE_QUEUED, DOWNLOADING_SOURCE, INSPECTING, PREPARING_INPUT,
     WAITING, RESERVING, UPLOADING, CONFIRMING, RETRY_WAIT, PAUSED, COMPLETE, CANCELLING,
 }
 
 @Serializable
-enum class ProcessingLocalProblem { STORAGE, INPUT_CHANGED, TRANSFER, RETRY_EXHAUSTED, UNKNOWN_STATE }
+enum class ProcessingLocalProblem { RESELECT_SOURCE, STORAGE, INPUT_CHANGED, TRANSFER, RETRY_EXHAUSTED, UNKNOWN_STATE }
 
 /** No signed grants, tokens, storage keys, or diagnostics belong in this durable record. */
 @Serializable
@@ -64,6 +64,10 @@ data class ProcessingOperation(
     val reservationAttempted: Boolean = false,
     val sourceWorkRequestId: String? = null,
     val awaitingCloudConsent: Boolean = false,
+    val sourceUri: String? = null,
+    val sourceName: String? = null,
+    val mediaPolicy: ProcessingMediaPolicy = ProcessingMediaPolicy.LEGACY,
+    val mediaSource: String = "audio_file",
     val schemaVersion: Int = 2,
 )
 

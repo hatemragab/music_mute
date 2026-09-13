@@ -1,3 +1,12 @@
+import { FairQueueService } from '../processing-queue/fair-queue.service.js';
+import { QueueExecutionUsage } from '../processing-queue/queue-scheduling.schema.js';
+import {
+  assertExecutionEvidence,
+  type AttemptExecutionEvidence,
+} from './execution-evidence.js';
+import { QueueCapacityService } from '../processing-queue/queue-capacity.service.js';
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
+import { ProcessingUsageLedger } from '../processing-usage/processing-usage.schema.js';
 import { HttpException, Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -97,16 +106,43 @@ export class WorkerCoordinatorService {
     }
   }
 
-  async claim(sessionId: string, identity?: WorkerIdentity) {
+  async claim(
+    sessionId: string,
+    identity?: WorkerIdentity,
+    mediaPolicyVersion?: 2,
+  ) {
     if (!isUUID(sessionId, '4')) throw authError('INVALID_INPUT');
     sessionId = sessionId.toLowerCase();
     await this.prepare();
+    if (mediaPolicyVersion !== 2)
+      await this.transactions.run(async (session) => {
+        const { control } = await this.authority(identity, session);
+        await this.workers.updateOne(
+          { _id: control._id },
+          { $set: { mediaPolicyVersion: null, mediaCapabilitySeenAt: null } },
+          { session },
+        );
+      });
     const job = await this.transactions.run(async (session) => {
       const {
         control,
         state,
         identity: owner,
       } = await this.authority(identity, session);
+      if (mediaPolicyVersion === 2) {
+        control.mediaPolicyVersion = 2;
+        control.mediaCapabilitySeenAt = new Date();
+        await this.workers.updateOne(
+          { _id: control._id },
+          {
+            $set: {
+              mediaPolicyVersion: 2,
+              mediaCapabilitySeenAt: control.mediaCapabilitySeenAt,
+            },
+          },
+          { session },
+        );
+      }
       if (control.activeJobId) {
         const current = await this.jobs
           .findById(control.activeJobId)
@@ -128,15 +164,22 @@ export class WorkerCoordinatorService {
             409,
           );
         }
+        if (
+          current.admissionSnapshot?.policyVersion === 2 &&
+          mediaPolicyVersion !== 2
+        )
+          throw jobError('WORKER_RECOVERY_REQUIRED');
         return current;
       }
       const next =
         state === 'draining'
           ? null
-          : await this.jobs
-              .findOne({ status: 'queued', deletedAt: null, workerId: null })
-              .sort({ queueOrder: 1 })
-              .session(session);
+          : await new FairQueueService(this.jobs).selectNextEligible(
+              new Date(),
+              session,
+              owner.workerId,
+              mediaPolicyVersion,
+            );
       if (!next) {
         await this.workers.updateOne(
           { _id: control._id },
@@ -147,7 +190,7 @@ export class WorkerCoordinatorService {
       }
       return this.assign(next, control, sessionId, session, identity);
     });
-    return job ? this.assignment(job, identity) : null;
+    return job ? this.assignment(job, identity, mediaPolicyVersion) : null;
   }
 
   private live(job: Job, control: WorkerControl): boolean {
@@ -231,6 +274,7 @@ export class WorkerCoordinatorService {
       durationSeconds: number;
       decodable: true;
       hasAudio: true;
+      executionEvidence?: AttemptExecutionEvidence;
     },
     identity?: WorkerIdentity,
   ) {
@@ -240,7 +284,7 @@ export class WorkerCoordinatorService {
       report.hasAudio !== true ||
       !Number.isFinite(report.durationSeconds) ||
       report.durationSeconds <= 0 ||
-      report.durationSeconds >= 600
+      report.durationSeconds > 1800
     )
       throw authError('INVALID_INPUT');
     const hash = requestHash({ operation: 'stage', selector, report });
@@ -256,12 +300,41 @@ export class WorkerCoordinatorService {
       }
       const { job } = await this.current(selector, session, true, identity);
       await this.accountAccess.assertActive(job.userId, session);
-      assertMeasuredDuration(
+      if (job.admissionSnapshot?.policyVersion === 2) {
+        if (
+          report.durationSeconds >
+          (job.admissionSnapshot.maxDurationSeconds ?? 0)
+        )
+          throw jobError('MEDIA_TOO_LONG');
+      } else
+        assertMeasuredDuration(
+          report.durationSeconds,
+          job.admissionSnapshot?.maxDurationSecondsExclusive ?? 600,
+        );
+      await new QueueCapacityService(this.jobs).assertCapacity(
         report.durationSeconds,
-        job.admissionSnapshot?.maxDurationSecondsExclusive ?? 600,
+        session,
+        job._id,
+        job.admissionSnapshot ?? undefined,
       );
+      await new ProcessingUsageService(
+        this.jobs.db.model<ProcessingUsageLedger>(ProcessingUsageLedger.name),
+        this.jobs,
+      ).reconcileMeasured(job, report.durationSeconds, session);
       if (!['validating', 'processing'].includes(job.status))
         throw jobError('JOB_STATE_CONFLICT');
+      if (
+        report.executionEvidence &&
+        report.executionEvidence.measuredAudioSeconds !== report.durationSeconds
+      )
+        throw jobError('JOB_STATE_CONFLICT');
+      if (report.executionEvidence)
+        await this.recordExecution(
+          job,
+          selector.eventId,
+          report.executionEvidence,
+          session,
+        );
       const now = new Date();
       const entering = job.status === 'validating';
       await this.jobs.updateOne(
@@ -323,6 +396,22 @@ export class WorkerCoordinatorService {
     )
       throw jobError('WORKER_RECOVERY_REQUIRED');
     await this.accountAccess.assertActive(job.userId, session);
+    if (
+      await new FairQueueService(this.jobs).ownerIsRunning(
+        job.userId,
+        session,
+        job._id,
+      )
+    )
+      throw jobError('PROCESSING_LIMIT_REACHED');
+    if (
+      job.admissionSnapshot?.policyVersion === 2 &&
+      (control.mediaPolicyVersion !== 2 ||
+        !job.admissionSnapshot.qualification?.qualifiedWorkerIds.includes(
+          control._id,
+        ))
+    )
+      throw jobError('PROCESSING_CAPACITY_UNAVAILABLE');
     const attemptId = randomUUID();
     const generation = control.generation + 1;
     if (!Number.isSafeInteger(generation))
@@ -370,10 +459,27 @@ export class WorkerCoordinatorService {
       ],
       { session },
     );
+    await this.jobs.db
+      .model<QueueExecutionUsage>(QueueExecutionUsage.name)
+      .create(
+        [
+          {
+            _id: attemptId,
+            userId: job.userId,
+            executionSeconds: null,
+            expiresAt: new Date(now.getTime() + 86400_000),
+          },
+        ],
+        { session },
+      );
     return job;
   }
 
-  async assignment(job: Job, identity?: WorkerIdentity) {
+  async assignment(
+    job: Job,
+    identity?: WorkerIdentity,
+    mediaPolicyVersion?: 2,
+  ) {
     if (
       !job.inputObject ||
       !job.attemptId ||
@@ -399,6 +505,39 @@ export class WorkerCoordinatorService {
     });
     await this.accountAccess.assertActive(job.userId);
     return {
+      ...(mediaPolicyVersion === 2 || job.admissionSnapshot?.policyVersion === 2
+        ? {
+            processingLimits: {
+              policyVersion: job.admissionSnapshot?.policyVersion ?? 1,
+              maxDurationSeconds:
+                job.admissionSnapshot?.policyVersion === 2
+                  ? job.admissionSnapshot.maxDurationSeconds
+                  : (job.admissionSnapshot?.maxDurationSecondsExclusive ?? 600),
+              durationInclusive: job.admissionSnapshot?.policyVersion === 2,
+              maxInputBytes:
+                job.admissionSnapshot?.policyVersion === 2
+                  ? job.admissionSnapshot.maxInputBytes
+                  : (job.admissionSnapshot?.maxInputBytesExclusive ??
+                    30_000_000),
+              inputBytesInclusive: job.admissionSnapshot?.policyVersion === 2,
+              maxOutputBytes:
+                job.admissionSnapshot?.qualification?.maxOutputBytes ??
+                this.config.get<number>(
+                  'PROCESSING_OUTPUT_MAX_BYTES',
+                  100_000_000,
+                ),
+              outputBytesInclusive: job.admissionSnapshot?.policyVersion === 2,
+              probeTimeoutSeconds:
+                job.admissionSnapshot?.qualification?.probeTimeoutSeconds ??
+                300,
+              processingTimeoutSeconds:
+                job.admissionSnapshot?.qualification
+                  ?.processingTimeoutSeconds ?? 7200,
+              costModelRevision:
+                job.admissionSnapshot?.qualification?.costModelRevision ?? null,
+            },
+          }
+        : {}),
       workerId: this.ownerId(job.workerId),
       jobId: job._id.toHexString(),
       attemptId: job.attemptId,
@@ -416,6 +555,70 @@ export class WorkerCoordinatorService {
         download,
       },
     };
+  }
+
+  async recordExecution(
+    job: Job,
+    eventId: string,
+    evidence: AttemptExecutionEvidence,
+    session: ClientSession,
+  ) {
+    const attempt = await this.attempts
+      .findOne({ attemptId: job.attemptId })
+      .session(session);
+    if (!attempt) throw jobError('STALE_ATTEMPT');
+    const hash = requestHash(evidence);
+    if (attempt.executionEvidenceEventId === eventId) {
+      if (attempt.executionEvidenceHash !== hash)
+        throw jobError('IDEMPOTENCY_CONFLICT');
+      return;
+    }
+    if (
+      attempt.separatorStoppedConfirmed &&
+      (!evidence.stoppedConfirmed ||
+        evidence.separatorExecutionSeconds !==
+          attempt.separatorExecutionSeconds)
+    )
+      throw jobError('JOB_STATE_CONFLICT');
+    assertExecutionEvidence(
+      evidence,
+      eventId,
+      attempt.separatorExecutionSeconds,
+      attempt.startedAt,
+      new Date(),
+    );
+    if (
+      job.measuredDurationSeconds !== null &&
+      evidence.measuredAudioSeconds !== job.measuredDurationSeconds
+    )
+      throw jobError('JOB_STATE_CONFLICT');
+    if (
+      attempt.separationCompleted === true &&
+      evidence.separationCompleted === false
+    )
+      throw jobError('JOB_STATE_CONFLICT');
+    if (evidence.separationCompleted !== undefined)
+      attempt.separationCompleted = evidence.separationCompleted;
+    attempt.executionEvidenceEventId = eventId;
+    attempt.executionEvidenceHash = hash;
+    attempt.separatorExecutionSeconds = evidence.separatorExecutionSeconds;
+    attempt.separatorStoppedConfirmed = evidence.stoppedConfirmed;
+    await attempt.save({ session });
+    await this.jobs.db
+      .model<QueueExecutionUsage>(QueueExecutionUsage.name)
+      .updateOne(
+        { _id: attempt.attemptId },
+        {
+          $set: {
+            executionSeconds: evidence.separatorExecutionSeconds,
+            expiresAt: new Date(
+              (attempt.processingStartedAt ?? attempt.startedAt).getTime() +
+                86400_000,
+            ),
+          },
+        },
+        { session },
+      );
   }
 
   private deadline(): Date {

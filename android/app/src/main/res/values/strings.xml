@@ -4,7 +4,7 @@
     <string name="home">Home</string>
     <string name="library">History</string>
     <string name="settings">Settings</string>
-    <string name="hero_title">Import audio</string>
+    <string name="hero_title">Choose audio or video file</string>
     <string name="hero_description">Choose an audio file you own or have permission to process.</string>
     <string name="voice_first">AUDIO, STRAIGHT FROM YOUTUBE</string>
     <string name="demo_badge">UI DEMO</string>
@@ -215,7 +215,7 @@
     <string name="auth_error_global_logout">You’re signed out here, but signing out all devices could not be confirmed. Sign in again to check or retry that action.</string>
     <string name="cloud_processing_title">Voice processing</string>
     <string name="cloud_processing_description">Remove music from a downloaded or imported audio file.</string>
-    <string name="processing_import">Import audio</string>
+    <string name="processing_import">Choose audio or video file</string>
     <string name="processing_remove">Remove music</string>
     <string name="processing_limits">Audio only · under 10 minutes · under 30 MB</string>
     <string name="processing_empty">Your processing jobs will appear here.</string>
@@ -340,4 +340,25 @@
     <string name="update_error_service">The update service is temporarily unavailable. Try again.</string>
     <string name="creative_account_full_name">Full name</string>
     <string name="creative_account_name_pending">Your account is ready. Your name could not be saved yet. Retry to finish your profile.</string>
+    <string name="media_import_photos">Choose video from Photos</string>
+    <string name="media_error_too_long">This media exceeds the current duration limit. Choose a shorter recording.</string>
+    <string name="media_error_too_large">This file exceeds the safe size limit. Choose a smaller file.</string>
+    <string name="media_error_no_audio">This video has no usable soundtrack. Choose another file.</string>
+    <string name="media_error_default_track">The default soundtrack is unavailable or ambiguous. Choose a file with one usable soundtrack.</string>
+    <string name="media_error_unsupported">This device cannot safely prepare this format. Choose a supported audio file.</string>
+    <string name="media_error_duration">The recording duration could not be verified. Choose another file.</string>
+    <string name="media_error_playlist">Paste an individual video link without playlist information.</string>
+    <string name="media_error_live">Live and upcoming videos are not supported. Choose a finished recording.</string>
+    <string name="processing_error_allowance">Your audio allowance is used or reserved. Check the next replenishment time.</string>
+    <string name="processing_error_queue_full">The processing queue is full. Try again later.</string>
+    <string name="processing_error_capacity">Processing is temporarily unavailable. Try again later.</string>
+    <string name="processing_error_compatibility">This processing policy requires a compatible app update.</string>
+    <string name="processing_error_active">Finish or cancel your existing task before starting another.</string>
+    <string name="processing_usage_remaining">%1$d audio minutes remaining</string>
+    <string name="processing_usage_details">%1$d minutes used · %2$d minutes reserved</string>
+    <string name="processing_usage_replenishment">Next allowance replenishment: %1$s</string>
+    <string name="processing_usage_admission">Availability can change during preparation. Admission is confirmed after preparation.</string>
+    <string name="media_inspecting">Inspecting media</string>
+    <string name="media_error_reselect">Access to the selected file was lost. Choose the file again.</string>
+    <string name="processing_fair_wait">Waiting order may change to share processing fairly. A reliable wait estimate is unavailable.</string>
 </resources>

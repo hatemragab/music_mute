@@ -11,6 +11,9 @@ struct InputDeclaration: Codable, Equatable, Sendable {
 enum JobSourceKind: String, Codable, Equatable, Sendable { case url, file }
 
 struct JobSourceMetadata: Codable, Equatable, Sendable {
+  let policyVersion: Int?
+  let preparationProfileId: String?
+  let source: String?
   let sourceTitle: String?
   let sourceKind: JobSourceKind?
   let clientStartedAt: Date?
@@ -18,8 +21,12 @@ struct JobSourceMetadata: Codable, Equatable, Sendable {
 
   init(
     sourceTitle: String? = nil, sourceKind: JobSourceKind? = nil,
-    clientStartedAt: Date? = nil, sourceURL: String? = nil
+    clientStartedAt: Date? = nil, sourceURL: String? = nil,
+    policyVersion: Int? = nil, preparationProfileId: String? = nil, source: String? = nil
   ) {
+    self.policyVersion = policyVersion
+    self.preparationProfileId = preparationProfileId
+    self.source = source
     self.sourceTitle = sourceTitle
     self.sourceKind = sourceKind
     self.clientStartedAt = clientStartedAt

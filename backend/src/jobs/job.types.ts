@@ -1,3 +1,5 @@
+import type { ProcessingQualification } from '../admin-settings/processing-qualification.js';
+import type { InputSource } from '../admin-settings/processing-policy-v2.js';
 export const JOB_STATUSES = [
   'awaiting_upload',
   'queued',
@@ -32,6 +34,18 @@ export interface InputReservation extends InputDeclaration {
   key: string;
 }
 export interface AdmissionSnapshot {
+  policyVersion?: 1 | 2;
+  maxDurationSeconds?: number;
+  maxInputBytes?: number;
+  qualification?: ProcessingQualification | null;
+  preparationProfileId?: string;
+  source?: InputSource;
+  queueLimits?: {
+    maxOutstandingJobs: number;
+    maxOutstandingAudioSeconds: number;
+  };
+  estimatedWorkerSeconds?: number;
+
   settingsRevision: number;
   maxInputBytesExclusive: number;
   maxDurationSecondsExclusive: number;

@@ -20,12 +20,15 @@ object AudioDownloadPolicy {
             "--no-mtime",
             "--newline",
             "--progress",
+            "--no-resize-buffer",
         )
     val options =
         mapOf(
             "-f" to FORMAT,
             "--fixup" to "never",
             "--socket-timeout" to "30",
+            "--buffer-size" to "65536",
+            "--extractor-retries" to "1",
             "--retries" to "3",
             "--fragment-retries" to "3",
             "--progress-template" to

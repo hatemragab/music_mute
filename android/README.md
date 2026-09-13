@@ -1,7 +1,7 @@
 # MusicMute
 
 Native Kotlin Android app that turns a complete pasted YouTube URL or selected
-local audio file into a durable local review before cloud processing. Source audio stays private and
+local audio/video file into a durable local review before cloud processing. Source audio stays private and
 the processed library retrieves voice-only MP3 results only when requested.
 
 Application ID and namespace: `com.hatem.musicmute`. Minimum SDK 26; compile/target
@@ -196,7 +196,7 @@ If a direct audio-only format is unavailable, the app reports a retryable failur
   or existing complete files. Different URL spellings can produce separate entries.
 - **Settings:** persistent system/light/dark theme and system/English/Arabic
   language. Arabic layouts use RTL; URL fields stay LTR.
-- **Multiple tasks:** up to two local pipelines may run concurrently; additional
+- **Multiple tasks:** one local pipeline runs at a time; additional
   accepted tasks wait durably and remain independently cancellable.
 
 WorkManager queues source and upload transfers when offline and runs real local
@@ -230,8 +230,7 @@ ABIs are packaged; the universal debug APK is about 85 MB. ARM64 executable ELF
 segments were inspected for 16 KB alignment; this is packaging evidence, not a run
 on every Android version or page-size configuration.
 
-The stable yt-dlp updater is attempted before the first download, at most once per
-24 hours in a process. If updating fails, the installed extractor is still tried.
+Downloads use the bundled yt-dlp extractor; an in-operation updater is not run.
 Review upstream native packaging, extractor changes, and GPL-3.0 obligations
 before distributing the app. No release/publication has been performed.
 
@@ -321,3 +320,59 @@ receipts persist outside that deadline even after an account switch or UI cancel
 An earlier ambiguous request stays recorded if a later retry is rate limited.
 Invalidated/disabled sessions trigger durable private cleanup for that UID, while
 ordinary sign-out and transient network failures retain private data.
+
+## Versioned media preparation (2026-09-13)
+
+Files accepts individual audio/video documents; Photos uses the scoped Android video
+picker. No broad photo/storage permission is requested. Documents are persisted as
+owner-scoped URI references and prepared by unique WorkManager work; a lost provider
+grant requests reselection. Existing rights confirmation remains required. Local
+work is serialized, cancellable, and distinguished as inspecting, preparing, source
+download, and upload; waiting for a remote worker does not keep this foreground work
+alive. Android force-stop/background restrictions still apply.
+
+`ProcessingMediaPolicy` reads schema 2 and the `preserve-or-aac-lc-256-v1` profile.
+Expanded media limits are inclusive 1,800 seconds and 100,000,000 bytes, bounded by
+the actual server policy. Null original-size/preparation/download evidence fields
+**disable expansion**. The currently supplied backend policy has null evidence and
+acceptNewJobs=false, so safe legacy audio behavior stays below 600 seconds and
+30,000,000 bytes; this change does not claim 30-minute production readiness.
+Unknown profiles fail safely. Backend admission remains authoritative after local
+preparation and can reject a race with another device or a full queue.
+
+The platform engine uses MediaExtractor directly on the provider descriptor without
+copying the original video. It honors the default or sole soundtrack and rejects
+ambiguous/unusable defaults. Compatible audio is copied unchanged. Selected AAC
+video tracks are remuxed to audio-only M4A; other decodable ordinary mono/stereo
+tracks use MediaCodec AAC-LC at 256 kbps. Multichannel conversion and known spatial
+codecs are rejected rather than downmixed. Prepared schema-2 audio is decoded under
+a deadline before immutable checksum publication and upload. Final prepared output
+must pass the same inclusive duration/size policy; codec padding handling is not a
+license for truncation. Native codec and exact boundary behavior remain unverified
+on Android hardware and must be validated before activating expanded readiness.
+
+Original source size must be known and within an evidence-backed bound for native
+video export. Unknown-size audio streams stay bounded by the prepared cap. Space
+checks reserve room for the bounded prepared copies plus a 16 MiB margin. This is a
+conservative storage guard, not a device benchmark. Prepared audio survives retries
+and completion markers recover after process death; only confirmed post-upload
+states delete that temporary input. Original media and independently saved library
+files remain intact. No video is uploaded or reconstructed; output remains cleaned
+audio retrieved on demand.
+
+YouTube URLs with playlist context, live/upcoming metadata, or unknown duration are
+rejected before downloading audio. The bundled extractor performs a minimal bounded
+metadata projection. Downloaded bytes are guarded by yt-dlp max-filesize, a fixed
+64 KiB buffer, actual progress/disk observation, and a hard process watchdog; absent
+content length does not remove the cap. Legacy downloads additionally use a
+conservative 120-second operation deadline, not a measured capability claim.
+Extractor/fragment retry counts remain bounded and partial attempt files are
+removed. Automatic in-operation extractor updates were removed so an update cannot
+escape the source-operation deadline. Live YouTube availability was not tested.
+
+Owner-only usage is refreshed before intake and periodically on the home screen.
+It separates spent, reserved, remaining audio minutes and the server UTC rolling
+replenishment time, shown in local time. Busy/allowance errors are localized in
+English and Arabic without raw diagnostics or automatic queue-full retries. No
+queue-position or completion-time promise is shown when estimates are unavailable.
+See `../docs/tasks/media-input-and-queue/evidence/android.md` for current validation.

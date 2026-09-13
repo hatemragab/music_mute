@@ -17,7 +17,10 @@ export type AdminUserView = Pick<
   | 'deletionPurgeStartedAt'
   | 'createdAt'
   | 'updatedAt'
-> & { _id: Types.ObjectId };
+> &
+  Partial<Pick<User, 'processingSuspensionExpiresAt'>> & {
+    _id: Types.ObjectId;
+  };
 
 export function presentAdminUser(user: AdminUserView) {
   return {
@@ -25,7 +28,10 @@ export function presentAdminUser(user: AdminUserView) {
     email: user.email ?? null,
     displayName: user.displayName,
     status: user.status,
-    processingSuspended: user.processingSuspended === true,
+    processingSuspended:
+      user.processingSuspended === true &&
+      (!user.processingSuspensionExpiresAt ||
+        user.processingSuspensionExpiresAt.getTime() > Date.now()),
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
     revision: user.adminRevision ?? 0,
@@ -42,6 +48,7 @@ export function presentAdminUserDetail(
     processingCounts,
     recentJobIds,
     suspension: {
+      expiresAt: user.processingSuspensionExpiresAt?.toISOString() ?? null,
       reason: user.processingSuspensionReason ?? null,
       actorUid: user.processingSuspendedBy ?? null,
       at: user.processingSuspendedAt?.toISOString() ?? null,

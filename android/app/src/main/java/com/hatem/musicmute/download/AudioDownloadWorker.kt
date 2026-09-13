@@ -237,10 +237,11 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
                 val stage = if (current.input != null) ClientErrorStage.RESERVING_JOB
                     else if (repository.store.get(recordId)?.status == DownloadStatus.COMPLETE) ClientErrorStage.PREPARING_INPUT
                     else ClientErrorStage.DOWNLOADING_SOURCE
-                val transient = reason == DownloadError.NETWORK || reason == DownloadError.ENGINE
+                val safeProblem = (error as? com.hatem.musicmute.processing.JobsFailure)?.problem
+                val transient = safeProblem == null && (reason == DownloadError.NETWORK || reason == DownloadError.ENGINE)
                 val retries = current.transientRetryCount
                 val retry = sourceRetryPlan(reason, retries, connected(), System.currentTimeMillis(), Math.random())
-                if (retry.shouldRetry) {
+                if (safeProblem == null && retry.shouldRetry) {
                     app.processingRepository.store.update(target.ownerUid, target.operationId) {
                         if (!canUpdateSource(target, it)) it
                         else it.copy(phase = if (it.input == null) ProcessingPhase.SOURCE_QUEUED else ProcessingPhase.WAITING,
@@ -260,7 +261,7 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
                     else if (transient) ProcessingLocalProblem.RETRY_EXHAUSTED else ProcessingLocalProblem.TRANSFER
                 app.processingRepository.store.update(target.ownerUid, target.operationId) {
                     if (!canUpdateSource(target, it)) it
-                    else it.copy(phase = ProcessingPhase.PAUSED, localProblem = problem)
+                    else it.copy(phase = ProcessingPhase.PAUSED, localProblem = if (safeProblem == null) problem else null, problem = safeProblem)
                 }
                 captureFailure(target, stage, reason, retryable = transient)
                 app.processingRepository.store.get(target.ownerUid, target.operationId)?.let { failed ->

@@ -16,9 +16,29 @@ from uuid import uuid4
 
 from .config import Config
 from .engine import SeparatorEngine
+from .media_limits import MediaLimits
 from .power import KeepAwake
 from .processes import ProcessRunner, SingleInstance
 from .worker import Stopping, inspect_audio
+
+
+def prepare_benchmark_audio(source, runner, check, *, prepared):
+    # Offline qualification must exercise the proposed ceiling before it can
+    # authorize production. This does not change claimed assignment limits.
+    return inspect_audio(
+        source,
+        runner,
+        check,
+        prepared=prepared,
+        limits=MediaLimits(
+            policy_version=2,
+            max_duration_seconds=1800,
+            duration_inclusive=True,
+            max_input_bytes=100_000_000,
+            input_bytes_inclusive=True,
+            probe_timeout_seconds=600,
+        ),
+    )
 
 
 def run_benchmark(
@@ -30,7 +50,7 @@ def run_benchmark(
     output_dir: Path | None = None,
     check=lambda: None,
     engine_factory=SeparatorEngine,
-    prepare=inspect_audio,
+    prepare=prepare_benchmark_audio,
 ) -> dict:
     """Caller holds SingleInstance and has recovered old contained processes."""
     if type(repeats) is not int or not 1 <= repeats <= 5 or not inputs:
@@ -126,7 +146,9 @@ def run_benchmark(
                     for future in as_completed(futures):
                         try:
                             future.result()
-                        except BaseException as error:  # noqa: BLE001 -- join both lanes before rethrowing
+                        except (
+                            BaseException
+                        ) as error:  # noqa: BLE001 -- join both lanes before rethrowing
                             failures.append(error)
                 if failures:
                     # A peer's cooperative stop must not hide the original failure.
@@ -147,9 +169,9 @@ def run_benchmark(
                 "completed": len(rows),
                 "wall_seconds": elapsed,
                 "jobs_per_minute": len(rows) * 60 / elapsed if elapsed > 0 else None,
-                "audio_seconds_per_wall_second": audio / elapsed
-                if elapsed > 0
-                else None,
+                "audio_seconds_per_wall_second": (
+                    audio / elapsed if elapsed > 0 else None
+                ),
                 "runs": sorted(rows, key=lambda row: (row["repeat"], row["clip_id"])),
             }
 
@@ -241,7 +263,9 @@ def main(argv=None) -> int:
     except (Stopping, KeyboardInterrupt):
         print('{"error":"BENCHMARK_STOPPED"}')
         return 130
-    except Exception:  # noqa: BLE001 -- CLI errors must never disclose paths or provider details
+    except (
+        Exception
+    ):  # noqa: BLE001 -- CLI errors must never disclose paths or provider details
         print('{"error":"BENCHMARK_FAILED"}')
         return 2
     finally:

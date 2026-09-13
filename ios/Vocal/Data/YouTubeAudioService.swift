@@ -62,6 +62,7 @@ struct YouTubeAudioService: AudioDownloading {
   /// resolves a supported direct audio URL. A persisted receipt is claimed first on relaunch.
   @MainActor func downloadForProcessing(
     videoID: String, id: UUID, ownerUid: String,
+    policy: ProcessingMediaPolicy = .legacy,
     stage: @escaping @Sendable (DownloadStatus) -> Void,
     progress: @escaping @Sendable (DownloadProgress) -> Void
   ) async throws -> SavedAudio {
@@ -76,7 +77,12 @@ struct YouTubeAudioService: AudioDownloading {
     }
 
     stage(.resolving)
-    let resolved = try await resolve(videoID)
+    if policy.version == 2
+      && (policy.maxSourceDownloadBytes == nil || policy.maxSourceDownloadSeconds == nil)
+    {
+      throw AudioInputPreparationError.policyUnavailable
+    }
+    let resolved = try await resolve(videoID, policy: policy)
     try Task.checkCancellation()
     stage(.downloading)
     var request = URLRequest(url: resolved.stream.url)
@@ -84,7 +90,9 @@ struct YouTubeAudioService: AudioDownloading {
     let context = SourceTransferContext(
       ownerUid: ownerUid, operationId: id, transferId: UUID(), title: resolved.title,
       codec: resolved.stream.codec, fileExtension: resolved.stream.fileExtension,
-      bitrate: resolved.stream.bitrate)
+      bitrate: resolved.stream.bitrate,
+      maxDownloadBytes: policy.maxSourceDownloadBytes,
+      maxDownloadSeconds: policy.maxSourceDownloadSeconds)
     let result = try await sourceTransfers.startDownload(
       request: request, context: context, progress: progress)
     return try await finishProcessingDownload(result, id: id, stage: stage)
@@ -116,10 +124,16 @@ struct YouTubeAudioService: AudioDownloading {
     }
   }
 
-  private func resolve(_ id: String) async throws -> ResolvedAudio {
+  private func resolve(_ id: String, policy: ProcessingMediaPolicy? = nil) async throws
+    -> ResolvedAudio
+  {
     try await withThrowingTaskGroup(of: ResolvedAudio.self) { group in
       group.addTask {
         // Explicitly disallow the library's optional remote extractor.
+        let duration = try await YouTubePreflight.inspectRecording(videoID: id)
+        if let policy, !policy.accepts(bytes: 1, duration: duration) {
+          throw AudioInputPreparationError.tooLong
+        }
         let video = YouTube(videoID: id, methods: [.local])
         let streams = try await video.streams
         let candidates = streams.map { stream in
@@ -177,6 +191,7 @@ enum ResumableTransfer {
 private final class TransferProgress: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
   private let report: @Sendable (DownloadProgress) -> Void
   private let lock = NSLock()
+  private let startedAt = Date()
   private var lastReport = Date.distantPast
   private var continuation: CheckedContinuation<(URL, URLResponse), Error>?
   private var task: URLSessionDownloadTask?
@@ -219,6 +234,13 @@ private final class TransferProgress: NSObject, URLSessionDownloadDelegate, @unc
     _ session: URLSession, downloadTask: URLSessionDownloadTask,
     didFinishDownloadingTo location: URL
   ) {
+    guard let bytes = try? location.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+      bytes > 0, bytes <= YouTubePreflight.maximumDownloadBytes,
+      Date().timeIntervalSince(startedAt) <= YouTubePreflight.maximumDownloadSeconds
+    else {
+      saveError = AudioInputPreparationError.invalidSize
+      return
+    }
     // Delegate download files disappear after this callback returns.
     let destination = FileManager.default.temporaryDirectory.appendingPathComponent(
       UUID().uuidString)
@@ -246,6 +268,13 @@ private final class TransferProgress: NSObject, URLSessionDownloadDelegate, @unc
     _ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
     totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
   ) {
+    guard totalBytesWritten <= YouTubePreflight.maximumDownloadBytes,
+      totalBytesExpectedToWrite <= YouTubePreflight.maximumDownloadBytes,
+      Date().timeIntervalSince(startedAt) <= YouTubePreflight.maximumDownloadSeconds
+    else {
+      downloadTask.cancel()
+      return
+    }
     let value = DownloadProgress(
       downloadedBytes: max(0, totalBytesWritten),
       totalBytes: totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil)

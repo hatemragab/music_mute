@@ -29,7 +29,7 @@ describe('worker output attestations', () => {
   it.each([
     { voiceOnly: false },
     { playable: false },
-    { durationSeconds: 600 },
+    { durationSeconds: 1800.001 },
     { durationSeconds: 0 },
     { bytes: '100' },
     { generation: '1' },

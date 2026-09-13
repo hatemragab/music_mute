@@ -15,6 +15,7 @@ export class WorkerIdentityService {
       workerId: identity.workerId,
       state: await this.registry.state(identity),
       protocolVersion: 2 as const,
+      mediaPolicyVersion: 2 as const,
     };
   }
 }

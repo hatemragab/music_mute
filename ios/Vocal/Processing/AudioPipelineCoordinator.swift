@@ -25,12 +25,13 @@ enum AudioPipelineFailure: Error, Equatable {
       _ error: Error
     ) async -> Void
 
+  var beforePreparation: @MainActor () async throws -> Void = {}
   @Published private(set) var pipelines: [AudioPipelineIntent] = []
   @Published private(set) var sourceProgress: [UUID: DownloadProgress] = [:]
 
   private enum Source {
     case url(String)
-    case file(URL, securityScoped: Bool)
+    case file(URL, securityScoped: Bool, temporary: Bool)
   }
 
   private let store: ProcessingStore
@@ -92,6 +93,11 @@ enum AudioPipelineFailure: Error, Equatable {
     running.removeAll()
     transferSlots.removeAll()
     queued.removeAll()
+    for source in sources.values {
+      if case .file(let url, _, let temporary) = source, temporary {
+        PreparedMediaCleanup.discardPhotoCopy(url)
+      }
+    }
     sources.removeAll()
     sourceProgress.removeAll()
     pipelines.removeAll()
@@ -144,6 +150,9 @@ enum AudioPipelineFailure: Error, Equatable {
   @discardableResult
   func acceptURL(_ rawValue: String, eventID: UUID = UUID()) async throws -> UUID {
     guard let fence = session else { throw AudioPipelineFailure.sessionChanged }
+    guard YouTubePreflight.isIndividualURL(rawValue) else {
+      throw AudioInputPreparationError.youtubePlaylist
+    }
     guard let videoID = YouTubeURL.videoID(from: rawValue) else {
       throw AudioPipelineFailure.invalidURL
     }
@@ -161,7 +170,7 @@ enum AudioPipelineFailure: Error, Equatable {
 
   @discardableResult
   func acceptFile(
-    _ url: URL, eventID: UUID = UUID(), securityScoped: Bool = true
+    _ url: URL, eventID: UUID = UUID(), securityScoped: Bool = true, temporary: Bool = false
   ) async throws -> UUID {
     guard let fence = session else { throw AudioPipelineFailure.sessionChanged }
     if try await store.pipeline(id: eventID, ownerUid: fence.uid) != nil { return eventID }
@@ -172,7 +181,7 @@ enum AudioPipelineFailure: Error, Equatable {
       operationId: eventID, ownerUid: fence.uid, sourceKind: .file,
       sourceTitle: title.isEmpty ? nil : String(title.prefix(200)), clientStartedAt: started)
     try check(fence)
-    sources[eventID] = .file(url, securityScoped: securityScoped)
+    sources[eventID] = .file(url, securityScoped: securityScoped, temporary: temporary)
     await publish(fence)
     enqueue(eventID)
     return eventID
@@ -396,6 +405,9 @@ enum AudioPipelineFailure: Error, Equatable {
     {
       transferSlots.insert(id)
     }
+    if case .file(let url, _, let temporary) = sources[id], temporary {
+      PreparedMediaCleanup.discardPhotoCopy(url)
+    }
     sources[id] = nil
     sourceProgress[id] = nil
     startAvailable()
@@ -504,6 +516,8 @@ enum AudioPipelineFailure: Error, Equatable {
     if let reviewed = intent.reviewInput {
       prepared = reviewed
     } else {
+      try await beforePreparation()
+      try checkRun(id, token: token, fence: fence)
       let source = sources[id] ?? intent.sourceVideoID.map(Source.url)
       guard let source else { throw AudioPipelineFailure.sourceNeedsReselection }
       let sourceFile: PipelineSourceFile
@@ -533,15 +547,15 @@ enum AudioPipelineFailure: Error, Equatable {
         _ = try await mutateRun(id, token: token, fence: fence) {
           $0.sourceTitle = String(sourceFile.title.prefix(200))
           if $0.displayName == nil { $0.displayName = $0.sourceTitle }
-          $0.phase = .preparingInput
+          $0.phase = .inspectingSource
         }
         needsSecurityScope = false
-      case .file(let file, let securityScoped):
+      case .file(let file, let securityScoped, _):
         sourceFile = PipelineSourceFile(
           url: file, title: intent.sourceTitle ?? file.lastPathComponent)
         needsSecurityScope = securityScoped
         _ = try await mutateRun(id, token: token, fence: fence) {
-          $0.phase = .preparingInput
+          $0.phase = .inspectingSource
         }
       }
       await publish(fence)
@@ -549,14 +563,23 @@ enum AudioPipelineFailure: Error, Equatable {
       guard let current = try await store.pipeline(id: id, ownerUid: fence.uid),
         !current.cancellationRequested
       else { throw CancellationError() }
-      prepared = try await preparer.prepare(
-        sourceURL: sourceFile.url, ownerUid: fence.uid, securityScoped: needsSecurityScope,
-        operationId: id, sourceTitle: current.sourceTitle ?? sourceFile.title,
-        sourceKind: current.sourceKind, clientStartedAt: current.clientStartedAt,
-        displayName: current.displayName,
-        canonicalSourceURL: current.sourceVideoID.flatMap {
-          YouTubeURL.canonicalURL(videoID: $0)
-        })
+      prepared = try await MediaPreparationCoordinator.run { [preparer] in
+        try await preparer.prepare(
+          sourceURL: sourceFile.url, ownerUid: fence.uid, securityScoped: needsSecurityScope,
+          operationId: id, sourceTitle: current.sourceTitle ?? sourceFile.title,
+          sourceKind: current.sourceKind, clientStartedAt: current.clientStartedAt,
+          displayName: current.displayName,
+          canonicalSourceURL: current.sourceVideoID.flatMap {
+            YouTubeURL.canonicalURL(videoID: $0)
+          },
+          onPreparation: { [weak self] in
+            guard let self else { throw CancellationError() }
+            _ = try await self.mutateRun(id, token: token, fence: fence) {
+              $0.phase = .preparingInput
+            }
+            await self.publish(fence)
+          })
+      }
       try checkRun(id, token: token, fence: fence)
     }
     if intent.cloudConsent != true {
@@ -592,7 +615,7 @@ enum AudioPipelineFailure: Error, Equatable {
       switch status {
       case .resolving: $0.phase = .resolvingSource
       case .downloading: $0.phase = .downloadingSource
-      case .checking: $0.phase = .preparingInput
+      case .checking: $0.phase = .inspectingSource
       default: break
       }
     }
@@ -618,7 +641,7 @@ enum AudioPipelineFailure: Error, Equatable {
   private static func clientStage(_ phase: AudioPipelinePhase) -> ClientErrorStage {
     switch phase {
     case .resolvingSource, .downloadingSource: return .downloadingSource
-    case .preparingInput: return .preparingInput
+    case .inspectingSource, .preparingInput: return .preparingInput
     case .reservingJob: return .reservingJob
     case .uploadingInput: return .uploadingInput
     case .confirmingUpload: return .confirmingUpload
@@ -671,6 +694,7 @@ enum AudioPipelineFailure: Error, Equatable {
   }
 
   private static func failureCode(_ error: Error) -> String {
+    if let key = ProcessingMediaMessage.key(error) { return key }
     if error is AudioPipelineFailure { return "processing_reselect_input" }
     if error is AudioInputPreparationError { return "processing_error_input" }
     if error is URLError || (error as? AuthFailure) == .offline {

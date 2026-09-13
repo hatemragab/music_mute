@@ -1,3 +1,4 @@
+import { QueuePolicyService } from './queue-policy.service.js';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module.js';
@@ -30,7 +31,11 @@ import { ProcessingSettingsService } from './processing-settings.service.js';
     ]),
   ],
   controllers: [AdminSettingsController, ProcessingPolicyController],
-  providers: [ProcessingSettingsService, ProcessingAdmissionService],
+  providers: [
+    ProcessingSettingsService,
+    ProcessingAdmissionService,
+    QueuePolicyService,
+  ],
   exports: [
     MongooseModule,
     ProcessingSettingsService,

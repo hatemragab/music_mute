@@ -73,6 +73,13 @@ export class AdminAuditService implements OnModuleInit {
         previousRevision: event.previousRevision,
         nextRevision: event.nextRevision,
         outcome: event.outcome,
+        ...(event.processingChanges
+          ? {
+              processingChanges: event.processingChanges.map(
+                ({ field, before, after }) => ({ field, before, after }),
+              ),
+            }
+          : {}),
         ...(event.exportMetadata
           ? {
               exportMetadata: {

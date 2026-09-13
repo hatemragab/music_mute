@@ -1,3 +1,6 @@
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
+import { ProcessingUsageLedger } from '../processing-usage/processing-usage.schema.js';
+import type { AttemptExecutionEvidence } from './execution-evidence.js';
 import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, trusted, type ClientSession, type Model } from 'mongoose';
@@ -253,6 +256,10 @@ export class WorkerRecoveryService {
     previousAttemptId: string,
     stopped: boolean,
     identity?: WorkerIdentity,
+    evidence?: {
+      eventId?: string;
+      executionEvidence?: AttemptExecutionEvidence;
+    },
   ) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -261,6 +268,7 @@ export class WorkerRecoveryService {
           previousAttemptId,
           stopped,
           identity,
+          evidence,
         );
       } catch (error) {
         if (
@@ -279,6 +287,10 @@ export class WorkerRecoveryService {
     previousAttemptId: string,
     stopped: boolean,
     identity?: WorkerIdentity,
+    evidence?: {
+      eventId?: string;
+      executionEvidence?: AttemptExecutionEvidence;
+    },
   ) {
     if (stopped !== true) throw jobError('WORKER_RECOVERY_REQUIRED');
     const { previous, snapshot, control } = await this.transactions.run(
@@ -305,6 +317,26 @@ export class WorkerRecoveryService {
               authority.identity.workerId)
         )
           throw jobError('STALE_ATTEMPT');
+        if (evidence?.executionEvidence) {
+          if (!evidence.eventId || !evidence.executionEvidence.stoppedConfirmed)
+            throw jobError('JOB_STATE_CONFLICT');
+          await this.coordinator.recordExecution(
+            { ...snapshot, attemptId: previousAttemptId },
+            evidence.eventId,
+            evidence.executionEvidence,
+            session,
+          );
+        }
+        if (
+          evidence?.executionEvidence &&
+          ['ready', 'failed', 'cancelled'].includes(snapshot.status)
+        )
+          await new ProcessingUsageService(
+            this.jobs.db.model<ProcessingUsageLedger>(
+              ProcessingUsageLedger.name,
+            ),
+            this.jobs,
+          ).settleJob(snapshot, session);
         return { previous, snapshot, control: authority.control };
       },
     );

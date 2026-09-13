@@ -12,6 +12,23 @@ from musicmute_worker.config import Config
 
 
 class BenchmarkTests(unittest.TestCase):
+    def test_offline_preparation_can_qualify_thirty_minute_inputs(self):
+        benchmark = importlib.import_module("musicmute_worker.benchmark")
+        with patch.object(benchmark, "inspect_audio", return_value=1800) as inspect:
+            self.assertEqual(
+                benchmark.prepare_benchmark_audio(
+                    Path("fixture.m4a"),
+                    object(),
+                    lambda: None,
+                    prepared=Path("output.wav"),
+                ),
+                1800,
+            )
+        limits = inspect.call_args.kwargs["limits"]
+        self.assertTrue(limits.accepts_duration(1800))
+        self.assertFalse(limits.accepts_duration(1800.001))
+        self.assertTrue(limits.accepts_input_bytes(100_000_000))
+
     def setUp(self):
         try:
             self.benchmark = importlib.import_module("musicmute_worker.benchmark")
@@ -241,9 +258,11 @@ class BenchmarkTests(unittest.TestCase):
                 self.assertEqual(report["failure"]["mode"], "prepare")
                 self.assertEqual(
                     report["status"],
-                    "stopped"
-                    if isinstance(error, self.benchmark.Stopping)
-                    else "failed",
+                    (
+                        "stopped"
+                        if isinstance(error, self.benchmark.Stopping)
+                        else "failed"
+                    ),
                 )
                 self.assertEqual(
                     [clip["clip_id"] for clip in report["clips"]], ["clip-001"]

@@ -1,6 +1,7 @@
+import { QueueCapacityService } from '../processing-queue/queue-capacity.service.js';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { mongo, trusted, type Model, type PipelineStage } from 'mongoose';
+import { trusted, type Model } from 'mongoose';
 import { adminError } from '../admin/admin-errors.js';
 import type { AdminActor } from '../admin/admin.types.js';
 import { Job } from '../jobs/job.schema.js';
@@ -26,6 +27,10 @@ export class AdminJobsQueryService {
     @InjectModel(WorkerControl.name)
     private readonly controls: Model<WorkerControl>,
   ) {}
+  queueSummary() {
+    return new QueueCapacityService(this.jobs).readSummary();
+  }
+
   private async present(
     records: Job[],
     actor: AdminActor,
@@ -73,57 +78,7 @@ export class AdminJobsQueryService {
     const starts = new Map(
       firstAttempts.map((row) => [row._id.toString(), row.first]),
     );
-    const queued = records.filter(
-      (j) =>
-        j.status === 'queued' &&
-        j.queueOrder != null &&
-        owners.get(j.userId.toString())?.status === 'active',
-    );
-    const positions = new Map<string, number>();
-    if (queued.length) {
-      const facets: Record<string, PipelineStage.FacetPipelineStage[]> = {};
-      queued.forEach((job, index) => {
-        facets[`q${index}`] = [
-          {
-            $match: {
-              queueOrder: {
-                $lt: mongo.Long.fromString(job.queueOrder!.toString()),
-              },
-            },
-          },
-          { $count: 'count' },
-        ];
-      });
-      try {
-        const [counts] = await this.jobs
-          .aggregate<Record<string, { count: number }[]>>([
-            { $match: { status: 'queued', deletedAt: null } },
-            {
-              $lookup: {
-                from: 'users',
-                localField: 'userId',
-                foreignField: '_id',
-                pipeline: [
-                  { $match: { status: 'active' } },
-                  { $project: { _id: 1 } },
-                ],
-                as: 'eligibleOwner',
-              },
-            },
-            { $match: { 'eligibleOwner.0': { $exists: true } } },
-            { $facet: facets },
-          ])
-          .option({ maxTimeMS: 5000 });
-        queued.forEach((j, i) =>
-          positions.set(
-            j._id.toString(),
-            (counts?.[`q${i}`]?.[0]?.count ?? 0) + 1,
-          ),
-        );
-      } catch (error) {
-        if ((error as { code?: number }).code !== 50) throw error;
-      }
-    }
+    // A fair scheduler has no stable FIFO position; expose nullable estimates instead.
     return records.map((job) => {
       const owner = owners.get(job.userId.toString()),
         control = reserved.get(job._id.toString());
@@ -136,7 +91,7 @@ export class AdminJobsQueryService {
         ...presentAdminJob(
           job,
           actor,
-          positions.get(job._id.toString()) ?? null,
+          null,
           now,
           detail,
           starts.get(job._id.toString()),

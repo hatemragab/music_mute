@@ -23,10 +23,12 @@ export class WorkerClaimWaitService implements OnModuleDestroy {
     waitSeconds: number,
     signal?: AbortSignal,
     identity?: WorkerIdentity,
+    mediaPolicyVersion?: 2,
   ) {
     if (this.stopping) throw authError('SERVICE_UNAVAILABLE');
     if (signal?.aborted) return null;
-    if (waitSeconds === 0) return this.coordinator.claim(sessionId, identity);
+    if (waitSeconds === 0)
+      return this.coordinator.claim(sessionId, identity, mediaPolicyVersion);
     const workerId = identity?.workerId ?? WORKER_ID;
     const maxWaiters =
       this.config?.get<number>('PROCESSING_WORKER_MAX_WAITERS', 32) ?? 32;
@@ -43,7 +45,11 @@ export class WorkerClaimWaitService implements OnModuleDestroy {
       while (!waiter.signal.aborted) {
         // Each check completes its own transaction. MongoDB remains authoritative;
         // concurrent claims still use the coordinator's single-slot fencing.
-        const assignment = await this.coordinator.claim(sessionId, identity);
+        const assignment = await this.coordinator.claim(
+          sessionId,
+          identity,
+          mediaPolicyVersion,
+        );
         if (waiter.signal.aborted || signal?.aborted) return null;
         if (assignment) return assignment;
         const remaining = deadline - performance.now();

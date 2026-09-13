@@ -2,6 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import type { Types } from 'mongoose';
 import type {
   AuditExportMetadata,
+  ProcessingChangeMetadata,
   StopEvidenceMetadata,
 } from './admin-audit-query.js';
 
@@ -35,6 +36,8 @@ const ExportMetadataSchema = SchemaFactory.createForClass(ExportMetadata);
 })
 export class AdminAuditEvent {
   _id!: Types.ObjectId;
+  @Prop({ type: [Object], default: null })
+  processingChanges!: ProcessingChangeMetadata[] | null;
   @Prop({ type: ExportMetadataSchema, default: null })
   exportMetadata!: AuditExportMetadata | null;
   @Prop({ type: StopEvidenceSchema, default: null })

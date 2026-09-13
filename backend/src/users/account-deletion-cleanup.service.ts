@@ -208,6 +208,8 @@ export class AccountDeletionCleanupService {
         'push_registrations',
         'client_errors',
         'account_recovery_requests',
+        'processing_usage_ledger',
+        'processing_execution_usage',
       ]) {
         await renew();
         if (await this.purgeBatch(name, { userId: user._id })) return true;

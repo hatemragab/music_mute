@@ -10,6 +10,10 @@ internal fun audioTaskFailureLabel(task: AudioTaskPresentation): Int? {
     if (task.errorCode != null) return when (task.errorCode) {
         "UPLOAD_EXPIRED" -> R.string.processing_reason_upload_expired
         "INVALID_AUDIO" -> R.string.processing_reason_invalid
+        "MEDIA_TOO_LONG" -> R.string.media_error_too_long
+        "MEDIA_TOO_LARGE" -> R.string.media_error_too_large
+        "MEDIA_NO_AUDIO" -> R.string.media_error_no_audio
+        "MEDIA_UNSUPPORTED", "MEDIA_DURATION_UNKNOWN" -> R.string.media_error_unsupported
         "INPUT_TOO_LONG" -> R.string.processing_reason_too_long
         "INPUT_CHECKSUM_MISMATCH" -> R.string.processing_reason_checksum
         "DOWNLOAD_FAILED" -> R.string.processing_reason_download
@@ -20,6 +24,7 @@ internal fun audioTaskFailureLabel(task: AudioTaskPresentation): Int? {
     }
     task.problem?.let { return processingFailureLabel(it) }
     return when (task.localProblem) {
+        ProcessingLocalProblem.RESELECT_SOURCE -> R.string.media_error_reselect
         ProcessingLocalProblem.STORAGE -> R.string.processing_error_storage
         ProcessingLocalProblem.INPUT_CHANGED -> R.string.processing_reason_invalid
         ProcessingLocalProblem.TRANSFER -> R.string.processing_reason_download
@@ -44,6 +49,19 @@ internal fun processingStatusLabel(status: String): Int = when (status) {
 }
 
 internal fun processingFailureLabel(problem: JobsProblem): Int = when (problem) {
+    JobsProblem.MEDIA_TOO_LONG -> R.string.media_error_too_long
+    JobsProblem.MEDIA_TOO_LARGE -> R.string.media_error_too_large
+    JobsProblem.MEDIA_NO_AUDIO -> R.string.media_error_no_audio
+    JobsProblem.MEDIA_DEFAULT_TRACK_UNAVAILABLE -> R.string.media_error_default_track
+    JobsProblem.MEDIA_UNSUPPORTED -> R.string.media_error_unsupported
+    JobsProblem.MEDIA_DURATION_UNKNOWN -> R.string.media_error_duration
+    JobsProblem.YOUTUBE_PLAYLIST_UNSUPPORTED -> R.string.media_error_playlist
+    JobsProblem.YOUTUBE_LIVE_UNSUPPORTED -> R.string.media_error_live
+    JobsProblem.PROCESSING_ALLOWANCE_EXHAUSTED -> R.string.processing_error_allowance
+    JobsProblem.PROCESSING_QUEUE_FULL -> R.string.processing_error_queue_full
+    JobsProblem.PROCESSING_CAPACITY_UNAVAILABLE -> R.string.processing_error_capacity
+    JobsProblem.PROCESSING_POLICY_INCOMPATIBLE -> R.string.processing_error_compatibility
+    JobsProblem.PROCESSING_LIMIT_REACHED -> R.string.processing_error_active
     JobsProblem.OFFLINE -> R.string.processing_error_offline
     JobsProblem.UNAUTHENTICATED -> R.string.processing_error_auth
     JobsProblem.INVALID_INPUT -> R.string.processing_error_input
@@ -59,6 +77,7 @@ internal fun processingFailureLabel(problem: JobsProblem): Int = when (problem) 
 internal fun audioTaskStageLabel(stage: AudioTaskStage): Int = when (stage) {
     AudioTaskStage.WAITING -> R.string.audio_task_waiting
     AudioTaskStage.DOWNLOADING_SOURCE -> R.string.audio_task_downloading
+    AudioTaskStage.INSPECTING -> R.string.media_inspecting
     AudioTaskStage.PREPARING_INPUT -> R.string.audio_task_preparing
     AudioTaskStage.RESERVING_JOB -> R.string.audio_task_reserving
     AudioTaskStage.UPLOADING_INPUT -> R.string.audio_task_uploading

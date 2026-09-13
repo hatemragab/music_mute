@@ -1,6 +1,9 @@
 import Foundation
 
 struct PreparedInput: Codable, Equatable, Sendable {
+  let policyVersion: Int?
+  let preparationProfileId: String?
+  let mediaSource: String?
   let operationId: UUID
   let ownerUid: String
   let fileURL: URL
@@ -14,8 +17,12 @@ struct PreparedInput: Codable, Equatable, Sendable {
   init(
     operationId: UUID, ownerUid: String, fileURL: URL, declaration: InputDeclaration,
     sourceTitle: String? = nil, sourceKind: JobSourceKind? = nil, clientStartedAt: Date? = nil,
-    displayName: String? = nil, sourceURL: String? = nil
+    displayName: String? = nil, sourceURL: String? = nil,
+    policyVersion: Int? = nil, preparationProfileId: String? = nil, mediaSource: String? = nil
   ) {
+    self.policyVersion = policyVersion
+    self.preparationProfileId = preparationProfileId
+    self.mediaSource = mediaSource
     self.operationId = operationId
     self.ownerUid = ownerUid
     self.fileURL = fileURL
@@ -30,6 +37,8 @@ struct PreparedInput: Codable, Equatable, Sendable {
 
 enum AudioInputPreparationError: Error, Equatable {
   case cancelled, accessDenied, unreadable, storage, invalidSize, invalidAudio, unsupportedFormat
+  case noAudio, defaultTrackUnavailable, durationUnknown, tooLong, policyUnavailable, youtubeLive,
+    youtubePlaylist, youtubeMetadataUnavailable, interrupted
 }
 
 func validProcessingInput(bytes: Int64, duration: Double) -> Bool {

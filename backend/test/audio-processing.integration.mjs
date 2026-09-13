@@ -45,12 +45,22 @@ test('HTTP uploads, private history and stable pagination survive API restart', 
   });
   assert.equal(grant.status, 200);
   assert.equal(grant.headers['cache-control'], 'no-store');
-  for (let i = 0; i < 2; i++)
-    assert.equal(
-      (await f.request('POST', '/jobs', { requestId: randomUUID(), input }))
-        .status,
-      201,
-    );
+  assert.equal(
+    (await f.request('POST', '/jobs', { requestId: randomUUID(), input }))
+      .status,
+    409,
+  );
+  // Historical terminal rows exercise pagination without bypassing current admission.
+  const addHistory = () =>
+    f.jobs.create({
+      userId: stored.userId,
+      requestId: randomUUID(),
+      requestHash: 'a'.repeat(64),
+      inputReservation: { ...stored.inputReservation },
+      status: 'failed',
+      finishedAt: new Date(),
+    });
+  for (let i = 0; i < 2; i++) await addHistory();
   const page = await f.request('GET', '/jobs?limit=2');
   assert.equal(page.status, 200);
   assert.equal(page.body.items.length, 2);
@@ -59,7 +69,7 @@ test('HTTP uploads, private history and stable pagination survive API restart', 
     JSON.stringify(page.body),
     /versionId|requestHash|sha256|users\/|attemptId|sessionId|https:/,
   );
-  await f.request('POST', '/jobs', { requestId: randomUUID(), input });
+  await addHistory();
   const tail = await f.request(
     'GET',
     `/jobs?limit=2&cursor=${page.body.nextCursor}`,

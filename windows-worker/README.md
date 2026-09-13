@@ -179,6 +179,16 @@ process per job. Production keeps **one global assignment and one GPU job**.
 
 ## Offline benchmark on the Z440
 
+Benchmark preparation accepts audio-only inputs up to 1800 seconds and 100,000,000
+bytes, inclusive, to qualify the proposed media policy. This does not expand live
+worker admission: claimed assignments carry versioned limits only after capability
+negotiation, and local output/time safety settings remain authoritative. Record
+actual hardware and cold/warm measurements before enabling expanded server policy.
+
+Separator execution evidence is checkpointed separately from upload/queue time.
+An unobserved crash interval is reported as unavailable; recovery never invents
+elapsed execution or a zero-cost cancellation.
+
 Stop the worker/task, then benchmark representative short and long local clips:
 
 ```powershell

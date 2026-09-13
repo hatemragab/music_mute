@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 
 @MainActor final class ProcessingModel: ObservableObject {
+  @Published private(set) var photoSourceLimit: Int64 = 29_999_999
   @Published private(set) var preparing = false
   @Published private(set) var busy = false
   @Published private(set) var pendingInputName: String?
@@ -9,6 +10,8 @@ import Foundation
   @Published var selectedJobID: String?
   @Published var selectedOperationID: UUID?
   @Published private(set) var sessionReady = false
+  let usageRepository: ProcessingUsageRepository
+  private let api: JobsAPI
   let repository: ProcessingRepository
   let pipeline: AudioPipelineCoordinator
   let history: ProcessingHistoryModel
@@ -25,6 +28,7 @@ import Foundation
   private var actions: [UUID: Task<Void, Never>] = [:]
   private var privatePlaybackID: UUID?
   private var sourcePickerFence: SessionFence?
+  private var sourcePickerPending = false
 
   init(
     api: JobsAPI, repository: ProcessingRepository, preparer: AudioInputPreparer,
@@ -34,6 +38,8 @@ import Foundation
     sessionDidChange: @escaping () -> Void = {},
     reportFailure: @escaping AudioPipelineCoordinator.FailureReporter = { _, _, _, _, _ in }
   ) {
+    self.api = api
+    self.usageRepository = ProcessingUsageRepository(api: api)
     self.repository = repository
     self.preparer = preparer
     self.pipeline = pipeline
@@ -46,7 +52,15 @@ import Foundation
       api: api,
       loadCached: { try await repository.store.cachedJobs(ownerUid: $0) },
       saveCached: { uid, jobs in try await repository.store.saveJobs(jobs, ownerUid: uid) })
-    history.onJobsChanged = { [weak pipeline] jobs in await pipeline?.reconcile(jobs) }
+    pipeline.beforePreparation = { [weak self] in
+      guard let self else { throw CancellationError() }
+      await self.refreshAvailability()
+      try self.usageRepository.checkAvailability()
+    }
+    history.onJobsChanged = { [weak self, weak pipeline] jobs in
+      await pipeline?.reconcile(jobs)
+      await self?.usageRepository.refresh()
+    }
     history.onJobMissing = { [weak self] id in await self?.handleMissingJob(id) }
     history.onFailure = { [weak self] id, error in
       await self?.reportDiagnostic(error, stage: .refreshingJob, jobID: id)
@@ -59,6 +73,9 @@ import Foundation
     epoch &+= 1
     let ticket = epoch
     ownerUid = uid
+    usageRepository.bind(uid)
+    photoSourceLimit = 29_999_999
+    await preparer.configure(policy: .legacy)
     sessionReady = false
     for action in actions.values { action.cancel() }
     actions.removeAll()
@@ -83,6 +100,28 @@ import Foundation
     await history.bindOwner(uid)
     guard ticket == epoch, uid != nil else { return }
     sessionReady = true
+    await refreshAvailability()
+  }
+
+  func refreshAvailability() async {
+    guard let captured = repository.session else { return }
+    await usageRepository.refresh()
+    do {
+      let response = try await api.processingPolicy()
+      let policy = try response.validated()
+      guard repository.session == captured else { return }
+      // Null evidence does not authorize expanded preparation; the established
+      // legacy path remains available under its existing exclusive limits.
+      let effective =
+        response.acceptNewJobs && policy.maxSourceBytes != nil
+          && policy.maxPreparationSeconds != nil ? policy : .legacy
+      photoSourceLimit = effective.maxSourceBytes ?? 29_999_999
+      await preparer.configure(policy: effective)
+    } catch {
+      guard repository.session == captured else { return }
+      photoSourceLimit = 29_999_999
+      await preparer.configure(policy: .legacy)
+    }
   }
 
   func resumePending() async {
@@ -96,16 +135,24 @@ import Foundation
     await history.refresh()
   }
 
-  func importAudio(_ url: URL) {
-    guard let captured = sourcePickerFence ?? repository.session,
+  func importPhoto(_ url: URL) { importAudio(url, securityScoped: false) }
+
+  func importAudio(_ url: URL, securityScoped: Bool = true) {
+    let pickerFence = sourcePickerPending ? sourcePickerFence : repository.session
+    sourcePickerPending = false
+    guard let captured = pickerFence,
       captured == repository.session, captured.uid == ownerUid
-    else { return }
+    else {
+      if !securityScoped { PreparedMediaCleanup.discardPhotoCopy(url) }
+      return
+    }
     sourcePickerFence = nil
     let ticket = epoch
     let operationID = UUID()
     Task {
       do {
-        _ = try await pipeline.acceptFile(url, eventID: operationID)
+        _ = try await pipeline.acceptFile(
+          url, eventID: operationID, securityScoped: securityScoped, temporary: !securityScoped)
       } catch {
         guard ticket == epoch, repository.session == captured else { return }
         if (error as NSError).code != NSUserCancelledError {
@@ -330,7 +377,10 @@ import Foundation
     }
   }
 
-  func beginSourceImport() { sourcePickerFence = repository.session }
+  func beginSourceImport() {
+    sourcePickerPending = true
+    sourcePickerFence = repository.session
+  }
 
   private func perform(
     preparation: Bool = false, stage: ClientErrorStage,

@@ -41,13 +41,13 @@ const inputReservation = new MongoSchema<InputReservation>(
       type: Number,
       required: true,
       min: 1,
-      max: 29_999_999,
+      max: 100_000_000,
       validate: Number.isInteger,
     },
     durationSeconds: {
       type: Number,
       required: true,
-      validate: (v: number) => Number.isFinite(v) && v > 0 && v < 600,
+      validate: (v: number) => Number.isFinite(v) && v > 0 && v <= 1800,
     },
     sha256: { type: String, required: true, validate: isSha256 },
   },
@@ -56,6 +56,19 @@ const inputReservation = new MongoSchema<InputReservation>(
 
 const admissionSnapshot = new MongoSchema<AdmissionSnapshot>(
   {
+    policyVersion: { type: Number, enum: [1, 2] },
+    maxDurationSeconds: { type: Number, min: Number.MIN_VALUE, max: 1800 },
+    maxInputBytes: {
+      type: Number,
+      min: 1,
+      max: 100_000_000,
+      validate: Number.isSafeInteger,
+    },
+    qualification: { type: MongoSchema.Types.Mixed },
+    preparationProfileId: { type: String, maxlength: 100 },
+    source: { type: String, enum: ['audio_file', 'video_file', 'youtube'] },
+    queueLimits: { type: MongoSchema.Types.Mixed },
+    estimatedWorkerSeconds: { type: Number, min: 1 },
     settingsRevision: {
       type: Number,
       required: true,
@@ -96,13 +109,13 @@ export const OutputReservationSchema = new MongoSchema<OutputReservation>(
       type: Number,
       required: true,
       min: 1,
-      max: 99_999_999,
+      max: 100_000_000,
       validate: Number.isInteger,
     },
     durationSeconds: {
       type: Number,
       required: true,
-      validate: (v: number) => Number.isFinite(v) && v > 0 && v < 600,
+      validate: (v: number) => Number.isFinite(v) && v > 0 && v <= 1800,
     },
     sha256: { type: String, required: true, validate: isSha256 },
     contentType: { type: String, required: true, enum: ['audio/mpeg'] },
@@ -205,7 +218,7 @@ export class Job {
     type: Number,
     default: null,
     validate: (value: number | null) =>
-      value === null || (Number.isFinite(value) && value > 0 && value < 600),
+      value === null || (Number.isFinite(value) && value > 0 && value <= 1800),
   })
   measuredDurationSeconds!: number | null;
   @Prop({ type: Date, default: null }) uploadingResultAt!: Date | null;
@@ -301,6 +314,7 @@ JobSchema.index(
   { userId: 1, createdAt: -1, _id: -1 },
   { name: 'jobs_owner_history' },
 );
+JobSchema.index({ userId: 1, status: 1 }, { name: 'jobs_owner_running' });
 JobSchema.index({ status: 1, queueOrder: 1 }, { name: 'jobs_fifo' });
 JobSchema.index(
   {

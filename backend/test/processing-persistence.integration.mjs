@@ -72,6 +72,8 @@ test('processing documents commit together and abort without partial slot or err
     jobId.toString(),
   );
   for (const entry of PROCESSING_MODELS) {
+    if (['ProcessingUsageLedger', 'QueueExecutionUsage'].includes(entry.name))
+      continue; // Minimal accounting has explicitly bounded retention; job history does not.
     const indexes = await connection.model(entry.name).listIndexes();
     assert.ok(
       indexes.every((index) => index.expireAfterSeconds === undefined),

@@ -228,6 +228,7 @@ struct AudioTaskPresentation: Equatable, Identifiable, Sendable {
     switch phase {
     case .resolvingSource: return .source
     case .downloadingSource: return .download
+    case .inspectingSource: return .inspect
     case .preparingInput: return .prepare
     case .reservingJob: return .reserve
     case .uploadingInput: return .upload
@@ -244,6 +245,7 @@ struct AudioTaskPresentation: Equatable, Identifiable, Sendable {
   }
 
   private enum Stage {
+    case inspect
     case source, download, prepare, reserve, upload, confirm, queued, validating, processing
     case uploadingResult, ready, awaitingUpload, awaitingAppResume, interrupted, cancelling
     case failed, cancelled, deleted, unknown, review
@@ -264,6 +266,7 @@ struct AudioTaskPresentation: Equatable, Identifiable, Sendable {
       switch self {
       case .source: return "processing_finding_audio"
       case .download: return "processing_finding_downloading"
+      case .inspect: return "media_inspecting"
       case .prepare: return "processing_preparing"
       case .reserve: return "processing_reserving"
       case .upload: return "processing_uploading_audio"

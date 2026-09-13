@@ -64,7 +64,7 @@ private fun taskStageRank(stage: AudioTaskStage): Int = when (stage) {
     AudioTaskStage.REVIEW -> 2
     AudioTaskStage.WAITING -> 0
     AudioTaskStage.DOWNLOADING_SOURCE -> 1
-    AudioTaskStage.PREPARING_INPUT -> 2
+    AudioTaskStage.INSPECTING, AudioTaskStage.PREPARING_INPUT -> 2
     AudioTaskStage.RESERVING_JOB -> 3
     AudioTaskStage.UPLOADING_INPUT -> 4
     AudioTaskStage.CONFIRMING_UPLOAD -> 5

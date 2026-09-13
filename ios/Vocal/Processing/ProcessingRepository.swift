@@ -264,7 +264,10 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
           requestId: operation.requestId, input: operation.input,
           metadata: JobSourceMetadata(
             sourceTitle: operation.sourceTitle, sourceKind: operation.sourceKind,
-            clientStartedAt: operation.clientStartedAt, sourceURL: operation.sourceURL))
+            clientStartedAt: operation.clientStartedAt, sourceURL: operation.sourceURL,
+            policyVersion: operation.policyVersion,
+            preparationProfileId: operation.preparationProfileId,
+            source: operation.mediaSource))
         operation = try await store.update(id: operationId, ownerUid: fence.uid) {
           $0.jobId = reservation.id
           $0.jobStatus = reservation.status
@@ -380,13 +383,19 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
         }
         try checkRun(operationId, token: token, fence: fence)
         switch operation.phase {
-        case .submitted, .stopped: return operation
+        case .submitted:
+          try await store.cleanupConfirmedInput(id: operationId, ownerUid: fence.uid)
+          return operation
+        case .stopped: return operation
         case .reservationPending:
           let reservation = try await api.create(
             requestId: operation.requestId, input: operation.input,
             metadata: JobSourceMetadata(
               sourceTitle: operation.sourceTitle, sourceKind: operation.sourceKind,
-              clientStartedAt: operation.clientStartedAt, sourceURL: operation.sourceURL))
+              clientStartedAt: operation.clientStartedAt, sourceURL: operation.sourceURL,
+              policyVersion: operation.policyVersion,
+              preparationProfileId: operation.preparationProfileId,
+              source: operation.mediaSource))
           // Save an acknowledged reservation even if its session became stale while waiting.
           // It remains owned by the captured UID and never enters a new session's visible state.
           try await store.update(id: operationId, ownerUid: fence.uid) {
@@ -455,7 +464,7 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
           let builder = Task.detached(priority: .utility) {
             try S3MultipartFile.build(
               inputURL: inputURL, declaration: operation.input,
-              destination: destination)
+              destination: destination, policyVersion: operation.policyVersion)
           }
           let multipart = try await withTaskCancellationHandler(
             operation: { try await builder.value }, onCancel: { builder.cancel() })

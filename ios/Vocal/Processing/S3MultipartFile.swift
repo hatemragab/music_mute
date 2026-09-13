@@ -21,7 +21,7 @@ struct S3MultipartFile: Sendable {
 
   static func build(
     inputURL: URL, declaration: InputDeclaration,
-    destination: URL,
+    destination: URL, policyVersion: Int? = nil,
     availableCapacity: (URL) throws -> Int64? = {
       try $0.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         .volumeAvailableCapacityForImportantUsage
@@ -30,7 +30,8 @@ struct S3MultipartFile: Sendable {
     guard ["m4a", "mp4", "mp3", "aac", "ogg", "opus", "webm"].contains(declaration.extension),
       ["audio/mp4", "audio/mpeg", "audio/aac", "audio/ogg", "audio/webm"].contains(
         declaration.contentType),
-      validProcessingInput(bytes: declaration.bytes, duration: declaration.durationSeconds)
+      (policyVersion == 2 ? ProcessingMediaPolicy.expanded : .legacy)
+        .accepts(bytes: declaration.bytes, duration: declaration.durationSeconds)
     else { throw ProcessingTransferFailure.invalidInput }
     let expectedBytes = declaration.bytes
     let directory = destination.deletingLastPathComponent()

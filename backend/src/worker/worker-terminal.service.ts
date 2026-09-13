@@ -1,3 +1,5 @@
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
+import { ProcessingUsageLedger } from '../processing-usage/processing-usage.schema.js';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import {
@@ -143,6 +145,16 @@ export class WorkerTerminalService {
       );
       if (job.status !== 'uploading_result')
         throw jobError('JOB_STATE_CONFLICT');
+      if (dto.executionEvidence) {
+        if (!dto.executionEvidence.stoppedConfirmed)
+          throw jobError('JOB_STATE_CONFLICT');
+        await this.coordinator.recordExecution(
+          job,
+          dto.eventId,
+          dto.executionEvidence,
+          session,
+        );
+      }
       await this.finalize(job, 'ready', session, object);
       await this.record(dto, hash, 'complete', 'ready', session);
       return { status: 'ready' as const };
@@ -165,6 +177,16 @@ export class WorkerTerminalService {
         identity,
       );
       if (dto.stopped !== true) throw jobError('JOB_STATE_CONFLICT');
+      if (dto.executionEvidence) {
+        if (!dto.executionEvidence.stoppedConfirmed)
+          throw jobError('JOB_STATE_CONFLICT');
+        await this.coordinator.recordExecution(
+          job,
+          dto.eventId,
+          dto.executionEvidence,
+          session,
+        );
+      }
       if (operation === 'cancelled' && job.status !== 'cancel_requested')
         throw jobError('JOB_STATE_CONFLICT');
       if (operation === 'fail') {
@@ -218,6 +240,10 @@ export class WorkerTerminalService {
       ...(output ? { outputObject: output } : {}),
     });
     await job.save({ session });
+    await new ProcessingUsageService(
+      this.attempts.db.model<ProcessingUsageLedger>(ProcessingUsageLedger.name),
+      this.attempts.db.model<Job>(Job.name),
+    ).settleJob(job, session);
     const released = await this.workers.updateOne(
       {
         _id: this.coordinator.ownerId(job.workerId),

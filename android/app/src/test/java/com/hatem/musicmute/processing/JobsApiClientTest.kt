@@ -26,6 +26,34 @@ class JobsApiClientTest {
             onUpdateRequired,
         )
 
+    @Test fun expandedMetadataIsAdditiveAndQueueFailureIsNotGenericRetry() = runTest {
+        var sent: JsonObject? = null
+        val api = client(AuthHttpTransport { _, _, _, body ->
+            sent = body?.let { Json.parseToJsonElement(it).jsonObject }
+            AuthHttpResponse(409, """{"code":"PROCESSING_QUEUE_FULL","message":"private diagnostic"}""")
+        })
+        val error = runCatching { api.createWithMetadata(requestId, input,
+            CreateJobMetadata(policyVersion = 2, preparationProfileId = "preserve-or-aac-lc-256-v1", source = "video_file")) }.exceptionOrNull() as JobsFailure
+        assertEquals(2, sent?.get("policyVersion")?.jsonPrimitive?.int)
+        assertEquals("video_file", sent?.get("source")?.jsonPrimitive?.content)
+        assertEquals(JobsProblem.PROCESSING_QUEUE_FULL, error.problem)
+        assertFalse(error.message.orEmpty().contains("private"))
+    }
+
+    @Test fun usageResponseIsPrivateTypedAndKeepsPartialReplenishments() = runTest {
+        val api = client(AuthHttpTransport { url, _, headers, _ ->
+            assertTrue(url.endsWith("/processing-usage"))
+            assertEquals("Bearer token", headers["Authorization"])
+            AuthHttpResponse(200, """{"policyRevision":1,"allowanceAudioSeconds":3600,"usedAudioSeconds":600,"reservedAudioSeconds":300,
+              "remainingAudioSeconds":2700,"activeJobs":0,"maxActiveJobs":1,"nextReplenishmentAt":"2026-09-14T12:00:00Z",
+              "replenishments":[{"at":"2026-09-14T12:00:00Z","audioSeconds":600}],"availability":"available","checkedAt":"2026-09-13T12:00:00Z"}""")
+        })
+        val usage = api.processingUsage()!!
+        assertEquals(600.0, usage.usedAudioSeconds, 0.0)
+        assertEquals(300.0, usage.reservedAudioSeconds, 0.0)
+        assertEquals(1, usage.replenishments.size)
+    }
+
     @Test fun allRoutesPreserveBodiesAndInstallationHeaders() = runTest {
         val requests = mutableListOf<List<Any?>>()
         val replies = ArrayDeque(listOf("""{"id":"$id","status":"awaiting_upload","upload":$upload}""", upload, mutation, """{"items":[],"nextCursor":null}""", job("queued").dropLast(1) + ",\"workerAvailable\":false}", mutation, mutation, grant))

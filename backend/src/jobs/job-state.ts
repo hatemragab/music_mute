@@ -25,17 +25,24 @@ export function isSha256(value: unknown): value is string {
   );
 }
 
-export function assertInputDeclaration(input: InputDeclaration): void {
+export function assertInputDeclaration(
+  input: InputDeclaration,
+  policyVersion: 1 | 2 = 1,
+): void {
   if (
     !input ||
     !Object.hasOwn(AUDIO_TYPES, input.extension) ||
     AUDIO_TYPES[input.extension] !== input.contentType ||
     !Number.isInteger(input.bytes) ||
     input.bytes < 1 ||
-    input.bytes >= 30_000_000 ||
+    (policyVersion === 2
+      ? input.bytes > 100_000_000
+      : input.bytes >= 30_000_000) ||
     !Number.isFinite(input.durationSeconds) ||
     input.durationSeconds <= 0 ||
-    input.durationSeconds >= 600 ||
+    (policyVersion === 2
+      ? input.durationSeconds > 1800
+      : input.durationSeconds >= 600) ||
     !isSha256(input.sha256)
   ) {
     throw authError('INVALID_INPUT');

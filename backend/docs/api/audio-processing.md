@@ -509,3 +509,5 @@ account or processing-policy denial, `404 JOB_NOT_FOUND`, `409` for state,
 idempotency, upload, stale-attempt, and recovery conflicts, `429 RATE_LIMITED`,
 and sanitized `503 SERVICE_UNAVAILABLE`. Internal diagnostics, tokens, object
 keys, and provider errors are never returned.
+
+See [media policy v2 and shared allowance](media-policy-v2.md) for additive policy, admission, worker evidence, and admin contracts.

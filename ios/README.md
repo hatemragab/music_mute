@@ -1,7 +1,7 @@
 # MusicMute for iOS
 
 Native Swift/SwiftUI app with bundle identifier `com.hatem.musicmute`, targeting iOS 17
-and newer. Import owned or permitted audio, review its validated size and duration,
+and newer. Select one owned or permitted audio/video file, review its prepared audio size and duration,
 confirm permission, and explicitly start cloud processing for vocals-only MP3 output.
 YouTube remains a labelled secondary download option **on the iPhone**. The app keeps persistent history,
 plays saved audio, and exports original files through Save to Files. English,
@@ -31,8 +31,8 @@ No account, cookies, proxy, or client secret is configured.
 
 Vocal filters for audio-only, natively playable **M4A/AAC** streams, then selects
 the highest available bitrate. It downloads the selected HTTPS Googlevideo stream
-with URLSession. It never downloads a combined video stream, decodes/re-encodes a
-file for saving, remuxes, or converts to MP3.
+with URLSession. The legacy YouTube flow never downloads a combined video stream or re-encodes a
+file for saving. Local Files/Photos video preparation is a separate path described below.
 
 This differs from Android's best-audio selection, which may choose WebM/Opus.
 iOS deliberately selects the best compatible original AAC stream for reliable
@@ -246,8 +246,9 @@ test when that happens; do not silently add server fallback. Client-side downloa
 change the originating IP and do not guarantee availability.
 
 Processing uses `Processing/`, `State/ProcessingModel.swift`, and the Processing UI
-views. Input must be nonempty, smaller than 30,000,000 bytes and shorter than 600
-seconds. Background URLSession uploads use file-backed signed multipart bodies;
+views. Legacy input must be nonempty, smaller than 30,000,000 bytes and shorter than 600
+seconds. Readiness-enabled version 2 input allows up to 100,000,000 bytes and 1,800
+seconds inclusively; the signed admission remains authoritative. Background URLSession uploads use file-backed signed multipart bodies;
 durable intent reconciles uncertain create/upload/cancel/retry responses on recovery.
 Result downloads resume through an explicit later action after interruption.
 Cancellation remains pending until acknowledged and a stopped worker remains visible.
@@ -284,3 +285,53 @@ plus actual Files selection through rights confirmation and explicit cloud proce
 using synthetic fixture audio. Scoped Swift lint and both localization resources
 passed. These fixture checks do not prove real Firebase/Apple revocation or deployed
 backend/S3/worker account erasure. Public privacy/deletion URLs remain unconfigured.
+
+
+## Versioned media preparation and account allowance (2026-09-13)
+
+Files offers individual audio/video selection; Photos uses PHPicker's one-video grant,
+without full-library authorization. Provider materialization has a 60-second cancellation
+deadline and a bounded streaming copy. Photos copies are private and discarded after use;
+original Files/Photos assets are never deleted. Lost provider access requires reselection.
+
+`ProcessingMediaPolicy` reads `/processing-policy?schemaVersion=2`. Only a validated,
+accepting response with non-null source and preparation bounds enables expanded preparation.
+Unknown readiness retains the existing exclusive 600-second/30-MB legacy path. Version 2
+supports the inclusive 1,800-second/100-MB prepared-audio ceiling. It persists policy version,
+profile ID, and source category with the immutable upload operation, including restoration.
+
+`MediaSourceInspector` honors the container's uniquely enabled default soundtrack. It
+accepts a single audio track and rejects ambiguous multiple defaults; it never guesses
+from track order or language. `AudioPreparationEngine` copies compatible audio, tries
+an audio-only passthrough composition for video, and otherwise uses AVAssetReader/
+AVAssetWriter AAC-LC at 256 kbps, 48 kHz stereo. Final audio is re-inspected and hashed;
+source size, available space, export time, and output size are bounded. The source's image
+track is never decoded for audio extraction. Supported formats depend on AVFoundation;
+no blanket support claim is made for every container or codec.
+
+Inspection and preparation have distinct local phases. UIKit background-task grace is
+finite and expires by cancelling preparation. URLSession upload recovery remains independent
+of transcoding. A completed consent-review input survives relaunch. Uncertain upload completion
+retains its immutable input until an authenticated receipt/reconciliation marks it submitted;
+only then is temporary prepared input removed. Force-quit cannot guarantee continued preparation.
+
+`ProcessingUsageRepository` fetches owner-only rolling used/reserved/remaining audio allowance,
+active jobs, availability, and server replenishment timestamps. Reads are advisory; create-job
+admission is authoritative. Account changes clear the snapshot, and known allowance/capacity
+rejections never become automatic rate-limit retries. English and Arabic messages accompany
+media, quota, capacity, and provider failures. Waiting and separator timers remain separate,
+and cleaned-audio results are still fetched only for Play/Download/Save.
+
+YouTube intake first reads the public watch page locally with a 5-MB response ceiling,
+30-second resource deadline, and no cookies/credentials/redirect fallback. A bounded JSON
+parser requires an available player response, matching video ID, explicit non-live metadata,
+and finite lengthSeconds at or below 1,800. Live/upcoming, consent/login pages, unknown
+metadata, and playlist context fail before audio transfer. YouTubeKit 0.4.9 then resolves
+audio-only streams locally. Source delegates enforce actual downloaded bytes (100 MB) and
+600 seconds independently of response length; background retry preserves the original
+persisted deadline. Final native frame duration and prepared policy are revalidated.
+Public YouTube response markup can change; deterministic parser tests are not live service proof.
+
+See `../docs/tasks/media-input-and-queue/evidence/ios.md` for current simulator validation and
+remaining readiness, provider, device, and network limitations. Earlier evidence in this README
+records historical versions and does not establish current production readiness.

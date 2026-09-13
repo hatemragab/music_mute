@@ -1,3 +1,5 @@
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
+import { ProcessingUsageLedger } from '../processing-usage/processing-usage.schema.js';
 import { Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isUUID } from 'class-validator';
@@ -45,6 +47,13 @@ export class JobActionsService {
     private readonly workerControls?: Model<WorkerControl>,
   ) {}
 
+  private get usage() {
+    return new ProcessingUsageService(
+      this.jobs.db.model<ProcessingUsageLedger>(ProcessingUsageLedger.name),
+      this.jobs,
+    );
+  }
+
   async cancel(userId: string, jobId: string) {
     const principal: JobActionPrincipal = {
       kind: 'owner',
@@ -84,6 +93,7 @@ export class JobActionsService {
         )
         .lean();
       if (!updated) throw jobError('JOB_STATE_CONFLICT');
+      await this.usage.settleJob(updated, session);
       return updated;
     });
     return { id: job._id.toHexString(), status: job.status };
@@ -130,6 +140,7 @@ export class JobActionsService {
       )
       .lean();
     if (!updated) this.changed(principal);
+    await this.usage.settleJob(updated, session);
     return updated;
   }
 
@@ -234,10 +245,21 @@ export class JobActionsService {
     if (await controls.exists({ activeJobId: original._id }).session(session))
       throw jobError('WORKER_RECOVERY_REQUIRED');
     await this.accountAccess.assertActive(original.userId, session);
+    const newJobId = new Types.ObjectId();
     const admissionSnapshot = await this.admission.assertNewWork(
       original.userId,
       original.inputReservation,
       session,
+      undefined,
+      newJobId,
+      original.admissionSnapshot?.policyVersion === 2
+        ? {
+            policyVersion: 2,
+            preparationProfileId:
+              original.admissionSnapshot.preparationProfileId,
+            source: original.admissionSnapshot.source,
+          }
+        : {},
     );
     // Retry and source deletion/rename write the same source revision. The new
     // reference commits with this fence, before cleanup may remove pinned input.
@@ -252,7 +274,7 @@ export class JobActionsService {
     const [created] = await this.jobs.create(
       [
         {
-          _id: new Types.ObjectId(),
+          _id: newJobId,
           userId: original.userId,
           requestId,
           requestHash: hash,

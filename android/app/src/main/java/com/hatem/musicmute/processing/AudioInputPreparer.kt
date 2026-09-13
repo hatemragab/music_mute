@@ -18,7 +18,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-enum class InputPreparationError { UNSUPPORTED, INVALID_AUDIO, TOO_LARGE, TOO_LONG, STORAGE }
+enum class InputPreparationError { UNSUPPORTED, INVALID_AUDIO, TOO_LARGE, TOO_LONG, STORAGE, NO_AUDIO, DEFAULT_TRACK_UNAVAILABLE, DURATION_UNKNOWN, PREPARATION_TIMEOUT }
 
 class InputPreparationException(val reason: InputPreparationError) : IOException(reason.name)
 
@@ -35,6 +35,8 @@ data class PreparedInput(
     val file: File,
     val declaration: InputDeclaration,
     val displayName: String,
+    val mediaPolicy: ProcessingMediaPolicy = ProcessingMediaPolicy.LEGACY,
+    val mediaSource: String = "audio_file",
 )
 
 fun validProcessingInput(bytes: Long, durationSeconds: Double): Boolean =
@@ -60,12 +62,15 @@ fun processingContentType(extension: String): String? = when (extension) {
 class AudioInputPreparer(
     private val root: File,
     private val maxBytes: Long = 30_000_000,
+    private val validateDecoded: suspend (File, ProcessingMediaPolicy) -> Unit = { _, _ -> },
     private val inspect: (File) -> AudioInspection,
 ) {
     suspend fun prepare(
         ownerUid: String,
         displayName: String,
         operationId: String = UUID.randomUUID().toString(),
+        policy: ProcessingMediaPolicy = ProcessingMediaPolicy.LEGACY,
+        mediaSource: String = "audio_file",
         open: () -> InputStream,
     ): PreparedInput =
         withContext(Dispatchers.IO) {
@@ -74,6 +79,7 @@ class AudioInputPreparer(
                 ?: throw InputPreparationException(InputPreparationError.UNSUPPORTED)
             require(UUID.fromString(operationId).toString() == operationId)
             val directory = File(processingOwnerDirectory(root, ownerUid), operationId)
+            val deadline = System.nanoTime() + (policy.maxPreparationSeconds ?: 120).coerceAtMost(3600) * 1_000_000_000
             withPreparationLock(directory.absolutePath) {
                 val file = File(directory, "input.$extension")
                 val pending = File(directory, ".input.pending.$extension")
@@ -87,18 +93,20 @@ class AudioInputPreparer(
                         if (marker.length() > 4096) throw IOException("Invalid staging metadata")
                         val declaration = Json.decodeFromString<InputDeclaration>(marker.readText())
                         if (declaration.extension != extension || declaration.contentType != contentType ||
-                            declaration.bytes >= maxBytes || !validProcessingInput(declaration.bytes, declaration.durationSeconds))
+                            !policy.acceptsPrepared(declaration.bytes, declaration.durationSeconds))
                             throw IOException("Staging metadata mismatch")
                         val committed = if (file.isFile) file else pending
                         if (!committed.isFile || committed.length() != declaration.bytes || sha256(committed) != declaration.sha256)
                             throw IOException("Staged input changed")
                         currentCoroutineContext().ensureActive()
                         if (committed == pending) Files.move(pending.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE)
-                        return@withPreparationLock PreparedInput(operationId, ownerUid, file, declaration, displayName)
+                        return@withPreparationLock PreparedInput(operationId, ownerUid, file, declaration, displayName, policy, mediaSource)
                     }
                     // Older/uncommitted input may belong to another operation path.
                     // Never adopt or delete it merely because mkdirs returned false.
                     if (file.exists()) throw IOException("Existing input has no completion record")
+                    if (directory.usableSpace < policy.maxPreparedAudioBytes + 16 * 1024 * 1024)
+                        throw InputPreparationException(InputPreparationError.STORAGE)
                     ownsPending = true
                     val digest = MessageDigest.getInstance("SHA-256")
                     var bytes = 0L
@@ -107,11 +115,12 @@ class AudioInputPreparer(
                             val buffer = ByteArray(64 * 1024)
                             while (true) {
                                 currentCoroutineContext().ensureActive()
+                                if (System.nanoTime() >= deadline) throw InputPreparationException(InputPreparationError.PREPARATION_TIMEOUT)
                                 val count = source.read(buffer)
                                 if (count < 0) break
                                 if (count == 0) continue
                                 bytes += count
-                                if (bytes >= maxBytes) throw InputPreparationException(InputPreparationError.TOO_LARGE)
+                                if (if (policy.version == 1) bytes >= minOf(maxBytes, policy.maxPreparedAudioBytes) else bytes > policy.maxPreparedAudioBytes) throw InputPreparationException(InputPreparationError.TOO_LARGE)
                                 digest.update(buffer, 0, count)
                                 destination.write(buffer, 0, count)
                             }
@@ -124,7 +133,9 @@ class AudioInputPreparer(
                     if (!media.hasAudio || media.hasVideo || media.contentType != contentType ||
                         !media.durationSeconds.isFinite() || media.durationSeconds <= 0
                     ) throw InputPreparationException(InputPreparationError.INVALID_AUDIO)
-                    if (media.durationSeconds >= 600) throw InputPreparationException(InputPreparationError.TOO_LONG)
+                    if (!policy.acceptsDuration(media.durationSeconds)) throw InputPreparationException(InputPreparationError.TOO_LONG)
+                    validateDecoded(pending, policy)
+                    currentCoroutineContext().ensureActive()
                     val declaration = InputDeclaration(extension, contentType, bytes, media.durationSeconds,
                         Base64.getEncoder().encodeToString(digest.digest()))
                     markerPending.outputStream().use {
@@ -136,7 +147,7 @@ class AudioInputPreparer(
                     Files.move(markerPending.toPath(), marker.toPath(), StandardCopyOption.ATOMIC_MOVE)
                     publishedMarker = true
                     Files.move(pending.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE)
-                    PreparedInput(operationId, ownerUid, file, declaration, displayName)
+                    PreparedInput(operationId, ownerUid, file, declaration, displayName, policy, mediaSource)
                 } catch (error: Exception) {
                     if (ownsPending && !publishedMarker) {
                         pending.delete()
@@ -150,6 +161,17 @@ class AudioInputPreparer(
                 }
             }
         }
+
+    suspend fun recover(ownerUid: String, operationId: String, displayName: String, policy: ProcessingMediaPolicy,
+        mediaSource: String = "audio_file"): PreparedInput? = withContext(Dispatchers.IO) {
+        require(UUID.fromString(operationId).toString() == operationId)
+        val marker = File(File(processingOwnerDirectory(root, ownerUid), operationId), "input.json")
+        if (!marker.isFile) return@withContext null
+        if (marker.length() > 4096) throw InputPreparationException(InputPreparationError.STORAGE)
+        val declaration = Json.decodeFromString<InputDeclaration>(marker.readText())
+        prepare(ownerUid, "${displayName.substringBeforeLast('.', displayName)}.${declaration.extension}",
+            operationId, policy, mediaSource) { throw InputPreparationException(InputPreparationError.STORAGE) }
+    }
 
     private suspend fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")

@@ -35,6 +35,16 @@ export function JobAttemptTimeline({
             {formatDateTime(attempt.startedAt)} ·{" "}
             {formatDuration(attempt.durationSeconds)}
           </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Separator execution:{" "}
+            {attempt.separatorExecutionSeconds == null
+              ? "Unavailable"
+              : formatDuration(attempt.separatorExecutionSeconds)}{" "}
+            · Stop confirmed:{" "}
+            {attempt.stoppedConfirmed === true ? "Yes" : "Not confirmed"} ·
+            Separation completed:{" "}
+            {attempt.separationCompleted === true ? "Yes" : "Not confirmed"}
+          </p>
           <p className="mt-1 font-mono text-[11px] text-muted-foreground break-all">
             {attempt.id}
           </p>

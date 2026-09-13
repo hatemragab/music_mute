@@ -15,6 +15,8 @@ from uuid import UUID, uuid4
 
 from .config import Config
 from .engine import EngineError, SeparatorEngine
+from .execution import ExecutionClock, read_execution_telemetry
+from .media_limits import MediaLimits, effective_media_limits
 from .processes import ProcessRunner
 from .progress import (
     Progress,
@@ -162,9 +164,18 @@ def inspect_audio(
     *,
     output: bool = False,
     prepared: Path | None = None,
+    limits: MediaLimits | None = None,
 ) -> float:
     """Probe stream type then decode up to the strict duration ceiling."""
     try:
+        limits = limits or MediaLimits()
+        if path.is_symlink() or not path.is_file():
+            raise MediaError("OUTPUT_INVALID" if output else "INVALID_AUDIO")
+        accepts_bytes = (
+            limits.accepts_output_bytes if output else limits.accepts_input_bytes
+        )
+        if not accepts_bytes(path.stat().st_size):
+            raise MediaError("OUTPUT_INVALID" if output else "INVALID_AUDIO")
         if prepared is not None and prepared.is_symlink():
             raise MediaError("INVALID_AUDIO")
         probe = runner.run(
@@ -172,22 +183,36 @@ def inspect_audio(
                 "ffprobe",
                 "-v",
                 "error",
-                "-select_streams",
-                "a:0",
                 "-show_entries",
-                "stream=codec_name",
+                "stream=codec_type,codec_name,channels,sample_rate",
                 "-of",
                 "json",
                 str(path),
             ],
             cwd=path.parent,
-            timeout=30,
+            timeout=min(30, limits.probe_timeout_seconds),
             check=check,
             capture=True,
         )
         streams = json.loads(probe.stdout)["streams"]
-        if not streams or (output and streams[0].get("codec_name") != "mp3"):
+        if (
+            not isinstance(streams, list)
+            or len(streams) != 1
+            or streams[0].get("codec_type") != "audio"
+            or (output and streams[0].get("codec_name") != "mp3")
+        ):
             raise MediaError("OUTPUT_INVALID" if output else "INVALID_AUDIO")
+        if limits.policy_version == 2:
+            stream = streams[0]
+            sample_rate = stream.get("sample_rate")
+            if (
+                type(stream.get("channels")) is not int
+                or stream["channels"] not in (1, 2)
+                or not isinstance(sample_rate, str)
+                or not sample_rate.isdigit()
+                or not 8000 <= int(sample_rate) <= 192000
+            ):
+                raise MediaError("OUTPUT_INVALID" if output else "INVALID_AUDIO")
         decoded = runner.run(
             [
                 "ffmpeg",
@@ -203,7 +228,10 @@ def inspect_audio(
                 "0:a:0",
                 "-vn",
                 "-t",
-                "600",
+                str(
+                    limits.max_duration_seconds
+                    + (1 / 44100 if limits.duration_inclusive else 0)
+                ),
                 "-ar",
                 "44100",
                 "-ac",
@@ -217,13 +245,13 @@ def inspect_audio(
                 ),
             ],
             cwd=path.parent,
-            timeout=300,
+            timeout=limits.probe_timeout_seconds if limits.policy_version == 2 else 300,
             check=check,
             capture=True,
         )
         values = re.findall(r"^out_time_us=(\d+)$", decoded.stdout, re.MULTILINE)
         duration = max((int(value) / 1_000_000 for value in values), default=0)
-        if duration >= 600:
+        if duration > 0 and not limits.accepts_duration(duration):
             raise MediaError("OUTPUT_INVALID" if output else "INPUT_TOO_LONG")
         if duration <= 0:
             raise MediaError("OUTPUT_INVALID" if output else "INVALID_AUDIO")
@@ -259,6 +287,7 @@ class Worker:
             active=self.journal.active is not None,
         )
         self.progress = Progress(config.state_dir, config.separator)
+        self.execution = ExecutionClock(config.state_dir)
         self.cleanup_path = config.state_dir / "pending-cleanup.json"
         self.long_poll_supported = True
         self.stage = "validating"
@@ -266,6 +295,7 @@ class Worker:
         self._engine = None
         self._engine_fingerprint = None
         self._identity_verified = False
+        self._media_policy_supported = False
 
     def __enter__(self):
         return self
@@ -285,6 +315,8 @@ class Worker:
 
     def _claim(self, wait_seconds: int = 0):
         body = {"sessionId": self.session}
+        if self._media_policy_supported:
+            body["mediaPolicyVersion"] = 2
         if wait_seconds and self.long_poll_supported:
             body["waitSeconds"] = wait_seconds
         try:
@@ -294,7 +326,9 @@ class Worker:
                 raise
             # Rolling upgrades: older servers reject the optional field. A
             # successful legacy request enables bounded one-second polling.
-            reply = self.api.post("claim", {"sessionId": self.session})
+            reply = self.api.post(
+                "claim", {k: v for k, v in body.items() if k != "waitSeconds"}
+            )
             self.long_poll_supported = False
             return reply
 
@@ -313,6 +347,10 @@ class Worker:
                 "Backend worker identity does not match this installation or protocol"
             )
         self._identity_verified = True
+        self._media_policy_supported = (
+            type(reply.get("mediaPolicyVersion")) is int
+            and reply["mediaPolicyVersion"] == 2
+        )
 
     def _finish_cleanup(self, assignment: dict, status: str):
         # Persist before erasing files so restart retries the attestation, even
@@ -334,11 +372,17 @@ class Worker:
             raise RuntimeError("Invalid cleanup terminal status")
         self._close_engine()
         self.progress.purge_job(assignment["jobId"])
-        reply = self.api.post("local-cleanup", {
-            **assignment, "eventId": str(uuid4()), "localDataDeleted": True,
-        })
+        reply = self.api.post(
+            "local-cleanup",
+            {
+                **assignment,
+                "eventId": str(uuid4()),
+                "localDataDeleted": True,
+            },
+        )
         if not reply or reply.get("status") != "cleaned":
             raise ApiError(0, "INVALID_RESPONSE")
+        self.execution.acknowledge(assignment["attemptId"])
         self.journal.save(None)
         atomic_json(self.cleanup_path, None)
         return {"status": value["status"]}
@@ -357,14 +401,7 @@ class Worker:
             for _ in range(4):
                 try:
                     reconciled_attempt_id = self.journal.active["attemptId"]
-                    reply = self.api.post(
-                        "reconcile",
-                        {
-                            "sessionId": self.session,
-                            "previousAttemptId": reconciled_attempt_id,
-                            "stopped": True,
-                        },
-                    )
+                    reply = self._reconcile(reconciled_attempt_id)
                     break
                 except ApiError as error:
                     if error.code == "STALE_ATTEMPT":
@@ -397,14 +434,7 @@ class Worker:
                     # contained processes before making this attestation.
                     self._close_engine()
                     reconciled_attempt_id = error.previous_attempt_id
-                    reply = self.api.post(
-                        "reconcile",
-                        {
-                            "sessionId": self.session,
-                            "previousAttemptId": reconciled_attempt_id,
-                            "stopped": True,
-                        },
-                    )
+                    reply = self._reconcile(reconciled_attempt_id)
                 else:
                     raise
         if reply and reply.get("status") in TERMINAL:
@@ -427,6 +457,28 @@ class Worker:
             self.journal.save(None)
         return reply
 
+    def _reconcile(self, previous_attempt_id):
+        body = {
+            "sessionId": self.session,
+            "previousAttemptId": previous_attempt_id,
+            "stopped": True,
+        }
+        if self._media_policy_supported:
+            duration = (self.progress.data or {}).get("inputDurationSeconds")
+            evidence = self.execution.reconciliation(previous_attempt_id, duration)
+            if evidence is not None:
+                body.update(evidence)
+        reply = self.api.post("reconcile", body)
+        if not isinstance(reply, dict) or not (
+            reply.get("status") in TERMINAL | {"released"}
+            or isinstance(reply.get("attemptId"), str)
+        ):
+            raise ApiError(0, "INVALID_RESPONSE")
+        # The acknowledged event is durable before a replacement attempt can
+        # replace this clock; a lost response reuses the same persisted event ID.
+        self.execution.acknowledge(previous_attempt_id)
+        return reply
+
     def _event(
         self,
         route: str,
@@ -437,10 +489,18 @@ class Worker:
         acknowledgement: bool = False,
     ):
         body = {**selectors(assignment), "eventId": str(uuid4()), **(fields or {})}
+        if self._media_policy_supported:
+            duration = (self.progress.data or {}).get("inputDurationSeconds")
+            evidence = self.execution.evidence(body["eventId"], duration)
+            if evidence is not None:
+                body["executionEvidence"] = evidence
         for attempt in range(5):
             lease.check(ignore_cancel=acknowledgement)
             try:
-                return self.api.post(route, body)
+                reply = self.api.post(route, body)
+                if "executionEvidence" in body and reply:
+                    self.execution.acknowledge(assignment["attemptId"])
+                return reply
             except ApiError as error:
                 if not error.retryable or attempt == 4:
                     raise
@@ -522,7 +582,16 @@ class Worker:
         raise TransferError("DOWNLOAD_FAILED")
 
     def _result(self, assignment: dict, lease: Lease, runner: ProcessRunner) -> Path:
+        limits = effective_media_limits(
+            assignment,
+            self.config.output_max_bytes,
+            self.config.processing_timeout_seconds,
+        )
         result = self.progress.artifact("output", lease.check)
+        if result is not None and not limits.accepts_output_bytes(
+            result.stat().st_size
+        ):
+            raise MediaError("OUTPUT_INVALID")
         if result is None:
             prepared = self.progress.artifact("prepared", lease.check)
             if prepared is None:
@@ -530,7 +599,9 @@ class Worker:
                 source = self.progress.work / ("input." + media["extension"])
                 self._download(assignment, source, lease)
                 prepared = self.progress.work / "prepared.wav"
-                duration = inspect_audio(source, runner, lease.check, prepared=prepared)
+                duration = inspect_audio(
+                    source, runner, lease.check, prepared=prepared, limits=limits
+                )
                 self.progress.data["inputDurationSeconds"] = duration
                 self.progress.record("prepared", prepared, duration, lease.check)
             else:
@@ -557,6 +628,7 @@ class Worker:
         # A crash can leave an uncheckpointed output. A new directory avoids
         # confusing it with a new successful result or overwriting it.
         output = self.progress.local_path(Path("outputs") / uuid4().hex)
+        self.execution.start(output)
         try:
             if self.config.reuse_separator:
                 if self._engine_fingerprint != self.progress.processor_fingerprint:
@@ -569,7 +641,7 @@ class Worker:
                 self._engine.run(
                     prepared,
                     output,
-                    timeout=self.config.processing_timeout_seconds,
+                    timeout=limits.processing_timeout_seconds,
                     check=lease.check,
                 )
             else:
@@ -583,25 +655,56 @@ class Worker:
                         str(output),
                     ],
                     cwd=self.config.separator.parent,
-                    timeout=self.config.processing_timeout_seconds,
+                    timeout=limits.processing_timeout_seconds,
                     check=lease.check,
                 )
-        except (EngineError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            self.close()
-            raise MediaError("SEPARATOR_FAILED") from None
+        except BaseException as error:
+            # Unwinding can itself fail to stop a descendant. Explicitly verify
+            # the engine and any retained runner containment before recording
+            # stopped timing or sending cancellation/failure attestations.
+            try:
+                self.close()
+                runner.recover()
+            except BaseException:
+                self.execution.stop(stopped_confirmed=False)
+                raise
+            self.execution.stop(
+                read_execution_telemetry(output),
+                stopped_confirmed=True,
+                run_id=output.name,
+            )
+            if isinstance(
+                error,
+                (EngineError, subprocess.CalledProcessError, subprocess.TimeoutExpired),
+            ):
+                raise MediaError("SEPARATOR_FAILED") from None
+            raise
+        else:
+            self.execution.stop(
+                read_execution_telemetry(output),
+                stopped_confirmed=True,
+                run_id=output.name,
+            )
         results = list(output.glob("*.mp3"))
         if len(results) != 1 or results[0].is_symlink():
             raise MediaError("OUTPUT_INVALID")
         result = results[0]
-        if not 0 < result.stat().st_size < self.config.output_max_bytes:
+        if not limits.accepts_output_bytes(result.stat().st_size):
             raise MediaError("OUTPUT_INVALID")
-        duration = inspect_audio(result, runner, lease.check, output=True)
+        duration = inspect_audio(
+            result, runner, lease.check, output=True, limits=limits
+        )
         self.progress.record("output", result, duration, lease.check)
         return result
 
     def _upload(self, assignment: dict, result: Path, lease: Lease):
+        limits = effective_media_limits(
+            assignment,
+            self.config.output_max_bytes,
+            self.config.processing_timeout_seconds,
+        )
         value = self.progress.data["output"]
-        if not 0 < value["bytes"] < self.config.output_max_bytes:
+        if not limits.accepts_output_bytes(value["bytes"]):
             raise MediaError("OUTPUT_INVALID")
         fields = {k: value[k] for k in ("bytes", "durationSeconds", "sha256")}
         fields.update(contentType="audio/mpeg", playable=True, voiceOnly=True)
@@ -646,6 +749,8 @@ class Worker:
             # contained descendants before sending any stopped attestation.
             if not self._recovered:
                 runner.recover()
+                self._close_engine()
+                self.execution.recover_completed_phase(stopped_confirmed=True)
                 self._recovered = True
             self._verify_identity()
             assignment = self._assignment(wait_seconds)
@@ -656,9 +761,20 @@ class Worker:
             LOG.info("Job %s: validating", assignment["jobId"])
             with Lease(self.api, assignment, self.stop) as lease:
                 self.stage = "validating"
+                self.execution.bind(assignment["attemptId"])
                 try:
                     lease.check()
                     media = assignment["input"]
+                    try:
+                        limits = effective_media_limits(
+                            assignment,
+                            self.config.output_max_bytes,
+                            self.config.processing_timeout_seconds,
+                        )
+                    except ValueError:
+                        raise MediaError("INVALID_AUDIO") from None
+                    if not limits.accepts_input_bytes(media.get("bytes")):
+                        raise MediaError("INVALID_AUDIO")
                     extension = media["extension"]
                     if extension not in (
                         "m4a",

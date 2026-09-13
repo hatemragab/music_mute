@@ -29,6 +29,9 @@ export class AdminJobsController {
   ) {
     return this.jobs.list(req.adminActor!, query);
   }
+  @Get('queue-summary') queueSummary() {
+    return this.jobs.queueSummary();
+  }
   @Get(':id') detail(@Req() req: AuthRequest, @Param('id') id: string) {
     return this.jobs.detail(req.adminActor!, id);
   }

@@ -1,3 +1,7 @@
+import {
+  PREPARATION_PROFILE_ID,
+  type InputSource,
+} from '../../admin-settings/processing-policy-v2.js';
 import { Transform, Type } from 'class-transformer';
 import {
   IsDefined,
@@ -42,7 +46,35 @@ export class InputDeclarationDto implements InputDeclaration {
   sha256!: string;
 }
 
+export class InputDeclarationV2Dto implements InputDeclaration {
+  @IsIn(Object.keys(AUDIO_TYPES)) extension!: keyof typeof AUDIO_TYPES;
+  @IsString() @IsIn(Object.values(AUDIO_TYPES)) contentType!: string;
+  @IsInt() @Min(1) @Max(100_000_000) bytes!: number;
+  @ValidateBy({
+    name: 'audioDurationV2',
+    validator: {
+      validate: (value: unknown) =>
+        typeof value === 'number' &&
+        Number.isFinite(value) &&
+        value > 0 &&
+        value <= 1800,
+    },
+  })
+  durationSeconds!: number;
+  @ValidateBy({ name: 'sha256', validator: { validate: isSha256 } })
+  sha256!: string;
+}
+
 export class CreateJobDto {
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsIn([2])
+  policyVersion?: 2;
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsIn([PREPARATION_PROFILE_ID])
+  preparationProfileId?: string;
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsIn(['audio_file', 'video_file', 'youtube'])
+  source?: InputSource;
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.toLowerCase() : value,
   )
@@ -51,7 +83,11 @@ export class CreateJobDto {
   @IsDefined()
   @IsObject()
   @ValidateNested()
-  @Type(() => InputDeclarationDto)
+  @Type((options) =>
+    options?.object?.policyVersion === 2
+      ? InputDeclarationV2Dto
+      : InputDeclarationDto,
+  )
   input!: InputDeclarationDto;
 
   @ValidateIf((_object, value: unknown) => value !== undefined)

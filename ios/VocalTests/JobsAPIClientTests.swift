@@ -21,6 +21,28 @@ import XCTest
       configuration: AuthConfiguration(apiOrigin: URL(string: "https://api.example")!),
       tokenSource: token, installationId: { self.installation }, sessionConfiguration: config)
   }
+  func testVersionedPolicyMetadataAndAllowanceRejection() async throws {
+    let token = JobsTokenFixture()
+    let api = client(token)
+    JobsURLProtocol.handler = { request in
+      let body = try! self.body(request)
+      XCTAssertEqual(body["policyVersion"] as? Int, 2)
+      XCTAssertEqual(body["preparationProfileId"] as? String, "preserve-or-aac-lc-256-v1")
+      XCTAssertEqual(body["source"] as? String, "video_file")
+      return (429, [:], Data(#"{"code":"PROCESSING_ALLOWANCE_EXHAUSTED"}"#.utf8))
+    }
+    do {
+      _ = try await api.create(
+        requestId: requestId, input: input,
+        metadata: JobSourceMetadata(
+          policyVersion: 2, preparationProfileId: "preserve-or-aac-lc-256-v1", source: "video_file")
+      )
+      XCTFail("allowance rejection accepted")
+    } catch {
+      XCTAssertEqual(error as? JobsFailure, .conflict(code: "PROCESSING_ALLOWANCE_EXHAUSTED"))
+    }
+  }
+
   func testAllRouteMethodsBodiesAndInstallationHeaders() async throws {
     let token = JobsTokenFixture()
     let api = client(token)

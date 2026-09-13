@@ -92,3 +92,28 @@ reference. The production server never reads it from disk.
 Configure the backend `CORS_ORIGINS` with the exact public HTTPS dashboard origin. If the dashboard uses a subpath, the origin still contains only scheme, host and optional port.
 
 See the [approved scope](../docs/tasks/full-dashboard/scope.md), [API contracts](../docs/tasks/full-dashboard/contracts.md), and [local validation record](../docs/validation/full-dashboard-local.md).
+
+## Media and fair queue administration (v2)
+
+The existing Settings page includes a separate version 2 editor backed by
+`GET/PUT /admin/settings/processing-v2`. It preserves the legacy settings document.
+Display minutes and decimal MB are submitted as exact seconds and bytes; the
+inclusive upper limits are 1,800 seconds and 100,000,000 prepared bytes. New
+long-job admission requires server-reported verified readiness. Measured
+qualification must be supplied explicitly, including evidence identity, expiry,
+qualified workers, source/preparation bounds and cost model. Missing evidence is
+never populated with guessed capacity. Existing qualification is preserved on an
+unrelated edit, or explicitly removed from the reviewed draft.
+
+Jobs and Overview show queued versus all outstanding reserved workload, snapshot
+freshness and nullable estimates. Job and worker details separate declared media,
+measured media, actual separator execution and reported capability. Missing
+physical ceilings and estimates are unavailable. Existing cancellation, drain and
+recovery actions retain their permissions and confirmation semantics.
+
+User detail includes rolling usage, reservation holds, individual replenishments,
+and temporary allowance increases/revocation. Expiry, reason, operation ID,
+expected revision and fresh authentication are required for allowance changes.
+Suspensions can have an optional expiry; effective access comes from the server,
+not a client timer. Policy and allowance writes perform authoritative read-back;
+policy conflicts retain the draft and require an explicit refreshed review.

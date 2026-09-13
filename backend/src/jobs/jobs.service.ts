@@ -1,3 +1,4 @@
+import { assertPreparedAudioV2 } from '../admin-settings/processing-policy-v2.js';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
@@ -34,11 +35,14 @@ export class JobsService {
     requestId: string,
     metadata: JobMetadata = {},
   ) {
-    assertInputDeclaration(input);
+    const normalized = normalizeJobMetadata(metadata);
+    if (normalized.policyVersion === 2) {
+      assertPreparedAudioV2(input, { evidenceStatus: 'verified' });
+      assertInputDeclaration(input, 2);
+    } else assertInputDeclaration(input);
     if (!isUUID(requestId, '4')) throw authError('INVALID_INPUT');
     requestId = requestId.toLowerCase();
     const owner = objectId(userId);
-    const normalized = normalizeJobMetadata(metadata);
     const hash = requestHash({
       operation: 'create',
       input,
@@ -58,6 +62,9 @@ export class JobsService {
             owner,
             input,
             session,
+            undefined,
+            id,
+            normalized,
           );
           const [result] = await this.jobs.create(
             [
@@ -134,14 +141,8 @@ export class JobsService {
       if (!current || current.deletedAt) throw jobError('JOB_NOT_FOUND');
       if (current.status !== 'awaiting_upload')
         throw jobError('JOB_STATE_CONFLICT');
-      const admissionSnapshot = await this.admission.assertNewWork(
-        owner,
-        current.inputReservation,
-        session,
-        current._id,
-      );
-      current.set({ admissionSnapshot, revision: current.revision + 1 });
-      await current.save({ session });
+      await this.access.assertActive(userId, session);
+      this.admission.assertAcceptedReservation(current);
       return current.toObject();
     });
     const grant = await processingIo(() => this.storage.createInputGrant(job));

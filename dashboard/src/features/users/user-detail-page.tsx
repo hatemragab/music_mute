@@ -1,3 +1,4 @@
+import { suspensionExpiry } from "./processing-access-validation";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, PauseCircle, PlayCircle } from "lucide-react";
@@ -19,12 +20,17 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format";
 import { getUser, setProcessingSuspended } from "./users-api";
 
+import { ProcessingUsageSection } from "./processing-usage-panel";
+
+import { SuspensionExpiryField } from "./processing-suspension-dialog";
+
 export function UserDetailPage() {
   const { id = "" } = useParams();
   const client = useApiClient();
   const queryClient = useQueryClient();
   const { can, reauthenticate } = useAdminSession();
-  const [changing, setChanging] = useState(false);
+  const [changing, setChanging] = useState<UserDetail | null>(null);
+  const [expiry, setExpiry] = useState("");
   const user = useQuery({
     queryKey: ["user", id],
     queryFn: () => getUser(client, id),
@@ -42,16 +48,24 @@ export function UserDetailPage() {
         expectedRevision: current.revision,
         operationId: createOperationId(),
         reason,
+        ...(current.processingSuspended
+          ? {}
+          : { expiresAt: suspensionExpiry(expiry) }),
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["user", id] });
       await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["processing-usage", id],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["audit"] });
     },
   });
   if (user.isLoading) return <LoadingState />;
   if (user.isError || !user.data)
     return <ErrorState error={user.error} retry={() => void user.refetch()} />;
   const data = user.data;
+  const actionUser = changing ?? data;
   return (
     <div className="space-y-6">
       <Link
@@ -67,7 +81,10 @@ export function UserDetailPage() {
           can("users.processing.manage") ? (
             <Button
               variant={data.processingSuspended ? "default" : "destructive"}
-              onClick={() => setChanging(true)}
+              onClick={() => {
+                setExpiry("");
+                setChanging(data);
+              }}
             >
               {data.processingSuspended ? (
                 <PlayCircle aria-hidden="true" />
@@ -153,6 +170,14 @@ export function UserDetailPage() {
               {data.suspension ? (
                 <dl className="mt-4 grid gap-2 text-sm">
                   <div>
+                    <dt className="text-muted-foreground">Suspension expiry</dt>
+                    <dd>
+                      {data.suspension.expiresAt
+                        ? formatDateTime(data.suspension.expiresAt)
+                        : "Until resumed"}
+                    </dd>
+                  </div>
+                  <div>
                     <dt className="text-muted-foreground">Reason</dt>
                     <dd>{data.suspension.reason}</dd>
                   </div>
@@ -206,33 +231,45 @@ export function UserDetailPage() {
           </PageSection>
         </CardContent>
       </Card>
+      <ProcessingUsageSection key={id} userId={id} />
       <ReasonDialog
-        open={changing}
-        onOpenChange={setChanging}
+        open={Boolean(changing)}
+        onOpenChange={(open) => {
+          if (!open) setChanging(null);
+        }}
         title={
-          data.processingSuspended ? "Resume processing" : "Suspend processing"
+          actionUser.processingSuspended
+            ? "Resume processing"
+            : "Suspend processing"
         }
         description={
-          data.processingSuspended
+          actionUser.processingSuspended
             ? "This allows new processing only if the account itself is active. It does not change a disabled or deleting account."
             : "New processing will be blocked. Existing jobs and results remain available."
         }
         confirmLabel={
-          data.processingSuspended ? "Resume processing" : "Suspend processing"
+          actionUser.processingSuspended
+            ? "Resume processing"
+            : "Suspend processing"
         }
-        destructive={!data.processingSuspended}
+        destructive={!actionUser.processingSuspended}
         freshAuth
         onReauthenticate={reauthenticate}
         summary={
           <>
-            <p>{data.displayName || data.email}</p>
+            <p>{actionUser.displayName || actionUser.email}</p>
+            {!actionUser.processingSuspended ? (
+              <SuspensionExpiryField value={expiry} onChange={setExpiry} />
+            ) : null}
             <p className="text-muted-foreground">
-              Account remains {data.status}
+              Account remains {actionUser.status}
             </p>
           </>
         }
         onConfirm={(reason) =>
-          update.mutateAsync({ current: data, reason }).then(() => undefined)
+          update
+            .mutateAsync({ current: actionUser, reason })
+            .then(() => undefined)
         }
       />
     </div>

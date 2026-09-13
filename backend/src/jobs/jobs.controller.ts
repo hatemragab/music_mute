@@ -125,6 +125,9 @@ export class JobsController {
       dto.input,
       dto.requestId,
       {
+        policyVersion: dto.policyVersion,
+        preparationProfileId: dto.preparationProfileId,
+        source: dto.source,
         sourceTitle: dto.sourceTitle,
         sourceKind: dto.sourceKind,
         sourceUrl: dto.sourceUrl,

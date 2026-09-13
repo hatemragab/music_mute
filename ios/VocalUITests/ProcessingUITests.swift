@@ -239,8 +239,8 @@ final class ProcessingUITests: XCTestCase {
     let names = [label, alternate].compactMap { $0 }
     for _ in 0..<5 {
       for name in names {
-        let cell = app.cells.containing(.staticText, identifier: name).firstMatch
-        if cell.exists, cell.isHittable {
+        let cell = app.cells.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+        if cell.waitForExistence(timeout: 1), cell.isHittable {
           // Files grid captions can have a separate hit region. Activate the
           // icon in the upper part of the matched cell, including wrapped names.
           cell.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()

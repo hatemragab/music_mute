@@ -170,7 +170,8 @@ class AudioTaskNotifications(private val context: Context) {
     private fun stageLabel(stage: AudioTaskStage): Int = when (stage) {
         AudioTaskStage.WAITING -> R.string.audio_task_waiting
         AudioTaskStage.DOWNLOADING_SOURCE -> R.string.downloading
-        AudioTaskStage.PREPARING_INPUT -> R.string.processing_preparing
+        AudioTaskStage.INSPECTING -> R.string.media_inspecting
+    AudioTaskStage.PREPARING_INPUT -> R.string.processing_preparing
         AudioTaskStage.RESERVING_JOB -> R.string.audio_task_reserving
         AudioTaskStage.UPLOADING_INPUT -> R.string.processing_uploading
         AudioTaskStage.CONFIRMING_UPLOAD -> R.string.audio_task_confirming

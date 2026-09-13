@@ -37,6 +37,8 @@ import { useVisibleInterval } from "@/hooks/use-visible-interval";
 import { listJobs } from "./jobs-api";
 import { JobSourceLink } from "./job-source-link";
 
+import { QueueSummarySection } from "./queue-summary-panel";
+
 export function JobsPage() {
   const client = useApiClient();
   const { can } = useAdminSession();
@@ -87,6 +89,7 @@ export function JobsPage() {
           ) : undefined
         }
       />
+      <QueueSummarySection />
       <div className="grid gap-2 rounded-xl border bg-card p-3 sm:grid-cols-2 xl:grid-cols-6">
         <Select
           value={status}

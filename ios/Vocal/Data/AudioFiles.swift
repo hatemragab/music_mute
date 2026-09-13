@@ -24,6 +24,10 @@ actor AudioFiles {
     -> SavedAudio
   {
     guard !purgedAttempts.contains(id) else { throw CancellationError() }
+    let sourceBytes = try temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+    guard sourceBytes > 0, sourceBytes <= YouTubePreflight.maximumDownloadBytes else {
+      throw AudioInputPreparationError.invalidSize
+    }
     let directory = root.appendingPathComponent(id.uuidString, isDirectory: true)
     let file = directory.appendingPathComponent("audio.m4a")
     do {
@@ -55,7 +59,9 @@ actor AudioFiles {
       let audioFile = try AVAudioFile(forReading: file)
       let duration = Double(audioFile.length) / audioFile.fileFormat.sampleRate
       let playable = try await asset.load(.isPlayable)
-      guard !audio.isEmpty, video.isEmpty, playable, duration.isFinite, duration > 0 else {
+      guard !audio.isEmpty, video.isEmpty, playable, duration.isFinite, duration > 0,
+        duration <= 1800
+      else {
         throw AudioFailure.invalidAudio
       }
       try Task.checkCancellation()

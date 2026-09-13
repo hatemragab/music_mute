@@ -1,3 +1,4 @@
+import { accountFixture } from './helpers/account-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -82,6 +83,10 @@ test('waiting claims discover newly queued work and preserve one durable assignm
     status: 'queued',
     queueOrder: 2n,
   });
+  await accountFixture(
+    connection,
+    (await jobs.find().lean()).map((job) => job.userId.toString()),
+  );
   const results = await pending;
   const wins = results.filter((result) => result.status === 'fulfilled');
   const conflicts = results.filter((result) => result.status === 'rejected');

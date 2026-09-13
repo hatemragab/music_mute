@@ -24,7 +24,7 @@ export const setProcessingSuspended = (
   client: ApiClient,
   id: string,
   suspended: boolean,
-  input: RevisionCommand,
+  input: RevisionCommand & { expiresAt?: string },
 ) =>
   submitWithReceiptReadBack<UserSummary>({
     client,
@@ -36,3 +36,40 @@ export const setProcessingSuspended = (
       ),
     readResult: (receipt) => getUser(client, receipt.resourceId ?? id),
   });
+
+export const getProcessingUsage = (client: ApiClient, id: string) =>
+  client.get<import("@/api/contracts").ProcessingUsage>(
+    `/admin/users/${encodeURIComponent(id)}/processing-usage`,
+  );
+
+export const setProcessingAllowance = (
+  client: ApiClient,
+  id: string,
+  input: RevisionCommand & { allowanceAudioSeconds: number; expiresAt: string },
+) =>
+  submitWithReceiptReadBack({
+    client,
+    operationId: input.operationId,
+    submit: () =>
+      client.put(
+        `/admin/users/${encodeURIComponent(id)}/processing-allowance`,
+        input,
+      ),
+    readResult: () => getProcessingUsage(client, id),
+  }).then(() => getProcessingUsage(client, id));
+
+export const clearProcessingAllowance = (
+  client: ApiClient,
+  id: string,
+  input: RevisionCommand,
+) =>
+  submitWithReceiptReadBack({
+    client,
+    operationId: input.operationId,
+    submit: () =>
+      client.post(
+        `/admin/users/${encodeURIComponent(id)}/clear-processing-allowance`,
+        input,
+      ),
+    readResult: () => getProcessingUsage(client, id),
+  }).then(() => getProcessingUsage(client, id));

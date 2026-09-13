@@ -35,6 +35,8 @@ fun HomeScreen(
     message: String? = null,
     onNotifications: () -> Unit = {},
     miniPlayer: @Composable () -> Unit = {},
+    onPhotos: () -> Unit = {},
+    usage: com.hatem.musicmute.processing.ProcessingUsage? = null,
 ) {
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         LazyColumn(
@@ -58,6 +60,22 @@ fun HomeScreen(
                     }
                 }
             }
+            item {
+                OutlinedButton(onClick = onPhotos, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.media_import_photos))
+                }
+            }
+            usage?.let { current -> item {
+                CreativeCard {
+                    Text(stringResource(R.string.processing_usage_remaining, kotlin.math.floor(current.remainingAudioSeconds / 60).toInt()))
+                    Text(stringResource(R.string.processing_usage_details, kotlin.math.ceil(current.usedAudioSeconds / 60).toInt(), kotlin.math.ceil(current.reservedAudioSeconds / 60).toInt()))
+                    current.nextReplenishmentAt?.let { at ->
+                        val local = runCatching { java.time.Instant.parse(at).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.SHORT)) }.getOrNull()
+                        if (local != null) Text(stringResource(R.string.processing_usage_replenishment, local))
+                    }
+                    Text(stringResource(R.string.processing_usage_admission), style = MaterialTheme.typography.bodySmall)
+                }
+            } }
             item {
                 OutlinedButton(onClick = onYoutube, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.Link, null)

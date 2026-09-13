@@ -17,7 +17,14 @@ class PackageTests(unittest.TestCase):
                 names = bundle.namelist()
                 self.assertIn("MusicMuteWindowsWorker/Start-Worker.ps1", names)
                 self.assertIn("MusicMuteWindowsWorker/Benchmark-Worker.ps1", names)
-                for runtime in ("engine", "power", "progress", "benchmark"):
+                for runtime in (
+                    "engine",
+                    "power",
+                    "progress",
+                    "benchmark",
+                    "execution",
+                    "media_limits",
+                ):
                     self.assertIn(
                         f"MusicMuteWindowsWorker/musicmute_worker/{runtime}.py", names
                     )
@@ -27,6 +34,10 @@ class PackageTests(unittest.TestCase):
                     "separator",
                     "reliability",
                     "benchmark",
+                    "execution",
+                    "execution_worker",
+                    "media_limits",
+                    "progress_v2",
                 ):
                     self.assertIn(f"MusicMuteWindowsWorker/tests/test_{test}.py", names)
                 self.assertIn(

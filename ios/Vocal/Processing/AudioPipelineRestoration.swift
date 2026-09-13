@@ -9,6 +9,20 @@ struct SourceTransferContext: Codable, Equatable, Sendable {
   let codec: String
   let fileExtension: String
   let bitrate: Int
+  var startedAt: Date? = Date()
+  var maxDownloadBytes: Int64? = nil
+  var maxDownloadSeconds: Double? = nil
+
+  var downloadByteLimit: Int64 {
+    min(
+      maxDownloadBytes ?? YouTubePreflight.maximumDownloadBytes,
+      YouTubePreflight.maximumDownloadBytes)
+  }
+  var downloadTimeLimit: Double {
+    min(
+      maxDownloadSeconds ?? YouTubePreflight.maximumDownloadSeconds,
+      YouTubePreflight.maximumDownloadSeconds)
+  }
 }
 
 struct SourceTransferResult: Equatable, Sendable {
@@ -90,7 +104,7 @@ final class BackgroundSourceTransferCoordinator: NSObject,
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.timeoutIntervalForRequest = 60
-        configuration.timeoutIntervalForResource = 3_600
+        configuration.timeoutIntervalForResource = YouTubePreflight.maximumDownloadSeconds
         return configuration
       }
     super.init()
@@ -156,10 +170,22 @@ final class BackgroundSourceTransferCoordinator: NSObject,
     {
       return restored
     }
-    try claim(context)
+    var boundedContext = context
+    if let directory = try? directory(for: context),
+      let previous = try? activeContext(in: directory), let startedAt = previous.startedAt
+    {
+      boundedContext.startedAt = startedAt
+    }
+    guard let started = boundedContext.startedAt,
+      boundedContext.downloadByteLimit > 0, boundedContext.downloadTimeLimit > 0,
+      Date().timeIntervalSince(started) <= boundedContext.downloadTimeLimit
+    else {
+      throw AudioInputPreparationError.interrupted
+    }
+    try claim(boundedContext)
     let task = session.downloadTask(with: request)
-    task.taskDescription = String(data: try JSONEncoder().encode(context), encoding: .utf8)
-    return try await wait(for: task, context: context, progress: progress)
+    task.taskDescription = String(data: try JSONEncoder().encode(boundedContext), encoding: .utf8)
+    return try await wait(for: task, context: boundedContext, progress: progress)
   }
 
   func consume(_ result: SourceTransferResult) {
@@ -256,6 +282,13 @@ final class BackgroundSourceTransferCoordinator: NSObject,
   func capture(_ location: URL, task: URLSessionDownloadTask) {
     guard captures[task.taskIdentifier] == nil, let context = Self.context(task) else { return }
     do {
+      let bytes = try location.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+      guard bytes > 0, bytes <= context.downloadByteLimit,
+        context.startedAt.map({ Date().timeIntervalSince($0) <= context.downloadTimeLimit })
+          ?? false
+      else {
+        throw AudioInputPreparationError.invalidSize
+      }
       try prepareDirectory(for: context)
       let directory = try directory(for: context)
       guard try activeContext(in: directory)?.transferId == context.transferId else {
@@ -285,7 +318,8 @@ final class BackgroundSourceTransferCoordinator: NSObject,
     let file = directory.appendingPathComponent(receipt.relativePath).standardizedFileURL
     guard file.deletingLastPathComponent() == directory.standardizedFileURL,
       let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
-      values.isRegularFile == true, (values.fileSize ?? 0) > 0
+      values.isRegularFile == true, (values.fileSize ?? 0) > 0,
+      Int64(values.fileSize ?? 0) <= receipt.context.downloadByteLimit
     else {
       try? FileManager.default.removeItem(at: directory.appendingPathComponent("receipt.json"))
       throw AudioFailure.storage
@@ -386,6 +420,15 @@ extension BackgroundSourceTransferCoordinator: URLSessionDownloadDelegate, URLSe
     totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
   ) {
     guard let context = Self.context(downloadTask) else { return }
+    guard totalBytesWritten <= context.downloadByteLimit,
+      totalBytesExpectedToWrite <= context.downloadByteLimit,
+      context.startedAt.map({
+        Date().timeIntervalSince($0) <= context.downloadTimeLimit
+      }) ?? false
+    else {
+      downloadTask.cancel()
+      return
+    }
     let progress = DownloadProgress(
       downloadedBytes: max(0, totalBytesWritten),
       totalBytes: totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil)

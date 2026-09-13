@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from datetime import datetime, timezone
 
 _PROTOCOL_LIMIT = 16 * 1024
 _IPC_RETRY_SECONDS = 2.0
@@ -196,15 +197,37 @@ def process_audio(
     padding=0.2,
 ):
     timings = {}
-    started = time.monotonic()
     # Current audio-separator resets file state itself. Also reset at request
     # boundaries for older installed versions, without releasing the ONNX model.
     model = getattr(separator, "model_instance", None)
     reset = getattr(model, "clear_file_specific_paths", None)
     if reset is not None:
         reset()
-    filenames = separator.separate(str(source))
-    timings["separation"] = time.monotonic() - started
+    output.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    phase = {
+        "runId": output.name,
+        "phase": "separating",
+        "startedAt": datetime.now(timezone.utc).isoformat(),
+        "startedMonotonic": started,
+    }
+    _write_message(output, ".execution.json", phase)
+    completed = False
+    try:
+        filenames = separator.separate(str(source))
+        completed = True
+    finally:
+        timings["separation"] = time.monotonic() - started
+        _write_message(
+            output,
+            ".execution.json",
+            {
+                **phase,
+                "phase": "separated",
+                "seconds": timings["separation"],
+                "completed": completed,
+            },
+        )
     if not filenames:
         raise ValueError("Separator produced no vocal output")
     timings["trim"] = timings["encode"] = 0.0
@@ -287,7 +310,9 @@ def serve(directory: Path, session: str, ffmpeg: str) -> int:
         started = time.monotonic()
         try:
             separator = load_separator(stems)
-        except Exception:  # noqa: BLE001 - sanitize third-party model failures at IPC boundary
+        except (
+            Exception
+        ):  # noqa: BLE001 - sanitize third-party model failures at IPC boundary
             _write_message(
                 directory,
                 "ready.json",
@@ -355,7 +380,9 @@ def serve(directory: Path, session: str, ffmpeg: str) -> int:
                     "response.json",
                     {"id": identifier, "status": "ok", "timings": timings},
                 )
-            except Exception:  # noqa: BLE001 - sanitize third-party processing failures at IPC boundary
+            except (
+                Exception
+            ):  # noqa: BLE001 - sanitize third-party processing failures at IPC boundary
                 _write_message(
                     directory,
                     "response.json",

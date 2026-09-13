@@ -25,15 +25,21 @@ class AudioPipelineCoordinator(
     private val preparer: AudioInputPreparer,
     private val session: () -> ProcessingSession?,
     private val sourceScheduler: PipelineSourceScheduler,
+    private val usageRepository: ProcessingUsageRepository? = null,
+    private val preparationScheduler: MediaPreparationScheduler? = null,
+    private val policyReader: suspend () -> ProcessingMediaPolicy = { ProcessingMediaPolicy.LEGACY },
 ) {
-    private val localSlots = Semaphore(2)
+    private val localSlots = Semaphore(1)
     private data class ActiveImport(val owner: ProcessingSession, val job: Job)
     private val activeImports = ConcurrentHashMap<String, ActiveImport>()
 
     suspend fun acceptUrl(operationId: String, rawUrl: String): ProcessingOperation {
         repository.requireUpdateAllowed()
         val owner = requireSession()
+        com.hatem.musicmute.download.YouTubePreflight.validateUrl(rawUrl)
         val url = requireNotNull(YouTubeUrl.canonical(rawUrl))
+        preflightAvailability()
+        checkSession(owner)
         repository.store.get(owner.uid, operationId)?.let { existing ->
             require(existing.sourceKind == SourceKind.URL && existing.sourceUrl == url)
             return existing
@@ -59,6 +65,8 @@ class AudioPipelineCoordinator(
     ): ProcessingOperation {
         repository.requireUpdateAllowed()
         val owner = requireSession()
+        preflightAvailability()
+        checkSession(owner)
         val extension = sourceName.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
         if (processingContentType(extension) == null)
             throw InputPreparationException(InputPreparationError.UNSUPPORTED)
@@ -78,7 +86,7 @@ class AudioPipelineCoordinator(
                 if (accepted.cancellationRequested || accepted.pendingDelete) throw CancellationException(
                     "Import cancelled"
                 )
-                val prepared = preparer.prepare(owner.uid, "$safeTitle.$extension", operationId, open)
+                val prepared = preparer.prepare(owner.uid, "$safeTitle.$extension", operationId, open = open)
                 repository.requireUpdateAllowed()
                 checkSession(owner)
                 repository.submit(prepared, requireCloudConsent = true)
@@ -94,6 +102,25 @@ class AudioPipelineCoordinator(
         } finally {
             activeImports.remove(key(owner.uid, operationId), active)
         }
+    }
+
+    suspend fun acceptDocument(operationId: String, name: String, uri: String): ProcessingOperation {
+        repository.requireUpdateAllowed()
+        val owner = requireSession()
+        preflightAvailability()
+        checkSession(owner)
+        val existing = repository.store.operations(owner.uid).first().firstOrNull {
+            it.sourceUri == uri && !it.cancellationRequested && it.phase != ProcessingPhase.COMPLETE
+        }
+        if (existing != null) return existing
+        repository.acceptIntent(operationId, SourceKind.FILE, boundedSourceTitle(name.substringBeforeLast('.', name)))
+        val operation = repository.store.update(owner.uid, operationId) {
+            it.copy(sourceUri = uri, sourceName = name, phase = ProcessingPhase.SOURCE_QUEUED)
+        } ?: changedSession()
+        checkSession(owner)
+        preparationScheduler?.enqueue(owner.uid, operationId, owner.epoch)
+            ?: throw InputPreparationException(InputPreparationError.STORAGE)
+        return operation
     }
 
     suspend fun completeUrlDownload(
@@ -119,7 +146,9 @@ class AudioPipelineCoordinator(
         repository.updateSourceTitle(operationId, sourceTitle)
         checkSession(owner)
         val extension = downloadedFile.extension.lowercase().ifBlank { "mp3" }
-        val prepared = preparer.prepare(ownerUid, "$sourceTitle.$extension", operationId) {
+        val fetched = policyReader()
+        val policy = if (fetched.youtubeExpansionReady && fetched.acceptNewJobs) fetched else ProcessingMediaPolicy.LEGACY
+        val prepared = preparer.prepare(ownerUid, "$sourceTitle.$extension", operationId, policy, "youtube") {
             downloadedFile.inputStream()
         }
         checkSession(owner)
@@ -145,6 +174,7 @@ class AudioPipelineCoordinator(
         repository.requestCancellation(operationId) ?: return
         activeImports[key(owner.uid, operationId)]?.job?.cancelAndJoin()
         checkSession(owner)
+        preparationScheduler?.cancel(owner.uid, operationId)
         sourceScheduler.cancel(owner.uid, operationId)
         checkSession(owner)
         repository.cancelOperation(operationId)
@@ -154,6 +184,11 @@ class AudioPipelineCoordinator(
         repository.requireUpdateAllowed()
         val owner = requireSession()
         val operation = repository.store.get(owner.uid, operationId) ?: return
+        if (operation.sourceUri != null && operation.input == null && !operation.cancellationRequested) {
+            repository.store.update(owner.uid, operationId) { it.copy(localProblem = null, problem = null, phase = ProcessingPhase.PREPARING_INPUT) }
+            preparationScheduler?.enqueue(owner.uid, operationId, owner.epoch)
+            return
+        }
         if (operation.sourceKind != SourceKind.URL || operation.input != null) {
             repository.resume(operationId)
             return
@@ -185,6 +220,8 @@ class AudioPipelineCoordinator(
             activeImports.values.filter { it.owner.uid == previousOwnerUid }.forEach {
                 it.job.cancelAndJoin()
             }
+            usageRepository?.clear()
+            preparationScheduler?.cancelOwner(previousOwnerUid)
             sourceScheduler.cancelOwner(previousOwnerUid)
         }
     }
@@ -193,6 +230,10 @@ class AudioPipelineCoordinator(
         repository.requireUpdateAllowed()
         val owner = requireSession()
         repository.store.operations(owner.uid).first().forEach { operation ->
+            if (operation.sourceUri != null && operation.input == null && !operation.cancellationRequested &&
+                operation.phase != ProcessingPhase.COMPLETE && operation.localProblem == null && operation.problem == null) {
+                preparationScheduler?.enqueue(owner.uid, operation.operationId, owner.epoch)
+            }
             if (operation.sourceKind == SourceKind.URL && operation.input == null &&
                 !operation.cancellationRequested && operation.phase != ProcessingPhase.COMPLETE
             ) {
@@ -229,6 +270,11 @@ class AudioPipelineCoordinator(
             }
         }
         repository.pauseForUpdate()
+    }
+
+    private suspend fun preflightAvailability() {
+        val policy = policyReader()
+        usageRepository?.refresh()?.requireAvailable(policy.localExpansionReady && policy.acceptNewJobs)
     }
 
     private fun requireSession() = session() ?: throw JobsFailure(JobsProblem.UNAUTHENTICATED)

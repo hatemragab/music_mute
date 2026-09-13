@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Header, Put, Req } from '@nestjs/common';
+import { QueuePolicyService } from './queue-policy.service.js';
+import { UpdateQueuePolicyDto } from './dto/queue-policy.dto.js';
+import { Body, Controller, Get, Header, Put, Query, Req } from '@nestjs/common';
 import type { AuthRequest } from '../auth/auth-request.js';
 import { Public } from '../auth/auth.decorators.js';
 import {
@@ -10,7 +12,23 @@ import { ProcessingSettingsService } from './processing-settings.service.js';
 
 @Controller('admin/settings')
 export class AdminSettingsController {
-  constructor(private readonly settings: ProcessingSettingsService) {}
+  constructor(
+    private readonly settings: ProcessingSettingsService,
+    private readonly queuePolicy: QueuePolicyService,
+  ) {}
+
+  @Get('processing-v2')
+  @RequireAdminPermission('settings.read')
+  queueCurrent() {
+    return this.queuePolicy.current();
+  }
+
+  @Put('processing-v2')
+  @RequireAdminPermission('settings.manage')
+  @RequireFreshAdminAuth()
+  queueUpdate(@Req() request: AuthRequest, @Body() dto: UpdateQueuePolicyDto) {
+    return this.queuePolicy.update(request.adminActor!, dto);
+  }
 
   @Get('processing')
   @RequireAdminPermission('settings.read')
@@ -36,7 +54,7 @@ export class ProcessingPolicyController {
   @Get()
   @Public()
   @Header('Cache-Control', 'no-store')
-  current() {
-    return this.settings.publicPolicy();
+  current(@Query('schemaVersion') schemaVersion?: string) {
+    return this.settings.publicPolicy(schemaVersion);
   }
 }

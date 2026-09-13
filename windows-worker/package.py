@@ -35,6 +35,10 @@ def build(destination: Path) -> Path:
             "test_separator.py",
             "test_warm_worker.py",
             "test_benchmark.py",
+            "test_execution.py",
+            "test_execution_worker.py",
+            "test_media_limits.py",
+            "test_progress_v2.py",
             "process_test_support.py",
         )
     ]

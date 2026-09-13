@@ -157,6 +157,14 @@ export function WorkerDetailPage() {
               <p className="text-sm text-muted-foreground">
                 {workerCapacityLabel(data)}
               </p>
+              <p className="text-sm text-muted-foreground">
+                Expanded media protocol:{" "}
+                {data.mediaPolicyVersion === 2 ? "v2 reported" : "Unavailable"}.
+                Capability observed:{" "}
+                {formatDateTime(data.mediaCapabilitySeenAt ?? null)}. Measured
+                physical ceilings: Unavailable. A reported capability does not
+                establish current admission readiness.
+              </p>
               <dl className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <dt className="text-muted-foreground">Last seen</dt>

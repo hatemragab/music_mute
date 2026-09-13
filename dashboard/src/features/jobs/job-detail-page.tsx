@@ -171,6 +171,38 @@ export function JobDetailPage() {
                   <dt className="text-muted-foreground">Finished</dt>
                   <dd>{formatDateTime(data.finishedAt)}</dd>
                 </div>
+                <div>
+                  <dt className="text-muted-foreground">Source category</dt>
+                  <dd>{data.source?.replaceAll("_", " ") ?? "Unavailable"}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">
+                    Declared / measured audio
+                  </dt>
+                  <dd>
+                    {formatDuration(data.declaredDurationSeconds)} /{" "}
+                    {formatDuration(data.measuredDurationSeconds)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">
+                    Declared / measured bytes
+                  </dt>
+                  <dd>
+                    {data.declaredBytes?.toLocaleString() ?? "Unavailable"} /{" "}
+                    {data.measuredBytes?.toLocaleString() ?? "Unavailable"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">
+                    Estimated worker time
+                  </dt>
+                  <dd>
+                    {data.estimatedWorkerSeconds == null
+                      ? "Unavailable"
+                      : formatDuration(data.estimatedWorkerSeconds)}
+                  </dd>
+                </div>
                 <div className="col-span-2">
                   <dt className="text-muted-foreground">Source URL</dt>
                   <dd>

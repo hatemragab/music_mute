@@ -4,12 +4,13 @@ import base64
 import hashlib
 import importlib.metadata
 import json
-import math
 import os
 import re
 import shutil
 from pathlib import Path
 from uuid import UUID, uuid4
+
+from .media_limits import MediaLimits, effective_media_limits
 
 
 def file_checksum(path: Path, check=lambda: None) -> str:
@@ -148,6 +149,7 @@ class Progress:
             "inputDurationSeconds",
             "prepared",
             "output",
+            "processingLimits",
         }:
             raise ValueError("Invalid checkpoint fields")
         if data["version"] != 1:
@@ -159,8 +161,9 @@ class Progress:
             if not isinstance(data[key], str):
                 raise TypeError("Invalid checkpoint identity")
         self._confined(data["workDir"])
+        limits = effective_media_limits(data, 100_000_000, 86400)
         if "inputDurationSeconds" in data:
-            self._duration(data["inputDurationSeconds"])
+            self._duration(data["inputDurationSeconds"], limits)
         for kind in ("prepared", "output"):
             artifact = data.get(kind)
             if artifact is None:
@@ -174,18 +177,14 @@ class Progress:
                 raise ValueError("Invalid artifact")
             if type(artifact["bytes"]) is not int or artifact["bytes"] <= 0:
                 raise ValueError("Invalid artifact size")
-            self._duration(artifact["durationSeconds"])
+            self._duration(artifact["durationSeconds"], limits)
             if len(base64.b64decode(artifact["sha256"], validate=True)) != 32:
                 raise ValueError("Invalid artifact checksum")
             self._artifact_path(data, artifact["file"])
 
     @staticmethod
-    def _duration(value):
-        if (
-            type(value) not in (int, float)
-            or not math.isfinite(value)
-            or not 0 < value < 600
-        ):
+    def _duration(value, limits=None):
+        if not (limits or MediaLimits()).accepts_duration(value):
             raise ValueError("Invalid artifact duration")
 
     def _confined(self, relative: str) -> Path:
@@ -228,6 +227,15 @@ class Progress:
                 {
                     "input": {k: media[k] for k in ("extension", "bytes", "sha256")},
                     **processor,
+                    **(
+                        {
+                            "processingLimits": effective_media_limits(
+                                assignment, 100_000_000, 86400
+                            ).to_wire()
+                        }
+                        if "processingLimits" in assignment
+                        else {}
+                    ),
                 },
                 sort_keys=True,
             ).encode()
@@ -245,6 +253,15 @@ class Progress:
             "workDir": str(Path("jobs") / assignment["jobId"] / uuid4().hex),
             "downloadAttempts": 0,
             "uploadAttempts": 0,
+            **(
+                {
+                    "processingLimits": effective_media_limits(
+                        assignment, 100_000_000, 86400
+                    ).to_wire()
+                }
+                if "processingLimits" in assignment
+                else {}
+            ),
         }
         self.work.mkdir(parents=True)
         self.save()
@@ -271,7 +288,7 @@ class Progress:
     def record(
         self, kind: str, path: Path, duration: float, check=lambda: None
     ) -> None:
-        self._duration(duration)
+        self._duration(duration, effective_media_limits(self.data, 100_000_000, 86400))
         relative = path.relative_to(self.work)
         self._artifact_path(self.data, str(relative))
         self.data[kind] = {

@@ -130,7 +130,10 @@ export class StorageTransfersService {
     if (
       !Number.isInteger(reservation.bytes) ||
       reservation.bytes < 1 ||
-      reservation.bytes >= this.outputMaxBytes ||
+      (job.admissionSnapshot?.policyVersion === 2
+        ? reservation.bytes >
+          (job.admissionSnapshot.qualification?.maxOutputBytes ?? 0)
+        : reservation.bytes >= this.outputMaxBytes) ||
       reservation.contentType !== 'audio/mpeg'
     ) {
       throw new TypeError('Invalid output reservation');

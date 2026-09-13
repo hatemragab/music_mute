@@ -1,3 +1,4 @@
+import { accountFixture } from './helpers/account-fixture.mjs';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -183,8 +184,10 @@ test('worker admin controls across independent API transactions', async (t) => {
         durationSeconds: 10,
         sha256: Buffer.alloc(32).toString('base64'),
       };
+      const userId = new Types.ObjectId();
+      await accountFixture(connections[0], [userId.toString()]);
       const job = await jobs.create({
-        userId: new Types.ObjectId(),
+        userId,
         requestId: randomUUID(),
         requestHash: 'a'.repeat(64),
         inputReservation: input,
@@ -239,7 +242,7 @@ test('worker admin controls across independent API transactions', async (t) => {
     );
   });
   const common = async (id) => ({
-    expectedRevision: (await workers.findById(id)).controlRevision,
+    expectedRevision: (await admin[0].detail(id)).revision,
     operationId: randomUUID(),
     reason: 'Synthetic scheduled maintenance',
   });
@@ -319,6 +322,63 @@ test('worker admin controls across independent API transactions', async (t) => {
       ])
         assert.equal(safe.includes(secret), false);
       assert.equal(await model('AdminAuditEvent').countDocuments(), 2);
+    },
+  );
+
+  await t.test(
+    'management CAS tolerates idle claims and heartbeats but rejects competing edits on legacy controls',
+    async () => {
+      await reset();
+      const identity = await register('node-a');
+      await workers.collection.updateOne(
+        { _id: 'node-a' },
+        { $unset: { managementRevision: '' } },
+      );
+      const idleRevision = await common('node-a');
+      const fenceBefore = (await workers.findById('node-a')).controlRevision;
+      await a.coordinator.claim(randomUUID(), identity);
+      assert.ok(
+        (await workers.findById('node-a')).controlRevision > fenceBefore,
+        'worker authority fence still advances',
+      );
+      await admin[0].update(actor, 'node-a', 'drain', idleRevision);
+      await admin[0].update(actor, 'node-a', 'enable', await common('node-a'));
+      await enqueue(1);
+      const assignment = await a.coordinator.claim(randomUUID(), identity);
+      const observed = await common('node-a');
+      await a.coordinator.heartbeat(selector(assignment), identity);
+      const drained = await admin[0].update(actor, 'node-a', 'drain', observed);
+      assert.equal(drained.revision, observed.expectedRevision + 1);
+      await assert.rejects(
+        admin[1].update(actor, 'node-a', 'enable', {
+          ...observed,
+          operationId: randomUUID(),
+        }),
+        code('REVISION_CONFLICT'),
+      );
+      assert.equal(
+        (await workers.findById('node-a')).activeJobId.toString(),
+        assignment.jobId,
+      );
+      const competingRevision = await common('node-a');
+      const competing = await Promise.allSettled(
+        admin.map((service, index) =>
+          service.update(actor, 'node-a', 'rename', {
+            ...competingRevision,
+            operationId: randomUUID(),
+            label: `Concurrent ${index}`,
+          }),
+        ),
+      );
+      assert.equal(
+        competing.filter((result) => result.status === 'fulfilled').length,
+        1,
+      );
+      assert.ok(
+        code('REVISION_CONFLICT')(
+          competing.find((result) => result.status === 'rejected').reason,
+        ),
+      );
     },
   );
 
@@ -448,9 +508,15 @@ test('worker admin controls across independent API transactions', async (t) => {
           assert.equal(results[1].value, null);
           assert.equal(await attempts.countDocuments(), 0);
         } else {
-          assert.equal(results[1].status, 'rejected');
-          assert.ok(code('REVISION_CONFLICT')(results[1].reason));
-          assert.equal(await attempts.countDocuments(), 1);
+          assert.equal(results[1].status, 'fulfilled');
+          assert.equal(
+            (await registrations.findById('node-a')).state,
+            'draining',
+          );
+          assert.equal(
+            await attempts.countDocuments(),
+            results[0].value === null ? 0 : 1,
+          );
         }
       },
     );
@@ -530,14 +596,17 @@ test('worker admin controls across independent API transactions', async (t) => {
         const settled = Promise.allSettled([first, second]);
         hold.release();
         const results = await settled;
-        assert.equal(results[0].status, 'fulfilled');
-        assert.equal(results[1].status, 'rejected');
-        assert.ok(
-          code(adminFirst ? 'UNAUTHENTICATED' : 'REVISION_CONFLICT')(
-            results[1].reason,
-          ),
-        );
-        assert.equal(grants.length, adminFirst ? 0 : 1);
+        const adminResult = results[adminFirst ? 0 : 1];
+        const workerResult = results[adminFirst ? 1 : 0];
+        assert.equal(adminResult.status, 'fulfilled');
+        if (workerResult.status === 'rejected') {
+          assert.ok(code('UNAUTHENTICATED')(workerResult.reason));
+          assert.equal(grants.length, adminFirst ? 0 : 1);
+        } else {
+          assert.equal(adminFirst, false);
+          assert.equal(grants.length, 1);
+        }
+        assert.equal((await registrations.findById('node-a')).state, 'revoked');
         assert.equal(
           (await workers.findById('node-a')).attemptId,
           assignment.attemptId,
@@ -570,15 +639,8 @@ test('worker admin controls across independent API transactions', async (t) => {
             denied = assert.rejects(pending, code('UNAUTHENTICATED'));
             await hold.entered;
             rotation = admin[1].update(actor, 'node-a', 'rotate-key', command);
-            const stale = assert.rejects(rotation, code('REVISION_CONFLICT'));
             hold.release();
-            await stale;
-            await admin[1].update(
-              actor,
-              'node-a',
-              'rotate-key',
-              await common('node-a'),
-            );
+            await rotation;
           }
           await denied;
           assert.equal(await attempts.countDocuments(), 0);

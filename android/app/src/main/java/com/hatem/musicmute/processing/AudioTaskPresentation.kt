@@ -1,7 +1,7 @@
 package com.hatem.musicmute.processing
 
 enum class AudioTaskStage {
-    REVIEW, WAITING, DOWNLOADING_SOURCE, PREPARING_INPUT, RESERVING_JOB, UPLOADING_INPUT,
+    REVIEW, WAITING, DOWNLOADING_SOURCE, INSPECTING, PREPARING_INPUT, RESERVING_JOB, UPLOADING_INPUT,
     CONFIRMING_UPLOAD, QUEUED, VALIDATING, PROCESSING, UPLOADING_RESULT, INTERRUPTED,
     CANCELLING, READY, FAILED, CANCELLED, UNKNOWN,
 }
@@ -60,7 +60,7 @@ private fun presentation(
 ): AudioTaskPresentation {
     val stage = resolvedTaskStage(operation, job)
     val active = stage in setOf(
-        AudioTaskStage.WAITING, AudioTaskStage.DOWNLOADING_SOURCE, AudioTaskStage.PREPARING_INPUT,
+        AudioTaskStage.WAITING, AudioTaskStage.DOWNLOADING_SOURCE, AudioTaskStage.INSPECTING, AudioTaskStage.PREPARING_INPUT,
         AudioTaskStage.RESERVING_JOB, AudioTaskStage.UPLOADING_INPUT, AudioTaskStage.CONFIRMING_UPLOAD,
         AudioTaskStage.QUEUED, AudioTaskStage.VALIDATING, AudioTaskStage.PROCESSING,
         AudioTaskStage.UPLOADING_RESULT, AudioTaskStage.INTERRUPTED, AudioTaskStage.CANCELLING,
@@ -151,6 +151,7 @@ private fun localStage(phase: ProcessingPhase): AudioTaskStage = when (phase) {
     ProcessingPhase.SOURCE_INTAKE, ProcessingPhase.SOURCE_QUEUED, ProcessingPhase.WAITING ->
         AudioTaskStage.WAITING
     ProcessingPhase.DOWNLOADING_SOURCE -> AudioTaskStage.DOWNLOADING_SOURCE
+    ProcessingPhase.INSPECTING -> AudioTaskStage.INSPECTING
     ProcessingPhase.PREPARING_INPUT -> AudioTaskStage.PREPARING_INPUT
     ProcessingPhase.RESERVING -> AudioTaskStage.RESERVING_JOB
     ProcessingPhase.UPLOADING -> AudioTaskStage.UPLOADING_INPUT

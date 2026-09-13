@@ -10,6 +10,20 @@ import { OutputReservationSchema } from './job.schema.js';
 })
 export class JobAttempt {
   _id!: Types.ObjectId;
+  @Prop({ type: Boolean, default: null }) separationCompleted!: boolean | null;
+  @Prop({ type: String, default: null, maxlength: 36 })
+  executionEvidenceEventId!: string | null;
+  @Prop({ type: String, default: null, match: /^[a-f0-9]{64}$/ })
+  executionEvidenceHash!: string | null;
+  @Prop({
+    type: Number,
+    default: null,
+    min: 0,
+    validate: (value: number | null) =>
+      value === null || Number.isFinite(value),
+  })
+  separatorExecutionSeconds!: number | null;
+  @Prop({ type: Boolean, default: false }) separatorStoppedConfirmed!: boolean;
   @Prop({
     type: String,
     required: true,

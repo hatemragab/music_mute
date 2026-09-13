@@ -386,3 +386,65 @@ class ProtocolRequestTests(unittest.TestCase):
         ):
             separator._read_request(request)
         request.open.assert_called_once()
+
+
+class SeparationTelemetryTests(unittest.TestCase):
+    def test_phase_records_only_separate_call_after_reset_before_trim(self):
+        import json
+
+        now = [0.0]
+
+        class Model:
+            def clear_file_specific_paths(self):
+                now[0] = 10.0
+
+        class FakeSeparator:
+            model_instance = Model()
+
+            def separate(self, _source):
+                now[0] = 14.0
+                return []
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            output = root / "run"
+            with patch.object(separator.time, "monotonic", side_effect=lambda: now[0]):
+                with self.assertRaisesRegex(ValueError, "no vocal"):
+                    separator.process_audio(
+                        FakeSeparator(),
+                        root / "source.wav",
+                        output,
+                        root / "stems",
+                        root,
+                        "ffmpeg",
+                    )
+            phase = json.loads((output / ".execution.json").read_text())
+            self.assertEqual(phase["runId"], "run")
+            self.assertEqual(phase["phase"], "separated")
+            self.assertEqual(phase["seconds"], 4.0)
+            self.assertTrue(phase["completed"])
+            self.assertEqual(phase["startedMonotonic"], 10.0)
+            self.assertNotIn("source", phase)
+
+    def test_failed_separator_phase_never_claims_completed_separation(self):
+        import json
+
+        class FailedSeparator:
+            def separate(self, _source):
+                raise RuntimeError("synthetic separator failure")
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with self.assertRaises(RuntimeError):
+                separator.process_audio(
+                    FailedSeparator(),
+                    root / "source.wav",
+                    root / "run",
+                    root / "stems",
+                    root,
+                    "ffmpeg",
+                )
+            phase = json.loads((root / "run" / ".execution.json").read_text())
+            self.assertEqual(phase["phase"], "separated")
+            self.assertFalse(phase["completed"])
+            self.assertGreaterEqual(phase["seconds"], 0)

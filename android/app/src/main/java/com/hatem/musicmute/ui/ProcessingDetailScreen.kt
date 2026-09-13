@@ -98,6 +98,7 @@ fun ProcessingDetailScreen(
             }
             if (!ready) CreativeCard {
                 Text(stringResource(audioTaskStageLabel(task.stage)), style = MaterialTheme.typography.titleLarge)
+                if (task.stage == AudioTaskStage.QUEUED) Text(stringResource(R.string.processing_fair_wait), style = MaterialTheme.typography.bodySmall)
                 if (task.active) {
                     val progress = task.progressFraction
                     if (progress != null) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())

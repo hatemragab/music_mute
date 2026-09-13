@@ -1,3 +1,4 @@
+import { PROCESSING_MODELS } from '../dist/processing/processing-persistence.module.js';
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -45,6 +46,11 @@ test(
         import('../dist/jobs/enqueue.service.js'),
         import('../dist/jobs/jobs.service.js'),
       ]);
+      for (const definition of PROCESSING_MODELS)
+        connection.model(definition.name, definition.schema);
+      await Promise.all(
+        Object.values(connection.models).map((model) => model.init()),
+      );
       const jobs = connection.model(Job.name, JobSchema);
       const counters = connection.model(QueueCounter.name, QueueCounterSchema);
       const users = connection.model(User.name, UserSchema);

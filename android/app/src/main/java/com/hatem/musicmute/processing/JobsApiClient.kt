@@ -19,6 +19,8 @@ interface JobsApi {
         input: InputDeclaration,
         metadata: CreateJobMetadata,
     ): CreateReservation = create(requestId, input)
+    suspend fun mediaPolicy(): ProcessingMediaPolicy = ProcessingMediaPolicy.LEGACY
+    suspend fun processingUsage(): ProcessingUsage? = null
     suspend fun renewUpload(id: String): UploadGrant
     suspend fun confirmUpload(id: String): JobMutation
     suspend fun list(cursor: String? = null, status: String? = null): JobPage
@@ -58,6 +60,9 @@ class JobsApiClient(
             metadata.sourceKind?.let { put("sourceKind", it.wireValue) }
             metadata.sourceUrl?.let { put("sourceUrl", it) }
             metadata.clientStartedAt?.let { put("clientStartedAt", wireInstant(it)) }
+            metadata.policyVersion?.let { put("policyVersion", it) }
+            metadata.preparationProfileId?.let { put("preparationProfileId", it) }
+            metadata.source?.let { put("source", it) }
             put("input", json.encodeToJsonElement(input))
         }.toString()
         return decode<CreateReservation>(request("POST", "/jobs", body, true)).also {
@@ -65,6 +70,15 @@ class JobsApiClient(
             if (it.status == "awaiting_upload" && it.upload == null) invalidResponse()
         }
     }
+
+    override suspend fun mediaPolicy(): ProcessingMediaPolicy = try {
+        ProcessingMediaPolicy.parse(request("GET", "/processing-policy?schemaVersion=2"))
+    } catch (error: JobsFailure) {
+        if (error.problem in setOf(JobsProblem.JOB_NOT_FOUND, JobsProblem.OFFLINE)) ProcessingMediaPolicy.LEGACY else throw error
+    }
+
+    override suspend fun processingUsage(): ProcessingUsage? =
+        decode<ProcessingUsage>(request("GET", "/processing-usage")).also { it.validate() }
 
     override suspend fun renewUpload(id: String): UploadGrant =
         decode<UploadGrant>(request("POST", "${path(id)}/upload-url", "{}", true)).also(::validateUpload)
@@ -164,7 +178,8 @@ class JobsApiClient(
 
     private fun failure(response: AuthHttpResponse): JobsFailure {
         val code = runCatching { json.parseToJsonElement(response.body).jsonObject["code"]?.jsonPrimitive?.content }.getOrNull()
-        val problem = when (response.status) {
+        val safeMediaProblem = JobsProblem.entries.find { it.name == code && (it.name.startsWith("MEDIA_") || it.name.startsWith("YOUTUBE_") || it.name.startsWith("PROCESSING_")) }
+        val problem = safeMediaProblem ?: when (response.status) {
             400 -> JobsProblem.INVALID_INPUT
             401 -> JobsProblem.UNAUTHENTICATED
             403 -> JobsProblem.entries.find { it.name == code && it in policyProblems } ?: JobsProblem.POLICY_DENIED

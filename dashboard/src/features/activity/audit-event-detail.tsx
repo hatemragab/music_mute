@@ -22,7 +22,7 @@ export function AuditEventDetail({
         if (!open) onClose();
       }}
     >
-      <SheetContent>
+      <SheetContent className="overflow-y-auto">
         <SheetHeader>
           <SheetTitle>{event?.action ?? "Activity"}</SheetTitle>
           <SheetDescription>
@@ -55,6 +55,24 @@ export function AuditEventDetail({
                 {event.previousRevision ?? "—"} → {event.nextRevision ?? "—"}
               </dd>
             </div>
+            {event.processingChanges?.length ? (
+              <div>
+                <dt className="text-muted-foreground">
+                  Processing changes (before → after)
+                </dt>
+                <dd>
+                  <ul className="mt-2 space-y-2">
+                    {event.processingChanges.map((change) => (
+                      <li key={change.field} className="break-words">
+                        <span className="font-medium">{change.field}</span>:{" "}
+                        {change.before == null ? "None" : String(change.before)}{" "}
+                        → {change.after == null ? "None" : String(change.after)}
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
+              </div>
+            ) : null}
             <div>
               <dt className="text-muted-foreground">Operation</dt>
               <dd className="font-mono break-all">

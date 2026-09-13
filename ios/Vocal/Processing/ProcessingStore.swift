@@ -6,6 +6,7 @@ enum UploadPhase: String, Codable, Sendable {
 }
 
 enum AudioPipelinePhase: String, Codable, Sendable {
+  case inspectingSource
   case resolvingSource, downloadingSource, preparingInput, reservingJob, uploadingInput
   case confirmingUpload, waitingProcessing, ready, awaitingAppResume, cancelling
   case failed, cancelled, deleted, awaitingConfirmation
@@ -93,12 +94,15 @@ struct UploadOperation: Codable, Equatable, Identifiable, Sendable {
   var clientStartedAt: Date?
   var displayName: String?
   var activeRunToken: UUID? = nil
+  var policyVersion: Int? = nil
+  var preparationProfileId: String? = nil
+  var mediaSource: String? = nil
 
   enum CodingKeys: String, CodingKey {
     case operationId, ownerUid, requestId, input, stagedRelativePath, createdAt, updatedAt
     case jobId, jobStatus, phase, transferId, transferTaskId, uploadAttempts, lastFailureCode
     case cancellationRequested, sourceTitle, sourceKind, sourceURL, clientStartedAt, displayName,
-      activeRunToken
+      activeRunToken, policyVersion, preparationProfileId, mediaSource
   }
 }
 
@@ -127,7 +131,10 @@ extension UploadOperation {
       sourceURL: try values.decodeIfPresent(String.self, forKey: .sourceURL),
       clientStartedAt: try values.decodeIfPresent(Date.self, forKey: .clientStartedAt),
       displayName: try values.decodeIfPresent(String.self, forKey: .displayName),
-      activeRunToken: try values.decodeIfPresent(UUID.self, forKey: .activeRunToken))
+      activeRunToken: try values.decodeIfPresent(UUID.self, forKey: .activeRunToken),
+      policyVersion: try values.decodeIfPresent(Int.self, forKey: .policyVersion),
+      preparationProfileId: try values.decodeIfPresent(String.self, forKey: .preparationProfileId),
+      mediaSource: try values.decodeIfPresent(String.self, forKey: .mediaSource))
   }
 }
 
@@ -244,6 +251,18 @@ actor ProcessingStore {
     try? FileManager.default.removeItem(at: directory)
   }
 
+  /// Only an authenticated, persisted upload-complete receipt permits deletion.
+  /// Unknown completion and uploadPending retain the immutable file for retry.
+  func cleanupConfirmedInput(id: UUID, ownerUid: String) throws {
+    guard let operation = try operation(id: id, ownerUid: ownerUid), operation.phase == .submitted,
+      let status = operation.jobStatus, status != "awaiting_upload"
+    else { return }
+    let directory = try inputURL(for: operation).deletingLastPathComponent()
+    if FileManager.default.fileExists(atPath: directory.path) {
+      try FileManager.default.removeItem(at: directory)
+    }
+  }
+
   func operation(id: UUID, ownerUid: String) throws -> UploadOperation? {
     try load(ownerUid).operations.first { $0.operationId == id }
   }
@@ -320,7 +339,9 @@ actor ProcessingStore {
       transferId: nil, transferTaskId: nil, uploadAttempts: 0, lastFailureCode: nil,
       sourceTitle: prepared.sourceTitle, sourceKind: prepared.sourceKind,
       sourceURL: prepared.sourceURL,
-      clientStartedAt: prepared.clientStartedAt, displayName: prepared.displayName)
+      clientStartedAt: prepared.clientStartedAt, displayName: prepared.displayName,
+      policyVersion: prepared.policyVersion, preparationProfileId: prepared.preparationProfileId,
+      mediaSource: prepared.mediaSource)
     snapshot.operations.append(operation)
     try persist(snapshot)
     return operation

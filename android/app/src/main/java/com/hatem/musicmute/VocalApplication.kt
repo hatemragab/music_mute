@@ -139,7 +139,7 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
             updateCoordinator::reportProcessingRejected,
         )
     }
-    val audioInputPreparer by lazy { AudioInputPreparer(processingStagingRoot, inspect = ::inspectProcessingAudio) }
+    val audioInputPreparer by lazy { AudioInputPreparer(processingStagingRoot, validateDecoded = { file, policy -> com.hatem.musicmute.processing.validateDecodedProcessingAudio(file, policy) }, inspect = ::inspectProcessingAudio) }
     override val processingRepository by lazy {
         ProcessingRepository(
             processingStore,
@@ -150,8 +150,9 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
             updateBlocked = updateAdmission::isBlocked,
         )
     }
+    val processingUsage by lazy { com.hatem.musicmute.processing.ProcessingUsageRepository(jobsApi, ::processingSession) }
     val audioPipelineCoordinator by lazy {
-        AudioPipelineCoordinator(processingRepository, audioInputPreparer, ::processingSession, downloadRepository)
+        AudioPipelineCoordinator(processingRepository, audioInputPreparer, ::processingSession, downloadRepository, processingUsage, com.hatem.musicmute.processing.WorkManagerMediaPreparationScheduler(this), jobsApi::mediaPolicy)
     }
     val clientErrorOutbox by lazy {
         val scheduler = WorkManagerClientErrorScheduler(this)
@@ -326,5 +327,5 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
     val downloadRepository by lazy {
         DownloadRepository(this, historyStore, File(filesDir, "audio_downloads"), processingStore)
     }
-    val audioDownloader by lazy { YoutubeAudioDownloader(this) }
+    val audioDownloader by lazy { YoutubeAudioDownloader(this) { jobsApi.mediaPolicy() } }
 }

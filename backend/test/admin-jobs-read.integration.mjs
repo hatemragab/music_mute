@@ -86,7 +86,7 @@ test(
       assert.equal(first.items[0].id, records[2]._id.toString());
       assert.deepEqual(
         first.items.map((j) => j.queuePosition),
-        [3, 2],
+        [null, null],
       );
       assert.equal(JSON.stringify(first).includes('Private'), false);
       assert.equal(JSON.stringify(first).includes('private'), false);

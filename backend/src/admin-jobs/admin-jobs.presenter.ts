@@ -90,6 +90,14 @@ export function presentAdminJob(
             ),
             stage('uploading_result', job.uploadingResultAt, job.finishedAt),
           ],
+          source:
+            job.admissionSnapshot?.source ??
+            (job.sourceKind === 'url' ? 'youtube' : 'audio_file'),
+          declaredBytes: job.inputReservation.bytes,
+          measuredBytes: job.inputObject?.bytes ?? null,
+          policyVersion: job.admissionSnapshot?.policyVersion ?? 1,
+          estimatedWorkerSeconds:
+            job.admissionSnapshot?.estimatedWorkerSeconds ?? null,
           declaredDurationSeconds: job.inputReservation.durationSeconds,
           measuredDurationSeconds: job.measuredDurationSeconds ?? null,
           media: {
@@ -105,6 +113,9 @@ export function presentAdminAttempt(
   recoveryRequired: boolean,
 ) {
   return {
+    separatorExecutionSeconds: attempt.separatorExecutionSeconds ?? null,
+    stoppedConfirmed: attempt.separatorStoppedConfirmed ?? false,
+    separationCompleted: attempt.separationCompleted ?? null,
     id: attempt.attemptId,
     jobId: attempt.jobId.toHexString(),
     workerId: attempt.workerId ?? null,

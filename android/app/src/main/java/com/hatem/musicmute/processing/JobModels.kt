@@ -30,6 +30,9 @@ data class CreateJobMetadata(
     val sourceKind: SourceKind? = null,
     val clientStartedAt: Instant? = null,
     val sourceUrl: String? = null,
+    val policyVersion: Int? = null,
+    val preparationProfileId: String? = null,
+    val source: String? = null,
 )
 
 /** Unknown server states remain displayable, but have no actionable enum value. */
@@ -173,6 +176,9 @@ data class ClientErrorReport(
 @Serializable data class ClientErrorAccepted(val eventId: String)
 
 enum class JobsProblem {
+    MEDIA_TOO_LONG, MEDIA_TOO_LARGE, MEDIA_NO_AUDIO, MEDIA_DEFAULT_TRACK_UNAVAILABLE, MEDIA_UNSUPPORTED, MEDIA_DURATION_UNKNOWN,
+    YOUTUBE_PLAYLIST_UNSUPPORTED, YOUTUBE_LIVE_UNSUPPORTED, PROCESSING_ALLOWANCE_EXHAUSTED, PROCESSING_QUEUE_FULL,
+    PROCESSING_POLICY_INCOMPATIBLE, PROCESSING_CAPACITY_UNAVAILABLE, PROCESSING_LIMIT_REACHED,
     INVALID_INPUT, UNAUTHENTICATED, ACCOUNT_DISABLED, POLICY_DENIED,
     EMAIL_VERIFICATION_REQUIRED, APP_UPDATE_REQUIRED, DEVICE_SYNC_REQUIRED, DEVICE_REPORT_CONFLICT,
     PROFILE_SYNC_REQUIRED, JOB_NOT_FOUND, JOB_STATE_CONFLICT, IDEMPOTENCY_CONFLICT,

@@ -11,7 +11,28 @@ describe('ProcessingAdmissionService', () => {
       updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
     };
     const count = vi.fn().mockResolvedValue(0);
-    const jobs = { countDocuments: vi.fn(() => ({ session: count })) };
+    const emptyQuery = () => ({
+      session() {
+        return this;
+      },
+      lean: async () => null,
+    });
+    const jobs = {
+      countDocuments: vi.fn(() => ({ session: count })),
+      findById: emptyQuery,
+      db: {
+        model: () => ({
+          findById: emptyQuery,
+          updateOne: async () => ({ acknowledged: true }),
+        }),
+      },
+      aggregate: () => ({
+        session() {
+          return this;
+        },
+        option: async () => [],
+      }),
+    };
     const effective = vi.fn().mockResolvedValue({
       revision: 2,
       acceptNewJobs: true,

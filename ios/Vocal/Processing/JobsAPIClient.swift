@@ -1,6 +1,8 @@
 import Foundation
 
 @MainActor protocol JobsAPI {
+  func processingPolicy() async throws -> ProcessingPolicyResponse
+  func processingUsage() async throws -> ProcessingUsage
   func create(requestId: UUID, input: InputDeclaration) async throws -> CreateReservation
   func create(requestId: UUID, input: InputDeclaration, metadata: JobSourceMetadata) async throws
     -> CreateReservation
@@ -18,6 +20,8 @@ import Foundation
 }
 
 extension JobsAPI {
+  func processingPolicy() async throws -> ProcessingPolicyResponse { throw JobsFailure.notFound }
+  func processingUsage() async throws -> ProcessingUsage { throw JobsFailure.notFound }
   func create(requestId: UUID, input: InputDeclaration, metadata: JobSourceMetadata) async throws
     -> CreateReservation
   {
@@ -63,6 +67,12 @@ extension JobsAPI {
       sessionConfiguration: sessionConfiguration, rejectRedirects: true)
   }
 
+  func processingPolicy() async throws -> ProcessingPolicyResponse {
+    try await send("GET", "/processing-policy?schemaVersion=2")
+  }
+  func processingUsage() async throws -> ProcessingUsage {
+    try await send("GET", "/processing-usage")
+  }
   func create(requestId: UUID, input: InputDeclaration) async throws -> CreateReservation {
     try await create(requestId: requestId, input: input, metadata: JobSourceMetadata())
   }
@@ -70,6 +80,9 @@ extension JobsAPI {
     -> CreateReservation
   {
     struct Body: Encodable {
+      let policyVersion: Int?
+      let preparationProfileId: String?
+      let source: String?
       let requestId: String
       let input: InputDeclaration
       let sourceTitle: String?
@@ -82,7 +95,10 @@ extension JobsAPI {
       "POST", "/jobs",
       body: encoder.encode(
         Body(
-          requestId: try requestUUID(requestId), input: input, sourceTitle: title,
+          policyVersion: metadata.policyVersion,
+          preparationProfileId: metadata.preparationProfileId,
+          source: metadata.source, requestId: try requestUUID(requestId), input: input,
+          sourceTitle: title,
           sourceKind: metadata.sourceKind, sourceUrl: metadata.sourceURL,
           clientStartedAt: metadata.clientStartedAt.map(Self.iso8601))),
       installation: true)
@@ -204,6 +220,9 @@ extension JobsAPI {
         "JOB_STATE_CONFLICT", "IDEMPOTENCY_CONFLICT", "UPLOAD_NOT_READY",
         "NEW_INPUT_REQUIRED", "JOB_ACTIVE", "JOB_NOT_FOUND",
       ]
+      if let rawCode, ProcessingMediaMessage.serverCodes.contains(rawCode) {
+        throw JobsFailure.conflict(code: rawCode)
+      }
       let code = rawCode.flatMap { safeCodes.contains($0) ? $0 : nil }
       switch response.statusCode {
       case 300...399: throw JobsFailure.redirectRejected

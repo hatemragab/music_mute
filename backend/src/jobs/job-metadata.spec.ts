@@ -31,3 +31,24 @@ describe('job source metadata', () => {
     ).toThrow();
   });
 });
+
+describe('versioned preparation metadata', () => {
+  it('preserves an explicit supported profile and source in the idempotency identity', () => {
+    const metadata = {
+      policyVersion: 2,
+      preparationProfileId: 'preserve-or-aac-lc-256-v1',
+      source: 'video_file',
+    };
+    expect(normalizeJobMetadata(metadata as never)).toEqual(metadata);
+  });
+  it('rejects an unknown version or profile instead of silently using legacy admission', () => {
+    expect(() => normalizeJobMetadata({ policyVersion: 3 } as never)).toThrow();
+    expect(() =>
+      normalizeJobMetadata({
+        policyVersion: 2,
+        preparationProfileId: 'unknown',
+        source: 'audio_file',
+      } as never),
+    ).toThrow();
+  });
+});

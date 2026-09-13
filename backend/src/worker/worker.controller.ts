@@ -120,6 +120,7 @@ export class WorkerController {
       dto.previousAttemptId,
       dto.stopped,
       req?.workerIdentity,
+      { eventId: dto.eventId, executionEvidence: dto.executionEvidence },
     );
   }
 
@@ -141,6 +142,7 @@ export class WorkerController {
         dto.waitSeconds,
         client.signal,
         req?.workerIdentity,
+        dto.mediaPolicyVersion,
       );
       if (client.signal.aborted) return;
       if (!assignment) {

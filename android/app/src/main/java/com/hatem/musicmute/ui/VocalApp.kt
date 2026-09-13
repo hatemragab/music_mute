@@ -176,6 +176,17 @@ fun VocalApp(
         update()
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer); processingModel.history.setVisible(false) }
     }
+    val usage by app.processingUsage.usage.collectAsStateWithLifecycle()
+    LaunchedEffect(processingSession) {
+        app.processingUsage.clear()
+        while (processingSession != null) {
+            try { app.processingUsage.refresh() } catch (error: kotlinx.coroutines.CancellationException) { throw error } catch (_: Exception) { }
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
+    val importVideo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) processingModel.importAudio(uri)
+    }
     val importAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) processingModel.importAudio(uri)
     }
@@ -189,7 +200,7 @@ fun VocalApp(
     }
     val openImport: () -> Unit = {
         nav.navigate(Destination.Home.name) { launchSingleTop = true }
-        importAudio.launch(arrayOf("audio/mp4", "audio/webm", "audio/ogg", "audio/aac", "audio/mpeg"))
+        importAudio.launch(arrayOf("audio/*", "video/*"))
     }
     LaunchedEffect(openProcessing, openProcessingJob, openProcessingOperation) {
         if (openProcessing || openProcessingJob != null || openProcessingOperation != null) {
@@ -343,6 +354,8 @@ fun VocalApp(
                                 else onProcessingNotifications()
                             },
                             onImport = openImport, onYoutube = { showYoutubeLink = true },
+                            onPhotos = { importVideo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
+                            usage = usage,
                             onRefresh = processingModel.history::refresh,
                             onLoadMore = processingModel.history::loadMore,
                             onOpen = { task ->

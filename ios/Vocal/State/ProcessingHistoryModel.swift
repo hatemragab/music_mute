@@ -16,6 +16,7 @@ func processingStatusKey(_ status: String) -> String {
 }
 
 func processingErrorKey(_ error: Error) -> String {
+  if let key = ProcessingMediaMessage.key(error) { return key }
   if let artifact = error as? JobArtifactFailure {
     switch artifact {
     case .storage: return "processing_error_storage"

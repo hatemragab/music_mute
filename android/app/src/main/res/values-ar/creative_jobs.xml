@@ -1,7 +1,7 @@
 <resources>
     <string name="creative_jobs_details_unavailable">تفاصيل المهمة غير متاحة بعد. حدّث الصفحة أو عُد إلى الرئيسية.</string>
     <string name="creative_jobs_home_title">امنح صوتك مساحة.</string>
-    <string name="creative_jobs_audio_only">اختر ملفًا صوتيًا</string>
+    <string name="creative_jobs_audio_only">يتم رفع الصوت المجهز فقط</string>
     <string name="creative_jobs_heading">مهام المعالجة</string>
     <string name="creative_jobs_empty">ستظهر مهامك هنا. استورد ملفًا صوتيًا لإنشاء أول نتيجة صوتية.</string>
     <string name="creative_jobs_load_more">تحميل المزيد</string>

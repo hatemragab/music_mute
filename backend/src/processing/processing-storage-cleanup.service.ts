@@ -1,3 +1,5 @@
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
+import { ProcessingUsageLedger } from '../processing-usage/processing-usage.schema.js';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -87,6 +89,10 @@ export class ProcessingStorageCleanupService {
       );
       if (changed.modifiedCount !== 1)
         throw new Error('Expired upload changed while scheduling cleanup');
+      await new ProcessingUsageService(
+        this.jobs.db.model<ProcessingUsageLedger>(ProcessingUsageLedger.name),
+        this.jobs,
+      ).settleJob({ ...candidate, status: 'failed' }, session);
       return true;
     });
   }

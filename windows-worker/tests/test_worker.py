@@ -162,6 +162,53 @@ class WorkerTests(unittest.TestCase):
         self.assertNotIn("stage", [r for r, _ in self.api.calls])
         self.assertIsNone(self.transfers.uploaded)
 
+    def test_media_policy_negotiation_reports_actual_execution_per_event(self):
+        # The synthetic separator emits the same phase protocol as separate.py;
+        # FFmpeg encoding below remains outside this measured fake AI phase.
+        self.separator.write_text(
+            self.separator.read_text().replace(
+                "subprocess.run([",
+                "import time, json\nfrom datetime import datetime, timezone\n"
+                "started=time.monotonic(); started_at=datetime.now(timezone.utc).isoformat(); time.sleep(.01)\n"
+                "(o/'.execution.json').write_text(json.dumps(dict(version=1,runId=o.name,phase='separated',completed=True,startedAt=started_at,startedMonotonic=started,seconds=time.monotonic()-started)))\n"
+                "subprocess.run([",
+                1,
+            )
+        )
+        original = self.api.post
+
+        def post(route, body):
+            reply = original(route, body)
+            if route == "identity":
+                reply["mediaPolicyVersion"] = 2
+            return reply
+
+        self.api.post = post
+        self.assertEqual(
+            Worker(self.config, self.api, self.transfers).run_once(), "ready"
+        )
+        claim = next(body for route, body in self.api.calls if route == "claim")
+        self.assertEqual(claim["mediaPolicyVersion"], 2)
+        reports = [
+            body
+            for route, body in self.api.calls
+            if route in ("output-url", "complete")
+        ]
+        self.assertEqual(len(reports), 2)
+        for report in reports:
+            evidence = report["executionEvidence"]
+            self.assertEqual(evidence["eventId"], report["eventId"])
+            self.assertGreater(evidence["separatorExecutionSeconds"], 0)
+            self.assertTrue(evidence["stoppedConfirmed"])
+            self.assertTrue(evidence["separationCompleted"])
+            self.assertGreater(
+                evidence["measuredAudioSeconds"], reports[0]["durationSeconds"]
+            )
+        self.assertEqual(
+            reports[0]["executionEvidence"]["separatorExecutionSeconds"],
+            reports[1]["executionEvidence"]["separatorExecutionSeconds"],
+        )
+
     def test_protocol_v2_identity_is_verified_before_the_first_claim(self):
         worker = Worker(self.config, self.api, self.transfers)
         self.assertEqual(worker.run_once(), "ready")
