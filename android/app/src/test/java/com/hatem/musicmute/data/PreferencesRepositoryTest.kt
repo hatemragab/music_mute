@@ -18,6 +18,32 @@ class PreferencesRepositoryTest {
     @get:Rule val temporaryFolder = TemporaryFolder()
 
     @Test
+    fun customAccentSurvivesRecreationAsOpaqueRgb() = runTest {
+        val file = File(temporaryFolder.root, "accent.preferences_pb")
+        val firstScope = CoroutineScope(backgroundScope.coroutineContext + Job())
+        val firstStore = PreferenceDataStoreFactory.create(scope = firstScope) { file }
+        DataStorePreferencesRepository(firstStore).setAccent(0x003355AA)
+        firstScope.cancel()
+        firstScope.coroutineContext[Job]!!.join()
+        val restored = PreferenceDataStoreFactory.create(scope = backgroundScope) { file }
+        assertEquals(0xFF3355AA.toInt(), DataStorePreferencesRepository(restored).preferences.first().accentArgb)
+    }
+
+    @Test
+    fun legacyLightPreferenceRestoresAsDarkWithoutLosingLanguage() = runTest {
+        val store = PreferenceDataStoreFactory.create(scope = backgroundScope) {
+            File(temporaryFolder.root, "legacy.preferences_pb")
+        }
+        store.edit {
+            it[stringPreferencesKey("theme")] = "LIGHT"
+            it[stringPreferencesKey("language")] = "ARABIC"
+        }
+        val preferences = DataStorePreferencesRepository(store).preferences.first()
+        assertEquals(ThemeChoice.DARK, preferences.theme)
+        assertEquals(LanguageChoice.ARABIC, preferences.language)
+    }
+
+    @Test
     fun defaultsAndStoredPreferencesRoundTrip() = runTest {
         val store =
             PreferenceDataStoreFactory.create(scope = backgroundScope) {
@@ -35,7 +61,7 @@ class PreferencesRepositoryTest {
         assertEquals(LanguageChoice.ARABIC, repository.preferences.first().language)
         repository.setLanguage(LanguageChoice.SYSTEM)
         assertEquals(
-            AppPreferences(ThemeChoice.LIGHT, LanguageChoice.SYSTEM),
+            AppPreferences(ThemeChoice.DARK, LanguageChoice.SYSTEM),
             repository.preferences.first(),
         )
     }

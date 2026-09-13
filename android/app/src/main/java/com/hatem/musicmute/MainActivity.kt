@@ -9,7 +9,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalConfiguration
@@ -21,8 +20,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hatem.musicmute.data.LanguageChoice
-import com.hatem.musicmute.data.ThemeChoice
-import com.hatem.musicmute.playback.AudioPlaybackController
 import com.hatem.musicmute.state.DownloadsViewModel
 import com.hatem.musicmute.state.VocalViewModel
 import com.hatem.musicmute.state.ProcessingViewModel
@@ -83,7 +80,7 @@ class MainActivity : AppCompatActivity() {
             val processing: ProcessingViewModel = viewModel(factory = viewModelFactory {
                 initializer {
                     ProcessingViewModel(app.jobsApi, app.processingRepository, app.audioPipelineCoordinator,
-                        app::processingSession, app.contentResolver, AudioPlaybackController(app),
+                        app::processingSession, app.contentResolver, app.audioPlayback,
                         app.processingArtifacts::ensureOutput,
                         app.processedAudioShare,
                         app.processingArtifacts::evict,
@@ -119,25 +116,13 @@ class MainActivity : AppCompatActivity() {
                             initializer {
                                 DownloadsViewModel(
                                     app.downloadRepository,
-                                    AudioPlaybackController(app),
+                                    app.audioPlayback,
                                 )
                             }
                         }
                 )
-            val dark =
-                when (state.preferences.theme) {
-                    ThemeChoice.SYSTEM -> isSystemInDarkTheme()
-                    ThemeChoice.LIGHT -> false
-                    ThemeChoice.DARK -> true
-                }
-            LaunchedEffect(dark) {
-                val style =
-                    if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-                    else
-                        SystemBarStyle.light(
-                            android.graphics.Color.TRANSPARENT,
-                            android.graphics.Color.TRANSPARENT,
-                        )
+            LaunchedEffect(Unit) {
+                val style = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
                 enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
             }
             LaunchedEffect(
@@ -152,7 +137,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
-            VocalTheme(dark = dark) {
+            VocalTheme(accentArgb = state.preferences.accentArgb) {
                 val language = LocalConfiguration.current.locales[0].language
                 UpdateGate(
                     state = updateState,

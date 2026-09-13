@@ -1,0 +1,25 @@
+<resources>
+    <string name="creative_account_login_hero">يسعدنا سماعك.</string>
+    <string name="creative_account_register_hero">اجعل صوتك مميزًا.</string>
+    <string name="creative_account_reset_hero">لنساعدك على العودة.</string>
+    <string name="creative_account_profile">الملف الشخصي</string>
+    <string name="creative_account_section">الحساب</string>
+    <string name="creative_account_session">الجلسة</string>
+    <string name="creative_account_other_devices">الأجهزة الأخرى</string>
+    <string name="creative_account_confirm_identity">تأكيد هويتك</string>
+    <string name="creative_account_add_password">إضافة تسجيل الدخول بكلمة مرور</string>
+    <string name="creative_account_disconnect">فصل %1$s؟</string>
+    <string name="creative_account_verify">تأكيد بريدك الإلكتروني</string>
+    <string name="creative_account_access">الوصول</string>
+    <string name="creative_account_recovery">الاستعادة</string>
+    <string name="creative_account_files">ملفاتك</string>
+    <string name="creative_account_delete_access">ينتهي الوصول فورًا. تتم جدولة حذف حسابك والمدخلات السحابية ونتائج الصوت والسجل وتسجيلات الأجهزة.</string>
+    <string name="creative_account_delete_recovery">لديك ثلاثة أشهر لطلب الاستعادة. يبدأ الحذف السحابي النهائي بعد انتهاء هذه المهلة.</string>
+    <string name="creative_account_delete_files">تُحذف النسخ الخاصة بالحساب على هذا التثبيت. تبقى الملفات الأصلية والنسخ المصدّرة أو المشتركة معك.</string>
+    <string name="creative_account_delete_step">الخطوة ١ من ٢ · يليها تأكيد نهائي.</string>
+    <string name="creative_account_submitted">تم إرسال الطلب</string>
+    <string name="creative_account_review">مراجعة الإدارة</string>
+    <string name="creative_account_decision_pending">بانتظار القرار</string>
+    <string name="creative_account_no_decision">لا يوجد قرار بعد.</string>
+    <string name="creative_account_reason_count">%1$d / 500</string>
+</resources>

@@ -1,5 +1,9 @@
 package com.hatem.musicmute.ui.auth
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.*
+import com.hatem.musicmute.ui.design.*
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.*
@@ -30,12 +34,18 @@ internal fun AccountScreen(
     google: GoogleCredentialProvider,
     activity: android.app.Activity,
 ) {
-    var deletionStep by remember { mutableIntStateOf(0) }
-    var deletionPassword by remember { mutableStateOf("") }
+    var deletionStep by remember(state.identity?.uid) { mutableIntStateOf(0) }
+    var deletionPassword by remember(state.identity?.uid) { mutableStateOf("") }
     LaunchedEffect(state.failure?.problem) {
         if (state.failure?.problem == AuthProblem.REAUTH_REQUIRED && deletionStep == 2) deletionStep = 1
     }
     var confirmGlobalLogout by remember { mutableStateOf(false) }
+    var verify by remember { mutableStateOf(false) }
+    LaunchedEffect(state.identity?.emailVerified) {
+        if (state.identity?.emailVerified == true) verify = false
+    }
+    fun cancelDeletion() { if (!state.busy) { deletionStep = 0; deletionPassword = "" } }
+    BackHandler(deletionStep > 0) { cancelDeletion() }
     var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
     LaunchedEffect(state.verificationCooldownUntil) {
         now = android.os.SystemClock.elapsedRealtime()
@@ -46,87 +56,52 @@ internal fun AccountScreen(
     }
     val cooldown = ((state.verificationCooldownUntil - now + 999) / 1000).coerceAtLeast(0)
     val context = LocalContext.current
+    if (deletionStep > 0) {
+        AccountDeletionReviewScreen(state, deletionPassword, { deletionPassword = it }, ::cancelDeletion, {
+            val password = deletionPassword
+            deletionPassword = ""
+            scope.launch { auth.prepareAccountDeletion(password, { google.credential(activity) }) { deletionStep = 2 } }
+        }, auth::dismissMessage)
+        if (deletionStep == 2) AccountDeletionDialog(state, ::cancelDeletion,
+            { scope.launch { auth.deleteAccount() } }, auth::dismissMessage)
+        return
+    }
     AuthPage {
-        TextButton(
-            onClick = onBack,
-            enabled = !state.busy,
-            modifier = Modifier.testTag("auth-account-back"),
-        ) {
-            Text(stringResource(R.string.back))
-        }
-        Text(stringResource(R.string.auth_account), style = MaterialTheme.typography.headlineLarge)
+        AccountHeader(stringResource(R.string.creative_account_profile), onBack, !state.busy)
         if (state.offline)
             Text(
                 stringResource(R.string.auth_offline_account),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         AuthMessages(state, auth::dismissMessage)
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    state.profile?.displayName.orEmpty(),
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                SelectionContainer {
-                    Text(
-                        state.identity?.email
-                            ?: state.profile?.email
-                            ?: stringResource(R.string.auth_no_email)
-                    )
-                }
-                Text(
-                    stringResource(
-                        if (state.identity?.emailVerified == true) R.string.auth_verified
-                        else R.string.auth_unverified
-                    ),
-                    modifier = Modifier.testTag("auth-verification-status"),
-                )
-                if (state.identity?.emailVerified != true) {
-                    Text(
-                        stringResource(R.string.auth_optional_verification),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    OutlinedButton(
-                        onClick = { scope.launch { auth.requestVerification() } },
-                        enabled = !state.busy && cooldown == 0L && state.identity?.email != null,
-                        modifier = Modifier.testTag("auth-verify-email"),
-                    ) {
-                        Text(
-                            if (cooldown > 0) stringResource(R.string.auth_retry_seconds, cooldown)
-                            else stringResource(R.string.auth_send_verification)
-                        )
-                    }
-                    TextButton(
-                        onClick = { scope.launch { auth.refreshAccount() } },
-                        enabled = !state.busy,
-                        modifier = Modifier.testTag("auth-check-verification"),
-                    ) {
-                        Text(stringResource(R.string.auth_check_verification))
-                    }
+        if (state.pendingProfileName != null) {
+            Text(stringResource(R.string.creative_account_name_pending))
+            TextButton(onClick = { scope.launch { auth.retryProfileName() } }, enabled = !state.busy) {
+                Text(stringResource(R.string.retry))
+            }
+        }
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            AccountSymbol(Icons.Outlined.Person)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val name = state.identity?.displayName?.takeIf { it.isNotBlank() } ?: state.profile?.displayName?.takeIf { it.isNotBlank() }
+                name?.let { Text(it, style = MaterialTheme.typography.titleLarge) }
+                SelectionContainer { Text(state.identity?.email ?: state.profile?.email ?: stringResource(R.string.auth_no_email)) }
+                Text(stringResource(if (state.identity?.emailVerified == true) R.string.auth_verified else R.string.auth_unverified),
+                    color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("auth-verification-status"))
+                if (state.identity?.emailVerified != true) TextButton(onClick = { verify = true }, enabled = !state.busy) {
+                    Text(stringResource(R.string.creative_account_verify))
                 }
             }
         }
-        OutlinedButton(
-            onClick = onMethods,
-            enabled = !state.busy,
-            modifier = Modifier.fillMaxWidth().testTag("auth-linked-methods"),
-        ) {
-            Text(stringResource(R.string.auth_login_methods))
-        }
-        OutlinedButton(
-            onClick = onDevices,
-            enabled = !state.busy,
-            modifier = Modifier.fillMaxWidth().testTag("auth-devices"),
-        ) {
-            Text(stringResource(R.string.auth_devices))
-        }
-        TextButton(
-            onClick = { scope.launch { auth.refreshAccount() } },
-            enabled = !state.busy,
-            modifier = Modifier.testTag("auth-refresh-account"),
-        ) {
-            Text(stringResource(R.string.auth_refresh_account))
-        }
+        CreativeCard {
+        Text(stringResource(R.string.creative_account_section), style = MaterialTheme.typography.labelMedium)
+        AccountActionRow(stringResource(R.string.auth_login_methods), Icons.Outlined.Key, Modifier.testTag("auth-linked-methods"), !state.busy, onClick = onMethods)
+        HorizontalDivider()
+        AccountActionRow(stringResource(R.string.auth_devices), Icons.Outlined.Devices, Modifier.testTag("auth-devices"), !state.busy, onClick = onDevices)
+        HorizontalDivider()
+        AccountActionRow(stringResource(R.string.auth_refresh_account), Icons.Outlined.Refresh, Modifier.testTag("auth-refresh-account"), !state.busy,
+            onClick = { scope.launch { auth.refreshAccount() } })
         val accessMessage =
             when {
                 state.offline || state.access == null -> R.string.auth_processing_unknown
@@ -164,69 +139,23 @@ internal fun AccountScreen(
                     }
             }
         }
-        TextButton(onClick = { deletionStep = 1; auth.dismissMessage() }, enabled = !state.busy) {
-            Text(stringResource(R.string.account_delete), color = MaterialTheme.colorScheme.error)
+        HorizontalDivider()
+        Text(stringResource(R.string.creative_account_session), style = MaterialTheme.typography.labelMedium)
+        AccountActionRow(stringResource(R.string.auth_sign_out), Icons.Outlined.Logout, Modifier.testTag("auth-sign-out"), !state.busy, onClick = auth::signOut)
+        AccountActionRow(stringResource(R.string.auth_logout_all), Icons.Outlined.People, Modifier.testTag("auth-logout-all"), !state.busy, onClick = { confirmGlobalLogout = true })
+        }
+        CreativeCard {
+            AccountActionRow(stringResource(R.string.account_delete), Icons.Outlined.DeleteOutline, enabled = !state.busy, destructive = true,
+                onClick = { deletionStep = 1; auth.dismissMessage() })
         }
         AccountPublicLinks()
-        HorizontalDivider()
-        Button(
-            onClick = { auth.signOut() },
-            modifier = Modifier.fillMaxWidth().testTag("auth-sign-out"),
-        ) {
-            Text(stringResource(R.string.auth_sign_out))
-        }
-        TextButton(
-            onClick = { confirmGlobalLogout = true },
-            enabled = !state.busy,
-            modifier = Modifier.fillMaxWidth().testTag("auth-logout-all"),
-        ) {
-            Text(stringResource(R.string.auth_logout_all))
-        }
     }
-    if (deletionStep > 0) AlertDialog(
-        onDismissRequest = { if (!state.busy) { deletionStep = 0; deletionPassword = "" } },
-        title = { Text(stringResource(R.string.account_delete)) },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(if (deletionStep == 1) R.string.account_delete_explanation else R.string.account_delete_final))
-            AuthMessages(state, auth::dismissMessage)
-            if (deletionStep == 1 && PASSWORD_PROVIDER in state.identity?.providers.orEmpty())
-                OutlinedTextField(value = deletionPassword, onValueChange = { deletionPassword = it },
-                    label = { Text(stringResource(R.string.auth_password)) }, singleLine = true,
-                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
-        } },
-        confirmButton = { TextButton(enabled = !state.busy, onClick = {
-            if (deletionStep == 1) scope.launch {
-                val password = deletionPassword
-                deletionPassword = ""
-                auth.prepareAccountDeletion(password, { google.credential(activity) }) { deletionStep = 2 }
-            } else scope.launch { auth.deleteAccount() }
-        }) { Text(stringResource(if (deletionStep == 1) R.string.auth_confirm else R.string.account_delete)) } },
-        dismissButton = { TextButton(enabled = !state.busy, onClick = { deletionStep = 0; deletionPassword = "" }) {
-            Text(stringResource(R.string.auth_cancel))
-        } },
-    )
-    if (confirmGlobalLogout)
-        AlertDialog(
-            onDismissRequest = { confirmGlobalLogout = false },
-            title = { Text(stringResource(R.string.auth_logout_all)) },
-            text = { Text(stringResource(R.string.auth_logout_all_description)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmGlobalLogout = false
-                        scope.launch { auth.logoutAll() }
-                    },
-                    modifier = Modifier.testTag("auth-confirm-logout-all"),
-                ) {
-                    Text(stringResource(R.string.auth_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmGlobalLogout = false }) {
-                    Text(stringResource(R.string.auth_cancel))
-                }
-            },
-        )
+    if (verify) EmailVerificationSheet(state, state.identity?.email ?: state.profile?.email.orEmpty(), cooldown,
+        { if (!state.busy) verify = false }, { scope.launch { auth.requestVerification() } },
+        { scope.launch { auth.refreshAccount() } }, auth::dismissMessage)
+    if (confirmGlobalLogout) SignOutAllSheet(state, { if (!state.busy) confirmGlobalLogout = false },
+        { scope.launch { auth.logoutAll() } }, auth::dismissMessage)
+
 }
 
 @Composable

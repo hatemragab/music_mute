@@ -615,6 +615,7 @@ class ProcessingRepository(
         val owner = requireSession()
         val result = api.rename(jobId, displayName)
         checkSession(owner)
+        store.updateLibraryJob(owner.uid, result)
         store.operations(owner.uid).first().firstOrNull { it.jobId == jobId }?.let { operation ->
             store.update(owner.uid, operation.operationId) {
                 it.copy(displayName = result.displayName ?: displayName.trim())
@@ -632,10 +633,12 @@ class ProcessingRepository(
         try {
             api.delete(jobId)
             checkSession(owner)
+            store.removeLibraryJob(owner.uid, jobId)
             operation?.let { store.removeOperation(owner.uid, it.operationId) }
         } catch (error: JobsFailure) {
             if (error.problem == JobsProblem.JOB_NOT_FOUND) {
                 checkSession(owner)
+                store.removeLibraryJob(owner.uid, jobId)
                 operation?.let { store.removeOperation(owner.uid, it.operationId) }
             } else throw error
         }

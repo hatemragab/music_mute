@@ -57,6 +57,7 @@ data class AuthUiState(
     val deletionUnconfirmed: Boolean = false,
     val accountRecovery: AccountRecoveryStatus? = null,
     val nextDeviceCursor: String? = null,
+    val pendingProfileName: PendingProfileName? = null,
 )
 
 /** Owns auth state only. A generation prevents callbacks from resurrecting a logged-out account. */
@@ -112,6 +113,7 @@ class AuthSessionCoordinator(
             return@action
         }
         trackedUid = user.uid
+        mutableState.value = mutableState.value.copy(pendingProfileName = installations.pendingProfileName(user.uid))
         val cached = installations.bootstrap()?.takeIf { it.uid == user.uid }
         try {
             bootstrap(ticket)
@@ -135,20 +137,46 @@ class AuthSessionCoordinator(
         }
     }
 
-    suspend fun signInEmail(email: String, password: String, register: Boolean = false) =
+    suspend fun signInEmail(email: String, password: String, register: Boolean = false, fullName: String? = null) =
         action { ticket ->
             api.configuration.apiRoot()
             val address = email.trim()
             if (!validAuthEmail(address) || password.isEmpty())
                 throw AuthFailure(AuthProblem.INVALID_INPUT)
+            val name = if (register) validatedFullName(fullName.orEmpty()) else null
             val signedIn =
                 if (register) identity.register(address, password)
                 else identity.signIn(address, password)
             checkTicket(ticket)
             trackedUid = signedIn.uid
             checkTicket(ticket)
+            if (name != null) {
+                val request = PendingProfileName(signedIn.uid, name)
+                mutableState.value = mutableState.value.copy(pendingProfileName = request)
+                applyProfileName(ticket, request)
+            }
             bootstrap(ticket)
         }
+
+    suspend fun retryProfileName() = action { ticket ->
+        val pending = mutableState.value.pendingProfileName ?: return@action
+        if (identity.identity()?.uid != pending.uid) throw AuthFailure(AuthProblem.ACCOUNT_MISMATCH)
+        if (applyProfileName(ticket, pending)) syncProfile(ticket)
+    }
+
+    private suspend fun applyProfileName(ticket: Long, request: PendingProfileName): Boolean {
+        val complete = completeProfileNameUpdate(request,
+            persist = { checkTicket(ticket); installations.savePendingProfileName(it); checkTicket(ticket) },
+            apply = { identity.updateDisplayName(it.uid, it.fullName); checkTicket(ticket) },
+            clear = { checkTicket(ticket); installations.clearPendingProfileName(it); checkTicket(ticket) },
+        )
+        checkTicket(ticket)
+        mutableState.value = mutableState.value.copy(
+            identity = identity.identity(),
+            pendingProfileName = if (complete) null else request,
+        )
+        return complete
+    }
 
     suspend fun signInSocial(credential: suspend () -> AuthCredential) = action { ticket ->
         api.configuration.apiRoot()

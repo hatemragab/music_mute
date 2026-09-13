@@ -338,4 +338,6 @@
     <string name="update_error_install_cancelled">The update was not installed. Update the app to continue.</string>
     <string name="update_error_play_unavailable">This update is not currently available in Google Play.</string>
     <string name="update_error_service">The update service is temporarily unavailable. Try again.</string>
+    <string name="creative_account_full_name">Full name</string>
+    <string name="creative_account_name_pending">Your account is ready. Your name could not be saved yet. Retry to finish your profile.</string>
 </resources>

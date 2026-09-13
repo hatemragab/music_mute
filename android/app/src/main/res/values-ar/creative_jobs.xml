@@ -1,0 +1,21 @@
+<resources>
+    <string name="creative_jobs_details_unavailable">تفاصيل المهمة غير متاحة بعد. حدّث الصفحة أو عُد إلى الرئيسية.</string>
+    <string name="creative_jobs_home_title">امنح صوتك مساحة.</string>
+    <string name="creative_jobs_audio_only">اختر ملفًا صوتيًا</string>
+    <string name="creative_jobs_heading">مهام المعالجة</string>
+    <string name="creative_jobs_empty">ستظهر مهامك هنا. استورد ملفًا صوتيًا لإنشاء أول نتيجة صوتية.</string>
+    <string name="creative_jobs_load_more">تحميل المزيد</string>
+    <string name="creative_jobs_open_result">فتح النتيجة</string>
+    <string name="creative_jobs_bring_audio">أضف صوتك.</string>
+    <string name="creative_jobs_youtube_subtitle">أضف رابط YouTube لتنزيل الملف الصوتي لمشروعك.</string>
+    <string name="creative_jobs_continue">متابعة</string>
+    <string name="creative_jobs_result">الصوت جاهز</string>
+    <string name="creative_jobs_open_player">فتح المشغّل</string>
+    <string name="creative_jobs_offline">متاح دون إنترنت</string>
+    <string name="creative_jobs_keep_offline">تنزيل للاستخدام دون إنترنت</string>
+    <string name="creative_jobs_source">تنزيل المصدر</string>
+    <string name="creative_jobs_source_notice">لم تبدأ المعالجة السحابية. راجع الملف الصوتي المنزّل قبل رفعه.</string>
+    <string name="creative_jobs_review">مراجعة الصوت</string>
+    <string name="creative_jobs_wait_output">اكتملت المهمة. النتيجة الصوتية غير متاحة للتنزيل بعد.</string>
+    <string name="creative_jobs_downloads">تنزيلات المصدر</string>
+</resources>

@@ -338,4 +338,6 @@
     <string name="update_error_install_cancelled">لم يتم تثبيت التحديث. حدّث التطبيق للمتابعة.</string>
     <string name="update_error_play_unavailable">هذا التحديث غير متاح حاليًا في Google Play.</string>
     <string name="update_error_service">خدمة التحديث غير متاحة مؤقتًا. حاول مجددًا.</string>
+    <string name="creative_account_full_name">الاسم الكامل</string>
+    <string name="creative_account_name_pending">حسابك جاهز. تعذر حفظ اسمك حتى الآن. أعد المحاولة لإكمال ملفك الشخصي.</string>
 </resources>

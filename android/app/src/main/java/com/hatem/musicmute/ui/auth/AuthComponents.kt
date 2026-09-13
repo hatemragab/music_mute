@@ -22,23 +22,12 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
+import com.hatem.musicmute.ui.design.*
 
 @Composable
 internal fun AuthPage(content: @Composable ColumnScope.() -> Unit) {
     Surface(Modifier.fillMaxSize()) {
-        Box(
-            Modifier.fillMaxSize().safeDrawingPadding().imePadding(),
-            contentAlignment = Alignment.TopCenter,
-        ) {
-            Column(
-                Modifier.widthIn(max = 600.dp)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-                content = content,
-            )
-        }
+        CreativePage(Modifier.safeDrawingPadding(), content = content)
     }
 }
 
@@ -52,14 +41,14 @@ internal fun PasswordField(
     newPassword: Boolean = false,
 ) {
     var visible by remember { mutableStateOf(false) }
-    OutlinedTextField(
+    CreativeTextField(
         value,
         onValueChange,
-        Modifier.fillMaxWidth().testTag(tag).semantics {
+        label = stringResource(label),
+        modifier = Modifier.fillMaxWidth().testTag(tag).semantics {
             contentType = if (newPassword) ContentType.NewPassword else ContentType.Password
         },
         enabled = enabled,
-        label = { Text(stringResource(label)) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         visualTransformation =

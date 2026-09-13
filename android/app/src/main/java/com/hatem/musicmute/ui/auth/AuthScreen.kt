@@ -1,12 +1,14 @@
 package com.hatem.musicmute.ui.auth
 
 import android.app.Activity
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
@@ -20,6 +22,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
+import com.hatem.musicmute.ui.design.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -39,8 +42,9 @@ internal fun AuthScreen(
     scope: CoroutineScope,
     onToggleLanguage: () -> Unit,
 ) {
-    var mode by remember { mutableStateOf(FormMode.LOGIN) }
-    var email by remember { mutableStateOf("") }
+    var mode by rememberSaveable { mutableStateOf(FormMode.LOGIN) }
+    var email by rememberSaveable { mutableStateOf("") }
+    var fullName by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmation by remember { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -63,25 +67,13 @@ internal fun AuthScreen(
         confirmation = ""
         auth.dismissMessage()
     }
+    BackHandler(mode != FormMode.LOGIN) { if (!state.busy) switch(FormMode.LOGIN) }
 
+    CreativeNavigation(mode, direction = { from, to -> to.ordinal - from.ordinal }) { visibleMode ->
     AuthPage {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = onToggleLanguage, enabled = !state.busy) {
                 Text(stringResource(R.string.auth_language))
-            }
-        }
-        Surface(
-            color = MaterialTheme.colorScheme.primaryContainer,
-            shape = MaterialTheme.shapes.extraLarge,
-            modifier = Modifier.size(68.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Outlined.Headphones,
-                    null,
-                    Modifier.size(34.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
             }
         }
         Text(
@@ -91,18 +83,25 @@ internal fun AuthScreen(
         )
         Text(
             stringResource(
-                when (mode) {
-                    FormMode.LOGIN -> R.string.auth_welcome
-                    FormMode.REGISTER -> R.string.auth_create_title
-                    FormMode.RESET -> R.string.auth_reset_title
+                when (visibleMode) {
+                    FormMode.LOGIN -> R.string.creative_account_login_hero
+                    FormMode.REGISTER -> R.string.creative_account_register_hero
+                    FormMode.RESET -> R.string.creative_account_reset_hero
                 }
             ),
             style = MaterialTheme.typography.headlineLarge,
             modifier = Modifier.testTag("auth-title"),
         )
+        CreativeWave(Modifier.fillMaxWidth().height(88.dp))
+        CreativeCard {
+        Text(stringResource(when (visibleMode) {
+            FormMode.LOGIN -> R.string.auth_sign_in
+            FormMode.REGISTER -> R.string.auth_create_account
+            FormMode.RESET -> R.string.auth_reset_title
+        }), style = MaterialTheme.typography.titleLarge)
         Text(
             stringResource(
-                when (mode) {
+                when (visibleMode) {
                     FormMode.LOGIN -> R.string.auth_login_description
                     FormMode.REGISTER -> R.string.auth_register_description
                     FormMode.RESET -> R.string.auth_reset_description
@@ -116,28 +115,36 @@ internal fun AuthScreen(
                 color = MaterialTheme.colorScheme.error,
             )
         AuthMessages(state, auth::dismissMessage)
-        AccountPublicLinks()
-        OutlinedTextField(
+        if (visibleMode == FormMode.REGISTER) {
+            CreativeTextField(
+                fullName, { fullName = it },
+                label = stringResource(R.string.creative_account_full_name),
+                modifier = Modifier.fillMaxWidth().testTag("auth-full-name").semantics { contentType = ContentType.PersonFullName },
+                enabled = !state.busy, singleLine = true,
+                error = if (fullName.isNotEmpty() && runCatching { validatedFullName(fullName) }.isFailure) stringResource(R.string.auth_error_input) else null,
+            )
+        }
+        CreativeTextField(
             email,
             { email = it },
-            Modifier.fillMaxWidth().testTag("auth-email").semantics {
+            label = stringResource(R.string.auth_email),
+            modifier = Modifier.fillMaxWidth().testTag("auth-email").semantics {
                 contentType = ContentType.EmailAddress
             },
             enabled = !state.busy,
             singleLine = true,
-            label = { Text(stringResource(R.string.auth_email)) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
         )
-        if (mode != FormMode.RESET)
+        if (visibleMode != FormMode.RESET)
             PasswordField(
                 password,
                 { password = it },
                 R.string.auth_password,
                 "auth-password",
                 !state.busy,
-                mode == FormMode.REGISTER,
+                visibleMode == FormMode.REGISTER,
             )
-        if (mode == FormMode.REGISTER) {
+        if (visibleMode == FormMode.REGISTER) {
             PasswordField(
                 confirmation,
                 { confirmation = it },
@@ -156,31 +163,33 @@ internal fun AuthScreen(
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-        Button(
+        CreativePrimaryButton(
             onClick = {
                 keyboard?.hide()
                 scope.launch {
-                    if (mode == FormMode.RESET) auth.requestPasswordReset(email)
-                    else auth.signInEmail(email, password, mode == FormMode.REGISTER)
+                    if (visibleMode == FormMode.RESET) auth.requestPasswordReset(email)
+                    else auth.signInEmail(email, password, visibleMode == FormMode.REGISTER, fullName)
                     password = ""
                     confirmation = ""
                 }
             },
             modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("auth-submit"),
+            busy = state.busy,
             enabled =
                 enabled &&
                     validAuthEmail(email.trim()) &&
-                    (if (mode == FormMode.RESET) cooldown == 0L
+                    (if (visibleMode == FormMode.RESET) cooldown == 0L
                     else
                         password.isNotEmpty() &&
-                            (mode != FormMode.REGISTER || password == confirmation)),
+                            (visibleMode != FormMode.REGISTER ||
+                                (password == confirmation && runCatching { validatedFullName(fullName) }.isSuccess))),
         ) {
             Text(
-                if (mode == FormMode.RESET && cooldown > 0)
+                if (visibleMode == FormMode.RESET && cooldown > 0)
                     stringResource(R.string.auth_retry_seconds, cooldown)
                 else
                     stringResource(
-                        when (mode) {
+                        when (visibleMode) {
                             FormMode.LOGIN -> R.string.auth_sign_in
                             FormMode.REGISTER -> R.string.auth_create_account
                             FormMode.RESET -> R.string.auth_send_reset
@@ -188,7 +197,7 @@ internal fun AuthScreen(
                     )
             )
         }
-        if (mode != FormMode.RESET) {
+        if (visibleMode != FormMode.RESET) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 Text(
                     stringResource(R.string.auth_or),
@@ -213,7 +222,7 @@ internal fun AuthScreen(
                 Text(stringResource(R.string.auth_continue_google))
             }
         }
-        if (mode == FormMode.LOGIN) {
+        if (visibleMode == FormMode.LOGIN) {
             TextButton(
                 onClick = { switch(FormMode.RESET) },
                 enabled = !state.busy,
@@ -236,5 +245,8 @@ internal fun AuthScreen(
             ) {
                 Text(stringResource(R.string.auth_back_login))
             }
+        AccountPublicLinks()
+        }
+    }
     }
 }

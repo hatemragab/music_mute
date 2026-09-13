@@ -1,0 +1,25 @@
+<resources>
+    <string name="creative_account_login_hero">Good to hear you.</string>
+    <string name="creative_account_register_hero">Make it your voice.</string>
+    <string name="creative_account_reset_hero">Let’s get you back.</string>
+    <string name="creative_account_profile">Profile</string>
+    <string name="creative_account_section">Account</string>
+    <string name="creative_account_session">Session</string>
+    <string name="creative_account_other_devices">Other devices</string>
+    <string name="creative_account_confirm_identity">Confirm it’s you</string>
+    <string name="creative_account_add_password">Add password sign-in</string>
+    <string name="creative_account_disconnect">Disconnect %1$s?</string>
+    <string name="creative_account_verify">Verify your email</string>
+    <string name="creative_account_access">Access</string>
+    <string name="creative_account_recovery">Recovery</string>
+    <string name="creative_account_files">Your files</string>
+    <string name="creative_account_delete_access">Access ends immediately. Your account, cloud inputs, voice results, history and device registrations are scheduled for deletion.</string>
+    <string name="creative_account_delete_recovery">You have three months to request recovery. Permanent cloud cleanup starts after that deadline.</string>
+    <string name="creative_account_delete_files">Private account copies on this installation are removed. Original files and exported or shared copies stay with you.</string>
+    <string name="creative_account_delete_step">Step 1 of 2 · A final confirmation follows.</string>
+    <string name="creative_account_submitted">Request submitted</string>
+    <string name="creative_account_review">Administrator review</string>
+    <string name="creative_account_decision_pending">Decision pending</string>
+    <string name="creative_account_no_decision">No decision yet.</string>
+    <string name="creative_account_reason_count">%1$d / 500</string>
+</resources>

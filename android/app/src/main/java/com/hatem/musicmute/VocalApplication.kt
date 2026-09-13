@@ -37,12 +37,21 @@ import kotlinx.coroutines.flow.asStateFlow
 
 private val Context.preferencesStore by preferencesDataStore(name = "vocal_preferences")
 
-class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost {
+class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost,
+    com.hatem.musicmute.playback.PlaybackDependencies {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var processingEpoch = System.currentTimeMillis()
     private val mutableProcessingSession = MutableStateFlow<ProcessingSession?>(null)
     val processingSessions = mutableProcessingSession.asStateFlow()
     fun processingSession(): ProcessingSession? = mutableProcessingSession.value
+    override fun currentPlaybackSession() = processingSession()
+    override val playbackSessions get() = processingSessions
+    override val playbackQueueStore by lazy {
+        com.hatem.musicmute.playback.PlaybackQueueStore(File(noBackupFilesDir, "playback"))
+    }
+    val audioPlayback by lazy { com.hatem.musicmute.playback.AudioPlaybackController(this) }
+    override suspend fun resolvePlaybackFile(key: com.hatem.musicmute.library.LibraryKey): File =
+        libraryRepository.ensureLocal(key)
     val googleCredentials by lazy { GoogleCredentialProvider(this) }
     private val firebaseIdentity by lazy {
         val firebase =
@@ -151,6 +160,11 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
     val processingArtifacts by lazy {
         JobArtifactRepository(File(processingRoot, "artifacts"), jobsApi, ::processingSession)
     }
+    val libraryRepository by lazy {
+        com.hatem.musicmute.library.DefaultLibraryRepository(
+            processingStore, processingArtifacts, processingSessions, applicationScope,
+        )
+    }
     val processedAudioShare by lazy {
         ProcessedAudioShare(this, File(filesDir, "processed_audio_share"))
     }
@@ -194,6 +208,7 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
             }
         }
         processingStore.clearOwner(uid)
+        kotlinx.coroutines.withContext(Dispatchers.IO) { playbackQueueStore.clear(uid) }
         val notifications = getSystemService(android.app.NotificationManager::class.java)
         notifications.activeNotifications.filter { it.notification.group == audioTaskNotificationGroup(uid) }
             .forEach { notifications.cancel(it.tag, it.id) }

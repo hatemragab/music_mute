@@ -1,64 +1,55 @@
 package com.hatem.musicmute.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hatem.musicmute.ui.design.AccentPalette
+import com.hatem.musicmute.ui.design.CreativeMotionProvider
 
-private val LightColors =
-    lightColorScheme(
-        primary = Color(0xFF236859),
-        onPrimary = Color.White,
-        primaryContainer = Color(0xFFD0EBDD),
-        onPrimaryContainer = Color(0xFF153E34),
-        secondary = Color(0xFF53685E),
-        secondaryContainer = Color(0xFFE1EADF),
-        background = Color(0xFFF7F8F4),
-        onBackground = Color(0xFF202C27),
-        surface = Color(0xFFF7F8F4),
-        onSurface = Color(0xFF202C27),
-        surfaceContainerLow = Color(0xFFFFFFFF),
-        surfaceContainer = Color(0xFFEEF1E9),
-        surfaceVariant = Color(0xFFE5EAE2),
-        onSurfaceVariant = Color(0xFF546158),
-        outline = Color(0xFF748177),
-        outlineVariant = Color(0xFFD4DCD1),
+private fun creativeColors(accentArgb: Int): androidx.compose.material3.ColorScheme {
+    val primary = AccentPalette.readableAccent(accentArgb)
+    val container = AccentPalette.blend(AccentPalette.SURFACE, primary, 0.16)
+    return darkColorScheme(
+        primary = Color(primary),
+        onPrimary = Color(AccentPalette.foreground(primary)),
+        primaryContainer = Color(container),
+        onPrimaryContainer = Color(AccentPalette.foreground(container)),
+        secondary = Color(0xFFCBC6D4),
+        secondaryContainer = Color(0xFF303039),
+        background = Color(AccentPalette.BACKGROUND),
+        onBackground = Color(0xFFF2F0F5),
+        surface = Color(AccentPalette.BACKGROUND),
+        onSurface = Color(0xFFF2F0F5),
+        surfaceContainerLow = Color(AccentPalette.SURFACE),
+        surfaceContainerLowest = Color(0xFF0C0D10),
+        surfaceContainer = Color(0xFF202229),
+        surfaceContainerHigh = Color(0xFF25272E),
+        surfaceContainerHighest = Color(0xFF2B2D35),
+        surfaceDim = Color(AccentPalette.BACKGROUND),
+        surfaceBright = Color(0xFF34363F),
+        surfaceVariant = Color(0xFF292B34),
+        onSurfaceVariant = Color(0xFFB9B8C3),
+        outline = Color(0xFF8F8E9C),
+        outlineVariant = Color(0xFF3A3C47),
     )
-
-private val DarkColors =
-    darkColorScheme(
-        primary = Color(0xFF9FD8BD),
-        onPrimary = Color(0xFF06382A),
-        primaryContainer = Color(0xFF234B3C),
-        onPrimaryContainer = Color(0xFFC4EDD8),
-        secondary = Color(0xFFBDCDC0),
-        secondaryContainer = Color(0xFF374A3F),
-        background = Color(0xFF121A17),
-        onBackground = Color(0xFFE1E9E0),
-        surface = Color(0xFF121A17),
-        onSurface = Color(0xFFE1E9E0),
-        surfaceContainerLow = Color(0xFF1C2520),
-        surfaceContainer = Color(0xFF222E27),
-        surfaceVariant = Color(0xFF344139),
-        onSurfaceVariant = Color(0xFFB7C5B9),
-        outline = Color(0xFF85968A),
-        outlineVariant = Color(0xFF3C4A40),
-    )
+}
 
 @Composable
-fun VocalTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+@Suppress("UNUSED_PARAMETER") // Retain source compatibility with existing preview call sites.
+fun VocalTheme(dark: Boolean = true, accentArgb: Int = AccentPalette.DEFAULT, content: @Composable () -> Unit) {
+    val colors = remember(accentArgb) { creativeColors(accentArgb) }
     MaterialTheme(
-        colorScheme = if (dark) DarkColors else LightColors,
+        colorScheme = colors,
         typography =
             Typography(
                 headlineLarge =
@@ -89,6 +80,6 @@ fun VocalTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () ->
                 medium = RoundedCornerShape(20.dp),
                 large = RoundedCornerShape(28.dp),
             ),
-        content = content,
+        content = { CreativeMotionProvider(content) },
     )
 }

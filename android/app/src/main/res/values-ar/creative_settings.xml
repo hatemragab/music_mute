@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="creative_settings_profile">الملف الشخصي</string>
+    <string name="creative_settings_accent">اللون الأساسي</string>
+    <string name="creative_settings_accent_description">اختر لون الأزرار والعناصر المميزة والموجات المتحركة.</string>
+    <string name="creative_settings_about_summary">افصل الصوت عن الموسيقى الخلفية.</string>
+    <string name="creative_settings_version">الإصدار %1$s · البناء %2$d</string>
+    <string name="creative_settings_about_import">استورد ملفًا صوتيًا أو استخدم رابط YouTube. راجع المصدر وأكد امتلاكك للحقوق قبل المعالجة.</string>
+    <string name="creative_settings_about_process">ترفع إزالة الموسيقى الملف إلى تخزين سحابي خاص لإنشاء نتيجة صوتية دون موسيقى. تابع كل مهمة من الصفحة الرئيسية.</string>
+    <string name="creative_settings_about_offline">تظهر النتائج المكتملة في المكتبة. يسترجع التشغيل أو التنزيل أو المشاركة الملف كاملًا، ويبقى على هذا الهاتف للاستماع دون اتصال.</string>
+    <string name="creative_settings_presets">ألوان جاهزة</string>
+    <string name="creative_settings_custom">لون مخصص</string>
+    <string name="creative_settings_hex">رمز اللون</string>
+    <string name="creative_settings_invalid_hex">أدخل ست خانات بالنظام الست عشري، مثل ‎#FF814A.</string>
+    <string name="creative_settings_preview">معاينة</string>
+    <string name="creative_settings_preview_action">زر المعاينة</string>
+    <string name="creative_settings_apply">تطبيق اللون</string>
+    <string name="creative_settings_reset">استعادة البرتقالي</string>
+    <string name="creative_settings_orange">برتقالي</string>
+    <string name="creative_settings_green">أخضر</string>
+    <string name="creative_settings_blue">أزرق</string>
+    <string name="creative_settings_purple">بنفسجي</string>
+    <string name="creative_settings_pink">وردي</string>
+    <string name="creative_settings_gold">ذهبي</string>
+</resources>

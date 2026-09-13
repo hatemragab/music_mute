@@ -117,7 +117,4 @@ class DownloadsViewModel(
         }
     }
 
-    override fun onCleared() {
-        playback.release()
-    }
 }

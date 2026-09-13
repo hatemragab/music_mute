@@ -129,7 +129,7 @@ class VocalViewModelTest {
             model.setTheme(ThemeChoice.DARK)
             runCurrent()
             assertTrue(model.state.value.preferencesError)
-            assertEquals(ThemeChoice.SYSTEM, model.state.value.preferences.theme)
+            assertEquals(ThemeChoice.DARK, model.state.value.preferences.theme)
             preferences.failWrites = false
             model.setTheme(ThemeChoice.DARK)
             runCurrent()
@@ -151,6 +151,8 @@ class VocalViewModelTest {
                     override suspend fun setTheme(theme: ThemeChoice) = Unit
 
                     override suspend fun setLanguage(language: LanguageChoice) = Unit
+
+                    override suspend fun setAccent(argb: Int) = Unit
                 }
             val model = model(preferences = preferences)
             runCurrent()
@@ -197,6 +199,11 @@ class VocalViewModelTest {
         override suspend fun setLanguage(language: LanguageChoice) {
             if (failWrites) throw IOException("test failure")
             preferences.value = preferences.value.copy(language = language)
+        }
+
+        override suspend fun setAccent(argb: Int) {
+            if (failWrites) throw IOException("test failure")
+            preferences.value = preferences.value.copy(accentArgb = argb)
         }
     }
 }

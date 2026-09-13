@@ -24,6 +24,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 
 /** Job identifiers are validated before using this key; raw owner names never enter paths. */
 fun outputCacheKey(uid: String, jobId: String): String = MessageDigest.getInstance("SHA-256")
@@ -51,6 +52,30 @@ class JobArtifactRepository(
     private val deleted = mutableSetOf<String>()
     private val mutableProgress = MutableStateFlow<Map<String, ArtifactProgress>>(emptyMap())
     val progress: StateFlow<Map<String, ArtifactProgress>> = mutableProgress.asStateFlow()
+    private val mutableAvailability = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val availability: StateFlow<Map<String, Boolean>> = mutableAvailability.asStateFlow()
+
+    /** Validate a retained complete file without consulting the API or requesting a grant. */
+    suspend fun localOutput(jobId: String): File? = withContext(Dispatchers.IO) {
+        if (!jobId.matches(Regex("[a-fA-F0-9]{24}"))) throw JobsFailure(JobsProblem.INVALID_INPUT)
+        val request = synchronized(lock) {
+            val session = sessionProvider() ?: throw JobsFailure(JobsProblem.UNAUTHENTICATED)
+            Request(session, jobId.lowercase(java.util.Locale.ROOT), revision)
+        }
+        requireCurrent(request)
+        val file = File(
+            File(processingOwnerDirectory(root, request.session.uid), "outputs"),
+            "${outputCacheKey(request.session.uid, request.jobId)}.mp3",
+        )
+        if (!file.canonicalPath.startsWith(root.canonicalPath + File.separator))
+            throw ArtifactException(ArtifactProblem.STORAGE)
+        val result = file.takeIf(::valid)
+        synchronized(lock) {
+            requireCurrent(request)
+            mutableAvailability.value = mutableAvailability.value + (request.jobId to (result != null))
+        }
+        result
+    }
 
     suspend fun ensureOutput(jobId: String): File {
         if (!jobId.matches(Regex("[a-fA-F0-9]{24}"))) throw JobsFailure(JobsProblem.INVALID_INPUT)
@@ -75,7 +100,10 @@ class JobArtifactRepository(
         return task.await().also {
             // A caller resuming after an account switch may not open the old file.
             currentCoroutineContext().ensureActive()
-            requireCurrent(request)
+            synchronized(lock) {
+                requireCurrent(request)
+                mutableAvailability.value = mutableAvailability.value + (request.jobId to true)
+            }
         }
     }
 
@@ -84,6 +112,7 @@ class JobArtifactRepository(
         val pending = synchronized(lock) {
             revision++
             mutableProgress.value = emptyMap()
+            mutableAvailability.value = emptyMap()
             requests.values.toList()
         }
         pending.forEach { it.cancel(CancellationException("Processing session changed")) }
@@ -92,7 +121,10 @@ class JobArtifactRepository(
     suspend fun purgeOwner(uid: String) {
         val pending = synchronized(lock) {
             val owned = requests.filterKeys { it.session.uid == uid }
-            if (sessionProvider()?.uid == uid) mutableProgress.value = emptyMap()
+            if (sessionProvider()?.uid == uid) {
+                mutableProgress.value = emptyMap()
+                mutableAvailability.value = emptyMap()
+            }
             owned.values.toList()
         }
         // Requests stay tracked until their file-writing coroutine has actually terminated.
@@ -109,6 +141,7 @@ class JobArtifactRepository(
         val cancelled = synchronized(lock) {
             deleted += identity
             mutableProgress.value = mutableProgress.value - normalized
+            mutableAvailability.value = mutableAvailability.value + (normalized to false)
             requests.filterKeys { it.session == session && it.jobId == normalized }.values.toList().also {
                 requests.keys.removeAll { request -> request.session == session && request.jobId == normalized }
             }

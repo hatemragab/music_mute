@@ -7,6 +7,17 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
+import com.hatem.musicmute.library.DefaultLibraryRepository
+import com.hatem.musicmute.library.LibraryKey
+import com.hatem.musicmute.library.OfflineStatus
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -19,6 +30,45 @@ class JobArtifactRepositoryTest {
     private val now = Instant.parse("2026-09-10T00:00:00Z")
     private val mp3 = "valid-mp3-bytes".toByteArray()
     private var session: ProcessingSession? = ProcessingSession("owner", 1)
+
+    @Test fun recreatedRepositoryResolvesFullOfflineFileWithoutAnyNetwork() = runTest {
+        val first = repository(FakeApi(), ArtifactDownloader { _, file, _ -> file.writeBytes(mp3) }, backgroundScope)
+        first.ensureOutput(id)
+        val offlineApi = FakeApi().apply { allowNetwork = false }
+        val restored = repository(offlineApi, ArtifactDownloader { _, _, _ -> error("Offline transfer") }, backgroundScope)
+        assertArrayEquals(mp3, restored.ensureOutput(id).readBytes())
+        assertArrayEquals(mp3, restored.localOutput(id)!!.readBytes())
+        assertNull(restored.localOutput("68c000000000000000000099"))
+        assertEquals(0, offlineApi.details)
+        assertEquals(0, offlineApi.grants)
+    }
+
+    @Test fun reopenedLibraryReportsOfflineAudioAndJobMetadataWithoutNetwork() = runTest {
+        val metadataRoot = temporary.newFolder("catalog")
+        val original = Job(id, "ready", now, now, JobInput("mp3", mp3.size.toLong(), 12.0),
+            false, true, displayName = "Saved voice")
+        val firstProcess = SupervisorJob()
+        val store = ProcessingStore(metadataRoot, CoroutineScope(firstProcess + Dispatchers.IO))
+        store.saveSnapshots("owner", listOf(original))
+        store.updateLibraryFlags("owner", id, starred = true)
+        repository(FakeApi(), ArtifactDownloader { _, file, _ -> file.writeBytes(mp3) }, backgroundScope).ensureOutput(id)
+        firstProcess.cancelAndJoin()
+
+        val offlineApi = FakeApi().apply { allowNetwork = false }
+        val artifacts = repository(offlineApi, ArtifactDownloader { _, _, _ -> error("Offline transfer") }, backgroundScope)
+        val library = DefaultLibraryRepository(ProcessingStore(metadataRoot, backgroundScope), artifacts,
+            MutableStateFlow(session), backgroundScope)
+        val entry = withContext(Dispatchers.Default) {
+            withTimeout(5_000) { library.entries.first { entries -> entries.singleOrNull()?.offlineStatus == OfflineStatus.AVAILABLE }.single() }
+        }
+        assertEquals("Saved voice", entry.title)
+        assertTrue(entry.starred)
+        val key = LibraryKey("owner", id)
+        assertEquals(original, library.storedJob(key))
+        assertArrayEquals(mp3, library.ensureLocal(key).readBytes())
+        assertEquals(0, offlineApi.details)
+        assertEquals(0, offlineApi.grants)
+    }
 
     @Test fun constructionNeverFetchesReadyJobsAndPlayCallsCoalesce() = runTest {
         val api = FakeApi()
@@ -206,16 +256,19 @@ class JobArtifactRepositoryTest {
             isPlayableMp3 = { it.isFile && it.readBytes().contentEquals(mp3) }, scope = scope, now = { now })
 
     private inner class FakeApi : JobsApi {
+        var allowNetwork = true
         var grants = 0
         var details = 0
         var status = "ready"
         var grant = DownloadGrant("https://storage.invalid/output", now.plusSeconds(60))
         var onGrant: ((Int) -> DownloadGrant)? = null
         override suspend fun detail(id: String): Job {
+            check(allowNetwork) { "Offline detail request" }
             details++
             return Job(id, status, now, now, JobInput("mp3", 1, 1.0), true, status == "ready", workerAvailable = true)
         }
         override suspend fun download(id: String, artifact: String): DownloadGrant {
+            check(allowNetwork) { "Offline grant request" }
             assertEquals("output", artifact)
             grants++
             return onGrant?.invoke(grants) ?: grant

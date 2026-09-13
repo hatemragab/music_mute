@@ -175,6 +175,8 @@ class VocalViewModel(
 
     fun setTheme(theme: ThemeChoice) = savePreference { preferencesRepository.setTheme(theme) }
 
+    fun setAccent(argb: Int) = savePreference { preferencesRepository.setAccent(argb) }
+
     fun setLanguage(language: LanguageChoice) = savePreference {
         preferencesRepository.setLanguage(language)
     }

@@ -1,0 +1,13 @@
+package com.hatem.musicmute.ui.design
+
+import androidx.compose.ui.unit.dp
+
+object CreativeTokens {
+    val PagePadding = 20.dp
+    val CardPadding = 20.dp
+    val CompactCardPadding = 12.dp
+    val ContentGap = 16.dp
+    val CompactGap = 8.dp
+    val ContentWidth = 680.dp
+    val TouchTarget = 48.dp
+}

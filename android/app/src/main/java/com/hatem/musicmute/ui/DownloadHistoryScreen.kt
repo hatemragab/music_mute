@@ -24,6 +24,8 @@ import com.hatem.musicmute.playback.PlaybackState
 import com.hatem.musicmute.state.DownloadsUiState
 import java.util.Date
 import java.util.Locale
+import com.hatem.musicmute.ui.design.CreativeHeader
+import com.hatem.musicmute.ui.design.CreativeCard
 
 @Composable
 fun DownloadHistoryScreen(
@@ -47,10 +49,7 @@ fun DownloadHistoryScreen(
         ) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        stringResource(R.string.library),
-                        style = MaterialTheme.typography.headlineLarge,
-                    )
+                    CreativeHeader(stringResource(R.string.creative_jobs_downloads))
                     Text(
                         stringResource(R.string.history_description),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -18,6 +18,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
+import com.hatem.musicmute.ui.design.*
 import kotlinx.coroutines.launch
 
 private enum class AccountPage {
@@ -60,13 +61,11 @@ fun AuthGate(
                 AuthScreen(auth, state, google, activity, scope, onToggleLanguage)
             AuthPhase.BOOTSTRAP_REQUIRED ->
                 AuthPage {
-                    Text(
-                        stringResource(R.string.auth_connecting_title),
-                        style = MaterialTheme.typography.headlineMedium,
-                    )
+                    CreativeHeader(stringResource(R.string.auth_connecting_title))
+                    CreativeCard {
                     Text(stringResource(R.string.auth_connecting_description))
                     AuthMessages(state, auth::dismissMessage)
-                    Button(
+                    CreativePrimaryButton(
                         onClick = {
                             scope.launch {
                                 if (state.identity == null) auth.restore()
@@ -84,6 +83,7 @@ fun AuthGate(
                     ) {
                         Text(stringResource(R.string.auth_sign_out))
                     }
+                    }
                 }
             AuthPhase.RECOVERY_REQUIRED ->
                 AccountRecoveryScreen(auth = auth, state = state, scope = scope)
@@ -96,7 +96,8 @@ fun AuthGate(
                                 if (page == AccountPage.ACCOUNT) AccountPage.HOME
                                 else AccountPage.ACCOUNT
                     }
-                    when (page) {
+                    CreativeNavigation(page, direction = { from, to -> to.ordinal - from.ordinal }) { visiblePage ->
+                    when (visiblePage) {
                         AccountPage.HOME ->
                             savedPages.SaveableStateProvider("local-app") {
                                 content { page = AccountPage.ACCOUNT }
@@ -117,6 +118,7 @@ fun AuthGate(
                             }
                         AccountPage.DEVICES ->
                             DevicesScreen(auth, state, scope) { page = AccountPage.ACCOUNT }
+                    }
                     }
                 }
         }

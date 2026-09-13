@@ -7,6 +7,8 @@ import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.background
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
@@ -36,15 +38,22 @@ fun AudioStepTimeline(task: AudioTaskPresentation) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(stringResource(R.string.audio_task_timeline), style = MaterialTheme.typography.titleMedium)
         steps.forEachIndexed { index, (_, label) ->
+            val rank = taskStageRank(steps[index].first)
+            val completed = rank < currentRank || task.stage == AudioTaskStage.READY
+            val current = rank == currentRank && !completed
             Row(verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(
-                    if (taskStageRank(steps[index].first) <= currentRank) Icons.Outlined.CheckCircle
+                    if (completed) Icons.Outlined.CheckCircle
                     else Icons.Outlined.RadioButtonUnchecked,
                     null,
-                    tint = if (taskStageRank(steps[index].first) <= currentRank) MaterialTheme.colorScheme.primary
+                    tint = if (completed || current) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.outline,
                 )
+                if (index != steps.lastIndex) Box(Modifier.width(1.dp).height(16.dp).background(
+                    if (completed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant))
+                }
                 Text(stringResource(label))
             }
         }

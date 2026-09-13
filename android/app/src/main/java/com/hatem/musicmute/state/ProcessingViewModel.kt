@@ -53,9 +53,12 @@ class ProcessingViewModel(
         loadCached = { repository.store.snapshots(it).first() },
         saveCached = { uid, jobs -> repository.store.saveSnapshots(uid, jobs) },
         onMissing = { jobId ->
-            playback.stopPrivateOutput()
-            evictOutput(jobId)
-            session()?.let { share.evict(it.uid, jobId) }
+            session()?.let { current ->
+                playback.removeTrack(com.hatem.musicmute.library.LibraryKey(current.uid, jobId))
+                repository.store.removeLibraryJob(current.uid, jobId)
+                evictOutput(jobId)
+                share.evict(current.uid, jobId)
+            }
         })
     private val mutableState = MutableStateFlow(ProcessingUiState())
     val state = mutableState.asStateFlow()
@@ -68,7 +71,7 @@ class ProcessingViewModel(
         if (value == owner) return
         operationsTask?.cancel()
         actionTask?.cancel()
-        playback.stopPrivateOutput()
+        // Service/session ownership handles invalidation. Attaching a new screen must not stop playback.
         owner = value
         mutableState.value = ProcessingUiState()
         // Force a new epoch even when the same account signs in again.
@@ -148,9 +151,10 @@ class ProcessingViewModel(
         history.select(null)
     }
 
-    fun renameSelected(displayName: String) = perform { ticket ->
-        val operationId = mutableState.value.selectedOperationId
-        val jobId = history.state.value.selectedId
+    fun renameSelected(displayName: String) =
+        renameTask(mutableState.value.selectedOperationId, history.state.value.selectedId, displayName)
+
+    fun renameTask(operationId: String?, jobId: String?, displayName: String) = perform { ticket ->
         when {
             operationId != null -> repository.renameOperation(operationId, displayName)
             jobId != null -> repository.renameJob(jobId, displayName)
@@ -160,20 +164,41 @@ class ProcessingViewModel(
         history.refresh()
     }
 
-    fun deleteSelected(onDeleted: () -> Unit = {}) = perform { ticket ->
-        val operationId = mutableState.value.selectedOperationId
-        val jobId = history.state.value.selectedId
+    fun deleteSelected(onDeleted: () -> Unit = {}) =
+        deleteTask(mutableState.value.selectedOperationId, history.state.value.selectedId, onDeleted)
+
+    fun deleteTask(operationId: String?, jobId: String?, onDeleted: () -> Unit) = perform { ticket ->
         if (jobId != null) {
-            playback.stopPrivateOutput()
             repository.deleteJob(jobId)
             checkSession(ticket)
+            playback.removeTrack(com.hatem.musicmute.library.LibraryKey(ticket.uid, jobId))
             evictOutput(jobId)
             share.evict(ticket.uid, jobId)
         } else if (operationId != null) {
             repository.deleteOperation(operationId)
         } else return@perform
         checkSession(ticket)
-        clearSelection()
+        if (history.state.value.selectedId == jobId && mutableState.value.selectedOperationId == operationId) clearSelection()
+        history.refresh()
+        onDeleted()
+    }
+
+    fun renameLibraryTrack(key: com.hatem.musicmute.library.LibraryKey, title: String) = perform { ticket ->
+        if (ticket.uid != key.ownerUid) throw CancellationException("Library owner changed")
+        repository.renameJob(key.jobId, title)
+        checkSession(ticket)
+        history.refresh()
+    }
+
+    fun deleteLibraryTrack(key: com.hatem.musicmute.library.LibraryKey, onDeleted: () -> Unit) = perform { ticket ->
+        if (ticket.uid != key.ownerUid) throw CancellationException("Library owner changed")
+        repository.deleteJob(key.jobId)
+        checkSession(ticket)
+        playback.removeTrack(key)
+        evictOutput(key.jobId)
+        share.evict(ticket.uid, key.jobId)
+        checkSession(ticket)
+        if (history.state.value.selectedId == key.jobId) clearSelection()
         history.refresh()
         onDeleted()
     }
@@ -199,17 +224,17 @@ class ProcessingViewModel(
         }
     }
 
-    fun cancelSelected() = history.state.value.selectedId?.let { id ->
-        perform { ticket -> repository.cancel(id); checkSession(ticket); history.refresh() }
-    }
-    fun retrySelected() = history.state.value.selectedId?.let { id ->
+    fun cancelSelected() = history.state.value.selectedId?.let(::cancelJob)
+    fun cancelJob(id: String) = perform { ticket -> repository.cancel(id); checkSession(ticket); history.refresh() }
+
+    fun retrySelected() = history.state.value.selectedId?.let(::retryJob)
+    fun retryJob(id: String) =
         perform { ticket ->
             val operation = repository.retry(id)
             checkSession(ticket)
             history.refresh()
-            operation.jobId?.let(history::select)
+            if (history.state.value.selectedId == id) operation.jobId?.let(history::select)
         }
-    }
 
     fun downloadSelected(onReady: ((File, String) -> Unit)? = null) = history.state.value.detail?.let { job ->
         perform { ticket ->
@@ -218,6 +243,26 @@ class ProcessingViewModel(
             mutableState.update { it.copy(message = R.string.processing_downloaded) }
             onReady?.invoke(file, processedAudioExportName(job.displayName ?: job.sourceTitle ?: "Voice"))
         }
+    }
+
+    /** Library actions must not depend on a successful online job-detail refresh. */
+    fun downloadLibraryTrack(key: com.hatem.musicmute.library.LibraryKey, title: String,
+        onReady: ((File, String) -> Unit)? = null) = perform { ticket ->
+        if (ticket.uid != key.ownerUid) throw CancellationException("Library owner changed")
+        val file = outputFile(key.jobId)
+        checkSession(ticket)
+        mutableState.update { it.copy(message = R.string.processing_downloaded) }
+        onReady?.invoke(file, processedAudioExportName(title))
+    }
+
+    fun shareLibraryTrack(key: com.hatem.musicmute.library.LibraryKey, title: String,
+        onReady: (Intent) -> Unit) = perform { ticket ->
+        if (ticket.uid != key.ownerUid) throw CancellationException("Library owner changed")
+        val file = outputFile(key.jobId)
+        checkSession(ticket)
+        val intent = withContext(Dispatchers.IO) { share.intent(file, title, ticket.uid, key.jobId) }
+        checkSession(ticket)
+        onReady(intent)
     }
 
     fun shareSelected(onReady: (Intent) -> Unit) = history.state.value.detail?.let { job ->
@@ -234,13 +279,12 @@ class ProcessingViewModel(
 
     fun playSelected(trackTitle: String) = history.state.value.detail?.let { job ->
         perform { ticket ->
-            val file = outputFile(job.id)
+            outputFile(job.id)
             checkSession(ticket)
-            playback.toggle(DownloadRecord(
-                id = "processing:${ticket.uid}:${job.id}", url = "", createdAt = job.createdAt.toEpochMilli(),
-                status = DownloadStatus.COMPLETE, title = "$trackTitle · ${job.id.takeLast(8)}", extension = "mp3",
-                durationMs = (job.input.durationSeconds * 1000).toLong(), sizeBytes = file.length(),
-            ), file)
+            val key = com.hatem.musicmute.library.LibraryKey(ticket.uid, job.id)
+            val playing = playback.state.value
+            if (playing.queue.getOrNull(playing.currentIndex)?.key == key) playback.togglePlayback()
+            else playback.playQueue(listOf(com.hatem.musicmute.playback.QueueTrack(key, trackTitle)), key)
         }
     }
 
@@ -350,7 +394,7 @@ class ProcessingViewModel(
         }
     }
 
-    override fun onCleared() { history.close(); playback.release() }
+    override fun onCleared() { history.close() }
 }
 
 internal fun processingActionFailureLabel(error: Exception): Int = when (error) {

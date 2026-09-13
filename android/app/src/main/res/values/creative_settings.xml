@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="creative_settings_profile">Profile</string>
+    <string name="creative_settings_accent">Accent color</string>
+    <string name="creative_settings_accent_description">Choose the color of buttons, highlights and flowing waves.</string>
+    <string name="creative_settings_about_summary">Separate voice from background music.</string>
+    <string name="creative_settings_version">Version %1$s · Build %2$d</string>
+    <string name="creative_settings_about_import">Import audio or use a YouTube link. Review the source and confirm your rights before processing.</string>
+    <string name="creative_settings_about_process">Remove music uploads the audio to private cloud storage to create a vocals-only result. Follow each job from Home.</string>
+    <string name="creative_settings_about_offline">Completed results appear in Library. Play, Download or Share retrieves the complete audio, which stays on this phone for offline playback.</string>
+    <string name="creative_settings_presets">Preset colors</string>
+    <string name="creative_settings_custom">Custom color</string>
+    <string name="creative_settings_hex">Hex color</string>
+    <string name="creative_settings_invalid_hex">Enter six hexadecimal characters, for example #FF814A.</string>
+    <string name="creative_settings_preview">Preview</string>
+    <string name="creative_settings_preview_action">Preview button</string>
+    <string name="creative_settings_apply">Apply color</string>
+    <string name="creative_settings_reset">Reset to orange</string>
+    <string name="creative_settings_orange">Orange</string>
+    <string name="creative_settings_green">Green</string>
+    <string name="creative_settings_blue">Blue</string>
+    <string name="creative_settings_purple">Purple</string>
+    <string name="creative_settings_pink">Pink</string>
+    <string name="creative_settings_gold">Gold</string>
+</resources>

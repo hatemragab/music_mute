@@ -12,6 +12,7 @@ data class IdentitySnapshot(
     val email: String?,
     val emailVerified: Boolean,
     val providers: Set<String>,
+    val displayName: String? = null,
 )
 
 @Serializable

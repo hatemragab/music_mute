@@ -20,6 +20,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromStream
 import kotlinx.serialization.ExperimentalSerializationApi
+import com.hatem.musicmute.library.StoredLibraryTrack
 
 data class ProcessingSession(val uid: String, val epoch: Long)
 
@@ -74,7 +75,9 @@ data class ProcessingDocument(
     val operations: List<ProcessingOperation> = emptyList(),
     val snapshots: List<Job> = emptyList(),
     val clientErrors: List<StoredClientError> = emptyList(),
-    val schemaVersion: Int = 2,
+    val schemaVersion: Int = 3,
+    val library: List<StoredLibraryTrack> = emptyList(),
+    val deletedLibraryJobs: Set<String> = emptySet(),
 )
 
 private object ProcessingSerializer : Serializer<ProcessingDocument> {
@@ -155,8 +158,73 @@ class ProcessingStore(
     suspend fun saveSnapshots(uid: String, jobs: List<Job>) {
         store(uid).updateData { current ->
             validateOwner(uid, current)
-            current.copy(snapshots = jobs.distinctBy { it.id })
+            current.copy(
+                snapshots = jobs.distinctBy { it.id },
+                library = mergeLibrary(current, jobs),
+                schemaVersion = 3,
+            )
         }
+    }
+
+    /** Catalog is independent of the current history page, including on version-2 restore. */
+    fun library(uid: String): Flow<List<StoredLibraryTrack>> = store(uid).data.map { document ->
+        validateOwner(uid, document)
+        mergeLibrary(document, emptyList())
+    }
+
+    suspend fun updateLibraryFlags(uid: String, jobId: String, starred: Boolean? = null, hidden: Boolean? = null) {
+        store(uid).updateData { current ->
+            validateOwner(uid, current)
+            current.copy(library = mergeLibrary(current, emptyList()).map {
+                if (it.job.id != jobId) it else it.copy(starred = starred ?: it.starred, hidden = hidden ?: it.hidden)
+            }, schemaVersion = 3)
+        }
+    }
+
+    suspend fun updateLibraryJob(uid: String, job: Job) {
+        store(uid).updateData { current ->
+            validateOwner(uid, current)
+            current.copy(library = mergeLibrary(current, listOf(job), acceptEqual = true), schemaVersion = 3)
+        }
+    }
+
+    suspend fun toggleLibraryStar(uid: String, jobId: String) {
+        store(uid).updateData { current ->
+            validateOwner(uid, current)
+            current.copy(library = mergeLibrary(current, emptyList()).map {
+                if (it.job.id == jobId) it.copy(starred = !it.starred) else it
+            }, schemaVersion = 3)
+        }
+    }
+
+    /** Call only after authoritative deletion; page absence is never deletion evidence. */
+    suspend fun removeLibraryJob(uid: String, jobId: String) {
+        store(uid).updateData { current ->
+            validateOwner(uid, current)
+            current.copy(
+                library = mergeLibrary(current, emptyList()).filterNot { it.job.id == jobId },
+                snapshots = current.snapshots.filterNot { it.id == jobId },
+                deletedLibraryJobs = current.deletedLibraryJobs + jobId,
+                schemaVersion = 3,
+            )
+        }
+    }
+
+    private fun mergeLibrary(document: ProcessingDocument, jobs: List<Job>, acceptEqual: Boolean = false): List<StoredLibraryTrack> {
+        val entries = document.library.associateBy { it.job.id }.toMutableMap()
+        // Cached pages only seed/advance records; they cannot undo an explicit mutation at an equal timestamp.
+        fun apply(job: Job, acceptEqual: Boolean) {
+            if (job.status == "ready" && job.id !in document.deletedLibraryJobs) {
+                val old = entries[job.id]
+                if (old == null || job.updatedAt.isAfter(old.job.updatedAt) ||
+                    (acceptEqual && job.updatedAt == old.job.updatedAt)) {
+                    entries[job.id] = old?.copy(job = job) ?: StoredLibraryTrack(job)
+                }
+            }
+        }
+        document.snapshots.forEach { apply(it, false) }
+        jobs.forEach { apply(it, acceptEqual) }
+        return entries.values.filterNot { it.job.id in document.deletedLibraryJobs }
     }
 
     fun clientErrors(uid: String): Flow<List<StoredClientError>> = store(uid).data.map { document ->

@@ -16,6 +16,7 @@ import kotlinx.serialization.json.Json
 private data class StoredInstallation(
     val report: InstallationReport,
     val bootstrap: BootstrapRecord? = null,
+    val pendingProfileName: PendingProfileName? = null,
 )
 
 /**
@@ -61,7 +62,21 @@ class InstallationStore(directory: File, private val currentMetadata: () -> Inst
         write(it.copy(bootstrap = BootstrapRecord(uid, profile)))
     }
 
-    suspend fun clearBootstrap() = access { write(it.copy(bootstrap = null)) }
+    suspend fun clearBootstrap() = access { write(it.copy(bootstrap = null, pendingProfileName = null)) }
+
+    suspend fun pendingProfileName(uid: String): PendingProfileName? = access {
+        it.pendingProfileName?.takeIf { request -> request.uid == uid }
+    }
+
+    suspend fun savePendingProfileName(request: PendingProfileName) = access {
+        require(request.uid.isNotBlank())
+        validatedFullName(request.fullName)
+        write(it.copy(pendingProfileName = request))
+    }
+
+    suspend fun clearPendingProfileName(uid: String) = access {
+        if (it.pendingProfileName?.uid == uid) write(it.copy(pendingProfileName = null))
+    }
 
     private suspend fun <T> access(action: (StoredInstallation) -> T): T =
         withContext(Dispatchers.IO) {

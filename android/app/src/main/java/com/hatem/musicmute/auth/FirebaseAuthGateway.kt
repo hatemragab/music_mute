@@ -8,6 +8,7 @@ import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.UserProfileChangeRequest
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -66,6 +67,15 @@ class FirebaseAuthGateway(val firebase: FirebaseAuth) {
         requireIdentity()
     }
 
+    suspend fun updateDisplayName(uid: String, fullName: String): IdentitySnapshot = translated {
+        checkSameUser(uid)
+        val user = requireUser()
+        user.updateProfile(UserProfileChangeRequest.Builder()
+            .setDisplayName(validatedFullName(fullName)).build()).awaitResult()
+        checkSameUser(uid)
+        requireIdentity()
+    }
+
     suspend fun token(forceRefresh: Boolean = false): String = translated {
         val user = requireUser()
         val result = user.getIdToken(forceRefresh).awaitResult()
@@ -118,6 +128,7 @@ class FirebaseAuthGateway(val firebase: FirebaseAuth) {
             email,
             isEmailVerified,
             providerData.map { it.providerId }.filter { it != "firebase" }.toSet(),
+            displayName,
         )
 
     private suspend fun <T> translated(operation: suspend () -> T): T =

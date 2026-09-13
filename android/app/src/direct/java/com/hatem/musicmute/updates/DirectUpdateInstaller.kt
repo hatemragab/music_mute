@@ -442,7 +442,8 @@ fun createUpdateInstaller(
     DirectUpdateInstaller(
         api = api,
         downloadRoot = File(context.externalCacheDir ?: context.cacheDir, "app-updates"),
-        downloader = AppUpdateDownloadClient(createUpdateDownloadClient(), AndroidApkVerifier(context, installedBuild)),
+        // Compose owns the approved prompt/progress UI; the existing transport and verifier still protect the APK.
+        downloader = createUpdateDownloadClient(),
         verifier = AndroidApkVerifier(context, installedBuild),
         platform = AndroidApkInstallPlatform(context),
         installedBuild = installedBuild,
