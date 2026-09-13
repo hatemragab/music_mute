@@ -32,6 +32,7 @@ object CreativeMotion {
     const val SHEET_CLOSE_MS = 300
     const val NAVIGATION_MS = 230
     const val STAR_MS = 300
+    const val PRESS_MS = 120
     const val PRESSED_SCALE = 0.975f
     val Ease = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
 

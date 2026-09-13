@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -50,6 +53,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 
 @Composable
 fun CreativePage(
@@ -57,11 +65,11 @@ fun CreativePage(
     scrollable: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+    Box(modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.TopCenter) {
         val scroll = if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier
         Column(
             Modifier.widthIn(max = CreativeTokens.ContentWidth).fillMaxWidth()
-                .then(scroll).imePadding().padding(CreativeTokens.PagePadding),
+                .then(scroll).padding(CreativeTokens.PagePadding),
             verticalArrangement = Arrangement.spacedBy(CreativeTokens.ContentGap),
             content = content,
         )
@@ -71,7 +79,7 @@ fun CreativePage(
 @Composable
 fun CreativeHeader(title: String, subtitle: String? = null, wave: Boolean = true) {
     Column(verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
-        Text(title, style = MaterialTheme.typography.headlineLarge)
+        Text(title, modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineLarge)
         subtitle?.let {
             Text(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -114,7 +122,7 @@ fun CreativePrimaryButton(
     val motion = rememberCreativeMotionEnabled()
     val scale by animateFloatAsState(
         if (pressed && enabled && !busy && motion) CreativeMotion.PRESSED_SCALE else 1f,
-        tween(if (motion) 120 else 0, easing = CreativeMotion.Ease), label = "button-press",
+        tween(if (motion) CreativeMotion.PRESS_MS else 0, easing = CreativeMotion.Ease), label = "button-press",
     )
     Button(
         onClick = onClick,
@@ -127,7 +135,10 @@ fun CreativePrimaryButton(
             contentColor = MaterialTheme.colorScheme.onError,
         ) else ButtonDefaults.buttonColors(),
     ) {
-        if (busy) CircularProgressIndicator(Modifier.padding(end = 8.dp).size(18.dp), strokeWidth = 2.dp)
+        if (busy) CircularProgressIndicator(
+            Modifier.padding(end = CreativeTokens.CompactGap).size(CreativeTokens.InlineProgress),
+            strokeWidth = CreativeTokens.ProgressStroke,
+        )
         content()
     }
 }
@@ -167,7 +178,7 @@ fun CreativeSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> 
         shape = MaterialTheme.shapes.large,
     ) {
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding()
+            Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
                 .padding(CreativeTokens.PagePadding),
             verticalArrangement = Arrangement.spacedBy(CreativeTokens.ContentGap),
             content = content,
@@ -183,9 +194,27 @@ fun CreativeFeedback(
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
 ) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
+    Column(modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
         Text(message, color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         if (actionLabel != null && onAction != null) TextButton(onClick = onAction) { Text(actionLabel) }
+    }
+}
+
+/** A single labelled checkbox target, including its wrapping consent text. */
+@Composable
+fun CreativeConsentRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit, label: String, enabled: Boolean = true) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = CreativeTokens.TouchTarget)
+            .toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = onCheckedChange)
+            .padding(vertical = CreativeTokens.CompactGap),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap),
+    ) {
+        Checkbox(checked = checked, onCheckedChange = null, enabled = enabled)
+        Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface.copy(
+            alpha = if (enabled) 1f else CreativeTokens.DisabledAlpha,
+        ))
     }
 }
 
