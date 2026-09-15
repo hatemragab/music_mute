@@ -131,6 +131,27 @@ export class DeviceInstallationOwnersService {
     return new Set(current.map((owner) => owner._id));
   }
 
+  async inactiveInstallationIds(
+    userId: Types.ObjectId,
+    installationIds: string[],
+  ): Promise<Set<string>> {
+    const normalized = [
+      ...new Set(installationIds.map((id) => this.installationId(id))),
+    ];
+    if (normalized.length === 0) return new Set();
+    const owners = await this.owners
+      .find({
+        _id: trusted({ $in: normalized }),
+        userId: trusted({ $ne: userId }),
+      })
+      .setOptions({ sanitizeFilter: false })
+      .select('_id')
+      .lean()
+      .exec();
+    // Missing legacy ownership records are unknown, not proof of sign-out.
+    return new Set(owners.map((owner) => owner._id));
+  }
+
   private updateCurrent(
     current: DeviceInstallationOwnerDocument,
     update: {

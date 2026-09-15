@@ -31,9 +31,15 @@ export class ApiThrottlerGuard extends ThrottlerGuard {
   }
 
   protected async throwThrottlingException(
-    _context: ExecutionContext,
-    _detail: ThrottlerLimitDetail,
+    context: ExecutionContext,
+    detail: ThrottlerLimitDetail,
   ): Promise<void> {
+    // Named throttlers normally emit Retry-After-overall. Mobile clients consume
+    // the standard header regardless of which protective bucket rejected them.
+    context
+      .switchToHttp()
+      .getResponse<{ header: (name: string, value: number) => void }>()
+      .header('Retry-After', detail.timeToBlockExpire);
     throw authError('RATE_LIMITED');
   }
 }

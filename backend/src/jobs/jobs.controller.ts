@@ -13,6 +13,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { AuthRequest } from '../auth/auth-request.js';
+import { SkipThrottle } from '@nestjs/throttler';
 import {
   LimitOperation,
   RequireProcessingAccess,
@@ -89,6 +90,8 @@ export class JobsController {
   }
 
   @Get()
+  @LimitOperation('processing-read')
+  @SkipThrottle({ default: true })
   @Header('Cache-Control', 'no-store')
   list(
     @Req() req: AuthRequest,
@@ -98,6 +101,8 @@ export class JobsController {
   }
 
   @Get(':id')
+  @LimitOperation('processing-read')
+  @SkipThrottle({ default: true })
   @Header('Cache-Control', 'no-store')
   detail(@Req() req: AuthRequest, @Param('id') id: string) {
     return this.query.detail(req.user!._id.toHexString(), id);

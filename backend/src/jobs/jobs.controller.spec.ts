@@ -4,6 +4,8 @@ import { JobsController } from './jobs.controller.js';
 
 describe('JobsController burst classes', () => {
   it.each([
+    ['list', 'processing-read'],
+    ['detail', 'processing-read'],
     ['create', 'processing-create'],
     ['retry', 'processing-create'],
     ['renew', 'processing-grant'],

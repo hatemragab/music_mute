@@ -65,6 +65,7 @@ export class Device {
   @Prop({ required: true, type: Date }) lastSeenAt!: Date;
   @Prop({ required: true, min: 0, validate: Number.isSafeInteger })
   lastAuthenticatedAtSec!: number;
+  @Prop({ type: Date, default: null }) historyHiddenAt!: Date | null;
   @Prop({
     type: [TransitionSchema],
     default: [],

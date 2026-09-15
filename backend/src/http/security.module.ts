@@ -16,6 +16,11 @@ import { RedisThrottlerStorage } from '../rate-limits/redis-throttler.storage.js
         storage,
         throttlers: [
           {
+            name: 'overall',
+            ttl: 60_000,
+            limit: config.get<number>('RATE_IP_CEILING_PER_MINUTE', 600),
+          },
+          {
             ttl: config.getOrThrow<number>('RATE_TTL_MS'),
             limit: config.getOrThrow<number>('RATE_LIMIT'),
           },

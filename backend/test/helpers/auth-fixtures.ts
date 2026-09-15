@@ -171,6 +171,10 @@ export async function authFixture() {
     }),
   };
   const devices = {
+    sessionStatuses: vi.fn(async (_userId: string, items: DeviceDocument[]) =>
+      items.map(() => 'unknown' as const),
+    ),
+    hideFromHistory: vi.fn(async () => {}),
     sync: vi.fn(
       async (userId: string, authTimeSec: number, report: DeviceReport) => {
         const key = `${userId}:${report.installationId}`;

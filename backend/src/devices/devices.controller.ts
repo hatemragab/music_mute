@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Put,
@@ -15,6 +17,7 @@ import { ListDevicesDto } from './dto/list-devices.dto.js';
 import { DevicesService } from './devices.service.js';
 import { presentDevice } from './devices.presenter.js';
 import { authError } from '../auth/auth.errors.js';
+import { EmptyBodyPipe } from '../auth/dto/empty-body.pipe.js';
 
 @Controller('users/me/devices')
 export class DevicesController {
@@ -25,10 +28,37 @@ export class DevicesController {
       req.user!._id.toHexString(),
       query,
     );
+    const statuses = await this.devices.sessionStatuses(
+      req.user!._id.toHexString(),
+      page.items,
+      req.user!.sessionsRevokedAfterSec,
+    );
     return {
-      items: page.items.map(presentDevice),
+      items: page.items.map((device, index) =>
+        presentDevice(device, statuses[index]),
+      ),
       nextCursor: page.nextCursor,
     };
+  }
+  @Delete(':installationId')
+  @HttpCode(204)
+  @LimitOperation('device')
+  async hide(
+    @Req() req: AuthRequest,
+    @Param(
+      'installationId',
+      new ParseUUIDPipe({
+        version: '4',
+        exceptionFactory: () => authError('INVALID_INPUT'),
+      }),
+    )
+    installationId: string,
+    @Body(EmptyBodyPipe) _body: unknown,
+  ) {
+    await this.devices.hideFromHistory(
+      req.user!._id.toHexString(),
+      installationId,
+    );
   }
   @Put(':installationId')
   @LimitOperation('device')

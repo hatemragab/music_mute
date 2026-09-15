@@ -14,20 +14,27 @@ addresses never merge different UIDs.
 
 ## Route reference
 
-| Method and path                         | Input                                                | Result                                    |
-| --------------------------------------- | ---------------------------------------------------- | ----------------------------------------- |
-| `POST /auth/session`                    | Installation report                                  | `200` user, device, policy, access        |
-| `POST /auth/profile-sync`               | Empty body                                           | `200` user and policy                     |
-| `GET /users/me`                         | None                                                 | `200` safe user                           |
-| `DELETE /users/me`                      | Empty body; fresh provider reauthentication          | `202` scheduled deletion receipt          |
-| `GET /users/me/account-recovery`        | None                                                 | Current deletion/recovery-request state   |
-| `POST /users/me/account-recovery`       | Optional trimmed `reason`, maximum 500 characters    | `202` idempotent recovery request         |
-| `GET /users/me/devices`                 | `limit` 1–50, default 20; optional ObjectId `before` | `200` items and nextCursor                |
-| `PUT /users/me/devices/:installationId` | Metadata excluding path UUID                         | `200` stored device                       |
-| `GET /app-policy`                       | None; public                                         | `200` public policy                       |
-| `POST /auth/verification-email`         | Empty body                                           | `202` accepted or `200` already verified  |
-| `POST /auth/password-reset`             | Valid email, maximum 254 characters; public          | Generic `202` accepted                    |
-| `POST /auth/logout-all`                 | Empty body                                           | `204` after both revocation steps succeed |
+| Method and path                            | Input                                                | Result                                    |
+| ------------------------------------------ | ---------------------------------------------------- | ----------------------------------------- |
+| `POST /auth/session`                       | Installation report                                  | `200` user, device, policy, access        |
+| `POST /auth/profile-sync`                  | Empty body                                           | `200` user and policy                     |
+| `GET /users/me`                            | None                                                 | `200` safe user                           |
+| `DELETE /users/me`                         | Empty body; fresh provider reauthentication          | `202` scheduled deletion receipt          |
+| `GET /users/me/account-recovery`           | None                                                 | Current deletion/recovery-request state   |
+| `POST /users/me/account-recovery`          | Optional trimmed `reason`, maximum 500 characters    | `202` idempotent recovery request         |
+| `GET /users/me/devices`                    | `limit` 1–50, default 20; optional ObjectId `before` | `200` items and nextCursor                |
+| `DELETE /users/me/devices/:installationId` | UUID v4 path; empty body                             | `204` history entry hidden (idempotent)   |
+| `PUT /users/me/devices/:installationId`    | Metadata excluding path UUID                         | `200` stored device                       |
+| `GET /app-policy`                          | None; public                                         | `200` public policy                       |
+| `POST /auth/verification-email`            | Empty body                                           | `202` accepted or `200` already verified  |
+| `POST /auth/password-reset`                | Valid email, maximum 254 characters; public          | Generic `202` accepted                    |
+| `POST /auth/logout-all`                    | Empty body                                           | `204` after both revocation steps succeed |
+
+Job list/detail reads use `PROCESSING_READ_UID_PER_MINUTE` (default 60) for the
+verified Firebase UID, separate from the ordinary private/mutation budget. They
+skip the legacy default IP bucket, but remain subject to the overall IP ceiling
+`RATE_IP_CEILING_PER_MINUTE` (default 600). Both IP buckets return standard
+`Retry-After` seconds. See [job request coordination](../../docs/job-request-coordination.md).
 
 All routes except existing liveness are throttled. Unknown write-body fields and
 unknown device-list query fields are rejected. Account actions do not accept target email, ownership, redirect URLs,
@@ -159,6 +166,21 @@ observe an offline update.
 Device listing returns `{ "items": [...], "nextCursor": "..." }`, newest MongoDB
 ID first, scoped to the owner. Pass `nextCursor` as `before` on the next request.
 Null `nextCursor` ends pagination.
+
+The list includes `sessionStatus`: `signed_out` only when the recorded authentication
+is at/before the account logout cutoff or the installation no longer belongs to
+this account; otherwise `unknown`. Neither recent activity nor retained ownership
+proves a currently valid Firebase session. Uninstalls and offline/local sign-outs
+are not detectable from this history. Bootstrap/PUT responses use `unknown`.
+Clients show their authenticated current installation separately from device history.
+
+DELETE hides only the verified user's matching history entry. Unknown/already-hidden
+IDs also return 204; invalid UUIDs or nonempty bodies return 400. This is not remote
+sign-out and does not revoke credentials, remove ownership, erase version history,
+or affect jobs/push bindings. A subsequent successful sync restores the same record.
+Hidden entries are excluded before pagination. `historyHiddenAt` is an optional
+internal Date field; legacy documents without it remain visible, with no migration
+or automatic data cleanup. App version/build never participates in device identity.
 
 ## Optional verification and password recovery
 

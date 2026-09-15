@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { ConfigService } from '@nestjs/config';
+import { Reflector } from '@nestjs/core';
+import { AuthGuard } from '../dist/auth/auth.guard.js';
+import { AUTH_OPERATION } from '../dist/auth/auth.decorators.js';
 import { Redis } from 'ioredis';
 import { RateBudgetService } from '../dist/rate-limits/rate-budget.service.js';
 import { RedisThrottlerStorage } from '../dist/rate-limits/redis-throttler.storage.js';
@@ -44,6 +47,65 @@ after(async () => {
 });
 
 test('shares rolling rate budgets atomically through Redis', async (t) => {
+  await t.test(
+    'isolates authenticated readers sharing an IP and preserves creation budget',
+    async () => {
+      const read = () => {};
+      const create = () => {};
+      Reflect.defineMetadata(AUTH_OPERATION, 'processing-read', read);
+      Reflect.defineMetadata(AUTH_OPERATION, 'processing-create', create);
+      const identity = (uid) => ({ uid, authTimeSec: 100 });
+      const guard = new AuthGuard(
+        new Reflector(),
+        {
+          verifySignature: async (uid) => identity(uid),
+          verifySession: async (uid) => identity(uid),
+        },
+        {
+          findByFirebaseUid: async () => ({
+            status: 'active',
+            sessionsRevokedAfterSec: 0,
+          }),
+        },
+        new RateBudgetService(client()),
+        {
+          bucket: (scope, uid) => `fixture:{project}:job-read:${scope}:${uid}`,
+        },
+        new ConfigService({
+          PROCESSING_READ_UID_PER_MINUTE: 2,
+          PROCESSING_CREATE_UID_PER_MINUTE: 1,
+        }),
+      );
+      const invoke = (uid, handler) => {
+        const req = {
+          headers: { authorization: `Bearer ${uid}` },
+          rawHeaders: [],
+          ip: '192.0.2.1',
+        };
+        return guard.canActivate({
+          getHandler: () => handler,
+          getClass: () => class {},
+          switchToHttp: () => ({
+            getRequest: () => req,
+            getResponse: () => ({ setHeader() {} }),
+          }),
+        });
+      };
+      assert.equal(await invoke('reader-a', read), true);
+      assert.equal(await invoke('reader-a', read), true);
+      await assert.rejects(
+        invoke('reader-a', read),
+        (error) => error.getStatus() === 429,
+      );
+      assert.equal(await invoke('reader-b', read), true);
+      assert.equal(await invoke('reader-a', create), true);
+      await assert.rejects(
+        invoke('reader-a', create),
+        (error) => error.getStatus() === 429,
+      );
+    },
+  );
+
   await t.test(
     'shares counters across service instances and API restarts',
     async () => {

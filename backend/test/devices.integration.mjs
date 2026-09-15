@@ -86,11 +86,18 @@ test(
         unicodeReport.appVersion,
       );
       assert.equal(await model.countDocuments(), 3);
-      const next = { ...report, metadataRevision: 2, buildNumber: 2 };
+      const next = {
+        ...report,
+        appVersion: '1.1',
+        metadataRevision: 2,
+        buildNumber: 2,
+      };
       const updates = await Promise.all(
         Array.from({ length: 20 }, () => service.sync(owner, 102, next)),
       );
       assert.ok(updates.every((item) => item.versionHistory.length === 2));
+      assert.ok(updates.every((item) => item._id.equals(initial[0]._id)));
+      assert.equal(await model.countDocuments(), 3);
       const stale = await service.sync(owner, 99, report);
       assert.equal(stale.buildNumber, 2);
       assert.equal(stale.lastAuthenticatedAtSec, 102);
@@ -184,6 +191,44 @@ test(
         ownershipIndexes.every(
           (index) => index.expireAfterSeconds === undefined,
         ),
+      );
+
+      // Session validity cannot be inferred from a matching model or recent use.
+      const ownDevice = await service.findOwned(owner, report.installationId);
+      const otherDevice = await service.findOwned(other, report.installationId);
+      assert.deepEqual(await service.sessionStatuses(owner, [ownDevice], 102), [
+        'unknown',
+      ]);
+      assert.deepEqual(await service.sessionStatuses(owner, [ownDevice], 103), [
+        'signed_out',
+      ]);
+      assert.deepEqual(await service.sessionStatuses(other, [otherDevice], 0), [
+        'signed_out',
+      ]);
+
+      // Removing history is owner-scoped, idempotent and never deletes identity.
+      await ownershipModel.deleteOne({ _id: unicodeReport.installationId });
+      assert.deepEqual(
+        await service.sessionStatuses(owner, [unicodeDevice], 0),
+        ['unknown'],
+      );
+      await model.updateMany({}, { $unset: { historyHiddenAt: 1 } });
+      await service.hideFromHistory(other, unicodeReport.installationId);
+      assert.equal((await service.listOwned(owner, {})).items.length, 2);
+      await service.hideFromHistory(owner, unicodeReport.installationId);
+      await service.hideFromHistory(owner, unicodeReport.installationId);
+      const visible = await service.listOwned(owner, { limit: 1 });
+      assert.equal(visible.items[0].installationId, report.installationId);
+      assert.equal(visible.nextCursor, null);
+      assert.ok(await service.findOwned(owner, unicodeReport.installationId));
+      assert.equal(await model.countDocuments(), 3);
+      await service.sync(owner, 100, unicodeReport);
+      assert.equal((await service.listOwned(owner, {})).items.length, 2);
+      assert.equal(
+        (
+          await service.findOwned(owner, unicodeReport.installationId)
+        )._id.toString(),
+        unicodeDevice._id.toString(),
       );
     } finally {
       await connection?.close();
