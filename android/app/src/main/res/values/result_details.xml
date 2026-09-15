@@ -1,0 +1,13 @@
+<resources>
+    <string name="result_details_title">Audio details</string>
+    <string name="result_history_title">Processing history</string>
+    <string name="result_job_title">Job details</string>
+    <string name="result_completed">Processing completed</string>
+    <string name="result_format">Voice-only MP3</string>
+    <string name="result_duration">Duration</string>
+    <string name="result_output">Output</string>
+    <string name="result_status">Status</string>
+    <string name="result_ready">Ready</string>
+    <string name="result_keep_offline">Keep offline</string>
+    <string name="result_offline_hint">Store in this app</string>
+</resources>

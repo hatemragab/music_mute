@@ -1,4 +1,6 @@
 <resources>
+    <string name="creative_library_search_short">ابحث عن صوت</string>
+    <string name="creative_library_newest_short">الأحدث</string>
     <string name="creative_library_tab">المكتبة</string>
     <string name="creative_library_name_error">استخدم من حرف واحد إلى ٢٠٠ حرف دون أحرف تحكم.</string>
     <string name="creative_library_title">مكتبتك</string>

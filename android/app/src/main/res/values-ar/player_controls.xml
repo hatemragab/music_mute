@@ -1,0 +1,10 @@
+<resources>
+    <string name="player_minimize">تصغير المشغّل</string>
+    <string name="player_gesture_hint">اسحب لأسفل لتصغير المشغّل</string>
+    <string name="player_swipe_volume">اسحب لأعلى لضبط الصوت</string>
+    <string name="player_speed">سرعة التشغيل</string>
+    <string name="player_speed_value">%1$.2f×</string>
+    <string name="player_volume">مستوى الصوت</string>
+    <string name="player_volume_percent">%1$d%%</string>
+    <string name="player_volume_hint">اضبط صوت هذا المشغّل. استخدم أزرار الصوت في هاتفك لتغيير مستوى صوت الجهاز.</string>
+</resources>

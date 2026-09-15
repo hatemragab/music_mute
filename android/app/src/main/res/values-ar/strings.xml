@@ -117,7 +117,7 @@
     <string name="auth_welcome">أهلاً بعودتك</string>
     <string name="auth_create_title">رحلتك مع الصوت تبدأ هنا</string>
     <string name="auth_reset_title">إعادة تعيين كلمة المرور</string>
-    <string name="auth_login_description">سجّل دخولك للمتابعة إلى ميوزك ميوت.</string>
+    <string name="auth_login_description">سجّل الدخول إلى حسابك.</string>
     <string name="auth_register_description">أنشئ حسابك بالبريد الإلكتروني أو تابع باستخدام Google.</string>
     <string name="auth_reset_description">أدخل بريد حسابك. سنرسل التعليمات إذا كانت استعادة كلمة المرور متاحة.</string>
     <string name="auth_email">البريد الإلكتروني</string>
@@ -302,7 +302,7 @@
     <string name="audio_remove_music">إزالة الموسيقى</string>
     <string name="youtube_secondary">رابط يوتيوب (خيار إضافي)</string>
     <string name="youtube_download_action">تنزيل من يوتيوب</string>
-    <string name="youtube_rights_disclosure">نزّل الصوت من يوتيوب فقط إذا كان لديك الإذن وكانت الخدمة تسمح بالتنزيل. ستراجع الصوت المنزّل بشكل منفصل قبل رفعه إلى السحابة.</string>
+    <string name="youtube_rights_disclosure">نزّل الصوت من يوتيوب فقط إذا كان لديك الإذن وكانت الخدمة تسمح بالتنزيل. بعد التنزيل، يُجهّز الصوت ويُرفع تلقائيًا للمعالجة.</string>
     <string name="account_deletion_unconfirmed">تعذر تأكيد طلب الحذف. سجّل الدخول مجدداً لإعادة المحاولة أو استخدم مساعدة حذف الحساب. لا نعتبر بياناتك محذوفة.</string>
     <string name="auth_error_deletion_pending">حذف الحساب مجدول. يمكنك طلب استرداده من هذه الصفحة.</string>
     <string name="auth_error_recovery_expired">انتهت مهلة الاسترداد البالغة ثلاثة أشهر وبدأ الحذف النهائي.</string>

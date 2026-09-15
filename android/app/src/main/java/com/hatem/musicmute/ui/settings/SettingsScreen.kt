@@ -1,6 +1,9 @@
 package com.hatem.musicmute.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -11,14 +14,20 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.hatem.musicmute.BuildConfig
 import com.hatem.musicmute.R
 import com.hatem.musicmute.data.LanguageChoice
@@ -34,63 +43,131 @@ fun CreativeSettingsScreen(
     onAbout: () -> Unit,
     onLanguage: (LanguageChoice) -> Unit,
     onRetry: () -> Unit,
+    displayName: String? = null,
 ) {
+    var showUsage by rememberSaveable { mutableStateOf(false) }
+    var showLanguage by rememberSaveable { mutableStateOf(false) }
+    val firstName = displayName?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.creative_settings_profile)
+    val preferencesEnabled = !state.preferencesLoading && !state.preferencesError
     CreativePage {
-        CreativeHeader(stringResource(R.string.settings))
-        SettingsRow(Icons.Outlined.Person, stringResource(R.string.creative_settings_profile),
-            stringResource(R.string.auth_account_description), onProfile, Modifier.testTag("auth-open-account"))
-        SettingsRow(Icons.Outlined.Palette, stringResource(R.string.creative_settings_accent),
-            stringResource(R.string.creative_settings_accent_description), onAccent)
+        Column {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.settings), Modifier.weight(1f), style = MaterialTheme.typography.headlineLarge)
+                Box(Modifier.size(54.dp).clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                    .clickable(onClick = onProfile).padding(5.dp), contentAlignment = Alignment.Center) {
+                    Text(firstName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            CreativeWave(Modifier.fillMaxWidth().height(70.dp).alpha(0.8f))
+        }
+        SettingsGroup {
+            SettingsItem(stringResource(R.string.creative_settings_account_security), onProfile,
+                modifier = Modifier.testTag("auth-open-account"))
+        }
+        SettingsGroup {
+            SettingsItem(stringResource(R.string.creative_settings_usage), { showUsage = true },
+                modifier = Modifier.testTag("settings-usage"))
+        }
         if (state.preferencesLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (state.preferencesError) CreativeFeedback(stringResource(R.string.preferences_error), error = true,
             actionLabel = stringResource(R.string.retry), onAction = onRetry)
-        CreativeCard {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Outlined.Language, null)
-                Text(stringResource(R.string.language), style = MaterialTheme.typography.titleMedium)
+        SettingsSection(stringResource(R.string.creative_settings_preferences)) {
+            SettingsItem(stringResource(R.string.creative_settings_accent), onAccent, enabled = preferencesEnabled) {
+                Box(Modifier.size(14.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
             }
+            SettingsDivider()
+            SettingsItem(stringResource(R.string.language), { showLanguage = true }, enabled = preferencesEnabled) {
+                Text(stringResource(languageLabel(state.preferences.language)), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        SettingsSection(stringResource(R.string.creative_settings_help)) {
+            SettingsItem(stringResource(R.string.creative_settings_feedback))
+            SettingsDivider()
+            SettingsItem(stringResource(R.string.creative_settings_support))
+            SettingsDivider()
+            SettingsItem(stringResource(R.string.creative_settings_sponsored))
+        }
+        SettingsSection(stringResource(R.string.creative_settings_legal)) {
+            SettingsItem(stringResource(R.string.creative_settings_terms))
+            SettingsDivider()
+            SettingsItem(stringResource(R.string.creative_settings_privacy))
+            SettingsDivider()
+            SettingsItem(stringResource(R.string.creative_settings_about), onAbout)
+        }
+        Text(stringResource(R.string.creative_settings_version, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    if (showUsage) {
+        CreativeSheet(onDismiss = { showUsage = false }) {
+            Text(stringResource(R.string.creative_settings_usage), style = MaterialTheme.typography.headlineMedium)
+            Text("∞", modifier = Modifier.fillMaxWidth(), fontSize = 64.sp, lineHeight = 72.sp,
+                color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+            Text(stringResource(R.string.creative_settings_usage_unlimited), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.creative_settings_usage_temporary), style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            CreativePrimaryButton(onClick = { showUsage = false }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.creative_library_close))
+            }
+        }
+    }
+    if (showLanguage) {
+        CreativeSheet(onDismiss = { showLanguage = false }) {
+            Text(stringResource(R.string.language), style = MaterialTheme.typography.headlineMedium)
             Column(Modifier.selectableGroup()) {
-                LanguageChoice.entries.forEachIndexed { index, choice ->
-                    if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 56.dp).selectable(
-                            selected = state.preferences.language == choice,
-                            enabled = !state.preferencesLoading && !state.preferencesError,
-                            role = Role.RadioButton, onClick = { onLanguage(choice) },
-                        ), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        RadioButton(selected = state.preferences.language == choice, onClick = null,
-                            enabled = !state.preferencesLoading && !state.preferencesError)
-                        Text(stringResource(when (choice) {
-                            LanguageChoice.SYSTEM -> R.string.system_default
-                            LanguageChoice.ENGLISH -> R.string.english
-                            LanguageChoice.ARABIC -> R.string.arabic
-                        }), Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface.copy(
-                            alpha = if (state.preferencesLoading || state.preferencesError) CreativeTokens.DisabledAlpha else 1f))
+                LanguageChoice.entries.forEach { choice ->
+                    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).selectable(
+                        selected = state.preferences.language == choice, enabled = preferencesEnabled, role = Role.RadioButton,
+                        onClick = { onLanguage(choice); showLanguage = false }),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        RadioButton(selected = state.preferences.language == choice, onClick = null, enabled = preferencesEnabled)
+                        Text(stringResource(languageLabel(choice)))
                     }
                 }
             }
         }
-        SettingsRow(Icons.Outlined.Info, stringResource(R.string.about_vocal),
-            stringResource(R.string.creative_settings_about_summary), onAbout)
-        Text(stringResource(R.string.creative_settings_version, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun SettingsRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    CreativeCard(modifier.clickable(onClick = onClick)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Icon(icon, null, Modifier.size(28.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(CreativeTokens.SmallIcon))
-        }
+private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        SettingsGroup(content)
     }
+}
+
+@Composable
+private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(content = content)
+    }
+}
+
+@Composable
+private fun SettingsDivider() {
+    HorizontalDivider(Modifier.padding(horizontal = 14.dp), color = MaterialTheme.colorScheme.outlineVariant)
+}
+
+@Composable
+private fun SettingsItem(title: String, onClick: (() -> Unit)? = null, modifier: Modifier = Modifier,
+    enabled: Boolean = true, trailing: @Composable () -> Unit = {}) {
+    Row(modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier)
+        .heightIn(min = 52.dp).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        trailing()
+        Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+private fun languageLabel(choice: LanguageChoice): Int = when (choice) {
+    LanguageChoice.SYSTEM -> R.string.system_default
+    LanguageChoice.ENGLISH -> R.string.english
+    LanguageChoice.ARABIC -> R.string.arabic
 }
 
 @Composable

@@ -1,5 +1,5 @@
 <resources>
-    <string name="creative_account_login_hero">Good to hear you.</string>
+    <string name="creative_account_login_hero">Welcome back</string>
     <string name="creative_account_register_hero">Make it your voice.</string>
     <string name="creative_account_reset_hero">Let’s get you back.</string>
     <string name="creative_account_profile">Profile</string>

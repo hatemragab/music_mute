@@ -13,6 +13,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AuthContractTest {
+    @Test fun removesDeviceHistoryWithAuthenticatedEmptyDelete() = runTest {
+        val id = "0e47b60a-4835-4cc3-a5b9-2d64d48f8c19"
+        val api = client(AuthHttpTransport { url, method, headers, body ->
+            assertTrue(url.endsWith("/users/me/devices/$id"))
+            assertEquals("DELETE", method)
+            assertEquals("Bearer token", headers["Authorization"])
+            assertNull(body)
+            AuthHttpResponse(204, "")
+        })
+        api.removeDeviceHistory(id)
+    }
+
+    @Test fun historyRemovalRejectsInvalidIdsBeforeSending() = runTest {
+        val api = client(AuthHttpTransport { _, _, _, _ -> error("Must not send invalid IDs") })
+        assertEquals(AuthProblem.INVALID_INPUT,
+            (runCatching { api.removeDeviceHistory("../me") }.exceptionOrNull() as AuthFailure).problem)
+    }
+
     private val profile =
         """{"id":"profile-1","displayName":"Listener","email":null,"emailVerified":false,"providers":["apple.com"]}"""
 

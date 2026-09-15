@@ -35,8 +35,23 @@ class ProcessingMediaPolicyTest {
         assertFalse(ProcessingMediaPolicy.LEGACY.acceptsPrepared(10, 600.0))
         assertFalse(ProcessingMediaPolicy.LEGACY.acceptsPrepared(30_000_000, 1.0))
     }
+    @Test fun standardLocalPreparationHasBoundsWithoutExpandedAdmission() {
+        val policy = ProcessingMediaPolicy.LEGACY
+        assertEquals(200_000_000L, policy.maxLocalSourceBytes)
+        assertEquals(120L, policy.maxPreparationSeconds)
+        assertEquals(1, policy.version)
+        assertNull(policy.profileId)
+        assertTrue(policy.localPreparationReady)
+        assertFalse(policy.localExpansionReady)
+        assertFalse(policy.youtubeExpansionReady)
+        assertTrue(policy.acceptsPrepared(29_999_999, 599.0))
+        assertFalse(policy.acceptsPrepared(30_000_000, 599.0))
+        assertFalse(policy.acceptsPrepared(1, 600.0))
+    }
     @Test fun readinessIsNotAnUnlimitedBound() {
         assertFalse(expandedMediaPolicy().copy(maxLocalSourceBytes = null).localExpansionReady)
+        assertFalse(ProcessingMediaPolicy.LEGACY.copy(maxLocalSourceBytes = null).localPreparationReady)
+        assertFalse(ProcessingMediaPolicy.LEGACY.copy(maxPreparationSeconds = 0).localPreparationReady)
     }
 }
 internal fun expandedMediaPolicy() = ProcessingMediaPolicy(

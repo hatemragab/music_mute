@@ -69,7 +69,27 @@ data class ProcessingOperation(
     val mediaPolicy: ProcessingMediaPolicy = ProcessingMediaPolicy.LEGACY,
     val mediaSource: String = "audio_file",
     val schemaVersion: Int = 2,
+    // Display history only. Retry/cancellation still use phase, never this value.
+    val lastReachedPhase: ProcessingPhase? = null,
 )
+
+private val processingMilestones = listOf(
+    ProcessingPhase.DOWNLOADING_SOURCE, ProcessingPhase.INSPECTING, ProcessingPhase.PREPARING_INPUT,
+    ProcessingPhase.RESERVING, ProcessingPhase.UPLOADING, ProcessingPhase.CONFIRMING,
+)
+
+internal val ProcessingOperation.hasUploadedInput: Boolean
+    get() = input?.bytes?.let { it > 0 && uploadedBytes >= it } == true
+
+// CONFIRMING is also used to probe for a prior upload before transferring any
+// bytes. Such a probe is not evidence that the upload step was completed.
+internal val ProcessingOperation.progressPhase: ProcessingPhase
+    get() = if (phase == ProcessingPhase.CONFIRMING && !hasUploadedInput) ProcessingPhase.UPLOADING else phase
+
+private fun retainProcessingHistory(previous: ProcessingOperation?, next: ProcessingOperation): ProcessingOperation =
+    next.copy(lastReachedPhase = listOfNotNull(previous?.lastReachedPhase, previous?.progressPhase, next.lastReachedPhase)
+        .filter { it in processingMilestones }
+        .maxByOrNull(processingMilestones::indexOf))
 
 @Serializable
 data class StoredClientError(val ownerUid: String, val report: ClientErrorReport)
@@ -143,7 +163,8 @@ class ProcessingStore(
             validateOwner(uid, document)
             val existing = document.operations.find { it.operationId == operation.operationId }
             require(existing == null || existing.requestId == operation.requestId)
-            document.copy(operations = document.operations.filterNot { it.operationId == operation.operationId } + operation)
+            document.copy(operations = document.operations.filterNot { it.operationId == operation.operationId } +
+                retainProcessingHistory(existing, operation))
         }
     }
 
@@ -151,7 +172,7 @@ class ProcessingStore(
         val document = store(uid).updateData { current ->
             validateOwner(uid, current)
             current.copy(operations = current.operations.map { operation ->
-                if (operation.operationId != operationId) operation else transform(operation).also {
+                if (operation.operationId != operationId) operation else retainProcessingHistory(operation, transform(operation)).also {
                     require(it.ownerUid == uid && it.operationId == operationId && it.requestId == operation.requestId)
                 }
             })

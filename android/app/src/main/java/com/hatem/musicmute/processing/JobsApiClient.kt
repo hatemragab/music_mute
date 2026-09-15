@@ -6,6 +6,8 @@ import com.hatem.musicmute.auth.AuthHttpResponse
 import com.hatem.musicmute.auth.AuthProblem
 import java.net.URI
 import java.net.URLEncoder
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.serializer
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.SerialDescriptor
@@ -41,8 +43,11 @@ class JobsApiClient(
     private val auth: AuthApiClient,
     private val installationId: () -> String,
     private val onUpdateRequired: () -> Unit = {},
+    private val nowNanos: () -> Long = System::nanoTime,
 ) : JobsApi {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    private val requests = Mutex()
+    private var retryNotBeforeNanos: Long? = null
 
     override suspend fun create(requestId: String, input: InputDeclaration): CreateReservation {
         return createWithMetadata(requestId, input, CreateJobMetadata())
@@ -133,9 +138,11 @@ class JobsApiClient(
         )))
     }
 
-    private suspend fun request(method: String, path: String, body: String? = null, processingAccess: Boolean = false): String {
+    private suspend fun request(method: String, path: String, body: String? = null, processingAccess: Boolean = false): String = requests.withLock {
+        val remaining = retryNotBeforeNanos?.minus(nowNanos()) ?: 0
+        if (remaining > 0) throw JobsFailure(JobsProblem.RATE_LIMITED, (remaining + 999_999_999) / 1_000_000_000)
         val headers = if (processingAccess) mapOf("X-Installation-Id" to installationId().also(::uuid)) else emptyMap()
-        return try {
+        try {
             auth.request(method, path, body, additionalHeaders = headers, responseFailure = ::failure)
         } catch (failure: AuthFailure) {
             throw JobsFailure(when (failure.problem) {
@@ -189,7 +196,13 @@ class JobsApiClient(
             else -> JobsProblem.SERVICE_UNAVAILABLE
         }
         if (problem == JobsProblem.APP_UPDATE_REQUIRED) onUpdateRequired()
-        return JobsFailure(problem, if (response.status == 429) response.retryAfter?.toLongOrNull()?.takeIf { it in 1..86_400 } ?: 60 else null)
+        val retryAfter = if (problem == JobsProblem.RATE_LIMITED)
+            response.retryAfter?.toLongOrNull()?.takeIf { it in 1..86_400 } ?: 60 else null
+        if (retryAfter != null) {
+            val deadline = nowNanos() + retryAfter * 1_000_000_000
+            retryNotBeforeNanos = maxOf(retryNotBeforeNanos ?: deadline, deadline)
+        }
+        return JobsFailure(problem, retryAfter)
     }
 
     private fun path(id: String): String {

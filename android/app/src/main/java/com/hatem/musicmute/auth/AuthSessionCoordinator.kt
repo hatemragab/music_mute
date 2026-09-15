@@ -44,6 +44,7 @@ data class AuthUiState(
     val policy: AppPolicy? = null,
     val access: ProcessingAccess? = null,
     val installationId: String? = null,
+    val currentDevice: RegisteredDevice? = null,
     val busy: Boolean = false,
     val offline: Boolean = false,
     val profileSyncPending: Boolean = false,
@@ -400,7 +401,8 @@ class AuthSessionCoordinator(
         val cursor = if (more) mutableState.value.nextDeviceCursor ?: return@action else null
         val page = safeDevices(ticket, cursor)
         checkTicket(ticket)
-        val items = if (more) mutableState.value.devices + page.items else page.items
+        val current = mutableState.value.currentDevice
+        val items = if (more) mutableState.value.devices + page.items else page.items + listOfNotNull(current)
         mutableState.value =
             mutableState.value.copy(
                 devices = items.distinctBy { it.installationId },
@@ -408,6 +410,16 @@ class AuthSessionCoordinator(
                 nextDeviceCursor = page.nextCursor?.takeIf { it != cursor },
                 offline = false,
             )
+    }
+
+    suspend fun removeDeviceHistory(installationId: String) = action { ticket ->
+        if (installationId == mutableState.value.installationId)
+            throw AuthFailure(AuthProblem.INVALID_INPUT)
+        api.removeDeviceHistory(installationId)
+        checkTicket(ticket)
+        mutableState.value = mutableState.value.copy(
+            devices = mutableState.value.devices.filterNot { it.installationId == installationId },
+        )
     }
 
     suspend fun prepareAccountDeletion(password: String, social: suspend () -> AuthCredential, onReady: () -> Unit) = action { ticket ->
@@ -524,6 +536,7 @@ class AuthSessionCoordinator(
                 profile = response.user,
                 policy = response.policy,
                 access = response.access,
+                currentDevice = response.device,
                 installationId = report.installationId,
                 failure = null,
                 notice = null,

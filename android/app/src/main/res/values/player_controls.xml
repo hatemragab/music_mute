@@ -1,0 +1,10 @@
+<resources>
+    <string name="player_minimize">Minimize player</string>
+    <string name="player_gesture_hint">Swipe down to minimize</string>
+    <string name="player_swipe_volume">Swipe up for volume</string>
+    <string name="player_speed">Playback speed</string>
+    <string name="player_speed_value">%1$.2f×</string>
+    <string name="player_volume">Audio volume</string>
+    <string name="player_volume_percent">%1$d%%</string>
+    <string name="player_volume_hint">Adjust this player’s volume. Use your phone’s volume buttons to change the device volume.</string>
+</resources>

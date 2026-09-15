@@ -3,16 +3,11 @@ package com.hatem.musicmute.ui
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
-import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.hatem.musicmute.ui.design.AccentPalette
 import com.hatem.musicmute.ui.design.CreativeMotionProvider
 
@@ -50,30 +45,7 @@ fun VocalTheme(dark: Boolean = true, accentArgb: Int = AccentPalette.DEFAULT, co
     val colors = remember(accentArgb) { creativeColors(accentArgb) }
     MaterialTheme(
         colorScheme = colors,
-        typography =
-            Typography(
-                headlineLarge =
-                    TextStyle(
-                        fontFamily = FontFamily.SansSerif,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 36.sp,
-                        lineHeight = 44.sp,
-                    ),
-                headlineMedium =
-                    TextStyle(
-                        fontFamily = FontFamily.SansSerif,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 28.sp,
-                        lineHeight = 36.sp,
-                    ),
-                titleLarge =
-                    TextStyle(
-                        fontFamily = FontFamily.SansSerif,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 22.sp,
-                        lineHeight = 30.sp,
-                    ),
-            ),
+        typography = musicTypography,
         shapes =
             Shapes(
                 small = RoundedCornerShape(12.dp),

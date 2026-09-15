@@ -2,6 +2,8 @@ package com.hatem.musicmute.ui.auth
 
 import android.app.Activity
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -9,10 +11,17 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -51,38 +60,37 @@ fun AuthGate(
     Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
         when (state.phase) {
             AuthPhase.RESTORING ->
-                Column(Modifier.fillMaxSize().safeDrawingPadding(),
-                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    CircularProgressIndicator(Modifier.testTag("auth-restoring"))
-                    Text(stringResource(R.string.auth_connecting_title), Modifier.padding(CreativeTokens.ContentGap))
-                }
+                GlowSplashScreen(Modifier.testTag("auth-restoring"))
             AuthPhase.SIGNED_OUT ->
                 AuthScreen(auth, state, google, activity, scope, onToggleLanguage)
             AuthPhase.BOOTSTRAP_REQUIRED ->
-                AuthPage {
-                    CreativeHeader(stringResource(R.string.auth_connecting_title))
-                    CreativeCard {
-                    Text(stringResource(R.string.auth_connecting_description))
-                    AuthMessages(state, auth::dismissMessage)
-                    CreativePrimaryButton(
-                        onClick = {
-                            scope.launch {
-                                if (state.identity == null) auth.restore()
-                                else auth.retryBootstrap()
+                if (state.busy) {
+                    GlowSplashScreen()
+                } else {
+                    AuthPage {
+                        CreativeHeader(stringResource(R.string.app_name))
+                        CreativeCard {
+                            AuthMessages(state, auth::dismissMessage)
+                            CreativePrimaryButton(
+                                onClick = {
+                                    scope.launch {
+                                        if (state.identity == null) auth.restore()
+                                        else auth.retryBootstrap()
+                                    }
+                                },
+                                busy = state.busy,
+                                modifier = Modifier.fillMaxWidth().testTag("auth-retry-bootstrap"),
+                            ) {
+                                Text(stringResource(R.string.retry))
                             }
-                        },
-                        busy = state.busy,
-                        modifier = Modifier.fillMaxWidth().testTag("auth-retry-bootstrap"),
-                    ) {
-                        Text(stringResource(R.string.retry))
-                    }
-                    TextButton(
-                        onClick = { auth.signOut() },
-                        enabled = !state.busy,
-                        modifier = Modifier.testTag("auth-sign-out"),
-                    ) {
-                        Text(stringResource(R.string.auth_sign_out))
-                    }
+                            TextButton(
+                                onClick = { auth.signOut() },
+                                enabled = !state.busy,
+                                modifier = Modifier.testTag("auth-sign-out"),
+                            ) {
+                                Text(stringResource(R.string.auth_sign_out))
+                            }
+                        }
                     }
                 }
             AuthPhase.RECOVERY_REQUIRED ->
@@ -125,5 +133,54 @@ fun AuthGate(
                     }
                 }
         }
+    }
+}
+
+@Composable
+private fun GlowSplashScreen(modifier: Modifier = Modifier) {
+    val green = Color(0xFF43C83E)
+    Box(
+        modifier.fillMaxSize().background(Color(0xFF0E1015)).safeDrawingPadding(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Canvas(Modifier.size(260.dp)) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(green.copy(alpha = 0.22f), Color.Transparent),
+                        radius = size.minDimension / 2,
+                    ),
+                )
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Canvas(Modifier.size(76.dp)) {
+                    val heights = listOf(0.32f, 0.65f, 0.92f, 0.65f, 0.32f)
+                    heights.forEachIndexed { index, fraction ->
+                        val x = size.width * (0.1f + index * 0.2f)
+                        val halfHeight = size.height * fraction / 2
+                        drawLine(
+                            color = green,
+                            start = Offset(x, center.y - halfHeight),
+                            end = Offset(x, center.y + halfHeight),
+                            strokeWidth = 7.dp.toPx(),
+                            cap = StrokeCap.Round,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    stringResource(R.string.app_name),
+                    color = Color.White,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+        LinearProgressIndicator(
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp)
+                .width(40.dp).height(3.dp),
+            color = green,
+            trackColor = green.copy(alpha = 0.12f),
+        )
     }
 }

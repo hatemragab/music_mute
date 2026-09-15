@@ -101,7 +101,7 @@ class ProcessingViewModel(
         catch (_: SecurityException) { /* A provider may give only a temporary grant; lost grants require reselection. */ }
         coordinator.acceptDocument(operationId, name, uri.toString())
         checkSession(ticket)
-        history.refresh()
+        history.refreshAfterChange()
         }
     }
 
@@ -111,7 +111,7 @@ class ProcessingViewModel(
             coordinator.acceptUrl(operationId, url)
             checkSession(ticket)
             onAccepted()
-            history.refresh()
+            history.refreshAfterChange()
         }
     }
 
@@ -123,14 +123,14 @@ class ProcessingViewModel(
             "${record.title.ifBlank { "Audio" }}.${record.extension}",
         ) { file.inputStream() }
         checkSession(ticket)
-        history.refresh()
+        history.refreshAfterChange()
         }
     }
 
     fun confirmCloudProcessing(id: String, rightsConfirmed: Boolean) = perform { ticket ->
         repository.confirmCloudProcessing(id, rightsConfirmed)
         checkSession(ticket)
-        history.refresh()
+        history.refreshAfterChange()
     }
 
     fun discardReview(id: String) = perform { ticket ->
@@ -138,8 +138,8 @@ class ProcessingViewModel(
         checkSession(ticket)
     }
 
-    fun resume(id: String) = perform { ticket -> coordinator.retry(id); checkSession(ticket); history.refresh() }
-    fun cancelOperation(id: String) = perform { ticket -> coordinator.cancel(id); checkSession(ticket); history.refresh() }
+    fun resume(id: String) = perform { ticket -> coordinator.retry(id); checkSession(ticket); history.refreshAfterChange() }
+    fun cancelOperation(id: String) = perform { ticket -> coordinator.cancel(id); checkSession(ticket); history.refreshAfterChange() }
 
     fun selectTask(operationId: String?, jobId: String?) {
         mutableState.update { it.copy(selectedOperationId = operationId) }
@@ -161,7 +161,7 @@ class ProcessingViewModel(
             else -> return@perform
         }
         checkSession(ticket)
-        history.refresh()
+        history.refreshAfterChange()
     }
 
     fun deleteSelected(onDeleted: () -> Unit = {}) =
@@ -179,7 +179,7 @@ class ProcessingViewModel(
         } else return@perform
         checkSession(ticket)
         if (history.state.value.selectedId == jobId && mutableState.value.selectedOperationId == operationId) clearSelection()
-        history.refresh()
+        history.refreshAfterChange()
         onDeleted()
     }
 
@@ -187,7 +187,7 @@ class ProcessingViewModel(
         if (ticket.uid != key.ownerUid) throw CancellationException("Library owner changed")
         repository.renameJob(key.jobId, title)
         checkSession(ticket)
-        history.refresh()
+        history.refreshAfterChange()
     }
 
     fun deleteLibraryTrack(key: com.hatem.musicmute.library.LibraryKey, onDeleted: () -> Unit) = perform { ticket ->
@@ -199,7 +199,7 @@ class ProcessingViewModel(
         share.evict(ticket.uid, key.jobId)
         checkSession(ticket)
         if (history.state.value.selectedId == key.jobId) clearSelection()
-        history.refresh()
+        history.refreshAfterChange()
         onDeleted()
     }
 
@@ -225,14 +225,14 @@ class ProcessingViewModel(
     }
 
     fun cancelSelected() = history.state.value.selectedId?.let(::cancelJob)
-    fun cancelJob(id: String) = perform { ticket -> repository.cancel(id); checkSession(ticket); history.refresh() }
+    fun cancelJob(id: String) = perform { ticket -> repository.cancel(id); checkSession(ticket); history.refreshAfterChange() }
 
     fun retrySelected() = history.state.value.selectedId?.let(::retryJob)
     fun retryJob(id: String) =
         perform { ticket ->
             val operation = repository.retry(id)
             checkSession(ticket)
-            history.refresh()
+            history.refreshAfterChange()
             if (history.state.value.selectedId == id) operation.jobId?.let(history::select)
         }
 
@@ -333,7 +333,7 @@ class ProcessingViewModel(
                             error,
                         )
                     }
-                    history.refresh()
+                    history.refreshAfterChange()
                 }
             } finally {
                 if (owner == ticket) mutableState.update {

@@ -8,6 +8,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class JobsApiClientTest {
+    @Test fun rateLimitStopsOtherJobRoutesBeforeTransport() = runTest {
+        var calls = 0
+        val api = client(AuthHttpTransport { _, _, _, _ ->
+            calls++
+            if (calls == 1) AuthHttpResponse(429, "{}", "60") else AuthHttpResponse(200, mutation)
+        }, nowNanos = { testScheduler.currentTime * 1_000_000 })
+        runCatching { api.list() }
+        val error = runCatching { api.cancel(id) }.exceptionOrNull() as JobsFailure
+        runCatching { api.detail(id) }
+        assertEquals(JobsProblem.RATE_LIMITED, error.problem)
+        assertEquals(1, calls)
+        testScheduler.advanceTimeBy(60_000)
+        assertEquals("queued", api.cancel(id).status)
+        assertEquals(2, calls)
+    }
+
     private val id = "68c000000000000000000001"
     private val requestId = "c21a2eaa-7e73-4f08-89da-6ac35baa83e1"
     private val input = InputDeclaration("mp3", "audio/mpeg", 42, 1.5, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
@@ -19,11 +35,13 @@ class JobsApiClientTest {
         transport: AuthHttpTransport,
         token: suspend (Boolean) -> String = { "token" },
         onUpdateRequired: () -> Unit = {},
+        nowNanos: () -> Long = System::nanoTime,
     ) =
         JobsApiClient(
             AuthApiClient(AuthConfiguration("https://api.example.test", false), { "uid" }, token, transport),
             { requestId },
             onUpdateRequired,
+            nowNanos,
         )
 
     @Test fun expandedMetadataIsAdditiveAndQueueFailureIsNotGenericRetry() = runTest {

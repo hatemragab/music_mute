@@ -52,6 +52,7 @@ data class DownloadRecord(
     val operationId: String? = null,
     val sessionEpoch: Long? = null,
     val workRequestId: String? = null,
+    val sourceDiagnostic: String? = null,
 )
 
 @Serializable data class DownloadHistory(val records: List<DownloadRecord> = emptyList())

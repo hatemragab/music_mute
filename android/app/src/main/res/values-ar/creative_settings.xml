@@ -1,5 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="creative_settings_account_security">الحساب والأمان</string>
+    <string name="creative_settings_usage">الاستخدام</string>
+    <string name="creative_settings_usage_unlimited">استخدام غير محدود</string>
+    <string name="creative_settings_usage_temporary">استخدامك حالياً غير محدود لفترة محدودة.</string>
+    <string name="creative_settings_preferences">التفضيلات</string>
+    <string name="creative_settings_help">المساعدة والمعلومات</string>
+    <string name="creative_settings_feedback">إرسال ملاحظات أو الإبلاغ عن مشكلة</string>
+    <string name="creative_settings_support">مساعدة الحساب والدعم</string>
+    <string name="creative_settings_sponsored">التقدم للحصول على وصول مدعوم</string>
+    <string name="creative_settings_legal">المعلومات القانونية</string>
+    <string name="creative_settings_terms">شروط الخدمة</string>
+    <string name="creative_settings_privacy">سياسة الخصوصية</string>
+    <string name="creative_settings_about">حول MusicMute</string>
     <string name="creative_settings_profile">الملف الشخصي</string>
     <string name="creative_settings_accent">اللون الأساسي</string>
     <string name="creative_settings_accent_description">اختر لون الأزرار والعناصر المميزة والموجات المتحركة.</string>

@@ -5,7 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Headphones
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -71,16 +71,24 @@ internal fun AuthScreen(
 
     CreativeNavigation(mode, direction = { from, to -> to.ordinal - from.ordinal }) { visibleMode ->
     AuthPage {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = if (visibleMode == FormMode.LOGIN) Arrangement.End else Arrangement.SpaceBetween,
+        ) {
+            if (visibleMode != FormMode.LOGIN) IconButton(
+                onClick = {
+                    keyboard?.hide()
+                    switch(FormMode.LOGIN)
+                },
+                enabled = !state.busy,
+                modifier = Modifier.testTag("auth-back"),
+            ) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back))
+            }
             TextButton(onClick = onToggleLanguage, enabled = !state.busy) {
                 Text(stringResource(R.string.auth_language))
             }
         }
-        Text(
-            stringResource(R.string.app_name),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
         Text(
             stringResource(
                 when (visibleMode) {
@@ -92,13 +100,10 @@ internal fun AuthScreen(
             style = MaterialTheme.typography.headlineLarge,
             modifier = Modifier.testTag("auth-title"),
         )
-        CreativeWave(Modifier.fillMaxWidth().height(88.dp))
-        CreativeCard {
-        Text(stringResource(when (visibleMode) {
-            FormMode.LOGIN -> R.string.auth_sign_in
-            FormMode.REGISTER -> R.string.auth_create_account
-            FormMode.RESET -> R.string.auth_reset_title
-        }), style = MaterialTheme.typography.titleLarge)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap),
+        ) {
         Text(
             stringResource(
                 when (visibleMode) {
@@ -163,6 +168,15 @@ internal fun AuthScreen(
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+        if (visibleMode == FormMode.LOGIN) {
+            TextButton(
+                onClick = { switch(FormMode.RESET) },
+                enabled = !state.busy,
+                modifier = Modifier.align(Alignment.End).testTag("auth-forgot"),
+            ) {
+                Text(stringResource(R.string.auth_forgot_password))
+            }
+        }
         CreativePrimaryButton(
             onClick = {
                 keyboard?.hide()
@@ -198,11 +212,17 @@ internal fun AuthScreen(
             )
         }
         if (visibleMode != FormMode.RESET) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                HorizontalDivider(Modifier.weight(1f))
                 Text(
                     stringResource(R.string.auth_or),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                HorizontalDivider(Modifier.weight(1f))
             }
             OutlinedButton(
                 onClick = {
@@ -224,16 +244,9 @@ internal fun AuthScreen(
         }
         if (visibleMode == FormMode.LOGIN) {
             TextButton(
-                onClick = { switch(FormMode.RESET) },
-                enabled = !state.busy,
-                modifier = Modifier.testTag("auth-forgot"),
-            ) {
-                Text(stringResource(R.string.auth_forgot_password))
-            }
-            TextButton(
                 onClick = { switch(FormMode.REGISTER) },
                 enabled = !state.busy,
-                modifier = Modifier.testTag("auth-register"),
+                modifier = Modifier.align(Alignment.CenterHorizontally).testTag("auth-register"),
             ) {
                 Text(stringResource(R.string.auth_new_account))
             }
@@ -241,7 +254,7 @@ internal fun AuthScreen(
             TextButton(
                 onClick = { switch(FormMode.LOGIN) },
                 enabled = !state.busy,
-                modifier = Modifier.testTag("auth-back-login"),
+                modifier = Modifier.align(Alignment.CenterHorizontally).testTag("auth-back-login"),
             ) {
                 Text(stringResource(R.string.auth_back_login))
             }

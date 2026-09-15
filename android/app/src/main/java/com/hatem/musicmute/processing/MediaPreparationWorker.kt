@@ -82,7 +82,7 @@ class MediaPreparationWorker(context: Context, parameters: WorkerParameters) : C
                             applicationContext.contentResolver.openInputStream(uri) ?: throw InputPreparationException(InputPreparationError.STORAGE)
                         }
                     } catch (error: InputPreparationException) {
-                        if (!policy.localExpansionReady || error.reason !in setOf(InputPreparationError.UNSUPPORTED, InputPreparationError.TOO_LARGE, InputPreparationError.INVALID_AUDIO)) throw error
+                        if (!policy.localPreparationReady || error.reason !in setOf(InputPreparationError.UNSUPPORTED, InputPreparationError.TOO_LARGE, InputPreparationError.INVALID_AUDIO)) throw error
                         engine.prepare(uri, temporary, policy)
                         app.audioInputPreparer.prepare(owner, "${name.substringBeforeLast('.', name)}.m4a", operationId, policy, sourceKind) { temporary.inputStream() }
                     }
@@ -90,7 +90,7 @@ class MediaPreparationWorker(context: Context, parameters: WorkerParameters) : C
                 checkOwner()
                 val latest = repository.store.get(owner, operationId) ?: return@withLocalSlot Result.failure()
                 if (latest.cancellationRequested || latest.pendingDelete) return@withLocalSlot Result.success()
-                repository.submit(prepared, requireCloudConsent = true)
+                repository.submit(prepared)
                 Result.success()
             }
         } catch (error: kotlinx.coroutines.TimeoutCancellationException) {

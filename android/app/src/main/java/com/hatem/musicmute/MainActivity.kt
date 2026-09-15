@@ -104,7 +104,7 @@ class MainActivity : AppCompatActivity() {
             }
             LaunchedEffect(app, updateBlocked) {
                 if (!updateBlocked) {
-                    app.processingPush.refreshHints.collect { processing.history.refresh() }
+                    app.processingPush.refreshHints.collect { processing.history.refreshIfVisible() }
                 }
             }
             val requestedHistory by openHistory.collectAsStateWithLifecycle()

@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -94,11 +95,12 @@ fun CreativeCard(
     modifier: Modifier = Modifier,
     contentPadding: Dp = CreativeTokens.CardPadding,
     contentGap: Dp = CreativeTokens.ContentGap,
+    shape: Shape = MaterialTheme.shapes.large,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Card(
         modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        shape = shape,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
     ) {

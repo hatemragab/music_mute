@@ -19,7 +19,8 @@ data class ProcessingMediaPolicy(
     val acceptLongJobs: Boolean = true,
     val longJobThresholdSeconds: Double? = null,
 ) {
-    val localExpansionReady get() = version == 2 && maxLocalSourceBytes != null && maxPreparationSeconds != null
+    val localPreparationReady get() = (maxLocalSourceBytes ?: 0) > 0 && (maxPreparationSeconds ?: 0) > 0
+    val localExpansionReady get() = version == 2 && localPreparationReady
     val youtubeExpansionReady get() = localExpansionReady && maxSourceDownloadBytes != null && maxSourceDownloadSeconds != null
     fun acceptsPrepared(bytes: Long, durationSeconds: Double): Boolean = bytes > 0 &&
         durationSeconds.isFinite() && durationSeconds > 0 && if (version == 2)
@@ -32,7 +33,9 @@ data class ProcessingMediaPolicy(
     }
 
     companion object {
-        val LEGACY = ProcessingMediaPolicy()
+        // On-device extraction does not expand server admission or establish worker capacity.
+        // Keep the standard exclusive audio limits and submit without v2 qualification metadata.
+        val LEGACY = ProcessingMediaPolicy(maxLocalSourceBytes = 200_000_000, maxPreparationSeconds = 120)
         fun parse(body: String): ProcessingMediaPolicy {
             try {
                 val root = Json.parseToJsonElement(body).jsonObject

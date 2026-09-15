@@ -40,6 +40,8 @@ data class PlaybackState(
     val shuffle: Boolean = false,
     val autoNext: Boolean = true,
     val orderedQueue: List<QueueTrack> = emptyList(),
+    val speed: Float = 1f,
+    val volume: Float = 1f,
 )
 
 class AudioPlaybackController(context: Context) : QueueCommands {
@@ -109,6 +111,17 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         }
     }
 
+    fun closePlayback() {
+        pending = null
+        pendingQueue = null
+        controller?.let { player ->
+            player.stop()
+            player.clearMediaItems()
+        }
+        mutableState.value = PlaybackState()
+        refresh()
+    }
+
     fun stopPrivateOutput() {
         clearPrivateOnConnect = true
         pendingQueue = null
@@ -159,6 +172,16 @@ class AudioPlaybackController(context: Context) : QueueCommands {
                 player.play()
             }
         }
+        refresh()
+    }
+    fun setSpeed(value: Float) {
+        controller?.setPlaybackSpeed(normalizedPlaybackSpeed(value))
+        refresh()
+    }
+
+    /** Per-player gain; the device media volume and audio focus remain system-managed. */
+    fun setVolume(value: Float) {
+        controller?.volume = normalizedPlaybackVolume(value)
         refresh()
     }
     fun removeTrack(key: LibraryKey) {
@@ -274,6 +297,8 @@ class AudioPlaybackController(context: Context) : QueueCommands {
                 shuffle = player.shuffleModeEnabled,
                 autoNext = player.sessionExtras.getBoolean(AUTO_NEXT_KEY, true),
                 orderedQueue = cachedOrder,
+                speed = player.playbackParameters.speed,
+                volume = player.volume,
             )
         }
     }

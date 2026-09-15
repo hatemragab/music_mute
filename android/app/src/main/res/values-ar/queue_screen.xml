@@ -1,0 +1,8 @@
+<resources>
+    <string name="queue_other">مقاطع أخرى في قائمة التشغيل</string>
+    <string name="queue_upcoming_count">التالي · %1$d</string>
+    <string name="queue_nothing_next">لن يتم تشغيل مقطع آخر تلقائيًا.</string>
+    <string name="queue_shuffle_on">التشغيل العشوائي مفعّل</string>
+    <string name="queue_shuffle_off">التشغيل العشوائي متوقف</string>
+    <string name="queue_auto_next">التشغيل التلقائي</string>
+</resources>

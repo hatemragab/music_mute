@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="device_history_title">Device history</string>
+    <string name="device_history_description">Previous connections, including reinstalls. These entries do not necessarily mean someone is still signed in.</string>
+    <string name="device_history_signed_out">Signed out</string>
+    <string name="device_history_unknown">Session status: not confirmed</string>
+    <string name="device_history_remove">Remove from history</string>
+    <string name="device_history_remove_title">Remove this entry?</string>
+    <string name="device_history_remove_body">This hides the entry but does not sign the device out. It will reappear if the installation connects again. To end access everywhere, use sign out on all devices.</string>
+</resources>
