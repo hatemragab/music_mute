@@ -316,3 +316,10 @@
 "media_replenishes" = "Next replenishment:";
 "media_minutes" = "minutes";
 "media_inspecting" = "Inspecting media…";
+"device_history_title" = "Device history";
+"device_history_description" = "Previous connections, including reinstalls. These entries do not necessarily mean someone is still signed in.";
+"device_history_signed_out" = "Signed out";
+"device_history_unknown" = "Session status: not confirmed";
+"device_history_remove" = "Remove from history";
+"device_history_remove_title" = "Remove this entry?";
+"device_history_remove_body" = "This hides the entry but does not sign the device out. It will reappear if the installation connects again. To end access everywhere, use sign out on all devices.";

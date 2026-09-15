@@ -7,10 +7,8 @@ struct AuthGate<Content: View>: View {
   var body: some View {
     Group {
       switch model.phase {
-      case .restoring, .authenticating:
-        authProgress("auth_restoring")
-      case .bootstrapping:
-        authProgress("auth_setting_up")
+      case .restoring, .authenticating, .bootstrapping:
+        GlowSplashView()
       case .signedOut:
         AuthView(model: model)
       case .blocked:
@@ -24,13 +22,52 @@ struct AuthGate<Content: View>: View {
     .accessibilityIdentifier("authGate")
   }
 
-  private func authProgress(_ key: LocalizedStringKey) -> some View {
-    VStack(spacing: 20) {
-      ProgressView().controlSize(.large)
-      Text(key).font(.headline)
+}
+
+private struct GlowSplashView: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var pulse = false
+  private let green = Color(red: 67 / 255, green: 200 / 255, blue: 62 / 255)
+
+  var body: some View {
+    ZStack {
+      Color(red: 14 / 255, green: 16 / 255, blue: 21 / 255).ignoresSafeArea()
+      ZStack {
+        Circle()
+          .fill(
+            RadialGradient(
+              colors: [green.opacity(0.22), .clear], center: .center,
+              startRadius: 0, endRadius: 130)
+          )
+          .frame(width: 260, height: 260)
+          .accessibilityHidden(true)
+        VStack(spacing: 24) {
+          HStack(spacing: 8) {
+            ForEach(Array([24.0, 49, 70, 49, 24].enumerated()), id: \.offset) { _, height in
+              Capsule().fill(green).frame(width: 7, height: height)
+            }
+          }
+          .frame(width: 76, height: 76)
+          .accessibilityHidden(true)
+          Text("app_name")
+            .font(.system(size: 30, weight: .semibold))
+            .foregroundStyle(.white)
+        }
+      }
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(uiColor: .systemBackground))
+    .overlay(alignment: .bottom) {
+      Capsule().fill(green)
+        .frame(width: 40, height: 3)
+        .opacity(reduceMotion || pulse ? 1 : 0.35)
+        .animation(
+          reduceMotion ? nil : .easeInOut(duration: 1).repeatForever(autoreverses: true),
+          value: pulse
+        )
+        .padding(.bottom, 64)
+        .accessibilityLabel(Text("auth_restoring"))
+        .onAppear { pulse = true }
+    }
+    .accessibilityIdentifier("authSplash")
   }
 }
 

@@ -122,6 +122,30 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
     try await send("GET", "/app-policy", authenticated: false, replayOnUnauthorized: false)
   }
 
+  func removeDeviceHistory(id: String) async throws {
+    guard let uuid = UUID(uuidString: id), uuid.uuidString.lowercased() == id.lowercased(),
+      id.split(separator: "-")[2].first == "4"
+    else { throw AuthFailure.invalidInput }
+    guard let tokenSource else { throw AuthFailure.sessionExpired }
+    let fence = tokenSource.tokenSession
+    let token = try await tokenSource.idToken(forceRefresh: false)
+    guard tokenSource.tokenSession == fence else { throw AuthFailure.sessionExpired }
+    var (data, response) = try await transport.perform(
+      method: "DELETE", path: "/users/me/devices/\(uuid.uuidString.lowercased())", body: nil,
+      bearer: token)
+    guard tokenSource.tokenSession == fence else { throw AuthFailure.sessionExpired }
+    if response.statusCode == 401 {
+      let refreshed = try await tokenSource.idToken(forceRefresh: true)
+      guard tokenSource.tokenSession == fence else { throw AuthFailure.sessionExpired }
+      (data, response) = try await transport.perform(
+        method: "DELETE", path: "/users/me/devices/\(uuid.uuidString.lowercased())", body: nil,
+        bearer: refreshed)
+      guard tokenSource.tokenSession == fence else { throw AuthFailure.sessionExpired }
+    }
+    let _: EmptyResponse = try decode(EmptyResponse.self, data: data, response: response)
+    guard response.statusCode == 204 else { throw AuthFailure.malformedResponse }
+  }
+
   func requestVerification() async throws -> MailOutcome {
     let response: MailResponse = try await send(
       "POST", "/auth/verification-email", body: encoder.encode(EmptyBody()), authenticated: true,

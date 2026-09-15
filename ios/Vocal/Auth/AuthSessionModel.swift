@@ -23,6 +23,7 @@ enum AuthPhase: Equatable {
   @Published private(set) var policy: AppPolicy?
   @Published private(set) var access: ProcessingAccess?
   @Published private(set) var currentInstallationID: String?
+  @Published private(set) var currentDevice: RegisteredDevice?
   @Published private(set) var devices: [RegisteredDevice] = []
   @Published private(set) var devicesNextCursor: String?
   @Published private(set) var isOffline = false
@@ -306,7 +307,31 @@ enum AuthPhase: Equatable {
       }
       let existing = Set(devices.map(\.installationId))
       devices.append(contentsOf: page.items.filter { !existing.contains($0.installationId) })
+      if let currentDevice,
+        !devices.contains(where: { $0.installationId == currentDevice.installationId })
+      {
+        devices.insert(currentDevice, at: 0)
+      }
       devicesNextCursor = page.nextCursor
+    } catch {
+      guard isCurrent(ticket) else { return }
+      applyFailure(error)
+      await closeGateIfSessionInvalid()
+    }
+  }
+
+  func removeDeviceHistory(_ device: RegisteredDevice) async {
+    guard phase == .authenticated, !isBusy, !isLoadingDevices,
+      device.installationId != currentInstallationID, let ticket = sessionTicket()
+    else { return }
+    isLoadingDevices = true
+    lastFailure = nil
+    defer { if isCurrent(ticket) { isLoadingDevices = false } }
+    do {
+      guard let api else { throw AuthFailure.configuration }
+      try await api.removeDeviceHistory(id: device.installationId)
+      try validate(ticket)
+      devices.removeAll { $0.installationId == device.installationId }
     } catch {
       guard isCurrent(ticket) else { return }
       applyFailure(error)
@@ -554,6 +579,7 @@ enum AuthPhase: Equatable {
       policy = result.policy
       access = result.access
       currentInstallationID = result.device.installationId
+      currentDevice = result.device
       isOffline = false
       profileSyncPending = false
       accountRecovery = nil
@@ -795,6 +821,7 @@ enum AuthPhase: Equatable {
     devices = []
     devicesNextCursor = nil
     currentInstallationID = nil
+    currentDevice = nil
     isOffline = false
     profileSyncPending = false
     isBusy = false

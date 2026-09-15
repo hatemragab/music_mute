@@ -71,6 +71,13 @@ func processingErrorKey(_ error: Error) -> String {
   private var polling: Task<Void, Never>?
   private var visible = false
   private var retryDelay: TimeInterval = 10
+  private let now: () -> TimeInterval
+  private var retryNotBefore: TimeInterval = 0
+  private var lastRefreshAt: TimeInterval?
+  private var lastSuccessfulRefreshAt: TimeInterval?
+  private var reading = false
+  private var freshIds: Set<String> = []
+  private var refreshPending = false
   var onJobsChanged: @MainActor ([Job]) async -> Void = { _ in }
   var onJobMissing: @MainActor (String) async -> Void = { _ in }
   var onFailure: @MainActor (String?, Error) async -> Void = { _, _ in }
@@ -78,11 +85,13 @@ func processingErrorKey(_ error: Error) -> String {
   init(
     api: any JobsAPI,
     loadCached: @escaping (String) async throws -> [Job] = { _ in [] },
-    saveCached: @escaping (String, [Job]) async throws -> Void = { _, _ in }
+    saveCached: @escaping (String, [Job]) async throws -> Void = { _, _ in },
+    now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
   ) {
     self.api = api
     self.loadCached = loadCached
     self.saveCached = saveCached
+    self.now = now
   }
 
   func bindOwner(_ uid: String?) async {
@@ -100,6 +109,13 @@ func processingErrorKey(_ error: Error) -> String {
     loading = false
     loadingMore = false
     messageKey = nil
+    reading = false
+    retryDelay = 10
+    retryNotBefore = 0
+    lastRefreshAt = nil
+    lastSuccessfulRefreshAt = nil
+    freshIds = []
+    refreshPending = false
     guard let uid else { return }
     let ticket = epoch
     let version = pageVersion
@@ -117,22 +133,39 @@ func processingErrorKey(_ error: Error) -> String {
   }
 
   func refresh() async {
-    guard let uid = owner else { return }
+    guard let uid = owner, !reading, now() >= retryNotBefore else { return }
+    refreshPending = false
+    reading = true
     let ticket = epoch
     pageVersion &+= 1
     let version = pageVersion
     loading = true
     loadingMore = false
     messageKey = nil
-    defer { if ticket == epoch, version == pageVersion { loading = false } }
+    defer {
+      if ticket == epoch, version == pageVersion {
+        loading = false
+        finishReading(ticket)
+      }
+    }
     do {
+      if let lastRefreshAt {
+        try await Task.sleep(for: .seconds(max(0, lastRefreshAt + 1 - now())))
+      }
+      guard ticket == epoch, now() >= retryNotBefore else { return }
+      lastRefreshAt = now()
       let page = try await api.list(cursor: nil, status: nil)
       guard !Task.isCancelled, ticket == epoch, version == pageVersion else { return }
       jobs = deduplicated(page.items)
+      lastSuccessfulRefreshAt = now()
+      freshIds = Set(jobs.map(\.id))
       nextCursor = page.nextCursor
       retryDelay = 10
+      retryNotBefore = 0
       try await saveCached(uid, jobs)
       await onJobsChanged(jobs)
+      guard ticket == epoch else { return }
+      reading = false
       if ticket == epoch, let id = selectedId { await select(id) }
     } catch is CancellationError {} catch {
       if ticket == epoch, version == pageVersion { await report(error) }
@@ -140,11 +173,19 @@ func processingErrorKey(_ error: Error) -> String {
   }
 
   func loadMore() async {
-    guard let uid = owner, let cursor = nextCursor, !loading, !loadingMore else { return }
+    guard let uid = owner, let cursor = nextCursor, !reading, now() >= retryNotBefore else {
+      return
+    }
+    reading = true
     let ticket = epoch
     let version = pageVersion
     loadingMore = true
-    defer { if ticket == epoch, version == pageVersion { loadingMore = false } }
+    defer {
+      if ticket == epoch, version == pageVersion {
+        loadingMore = false
+        finishReading(ticket)
+      }
+    }
     do {
       let page = try await api.list(cursor: cursor, status: nil)
       guard !Task.isCancelled, ticket == epoch, version == pageVersion else { return }
@@ -152,18 +193,42 @@ func processingErrorKey(_ error: Error) -> String {
       nextCursor = page.nextCursor
       try await saveCached(uid, jobs)
       await onJobsChanged(jobs)
+      guard ticket == epoch else { return }
+      reading = false
+      if let selectedId { await select(selectedId) }
     } catch is CancellationError {} catch {
       if ticket == epoch, version == pageVersion { await report(error) }
     }
   }
 
   func select(_ id: String?) async {
+    if reading, id == selectedId { return }
     detailVersion &+= 1
     let version = detailVersion
     let ticket = epoch
     selectedId = id
     if detail?.id != id { detail = nil }
     guard let id, owner != nil else { return }
+    if freshIds.contains(id), let value = jobs.first(where: { $0.id == id }),
+      value.workerAvailable != nil || ["ready", "failed", "cancelled"].contains(value.status),
+      let lastSuccessfulRefreshAt, now() - lastSuccessfulRefreshAt < 10
+    {
+      detail = value
+      return
+    }
+    guard !reading, now() >= retryNotBefore else { return }
+    reading = true
+    defer {
+      if ticket == epoch {
+        finishReading(ticket)
+        if let selectedId, selectedId != id {
+          Task {
+            guard ticket == self.epoch else { return }
+            await self.select(selectedId)
+          }
+        }
+      }
+    }
     do {
       let value = try await api.detail(id: id)
       guard !Task.isCancelled, ticket == epoch, version == detailVersion else { return }
@@ -184,17 +249,22 @@ func processingErrorKey(_ error: Error) -> String {
   }
 
   func setVisible(_ visible: Bool) {
+    if self.visible == visible, !visible || polling != nil { return }
     self.visible = visible
     polling?.cancel()
     polling = nil
     guard visible, owner != nil else { return }
     polling = Task { [weak self] in
-      await self?.refresh()
+      if let self,
+        self.refreshPending || self.lastSuccessfulRefreshAt.map({ self.now() - $0 >= 10 }) != false
+      {
+        await self.refreshAfterChange()
+      }
       while !Task.isCancelled {
         let seconds = self?.retryDelay ?? 10
         do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
         guard let self else { return }
-        if self.messageKey != nil
+        if self.refreshPending || self.retryNotBefore > 0 || self.messageKey != nil
           || self.jobs.contains(where: { shouldPollProcessingJob($0.status) })
           || self.detail.map({ shouldPollProcessingJob($0.status) }) == true
         {
@@ -208,10 +278,27 @@ func processingErrorKey(_ error: Error) -> String {
     messageKey = processingErrorKey(error)
     if case JobsFailure.rateLimited(let seconds) = error {
       retryDelay = max(10, seconds)
+      retryNotBefore = max(retryNotBefore, now() + seconds)
     } else {
       retryDelay = min(60, retryDelay * 2)
     }
     await onFailure(selectedId, error)
+  }
+
+  func refreshAfterChange() async {
+    refreshPending = true
+    await refresh()
+  }
+
+  private func finishReading(_ ticket: UInt64) {
+    guard ticket == epoch else { return }
+    reading = false
+    if refreshPending, now() >= retryNotBefore, visible || !Task.isCancelled {
+      Task {
+        guard ticket == self.epoch else { return }
+        await self.refresh()
+      }
+    }
   }
 
   private func deduplicated(_ values: [Job]) -> [Job] {

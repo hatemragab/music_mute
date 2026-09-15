@@ -68,6 +68,7 @@ struct RegisteredDevice: Codable, Equatable, Identifiable, Sendable {
   let firstSeenAt: Date
   let lastSeenAt: Date
   let versionHistory: [VersionTransition]
+  var sessionStatus: String? = nil
 }
 
 struct DevicePage: Codable, Equatable, Sendable {
