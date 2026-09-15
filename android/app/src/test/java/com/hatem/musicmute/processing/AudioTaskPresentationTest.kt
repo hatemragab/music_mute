@@ -119,7 +119,7 @@ class AudioTaskPresentationTest {
         assertEquals(.5f, uploading.progressFraction)
         assertEquals(
             AudioTaskStage.CONFIRMING_UPLOAD,
-            stage(base.copy(phase = ProcessingPhase.CONFIRMING), "awaiting_upload").stage,
+            stage(base.copy(phase = ProcessingPhase.CONFIRMING, uploadedBytes = 1000), "awaiting_upload").stage,
         )
         assertEquals(
             AudioTaskStage.CANCELLING,
@@ -148,6 +148,58 @@ class AudioTaskPresentationTest {
             audioTaskPresentations(listOf(operation.copy(serverStatus = "queued")), emptyList(), 0)
                 .single().stage,
         )
+    }
+
+    @Test fun confirmedUploadNeverReturnsToWaitingWhileHistoryStillAwaitsUpload() {
+        val operation = ProcessingOperation("operation", "owner", "request",
+            jobId = job("awaiting_upload").id, phase = ProcessingPhase.CONFIRMING,
+            input = InputDeclaration("mp3", "audio/mpeg", 1000, 30.0, "hash"), uploadedBytes = 1000,
+            serverStatus = "awaiting_upload")
+        val cached = job("awaiting_upload")
+        val snapshots = listOf(
+            operation,
+            operation.copy(serverStatus = "queued"),
+            operation.copy(serverStatus = "queued", phase = ProcessingPhase.COMPLETE),
+        )
+        assertEquals(
+            listOf(AudioTaskStage.CONFIRMING_UPLOAD, AudioTaskStage.QUEUED, AudioTaskStage.QUEUED),
+            snapshots.map { audioTaskPresentations(listOf(it), listOf(cached), 0).single().stage },
+        )
+    }
+
+    @Test fun reservationResponseDoesNotResetLocalPreparationToWaiting() {
+        val operation = ProcessingOperation("operation", "owner", "request",
+            jobId = job("awaiting_upload").id, phase = ProcessingPhase.RESERVING,
+            serverStatus = "awaiting_upload")
+        assertEquals(AudioTaskStage.RESERVING_JOB,
+            audioTaskPresentations(listOf(operation), listOf(job("awaiting_upload")), 0).single().stage)
+    }
+
+    @Test fun zeroBytesIsZeroPercentWhenTransferSizeIsKnown() {
+        val operation = ProcessingOperation("operation", "owner", "request",
+            phase = ProcessingPhase.UPLOADING,
+            input = InputDeclaration("mp3", "audio/mpeg", 1000, 30.0, "hash"))
+        assertEquals(0f, audioTaskPresentations(listOf(operation), emptyList(), 0).single().progressFraction)
+        assertEquals(0f, audioTaskPresentations(listOf(operation.copy(
+            phase = ProcessingPhase.DOWNLOADING_SOURCE, sourceTotalBytes = 1000)), emptyList(), 0)
+            .single().progressFraction)
+    }
+
+    @Test fun authoritativeRecoveryAndTerminalStatesOverridePersistedSubmission() {
+        val operation = ProcessingOperation("operation", "owner", "request",
+            jobId = job("queued").id, phase = ProcessingPhase.COMPLETE, serverStatus = "processing")
+        for ((status, expected) in listOf(
+            "queued" to AudioTaskStage.QUEUED,
+            "interrupted" to AudioTaskStage.INTERRUPTED,
+            "cancel_requested" to AudioTaskStage.CANCELLING,
+            "failed" to AudioTaskStage.FAILED,
+            "cancelled" to AudioTaskStage.CANCELLED,
+            "ready" to AudioTaskStage.READY,
+            "future_state" to AudioTaskStage.UNKNOWN,
+        )) {
+            assertEquals(status, expected,
+                audioTaskPresentations(listOf(operation), listOf(job(status)), 0).single().stage)
+        }
     }
 
     private fun job(status: String) = Job(

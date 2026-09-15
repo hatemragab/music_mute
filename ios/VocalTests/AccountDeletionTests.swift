@@ -55,6 +55,64 @@ final class AccountDeletionTests: XCTestCase {
 }
 
 @MainActor final class AccountRecoveryAPIClientTests: XCTestCase {
+  func testDeviceHistoryRemovalRefreshesOnceAfterUnauthorized() async throws {
+    let source = RecoveryTokenSource()
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [RecoveryURLProtocol.self]
+    let api = AuthAPIClient(
+      configuration: AuthConfiguration(apiOrigin: URL(string: "https://api.example")!),
+      tokenSource: source, sessionConfiguration: configuration)
+    var calls = 0
+    defer { RecoveryURLProtocol.handler = nil }
+    RecoveryURLProtocol.handler = { _ in
+      calls += 1
+      return calls == 1 ? (401, Data()) : (204, Data())
+    }
+    try await api.removeDeviceHistory(id: "0e47b60a-4835-4cc3-a5b9-2d64d48f8c19")
+    XCTAssertEqual(calls, 2)
+    XCTAssertEqual(source.refreshRequests, [false, true])
+    calls = 0
+    source.refreshRequests = []
+    RecoveryURLProtocol.handler = { _ in
+      calls += 1
+      return (401, Data())
+    }
+    do {
+      try await api.removeDeviceHistory(id: "0e47b60a-4835-4cc3-a5b9-2d64d48f8c19")
+      XCTFail("A repeated 401 must stop retrying")
+    } catch { XCTAssertEqual(error as? AuthFailure, .sessionExpired) }
+    XCTAssertEqual(calls, 2)
+    XCTAssertEqual(source.refreshRequests, [false, true])
+  }
+
+  func testDeviceHistoryRemovalUsesAuthenticatedEmptyDeleteAndRequires204() async throws {
+    let source = RecoveryTokenSource()
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [RecoveryURLProtocol.self]
+    let api = AuthAPIClient(
+      configuration: AuthConfiguration(apiOrigin: URL(string: "https://api.example")!),
+      tokenSource: source, sessionConfiguration: configuration)
+    let id = "0e47b60a-4835-4cc3-a5b9-2d64d48f8c19"
+    defer { RecoveryURLProtocol.handler = nil }
+    RecoveryURLProtocol.handler = { request in
+      XCTAssertEqual(request.url?.path, "/api/v1/users/me/devices/\(id)")
+      XCTAssertEqual(request.httpMethod, "DELETE")
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token")
+      XCTAssertTrue(recoveryRequestData(request).isEmpty)
+      return (204, Data())
+    }
+    try await api.removeDeviceHistory(id: id)
+    RecoveryURLProtocol.handler = { _ in (200, Data("{}".utf8)) }
+    do {
+      try await api.removeDeviceHistory(id: id)
+      XCTFail("Expected a 204 response")
+    } catch { XCTAssertEqual(error as? AuthFailure, .malformedResponse) }
+    do {
+      try await api.removeDeviceHistory(id: "../me")
+      XCTFail("Invalid IDs must not reach the transport")
+    } catch { XCTAssertEqual(error as? AuthFailure, .invalidInput) }
+  }
+
   func testPendingDeletionMapsToRecoveryGateAndOptionalReasonUsesEmptyBody() async throws {
     let source = RecoveryTokenSource()
     let configuration = URLSessionConfiguration.ephemeral
@@ -294,7 +352,11 @@ final class AccountDeletionTests: XCTestCase {
 }
 
 @MainActor private final class RecoveryTokenSource: IDTokenSource {
-  func idToken(forceRefresh: Bool) async throws -> String { "token" }
+  var refreshRequests: [Bool] = []
+  func idToken(forceRefresh: Bool) async throws -> String {
+    refreshRequests.append(forceRefresh)
+    return "token"
+  }
 }
 
 private final class RecoveryURLProtocol: URLProtocol, @unchecked Sendable {

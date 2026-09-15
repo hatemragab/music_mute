@@ -250,7 +250,8 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
                     }
                     updateDownload(record) {
                         if (it.status == DownloadStatus.COMPLETE) it
-                        else it.copy(status = DownloadStatus.QUEUED, error = DownloadError.NONE)
+                        else it.copy(status = DownloadStatus.QUEUED, error = DownloadError.NONE,
+                            sourceDiagnostic = (error as? YoutubeSourceFailure)?.diagnostic)
                     }
                     captureFailure(target, stage, reason, retryable = true)
                     return Result.retry()
@@ -275,6 +276,7 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
                     current.copy(
                         status = DownloadStatus.FAILED,
                         error = classifyDownloadError(error),
+                        sourceDiagnostic = (error as? YoutubeSourceFailure)?.diagnostic,
                     )
             }
             Result.failure()
@@ -378,20 +380,23 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
 }
 
 fun classifyDownloadError(error: Exception): DownloadError {
+    if (error is YoutubeSourceFailure) return error.reason
     if (error is InputPreparationException) return when (error.reason) {
         InputPreparationError.STORAGE -> DownloadError.STORAGE
         else -> DownloadError.INVALID_AUDIO
     }
     val message = error.message.orEmpty().lowercase()
     return when {
-        "space" in message || "disk" in message || "permission denied" in message ->
+        "no space left" in message || "disk full" in message || "permission denied" in message ->
             DownloadError.STORAGE
+        "429" in message || "too many requests" in message ||
+            "try again later" in message || "403" in message -> DownloadError.NETWORK
+        "requested format" in message || "signature extraction" in message ||
+            "nsig extraction" in message -> DownloadError.ENGINE
         "sign in" in message ||
             "not available" in message ||
             "unavailable" in message ||
-            "private" in message ||
-            "requested format" in message ||
-            "403" in message -> DownloadError.UNAVAILABLE
+            "private" in message -> DownloadError.UNAVAILABLE
         "timed out" in message ||
             "network" in message ||
             "resolve" in message ||

@@ -316,3 +316,10 @@
 "media_replenishes" = "التجدد التالي:";
 "media_minutes" = "دقيقة";
 "media_inspecting" = "فحص الوسائط…";
+"device_history_title" = "سجل الأجهزة";
+"device_history_description" = "اتصالات سابقة، بما فيها إعادة تثبيت التطبيق. لا تعني هذه السجلات بالضرورة أن أحدًا لا يزال مسجّل الدخول.";
+"device_history_signed_out" = "تم تسجيل الخروج";
+"device_history_unknown" = "حالة الجلسة: غير مؤكدة";
+"device_history_remove" = "إزالة من السجل";
+"device_history_remove_title" = "إزالة هذا السجل؟";
+"device_history_remove_body" = "يخفي هذا الإجراء السجل دون تسجيل خروج الجهاز. سيظهر مجددًا إذا اتصل هذا التثبيت مرة أخرى. لإنهاء الوصول من كل الأجهزة، استخدم تسجيل الخروج من جميع الأجهزة.";

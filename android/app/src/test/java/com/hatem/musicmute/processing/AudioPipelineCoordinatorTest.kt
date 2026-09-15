@@ -60,7 +60,7 @@ class AudioPipelineCoordinatorTest {
         assertEquals(ProcessingPhase.DOWNLOADING_SOURCE, first.phase)
     }
 
-    @Test fun invalidUrlDoesNotPersistAndImportWaitsForExplicitCloudConsent() = runTest {
+    @Test fun invalidUrlDoesNotPersistAndValidImportSchedulesAutomatically() = runTest {
         val fixture = fixture()
         val invalidId = UUID.randomUUID().toString()
         assertTrue(runCatching { fixture.coordinator.acceptUrl(invalidId, "https://example.com/nope") }.isFailure)
@@ -74,8 +74,18 @@ class AudioPipelineCoordinatorTest {
         assertEquals("meeting", operation.displayName)
         assertEquals("meeting", operation.sourceTitle)
         assertEquals(SourceKind.FILE, operation.sourceKind)
-        assertEquals(ProcessingPhase.PAUSED, fixture.store.get("owner", importId)!!.phase)
-        assertTrue(fixture.uploads.enqueued.isEmpty())
+        assertEquals(ProcessingPhase.WAITING, fixture.store.get("owner", importId)!!.phase)
+        assertFalse(operation.awaitingCloudConsent)
+        assertEquals(listOf(importId), fixture.uploads.enqueued)
+    }
+
+    @Test fun importTitleRemovesOnlyTheFileExtension() = runTest {
+        val fixture = fixture()
+        val operation = fixture.coordinator.acceptImport(UUID.randomUUID().toString(), "Song ft. Singer.mp3") {
+            ByteArrayInputStream(byteArrayOf(1, 2, 3))
+        }
+        assertEquals("Song ft. Singer", operation.displayName)
+        assertEquals("Song ft. Singer", operation.sourceTitle)
     }
 
     @Test fun longImportNameKeepsSupportedExtensionAfterTitleBounding() = runTest {
@@ -86,7 +96,7 @@ class AudioPipelineCoordinatorTest {
         }
         assertEquals("mp3", operation.input?.extension)
         assertEquals(200, operation.sourceTitle.codePointCount(0, operation.sourceTitle.length))
-        assertEquals(ProcessingPhase.PAUSED, operation.phase)
+        assertEquals(ProcessingPhase.WAITING, operation.phase)
     }
 
     @Test fun completedUrlKeepsExtractedTitleAndHandsSameDurableOperationToUpload() = runTest {
@@ -98,7 +108,9 @@ class AudioPipelineCoordinatorTest {
         assertEquals(id, operation.operationId)
         assertEquals("Original title", operation.sourceTitle)
         assertEquals("Original title", operation.displayName)
-        assertTrue(fixture.uploads.enqueued.isEmpty())
+        assertFalse(operation.awaitingCloudConsent)
+        assertEquals(ProcessingPhase.WAITING, operation.phase)
+        assertEquals(listOf(id), fixture.uploads.enqueued)
     }
 
     @Test fun lostSourceEnqueueIsPersistedAndRecoveredWithoutASecondIntent() = runTest {
@@ -150,27 +162,25 @@ class AudioPipelineCoordinatorTest {
         assertEquals("https://www.youtube.com/watch?v=abc12345678", retained.sourceUrl)
     }
 
-    @Test fun reviewSurvivesResumeAndWorkerUntilExplicitRightsConfirmation() = runTest {
+    @Test fun legacyPreparedReviewResumesWithoutAnotherSheet() = runTest {
         val fixture = fixture()
         val id = UUID.randomUUID().toString()
         fixture.coordinator.acceptImport(id, "meeting.mp3") { ByteArrayInputStream(byteArrayOf(1, 2, 3)) }
+        fixture.store.update("owner", id) { it.copy(awaitingCloudConsent = true, phase = ProcessingPhase.PAUSED) }
+        fixture.uploads.enqueued.clear()
         fixture.repository.resumePending()
-        fixture.repository.resume(id)
-        assertEquals(ProcessingRunResult.PAUSED, fixture.repository.runUpload("owner", id, 7))
-        assertTrue(fixture.uploads.enqueued.isEmpty())
-        assertTrue(runCatching { fixture.repository.confirmCloudProcessing(id, false) }.isFailure)
-        assertTrue(fixture.store.get("owner", id)!!.awaitingCloudConsent)
-        assertEquals(AudioTaskStage.REVIEW, audioTaskPresentations(listOf(fixture.store.get("owner", id)!!), emptyList(), 0).single().stage)
-        fixture.repository.confirmCloudProcessing(id, true)
         assertFalse(fixture.store.get("owner", id)!!.awaitingCloudConsent)
         assertEquals(listOf(id), fixture.uploads.enqueued)
     }
 
-    @Test fun cancellingReviewRemovesPrivateStagingWithoutCreatingACloudJob() = runTest {
+    @Test fun cancellingLegacyReviewRemovesPrivateStagingWithoutResumingUpload() = runTest {
         val fixture = fixture()
         val id = UUID.randomUUID().toString()
         fixture.coordinator.acceptImport(id, "meeting.mp3") { ByteArrayInputStream(byteArrayOf(1, 2, 3)) }
+        fixture.store.update("owner", id) { it.copy(awaitingCloudConsent = true, phase = ProcessingPhase.PAUSED) }
+        fixture.uploads.enqueued.clear()
         fixture.repository.deleteOperation(id)
+        fixture.repository.resumePending()
         assertNull(fixture.store.get("owner", id))
         assertFalse(File(processingOwnerDirectory(File(fixture.root, "staging"), "owner"), id).exists())
         assertTrue(fixture.uploads.enqueued.isEmpty())

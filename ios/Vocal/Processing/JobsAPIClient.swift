@@ -54,14 +54,29 @@ extension JobsAPI {
     return value
   }()
   private let decoder = JSONDecoder.authDecoder()
+  private var retryNotBefore: TimeInterval = 0
+  private let now: () -> TimeInterval
+
+  private func checkCooldown() throws {
+    let remaining = retryNotBefore - now()
+    if remaining > 0 { throw JobsFailure.rateLimited(retryAfter: ceil(remaining)) }
+  }
+
+  private func rateLimited(_ response: HTTPURLResponse) -> JobsFailure {
+    let seconds = max(1, retryAfter(response))
+    retryNotBefore = max(retryNotBefore, now() + seconds)
+    return .rateLimited(retryAfter: seconds)
+  }
 
   init(
     configuration: AuthConfiguration, tokenSource: IDTokenSource,
     installationId: @escaping @MainActor () -> String?,
-    sessionConfiguration: URLSessionConfiguration? = nil
+    sessionConfiguration: URLSessionConfiguration? = nil,
+    now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
   ) {
     self.tokenSource = tokenSource
     self.installationId = installationId
+    self.now = now
     transport = AuthHTTPTransport(
       configuration: configuration,
       sessionConfiguration: sessionConfiguration, rejectRedirects: true)
@@ -187,6 +202,7 @@ extension JobsAPI {
     installation: Bool = false
   ) async throws -> Response {
     try Task.checkCancellation()
+    try checkCooldown()
     guard let tokenSource else { throw AuthFailure.sessionExpired }
     let capturedSession = tokenSource.tokenSession
     var headers: [String: String] = [:]
@@ -202,6 +218,7 @@ extension JobsAPI {
       let token = try await tokenSource.idToken(forceRefresh: attempt == 1)
       try Task.checkCancellation()
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
+      try checkCooldown()
       let (data, response) = try await transport.perform(
         method: method, path: path, body: body, bearer: token, headers: headers)
       try Task.checkCancellation()
@@ -231,7 +248,7 @@ extension JobsAPI {
       case 403: throw JobsFailure.forbidden(code: code)
       case 404: throw JobsFailure.notFound
       case 409: throw JobsFailure.conflict(code: code)
-      case 429: throw JobsFailure.rateLimited(retryAfter: retryAfter(response))
+      case 429: throw rateLimited(response)
       default: throw JobsFailure.serviceUnavailable
       }
     }
@@ -239,12 +256,14 @@ extension JobsAPI {
   }
   private func sendNoContent(_ method: String, _ path: String) async throws {
     try Task.checkCancellation()
+    try checkCooldown()
     guard let tokenSource else { throw AuthFailure.sessionExpired }
     let capturedSession = tokenSource.tokenSession
     for attempt in 0...1 {
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
       let token = try await tokenSource.idToken(forceRefresh: attempt == 1)
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
+      try checkCooldown()
       let (data, response) = try await transport.perform(
         method: method, path: path, body: nil, bearer: token, headers: [:])
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
@@ -256,7 +275,7 @@ extension JobsAPI {
       case 401: throw AuthFailure.sessionExpired
       case 404: throw JobsFailure.notFound
       case 409: throw JobsFailure.conflict(code: rawCode == "JOB_ACTIVE" ? rawCode : nil)
-      case 429: throw JobsFailure.rateLimited(retryAfter: retryAfter(response))
+      case 429: throw rateLimited(response)
       default: throw JobsFailure.serviceUnavailable
       }
     }

@@ -46,7 +46,8 @@ describe('Firebase account API composition', () => {
       .get('/api/v1/users/me')
       .set('Authorization', token)
       .expect(200);
-    expect(f.events.slice(0, 5)).toEqual([
+    expect(f.events.slice(0, 6)).toEqual([
+      'ip-limit',
       'ip-limit',
       'signature',
       'uid-budget',

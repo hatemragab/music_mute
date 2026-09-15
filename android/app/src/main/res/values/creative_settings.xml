@@ -1,5 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="creative_settings_account_security">Account &amp; security</string>
+    <string name="creative_settings_usage">Usage</string>
+    <string name="creative_settings_usage_unlimited">Unlimited usage</string>
+    <string name="creative_settings_usage_temporary">Your usage is currently unlimited for a limited time.</string>
+    <string name="creative_settings_preferences">Preferences</string>
+    <string name="creative_settings_help">Help &amp; about</string>
+    <string name="creative_settings_feedback">Feedback or report a bug</string>
+    <string name="creative_settings_support">Account help &amp; support</string>
+    <string name="creative_settings_sponsored">Apply for sponsored access</string>
+    <string name="creative_settings_legal">Legal</string>
+    <string name="creative_settings_terms">Terms of service</string>
+    <string name="creative_settings_privacy">Privacy policy</string>
+    <string name="creative_settings_about">About MusicMute</string>
     <string name="creative_settings_profile">Profile</string>
     <string name="creative_settings_accent">Accent color</string>
     <string name="creative_settings_accent_description">Choose the color of buttons, highlights and flowing waves.</string>

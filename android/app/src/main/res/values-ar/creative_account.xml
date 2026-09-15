@@ -1,5 +1,5 @@
 <resources>
-    <string name="creative_account_login_hero">يسعدنا سماعك.</string>
+    <string name="creative_account_login_hero">مرحبًا بعودتك</string>
     <string name="creative_account_register_hero">اجعل صوتك مميزًا.</string>
     <string name="creative_account_reset_hero">لنساعدك على العودة.</string>
     <string name="creative_account_profile">الملف الشخصي</string>

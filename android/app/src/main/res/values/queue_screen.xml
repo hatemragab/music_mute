@@ -1,0 +1,8 @@
+<resources>
+    <string name="queue_other">Other queued audio</string>
+    <string name="queue_upcoming_count">Up next · %1$d</string>
+    <string name="queue_nothing_next">Nothing else will play automatically.</string>
+    <string name="queue_shuffle_on">Shuffle on</string>
+    <string name="queue_shuffle_off">Shuffle off</string>
+    <string name="queue_auto_next">Auto-next</string>
+</resources>

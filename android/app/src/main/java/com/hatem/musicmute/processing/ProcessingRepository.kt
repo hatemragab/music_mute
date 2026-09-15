@@ -70,9 +70,9 @@ class ProcessingRepository(
             operationId = operationId,
             ownerUid = owner.uid,
             requestId = operationId,
-            displayName = normalizedTitle.substringBeforeLast('.').ifBlank { normalizedTitle },
+            displayName = normalizedTitle,
             sourceKind = sourceKind,
-            sourceTitle = normalizedTitle.substringBeforeLast('.').ifBlank { normalizedTitle },
+            sourceTitle = normalizedTitle,
             sourceUrl = sourceUrl,
             clientStartedAtMillis = acceptedAt,
             acceptedAtMillis = acceptedAt,
@@ -191,6 +191,13 @@ class ProcessingRepository(
         val operations = store.operations(owner.uid).first()
         checkSession(owner)
         for (operation in operations) {
+            // Resume prepared imports left at the review step by older app versions.
+            if (operation.awaitingCloudConsent && operation.input != null &&
+                !operation.cancellationRequested && !operation.pendingDelete && operation.localProblem == null) {
+                checkSession(owner)
+                confirmCloudProcessing(operation.operationId, true)
+                continue
+            }
             if ((operation.phase in setOf(ProcessingPhase.WAITING, ProcessingPhase.RESERVING,
                     ProcessingPhase.UPLOADING, ProcessingPhase.CONFIRMING,
                     ProcessingPhase.CANCELLING, ProcessingPhase.RETRY_WAIT) ||

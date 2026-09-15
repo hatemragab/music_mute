@@ -4,6 +4,25 @@ import XCTest
 @testable import Vocal
 
 @MainActor final class JobsAPIClientTests: XCTestCase {
+  func testRateLimitStopsOtherJobRoutesBeforeTransport() async {
+    let token = JobsTokenFixture()
+    var clock: TimeInterval = 0
+    let api = client(token, now: { clock })
+    var calls = 0
+    JobsURLProtocol.handler = { _ in
+      calls += 1
+      if calls == 1 { return (429, ["Retry-After": "60"], Data("{}".utf8)) }
+      return (204, [:], Data())
+    }
+    _ = try? await api.list()
+    _ = try? await api.cancel(id: id)
+    try? await api.delete(id: id)
+    XCTAssertEqual(calls, 1)
+    clock = 60
+    do { try await api.delete(id: id) } catch { XCTFail("cooldown did not expire: \(error)") }
+    XCTAssertEqual(calls, 2)
+  }
+
   private let id = "68c000000000000000000001"
   private let requestId = UUID(uuidString: "C21A2EAA-7E73-4F08-89DA-6AC35BAA83E1")!
   private let installation = "D7EA7DE6-52E9-4B96-8834-3B517941BDB0"
@@ -14,12 +33,16 @@ import XCTest
       extension: "mp3", contentType: "audio/mpeg", bytes: 123,
       durationSeconds: 2.5, sha256: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
   }
-  private func client(_ token: JobsTokenFixture) -> JobsAPIClient {
+  private func client(
+    _ token: JobsTokenFixture,
+    now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+  ) -> JobsAPIClient {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [JobsURLProtocol.self]
     return JobsAPIClient(
       configuration: AuthConfiguration(apiOrigin: URL(string: "https://api.example")!),
-      tokenSource: token, installationId: { self.installation }, sessionConfiguration: config)
+      tokenSource: token, installationId: { self.installation }, sessionConfiguration: config,
+      now: now)
   }
   func testVersionedPolicyMetadataAndAllowanceRejection() async throws {
     let token = JobsTokenFixture()
@@ -237,12 +260,12 @@ import XCTest
   }
   func testSafeErrorsAndRetryAfter() async throws {
     let token = JobsTokenFixture()
-    let api = client(token)
     for (status, expected) in [
       (403, JobsFailure.forbidden(code: "EMAIL_VERIFICATION_REQUIRED")), (404, .notFound),
       (409, .conflict(code: "NEW_INPUT_REQUIRED")), (429, .rateLimited(retryAfter: 12)),
       (503, .serviceUnavailable), (302, .redirectRejected),
     ] {
+      let api = client(token)
       JobsURLProtocol.handler = { _ in
         let code = status == 403 ? "EMAIL_VERIFICATION_REQUIRED" : "NEW_INPUT_REQUIRED"
         return (

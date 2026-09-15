@@ -1,6 +1,9 @@
 import type { DeviceDocument } from './device.schema.js';
 
-export function presentDevice(device: DeviceDocument) {
+export function presentDevice(
+  device: DeviceDocument,
+  sessionStatus: 'signed_out' | 'unknown' = 'unknown',
+) {
   return {
     installationId: device.installationId,
     platform: device.platform,
@@ -11,6 +14,7 @@ export function presentDevice(device: DeviceDocument) {
     deviceModel: device.deviceModel,
     firstSeenAt: device.firstSeenAt,
     lastSeenAt: device.lastSeenAt,
+    sessionStatus,
     versionHistory: device.versionHistory.map((entry) => ({
       appVersion: entry.appVersion,
       buildNumber: entry.buildNumber,

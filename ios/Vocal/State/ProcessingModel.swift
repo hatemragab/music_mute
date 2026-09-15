@@ -132,7 +132,7 @@ import Foundation
     for intent in pipeline.pipelines where !intent.phase.isTerminal {
       await pipeline.resume(intent.operationId)
     }
-    await history.refresh()
+    await history.refreshAfterChange()
   }
 
   func importPhoto(_ url: URL) { importAudio(url, securityScoped: false) }
@@ -192,7 +192,7 @@ import Foundation
       try self.check(uid, ticket)
       self.prepared = nil
       self.pendingInputName = nil
-      await self.history.refresh()
+      await self.history.refreshAfterChange()
     }
   }
 
@@ -235,7 +235,7 @@ import Foundation
     perform(stage: .cancelling, jobID: id) { uid, ticket in
       _ = try await self.repository.cancel(jobId: id)
       try self.check(uid, ticket)
-      await self.history.refresh()
+      await self.history.refreshAfterChange()
     }
   }
 
@@ -257,7 +257,7 @@ import Foundation
     perform(stage: .retrying, operationID: task.operationID, jobID: id) { uid, ticket in
       let result = try await self.repository.retry(jobId: id)
       try self.check(uid, ticket)
-      await self.history.refresh()
+      await self.history.refreshAfterChange()
       self.selectedJobID = result.id
       await self.history.select(result.id)
     }
@@ -335,7 +335,7 @@ import Foundation
         _ = try await self.repository.rename(jobId: jobID, displayName: name)
       }
       try self.check(uid, ticket)
-      await self.history.refresh()
+      await self.history.refreshAfterChange()
       if let jobID = task.jobID { await self.history.select(jobID) }
     }
   }
@@ -361,7 +361,7 @@ import Foundation
       self.selectedJobID = nil
       self.selectedOperationID = nil
       await self.history.select(nil)
-      await self.history.refresh()
+      await self.history.refreshAfterChange()
     }
   }
 
@@ -406,7 +406,7 @@ import Foundation
         self.messageKey = processingErrorKey(error)
         await self.reportDiagnostic(
           error, stage: stage, operationID: operationID, jobID: jobID)
-        await self.history.refresh()
+        await self.history.refreshAfterChange()
       }
     }
     actions[actionID] = task

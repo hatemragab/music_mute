@@ -1,0 +1,13 @@
+<resources>
+    <string name="result_details_title">تفاصيل الصوت</string>
+    <string name="result_history_title">سجل المعالجة</string>
+    <string name="result_job_title">تفاصيل المهمة</string>
+    <string name="result_completed">اكتملت المعالجة</string>
+    <string name="result_format">MP3 للصوت فقط</string>
+    <string name="result_duration">المدة</string>
+    <string name="result_output">النتيجة</string>
+    <string name="result_status">الحالة</string>
+    <string name="result_ready">جاهز</string>
+    <string name="result_keep_offline">الاحتفاظ دون إنترنت</string>
+    <string name="result_offline_hint">حفظ داخل هذا التطبيق</string>
+</resources>

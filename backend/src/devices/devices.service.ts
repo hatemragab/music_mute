@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { ClientSession, Model } from 'mongoose';
 import { AccountAccessService } from '../users/account-access.service.js';
-import { trusted } from 'mongoose';
+import { trusted, Types } from 'mongoose';
 import type { DeviceReport } from '../auth/auth.types.js';
 import { authError } from '../auth/auth.errors.js';
 import { DeviceInstallationOwnersService } from './device-installation-owners.service.js';
@@ -114,7 +114,13 @@ export class DevicesService {
         ))
       )
         return null;
-      if (!changed && !seenDue && authTimeSec <= current.lastAuthenticatedAtSec)
+      const restoreHistory = current.historyHiddenAt != null;
+      if (
+        !changed &&
+        !seenDue &&
+        !restoreHistory &&
+        authTimeSec <= current.lastAuthenticatedAtSec
+      )
         return current;
       const versionChanged =
         changed &&
@@ -130,8 +136,14 @@ export class DevicesService {
             lastAuthenticatedAtSec: current.lastAuthenticatedAtSec,
           },
           {
-            ...(changed || seenDue
-              ? { $set: { ...(changed ? metadata : {}), lastSeenAt: now } }
+            ...(changed || seenDue || restoreHistory
+              ? {
+                  $set: {
+                    ...(changed ? metadata : {}),
+                    lastSeenAt: now,
+                    historyHiddenAt: null,
+                  },
+                }
               : {}),
             $max: { lastAuthenticatedAtSec: authTimeSec },
             ...(versionChanged
@@ -173,6 +185,7 @@ export class DevicesService {
     const items = await this.devices
       .find({
         userId,
+        historyHiddenAt: null,
         ...(query.before ? { _id: trusted({ $lt: query.before }) } : {}),
       })
       .sort({ _id: -1 })
@@ -181,6 +194,41 @@ export class DevicesService {
     const hasMore = items.length > limit;
     if (hasMore) items.pop();
     return { items, nextCursor: hasMore ? items.at(-1)!._id.toString() : null };
+  }
+
+  async hideFromHistory(userId: string, installationId: string): Promise<void> {
+    await this.access.runActive(userId, async (session) => {
+      await this.devices.updateOne(
+        {
+          userId,
+          installationId: installationId.toLowerCase(),
+          historyHiddenAt: null,
+        },
+        { $set: { historyHiddenAt: new Date() } },
+        { session, runValidators: true },
+      );
+    });
+  }
+
+  async sessionStatuses(
+    userId: string,
+    devices: DeviceDocument[],
+    revokedAfterSec: number,
+  ): Promise<Array<'signed_out' | 'unknown'>> {
+    const owned = devices.filter(
+      (device) => device.userId.toString() === userId,
+    );
+    const inactive = await this.installationOwners.inactiveInstallationIds(
+      // All callers supply documents scoped to this verified user.
+      new Types.ObjectId(userId),
+      owned.map((device) => device.installationId),
+    );
+    return devices.map((device) =>
+      device.lastAuthenticatedAtSec <= revokedAfterSec ||
+      inactive.has(device.installationId)
+        ? 'signed_out'
+        : 'unknown',
+    );
   }
 
   private metadata(report: DeviceReport) {

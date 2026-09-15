@@ -117,7 +117,7 @@
     <string name="auth_welcome">Welcome back</string>
     <string name="auth_create_title">Your listening starts here</string>
     <string name="auth_reset_title">Reset your password</string>
-    <string name="auth_login_description">Sign in to continue to MusicMute.</string>
+    <string name="auth_login_description">Sign in to your account.</string>
     <string name="auth_register_description">Create your account with email or continue with Google.</string>
     <string name="auth_reset_description">Enter your account email. We’ll send instructions if password recovery is available.</string>
     <string name="auth_email">Email address</string>
@@ -302,7 +302,7 @@
     <string name="audio_remove_music">Remove music</string>
     <string name="youtube_secondary">YouTube link (secondary option)</string>
     <string name="youtube_download_action">Download from YouTube</string>
-    <string name="youtube_rights_disclosure">Download audio from YouTube only when you have permission and the service permits downloading. You will review the downloaded audio separately before any cloud upload.</string>
+    <string name="youtube_rights_disclosure">Download audio from YouTube only when you have permission and the service permits downloading. After download, the audio is prepared and uploaded automatically for processing.</string>
     <string name="account_deletion_unconfirmed">A deletion request could not be confirmed. Sign in again to retry deletion, or use account deletion help. Your data is not reported as deleted.</string>
     <string name="auth_error_deletion_pending">Account deletion is scheduled. You can request recovery from this page.</string>
     <string name="auth_error_recovery_expired">The three-month recovery period has ended and permanent deletion has started.</string>

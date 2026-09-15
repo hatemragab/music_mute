@@ -4,6 +4,136 @@ import XCTest
 @testable import Vocal
 
 @MainActor final class ProcessingHistoryTests: XCTestCase {
+  func testMutationDuringRefreshSchedulesOneFollowupForNewJob() async {
+    let api = HistoryAPIFixture()
+    var pending: CheckedContinuation<JobPage, Error>?
+    var calls = 0
+    let updated = expectation(description: "mutation refresh")
+    api.page = { _ in
+      calls += 1
+      if calls == 1 { return try await withCheckedThrowingContinuation { pending = $0 } }
+      updated.fulfill()
+      return JobPage(items: [self.job("new")], nextCursor: nil)
+    }
+    let model = ProcessingHistoryModel(api: api)
+    await model.bindOwner("owner")
+    let first = Task { await model.refresh() }
+    while pending == nil { await Task.yield() }
+    await model.refreshAfterChange()
+    await model.refreshAfterChange()
+    pending?.resume(returning: JobPage(items: [], nextCursor: nil))
+    await first.value
+    await fulfillment(of: [updated], timeout: 3)
+    while model.loading { await Task.yield() }
+    XCTAssertEqual(model.jobs.map(\.id), ["new"])
+    XCTAssertEqual(calls, 2)
+  }
+
+  func testForegroundRetriesCancelledInitialRefresh() async {
+    let api = HistoryAPIFixture()
+    var calls = 0
+    let started = expectation(description: "first request")
+    let recovered = expectation(description: "replacement request")
+    api.page = { _ in
+      calls += 1
+      if calls == 1 {
+        started.fulfill()
+        try await Task.sleep(for: .seconds(60))
+      } else {
+        recovered.fulfill()
+      }
+      return JobPage(items: [self.job("a", status: "ready")], nextCursor: nil)
+    }
+    let model = ProcessingHistoryModel(api: api)
+    await model.bindOwner("owner")
+    model.setVisible(true)
+    await fulfillment(of: [started], timeout: 2)
+    model.setVisible(false)
+    while model.loading { await Task.yield() }
+    model.setVisible(true)
+    await fulfillment(of: [recovered], timeout: 3)
+    while model.loading { await Task.yield() }
+    XCTAssertEqual(model.jobs.map(\.id), ["a"])
+    model.setVisible(false)
+  }
+
+  func testSelectionDuringPaginationIsResolvedAfterPageArrives() async {
+    let api = HistoryAPIFixture()
+    var pending: CheckedContinuation<JobPage, Error>?
+    var clock: TimeInterval = 0
+    api.page = { cursor in
+      if cursor == nil {
+        return JobPage(items: [self.job("a", status: "ready")], nextCursor: "next")
+      }
+      return try await withCheckedThrowingContinuation { pending = $0 }
+    }
+    api.fetch = { id in self.job(id, status: "ready") }
+    let model = ProcessingHistoryModel(api: api, now: { clock })
+    await model.bindOwner("owner")
+    await model.refresh()
+    clock = 20
+    let more = Task { await model.loadMore() }
+    while pending == nil { await Task.yield() }
+    await model.select("a")
+    pending?.resume(returning: JobPage(items: [], nextCursor: nil))
+    await more.value
+    XCTAssertEqual(model.detail?.id, "a")
+  }
+
+  func testFreshTerminalPageSuppliesDetailWithoutAnotherRequest() async {
+    let api = HistoryAPIFixture()
+    var details = 0
+    api.page = { _ in JobPage(items: [self.job("a", status: "ready")], nextCursor: nil) }
+    api.fetch = { _ in
+      details += 1
+      throw JobsFailure.notFound
+    }
+    let model = ProcessingHistoryModel(api: api)
+    await model.bindOwner("owner")
+    await model.refresh()
+    await model.select("a")
+    XCTAssertEqual(model.detail?.status, "ready")
+    XCTAssertEqual(details, 0)
+  }
+
+  func testOverlappingRefreshesShareThePendingRequest() async {
+    let api = HistoryAPIFixture()
+    var pending: CheckedContinuation<JobPage, Error>?
+    var calls = 0
+    api.page = { _ in
+      calls += 1
+      return try await withCheckedThrowingContinuation { pending = $0 }
+    }
+    let model = ProcessingHistoryModel(api: api)
+    await model.bindOwner("owner")
+    let first = Task { await model.refresh() }
+    while pending == nil { await Task.yield() }
+    await model.refresh()
+    XCTAssertEqual(calls, 1)
+    pending?.resume(returning: JobPage(items: [job("a")], nextCursor: nil))
+    await first.value
+    XCTAssertEqual(model.jobs.map(\.id), ["a"])
+  }
+
+  func testRateLimitBlocksManualRefreshAndSelection() async {
+    let api = HistoryAPIFixture()
+    var calls = 0
+    api.page = { _ in
+      calls += 1
+      throw JobsFailure.rateLimited(retryAfter: 60)
+    }
+    api.fetch = { _ in
+      calls += 1
+      return self.job("a")
+    }
+    let model = ProcessingHistoryModel(api: api)
+    await model.bindOwner("owner")
+    await model.refresh()
+    await model.refresh()
+    await model.select("a")
+    XCTAssertEqual(calls, 1)
+  }
+
   func testOutputStorageFailureUsesStorageMessage() {
     XCTAssertEqual(processingErrorKey(JobArtifactFailure.storage), "processing_error_storage")
     XCTAssertEqual(processingErrorKey(JobArtifactFailure.unavailable), "processing_error_state")
@@ -26,11 +156,9 @@ import XCTest
 
   func testManualRefreshDuringCacheLoadDoesNotLoseVisiblePolling() async {
     let api = HistoryAPIFixture()
-    let polled = expectation(description: "poll after cache race")
     var calls = 0
     api.page = { _ in
       calls += 1
-      if calls == 2 { polled.fulfill() }
       return JobPage(items: [], nextCursor: nil)
     }
     var pending: CheckedContinuation<[Job], Error>?
@@ -45,7 +173,8 @@ import XCTest
     await model.refresh()
     pending?.resume(returning: [])
     await bind.value
-    await fulfillment(of: [polled], timeout: 1)
+    await Task.yield()
+    XCTAssertEqual(calls, 1, "cache completion must not duplicate the fresh network page")
     model.setVisible(false)
   }
 

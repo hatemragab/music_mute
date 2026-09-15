@@ -24,7 +24,7 @@ import com.hatem.musicmute.ui.settings.CreativeSettingsScreen
 @Preview(name = "Creative Home narrow large text", widthDp = 320, heightDp = 900, fontScale = 1.6f)
 @Composable
 private fun HomePreview() = VocalTheme {
-    Surface { HomeScreen(emptyList(), JobHistoryState(), false, {}, {}, {}, {}, {}, {}, {}) }
+    Surface { HomeScreen(emptyList(), JobHistoryState(), false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }) }
 }
 
 private val savedTrack = LibraryEntry(
@@ -38,14 +38,14 @@ private val previewPlayback = PlaybackState(
     currentIndex = 0, positionMs = 42_000, durationMs = 182_000,
 )
 private val libraryActions = LibraryActions({}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {})
-private val playerActions = PlayerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+private val playerActions = PlayerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
 
 @Preview(name = "Creative Library offline", widthDp = 390, heightDp = 850)
 @Preview(name = "Creative Library Arabic large text", locale = "ar", widthDp = 320, heightDp = 1000, fontScale = 1.6f)
 @Composable
 private fun LibraryPreview() = VocalTheme {
     Surface { LibraryScreen(LibraryUiState(entries = listOf(savedTrack)), libraryActions) {
-        MiniPlayer(previewPlayback, {}, {}, {})
+        MiniPlayer(previewPlayback, {}, {}, {}, {}, {})
     } }
 }
 

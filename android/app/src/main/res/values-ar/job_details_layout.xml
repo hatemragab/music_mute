@@ -1,0 +1,4 @@
+<resources>
+    <string name="job_total_time_label">الوقت الإجمالي</string>
+    <string name="job_processing_time_label">وقت المعالجة</string>
+</resources>

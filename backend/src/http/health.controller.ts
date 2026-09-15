@@ -19,7 +19,7 @@ export class HealthController {
     @InjectConnection() private readonly database: Connection,
     @Inject(SECURITY_REDIS) private readonly redis: Redis,
   ) {}
-  @SkipThrottle()
+  @SkipThrottle({ default: true, overall: true })
   @Get('live')
   live() {
     return { status: 'ok' };

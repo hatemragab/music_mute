@@ -46,7 +46,7 @@ private val auditPlayback = PlaybackState(
     trackId = "track-0", queue = auditQueue, orderedQueue = auditQueue,
     currentIndex = 0, durationMs = 123_000, positionMs = 45_000,
 )
-private val auditPlayerActions = PlayerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+private val auditPlayerActions = PlayerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
 private val auditLibraryActions = LibraryActions({}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {})
 
 @AuditConfigurations
@@ -83,7 +83,7 @@ private fun QueueAudit() = VocalTheme {
 @Composable
 private fun OfflineHomeAudit() = VocalTheme {
     Surface {
-        HomeScreen(emptyList(), JobHistoryState(failure = JobsProblem.OFFLINE), false, {}, {}, {}, {}, {}, {}, {})
+        HomeScreen(emptyList(), JobHistoryState(failure = JobsProblem.OFFLINE), false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> })
     }
 }
 

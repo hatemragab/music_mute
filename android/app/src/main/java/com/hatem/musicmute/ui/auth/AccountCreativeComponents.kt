@@ -20,14 +20,14 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 
 @Composable
-internal fun AccountHeader(title: String, onBack: () -> Unit, enabled: Boolean = true) {
+internal fun AccountHeader(title: String, onBack: () -> Unit, enabled: Boolean = true, showWave: Boolean = true) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(onBack, enabled = enabled) {
             Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back))
         }
         Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
     }
-    CreativeWave(Modifier.fillMaxWidth().height(64.dp))
+    if (showWave) CreativeWave(Modifier.fillMaxWidth().height(64.dp))
 }
 
 @Composable

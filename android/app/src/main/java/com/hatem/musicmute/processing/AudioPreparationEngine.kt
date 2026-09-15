@@ -15,6 +15,12 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
+internal fun decodedAudioSampleRate(sourceChannels: Int, channels: Int, sampleRate: Int, pcm16Bit: Boolean): Int {
+    if (channels != sourceChannels || channels !in 1..2 || sampleRate !in 8000..96000 || !pcm16Bit)
+        throw InputPreparationException(InputPreparationError.UNSUPPORTED)
+    return sampleRate
+}
+
 /** Direct provider access: never makes a private copy of the original video. */
 class AudioPreparationEngine(private val context: Context) {
     suspend fun inspect(uri: Uri): MediaSourceInspection = withContext(Dispatchers.IO) {
@@ -28,7 +34,7 @@ class AudioPreparationEngine(private val context: Context) {
     }
 
     suspend fun prepare(uri: Uri, output: File, policy: ProcessingMediaPolicy): File = withContext(Dispatchers.IO) {
-        if (!policy.localExpansionReady) throw InputPreparationException(InputPreparationError.UNSUPPORTED)
+        if (!policy.localPreparationReady) throw InputPreparationException(InputPreparationError.UNSUPPORTED)
         val sourceLimit = requireNotNull(policy.maxLocalSourceBytes)
         val descriptor = context.contentResolver.openAssetFileDescriptor(uri, "r")
             ?: throw InputPreparationException(InputPreparationError.STORAGE)
@@ -118,12 +124,7 @@ class AudioPreparationEngine(private val context: Context) {
         try {
             val decodeFormat = source.getTrackFormat(selected.id).apply { setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT) }
             decoder.configure(decodeFormat, null, null, 0); decoder.start(); decoderStarted = true
-            val encodeFormat = MediaFormat.createAudioFormat("audio/mp4a-latm", selected.sampleRate, selected.channels).apply {
-                setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-                setInteger(MediaFormat.KEY_BIT_RATE, 256000)
-                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
-            }
-            encoder.configure(encodeFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE); encoder.start(); encoderStarted = true
+            var outputSampleRate = 0
             var inputEnded = false
             var decodeEnded = false
             var encodeEnded = false
@@ -154,10 +155,23 @@ class AudioPreparationEngine(private val context: Context) {
                     val index = decoder.dequeueOutputBuffer(decodedInfo, 1000)
                     if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         val actual = decoder.outputFormat
-                        if (actual.getInteger(MediaFormat.KEY_CHANNEL_COUNT) != selected.channels ||
-                            actual.getInteger(MediaFormat.KEY_SAMPLE_RATE) != selected.sampleRate ||
-                            (actual.containsKey(MediaFormat.KEY_PCM_ENCODING) && actual.getInteger(MediaFormat.KEY_PCM_ENCODING) != AudioFormat.ENCODING_PCM_16BIT))
+                        val sampleRate = decodedAudioSampleRate(selected.channels,
+                            actual.getInteger(MediaFormat.KEY_CHANNEL_COUNT), actual.getInteger(MediaFormat.KEY_SAMPLE_RATE),
+                            !actual.containsKey(MediaFormat.KEY_PCM_ENCODING) || actual.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_16BIT)
+                        if (encoderStarted && sampleRate != outputSampleRate)
                             throw InputPreparationException(InputPreparationError.UNSUPPORTED)
+                        if (!encoderStarted) {
+                            // Opus can report its original input rate in the container but decode at 48 kHz.
+                            // Encode the actual PCM rate so pitch, duration and timestamps stay correct.
+                            outputSampleRate = sampleRate
+                            val encodeFormat = MediaFormat.createAudioFormat("audio/mp4a-latm", outputSampleRate, selected.channels).apply {
+                                setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+                                setInteger(MediaFormat.KEY_BIT_RATE, 256000)
+                                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
+                            }
+                            encoder.configure(encodeFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                            encoder.start(); encoderStarted = true
+                        }
                     } else if (index >= 0) {
                         pendingIndex = index
                         pending = requireNotNull(decoder.getOutputBuffer(index)).apply {
@@ -168,6 +182,7 @@ class AudioPreparationEngine(private val context: Context) {
                     }
                 }
                 if (pendingIndex >= 0) {
+                    if (!encoderStarted) throw InputPreparationException(InputPreparationError.INVALID_AUDIO)
                     val index = encoder.dequeueInputBuffer(1000)
                     if (index >= 0) {
                         val input = requireNotNull(encoder.getInputBuffer(index)).apply { clear() }
@@ -178,14 +193,14 @@ class AudioPreparationEngine(private val context: Context) {
                         val end = !pcm.hasRemaining() && pendingEnd
                         encoder.queueInputBuffer(index, 0, count, pendingTime, if (end) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0)
                         pcmBytes += count
-                        pendingTime += count.toLong() * 1_000_000 / (selected.sampleRate * selected.channels * 2)
+                        pendingTime += count.toLong() * 1_000_000 / (outputSampleRate * selected.channels * 2)
                         if (!pcm.hasRemaining()) {
                             decoder.releaseOutputBuffer(pendingIndex, false); pendingIndex = -1; pending = null
                             decodeEnded = end
                         }
                     }
                 }
-                var index = encoder.dequeueOutputBuffer(encodedInfo, 1000)
+                var index = if (encoderStarted) encoder.dequeueOutputBuffer(encodedInfo, 1000) else MediaCodec.INFO_TRY_AGAIN_LATER
                 while (index != MediaCodec.INFO_TRY_AGAIN_LATER) {
                     check()
                     if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {

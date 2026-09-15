@@ -30,6 +30,7 @@ data class AudioTaskPresentation(
     val errorCode: String? = null,
     val problem: JobsProblem? = null,
     val localProblem: ProcessingLocalProblem? = null,
+    val lastReachedStage: AudioTaskStage = stage,
 )
 
 fun audioTaskPresentations(
@@ -66,8 +67,8 @@ private fun presentation(
         AudioTaskStage.UPLOADING_RESULT, AudioTaskStage.INTERRUPTED, AudioTaskStage.CANCELLING,
     )
     val transferred = when (stage) {
-        AudioTaskStage.DOWNLOADING_SOURCE -> operation?.sourceDownloadedBytes?.takeIf { it > 0 }
-        AudioTaskStage.UPLOADING_INPUT -> operation?.uploadedBytes?.takeIf { it > 0 }
+        AudioTaskStage.DOWNLOADING_SOURCE -> operation?.sourceDownloadedBytes?.coerceAtLeast(0)
+        AudioTaskStage.UPLOADING_INPUT -> operation?.uploadedBytes?.coerceAtLeast(0)
         else -> null
     }
     val total = when (stage) {
@@ -114,23 +115,54 @@ private fun presentation(
         errorCode = if (stage == AudioTaskStage.FAILED) job?.error?.code else null,
         problem = if (stage == AudioTaskStage.FAILED || stage == AudioTaskStage.WAITING) operation?.problem else null,
         localProblem = if (stage == AudioTaskStage.FAILED) operation?.localProblem else null,
+        lastReachedStage = lastReachedStage(stage, operation, job),
     )
 }
 
 private fun resolvedTaskStage(operation: ProcessingOperation?, job: Job?): AudioTaskStage {
     if (operation?.awaitingCloudConsent == true && !operation.cancellationRequested) return AudioTaskStage.REVIEW
-    val server = (job?.status ?: operation?.serverStatus)?.let(::serverStage)
+    // A reservation cannot return to awaiting_upload after confirmation. The
+    // history poll may still contain the earlier reservation while upload work
+    // has already persisted the confirmation response.
+    val status = if (job?.status == "awaiting_upload" &&
+        JobStatus.entries.any { it != JobStatus.AWAITING_UPLOAD && it.wireValue == operation?.serverStatus }
+    ) operation?.serverStatus else job?.status ?: operation?.serverStatus
+    val server = status?.let(::serverStage)
     if (server in setOf(AudioTaskStage.READY, AudioTaskStage.FAILED, AudioTaskStage.CANCELLED))
         return server!!
-    val local = operation?.phase?.let(::localStage)
+    val local = operation?.progressPhase?.let(::localStage)
     if (local == AudioTaskStage.CANCELLING) return local
     if (server == AudioTaskStage.WAITING &&
         local in setOf(
+            AudioTaskStage.RESERVING_JOB,
             AudioTaskStage.UPLOADING_INPUT,
             AudioTaskStage.CONFIRMING_UPLOAD,
             AudioTaskStage.FAILED,
         )) return local!!
     return server ?: local ?: AudioTaskStage.UNKNOWN
+}
+
+private fun lastReachedStage(stage: AudioTaskStage, operation: ProcessingOperation?, job: Job?): AudioTaskStage {
+    // Use durable evidence, not a remembered UI rank: reopening a failed job
+    // must retain history, and a different job must never inherit its progress.
+    val recorded = when {
+        job?.stages?.uploadingResultAt != null || job?.stages?.processingFinishedAt != null -> AudioTaskStage.UPLOADING_RESULT
+        job?.stages?.processingStartedAt != null -> AudioTaskStage.PROCESSING
+        job?.stages?.validatingAt != null -> AudioTaskStage.VALIDATING
+        job?.queuedAt != null -> AudioTaskStage.QUEUED
+        else -> AudioTaskStage.UNKNOWN
+    }
+    val localEvidence = when {
+        operation?.hasUploadedInput == true -> AudioTaskStage.CONFIRMING_UPLOAD
+        job != null || operation?.jobId != null -> AudioTaskStage.UPLOADING_INPUT
+        operation?.input != null -> AudioTaskStage.RESERVING_JOB
+        operation?.sourceTotalBytes?.let { it > 0 && operation.sourceDownloadedBytes >= it } == true -> AudioTaskStage.PREPARING_INPUT
+        else -> AudioTaskStage.UNKNOWN
+    }
+    return listOfNotNull(stage, recorded, localEvidence,
+        operation?.serverStatus?.let(::serverStage), operation?.progressPhase?.let(::localStage),
+        operation?.lastReachedPhase?.let(::localStage))
+        .maxBy(::taskStageRank)
 }
 
 private fun serverStage(status: String): AudioTaskStage = when (status) {

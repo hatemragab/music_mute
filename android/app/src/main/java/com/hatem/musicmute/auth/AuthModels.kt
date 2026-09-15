@@ -66,6 +66,7 @@ data class RegisteredDevice(
     val firstSeenAt: String,
     val lastSeenAt: String,
     val versionHistory: List<VersionObservation> = emptyList(),
+    val sessionStatus: String = "unknown",
 )
 
 @Serializable

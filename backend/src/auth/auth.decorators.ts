@@ -12,6 +12,7 @@ export type AuthOperation =
   | 'profile'
   | 'device'
   | 'logout'
+  | 'processing-read'
   | 'processing-create'
   | 'processing-grant'
   | 'processing-mutation';

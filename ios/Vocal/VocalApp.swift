@@ -324,7 +324,7 @@ struct VocalRootView: View {
       }
       .onChange(of: push.refreshHint) { _, _ in
         guard tab == 2, scenePhase == .active else { return }
-        Task { await processing.history.refresh() }
+        Task { await processing.history.refreshAfterChange() }
       }
   }
 }

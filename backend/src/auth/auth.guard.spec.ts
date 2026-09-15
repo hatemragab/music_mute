@@ -17,6 +17,16 @@ import { WORKER_ONLY_ROUTE } from '../worker/worker-routes.js';
 import { ADMIN_ROUTE } from '../admin/admin.decorators.js';
 
 describe('private request trust order', () => {
+  it('isolates job reads from the private mutation budget', async () => {
+    const f = setup();
+    Reflect.defineMetadata(AUTH_OPERATION, 'processing-read', f.handler);
+    await f.guard.canActivate(f.context);
+    expect(f.budgets.reserve).toHaveBeenCalledWith([
+      { key: 'processing-read-uid:fixture-owner', limit: 60, windowMs: 60000 },
+    ]);
+    expect(f.req.identity.uid).toBe('fixture-owner');
+  });
+
   function setup(header: unknown = 'Bearer fixture-token') {
     const events: string[] = [];
     const identity = {

@@ -24,10 +24,15 @@ class ProbeController {
   @Get('alternate') alternate() {
     return { ok: true };
   }
-  @SkipThrottle()
+  @SkipThrottle({ default: true, overall: true })
   @Get('live')
   live() {
     return { status: 'ok' };
+  }
+  @SkipThrottle({ default: true })
+  @Get('job-read')
+  read() {
+    return { ok: true };
   }
   @Get('failure') failure() {
     throw new Error('private-sdk-credential');
@@ -52,6 +57,7 @@ describe('HTTP security defaults', () => {
             () => ({
               APP_ENV: 'production',
               RATE_LIMIT: 3,
+              RATE_IP_CEILING_PER_MINUTE: 8,
               RATE_TTL_MS: 60000,
               FIREBASE_PROJECT_ID: 'demo-musicmute',
               RATE_LIMIT_HASH_SECRET: '0123456789abcdef0123456789abcdef',
@@ -121,6 +127,21 @@ describe('HTTP security defaults', () => {
   it('preserves explicit liveness throttle exemptions', async () => {
     for (let index = 0; index < 5; index++)
       await request(app.getHttpServer()).get('/api/v1/probe/live').expect(200);
+  });
+  it('keeps job reads outside the ordinary IP bucket but inside the overall ceiling', async () => {
+    for (let index = 0; index < 6; index++)
+      await request(app.getHttpServer())
+        .get('/api/v1/probe/job-read')
+        .expect(200);
+    await request(app.getHttpServer()).get('/api/v1/probe').expect(200);
+    await request(app.getHttpServer())
+      .get('/api/v1/probe/job-read')
+      .expect(200);
+    const blocked = await request(app.getHttpServer())
+      .get('/api/v1/probe/job-read')
+      .expect(429);
+    expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
+    await request(app.getHttpServer()).get('/api/v1/probe/live').expect(200);
   });
   it('fails closed without exposing Redis errors', async () => {
     redis.available = false;

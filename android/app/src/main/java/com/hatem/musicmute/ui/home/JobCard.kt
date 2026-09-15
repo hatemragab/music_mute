@@ -1,13 +1,16 @@
 package com.hatem.musicmute.ui.home
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -16,26 +19,43 @@ import com.hatem.musicmute.R
 import com.hatem.musicmute.processing.AudioTaskPresentation
 import com.hatem.musicmute.processing.AudioTaskStage
 import com.hatem.musicmute.ui.*
-import com.hatem.musicmute.ui.design.*
 
 @Composable
-fun JobCard(task: AudioTaskPresentation, busy: Boolean, onOpen: () -> Unit, onCancel: () -> Unit, onRetry: () -> Unit) {
-    CreativeCard(Modifier.clickable(onClick = onOpen), contentPadding = CreativeTokens.CompactCardPadding,
-        contentGap = CreativeTokens.CompactGap) {
-        BoxWithConstraints {
-            val inlineAction = maxWidth >= 280.dp && LocalDensity.current.fontScale < 1.3f
+fun JobCard(task: AudioTaskPresentation, busy: Boolean, onOpen: () -> Unit, onCancel: () -> Unit, onRetry: () -> Unit, onDelete: () -> Unit) {
+    val accent = if (task.stage == AudioTaskStage.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    Box(Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(8.dp))
+        .background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Box(Modifier.matchParentSize().padding(vertical = 16.dp)) {
+            Box(Modifier.align(Alignment.CenterStart).fillMaxHeight().width(3.dp)
+                .background(accent, RoundedCornerShape(3.dp)))
+        }
+        BoxWithConstraints(Modifier.fillMaxWidth().clickable(onClick = onOpen)
+            .heightIn(min = 84.dp).padding(start = 17.dp, end = 14.dp, top = 16.dp, bottom = 16.dp),
+            contentAlignment = Alignment.CenterStart) {
+            val showAction = task.stage != AudioTaskStage.READY
+            val inlineAction = task.stage != AudioTaskStage.FAILED && maxWidth >= 280.dp && LocalDensity.current.fontScale < 1.3f
+            val duration = task.audioDurationMs?.takeIf { !task.active }?.let(::formatElapsed)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(when (task.stage) {
-                        AudioTaskStage.READY -> Icons.Outlined.CheckCircle
-                        AudioTaskStage.FAILED -> Icons.Outlined.ErrorOutline
-                        else -> Icons.Outlined.Schedule
-                    }, null, tint = if (task.stage == AudioTaskStage.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(task.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 2,
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(task.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 1,
                             overflow = TextOverflow.Ellipsis)
-                        Text(stringResource(audioTaskStageLabel(task.stage)), style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (task.stage == AudioTaskStage.READY) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Row(Modifier.background(accent.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Outlined.Check, null, modifier = Modifier.size(12.dp), tint = accent)
+                                    Text(stringResource(R.string.creative_jobs_ready_badge), style = MaterialTheme.typography.labelSmall,
+                                        color = accent)
+                                }
+                                Text(stringResource(R.string.creative_jobs_voice_format), modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        } else {
+                            Text(stringResource(audioTaskStageLabel(task.stage)), style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         if (task.active) {
                             val progress = task.progressFraction
                             if (progress != null) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
@@ -45,17 +65,21 @@ fun JobCard(task: AudioTaskPresentation, busy: Boolean, onOpen: () -> Unit, onCa
                                     if (task.totalElapsedApproximate) " · " + stringResource(R.string.audio_task_approximate) else "",
                                     style = MaterialTheme.typography.labelSmall)
                             }
-                        } else {
-                            task.audioDurationMs?.let {
-                                Text(stringResource(R.string.audio_task_duration, formatElapsed(it)), style = MaterialTheme.typography.labelSmall)
-                            }
                         }
                     }
-                    if (inlineAction) JobAction(task, busy, onOpen, onCancel, onRetry)
+                    if (duration != null) Text(duration, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    if (showAction && inlineAction) JobAction(task, busy, onOpen, onCancel, onRetry)
                 }
                 audioTaskFailureLabel(task)?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
                 if (task.active && task.workerAvailable == false) Text(stringResource(R.string.processing_worker_offline))
-                if (!inlineAction) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                if (showAction && !inlineAction) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    if (task.stage == AudioTaskStage.FAILED && task.canDelete) {
+                        TextButton(onClick = onDelete, enabled = !busy,
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+                            Text(stringResource(R.string.audio_task_delete))
+                        }
+                    }
                     JobAction(task, busy, onOpen, onCancel, onRetry)
                 }
             }
@@ -71,7 +95,7 @@ private fun JobAction(task: AudioTaskPresentation, busy: Boolean, onOpen: () -> 
         task.canRetry ->
             TextButton(onClick = onRetry, enabled = !busy) { Text(stringResource(R.string.retry)) }
         else -> TextButton(onClick = onOpen) {
-            Text(stringResource(if (task.stage == AudioTaskStage.READY) R.string.creative_jobs_open_result else R.string.processing_details))
+            Text(stringResource(R.string.processing_details))
         }
     }
 }

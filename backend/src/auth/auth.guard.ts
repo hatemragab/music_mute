@@ -83,17 +83,21 @@ export class AuthGuard implements CanActivate {
     const signed = await this.firebase
       .verifySignature(bearer)
       .catch(mapFirebaseFailure);
-    const buckets: RateBucket[] = [
-      {
-        key: this.keys.bucket('private-uid', signed.uid),
-        limit: this.config.get<number>('AUTH_UID_PER_MINUTE', 120),
-        windowMs: 60000,
-      },
-    ];
     const operation = this.reflector.getAllAndOverride<AuthOperation>(
       AUTH_OPERATION,
       targets,
     );
+    // Status reads have their own user budget; polling must not consume mutations.
+    const buckets: RateBucket[] =
+      operation === 'processing-read'
+        ? []
+        : [
+            {
+              key: this.keys.bucket('private-uid', signed.uid),
+              limit: this.config.get<number>('AUTH_UID_PER_MINUTE', 120),
+              windowMs: 60000,
+            },
+          ];
     if (operation === 'profile')
       buckets.push(
         {
@@ -120,6 +124,11 @@ export class AuthGuard implements CanActivate {
         windowMs: 3600000,
       });
     const processingBudget = {
+      'processing-read': {
+        scope: 'processing-read-uid',
+        config: 'PROCESSING_READ_UID_PER_MINUTE',
+        defaultLimit: 60,
+      },
       'processing-create': {
         scope: 'processing-create-uid',
         config: 'PROCESSING_CREATE_UID_PER_MINUTE',

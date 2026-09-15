@@ -351,8 +351,26 @@ must pass the same inclusive duration/size policy; codec padding handling is not
 license for truncation. Native codec and exact boundary behavior remain unverified
 on Android hardware and must be validated before activating expanded readiness.
 
-Original source size must be known and within an evidence-backed bound for native
-video export. Unknown-size audio streams stay bounded by the prepared cap. Space
+Without expanded server readiness, local files use the standard submission path:
+audio must remain below 600 seconds and 30,000,000 bytes. Local extraction accepts
+known-size sources up to 200,000,000 bytes with a 120-second preparation deadline.
+These are conservative client limits, not measured worker qualification; they do
+not enable expanded admission, longer jobs, or additional worker capacity. Server
+maintenance, allowance, and admission checks still apply when submitting the audio.
+
+Video imports use the system document picker so the provider supplies the original
+filename instead of the photo picker's numeric alias. Only the final extension is
+removed from the title. Native AAC conversion uses the decoder's actual PCM sample
+rate (including Opus sources that declare 24 kHz but decode at 48 kHz).
+
+An opt-in device regression runner is available in `src/androidTest`. Build with
+`:app:assembleDirectDebugAndroidTest` and pass `-e sourceUri <granted-uri>` to
+`com.hatem.musicmute.test/com.hatem.musicmute.processing.MediaPreparationTestRunner`.
+It checks audio-only output, standard limits, and preserved duration, then removes
+its own temporary output. It does not submit a processing job or run a benchmark.
+
+Original source size must be known and within the selected preparation bound for
+native video export. Unknown-size audio streams stay bounded by the prepared cap. Space
 checks reserve room for the bounded prepared copies plus a 16 MiB margin. This is a
 conservative storage guard, not a device benchmark. Prepared audio survives retries
 and completion markers recover after process death; only confirmed post-upload

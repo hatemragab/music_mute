@@ -89,7 +89,7 @@ class AudioPipelineCoordinator(
                 val prepared = preparer.prepare(owner.uid, "$safeTitle.$extension", operationId, open = open)
                 repository.requireUpdateAllowed()
                 checkSession(owner)
-                repository.submit(prepared, requireCloudConsent = true)
+                repository.submit(prepared)
             }
         } catch (error: CancellationException) {
             throw error
@@ -155,7 +155,7 @@ class AudioPipelineCoordinator(
         val preparedCurrent = repository.store.get(ownerUid, operationId) ?: changedSession()
         if (expectedWorkRequestId != null && preparedCurrent.sourceWorkRequestId != expectedWorkRequestId)
             changedSession()
-        return repository.submit(prepared, expectedWorkRequestId, requireCloudConsent = true).also { checkSession(owner) }
+        return repository.submit(prepared, expectedWorkRequestId).also { checkSession(owner) }
     }
 
     suspend fun <T> withLocalSlot(

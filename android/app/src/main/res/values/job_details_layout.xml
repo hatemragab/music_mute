@@ -1,0 +1,4 @@
+<resources>
+    <string name="job_total_time_label">Total time</string>
+    <string name="job_processing_time_label">Processing time</string>
+</resources>
