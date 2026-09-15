@@ -1,6 +1,13 @@
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { createHash } from 'node:crypto';
+import { authError } from '../src/auth/auth.errors.js';
+import { WorkerAuthGuard } from '../src/worker/worker-auth.guard.js';
 import { setTimeout as delay } from 'node:timers/promises';
+import { WorkerRuntimeService } from '../src/worker/worker-runtime.service.js';
+import { WorkerIdentityService } from '../src/worker/worker-identity.service.js';
 import { WorkerController } from '../src/worker/worker.controller.js';
 import { WorkerCoordinatorService } from '../src/worker/worker-coordinator.service.js';
 import { WorkerClaimWaitService } from '../src/worker/worker-claim-wait.service.js';
@@ -14,9 +21,12 @@ describe('worker claim HTTP waiting lifecycle', () => {
   let url: string;
   let checks: number;
   let firstCheck: Promise<void>;
+  let processingEnabled: boolean;
+  const bearer = 'fixture-recovery-worker-token';
 
   beforeEach(async () => {
     checks = 0;
+    processingEnabled = true;
     let checked!: () => void;
     firstCheck = new Promise<void>((resolve) => {
       checked = resolve;
@@ -25,6 +35,23 @@ describe('worker claim HTTP waiting lifecycle', () => {
       controllers: [WorkerController],
       providers: [
         WorkerClaimWaitService,
+        { provide: WorkerRuntimeService, useValue: {} },
+        { provide: APP_GUARD, useClass: WorkerAuthGuard },
+        { provide: ConfigService, useValue: { get: () => processingEnabled } },
+        {
+          provide: WorkerIdentityService,
+          useValue: {
+            authenticateDigest: async (digest: string) => {
+              if (digest !== createHash('sha256').update(bearer).digest('hex'))
+                throw authError('UNAUTHENTICATED');
+              return {
+                workerId: 'fixture',
+                installationId: '11111111-1111-4111-8111-111111111111',
+                keySha256: digest,
+              };
+            },
+          },
+        },
         {
           provide: WorkerCoordinatorService,
           useValue: {
@@ -59,16 +86,19 @@ describe('worker claim HTTP waiting lifecycle', () => {
   function claim(body: object, signal?: AbortSignal) {
     return fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+      },
       body: JSON.stringify(body),
       signal,
     });
   }
 
   it('validates waits and preserves immediate and waited empty responses', async () => {
-    const legacy = await claim({ sessionId });
-    expect(legacy.status).toBe(204);
-    expect(legacy.headers.get('Retry-After')).toBe('15');
+    const immediate = await claim({ sessionId });
+    expect(immediate.status).toBe(204);
+    expect(immediate.headers.get('Retry-After')).toBe('15');
     expect((await claim({ sessionId, waitSeconds: null })).status).toBe(400);
     const startedAt = performance.now();
     const waited = await claim({ sessionId, waitSeconds: 1 });
@@ -87,6 +117,24 @@ describe('worker claim HTTP waiting lifecycle', () => {
     expect(checks).toBe(1);
   });
 
+  it('discovers ownership without waiting and rejects a fresh-claim wait field', async () => {
+    const recovery = (body: object) =>
+      fetch(`${url}/recovery`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bearer}`,
+        },
+        body: JSON.stringify(body),
+      });
+    const response = await recovery({ sessionId, mediaPolicyVersion: 2 });
+    expect(response.status).toBe(204);
+    expect(response.headers.get('X-Worker-Reason')).toBe('NO_OWNED_ASSIGNMENT');
+    expect(checks).toBe(1);
+    expect((await recovery({ sessionId, waitSeconds: 25 })).status).toBe(400);
+    expect(checks).toBe(1);
+  });
+
   it('closes the app promptly with an active long poll', async () => {
     const pending = claim(
       { sessionId, waitSeconds: 25 },
@@ -97,5 +145,22 @@ describe('worker claim HTTP waiting lifecycle', () => {
     await app.close();
     expect((await pending).status).toBe(204);
     expect(performance.now() - startedAt).toBeLessThan(1500);
+  });
+
+  it('authenticates recovery while processing is disabled and blocks fresh claims', async () => {
+    processingEnabled = false;
+    expect((await claim({ sessionId })).status).toBe(503);
+    for (const token of [undefined, 'invalid-worker-token', bearer]) {
+      const response = await fetch(`${url}/recovery`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ sessionId, mediaPolicyVersion: 2 }),
+      });
+      expect(response.status).toBe(token === bearer ? 204 : 401);
+    }
+    expect(checks).toBe(1);
   });
 });

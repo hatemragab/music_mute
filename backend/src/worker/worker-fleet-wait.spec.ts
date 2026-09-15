@@ -5,7 +5,7 @@ import type { WorkerIdentity } from './worker-routes.js';
 
 const identity = (workerId: string): WorkerIdentity => ({
   workerId,
-  mode: 'fleet',
+  installationId: '11111111-1111-4111-8111-111111111111',
   keySha256: 'a'.repeat(64),
 });
 

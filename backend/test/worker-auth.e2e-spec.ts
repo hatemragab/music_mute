@@ -23,6 +23,7 @@ import { FirebaseIdentityService } from '../src/auth/firebase-identity.service.j
 import { UsersService } from '../src/users/users.service.js';
 import { RateBudgetService } from '../src/rate-limits/rate-budget.service.js';
 import { RateLimitKeys } from '../src/rate-limits/rate-limit-keys.js';
+import { WorkerIdentityService } from '../src/worker/worker-identity.service.js';
 import { WorkerAuthGuard } from '../src/worker/worker-auth.guard.js';
 import {
   WorkerOnly,
@@ -89,7 +90,6 @@ async function startApp(enabled = true) {
   const keys = { bucket: (scope: string, id: string) => `${scope}:${id}` };
   const config = new ConfigService({
     AUDIO_PROCESSING_ENABLED: enabled,
-    PROCESSING_WORKER_KEY_SHA256: workerDigest,
     AUTH_UID_PER_MINUTE: 120,
   });
 
@@ -97,6 +97,19 @@ async function startApp(enabled = true) {
     controllers: [WorkerAuthProbeController],
     providers: [
       { provide: ConfigService, useValue: config },
+      {
+        provide: WorkerIdentityService,
+        useValue: {
+          authenticateDigest: async (digest: string) => {
+            if (digest !== workerDigest) throw authError('UNAUTHENTICATED');
+            return {
+              workerId: 'fixture-worker',
+              installationId: '11111111-1111-4111-8111-111111111111',
+              keySha256: digest,
+            };
+          },
+        },
+      },
       { provide: FirebaseIdentityService, useValue: firebase },
       { provide: UsersService, useValue: users },
       { provide: RateBudgetService, useValue: budgets },
@@ -128,13 +141,13 @@ describe('worker credential HTTP isolation', () => {
     await app?.close();
   });
 
-  it('accepts only the configured worker bearer on a worker-only route', async () => {
+  it('accepts only the registered worker bearer on a worker-only route', async () => {
     const response = await request(app.getHttpServer())
       .post('/api/v1/worker/claim')
       .set('Authorization', `Bearer ${workerSecret}`)
       .send({ sessionId: '00000000-0000-4000-8000-000000000000' })
       .expect(201);
-    expect(response.body).toEqual({ workerId: 'z440' });
+    expect(response.body).toEqual({ workerId: 'fixture-worker' });
 
     await request(app.getHttpServer())
       .post('/api/v1/worker/claim')

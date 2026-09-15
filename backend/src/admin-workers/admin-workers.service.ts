@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { reserveCredential } from '../worker-installations/credential-reservation.schema.js';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { createHash, randomBytes } from 'node:crypto';
@@ -18,7 +19,6 @@ import {
   workerPage,
 } from './admin-workers.presenter.js';
 import type {
-  CreateAdminWorkerDto,
   RenameAdminWorkerDto,
   RevokeAdminWorkerDto,
   ReleaseStoppedWorkerDto,
@@ -123,7 +123,7 @@ export class AdminWorkersService {
     });
     return {
       ...worker,
-      protocolVersion: 2,
+      protocolVersion: 3,
       slotState: worker.recoveryRequired
         ? 'recovery_required'
         : control?.activeJobId
@@ -145,53 +145,6 @@ export class AdminWorkersService {
         outcome: event.outcome,
       })),
     };
-  }
-
-  async create(actor: AdminActor, dto: CreateAdminWorkerDto) {
-    this.authorize(actor, 'workers.manage');
-    workerId(dto.id);
-    const result = await this.operations.run(
-      actor,
-      {
-        operationId: dto.operationId,
-        route: 'POST /admin/workers',
-        request: { id: dto.id, label: dto.label },
-        action: 'workers.create',
-        resourceType: 'worker',
-        reason: dto.reason,
-      },
-      async (session) => {
-        const rawKey = randomBytes(32).toString('hex');
-        try {
-          const [registration] = await this.registrations.create(
-            [
-              {
-                _id: dto.id,
-                label: dto.label,
-                state: 'enabled',
-                keySha256: createHash('sha256').update(rawKey).digest('hex'),
-              },
-            ],
-            { session },
-          );
-          const [control] = await this.controls.create(
-            [{ _id: dto.id, controlRevision: 0 }],
-            { session },
-          );
-          return {
-            resourceId: dto.id,
-            previousRevision: null,
-            revision: 0,
-            value: { worker: this.present(registration!, control!), rawKey },
-          };
-        } catch (error) {
-          if ((error as { code?: number }).code === 11000)
-            throw adminError('REVISION_CONFLICT');
-          throw error;
-        }
-      },
-    );
-    return result.value ?? { operation: result.receipt };
   }
 
   async update(
@@ -225,15 +178,17 @@ export class AdminWorkersService {
       async (session) => {
         const { registration, control } = await this.read(id, session);
         if (!control) throw adminError('RECOVERY_PROOF_REQUIRED');
-        if ((control.managementRevision ?? 0) !== dto.expectedRevision)
+        if (control.managementRevision !== dto.expectedRevision)
           throw adminError('REVISION_CONFLICT');
-        const previousRevision = control.managementRevision ?? 0;
+        const previousRevision = control.managementRevision;
         // The same control-document write remains serialized with worker authority fences.
-        await this.controls.updateOne(
-          { _id: id },
+        const managementUpdate = await this.controls.updateOne(
+          { _id: id, managementRevision: dto.expectedRevision },
           { $inc: { managementRevision: 1 } },
           { session },
         );
+        if (managementUpdate.matchedCount !== 1)
+          throw adminError('REVISION_CONFLICT');
         control.managementRevision = previousRevision + 1;
         const active = Boolean(
           control.activeJobId || control.attemptId || control.sessionId,
@@ -249,7 +204,7 @@ export class AdminWorkersService {
           return {
             resourceId: id,
             previousRevision,
-            revision: latest!.managementRevision ?? 0,
+            revision: latest!.managementRevision,
             stopEvidence: {
               attestation: proof.stopEvidence,
               stoppedAt: proof.stoppedAt,
@@ -285,6 +240,13 @@ export class AdminWorkersService {
           registration.keySha256 = createHash('sha256')
             .update(rawKey)
             .digest('hex');
+          await reserveCredential(
+            this.registrations.db,
+            session,
+            registration.keySha256,
+            'worker',
+            id,
+          );
         }
         await this.registry.touchControl(control, session);
         await registration.save({ session });
@@ -309,7 +271,6 @@ export class AdminWorkersService {
   ) {
     if (!actor.permissions.includes(permission))
       throw adminError('PERMISSION_DENIED');
-    if (this.registry.mode !== 'fleet') throw adminError('JOB_STATE_CONFLICT');
   }
   private async read(id: string, session?: ClientSession) {
     const registryQuery = this.registrations.findById(id).maxTimeMS(5000);

@@ -4,13 +4,14 @@ NestJS backend for the MusicMute native apps. Includes Firebase authentication,
 profiles, installation/version tracking, voluntary verification, password recovery,
 shared Redis limits, processing-access policy and logout-all. MongoDB, external
 Redis and S3 provide the infrastructure foundation. Opt-in audio processing adds
-private direct uploads/downloads, durable FIFO jobs, one external Z440 assignment,
+private direct uploads/downloads, durable FIFO jobs, installation-bound worker assignments,
 shutdown recovery, cancellation, voice-only MP3 results, and an FCM outbox.
 The backend coordinates processing; separation runs on the external Windows PC.
 
 - [Audio user/worker API](docs/api/audio-processing.md)
 - [Audio operations and Windows handoff](docs/operations/audio-processing.md)
-- [Worker fleet ownership, protocol and migration audit](docs/worker-fleet.md)
+- [Worker pairing, ownership and integrity audit](docs/worker-fleet.md)
+- [Structured worker event ingestion and 30-day timelines](docs/api/worker-events.md)
 - [Implementation and validation tracker](docs/tasks/audio-processing.md)
 - [Dashboard API](docs/dashboard-api.md)
 - [Dashboard permission matrix](docs/dashboard-permissions.md)
@@ -90,7 +91,7 @@ Native apps -> TLS reverse proxy -> API (main.ts)
 - `src/rate-limits/`: persistent counters and atomic mail reservations.
 - `src/app-policy/`: live verification and minimum-build policy.
 - `src/infrastructure/`: MongoDB and S3 Nest modules.
-- `src/jobs/`, `src/worker/`, `src/processing/`: durable audio lifecycle and Z440 protocol.
+- `src/jobs/`, `src/worker/`, `src/processing/`: durable audio lifecycle and protocol 3 workers.
 - `src/storage/`: restricted transfers and bucket preflight.
 - `src/notifications/`, `src/job-errors/`: durable push delivery and safe error records.
 - `src/app.module.ts`: HTTP composition.
@@ -155,12 +156,7 @@ npm run test:processing:integration
 npm audit --omit=dev
 ```
 
-The worker fleet cutover is always explicit. With the production runtime
-environment and the legacy worker stopped at verified idle, use
-`npm run worker:fleet:migrate -- --dry-run`, then `--apply`, and finally
-`npm run worker:fleet:audit` before changing `PROCESSING_WORKER_AUTH_MODE` to
-`fleet`. See [worker fleet operations](docs/worker-fleet.md) for the guarded
-sequence and rollback boundary.
+Workers use installation pairing and protocol 3 readiness. See [worker fleet operations](docs/worker-fleet.md) for development re-enrollment and coordinated idle validation.
 
 `verify` runs formatting checks, lint, TypeScript checks, a tracked-file credential
 scan, unit and HTTP security tests, then compiles the API. The scan reports only

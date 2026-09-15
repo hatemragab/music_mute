@@ -1,5 +1,6 @@
 import 'reflect-metadata';
-import { createHash, randomUUID } from 'node:crypto';
+import { pairedWorkerFixture } from './paired-worker-fixture.mjs';
+import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
@@ -23,7 +24,6 @@ const managedEnvironmentKeys = [
   'FIREBASE_AUTH_EMULATOR_HOST',
   'RATE_LIMIT_HASH_SECRET',
   'AUDIO_PROCESSING_ENABLED',
-  'PROCESSING_WORKER_KEY_SHA256',
   'PROCESSING_LEASE_SECONDS',
   'PROCESSING_URL_SECONDS',
   'PROCESSING_OUTPUT_MAX_BYTES',
@@ -229,9 +229,6 @@ export async function startAudioProcessingFixture(t) {
       FIREBASE_AUTH_EMULATOR_HOST: auth.authHost,
       RATE_LIMIT_HASH_SECRET: 'musicmute-audio-fixture-rate-secret-2026-09-09',
       AUDIO_PROCESSING_ENABLED: true,
-      PROCESSING_WORKER_KEY_SHA256: createHash('sha256')
-        .update(workerSecret)
-        .digest('hex'),
       PROCESSING_LEASE_SECONDS: 90,
       PROCESSING_URL_SECONDS: 900,
       PROCESSING_OUTPUT_MAX_BYTES: 30_000_000,
@@ -405,6 +402,9 @@ export async function startAudioProcessingFixture(t) {
     };
 
     await startApi();
+    const workerIdentity = await pairedWorkerFixture(models.jobs.db, {
+      rawKey: workerSecret,
+    });
     await Promise.all([
       firebaseAuth.updateUser(ownerIdentity.localId, { emailVerified: true }),
       firebaseAuth.updateUser(otherIdentity.localId, { emailVerified: true }),
@@ -434,6 +434,14 @@ export async function startAudioProcessingFixture(t) {
     }
 
     const fixture = {
+      workerRequest(token, path, body) {
+        return supertest(app.getHttpServer())
+          .post(`/api/v1/worker/${path}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send(body);
+      },
+      workerId: workerIdentity.workerId,
+      workerIdentity,
       installationId,
       sentMessages,
       fakeStorage,

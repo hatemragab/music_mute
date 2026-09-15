@@ -3,6 +3,32 @@
   "roles": ["owner", "release_manager", "worker_manager", "support", "viewer"],
   "routes": [
     {
+      "controller": "AdminInstallationEventsController",
+      "method": "GET",
+      "path": "/admin/worker-installations/:id/events",
+      "permissions": ["workers.read"],
+      "roles": ["owner", "worker_manager", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "page",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminWorkerEventsController",
+      "method": "GET",
+      "path": "/admin/workers/:id/events",
+      "permissions": ["workers.read"],
+      "roles": ["owner", "worker_manager", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "page",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
       "controller": "AdminSessionController",
       "method": "GET",
       "path": "/admin/session",
@@ -128,24 +154,6 @@
       "responseCategory": "worker",
       "validationOwner": "service",
       "successStatus": 200
-    },
-    {
-      "controller": "AdminWorkersController",
-      "method": "POST",
-      "path": "/admin/workers",
-      "permissions": ["workers.manage"],
-      "roles": ["owner", "worker_manager"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "reason": "Synthetic contract fixture",
-        "id": "node-a",
-        "label": "Synthetic worker"
-      },
-      "responseCategory": "one-time-worker-key",
-      "validationOwner": "dto",
-      "successStatus": 201
     },
     {
       "controller": "AdminWorkersController",
@@ -931,6 +939,271 @@
       "responseCategory": "job",
       "validationOwner": "service",
       "successStatus": 200
+    },
+    {
+      "controller": "AdminWorkerInstallationsController",
+      "method": "GET",
+      "path": "/admin/worker-installations",
+      "permissions": ["workers.read"],
+      "roles": ["owner", "worker_manager", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "page",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminWorkerInstallationsController",
+      "method": "GET",
+      "path": "/admin/worker-installations/:id",
+      "permissions": ["workers.read"],
+      "roles": ["owner", "worker_manager", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminWorkerInstallationsController",
+      "method": "POST",
+      "path": "/admin/worker-installations/approve",
+      "permissions": ["workers.manage"],
+      "roles": ["owner", "worker_manager"],
+      "freshAuth": true,
+      "rateClass": "write",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "userCode": "ABCDE-FGHJK",
+        "label": "Fixture worker"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminWorkerInstallationsController",
+      "method": "POST",
+      "path": "/admin/worker-installations/:id/reject",
+      "permissions": ["workers.manage"],
+      "roles": ["owner", "worker_manager"],
+      "freshAuth": false,
+      "rateClass": "write",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "reason": "Synthetic rejection"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "WorkerGroupsController",
+      "method": "GET",
+      "path": "/admin/worker-groups",
+      "permissions": ["workers.read"],
+      "roles": ["owner", "worker_manager", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "page",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "WorkerGroupsController",
+      "method": "POST",
+      "path": "/admin/worker-groups",
+      "permissions": ["workers.manage"],
+      "roles": ["owner", "worker_manager"],
+      "freshAuth": false,
+      "rateClass": "write",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "name": "Fixture group",
+        "workerIds": []
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
+      "controller": "WorkerGroupsController",
+      "method": "PATCH",
+      "path": "/admin/worker-groups/:id",
+      "permissions": ["workers.manage"],
+      "roles": ["owner", "worker_manager"],
+      "freshAuth": false,
+      "rateClass": "write",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "name": "Fixture group",
+        "workerIds": []
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "WorkerReleasesController",
+      "method": "GET",
+      "path": "/admin/worker-releases",
+      "permissions": ["workers.read"],
+      "roles": ["owner", "worker_manager", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "page",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "WorkerReleasesController",
+      "method": "POST",
+      "path": "/admin/worker-releases",
+      "permissions": ["workers.manage"],
+      "roles": ["owner", "worker_manager"],
+      "freshAuth": false,
+      "rateClass": "write",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "build": 101
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
+      "controller": "WorkerReleasesController",
+      "method": "POST",
+      "path": "/admin/worker-releases/:id/publish",
+      "permissions": ["workers.manage"],
+      "roles": ["owner", "worker_manager"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
+      "controller": "WorkerReleasesController",
+      "method": "POST",
+      "path": "/admin/worker-releases/:id/withdraw",
+      "permissions": ["workers.manage"],
+      "roles": ["owner", "worker_manager"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
+      "controller": "WorkerReleasesController",
+      "method": "POST",
+      "path": "/admin/worker-releases/:id/stable",
+      "permissions": ["workers.manage"],
+      "roles": ["owner", "worker_manager"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
+      "controller": "WorkerRolloutsController",
+      "method": "POST",
+      "path": "/admin/worker-rollouts/preview",
+      "permissions": ["workers.read"],
+      "roles": ["owner", "worker_manager", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "write",
+      "requestBody": {
+        "releaseId": "aaaaaaaaaaaaaaaaaaaaaaaa",
+        "workerIds": ["node-a"]
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
+      "controller": "WorkerRolloutsController",
+      "method": "POST",
+      "path": "/admin/worker-rollouts",
+      "permissions": ["workers.manage"],
+      "roles": ["owner", "worker_manager"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
+      "controller": "WorkerRolloutsController",
+      "method": "GET",
+      "path": "/admin/worker-rollouts/:id",
+      "permissions": ["workers.read"],
+      "roles": ["owner", "worker_manager", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "WorkerRolloutsController",
+      "method": "POST",
+      "path": "/admin/worker-rollouts/:id/pause",
+      "permissions": ["workers.manage"],
+      "roles": ["owner", "worker_manager"],
+      "freshAuth": false,
+      "rateClass": "write",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
+      "controller": "WorkerRolloutsController",
+      "method": "POST",
+      "path": "/admin/worker-rollouts/:id/retry",
+      "permissions": ["workers.manage"],
+      "roles": ["owner", "worker_manager"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
     }
   ]
 }

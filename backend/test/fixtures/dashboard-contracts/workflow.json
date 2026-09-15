@@ -17,6 +17,7 @@
           "jobs.manage",
           "users.read",
           "users.processing.manage",
+          "users.account-recovery.manage",
           "media.read",
           "releases.read",
           "releases.manage",
@@ -29,7 +30,7 @@
           "admin.access.manage"
         ],
         "accessRevision": 0,
-        "authTimeSec": 1789079284,
+        "authTimeSec": 1789337858,
         "serverTime": "2026-01-01T00:00:00.000Z"
       }
     },
@@ -60,38 +61,23 @@
           "jobs.manage",
           "users.read",
           "users.processing.manage",
+          "users.account-recovery.manage",
           "media.read",
           "settings.read",
           "exports.read"
         ],
         "accessRevision": 0,
-        "authTimeSec": 1789079284,
+        "authTimeSec": 1789337858,
         "serverTime": "2026-01-01T00:00:00.000Z"
       }
     },
     {
-      "method": "POST",
-      "path": "/admin/workers",
-      "response": {
-        "worker": {
-          "id": "fixture-worker",
-          "label": "Fixture worker",
-          "state": "enabled",
-          "online": false,
-          "lastSeenAt": null,
-          "activeJobId": null,
-          "activeAttemptId": null,
-          "recoveryRequired": false,
-          "revision": 0
-        },
-        "rawKey": "<one-time-fixture-key>"
-      }
-    },
-    {
       "method": "GET",
-      "path": "/admin/workers/fixture-worker",
+      "path": "/admin/workers/worker-00000000-0000-4000-8000-000000000001",
       "response": {
-        "id": "fixture-worker",
+        "mediaPolicyVersion": 2,
+        "mediaCapabilitySeenAt": "2026-01-01T00:00:00.000Z",
+        "id": "worker-00000000-0000-4000-8000-000000000001",
         "label": "Fixture worker",
         "state": "enabled",
         "online": true,
@@ -99,8 +85,8 @@
         "activeJobId": "000000000000000000000001",
         "activeAttemptId": "00000000-0000-4000-8000-000000000001",
         "recoveryRequired": false,
-        "revision": 3,
-        "protocolVersion": 2,
+        "revision": 0,
+        "protocolVersion": 3,
         "slotState": "active",
         "assignment": {
           "jobId": "000000000000000000000001",
@@ -112,7 +98,7 @@
         "recentEvents": [
           {
             "id": "000000000000000000000001",
-            "action": "workers.create",
+            "action": "workers.pair",
             "at": "2026-01-01T00:00:00.000Z",
             "outcome": "succeeded"
           }
@@ -121,9 +107,11 @@
     },
     {
       "method": "POST",
-      "path": "/admin/workers/fixture-worker/drain",
+      "path": "/admin/workers/worker-00000000-0000-4000-8000-000000000001/drain",
       "response": {
-        "id": "fixture-worker",
+        "mediaPolicyVersion": 2,
+        "mediaCapabilitySeenAt": "2026-01-01T00:00:00.000Z",
+        "id": "worker-00000000-0000-4000-8000-000000000001",
         "label": "Fixture worker",
         "state": "draining",
         "online": true,
@@ -131,14 +119,16 @@
         "activeJobId": "000000000000000000000001",
         "activeAttemptId": "00000000-0000-4000-8000-000000000001",
         "recoveryRequired": false,
-        "revision": 4
+        "revision": 1
       }
     },
     {
       "method": "GET",
-      "path": "/admin/workers/fixture-worker",
+      "path": "/admin/workers/worker-00000000-0000-4000-8000-000000000001",
       "response": {
-        "id": "fixture-worker",
+        "mediaPolicyVersion": 2,
+        "mediaCapabilitySeenAt": "2026-01-01T00:00:00.000Z",
+        "id": "worker-00000000-0000-4000-8000-000000000001",
         "label": "Fixture worker",
         "state": "draining",
         "online": true,
@@ -146,8 +136,8 @@
         "activeJobId": "000000000000000000000001",
         "activeAttemptId": "00000000-0000-4000-8000-000000000001",
         "recoveryRequired": false,
-        "revision": 4,
-        "protocolVersion": 2,
+        "revision": 1,
+        "protocolVersion": 3,
         "slotState": "active",
         "assignment": {
           "jobId": "000000000000000000000001",
@@ -165,7 +155,7 @@
           },
           {
             "id": "000000000000000000000001",
-            "action": "workers.create",
+            "action": "workers.pair",
             "at": "2026-01-01T00:00:00.000Z",
             "outcome": "succeeded"
           }
@@ -174,9 +164,11 @@
     },
     {
       "method": "POST",
-      "path": "/admin/workers/fixture-worker/release-stopped",
+      "path": "/admin/workers/worker-00000000-0000-4000-8000-000000000001/release-stopped",
       "response": {
-        "id": "fixture-worker",
+        "mediaPolicyVersion": 2,
+        "mediaCapabilitySeenAt": "2026-01-01T00:00:00.000Z",
+        "id": "worker-00000000-0000-4000-8000-000000000001",
         "label": "Fixture worker",
         "state": "draining",
         "online": true,
@@ -184,14 +176,16 @@
         "activeJobId": null,
         "activeAttemptId": null,
         "recoveryRequired": false,
-        "revision": 5
+        "revision": 2
       }
     },
     {
       "method": "GET",
-      "path": "/admin/workers/fixture-worker",
+      "path": "/admin/workers/worker-00000000-0000-4000-8000-000000000001",
       "response": {
-        "id": "fixture-worker",
+        "mediaPolicyVersion": 2,
+        "mediaCapabilitySeenAt": "2026-01-01T00:00:00.000Z",
+        "id": "worker-00000000-0000-4000-8000-000000000001",
         "label": "Fixture worker",
         "state": "draining",
         "online": true,
@@ -199,8 +193,8 @@
         "activeJobId": null,
         "activeAttemptId": null,
         "recoveryRequired": false,
-        "revision": 5,
-        "protocolVersion": 2,
+        "revision": 2,
+        "protocolVersion": 3,
         "slotState": "idle",
         "assignment": null,
         "recentEvents": [
@@ -218,7 +212,7 @@
           },
           {
             "id": "000000000000000000000001",
-            "action": "workers.create",
+            "action": "workers.pair",
             "at": "2026-01-01T00:00:00.000Z",
             "outcome": "succeeded"
           }
@@ -263,10 +257,11 @@
         "startedAt": "2026-01-01T00:00:00.000Z",
         "finishedAt": null,
         "elapsedSeconds": 0,
-        "queuePosition": 1,
+        "queuePosition": null,
         "revision": 3,
         "lastError": null,
         "displayName": null,
+        "sourceUrl": null,
         "retryOfJobId": null,
         "stageTimings": [
           {
@@ -279,7 +274,7 @@
             "stage": "queued",
             "startedAt": "2026-01-01T00:00:00.000Z",
             "finishedAt": "2026-01-01T00:00:00.000Z",
-            "durationSeconds": 0.012
+            "durationSeconds": 0.016
           },
           {
             "stage": "validating",
@@ -300,6 +295,11 @@
             "durationSeconds": null
           }
         ],
+        "source": "audio_file",
+        "declaredBytes": 42,
+        "measuredBytes": 42,
+        "policyVersion": 1,
+        "estimatedWorkerSeconds": null,
         "declaredDurationSeconds": 1,
         "measuredDurationSeconds": null,
         "media": {
@@ -320,7 +320,7 @@
         "platform": "android",
         "source": "direct_apk",
         "versionName": "1.0.0",
-        "buildNumber": 1,
+        "buildNumber": 2,
         "changelogEn": "Fixture release notes",
         "storeUrl": null,
         "state": "draft",
@@ -341,9 +341,9 @@
       "response": {
         "uploadId": "000000000000000000000001",
         "grant": {
-          "method": "PUT",
           "url": "https://example.invalid/fixture-signed-grant",
           "expiresAt": "2026-01-01T00:00:00.000Z",
+          "method": "PUT",
           "headers": {
             "Content-Type": "application/vnd.android.package-archive",
             "x-amz-checksum-sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -370,7 +370,7 @@
         "platform": "android",
         "source": "direct_apk",
         "versionName": "1.0.0",
-        "buildNumber": 1,
+        "buildNumber": 2,
         "changelogEn": "Fixture release notes",
         "storeUrl": null,
         "state": "draft",
@@ -411,7 +411,7 @@
           "platform": "android",
           "source": "direct_apk",
           "versionName": "1.0.0",
-          "buildNumber": 1,
+          "buildNumber": 2,
           "changelogEn": "Fixture release notes",
           "storeUrl": null,
           "state": "published",
@@ -438,7 +438,7 @@
           "platform": "android",
           "source": "direct_apk",
           "versionName": "1.0.0",
-          "buildNumber": 1,
+          "buildNumber": 2,
           "changelogEn": "Fixture release notes",
           "storeUrl": null,
           "state": "withdrawn",
@@ -473,10 +473,10 @@
         "queue": {
           "waiting": 1,
           "processing": 0,
-          "oldestWaitSeconds": 0.23
+          "oldestWaitSeconds": 0.222
         },
         "timings": {
-          "meanQueueWaitSeconds": 0.012,
+          "meanQueueWaitSeconds": 0.016,
           "meanProcessingSeconds": null,
           "sampleCount": {
             "queueWait": 1,
@@ -533,6 +533,15 @@
             "revision": 0,
             "createdAt": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "uid": "fixture-00000000-0000-4000-8000-000000000001",
+            "verifiedEmail": "pairing-00000000-0000-4000-8000-000000000001@example.test",
+            "role": "worker_manager",
+            "active": true,
+            "revision": 0,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z"
           }
         ],
         "nextCursor": null,
@@ -545,7 +554,9 @@
       "response": {
         "items": [
           {
-            "id": "fixture-worker",
+            "mediaPolicyVersion": 2,
+            "mediaCapabilitySeenAt": "2026-01-01T00:00:00.000Z",
+            "id": "worker-00000000-0000-4000-8000-000000000001",
             "label": "Fixture worker",
             "state": "draining",
             "online": true,
@@ -553,7 +564,7 @@
             "activeJobId": null,
             "activeAttemptId": null,
             "recoveryRequired": false,
-            "revision": 5
+            "revision": 2
           }
         ],
         "nextCursor": null,
@@ -575,10 +586,11 @@
             "startedAt": "2026-01-01T00:00:00.000Z",
             "finishedAt": null,
             "elapsedSeconds": 0,
-            "queuePosition": 1,
+            "queuePosition": null,
             "revision": 3,
             "lastError": null,
             "displayName": null,
+            "sourceUrl": null,
             "userEmail": "user@example.invalid",
             "userDisplayName": "Fixture user"
           }
@@ -601,6 +613,16 @@
             "createdAt": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
             "revision": 1
+          },
+          {
+            "id": "000000000000000000000001",
+            "email": "secondary@example.invalid",
+            "displayName": "Secondary fixture user",
+            "status": "active",
+            "processingSuspended": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z",
+            "revision": 0
           }
         ],
         "nextCursor": null,
@@ -617,7 +639,7 @@
             "platform": "android",
             "source": "direct_apk",
             "versionName": "1.0.0",
-            "buildNumber": 1,
+            "buildNumber": 2,
             "changelogEn": "Fixture release notes",
             "storeUrl": null,
             "state": "withdrawn",
@@ -701,9 +723,12 @@
       "response": {
         "items": [
           {
+            "separatorExecutionSeconds": null,
+            "stoppedConfirmed": false,
+            "separationCompleted": null,
             "id": "00000000-0000-4000-8000-000000000001",
             "jobId": "000000000000000000000001",
-            "workerId": "fixture-worker",
+            "workerId": "worker-00000000-0000-4000-8000-000000000001",
             "sessionId": "00000000-0000-4000-8000-000000000001",
             "generation": 1,
             "outcome": "interrupted",
@@ -741,10 +766,12 @@
         },
         "recentJobIds": ["000000000000000000000001"],
         "suspension": {
+          "expiresAt": null,
           "reason": "Owned dashboard integration fixture",
           "actorUid": "support-fixture",
           "at": "2026-01-01T00:00:00.000Z"
-        }
+        },
+        "deletion": null
       }
     },
     {
@@ -883,19 +910,31 @@
             "at": "2026-01-01T00:00:00.000Z",
             "previousRevision": 0,
             "nextRevision": 1,
-            "outcome": "succeeded"
+            "outcome": "succeeded",
+            "processingChanges": [
+              {
+                "field": "processingSuspended",
+                "before": false,
+                "after": true
+              },
+              {
+                "field": "suspensionExpiresAt",
+                "before": null,
+                "after": null
+              }
+            ]
           },
           {
             "id": "000000000000000000000001",
             "actorUid": "owner-fixture",
             "action": "workers.release-stopped",
             "resourceType": "worker",
-            "resourceId": "fixture-worker",
+            "resourceId": "worker-00000000-0000-4000-8000-000000000001",
             "operationId": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": 4,
-            "nextRevision": 5,
+            "previousRevision": 1,
+            "nextRevision": 2,
             "outcome": "succeeded",
             "stopEvidence": {
               "attestation": "Owned fixture worker process terminated; PID 4321 verified exited.",
@@ -911,25 +950,25 @@
             "actorUid": "owner-fixture",
             "action": "workers.drain",
             "resourceType": "worker",
-            "resourceId": "fixture-worker",
+            "resourceId": "worker-00000000-0000-4000-8000-000000000001",
             "operationId": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": 3,
-            "nextRevision": 4,
+            "previousRevision": 0,
+            "nextRevision": 1,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
-            "action": "workers.create",
+            "actorUid": "fixture-00000000-0000-4000-8000-000000000001",
+            "action": "workers.pair",
             "resourceType": "worker",
-            "resourceId": "fixture-worker",
+            "resourceId": "worker-00000000-0000-4000-8000-000000000001",
             "operationId": "00000000-0000-4000-8000-000000000001",
-            "reason": "Owned dashboard integration fixture",
+            "reason": null,
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": null,
-            "nextRevision": 0,
+            "previousRevision": 1,
+            "nextRevision": 2,
             "outcome": "succeeded"
           },
           {

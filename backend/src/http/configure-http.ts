@@ -5,12 +5,44 @@ import helmet from 'helmet';
 import { PublicExceptionFilter } from './public-exception.filter.js';
 import type { Server } from 'node:http';
 import { authError } from '../auth/auth.errors.js';
+import { json } from 'express';
+import type { EventRequest } from '../worker-events/worker-events.controller.js';
+import { EVENT_BODY_BYTES } from '../worker-events/worker-event-policy.js';
 
 export function configureHttp(app: NestExpressApplication): void {
   const config = app.get(ConfigService);
   app.disable('x-powered-by');
   app.set('trust proxy', config.get('TRUST_PROXY') === '1' ? 1 : false);
   app.use(helmet());
+  const eventParser = json({
+    limit: EVENT_BODY_BYTES,
+    inflate: false,
+    verify: (req, _res, buffer) => {
+      (req as EventRequest).eventBodyBytes = buffer.length;
+    },
+  });
+  app.use(
+    (
+      req: EventRequest,
+      res: Parameters<typeof eventParser>[1],
+      next: Parameters<typeof eventParser>[2],
+    ) => {
+      let path: string;
+      try {
+        path = decodeURIComponent(req.path);
+      } catch {
+        next();
+        return;
+      }
+      if (
+        /^\/api\/v1\/(?:worker\/events|worker-installations\/[^/]+\/events)\/?$/i.test(
+          path,
+        )
+      )
+        eventParser(req, res, next);
+      else next();
+    },
+  );
   app.useBodyParser('json', {
     limit: config.getOrThrow<number>('BODY_LIMIT_BYTES'),
   });

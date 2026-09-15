@@ -16,7 +16,6 @@ import {
 } from '../admin/admin.decorators.js';
 import { AdminWorkersService } from './admin-workers.service.js';
 import {
-  CreateAdminWorkerDto,
   ReleaseStoppedWorkerDto,
   RenameAdminWorkerDto,
   RevokeAdminWorkerDto,
@@ -35,13 +34,6 @@ export class AdminWorkersController {
   @RequireAdminPermission('workers.read')
   detail(@Param('id') id: string) {
     return this.workers.detail(id);
-  }
-  @Post()
-  @RequireAdminPermission('workers.manage')
-  @RequireFreshAdminAuth()
-  @LimitAdmin('sensitive')
-  create(@Req() request: AuthRequest, @Body() body: CreateAdminWorkerDto) {
-    return this.workers.create(request.adminActor!, body);
   }
   @Patch(':id')
   @RequireAdminPermission('workers.manage')

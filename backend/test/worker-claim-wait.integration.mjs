@@ -1,3 +1,4 @@
+import { pairedWorkerFixture } from './helpers/paired-worker-fixture.mjs';
 import { accountFixture } from './helpers/account-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -22,6 +23,7 @@ test('waiting claims discover newly queued work and preserve one durable assignm
   await Promise.all(
     PROCESSING_MODELS.map(({ name }) => connection.model(name).init()),
   );
+  const workerIdentity = await pairedWorkerFixture(connection);
   const jobs = connection.model('Job');
   const workers = connection.model('WorkerControl');
   const attempts = connection.model('JobAttempt');
@@ -58,11 +60,14 @@ test('waiting claims discover newly queued work and preserve one durable assignm
     contentType: input.contentType,
   };
   // Confirm the durable queue is empty before opening the waiters.
-  assert.equal(await wait.claim(randomUUID(), 0), null);
+  assert.equal(
+    await wait.claim(randomUUID(), 0, undefined, workerIdentity, 2),
+    null,
+  );
   const startedAt = performance.now();
   const pending = Promise.allSettled([
-    wait.claim(randomUUID(), 5),
-    wait.claim(randomUUID(), 5),
+    wait.claim(randomUUID(), 5, undefined, workerIdentity, 2),
+    wait.claim(randomUUID(), 5, undefined, workerIdentity, 2),
   ]);
   await delay(100);
   const first = await jobs.create({
@@ -104,8 +109,8 @@ test('waiting claims discover newly queued work and preserve one durable assignm
   assert.equal(await jobs.countDocuments({ status: 'queued' }), 1);
 
   const repeats = await Promise.allSettled([
-    wait.claim(assignment.sessionId, 25),
-    wait.claim(assignment.sessionId, 25),
+    wait.claim(assignment.sessionId, 25, undefined, workerIdentity, 2),
+    wait.claim(assignment.sessionId, 25, undefined, workerIdentity, 2),
   ]);
   const repeated = repeats.filter((value) => value.status === 'fulfilled');
   const limited = repeats.filter((value) => value.status === 'rejected');
@@ -114,9 +119,10 @@ test('waiting claims discover newly queued work and preserve one durable assignm
   assert.equal(limited.length, 1);
   assert.equal(limited[0].reason.getStatus(), 429);
   assert.equal(
-    (await wait.claim(assignment.sessionId, 25)).attemptId,
+    (await wait.claim(assignment.sessionId, 25, undefined, workerIdentity, 2))
+      .attemptId,
     assignment.attemptId,
   );
   assert.equal(await attempts.countDocuments(), 1);
-  assert.equal((await workers.findById('z440')).generation, 1);
+  assert.equal((await workers.findById(workerIdentity.workerId)).generation, 1);
 });

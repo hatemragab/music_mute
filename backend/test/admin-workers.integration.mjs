@@ -1,3 +1,4 @@
+import { pairedWorkerFixture } from './helpers/paired-worker-fixture.mjs';
 import { accountFixture } from './helpers/account-fixture.mjs';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -66,7 +67,6 @@ test('worker admin controls across independent API transactions', async (t) => {
     );
   }
   const config = new ConfigService({
-    PROCESSING_WORKER_AUTH_MODE: 'fleet',
     AUDIO_PROCESSING_ENABLED: true,
     PROCESSING_LEASE_SECONDS: 90,
     PROCESSING_OUTPUT_MAX_BYTES: 30_000_000,
@@ -160,18 +160,12 @@ test('worker admin controls across independent API transactions', async (t) => {
     await model('AdminOperation').deleteMany({});
     grants.length = 0;
   };
-  const register = async (workerId) => {
-    const keySha256 = createHash('sha256')
-      .update(`synthetic-fleet-secret-${workerId}`)
-      .digest('hex');
-    await a.transactions.run(async (session) => {
-      await registrations.create(
-        [{ _id: workerId, label: workerId, keySha256, state: 'enabled' }],
-        { session },
-      );
-      await workers.create([{ _id: workerId }], { session });
-    });
-    return { workerId, mode: 'fleet', keySha256 };
+  const workerIds = new Map();
+  const workerIdFor = (label) => workerIds.get(label);
+  const register = async (label) => {
+    const identity = await pairedWorkerFixture(connections[0], { label });
+    workerIds.set(label, identity.workerId);
+    return identity;
   };
   const enqueue = async (count) => {
     const ids = [];
@@ -277,40 +271,36 @@ test('worker admin controls across independent API transactions', async (t) => {
   };
 
   await t.test(
-    'create and rotation reveal once; receipts, queries and audit contain no credential material',
+    'pairing and rotation preserve credential privacy; receipts, queries and audit contain no credential material',
     async () => {
       await reset();
-      const dto = {
-        id: 'admin-a',
-        label: 'Admin A',
-        operationId: randomUUID(),
-        reason: 'Synthetic registration',
-      };
-      const created = await admin[0].create(actor, dto);
-      assert.match(created.rawKey, /^[a-f0-9]{64}$/);
-      const replay = await admin[1].create(actor, dto);
-      assert.equal(replay.rawKey, undefined);
-      assert.equal(replay.operation.status, 'succeeded');
-      const identity = await a.registry.authenticateDigest(
-        digest(created.rawKey),
-      );
-      const rotate = await common('admin-a');
+      assert.equal(typeof admin[0].create, 'undefined');
+      const identity = await register('admin-a');
+      const created = { rawKey: identity.rawKey };
+      const rotate = await common(workerIdFor('admin-a'));
       const rotated = await admin[1].update(
         actor,
-        'admin-a',
+        workerIdFor('admin-a'),
         'rotate-key',
         rotate,
       );
       assert.notEqual(rotated.rawKey, created.rawKey);
       assert.equal(
-        (await admin[0].update(actor, 'admin-a', 'rotate-key', rotate)).rawKey,
+        (
+          await admin[0].update(
+            actor,
+            workerIdFor('admin-a'),
+            'rotate-key',
+            rotate,
+          )
+        ).rawKey,
         undefined,
       );
       await assert.rejects(a.registry.state(identity), code('UNAUTHENTICATED'));
       await a.registry.authenticateDigest(digest(rotated.rawKey));
       const safe = JSON.stringify([
         await admin[0].list({}),
-        await admin[0].detail('admin-a'),
+        await admin[0].detail(workerIdFor('admin-a')),
         await model('AdminOperation').find().lean(),
         await model('AdminAuditEvent').find().lean(),
       ]);
@@ -326,44 +316,57 @@ test('worker admin controls across independent API transactions', async (t) => {
   );
 
   await t.test(
-    'management CAS tolerates idle claims and heartbeats but rejects competing edits on legacy controls',
+    'management CAS tolerates idle claims and heartbeats but rejects competing edits on freshly initialized controls',
     async () => {
       await reset();
       const identity = await register('node-a');
-      await workers.collection.updateOne(
-        { _id: 'node-a' },
-        { $unset: { managementRevision: '' } },
-      );
-      const idleRevision = await common('node-a');
-      const fenceBefore = (await workers.findById('node-a')).controlRevision;
+      const idleRevision = await common(workerIdFor('node-a'));
+      const fenceBefore = (await workers.findById(workerIdFor('node-a')))
+        .controlRevision;
       await a.coordinator.claim(randomUUID(), identity);
       assert.ok(
-        (await workers.findById('node-a')).controlRevision > fenceBefore,
+        (await workers.findById(workerIdFor('node-a'))).controlRevision >
+          fenceBefore,
         'worker authority fence still advances',
       );
-      await admin[0].update(actor, 'node-a', 'drain', idleRevision);
-      await admin[0].update(actor, 'node-a', 'enable', await common('node-a'));
+      await admin[0].update(
+        actor,
+        workerIdFor('node-a'),
+        'drain',
+        idleRevision,
+      );
+      await admin[0].update(
+        actor,
+        workerIdFor('node-a'),
+        'enable',
+        await common(workerIdFor('node-a')),
+      );
       await enqueue(1);
       const assignment = await a.coordinator.claim(randomUUID(), identity);
-      const observed = await common('node-a');
+      const observed = await common(workerIdFor('node-a'));
       await a.coordinator.heartbeat(selector(assignment), identity);
-      const drained = await admin[0].update(actor, 'node-a', 'drain', observed);
+      const drained = await admin[0].update(
+        actor,
+        workerIdFor('node-a'),
+        'drain',
+        observed,
+      );
       assert.equal(drained.revision, observed.expectedRevision + 1);
       await assert.rejects(
-        admin[1].update(actor, 'node-a', 'enable', {
+        admin[1].update(actor, workerIdFor('node-a'), 'enable', {
           ...observed,
           operationId: randomUUID(),
         }),
         code('REVISION_CONFLICT'),
       );
       assert.equal(
-        (await workers.findById('node-a')).activeJobId.toString(),
+        (await workers.findById(workerIdFor('node-a'))).activeJobId.toString(),
         assignment.jobId,
       );
-      const competingRevision = await common('node-a');
+      const competingRevision = await common(workerIdFor('node-a'));
       const competing = await Promise.allSettled(
         admin.map((service, index) =>
-          service.update(actor, 'node-a', 'rename', {
+          service.update(actor, workerIdFor('node-a'), 'rename', {
             ...competingRevision,
             operationId: randomUUID(),
             label: `Concurrent ${index}`,
@@ -390,31 +393,46 @@ test('worker admin controls across independent API transactions', async (t) => {
       await enqueue(2);
       const assignment = await a.coordinator.claim(randomUUID(), identity);
       await assert.rejects(
-        admin[1].update(actor, 'node-a', 'rotate-key', await common('node-a')),
+        admin[1].update(
+          actor,
+          workerIdFor('node-a'),
+          'rotate-key',
+          await common(workerIdFor('node-a')),
+        ),
         code('WORKER_NOT_IDLE'),
       );
       const drained = await admin[1].update(
         actor,
-        'node-a',
+        workerIdFor('node-a'),
         'drain',
-        await common('node-a'),
+        await common(workerIdFor('node-a')),
       );
       assert.equal(drained.activeJobId, assignment.jobId);
       await assert.rejects(
-        admin[1].update(actor, 'node-a', 'revoke', {
-          ...(await common('node-a')),
+        admin[1].update(actor, workerIdFor('node-a'), 'revoke', {
+          ...(await common(workerIdFor('node-a'))),
           emergency: false,
         }),
         code('WORKER_NOT_IDLE'),
       );
-      const revoked = await admin[1].update(actor, 'node-a', 'revoke', {
-        ...(await common('node-a')),
-        emergency: true,
-      });
+      const revoked = await admin[1].update(
+        actor,
+        workerIdFor('node-a'),
+        'revoke',
+        {
+          ...(await common(workerIdFor('node-a'))),
+          emergency: true,
+        },
+      );
       assert.equal(revoked.activeAttemptId, assignment.attemptId);
       assert.equal(revoked.recoveryRequired, true);
       await assert.rejects(
-        admin[1].update(actor, 'node-a', 'enable', await common('node-a')),
+        admin[1].update(
+          actor,
+          workerIdFor('node-a'),
+          'enable',
+          await common(workerIdFor('node-a')),
+        ),
         code('REVISION_CONFLICT'),
       );
       await assert.rejects(a.registry.state(identity), code('UNAUTHENTICATED'));
@@ -440,7 +458,7 @@ test('worker admin controls across independent API transactions', async (t) => {
         { stopEvidence: 'The worker heartbeat has stopped for ten minutes.' },
       ]) {
         await assert.rejects(
-          admin[1].update(actor, 'node-a', 'release-stopped', {
+          admin[1].update(actor, workerIdFor('node-a'), 'release-stopped', {
             ...valid,
             ...change,
             operationId: randomUUID(),
@@ -449,15 +467,15 @@ test('worker admin controls across independent API transactions', async (t) => {
         );
       }
       await assert.rejects(
-        admin[1].update(actor, 'node-b', 'release-stopped', {
+        admin[1].update(actor, workerIdFor('node-b'), 'release-stopped', {
           ...valid,
-          ...(await common('node-b')),
+          ...(await common(workerIdFor('node-b'))),
         }),
         code('RECOVERY_PROOF_REQUIRED'),
       );
       const released = await admin[1].update(
         actor,
-        'node-a',
+        workerIdFor('node-a'),
         'release-stopped',
         { ...valid, operationId: randomUUID() },
       );
@@ -477,8 +495,46 @@ test('worker admin controls across independent API transactions', async (t) => {
       assert.equal(audit.stopEvidence.attestation, valid.stopEvidence);
       assert.equal(audit.stopEvidence.generation, valid.generation);
       assert.equal(
-        (await workers.findById('node-a')).lastSeenAt.getTime(),
+        (await workers.findById(workerIdFor('node-a'))).lastSeenAt.getTime(),
         new Date(assignment.leaseExpiresAt).getTime() - 90000,
+      );
+    },
+  );
+
+  await t.test(
+    'malformed missing revisions cannot be silently initialized by worker or admin traffic',
+    async () => {
+      await reset();
+      const identity = await register('malformed');
+      await workers.collection.updateOne(
+        { _id: identity.workerId },
+        { $unset: { managementRevision: '' } },
+      );
+      await assert.rejects(
+        admin[0].update(actor, identity.workerId, 'drain', {
+          operationId: randomUUID(),
+          reason: 'Fixture',
+          expectedRevision: 0,
+        }),
+        code('REVISION_CONFLICT'),
+      );
+      assert.equal(
+        (await workers.collection.findOne({ _id: identity.workerId }))
+          .managementRevision,
+        undefined,
+      );
+      await workers.collection.updateOne(
+        { _id: identity.workerId },
+        { $unset: { controlRevision: '' } },
+      );
+      await assert.rejects(
+        a.coordinator.claim(randomUUID(), identity),
+        code('STALE_ATTEMPT'),
+      );
+      assert.equal(
+        (await workers.collection.findOne({ _id: identity.workerId }))
+          .controlRevision,
+        undefined,
       );
     },
   );
@@ -490,27 +546,30 @@ test('worker admin controls across independent API transactions', async (t) => {
         await reset();
         const identity = await register('node-a');
         await enqueue(1);
-        const command = await common('node-a');
+        const command = await common(workerIdFor('node-a'));
         const hold = holdFence(adminFirst ? b : a);
         const first = adminFirst
-          ? admin[1].update(actor, 'node-a', 'drain', command)
+          ? admin[1].update(actor, workerIdFor('node-a'), 'drain', command)
           : a.coordinator.claim(randomUUID(), identity);
         await hold.entered;
         const second = adminFirst
           ? a.coordinator.claim(randomUUID(), identity)
-          : admin[1].update(actor, 'node-a', 'drain', command);
+          : admin[1].update(actor, workerIdFor('node-a'), 'drain', command);
         const settled = Promise.allSettled([first, second]);
         hold.release();
         const results = await settled;
         assert.equal(results[0].status, 'fulfilled');
         if (adminFirst) {
-          assert.equal(results[1].status, 'fulfilled');
-          assert.equal(results[1].value, null);
+          assert.equal(results[1].status, 'rejected');
+          assert.equal(
+            results[1].reason.getResponse().code,
+            'WORKER_NOT_ENABLED',
+          );
           assert.equal(await attempts.countDocuments(), 0);
         } else {
           assert.equal(results[1].status, 'fulfilled');
           assert.equal(
-            (await registrations.findById('node-a')).state,
+            (await registrations.findById(workerIdFor('node-a'))).state,
             'draining',
           );
           assert.equal(
@@ -542,7 +601,12 @@ test('worker admin controls across independent API transactions', async (t) => {
             identity,
           );
         const recover = () =>
-          admin[1].update(actor, 'node-a', 'release-stopped', command);
+          admin[1].update(
+            actor,
+            workerIdFor('node-a'),
+            'release-stopped',
+            command,
+          );
         const first = adminFirst ? recover() : finish();
         await hold.entered;
         const second = adminFirst ? finish() : recover();
@@ -551,7 +615,10 @@ test('worker admin controls across independent API transactions', async (t) => {
         const results = await settled;
         assert.equal(results[0].status, 'fulfilled');
         assert.equal(results[1].status, 'rejected');
-        assert.equal((await workers.findById('node-a')).activeJobId, null);
+        assert.equal(
+          (await workers.findById(workerIdFor('node-a'))).activeJobId,
+          null,
+        );
         assert.equal(
           (await jobs.findById(assignment.jobId)).status,
           'cancelled',
@@ -585,10 +652,13 @@ test('worker admin controls across independent API transactions', async (t) => {
           playable: true,
           voiceOnly: true,
         };
-        const command = { ...(await common('node-a')), emergency: true };
+        const command = {
+          ...(await common(workerIdFor('node-a'))),
+          emergency: true,
+        };
         const hold = holdFence(adminFirst ? b : a);
         const revoke = () =>
-          admin[1].update(actor, 'node-a', 'revoke', command);
+          admin[1].update(actor, workerIdFor('node-a'), 'revoke', command);
         const output = () => a.output.reserve(dto, identity);
         const first = adminFirst ? revoke() : output();
         await hold.entered;
@@ -606,9 +676,12 @@ test('worker admin controls across independent API transactions', async (t) => {
           assert.equal(adminFirst, false);
           assert.equal(grants.length, 1);
         }
-        assert.equal((await registrations.findById('node-a')).state, 'revoked');
         assert.equal(
-          (await workers.findById('node-a')).attemptId,
+          (await registrations.findById(workerIdFor('node-a'))).state,
+          'revoked',
+        );
+        assert.equal(
+          (await workers.findById(workerIdFor('node-a'))).attemptId,
           assignment.attemptId,
         );
       },
@@ -621,14 +694,19 @@ test('worker admin controls across independent API transactions', async (t) => {
         await reset();
         const identity = await register('node-a');
         const waits = new WorkerClaimWaitService(a.coordinator, config);
-        const command = await common('node-a');
+        const command = await common(workerIdFor('node-a'));
         const hold = holdFence(adminFirst ? b : a);
         let pending;
         let denied;
         let rotation;
         try {
           if (adminFirst) {
-            rotation = admin[1].update(actor, 'node-a', 'rotate-key', command);
+            rotation = admin[1].update(
+              actor,
+              workerIdFor('node-a'),
+              'rotate-key',
+              command,
+            );
             await hold.entered;
             pending = waits.claim(randomUUID(), 25, undefined, identity);
             denied = assert.rejects(pending, code('UNAUTHENTICATED'));
@@ -638,7 +716,12 @@ test('worker admin controls across independent API transactions', async (t) => {
             pending = waits.claim(randomUUID(), 25, undefined, identity);
             denied = assert.rejects(pending, code('UNAUTHENTICATED'));
             await hold.entered;
-            rotation = admin[1].update(actor, 'node-a', 'rotate-key', command);
+            rotation = admin[1].update(
+              actor,
+              workerIdFor('node-a'),
+              'rotate-key',
+              command,
+            );
             hold.release();
             await rotation;
           }

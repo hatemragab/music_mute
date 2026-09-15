@@ -13,10 +13,7 @@ export async function runWorkerFleetAudit(args: string[]): Promise<void> {
     serverSelectionTimeoutMS: 5000,
   }).asPromise();
   try {
-    const report = await auditWorkerFleet(
-      connection,
-      environment.PROCESSING_WORKER_KEY_SHA256 as string | undefined,
-    );
+    const report = await auditWorkerFleet(connection);
     process.stdout.write(`${JSON.stringify(report)}\n`);
   } finally {
     await connection.close();

@@ -3,12 +3,20 @@ import { Schema as MongoSchema, type Types } from 'mongoose';
 import type { OutputReservation } from './job.types.js';
 import { OutputReservationSchema } from './job.schema.js';
 
+export interface ClaimAdmissionEvidence {
+  maxDurationSeconds: number;
+  maxPreparedAudioBytes: number;
+  evidenceSha256: string | null;
+  qualificationReportId: string | null;
+}
 @Schema({
   collection: 'audio_job_attempts',
   strict: 'throw',
   versionKey: false,
 })
 export class JobAttempt {
+  @Prop({ type: MongoSchema.Types.Mixed, default: null, immutable: true })
+  admissionEvidence!: ClaimAdmissionEvidence | null;
   _id!: Types.ObjectId;
   @Prop({ type: Boolean, default: null }) separationCompleted!: boolean | null;
   @Prop({ type: String, default: null, maxlength: 36 })

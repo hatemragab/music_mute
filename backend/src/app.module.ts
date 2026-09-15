@@ -1,4 +1,7 @@
 import { Module } from '@nestjs/common';
+import { WorkerEventsModule } from './worker-events/worker-events.module.js';
+import { WorkerInstallationsModule } from './worker-installations/worker-installations.module.js';
+import { WorkerReleasesModule } from './worker-releases/worker-releases.module.js';
 import { InfrastructureModule } from './infrastructure/infrastructure.module.js';
 import { SecurityModule } from './http/security.module.js';
 import { HealthController } from './http/health.controller.js';
@@ -21,6 +24,9 @@ import { AdminHealthModule } from './admin-observability/admin-health.module.js'
     InfrastructureModule,
     SecurityModule,
     AuthModule,
+    WorkerInstallationsModule,
+    WorkerEventsModule,
+    WorkerReleasesModule,
     OperationsModule,
     AudioProcessingModule,
     PublicPagesModule,

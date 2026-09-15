@@ -7,7 +7,6 @@ import type { AdminActor } from '../admin/admin.types.js';
 import { Job } from '../jobs/job.schema.js';
 import { WorkerRegistration } from '../worker/worker-registration.schema.js';
 import { WorkerControl } from '../worker/worker-control.schema.js';
-import { WORKER_ID } from '../worker/worker-routes.js';
 import { Release } from '../releases/release.schema.js';
 import { parseOverviewRange, utcDays } from './overview-query.js';
 import type { OverviewSnapshot } from './overview.types.js';
@@ -448,17 +447,32 @@ export class AdminOverviewService {
         online: { $sum: { $cond: [{ $gt: ['$lastSeenAt', recent] }, 1, 0] } },
       },
     };
-    if (this.config.get('PROCESSING_WORKER_AUTH_MODE', 'legacy') === 'legacy')
-      return this.controls
-        .aggregate<{ online: number; total: number }>([
-          { $match: { _id: WORKER_ID } },
-          summary,
-          { $project: { _id: 0 } },
-        ])
-        .option({ maxTimeMS: 2000 });
     return this.registrations
       .aggregate<{ online: number; total: number }>([
-        { $match: { state: { $ne: 'revoked' } } },
+        { $match: { state: { $in: ['enabled', 'draining'] } } },
+        {
+          $lookup: {
+            from: 'worker_installations',
+            let: { installationId: '$installationId', workerId: '$_id' },
+            pipeline: [
+              {
+                $match: {
+                  pairingState: 'approved',
+                  revoked: false,
+                  $expr: {
+                    $and: [
+                      { $eq: ['$_id', '$$installationId'] },
+                      { $eq: ['$assignedWorkerId', '$$workerId'] },
+                    ],
+                  },
+                },
+              },
+              { $project: { _id: 1 } },
+            ],
+            as: 'installation',
+          },
+        },
+        { $match: { 'installation.0': { $exists: true } } },
         {
           $lookup: {
             from: 'audio_worker_control',

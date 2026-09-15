@@ -71,7 +71,7 @@ describe('worker admin HTTP permissions and validation', () => {
           },
           token,
         )
-        .expect(write ? 201 : 403);
+        .expect(404);
       await harness
         .request(
           'patch',
@@ -104,7 +104,6 @@ describe('worker admin HTTP permissions and validation', () => {
     const token = harness.signInAs('owner');
     harness.identities.get(token)!.authTimeSec -= 301;
     for (const path of [
-      '',
       '/node-a/rotate-key',
       '/node-a/revoke',
       '/node-a/release-stopped',
@@ -140,7 +139,7 @@ describe('worker admin HTTP permissions and validation', () => {
     ])
       await harness
         .request('post', '/admin/workers', { ...create, ...change }, token)
-        .expect(400);
+        .expect(404);
     for (const change of [
       { expectedRevision: -1 },
       { expectedRevision: '1' },

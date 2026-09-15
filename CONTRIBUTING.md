@@ -16,7 +16,7 @@ Each component owns its dependencies and commands; there is no root package inst
 | iOS            | [Setup](ios/README.md)            | Xcode build/tests and Swift formatting           |
 | Backend        | [Setup](backend/README.md)        | `npm run verify`; relevant infrastructure suites |
 | Dashboard      | [Setup](dashboard/README.md)      | Format, lint, typecheck, tests, and build        |
-| Windows worker | [Setup](windows-worker/README.md) | Worker tests and packaging checks                |
+| Shared worker | [Setup](worker/README.md) | Worker tests and packaging checks                |
 
 Run commands from the component directory. Follow the existing simulator policy
 in the iOS guide for runtime/UI checks; do not automatically substitute devices.

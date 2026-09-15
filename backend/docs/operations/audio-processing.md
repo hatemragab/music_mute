@@ -1,18 +1,18 @@
 # Audio processing operations and external worker handoff
 
-This backend stores durable jobs and coordinates one external Z440 supervisor.
+This backend stores durable jobs and coordinates registered installation-bound workers.
 It does not install or run the Windows separator, download models, implement a
 mobile client, or prove that the returned audio contains only voice.
 
 ## Enablement
 
 `AUDIO_PROCESSING_ENABLED=false` preserves the existing auth-only startup path.
-Set it to `true` only after supplying `PROCESSING_WORKER_KEY_SHA256` as the
-lowercase SHA-256 hex digest of a strong worker bearer secret. Keep the raw secret
-on the worker and transmit it only over HTTPS. Rotation takes effect after the
-API configuration is refreshed/restarted. Never put it in a URL or worker DTO.
+Set it to `true` for protocol 3 workers enrolled through installation pairing.
+Keep permanent secrets on the worker and transmit them only over HTTPS. Idle
+credential rotation takes effect transactionally through the administrator API.
+See [worker pairing and ownership](../worker-fleet.md).
 
-Enabled startup does not require the Z440 to be online. Safe startup diagnostics
+Enabled startup does not require a worker to be online. Safe startup diagnostics
 identify these prerequisite failures without printing provider errors or secrets:
 
 - `Audio processing MongoDB capability check failed`: the MongoDB capability
@@ -72,7 +72,7 @@ records explicitly; startup must not drop indexes or delete records to proceed.
 
 Queue sequence allocation and claiming use Mongo transactions. Redis continues
 to provide the existing request limits; it is not the authority for audio jobs.
-Multiple API instances contend on the same singleton `z440` control document.
+Multiple API instances fence each registered worker through its own control document.
 
 ## S3 prerequisites
 

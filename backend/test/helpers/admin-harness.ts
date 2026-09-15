@@ -23,6 +23,7 @@ import { FirebaseIdentityService } from '../../src/auth/firebase-identity.servic
 import { UsersService } from '../../src/users/users.service.js';
 import { RateBudgetService } from '../../src/rate-limits/rate-budget.service.js';
 import { RateLimitKeys } from '../../src/rate-limits/rate-limit-keys.js';
+import { WorkerIdentityService } from '../../src/worker/worker-identity.service.js';
 import { WorkerAuthGuard } from '../../src/worker/worker-auth.guard.js';
 import { AdminAccess } from '../../src/admin/admin-access.schema.js';
 import {
@@ -187,7 +188,6 @@ export async function createAdminHarness(
   const config = new ConfigService({
     ADMIN_REAUTH_MAX_AGE_SECONDS: 300,
     AUDIO_PROCESSING_ENABLED: true,
-    PROCESSING_WORKER_KEY_SHA256: '0'.repeat(64),
   });
 
   @Module({
@@ -198,6 +198,14 @@ export async function createAdminHarness(
     ],
     providers: [
       { provide: ConfigService, useValue: config },
+      {
+        provide: WorkerIdentityService,
+        useValue: {
+          authenticateDigest: async () => {
+            throw authError('UNAUTHENTICATED');
+          },
+        },
+      },
       { provide: FirebaseIdentityService, useValue: firebase },
       { provide: UsersService, useValue: users },
       { provide: RateBudgetService, useValue: budgets },

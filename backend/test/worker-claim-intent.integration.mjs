@@ -37,7 +37,7 @@ test('lost claim replies can recover only the persisted installation session', a
     { $set: { leaseExpiresAt: new Date(0) } },
   );
   await f.control.updateOne(
-    { _id: 'z440' },
+    { _id: f.workerId },
     { $set: { leaseExpiresAt: new Date(0) } },
   );
   const foreign = await f.request(

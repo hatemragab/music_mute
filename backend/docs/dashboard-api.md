@@ -43,7 +43,6 @@ Administrative errors are JSON:
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------- | ------------------------ |
 | `GET /admin/workers`                      | `state?`, `online?`, `limit?`, `cursor?`                                                                            | page of `WorkerSummary`           | `workers.read`           |
 | `GET /admin/workers/:id`                  | none                                                                                                                | worker detail                     | `workers.read`           |
-| `POST /admin/workers`                     | `id`, `label`, `operationId`, `reason`                                                                              | `{worker,rawKey}` once            | `workers.manage`, fresh  |
 | `PATCH /admin/workers/:id`                | `label`, `expectedRevision`, `operationId`, `reason`                                                                | `WorkerSummary`                   | `workers.manage`         |
 | `POST /admin/workers/:id/drain`           | common revisioned body                                                                                              | `WorkerSummary`                   | `workers.manage`         |
 | `POST /admin/workers/:id/enable`          | common revisioned body                                                                                              | `WorkerSummary`                   | `workers.manage`         |
@@ -53,7 +52,7 @@ Administrative errors are JSON:
 
 Worker IDs are lowercase `[a-z0-9-]`, length 1–64; labels are 1–100 characters. `stopEvidence` is 20–1000 characters and must attest that the exact external process stopped. Heartbeat loss is insufficient.
 
-`WorkerSummary` is `{id,label,state,online,lastSeenAt,activeJobId,activeAttemptId,recoveryRequired,revision}`. Detail adds `protocolVersion:2`, `slotState`, `assignment:null|{jobId,attemptId,sessionId,generation,leaseExpiresAt}`, and bounded `recentEvents`. No key digest is returned.
+`WorkerSummary` is `{id,label,state,online,lastSeenAt,activeJobId,activeAttemptId,recoveryRequired,revision}`. Detail adds `protocolVersion:3`, `slotState`, `assignment:null|{jobId,attemptId,sessionId,generation,leaseExpiresAt}`, and bounded `recentEvents`. No key digest is returned.
 
 ## Jobs, users and media
 

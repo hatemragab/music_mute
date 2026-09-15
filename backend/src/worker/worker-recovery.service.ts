@@ -505,6 +505,7 @@ export class WorkerRecoveryService {
         sessionId,
         session,
         identity,
+        previous.admissionEvidence ?? undefined,
       );
       await this.attempts.updateOne(
         { attemptId: previousAttemptId },

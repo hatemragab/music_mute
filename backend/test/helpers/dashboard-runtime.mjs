@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { Test } from '@nestjs/testing';
@@ -28,6 +28,7 @@ const { ApkVerifierService } =
 const { WorkerCoordinatorService } =
   await import('../../dist/worker/worker-coordinator.service.js');
 const { authError } = await import('../../dist/auth/auth.errors.js');
+const { pairedWorkerFixture } = await import('./paired-worker-fixture.mjs');
 
 const useCurl = process.env.DASHBOARD_HTTP_CLIENT === 'curl';
 const probeAllRoutes = process.env.DASHBOARD_PROBE_ALL_ROUTES === '1';
@@ -285,16 +286,30 @@ try {
     (await api('GET', '/admin/session', undefined, 'support-fixture')).role,
     'support',
   );
-  const worker = await api(
-    'POST',
-    '/admin/workers',
-    command({ id: 'fixture-worker', label: 'Fixture worker' }),
-  );
-  assert.equal(worker.rawKey.length, 64);
   await api(
     'POST',
     '/admin/workers',
-    command({ id: 'forbidden-worker', label: 'Forbidden' }),
+    command({ id: 'forbidden-worker', label: 'Obsolete manual enrollment' }),
+    'owner-fixture',
+    404,
+  );
+  const worker = await pairedWorkerFixture(db, { label: 'Fixture worker' });
+  assert.equal(worker.rawKey.length, 64);
+  const workerTimeline = await api(
+    'GET',
+    `/admin/workers/${worker.workerId}/events`,
+  );
+  assert.deepEqual(workerTimeline.items, []);
+  assert.equal(workerTimeline.reporting.outcome, 'unknown');
+  const setupTimeline = await api(
+    'GET',
+    `/admin/worker-installations/${worker.installationId}/events`,
+  );
+  assert.deepEqual(setupTimeline.items, []);
+  await api(
+    'POST',
+    `/admin/workers/${worker.workerId}/drain`,
+    command({ expectedRevision: 0 }),
     'support-fixture',
     403,
   );
@@ -352,26 +367,26 @@ try {
     inputObject: input,
   });
   const identity = {
-    workerId: 'fixture-worker',
-    mode: 'fleet',
-    keySha256: createHash('sha256').update(worker.rawKey).digest('hex'),
+    workerId: worker.workerId,
+    installationId: worker.installationId,
+    keySha256: worker.keySha256,
   };
   const assignment = await app
     .get(WorkerCoordinatorService)
-    .claim(randomUUID(), identity);
+    .claim(randomUUID(), identity, 2);
   assert.equal(assignment.jobId, jobId.toString());
-  const beforeDrain = await api('GET', '/admin/workers/fixture-worker');
+  const beforeDrain = await api('GET', `/admin/workers/${worker.workerId}`);
   await api(
     'POST',
-    '/admin/workers/fixture-worker/drain',
+    `/admin/workers/${worker.workerId}/drain`,
     command({ expectedRevision: beforeDrain.revision }),
   );
-  const draining = await api('GET', '/admin/workers/fixture-worker');
+  const draining = await api('GET', `/admin/workers/${worker.workerId}`);
   assert.equal(draining.state, 'draining');
   assert.equal(draining.activeJobId, jobId.toString());
   await api(
     'POST',
-    '/admin/workers/fixture-worker/release-stopped',
+    `/admin/workers/${worker.workerId}/release-stopped`,
     command({
       expectedRevision: draining.revision,
       jobId: assignment.jobId,
@@ -384,7 +399,7 @@ try {
     }),
   );
   assert.equal((await jobs.findById(jobId)).status, 'queued');
-  const released = await api('GET', '/admin/workers/fixture-worker');
+  const released = await api('GET', `/admin/workers/${worker.workerId}`);
   assert.equal(released.slotState, 'idle');
   assert.equal(released.assignment, null);
   const suspended = await api(

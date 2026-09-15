@@ -38,7 +38,6 @@ describe('overview date and cache boundaries', () => {
       controls as never,
       releases as never,
       new ConfigService({
-        PROCESSING_WORKER_AUTH_MODE: 'fleet',
         PROCESSING_LEASE_SECONDS: 90,
       }),
     );

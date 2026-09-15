@@ -1,3 +1,4 @@
+import { WorkerReadinessService } from './worker-readiness.service.js';
 import { FairQueueService } from '../processing-queue/fair-queue.service.js';
 import { QueueExecutionUsage } from '../processing-queue/queue-scheduling.schema.js';
 import {
@@ -15,11 +16,14 @@ import type { ClientSession, HydratedDocument, Model } from 'mongoose';
 import { isUUID } from 'class-validator';
 import { authError } from '../auth/auth.errors.js';
 import { Job } from '../jobs/job.schema.js';
-import { JobAttempt } from '../jobs/job-attempt.schema.js';
+import {
+  JobAttempt,
+  type ClaimAdmissionEvidence,
+} from '../jobs/job-attempt.schema.js';
 import { JobReceipt } from '../jobs/job-receipt.schema.js';
 import { jobError } from '../jobs/job-errors.js';
 import { assertMeasuredDuration } from '../jobs/job-state.js';
-import { isDuplicateKey, objectId, requestHash } from '../jobs/job-request.js';
+import { objectId, requestHash } from '../jobs/job-request.js';
 import type { WorkerEvent, WorkerSelector } from '../jobs/job.types.js';
 import { ProcessingTransactions } from '../processing/processing-transactions.js';
 import { StorageTransfersService } from '../storage/storage-transfers.service.js';
@@ -93,27 +97,14 @@ export class WorkerCoordinatorService {
     return { ...authority, attempt };
   }
 
-  async prepare(): Promise<void> {
-    if (this.workerRegistry.mode !== 'legacy') return;
-    try {
-      await this.workers.updateOne(
-        { _id: 'z440' },
-        { $setOnInsert: { generation: 0 } },
-        { upsert: true },
-      );
-    } catch (error) {
-      if (!isDuplicateKey(error)) throw error;
-    }
-  }
-
   async claim(
     sessionId: string,
     identity?: WorkerIdentity,
     mediaPolicyVersion?: 2,
+    recoveryOnly = false,
   ) {
     if (!isUUID(sessionId, '4')) throw authError('INVALID_INPUT');
     sessionId = sessionId.toLowerCase();
-    await this.prepare();
     if (mediaPolicyVersion !== 2)
       await this.transactions.run(async (session) => {
         const { control } = await this.authority(identity, session);
@@ -171,14 +162,28 @@ export class WorkerCoordinatorService {
           throw jobError('WORKER_RECOVERY_REQUIRED');
         return current;
       }
+      // Discovery after a lost claim response must never reserve fresh work.
+      if (recoveryOnly) return null;
+      const readiness = await new WorkerReadinessService(
+        this.jobs.db,
+      ).evaluateNewClaim(owner.workerId, session);
+      if (!readiness.allowed)
+        throw new HttpException(
+          {
+            code: readiness.reasonCodes[0],
+            reasonCodes: readiness.reasonCodes,
+            message: 'Worker is not eligible for a new assignment',
+          },
+          409,
+        );
       const next =
         state === 'draining'
           ? null
           : await new FairQueueService(this.jobs).selectNextEligible(
               new Date(),
               session,
-              owner.workerId,
               mediaPolicyVersion,
+              readiness,
             );
       if (!next) {
         await this.workers.updateOne(
@@ -188,7 +193,14 @@ export class WorkerCoordinatorService {
         );
         return null;
       }
-      return this.assign(next, control, sessionId, session, identity);
+      return this.assign(
+        next,
+        control,
+        sessionId,
+        session,
+        identity,
+        readiness,
+      );
     });
     return job ? this.assignment(job, identity, mediaPolicyVersion) : null;
   }
@@ -299,6 +311,16 @@ export class WorkerCoordinatorService {
         return { status: receipt.status };
       }
       const { job } = await this.current(selector, session, true, identity);
+      const admittedAttempt = await this.attempts
+        .findOne({ attemptId: job.attemptId })
+        .session(session)
+        .lean();
+      if (
+        admittedAttempt?.admissionEvidence &&
+        report.durationSeconds >
+          admittedAttempt.admissionEvidence.maxDurationSeconds
+      )
+        throw jobError('MEDIA_TOO_LONG');
       await this.accountAccess.assertActive(job.userId, session);
       if (job.admissionSnapshot?.policyVersion === 2) {
         if (
@@ -386,6 +408,7 @@ export class WorkerCoordinatorService {
     sessionId: string,
     session: ClientSession,
     identity?: WorkerIdentity,
+    admissionEvidence?: ClaimAdmissionEvidence,
   ) {
     if (this.config.get<boolean>('AUDIO_PROCESSING_ENABLED') === false)
       throw authError('SERVICE_UNAVAILABLE');
@@ -406,10 +429,7 @@ export class WorkerCoordinatorService {
       throw jobError('PROCESSING_LIMIT_REACHED');
     if (
       job.admissionSnapshot?.policyVersion === 2 &&
-      (control.mediaPolicyVersion !== 2 ||
-        !job.admissionSnapshot.qualification?.qualifiedWorkerIds.includes(
-          control._id,
-        ))
+      control.mediaPolicyVersion !== 2
     )
       throw jobError('PROCESSING_CAPACITY_UNAVAILABLE');
     const attemptId = randomUUID();
@@ -455,6 +475,7 @@ export class WorkerCoordinatorService {
           sessionId,
           generation,
           startedAt: now,
+          admissionEvidence,
         },
       ],
       { session },

@@ -99,7 +99,7 @@ test('voice result completion is durable and recovery adopts an uploaded result'
       'uploading_result',
     );
     assert.equal(
-      (await f.control.findById('z440')).activeJobId.toString(),
+      (await f.control.findById(f.workerId)).activeJobId.toString(),
       first.jobId,
     );
     assert.equal(
@@ -123,7 +123,7 @@ test('voice result completion is durable and recovery adopts an uploaded result'
   assert.equal(completed.body.status, 'ready');
   const outbox = f.jobs.db.model('NotificationOutbox');
   assert.equal(await outbox.countDocuments(), 1);
-  assert.equal((await f.control.findById('z440')).activeJobId, null);
+  assert.equal((await f.control.findById(f.workerId)).activeJobId, null);
   await f.restartApi();
   assert.equal(
     (await f.request('POST', '/worker/complete', callback, 'worker')).body
@@ -137,7 +137,7 @@ test('voice result completion is durable and recovery adopts an uploaded result'
     { $set: { leaseExpiresAt: new Date(0) } },
   );
   await f.control.updateOne(
-    { _id: 'z440' },
+    { _id: f.workerId },
     { $set: { leaseExpiresAt: new Date(0) } },
   );
   f.fakeStorage.failNext('findOutput');
@@ -151,7 +151,7 @@ test('voice result completion is durable and recovery adopts an uploaded result'
     503,
   );
   assert.equal(
-    (await f.control.findById('z440')).activeJobId.toString(),
+    (await f.control.findById(f.workerId)).activeJobId.toString(),
     second.jobId,
   );
   const recovered = await f.request(

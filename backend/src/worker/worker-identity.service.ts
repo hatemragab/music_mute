@@ -12,10 +12,13 @@ export class WorkerIdentityService {
 
   async describe(identity: WorkerIdentity) {
     return {
-      workerId: identity.workerId,
-      state: await this.registry.state(identity),
-      protocolVersion: 2 as const,
+      ...(await this.registry.describeInstallation(identity)),
+      protocolVersion: 3 as const,
       mediaPolicyVersion: 2 as const,
+      updateCapability: {
+        supported: false,
+        reasonCode: 'UPDATE_SERVICE_UNAVAILABLE',
+      },
     };
   }
 }

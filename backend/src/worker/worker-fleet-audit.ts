@@ -1,3 +1,4 @@
+import { INSTALLATION_ID_PATTERN } from './dto/worker-runtime.dto.js';
 import type { Connection } from 'mongoose';
 import {
   WORKER_ID_PATTERN,
@@ -7,10 +8,7 @@ import type { WorkerRegistration } from './worker-registration.schema.js';
 import type { WorkerControl } from './worker-control.schema.js';
 
 /** Read-only snapshot; no model initialization, index changes, backfill or key writes. */
-export async function auditWorkerFleet(
-  connection: Connection,
-  legacyKeySha256?: string,
-) {
+export async function auditWorkerFleet(connection: Connection) {
   if (!connection.db) throw new Error('Database connection unavailable');
   const db = connection.db;
   const session = await connection.startSession();
@@ -31,7 +29,17 @@ export async function auditWorkerFleet(
             !WORKER_ID_PATTERN.test(row._id) ||
             typeof row.keySha256 !== 'string' ||
             !WORKER_KEY_PATTERN.test(row.keySha256) ||
-            !['enabled', 'draining', 'revoked'].includes(String(row.state))
+            !['enabled', 'draining', 'revoked'].includes(String(row.state)) ||
+            !INSTALLATION_ID_PATTERN.test(row.installationId) ||
+            !(await db.collection('worker_installations').findOne(
+              {
+                _id: row.installationId as never,
+                assignedWorkerId: row._id,
+                pairingState: 'approved',
+                revoked: false,
+              },
+              { session, projection: { _id: 1 } },
+            ))
           )
             invalidRegistrations++;
           registered.add(String(row._id));
@@ -44,7 +52,6 @@ export async function auditWorkerFleet(
             orphanRegistrations++;
         }
         let activeAssignments = 0;
-        let nonLegacyActiveAssignments = 0;
         let inconsistentAssignments = 0;
         let orphanControls = 0;
         for await (const control of controls.find({}, { session })) {
@@ -52,7 +59,6 @@ export async function auditWorkerFleet(
           if (!registered.has(workerId)) orphanControls++;
           if (!control.activeJobId) continue;
           activeAssignments++;
-          if (workerId !== 'z440') nonLegacyActiveAssignments++;
           const job = await jobs.findOne(
             { _id: control.activeJobId },
             { session },
@@ -78,8 +84,8 @@ export async function auditWorkerFleet(
             attempt.sessionId !== control.sessionId ||
             attempt.generation !== control.generation ||
             attempt.endedAt != null ||
-            (job.workerId ?? 'z440') !== workerId ||
-            (attempt.workerId ?? 'z440') !== workerId
+            job.workerId !== workerId ||
+            attempt.workerId !== workerId
           )
             inconsistentAssignments++;
         }
@@ -175,22 +181,12 @@ export async function auditWorkerFleet(
           )
           .toArray();
         const duplicateKeyDigests = Number(duplicateGroups[0]?.count ?? 0);
-        const legacyKeyMatches =
-          legacyKeySha256 === undefined
-            ? null
-            : Boolean(
-                await registrations.findOne(
-                  { _id: 'z440', keySha256: legacyKeySha256 },
-                  { session, projection: { _id: 1 } },
-                ),
-              );
         const missingOwnership = missingJobOwners + missingAttemptOwners;
         return {
           dryRun: true as const,
           asOf: new Date().toISOString(),
           registeredWorkers: registered.size,
           activeAssignments,
-          nonLegacyActiveAssignments,
           inconsistentAssignments,
           orphanControls,
           orphanRegistrations,
@@ -203,11 +199,7 @@ export async function auditWorkerFleet(
           unreservedAttempts,
           duplicateKeyDigests,
           invalidRegistrations,
-          legacyKeyMatches,
-          requiresOwnershipBackfill: missingOwnership > 0,
-          canEnableFleet:
-            registered.size > 0 &&
-            activeAssignments === 0 &&
+          consistent:
             missingOwnership === 0 &&
             inconsistentAssignments === 0 &&
             orphanControls === 0 &&
@@ -218,12 +210,7 @@ export async function auditWorkerFleet(
             duplicateKeyDigests === 0 &&
             unreservedActiveJobs === 0 &&
             unreservedAttempts === 0 &&
-            invalidRegistrations === 0 &&
-            legacyKeyMatches !== false,
-          rollbackSlotsIdle:
-            nonLegacyActiveAssignments === 0 &&
-            unreservedActiveJobs === 0 &&
-            unreservedAttempts === 0,
+            invalidRegistrations === 0,
         };
       },
       {

@@ -16,24 +16,11 @@ describe('processing configuration', () => {
   it('keeps processing disabled without a worker credential', () => {
     expect(validateEnvironment(base).AUDIO_PROCESSING_ENABLED).toBe(false);
   });
-  it('requires a digest when processing is enabled without exposing its value', () => {
-    expect(() =>
-      validateEnvironment({ ...base, AUDIO_PROCESSING_ENABLED: 'true' }),
-    ).toThrow('PROCESSING_WORKER_KEY_SHA256');
-    expect(() =>
-      validateEnvironment({
-        ...base,
-        AUDIO_PROCESSING_ENABLED: true,
-        PROCESSING_WORKER_KEY_SHA256: 'secret',
-      }),
-    ).toThrow('PROCESSING_WORKER_KEY_SHA256');
-  });
   it('parses a enabled deployment with bounded transfer and lease defaults', () => {
     expect(
       validateEnvironment({
         ...base,
         AUDIO_PROCESSING_ENABLED: 'true',
-        PROCESSING_WORKER_KEY_SHA256: 'a'.repeat(64),
       }),
     ).toMatchObject({
       AUDIO_PROCESSING_ENABLED: true,

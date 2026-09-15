@@ -28,8 +28,16 @@ function placeholder(value) {
   );
 }
 
+function computedSourceValue(value) {
+  const candidate = value.trim();
+  return (
+    candidate.startsWith('$(') ||
+    /^[A-Za-z_][A-Za-z0-9_.]*\s*\(/.test(candidate)
+  );
+}
+
 function credentialEnvironmentValue(key, value) {
-  if (placeholder(value)) return false;
+  if (placeholder(value) || computedSourceValue(value)) return false;
   if (key === 'MONGODB_URI' || key === 'REDIS_URL') {
     try {
       const url = new URL(value.replace(/^(['"])(.*)\1$/, '$2'));
@@ -84,7 +92,13 @@ export function scanTrackedFiles(cwd = process.cwd()) {
     const path = resolve(root, name);
     if (isAbsolute(name) || relative(root, path).startsWith('..'))
       throw new Error('Tracked path escaped repository root');
-    const stat = lstatSync(path);
+    let stat;
+    try {
+      stat = lstatSync(path);
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      throw error;
+    }
     const contents = stat.isSymbolicLink()
       ? readlinkSync(path, 'utf8')
       : readFileSync(path, 'utf8');

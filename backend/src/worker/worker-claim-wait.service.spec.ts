@@ -5,7 +5,7 @@ import type { WorkerIdentity } from './worker-routes.js';
 
 const machine = (workerId: string): WorkerIdentity => ({
   workerId,
-  mode: 'fleet',
+  installationId: '11111111-1111-4111-8111-111111111111',
   keySha256: 'a'.repeat(64),
 });
 
@@ -52,17 +52,24 @@ describe('bounded worker claim waiting', () => {
     vi.useRealTimers();
   });
 
-  it('returns immediately for old requests and already available work', async () => {
-    await expect(service.claim(assignment.sessionId, 0)).resolves.toBeNull();
+  it('returns immediately for immediate requests and already available work', async () => {
+    await expect(
+      service.claim(assignment.sessionId, 0, undefined, machine('fixture')),
+    ).resolves.toBeNull();
     available = assignment;
-    await expect(service.claim(assignment.sessionId, 25)).resolves.toEqual(
-      assignment,
-    );
+    await expect(
+      service.claim(assignment.sessionId, 25, undefined, machine('fixture')),
+    ).resolves.toEqual(assignment);
     expect(vi.getTimerCount()).toBe(0);
   });
 
   it('picks up durable work arriving during the wait within one second', async () => {
-    const pending = service.claim(assignment.sessionId, 25);
+    const pending = service.claim(
+      assignment.sessionId,
+      25,
+      undefined,
+      machine('fixture'),
+    );
     await vi.advanceTimersByTimeAsync(500);
     available = assignment;
     await vi.advanceTimersByTimeAsync(500);
@@ -72,9 +79,11 @@ describe('bounded worker claim waiting', () => {
 
   it('waits until the requested deadline with bounded database checks', async () => {
     let settled = false;
-    const pending = service.claim(assignment.sessionId, 25).finally(() => {
-      settled = true;
-    });
+    const pending = service
+      .claim(assignment.sessionId, 25, undefined, machine('fixture'))
+      .finally(() => {
+        settled = true;
+      });
     await vi.advanceTimersByTimeAsync(24999);
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
@@ -85,7 +94,12 @@ describe('bounded worker claim waiting', () => {
 
   it('releases its timer and abort listener when the client disconnects', async () => {
     const client = new AbortController();
-    const pending = service.claim(assignment.sessionId, 25, client.signal);
+    const pending = service.claim(
+      assignment.sessionId,
+      25,
+      client.signal,
+      machine('fixture'),
+    );
     await vi.advanceTimersByTimeAsync(10);
     client.abort();
     await expect(pending).resolves.toBeNull();
@@ -101,23 +115,28 @@ describe('bounded worker claim waiting', () => {
     client.abort();
     available = assignment;
     await expect(
-      service.claim(assignment.sessionId, 25, client.signal),
+      service.claim(
+        assignment.sessionId,
+        25,
+        client.signal,
+        machine('fixture'),
+      ),
     ).resolves.toBeNull();
     expect(checks).toBe(0);
   });
 
   it('releases all waits on shutdown and refuses new waits', async () => {
     const waits = [
-      service.claim(assignment.sessionId, 25),
+      service.claim(assignment.sessionId, 25, undefined, machine('fixture')),
       service.claim(assignment.sessionId, 25, undefined, machine('another')),
     ];
     await vi.advanceTimersByTimeAsync(10);
     service.onModuleDestroy();
     await expect(Promise.all(waits)).resolves.toEqual([null, null]);
     expect(vi.getTimerCount()).toBe(0);
-    await expect(service.claim(assignment.sessionId, 25)).rejects.toMatchObject(
-      { status: 503 },
-    );
+    await expect(
+      service.claim(assignment.sessionId, 25, undefined, machine('fixture')),
+    ).rejects.toMatchObject({ status: 503 });
   });
 
   it('bounds simultaneous waiters and permits another after disconnect', async () => {
@@ -131,15 +150,15 @@ describe('bounded worker claim waiting', () => {
       ),
     );
     await vi.advanceTimersByTimeAsync(10);
-    await expect(service.claim(assignment.sessionId, 25)).rejects.toMatchObject(
-      { status: 429 },
-    );
+    await expect(
+      service.claim(assignment.sessionId, 25, undefined, machine('fixture')),
+    ).rejects.toMatchObject({ status: 429 });
     clients[0].abort();
     await waits[0];
     available = assignment;
-    await expect(service.claim(assignment.sessionId, 25)).resolves.toEqual(
-      assignment,
-    );
+    await expect(
+      service.claim(assignment.sessionId, 25, undefined, machine('fixture')),
+    ).resolves.toEqual(assignment);
     clients.forEach((client) => client.abort());
     await Promise.all(waits);
     expect(vi.getTimerCount()).toBe(0);
@@ -153,9 +172,9 @@ describe('bounded worker claim waiting', () => {
       },
     } as unknown as WorkerCoordinatorService);
     for (let i = 0; i < 10; i++) {
-      await expect(failing.claim(assignment.sessionId, 25)).rejects.toBe(
-        conflict,
-      );
+      await expect(
+        failing.claim(assignment.sessionId, 25, undefined, machine('fixture')),
+      ).rejects.toBe(conflict);
     }
     expect(vi.getTimerCount()).toBe(0);
   });

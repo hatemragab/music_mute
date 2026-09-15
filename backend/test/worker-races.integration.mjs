@@ -76,7 +76,7 @@ test('cancellation during output verification wins and offline cancellation wait
     { $set: { leaseExpiresAt: new Date(0) } },
   );
   await f.control.updateOne(
-    { _id: 'z440' },
+    { _id: f.workerId },
     { $set: { leaseExpiresAt: new Date(0) } },
   );
   assert.equal(
@@ -91,7 +91,7 @@ test('cancellation during output verification wins and offline cancellation wait
     409,
   );
   assert.equal(
-    (await f.control.findById('z440')).activeJobId.toString(),
+    (await f.control.findById(f.workerId)).activeJobId.toString(),
     jobId,
   );
   const recovery = {
@@ -106,7 +106,7 @@ test('cancellation during output verification wins and offline cancellation wait
     'worker',
   );
   assert.equal(final.body.status, 'cancelled');
-  assert.equal((await f.control.findById('z440')).activeJobId, null);
+  assert.equal((await f.control.findById(f.workerId)).activeJobId, null);
   assert.equal((await f.jobs.findById(jobId)).outputObject, null);
   assert.equal(f.fakeStorage.objects.size, 2);
 });

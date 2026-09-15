@@ -13,35 +13,17 @@ const fixture = {
 };
 
 describe('fleet environment', () => {
-  it('defaults to explicit legacy authentication and 32 waiters', () => {
-    expect(validateEnvironment(fixture)).toMatchObject({
-      PROCESSING_WORKER_AUTH_MODE: 'legacy',
-      PROCESSING_WORKER_MAX_WAITERS: 32,
-    });
-  });
-  it('requires the environment digest in enabled legacy mode only', () => {
-    expect(() =>
+  it('enables processing with paired registry credentials only and bounds waiters', () => {
+    expect(
       validateEnvironment({ ...fixture, AUDIO_PROCESSING_ENABLED: true }),
-    ).toThrow();
-    expect(() =>
-      validateEnvironment({
-        ...fixture,
-        AUDIO_PROCESSING_ENABLED: true,
-        PROCESSING_WORKER_AUTH_MODE: 'fleet',
-      }),
-    ).not.toThrow();
+    ).toMatchObject({ PROCESSING_WORKER_MAX_WAITERS: 32 });
+    expect(validateEnvironment(fixture)).not.toHaveProperty(
+      'PROCESSING_WORKER_AUTH_MODE',
+    );
   });
   it.each([0, 1025, 1.5])('rejects invalid waiter ceiling %s', (limit) => {
     expect(() =>
       validateEnvironment({ ...fixture, PROCESSING_WORKER_MAX_WAITERS: limit }),
-    ).toThrow();
-  });
-  it('rejects unknown authentication modes', () => {
-    expect(() =>
-      validateEnvironment({
-        ...fixture,
-        PROCESSING_WORKER_AUTH_MODE: 'fallback',
-      }),
     ).toThrow();
   });
 });

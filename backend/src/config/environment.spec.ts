@@ -34,6 +34,23 @@ const testEnvironment = {
 };
 
 describe('environment boundary', () => {
+  it('validates bounded event quotas and defaults independently from fixed retention', () => {
+    expect(validateEnvironment(local)).toMatchObject({
+      WORKER_EVENTS_SETUP_BYTES_PER_DAY: 2097152,
+      WORKER_EVENTS_WORKER_BYTES_PER_DAY: 20971520,
+      WORKER_EVENTS_BATCHES_PER_MINUTE: 60,
+      WORKER_EVENTS_STALE_SECONDS: 300,
+    });
+    for (const [key, value] of [
+      ['WORKER_EVENTS_SETUP_BYTES_PER_DAY', 65535],
+      ['WORKER_EVENTS_WORKER_BYTES_PER_DAY', 1073741825],
+      ['WORKER_EVENTS_BATCHES_PER_MINUTE', 0],
+      ['WORKER_EVENTS_STALE_SECONDS', 3601],
+    ])
+      expect(() => validateEnvironment({ ...local, [key]: value })).toThrow(
+        `Invalid environment: ${key}`,
+      );
+  });
   it('selects exactly one file and rejects arbitrary paths', () => {
     expect(environmentFile('local')).toBe('.env.local');
     expect(environmentFile('production')).toBe('.env.production');

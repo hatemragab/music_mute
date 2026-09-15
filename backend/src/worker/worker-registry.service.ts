@@ -1,3 +1,4 @@
+import { WorkerReadinessService } from './worker-readiness.service.js';
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -15,7 +16,8 @@ import {
   WORKER_ID_PATTERN,
   WORKER_KEY_PATTERN,
 } from './worker-registration.schema.js';
-import { WORKER_ID, type WorkerIdentity } from './worker-routes.js';
+import { INSTALLATION_ID_PATTERN } from './dto/worker-runtime.dto.js';
+import { type WorkerIdentity } from './worker-routes.js';
 import type { Job } from '../jobs/job.schema.js';
 
 @Injectable()
@@ -32,37 +34,10 @@ export class WorkerRegistryService implements OnModuleInit {
     await Promise.all([this.registrations.init(), this.controls.init()]);
   }
 
-  get mode(): 'legacy' | 'fleet' {
-    return this.config.get<'legacy' | 'fleet'>(
-      'PROCESSING_WORKER_AUTH_MODE',
-      'legacy',
-    );
-  }
-
   context(identity?: WorkerIdentity): WorkerIdentity {
-    if (this.mode === 'legacy') {
-      if (
-        identity &&
-        (identity.mode !== 'legacy' ||
-          identity.workerId !== WORKER_ID ||
-          identity.keySha256 !==
-            this.config.get<string>('PROCESSING_WORKER_KEY_SHA256', ''))
-      )
-        throw authError('UNAUTHENTICATED');
-      return (
-        identity ?? {
-          workerId: WORKER_ID,
-          mode: 'legacy',
-          keySha256: this.config.get<string>(
-            'PROCESSING_WORKER_KEY_SHA256',
-            '',
-          ),
-        }
-      );
-    }
     if (
       !identity ||
-      identity.mode !== 'fleet' ||
+      !INSTALLATION_ID_PATTERN.test(identity.installationId) ||
       !WORKER_ID_PATTERN.test(identity.workerId) ||
       !WORKER_KEY_PATTERN.test(identity.keySha256)
     )
@@ -72,13 +47,11 @@ export class WorkerRegistryService implements OnModuleInit {
 
   ownerId(value: string | null | undefined): string {
     if (value && WORKER_ID_PATTERN.test(value)) return value;
-    if (value == null && this.mode === 'legacy') return WORKER_ID;
     throw jobError('STALE_ATTEMPT');
   }
 
   async authenticateDigest(keySha256: string): Promise<WorkerIdentity> {
-    if (this.mode !== 'fleet' || !WORKER_KEY_PATTERN.test(keySha256))
-      throw authError('UNAUTHENTICATED');
+    if (!WORKER_KEY_PATTERN.test(keySha256)) throw authError('UNAUTHENTICATED');
     const registration = await this.registrations
       .findOne({ keySha256 })
       .lean()
@@ -91,12 +64,44 @@ export class WorkerRegistryService implements OnModuleInit {
       !['enabled', 'draining'].includes(registration.state)
     )
       throw authError('UNAUTHENTICATED');
-    return { workerId: registration._id, keySha256, mode: 'fleet' };
+    const identity = this.context({
+      workerId: registration._id,
+      keySha256,
+      installationId: registration.installationId,
+    });
+    await this.assertInstallation(identity);
+    return identity;
+  }
+
+  async describeInstallation(identity: WorkerIdentity) {
+    const current = this.context(identity);
+    const registration = await this.registrations
+      .findOne({ _id: current.workerId, keySha256: current.keySha256 })
+      .lean()
+      .catch(() => {
+        throw authError('SERVICE_UNAVAILABLE');
+      });
+    if (
+      !registration ||
+      !['enabled', 'draining'].includes(registration.state) ||
+      typeof registration.installationId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        registration.installationId,
+      )
+    )
+      throw authError('UNAUTHENTICATED');
+    if (registration.installationId !== current.installationId)
+      throw authError('UNAUTHENTICATED');
+    await this.assertInstallation(current);
+    return {
+      workerId: current.workerId,
+      installationId: registration.installationId,
+      state: registration.state,
+    };
   }
 
   async state(identity: WorkerIdentity, session?: ClientSession) {
     const current = this.context(identity);
-    if (current.mode === 'legacy') return 'enabled' as const;
     const query = this.registrations.findOne({
       _id: current.workerId,
       keySha256: current.keySha256,
@@ -107,7 +112,45 @@ export class WorkerRegistryService implements OnModuleInit {
     });
     if (!registration || !['enabled', 'draining'].includes(registration.state))
       throw authError('UNAUTHENTICATED');
+    if (registration.installationId !== current.installationId)
+      throw authError('UNAUTHENTICATED');
+    await this.assertInstallation(current, session);
     return registration.state;
+  }
+
+  private async installationBound(
+    identity: Pick<WorkerIdentity, 'workerId' | 'installationId'>,
+    session?: ClientSession,
+  ): Promise<boolean> {
+    if (!INSTALLATION_ID_PATTERN.test(identity.installationId)) return false;
+    const installation = await this.registrations.db
+      .collection<{
+        _id: string;
+        assignedWorkerId: string;
+        pairingState: string;
+        revoked: boolean;
+      }>('worker_installations')
+      .findOne(
+        {
+          _id: identity.installationId,
+          assignedWorkerId: identity.workerId,
+          pairingState: 'approved',
+          revoked: false,
+        },
+        { session, projection: { _id: 1 } },
+      )
+      .catch(() => {
+        throw authError('SERVICE_UNAVAILABLE');
+      });
+    return Boolean(installation);
+  }
+
+  private async assertInstallation(
+    identity: WorkerIdentity,
+    session?: ClientSession,
+  ): Promise<void> {
+    if (!(await this.installationBound(identity, session)))
+      throw authError('UNAUTHENTICATED');
   }
 
   // All registry lifecycle/key mutations must touch this same control document in
@@ -126,14 +169,7 @@ export class WorkerRegistryService implements OnModuleInit {
     const result = await this.controls.updateOne(
       {
         _id: control._id,
-        ...(revision === 0
-          ? {
-              $or: [
-                { controlRevision: 0 },
-                { controlRevision: trusted({ $exists: false }) },
-              ],
-            }
-          : { controlRevision: revision }),
+        controlRevision: revision,
       },
       { $inc: { controlRevision: 1 } },
       { session },
@@ -153,46 +189,67 @@ export class WorkerRegistryService implements OnModuleInit {
     return { identity: current, state, control };
   }
 
-  async available(job: Pick<Job, 'workerId' | 'attemptId'>): Promise<boolean> {
+  async available(
+    job: Pick<
+      Job,
+      'workerId' | 'attemptId' | 'measuredDurationSeconds' | 'inputReservation'
+    >,
+  ): Promise<boolean> {
     const since = new Date(
       Date.now() -
         this.config.getOrThrow<number>('PROCESSING_LEASE_SECONDS') * 1000,
     );
-    if (this.mode === 'legacy') {
-      if (job.workerId && job.workerId !== WORKER_ID) return false;
-      return Boolean(
-        await this.controls.exists({
-          _id: WORKER_ID,
-          lastSeenAt: trusted({ $gt: since }),
-        }),
-      );
-    }
     if (job.attemptId && !job.workerId) return false;
-    const rows = await this.controls.aggregate([
-      {
-        $match: {
-          lastSeenAt: { $gt: since },
-          ...(job.workerId ? { _id: job.workerId } : {}),
-        },
-      },
-      {
-        $lookup: {
-          from: 'audio_workers',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'registration',
-        },
-      },
-      {
-        $match: {
-          'registration.state': job.workerId
-            ? { $in: ['enabled', 'draining'] }
-            : 'enabled',
-        },
-      },
-      { $limit: 1 },
-      { $project: { _id: 1 } },
-    ]);
-    return rows.length > 0;
+    if (!job.workerId) {
+      const candidates = await this.registrations
+        .find({ state: 'enabled' })
+        .sort({ _id: 1 })
+        .limit(1000)
+        .lean();
+      const readiness = new WorkerReadinessService(this.controls.db);
+      const duration =
+        job.measuredDurationSeconds ?? job.inputReservation.durationSeconds;
+      for (const candidate of candidates) {
+        if (
+          !(await this.installationBound({
+            workerId: candidate._id,
+            installationId: candidate.installationId,
+          }))
+        )
+          continue;
+        const eligibility = await readiness.evaluateNewClaim(
+          candidate._id,
+          undefined,
+          true,
+        );
+        if (
+          eligibility.allowed &&
+          duration <= eligibility.maxDurationSeconds &&
+          job.inputReservation.bytes <= eligibility.maxPreparedAudioBytes
+        )
+          return true;
+      }
+      return false;
+    }
+    const registration = await this.registrations
+      .findOne({
+        _id: job.workerId,
+        state: trusted({ $in: ['enabled', 'draining'] }),
+      })
+      .lean();
+    if (
+      !registration ||
+      !(await this.installationBound({
+        workerId: registration._id,
+        installationId: registration.installationId,
+      }))
+    )
+      return false;
+    return Boolean(
+      await this.controls.exists({
+        _id: job.workerId,
+        lastSeenAt: trusted({ $gt: since }),
+      }),
+    );
   }
 }

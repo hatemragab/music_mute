@@ -40,6 +40,33 @@ export function environmentFile(environment = 'local'): string {
 }
 
 const schema = Joi.object({
+  WORKER_EVENTS_SETUP_BYTES_PER_DAY: Joi.number()
+    .integer()
+    .min(65536)
+    .max(1073741824)
+    .default(2097152),
+  WORKER_EVENTS_WORKER_BYTES_PER_DAY: Joi.number()
+    .integer()
+    .min(65536)
+    .max(1073741824)
+    .default(20971520),
+  WORKER_EVENTS_BATCHES_PER_MINUTE: Joi.number()
+    .integer()
+    .min(1)
+    .max(1000)
+    .default(60),
+  WORKER_EVENTS_STALE_SECONDS: Joi.number()
+    .integer()
+    .min(30)
+    .max(3600)
+    .default(300),
+  WORKER_DISTRIBUTION_ORIGIN: Joi.string()
+    .valid('https://updates.music-mute.com')
+    .default('https://updates.music-mute.com'),
+  WORKER_PUBLICATION_KEY_ID: Joi.string()
+    .pattern(/^[a-zA-Z0-9_-]{1,64}$/)
+    .optional(),
+  WORKER_PUBLICATION_PUBLIC_KEY: Joi.string().max(1024).optional(),
   APP_ENV: Joi.string().valid('local', 'production', 'test').default('local'),
   NODE_ENV: Joi.string()
     .valid('development', 'production', 'test')
@@ -103,12 +130,6 @@ const schema = Joi.object({
   RELEASE_LANDING_BASE_URL: Joi.string()
     .uri({ scheme: ['https'] })
     .optional(),
-  PROCESSING_WORKER_KEY_SHA256: Joi.string()
-    .pattern(/^[a-f0-9]{64}$/)
-    .optional(),
-  PROCESSING_WORKER_AUTH_MODE: Joi.string()
-    .valid('legacy', 'fleet')
-    .default('legacy'),
   PROCESSING_WORKER_MAX_WAITERS: Joi.number()
     .integer()
     .min(1)
@@ -213,12 +234,6 @@ export function validateEnvironment(
     );
   }
   const env = result.value as Record<string, unknown>;
-  if (
-    env.AUDIO_PROCESSING_ENABLED &&
-    env.PROCESSING_WORKER_AUTH_MODE === 'legacy' &&
-    !env.PROCESSING_WORKER_KEY_SHA256
-  )
-    throw new Error('Invalid environment: PROCESSING_WORKER_KEY_SHA256');
   const production = env.APP_ENV === 'production';
   if (production !== (env.NODE_ENV === 'production'))
     throw new Error('APP_ENV and NODE_ENV disagree');

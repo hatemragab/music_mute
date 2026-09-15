@@ -1,3 +1,4 @@
+import { pairedWorkerFixture } from './helpers/paired-worker-fixture.mjs';
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -91,8 +92,6 @@ test(
       );
       const config = new ConfigService({
         AUDIO_PROCESSING_ENABLED: true,
-        PROCESSING_WORKER_AUTH_MODE: 'legacy',
-        PROCESSING_WORKER_KEY_SHA256: 'a'.repeat(64),
         PROCESSING_LEASE_SECONDS: 90,
         PROCESSING_URL_SECONDS: 900,
         PROCESSING_OUTPUT_MAX_BYTES: 30_000_000,
@@ -332,13 +331,20 @@ test(
             queuedAt: new Date(0),
           });
           await counters.create({ _id: 'audio', sequence: 41n });
-          await makeJob(user, 'queued', { queueOrder: 41n });
+          await makeJob(await owner(), 'queued', { queueOrder: 41n });
           const body = command();
           const results = await Promise.allSettled([
             admin.retry(actor, source.id, body),
             admin.retry(actor, source.id, body),
           ]);
-          assert.ok(results.some((r) => r.status === 'fulfilled'));
+          assert.ok(
+            results.some((r) => r.status === 'fulfilled'),
+            JSON.stringify(
+              results.map((r) =>
+                r.status === 'rejected' ? r.reason.getResponse?.() : r.status,
+              ),
+            ),
+          );
           for (const r of results)
             if (r.status === 'rejected')
               assert.ok(code('OPERATION_IN_PROGRESS')(r.reason));
@@ -674,12 +680,17 @@ test(
             connection.model('NotificationOutbox'),
             userAccess,
           );
+          const workerIdentity = await pairedWorkerFixture(connection);
           const upload = async () => {
             const job = await makeJob(user, 'queued', {
               queueOrder: BigInt((await jobs.countDocuments()) + 1),
               queuedAt: new Date(),
             });
-            const assigned = await coordinator.claim(randomUUID());
+            const assigned = await coordinator.claim(
+              randomUUID(),
+              workerIdentity,
+              2,
+            );
             const selector = {
               jobId: assigned.jobId,
               attemptId: assigned.attemptId,
@@ -694,17 +705,21 @@ test(
                 hasAudio: true,
                 durationSeconds: 10,
               },
+              workerIdentity,
             );
-            await output.reserve({
-              ...selector,
-              eventId: randomUUID(),
-              bytes: 100,
-              sha256: Buffer.alloc(32).toString('base64'),
-              contentType: 'audio/mpeg',
-              durationSeconds: 10,
-              playable: true,
-              voiceOnly: true,
-            });
+            await output.reserve(
+              {
+                ...selector,
+                eventId: randomUUID(),
+                bytes: 100,
+                sha256: Buffer.alloc(32).toString('base64'),
+                contentType: 'audio/mpeg',
+                durationSeconds: 10,
+                playable: true,
+                voiceOnly: true,
+              },
+              workerIdentity,
+            );
             return { job, selector };
           };
           const first = await upload(),
@@ -716,10 +731,13 @@ test(
             await release.promise;
             return verify(job);
           };
-          const pending = terminal.complete({
-            ...first.selector,
-            eventId: randomUUID(),
-          });
+          const pending = terminal.complete(
+            {
+              ...first.selector,
+              eventId: randomUUID(),
+            },
+            workerIdentity,
+          );
           const conflicted = assert.rejects(
             pending,
             code('JOB_STATE_CONFLICT'),
@@ -733,7 +751,9 @@ test(
           );
           assert.equal(requested.status, 'cancel_requested');
           assert.equal(
-            (await controls.findById('z440')).activeJobId.toString(),
+            (
+              await controls.findById(workerIdentity.workerId)
+            ).activeJobId.toString(),
             first.job.id,
           );
           release.resolve();
@@ -742,19 +762,27 @@ test(
           await terminal.stopped(
             { ...first.selector, eventId: randomUUID(), stopped: true },
             'cancelled',
+            workerIdentity,
           );
           assert.equal(
             (await jobs.findById(first.job._id)).status,
             'cancelled',
+            workerIdentity,
           );
-          assert.equal((await controls.findById('z440')).activeJobId, null);
+          assert.equal(
+            (await controls.findById(workerIdentity.workerId)).activeJobId,
+            null,
+          );
           const second = await upload();
           const priorRevision = (await jobs.findById(second.job._id))
             .adminRevision;
-          await terminal.complete({
-            ...second.selector,
-            eventId: randomUUID(),
-          });
+          await terminal.complete(
+            {
+              ...second.selector,
+              eventId: randomUUID(),
+            },
+            workerIdentity,
+          );
           await assert.rejects(
             admin.cancel(actor, second.job.id, command(priorRevision)),
             code('REVISION_CONFLICT'),

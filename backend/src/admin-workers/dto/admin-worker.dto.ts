@@ -6,22 +6,16 @@ import {
   IsMongoId,
   IsString,
   IsUUID,
-  Matches,
   Max,
   MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
-import { WORKER_ID_PATTERN } from '../../worker/worker-registration.schema.js';
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
 export class WorkerOperationDto {
   @IsUUID('4') operationId!: string;
   @Transform(trim) @IsString() @MinLength(1) @MaxLength(500) reason!: string;
-}
-export class CreateAdminWorkerDto extends WorkerOperationDto {
-  @IsString() @Matches(WORKER_ID_PATTERN) id!: string;
-  @Transform(trim) @IsString() @MinLength(1) @MaxLength(100) label!: string;
 }
 export class UpdateAdminWorkerDto extends WorkerOperationDto {
   @IsInt() @Min(0) @Max(Number.MAX_SAFE_INTEGER - 1) expectedRevision!: number;

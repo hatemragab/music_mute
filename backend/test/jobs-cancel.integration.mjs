@@ -35,7 +35,7 @@ test('cancellation retains the active slot until stopped and failures are safe a
   const cancelled = await f.request('POST', `/jobs/${first.jobId}/cancel`, {});
   assert.equal(cancelled.body.status, 'cancel_requested');
   assert.equal(
-    (await f.control.findById('z440')).activeJobId.toString(),
+    (await f.control.findById(f.workerId)).activeJobId.toString(),
     first.jobId,
   );
   assert.equal(
@@ -76,7 +76,7 @@ test('cancellation retains the active slot until stopped and failures are safe a
   const stopped = await f.request('POST', '/worker/fail', failure, 'worker');
   assert.equal(stopped.status, 200, JSON.stringify(stopped.body));
   assert.equal(stopped.body.status, 'cancelled');
-  assert.equal((await f.control.findById('z440')).activeJobId, null);
+  assert.equal((await f.control.findById(f.workerId)).activeJobId, null);
   assert.equal(await f.errors.countDocuments(), 1);
   assert.equal(await f.jobs.db.model('NotificationOutbox').countDocuments(), 0);
   assert.equal(

@@ -28,8 +28,8 @@ export class FairQueueService {
   async selectNextEligible(
     now: Date,
     session: ClientSession,
-    workerId = 'z440',
     mediaPolicyVersion?: 2,
+    media?: { maxDurationSeconds: number; maxPreparedAudioBytes: number },
   ) {
     const policy = await readQueuePolicy(
       this.jobs.db.model<ProcessingQueuePolicy>(ProcessingQueuePolicy.name),
@@ -42,14 +42,37 @@ export class FairQueueService {
             status: 'queued',
             deletedAt: null,
             workerId: null,
+            ...(media
+              ? {
+                  $expr: {
+                    $and: [
+                      {
+                        $lte: [
+                          {
+                            $ifNull: [
+                              '$measuredDurationSeconds',
+                              '$inputReservation.durationSeconds',
+                            ],
+                          },
+                          media.maxDurationSeconds,
+                        ],
+                      },
+                      {
+                        $lte: [
+                          '$inputReservation.bytes',
+                          media.maxPreparedAudioBytes,
+                        ],
+                      },
+                    ],
+                  },
+                }
+              : {}),
             $or: [
               { 'admissionSnapshot.policyVersion': { $ne: 2 } },
               ...(mediaPolicyVersion === 2
                 ? [
                     {
                       'admissionSnapshot.policyVersion': 2,
-                      'admissionSnapshot.qualification.qualifiedWorkerIds':
-                        workerId,
                     },
                   ]
                 : []),

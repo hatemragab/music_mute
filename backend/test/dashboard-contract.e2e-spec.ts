@@ -2,7 +2,6 @@ import 'reflect-metadata';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 import { RequestMethod, type Type } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants.js';
@@ -20,6 +19,17 @@ import { AdminAuditController } from '../src/admin/admin-audit.controller.js';
 import { AdminOperationsController } from '../src/admin/admin-operations.controller.js';
 import { AdminSessionController } from '../src/admin/admin-session.controller.js';
 import { AdminWorkersController } from '../src/admin-workers/admin-workers.controller.js';
+import { AdminWorkerInstallationsController } from '../src/worker-installations/worker-installations.controller.js';
+import {
+  AdminInstallationEventsController,
+  AdminWorkerEventsController,
+} from '../src/worker-events/worker-events.controller.js';
+import { InstallationLimitsService } from '../src/worker-installations/installation-limits.service.js';
+import {
+  WorkerGroupsController,
+  WorkerReleasesController,
+  WorkerRolloutsController,
+} from '../src/worker-releases/worker-releases.controller.js';
 import { AdminUsersController } from '../src/admin-users/admin-users.controller.js';
 import { AdminAccountRecoveryController } from '../src/admin-users/admin-account-recovery.controller.js';
 import { AdminJobsController } from '../src/admin-jobs/admin-jobs.controller.js';
@@ -72,6 +82,12 @@ const controllers: Type[] = [
   AdminAuditController,
   AdminOperationsController,
   AdminWorkersController,
+  AdminWorkerInstallationsController,
+  AdminInstallationEventsController,
+  AdminWorkerEventsController,
+  WorkerGroupsController,
+  WorkerReleasesController,
+  WorkerRolloutsController,
   AdminUsersController,
   AdminAccountRecoveryController,
   AdminJobsController,
@@ -125,6 +141,15 @@ describe('complete administration route authorization contract', () => {
         services.add(dependency);
     }
     const providers = [...services].map((service) => {
+      if (service === InstallationLimitsService) {
+        return {
+          provide: service,
+          useValue: {
+            take: vi.fn(async () => undefined),
+            approvalAttempt: vi.fn(async () => async () => undefined),
+          },
+        };
+      }
       const methods = Object.getOwnPropertyNames(service.prototype).filter(
         (name) => name !== 'constructor',
       );
@@ -153,9 +178,6 @@ describe('complete administration route authorization contract', () => {
           useValue: new ConfigService({
             ADMIN_REAUTH_MAX_AGE_SECONDS: 300,
             AUDIO_PROCESSING_ENABLED: true,
-            PROCESSING_WORKER_KEY_SHA256: createHash('sha256')
-              .update(workerKey)
-              .digest('hex'),
           }),
         },
       ],

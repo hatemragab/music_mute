@@ -1,3 +1,9 @@
+import { WORKER_RELEASE_MODELS } from '../worker-releases/worker-release.schema.js';
+import {
+  CredentialReservation,
+  CredentialReservationSchema,
+} from '../worker-installations/credential-reservation.schema.js';
+import { WorkerQualificationSchema } from '../worker/worker-qualification.schema.js';
 import {
   ProcessingQueuePolicy,
   ProcessingQueuePolicySchema,
@@ -49,7 +55,16 @@ import {
   NotificationDeliverySchema,
 } from '../notifications/notification-delivery.schema.js';
 
+import {
+  WorkerRuntime,
+  WorkerRuntimeSchema,
+} from '../worker/worker-runtime.schema.js';
+
 export const PROCESSING_MODELS = [
+  { name: CredentialReservation.name, schema: CredentialReservationSchema },
+  ...WORKER_RELEASE_MODELS,
+  { name: 'WorkerQualification', schema: WorkerQualificationSchema },
+  { name: WorkerRuntime.name, schema: WorkerRuntimeSchema },
   { name: ProcessingQueuePolicy.name, schema: ProcessingQueuePolicySchema },
   { name: QueueExecutionUsage.name, schema: QueueExecutionUsageSchema },
   {

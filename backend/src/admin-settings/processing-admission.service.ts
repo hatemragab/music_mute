@@ -81,6 +81,8 @@ export class ProcessingAdmissionService {
         this.jobs.db.model<ProcessingQueuePolicy>(ProcessingQueuePolicy.name),
         queuePolicy.qualification,
         session,
+        input.durationSeconds,
+        input.bytes,
       );
       if (workers.length === 0 || !queuePolicy.qualification)
         throw jobError('PROCESSING_CAPACITY_UNAVAILABLE');

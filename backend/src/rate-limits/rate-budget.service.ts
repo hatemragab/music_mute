@@ -8,6 +8,11 @@ import type { Redis } from 'ioredis';
 import type { RateBucket, RateDecision } from '../auth/auth.types.js';
 import { QUOTA_RESERVATION_SCRIPT } from './quota-script.js';
 import { SECURITY_REDIS } from './security-redis.provider.js';
+import { WEIGHTED_QUOTA_SCRIPT } from './weighted-quota-script.js';
+
+export interface WeightedRateBucket extends RateBucket {
+  weight: number;
+}
 
 function positiveInteger(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
@@ -17,7 +22,44 @@ function positiveInteger(value: number): boolean {
 export class RateBudgetService {
   constructor(@Inject(SECURITY_REDIS) private readonly redis: Redis) {}
 
-  async reserve(buckets: RateBucket[]): Promise<RateDecision> {
+  async reserveWeighted(buckets: WeightedRateBucket[]): Promise<RateDecision> {
+    if (
+      buckets.length < 1 ||
+      buckets.length > 100 ||
+      new Set(buckets.map((bucket) => bucket.key)).size !== buckets.length ||
+      buckets.some(
+        (bucket) =>
+          !bucket.key ||
+          !positiveInteger(bucket.limit) ||
+          !positiveInteger(bucket.windowMs) ||
+          !positiveInteger(bucket.weight) ||
+          bucket.limit > Number.MAX_SAFE_INTEGER / 2 ||
+          bucket.weight > Number.MAX_SAFE_INTEGER / 2,
+      )
+    )
+      throw new TypeError('Invalid weighted rate-limit buckets');
+    try {
+      const result = await this.redis.eval(
+        WEIGHTED_QUOTA_SCRIPT,
+        buckets.length,
+        ...buckets.map((bucket) => bucket.key),
+        ...buckets.flatMap((bucket) => [
+          String(bucket.windowMs),
+          String(bucket.limit),
+          String(bucket.weight),
+        ]),
+      );
+      const [allowed, retryAfterSeconds] = this.parseResult(result);
+      return { allowed: allowed === 1, retryAfterSeconds };
+    } catch {
+      throw new ServiceUnavailableException('Service unavailable');
+    }
+  }
+
+  async reserve(
+    buckets: RateBucket[],
+    reservationId = randomUUID(),
+  ): Promise<RateDecision> {
     if (buckets.length === 0)
       throw new TypeError('At least one bucket is required');
     const keys = new Set<string>();
@@ -38,7 +80,7 @@ export class RateBudgetService {
         QUOTA_RESERVATION_SCRIPT,
         buckets.length,
         ...buckets.map((bucket) => bucket.key),
-        randomUUID(),
+        reservationId,
         ...buckets.flatMap((bucket) => [
           String(bucket.windowMs),
           String(bucket.limit),
@@ -51,6 +93,15 @@ export class RateBudgetService {
       };
     } catch (error) {
       if (error instanceof ServiceUnavailableException) throw error;
+      throw new ServiceUnavailableException('Service unavailable');
+    }
+  }
+
+  /** Release only this admitted attempt; failed attempts retain their sliding-window slot. */
+  async release(key: string, reservationId: string): Promise<void> {
+    try {
+      await this.redis.zrem(key, reservationId);
+    } catch {
       throw new ServiceUnavailableException('Service unavailable');
     }
   }

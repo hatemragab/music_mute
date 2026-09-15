@@ -10,7 +10,6 @@ import { JobAttemptSchema } from '../dist/jobs/job-attempt.schema.js';
 import { UserSchema } from '../dist/users/user.schema.js';
 import { WorkerRegistrationSchema } from '../dist/worker/worker-registration.schema.js';
 import { WorkerControlSchema } from '../dist/worker/worker-control.schema.js';
-import { WORKER_ID } from '../dist/worker/worker-routes.js';
 import { ReleaseSchema } from '../dist/releases/release.schema.js';
 import { AdminOverviewService } from '../dist/admin-observability/admin-overview.service.js';
 
@@ -114,16 +113,40 @@ test(
           processingStartedAt: null,
         },
       ]);
+      const installationIds = [randomUUID(), randomUUID(), randomUUID()];
+      await connection.collection('worker_installations').insertMany(
+        ['online', 'offline', 'revoked'].map((id, index) => ({
+          _id: installationIds[index],
+          assignedWorkerId: id,
+          pairingState: 'approved',
+          revoked: false,
+        })),
+      );
       await workers.collection.insertMany([
-        { _id: 'online', state: 'enabled', keySha256: '1'.repeat(64) },
-        { _id: 'offline', state: 'draining', keySha256: '2'.repeat(64) },
-        { _id: 'revoked', state: 'revoked', keySha256: '3'.repeat(64) },
+        {
+          _id: 'online',
+          installationId: installationIds[0],
+          state: 'enabled',
+          keySha256: '1'.repeat(64),
+        },
+        {
+          _id: 'offline',
+          installationId: installationIds[1],
+          state: 'draining',
+          keySha256: '2'.repeat(64),
+        },
+        {
+          _id: 'revoked',
+          installationId: installationIds[2],
+          state: 'revoked',
+          keySha256: '3'.repeat(64),
+        },
       ]);
       await controls.collection.insertMany([
         { _id: 'online', lastSeenAt: new Date() },
         { _id: 'offline', lastSeenAt: new Date(0) },
         { _id: 'revoked', lastSeenAt: new Date() },
-        { _id: WORKER_ID, lastSeenAt: new Date() },
+        { _id: 'unregistered-control', lastSeenAt: new Date() },
       ]);
       await releases.collection.insertMany([
         {
@@ -143,7 +166,6 @@ test(
         },
       ]);
       const config = new ConfigService({
-        PROCESSING_WORKER_AUTH_MODE: 'fleet',
         PROCESSING_LEASE_SECONDS: 90,
       });
       const service = new AdminOverviewService(
@@ -190,20 +212,6 @@ test(
         published: 1,
         withdrawn: 0,
         rejectedArtifacts: 1,
-      });
-      const legacy = new AdminOverviewService(
-        jobs,
-        workers,
-        controls,
-        releases,
-        new ConfigService({
-          PROCESSING_WORKER_AUTH_MODE: 'legacy',
-          PROCESSING_LEASE_SECONDS: 90,
-        }),
-      );
-      assert.deepEqual((await legacy.read(actor, range)).workers, {
-        total: 1,
-        online: 1,
       });
       const empty = await service.read(actor, {
         from: '2027-01-01T00:00:00Z',

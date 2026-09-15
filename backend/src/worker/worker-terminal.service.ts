@@ -3,7 +3,6 @@ import { ProcessingUsageLedger } from '../processing-usage/processing-usage.sche
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import {
-  trusted,
   type ClientSession,
   type HydratedDocument,
   type Model,
@@ -67,15 +66,7 @@ export class WorkerTerminalService {
           generation: dto.generation,
         })
         .session(session);
-      // A successful acknowledgement may already have enabled account purging.
-      if (!attempt) {
-        if (
-          owner.mode === 'fleet' ||
-          (await this.attempts.exists({ jobId }).session(session))
-        )
-          throw jobError('STALE_ATTEMPT');
-        return { status: 'cleaned' as const };
-      }
+      if (!attempt) throw jobError('STALE_ATTEMPT');
       if (this.coordinator.ownerId(attempt.workerId) !== owner.workerId)
         throw jobError('STALE_ATTEMPT');
       if (await this.workers.exists({ activeJobId: jobId }).session(session))
@@ -84,10 +75,7 @@ export class WorkerTerminalService {
         {
           jobId,
           sessionId: dto.sessionId,
-          workerId:
-            owner.mode === 'legacy'
-              ? trusted({ $in: [owner.workerId, null] })
-              : owner.workerId,
+          workerId: owner.workerId,
         },
         { $set: { localDataDeletedAt: new Date() } },
         { session },

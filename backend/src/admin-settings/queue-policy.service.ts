@@ -1,11 +1,10 @@
+import { WorkerReadinessService } from '../worker/worker-readiness.service.js';
 import {
   assertQualification,
   qualificationReady,
   type ProcessingQualification,
 } from './processing-qualification.js';
-import { WorkerControl } from '../worker/worker-control.schema.js';
 import { WorkerRegistration } from '../worker/worker-registration.schema.js';
-import { trusted } from 'mongoose';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { ClientSession, Model } from 'mongoose';
@@ -54,29 +53,33 @@ export async function qualifiedWorkers(
   model: Model<ProcessingQueuePolicy>,
   qualification: ProcessingQualification | null,
   session?: ClientSession,
+  durationSeconds = 1,
+  bytes = 1,
 ): Promise<string[]> {
   if (!qualificationReady(qualification, new Date())) return [];
-  const controls = await model.db
-    .model<WorkerControl>(WorkerControl.name)
-    .find({
-      _id: trusted({ $in: qualification.qualifiedWorkerIds }),
-      mediaPolicyVersion: 2,
-      mediaCapabilitySeenAt: trusted({ $gte: new Date(Date.now() - 300_000) }),
-    })
-    .session(session ?? null)
-    .lean();
   const registrations = await model.db
     .model<WorkerRegistration>(WorkerRegistration.name)
-    .find({ _id: trusted({ $in: controls.map((c) => c._id) }) })
+    .find({ state: 'enabled' })
+    .sort({ _id: 1 })
+    .limit(1000)
     .session(session ?? null)
     .lean();
-  return controls
-    .filter(
-      (c) =>
-        registrations.some((r) => r._id === c._id && r.state === 'enabled') ||
-        (!registrations.some((r) => r._id === c._id) && c._id === 'z440'),
+  const eligible: string[] = [];
+  const readiness = new WorkerReadinessService(model.db);
+  for (const registration of registrations) {
+    const result = await readiness.evaluateNewClaim(
+      registration._id,
+      session,
+      true,
+    );
+    if (
+      result.allowed &&
+      result.maxDurationSeconds >= durationSeconds &&
+      result.maxPreparedAudioBytes >= bytes
     )
-    .map((c) => c._id);
+      eligible.push(registration._id);
+  }
+  return eligible;
 }
 @Injectable()
 export class QueuePolicyService {

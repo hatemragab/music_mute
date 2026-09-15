@@ -7,7 +7,7 @@ and iOS apps. Import audio you have permission to process, submit it for vocal
 isolation, and play, download, or share the voice-only result.
 
 This repository contains the mobile apps, API, administrator dashboard, and
-Windows processing worker. Audio separation runs on an external worker; a mobile
+shared processing worker. Audio separation runs on an external worker; a mobile
 build alone does not provide offline music removal.
 
 [Getting started](#getting-started) · [Architecture](#architecture) ·
@@ -35,7 +35,7 @@ flowchart LR
     API --> Redis[(Redis)]
     API --> S3[(Private S3 storage)]
     Apps -->|Signed transfers| S3
-    Worker[Windows audio worker] -->|Claim jobs and report results| API
+    Worker[Shared audio worker] -->|Claim jobs and report results| API
     Worker -->|Download input and upload output| S3
 ```
 
@@ -45,7 +45,7 @@ flowchart LR
 | iOS app         | Swift, SwiftUI                         | [ios/](ios/README.md)                       |
 | API             | NestJS, TypeScript, MongoDB, Redis, S3 | [backend/](backend/README.md)               |
 | Admin dashboard | React, TypeScript, Vite, Tailwind CSS  | [dashboard/](dashboard/README.md)           |
-| Audio worker    | Windows, DirectML                      | [windows-worker/](windows-worker/README.md) |
+| Audio worker    | Python shared core; native adapters in development | [worker/](worker/README.md) |
 
 ## Getting started
 
@@ -67,7 +67,8 @@ Choose the component you want to work on; there is no root-level install command
    for iOS. Configure Firebase and the API endpoint using the platform guides
    before building.
 4. **Audio processing:** configure private S3 storage and the
-   [Windows worker](windows-worker/README.md) to run the complete processing flow.
+   [shared worker](worker/README.md). Native installers and qualified GPU recipes
+   are still under development; the source archive is not a deployable installer.
 
 Start with the component guides for exact environment variables and verification
 commands. Local builds and fixture tests do not establish that production

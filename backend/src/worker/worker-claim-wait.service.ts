@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { authError } from '../auth/auth.errors.js';
 import { AuthRateLimitException } from '../auth/rate-limit.exception.js';
 import { WorkerCoordinatorService } from './worker-coordinator.service.js';
-import { WORKER_ID, type WorkerIdentity } from './worker-routes.js';
+import { type WorkerIdentity } from './worker-routes.js';
 
 const RECHECK_MILLISECONDS = 1000;
 
@@ -25,11 +25,12 @@ export class WorkerClaimWaitService implements OnModuleDestroy {
     identity?: WorkerIdentity,
     mediaPolicyVersion?: 2,
   ) {
+    if (!identity) throw authError('UNAUTHENTICATED');
     if (this.stopping) throw authError('SERVICE_UNAVAILABLE');
     if (signal?.aborted) return null;
     if (waitSeconds === 0)
       return this.coordinator.claim(sessionId, identity, mediaPolicyVersion);
-    const workerId = identity?.workerId ?? WORKER_ID;
+    const workerId = identity.workerId;
     const maxWaiters =
       this.config?.get<number>('PROCESSING_WORKER_MAX_WAITERS', 32) ?? 32;
     if (this.waiters.size >= maxWaiters || this.workerWaiters.has(workerId))

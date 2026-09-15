@@ -9,6 +9,7 @@ import type { Response } from 'express';
 import type { Request } from 'express';
 import { AuthRateLimitException } from '../auth/rate-limit.exception.js';
 import { adminError, adminRequestId } from '../admin/admin-errors.js';
+import { WorkerEventException } from '../worker-events/worker-event-policy.js';
 
 @Catch()
 export class PublicExceptionFilter implements ExceptionFilter {
@@ -108,6 +109,10 @@ export class PublicExceptionFilter implements ExceptionFilter {
     }
     const status =
       exception instanceof HttpException ? exception.getStatus() : 500;
+    if (exception instanceof WorkerEventException) {
+      response.status(status).json(exception.getResponse());
+      return;
+    }
     if (status === 400) {
       response.status(status).json({
         statusCode: status,

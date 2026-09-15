@@ -1,97 +1,83 @@
-# Worker fleet ownership foundation
+# Worker pairing and fleet ownership
 
-The API supports two explicit authentication modes. `PROCESSING_WORKER_AUTH_MODE=legacy`
-is the default and accepts only the configured `PROCESSING_WORKER_KEY_SHA256` for
-`z440`. `fleet` resolves each bounded bearer digest through `audio_workers`; it
-does not fall back to the environment digest. Neither mode registers workers from
-HTTP claims, changes credentials at startup, or migrates documents automatically.
+Every worker uses protocol 3 and a permanent credential bound to its registered
+installation. There is no configuration switch, environment credential, default
+machine identity, startup slot creation, manual registration endpoint, migration,
+backfill, or compatibility decoder. Physical machines, including the Z440, enroll
+through the same installation flow.
 
-`POST /api/v1/worker/identity` accepts an empty body and returns
-`{workerId,state,protocolVersion:2}` with `Cache-Control: no-store`. Worker IDs and
-credentials come from authentication, never request body fields or identity headers.
-Every returned assignment includes `workerId`. The existing selector fields and
-event request hashes are preserved.
+Installers create separate installation and permanent secrets locally. Setup uses
+`/worker-installations` registration, qualification reporting and pairing-code
+issuance. A freshly authenticated worker administrator approves the code through
+`/admin/worker-installations/approve`. Approval transactionally creates the
+registration and control slot. Installation expiry affects setup authority only;
+permanent credentials remain governed by current registry state and installation
+ownership. Credentials and pairing codes must never enter logs or URLs.
 
-Each registration has a matching `audio_worker_control` row. Claims, recovery,
-event receipts and grant issuance recheck the current credential/state and touch
-the same control's `controlRevision` inside their MongoDB transaction. Administrative
-state/key changes must call `WorkerRegistryService.touchControl(control, session)`
-in the transaction that updates registration. Reading registration alone is not
-sufficient. Rotation is an idle-only administrative operation; revocation leaves
-unfinished ownership reserved. Issued S3 URLs cannot be recalled, so the final
-attempt and credential checks still apply before publication.
+`POST /api/v1/worker/identity` accepts an empty body and returns the current
+`workerId`, `installationId`, state, `protocolVersion: 3`, `mediaPolicyVersion: 2`
+and update capability with `Cache-Control: no-store`. Request bodies and identity
+headers cannot substitute another worker. The media policy version is independent
+of the worker protocol version.
 
-New attempts require `workerId`; jobs preserve their latest assigned owner for
-history. Only legacy mode interprets missing historical ownership as `z440`.
-Expired attempts retain their per-machine slot until verified stopped recovery.
-Other registered machines continue claiming the oldest eligible queued jobs.
-A draining worker finishes existing work and receives no new assignment. When
-stopped reconciliation releases its interrupted job, the job keeps its FIFO order
-and the reply is `{status:'released',previousAttemptId}`. Repeating that recovery
-returns the same release result. Windows clients must understand protocol 2 and
-this reply before fleet mode is enabled.
+Fresh claims require permanent-auth runtime and installation readiness: an exact
+published build and approved profile, persisted fixture/provider/model/service
+qualification, boot verification, current policy and explicit installation
+binding. Publication alone does not qualify hardware. Qualification observations
+can be renewed through permanent-auth `/worker/qualification`.
 
-Long polls allow one pending request per worker per API process. The validated
-`PROCESSING_WORKER_MAX_WAITERS` default is 32, range 1–1024. Duplicate/capacity
-requests return 429 with `Retry-After: 1`; disconnects, credential changes, errors
-and shutdown release admission. The existing IP/global rate limits still apply:
-operators must review the effective shared-NAT budget before enabling several
-machines. No new fleet-wide rate budget was introduced.
+Claims, recovery, event receipts and grants recheck the current registration,
+digest, installation ownership and lifecycle state inside their transactions.
+Administrative changes touch the same control revision. Attempts always carry an
+explicit worker owner; missing ownership is rejected and never inferred. Draining
+or floor-blocked workers can heartbeat, cancel, finish, clean up and reconcile
+existing owned attempts. Revoked credentials cannot authenticate. Recovery cannot
+transfer an owned attempt to another machine.
 
-The mobile `workerAvailable` field remains a Boolean. Assigned jobs reflect the
-actual owner's recent liveness and enabled/draining state. Unassigned jobs report
-whether an enabled worker is recently online, including a busy worker. Registry
-IDs, labels, counts and key digests are not added to mobile responses.
+Long polls allow one waiter per worker per API process, with validated
+`PROCESSING_WORKER_MAX_WAITERS` default 32 and range 1–1024. Capacity and duplicate
+requests return 429 with `Retry-After: 1`. Disconnects, credential changes, errors
+and shutdown release admission. Existing IP/global rate limits remain effective.
 
-## Explicit legacy-to-fleet migration
+The mobile availability Boolean reflects qualified media capacity for unassigned
+jobs and recent enabled/draining liveness for an assigned owner. It exposes no
+registry identifiers or secrets.
 
-The migration is an operator-only command; it never runs during API startup. With
-the backend runtime environment supplied, inspect the exact production database:
+## Administrative operations
 
-```sh
-npm run worker:fleet:migrate -- --dry-run
-```
+`GET /admin/workers` and detail routes expose registered fleet state. The retired
+`POST /admin/workers` route is absent. Pairing is the only enrollment path. Idle
+credential rotation remains an audited, freshly authenticated operation, returning
+`{worker,rawKey}` once. A retry returns the non-secret receipt. Old and new digest
+reservations remain unavailable for installation-token reuse. Revocation preserves
+unfinished slots and cannot be undone by enabling the registration.
 
-The dry run opens MongoDB without model/index initialization and reports only safe
-counts and decisions. It never prints digests or row payloads and performs no
-writes. `canApply` concerns the database snapshot only; it does not prove that the
-worker is upgraded or stopped.
+Release-stopped requires the exact assignment, observed termination time and a
+bounded operator statement identifying actual process termination. Missing
+heartbeats are insufficient. Evidence is stored as audit text and never executed.
+Release preserves history and queue order or finalizes requested cancellation.
 
-After verifying the legacy worker is idle and stopping its process, apply while
-every API replica is still in `legacy` mode:
+`npm run worker:fleet:audit` is a read-only integrity snapshot of the current
+schema. It reports ownership, binding, duplicate and reservation inconsistencies
+without changing records, initializing indexes or reporting credentials. It is
+not a conversion or deployment command.
 
-```sh
-npm run worker:fleet:migrate -- --apply
-npm run worker:fleet:audit
-```
+## Development re-enrollment and V03 sequence
 
-Apply imports the configured legacy digest into `z440`, creates only a missing
-control slot, preserves an existing slot's session/generation/liveness fields,
-and backfills historical job and attempt ownership in bounded batches. It is
-idempotent and resumable. It refuses active work, conflicting ID/digest mappings,
-non-legacy ownership, orphaned fleet rows, invalid registrations, and owned queued
-jobs. It does not create or modify indexes.
+Old development state may be incompatible. Keep existing databases and worker
+journals intact. Manually re-enroll machines through the current installer and
+pairing flow using a fresh development database, or obtain separate authorization
+for a disposable development reset. No reset or re-enrollment is automatic.
 
-Only continue when apply reports `canEnableFleet:true` and the follow-up audit
-reports `canEnableFleet:true`. Then set `PROCESSING_WORKER_AUTH_MODE=fleet` on all
-API replicas together, restart the API, verify `/api/v1/worker/identity` using the
-upgraded client, and restart the worker. If Atlas only permits the CapRover host, execute
-these commands in a temporary service command using the already deployed backend
-image and immediately restore the normal API command afterward.
+For a later separately authorized V03 idle validation: verify all old processes
+are stopped and no unfinished ownership remains; finish installer and D01 pairing
+UI integration; start the matching backend and protocol 3 worker release against
+fresh development state; pair and qualify each machine; verify readiness, claim,
+completion, cleanup and audit read-back. Never mix the singleton backend with
+fleet ownership. This B06 intermediate checkout is not deployable while D01's old
+manual-registration form remains. No live deployment or data change is authorized
+by this document.
 
-Rollback requires every non-legacy machine to have no unfinished assignment.
-Never deploy the old singleton API while another machine owns work.
-
-Local validation uses synthetic inputs and isolated MongoDB/Redis. The fleet
-integration covers twenty identities over two API service instances, credential
-races, cross-worker event/receipt/grant denial, draining recovery, HTTP identity
-forwarding and audit non-mutation. No physical Windows or live S3 fleet proof is
-claimed.
-
-## Administrator controls
-
-`/api/v1/admin/workers` exposes the bounded fleet registry and its actual control slots. Management writes are available only with `PROCESSING_WORKER_AUTH_MODE=fleet`; use the trusted migration procedure before changing production mode. Registration, key rotation, revocation and stopped recovery require fresh Google administrator authentication. Ordinary drain/enable/label changes require worker management permission. All writes use an operation ID, audit transaction and control revision; active worker traffic may make a displayed revision stale.
-
-A registration or idle rotation returns `{worker,rawKey}` once. Retrying that same operation returns only its non-secret operation receipt. Inspect the receipt after a lost response, then explicitly rotate with a new operation ID while idle. There is no key reveal endpoint. Draining workers finish existing work but cannot take new assignments. Emergency revocation disables the identity while preserving its active slot, and revoked registrations cannot be enabled again.
-
-Release-stopped requires the exact current assignment and an operator statement identifying observed process termination. For example, `Observed worker process PID 422 exit and verified it stopped.` Include the UTC time that termination was observed; it must be no earlier than the attempt or its latest worker activity. Offline status, a lost heartbeat or a process that stopped responding is insufficient. The API validates the attestation and selectors; it does not contact the machine to prove termination. Evidence is bounded plain text in the audit event and never executed. A successful release retains attempt/media history and original queue order, or finalizes an already requested cancellation.
+Local integration evidence uses synthetic approved profiles and isolated MongoDB
+replica sets and Redis. It is not physical GPU, unattended reboot or production
+storage proof.

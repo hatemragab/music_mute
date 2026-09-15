@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import type { QueryFilter, Model } from 'mongoose';
@@ -58,7 +58,7 @@ export class JobsQueryService {
     private readonly owners: JobsService,
     private readonly storage: StorageTransfersService,
     private readonly config: ConfigService,
-    @Optional() private readonly registry?: WorkerRegistryService,
+    private readonly registry: WorkerRegistryService,
   ) {}
 
   async list(
@@ -119,25 +119,9 @@ export class JobsQueryService {
 
   async detail(userId: string, jobId: string) {
     const job = await this.owners.findOwned(userId, jobId);
-    if (this.registry)
-      return {
-        ...presentJob(job),
-        workerAvailable: await this.registry.available(job),
-      };
-    if (
-      this.config.get<string>('PROCESSING_WORKER_AUTH_MODE', 'legacy') ===
-      'fleet'
-    )
-      return { ...presentJob(job), workerAvailable: false };
-    const worker = await this.workers.findById('z440').lean();
-    const availableAfter =
-      Date.now() -
-      this.config.getOrThrow<number>('PROCESSING_LEASE_SECONDS') * 1000;
     return {
       ...presentJob(job),
-      workerAvailable: Boolean(
-        worker?.lastSeenAt && worker.lastSeenAt.getTime() > availableAfter,
-      ),
+      workerAvailable: await this.registry.available(job),
     };
   }
 

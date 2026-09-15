@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-13",
+  "qualificationPolicy": {
+    "inference": "All neural graph nodes must execute on the declared accelerator provider.",
+    "requiredChecks": [
+      "immutable recipe, model, and fixture digests",
+      "provider profiling with accelerated and neural node counts",
+      "finite structurally valid output",
+      "measured reference comparison",
+      "cold and warm duration",
+      "observed peak host memory",
+      "cancellation",
+      "resource-bounded long clip"
+    ]
+  },
+  "candidates": [
+    {
+      "profileId": "windows-x64-directml-amd-ort-1.24.4",
+      "os": "windows", "arch": "x64", "gpuVendor": "amd", "provider": "DmlExecutionProvider",
+      "dependencies": {"python": "3.11", "audio-separator": "0.47.0", "onnxruntime-directml": "1.24.4", "numpy": "2.5.3", "soundfile": "0.14.0"},
+      "driverConstraint": "Windows 10 1903+ or Windows 11; DirectX 12 capable AMD GPU and vendor driver exposing DirectML",
+      "modelSha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b", "fixtureSha256": "unknown", "runtimeLockSha256": "unknown",
+      "evidenceChecks": ["onnxruntime profile node assignments", "Kim Vocal 2 output/reference", "cold/warm", "memory", "cancellation", "long clip", "service context", "reboot"],
+      "status": "unavailable", "statusReason": "No current AMD machine run bound to this exact recipe/model/fixture. Prior Z440 results do not supply the required immutable identities and service/reboot report for this manifest."
+    },
+    {
+      "profileId": "windows-x64-directml-intel-ort-1.24.4",
+      "os": "windows", "arch": "x64", "gpuVendor": "intel", "provider": "DmlExecutionProvider",
+      "dependencies": {"python": "3.11", "audio-separator": "0.47.0", "onnxruntime-directml": "1.24.4", "numpy": "2.5.3", "soundfile": "0.14.0"},
+      "driverConstraint": "Windows 10 1903+ or Windows 11; DirectX 12 capable Intel GPU and vendor driver exposing DirectML",
+      "modelSha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b", "fixtureSha256": "unknown", "runtimeLockSha256": "unknown",
+      "evidenceChecks": ["onnxruntime profile node assignments", "Kim Vocal 2 output/reference", "cold/warm", "memory", "cancellation", "long clip", "service context", "reboot"],
+      "status": "unavailable", "statusReason": "No Intel Windows GPU hardware was available for native qualification."
+    },
+    {
+      "profileId": "windows-x64-directml-nvidia-ort-1.24.4",
+      "os": "windows", "arch": "x64", "gpuVendor": "nvidia", "provider": "DmlExecutionProvider",
+      "dependencies": {"python": "3.11", "audio-separator": "0.47.0", "onnxruntime-directml": "1.24.4", "numpy": "2.5.3", "soundfile": "0.14.0"},
+      "driverConstraint": "Windows 10 1903+ or Windows 11; DirectX 12 capable NVIDIA GPU and vendor driver exposing DirectML",
+      "modelSha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b", "fixtureSha256": "unknown", "runtimeLockSha256": "unknown",
+      "evidenceChecks": ["onnxruntime profile node assignments", "Kim Vocal 2 output/reference", "cold/warm", "memory", "cancellation", "long clip", "service context", "reboot"],
+      "status": "unavailable", "statusReason": "No NVIDIA Windows GPU hardware was available for DirectML qualification."
+    },
+    {
+      "profileId": "windows-x64-cuda-nvidia-ort-1.26.0",
+      "os": "windows", "arch": "x64", "gpuVendor": "nvidia", "provider": "CUDAExecutionProvider",
+      "dependencies": {"python": "3.11", "audio-separator": "0.47.0", "onnxruntime-gpu": "1.26.0", "cuda": "12.8", "cudnn": "9.x", "numpy": "2.5.3", "soundfile": "0.14.0"},
+      "driverConstraint": "NVIDIA driver compatible with CUDA 12.8 and cuDNN 9; exact minimum must be recorded from tested host",
+      "modelSha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b", "fixtureSha256": "unknown", "runtimeLockSha256": "unknown",
+      "evidenceChecks": ["onnxruntime profile node assignments", "Kim Vocal 2 output/reference", "cold/warm", "GPU memory", "cancellation", "long clip", "service context", "reboot"],
+      "status": "unavailable", "statusReason": "No NVIDIA Windows CUDA host was available; driver floor and Kim Vocal 2 graph coverage are unmeasured."
+    },
+    {
+      "profileId": "macos-arm64-coreml-kim-ort-1-24-4",
+      "os": "macos", "arch": "arm64", "gpuVendor": "apple", "provider": "CoreMLExecutionProvider",
+      "dependencies": {"python": "3.12.13", "onnxruntime": "1.24.4", "numpy": "2.5.3", "soundfile": "0.14.0"},
+      "driverConstraint": "macOS 14+ binary floor; actual GPU audio observed only on M4 Pro macOS 26.6.2; no service/boot qualification",
+      "modelSha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b", "fixtureSha256": "dffe793207240b39f03c00eae05267f29548804a985c2e3179d1669a6e0e7065", "runtimeLockSha256": "a20b6f4c70fb81a9f620b615d2a6cfc54ec3d0c2ef96898bfa00914dafcbf0a8",
+      "evidenceChecks": ["CoreML partition/profile evidence", "Kim Vocal 2 output/reference", "cold/warm", "memory", "cancellation", "long clip", "LaunchDaemon context", "reboot"],
+      "status": "unavailable", "statusReason": "W02 installed the exact minimal Kim-only runtime and exercised CoreML audio with GPU placement and numerical reference evidence. Representative vocal quality, capacity, native service/boot and FFmpeg/model redistribution approval remain unavailable; no claim-capable recipe is approved."
+    },
+    {
+      "profileId": "macos-x64-coreml-intel-ort-1.24.4",
+      "os": "macos", "arch": "x64", "gpuVendor": "intel", "provider": "CoreMLExecutionProvider",
+      "dependencies": {"python": "3.11", "audio-separator": "0.47.0", "onnxruntime": "1.24.4", "numpy": "2.5.3", "soundfile": "0.14.0"},
+      "driverConstraint": "macOS 10.15+; actual Intel GPU execution rather than CoreML CPU allocation must be proven",
+      "modelSha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b", "fixtureSha256": "unknown", "runtimeLockSha256": "unknown",
+      "evidenceChecks": ["CoreML partition/profile evidence", "Kim Vocal 2 output/reference", "cold/warm", "memory", "cancellation", "long clip", "LaunchDaemon context", "reboot"],
+      "status": "unavailable", "statusReason": "No Intel Mac hardware was available; CoreML can choose CPU, so provider presence is insufficient."
+    },
+    {
+      "profileId": "linux-x64-cuda-nvidia-ort-1.26.0",
+      "os": "linux", "arch": "x64", "gpuVendor": "nvidia", "provider": "CUDAExecutionProvider",
+      "dependencies": {"python": "3.11", "audio-separator": "0.47.0", "onnxruntime-gpu": "1.26.0", "cuda": "12.8", "cudnn": "9.x", "numpy": "2.5.3", "soundfile": "0.14.0"},
+      "driverConstraint": "NVIDIA driver compatible with CUDA 12.8 and cuDNN 9; exact minimum must be recorded from tested host",
+      "modelSha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b", "fixtureSha256": "unknown", "runtimeLockSha256": "unknown",
+      "evidenceChecks": ["onnxruntime profile node assignments", "Kim Vocal 2 output/reference", "cold/warm", "GPU memory", "cancellation", "long clip", "systemd context", "reboot"],
+      "status": "unavailable", "statusReason": "No Linux NVIDIA host was available for native qualification."
+    },
+    {
+      "profileId": "linux-x64-migraphx-amd-ort-1.23.2-rocm-7.2.1",
+      "os": "linux", "arch": "x64", "gpuVendor": "amd", "provider": "MIGraphXExecutionProvider",
+      "dependencies": {"python": "3.12", "audio-separator": "0.47.0", "onnxruntime-migraphx": "1.23.2", "rocm": "7.2.1", "numpy": "2.5.3", "soundfile": "0.14.0"},
+      "driverConstraint": "AMD-supported ROCm 7.2.1 Linux distribution and GPU; exact GPU/driver tuple must match tested host",
+      "modelSha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b", "fixtureSha256": "unknown", "runtimeLockSha256": "unknown",
+      "evidenceChecks": ["onnxruntime profile node assignments", "Kim Vocal 2 compile/output/reference", "cold/warm", "GPU memory", "cancellation", "long clip", "systemd context", "reboot"],
+      "status": "unavailable", "statusReason": "No ROCm-compatible AMD Linux host was available; wheel name/source and complete Kim Vocal 2 coverage require an isolated native environment check."
+    },
+    {
+      "profileId": "linux-x64-openvino-intel-ort-2025.2.0",
+      "os": "linux", "arch": "x64", "gpuVendor": "intel", "provider": "OpenVINOExecutionProvider",
+      "dependencies": {"python": "3.11", "audio-separator": "0.47.0", "onnxruntime-openvino": "1.22.0", "openvino": "2025.2.0", "numpy": "2.5.3", "soundfile": "0.14.0"},
+      "driverConstraint": "Intel GPU supported by OpenVINO 2025.2 and its Linux graphics stack; device_type must be GPU",
+      "modelSha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b", "fixtureSha256": "unknown", "runtimeLockSha256": "unknown",
+      "evidenceChecks": ["OpenVINO GPU device and graph profiling", "Kim Vocal 2 output/reference", "cold/warm", "GPU memory where observable", "cancellation", "long clip", "systemd context", "reboot"],
+      "status": "unavailable", "statusReason": "No Intel Linux GPU host was available and the proposed ORT/OpenVINO pair needs isolated compatibility proof."
+    },
+    {
+      "profileId": "linux-arm64-armnn-source-candidate",
+      "os": "linux", "arch": "arm64", "gpuVendor": "arm", "provider": "ArmNNExecutionProvider",
+      "dependencies": {"python": "3.11", "audio-separator": "0.47.0", "onnxruntime": "source-build-required", "armnn": "source-build-required", "numpy": "2.5.3", "soundfile": "0.14.0"},
+      "driverConstraint": "Board-specific Arm NN GPU backend and Linux driver; no general immutable binary recipe identified",
+      "modelSha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b", "fixtureSha256": "unknown", "runtimeLockSha256": "unknown",
+      "evidenceChecks": ["wheel/build provenance", "accelerated graph profiling", "Kim Vocal 2 output/reference", "memory", "cancellation", "long clip", "systemd context", "reboot"],
+      "status": "unavailable", "statusReason": "No general prebuilt runtime recipe or target ARM64 board was available; a source-build placeholder is not packageable."
+    },
+    {
+      "profileId": "linux-arm64-cuda-nvidia-jetson-candidate",
+      "os": "linux", "arch": "arm64", "gpuVendor": "nvidia", "provider": "CUDAExecutionProvider",
+      "dependencies": {"python": "3.11", "audio-separator": "0.47.0", "onnxruntime-gpu": "jetpack-specific-wheel-unverified", "cuda": "jetpack-coupled", "cudnn": "jetpack-coupled", "numpy": "2.5.3", "soundfile": "0.14.0"},
+      "driverConstraint": "NVIDIA Jetson/JetPack release-specific CUDA and cuDNN stack; exact supported board and immutable wheel must be selected",
+      "modelSha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b", "fixtureSha256": "unknown", "runtimeLockSha256": "unknown",
+      "evidenceChecks": ["JetPack wheel provenance", "neural graph profiling", "Kim Vocal 2 output/reference", "memory", "cancellation", "long clip", "systemd context", "reboot"],
+      "status": "unavailable", "statusReason": "No Jetson target, JetPack-specific immutable runtime recipe, or native Kim Vocal 2 evidence was available."
+    },
+    {
+      "profileId": "windows-arm64-directml-qualcomm-candidate",
+      "os": "windows", "arch": "arm64", "gpuVendor": "qualcomm", "provider": "DmlExecutionProvider",
+      "dependencies": {"python": "3.11", "audio-separator": "0.47.0", "onnxruntime-directml": "wheel-availability-unverified", "numpy": "2.5.3", "soundfile": "0.14.0"},
+      "driverConstraint": "Windows 11 ARM64, DirectX 12 capable Adreno 600+; native Python dependency wheels required",
+      "modelSha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b", "fixtureSha256": "unknown", "runtimeLockSha256": "unknown",
+      "evidenceChecks": ["native ARM64 wheel resolution", "onnxruntime profile node assignments", "Kim Vocal 2 output/reference", "memory", "cancellation", "long clip", "service context", "reboot"],
+      "status": "unavailable", "statusReason": "Native ARM64 dependency resolution and Kim Vocal 2 execution were not tested on Qualcomm Windows hardware."
+    }
+  ]
+}

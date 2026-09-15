@@ -281,7 +281,14 @@ export async function authFixture() {
     providers: [
       {
         provide: getConnectionToken(),
-        useValue: { readyState: 1, db: { command: async () => ({ ok: 1 }) } },
+        useValue: {
+          readyState: 1,
+          db: { command: async () => ({ ok: 1 }) },
+          model: () => ({
+            init: async () => undefined,
+            updateOne: async () => ({ modifiedCount: 0 }),
+          }),
+        },
       },
     ],
     exports: [getConnectionToken()],
@@ -338,6 +345,9 @@ export async function authFixture() {
     ProcessingSettings.name,
     ProcessingAdmissionFence.name,
     StorageCleanupTask.name,
+    'WorkerInstallation',
+    'WorkerEvent',
+    'InstallationOperation',
     ...PROCESSING_MODELS.map(({ name }) => name),
   ])
     builder.overrideProvider(getModelToken(name)).useValue({

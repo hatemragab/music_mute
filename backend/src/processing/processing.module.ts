@@ -1,3 +1,5 @@
+import { WorkerReadinessService } from '../worker/worker-readiness.service.js';
+import { WorkerQualificationService } from '../worker/worker-qualification.service.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { ProcessingUsageController } from '../processing-usage/processing-usage.controller.js';
 import { Module } from '@nestjs/common';
@@ -13,6 +15,7 @@ import { StorageTransfersModule } from '../storage/storage-transfers.module.js';
 import { WorkerAuthGuard } from '../worker/worker-auth.guard.js';
 import { WorkerRegistryService } from '../worker/worker-registry.service.js';
 import { WorkerIdentityService } from '../worker/worker-identity.service.js';
+import { WorkerRuntimeService } from '../worker/worker-runtime.service.js';
 import { WorkerController } from '../worker/worker.controller.js';
 import { WorkerCoordinatorService } from '../worker/worker-coordinator.service.js';
 import { WorkerClaimWaitService } from '../worker/worker-claim-wait.service.js';
@@ -47,7 +50,12 @@ import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js'
     DevicesModule,
     AdminSettingsModule,
   ],
-  exports: [WorkerRegistryService, WorkerRecoveryService],
+  exports: [
+    WorkerRegistryService,
+    WorkerRecoveryService,
+    WorkerReadinessService,
+    WorkerQualificationService,
+  ],
   controllers: [
     ProcessingUsageController,
     JobsController,
@@ -72,6 +80,9 @@ import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js'
     WorkerCoordinatorService,
     WorkerRegistryService,
     WorkerIdentityService,
+    WorkerRuntimeService,
+    WorkerReadinessService,
+    WorkerQualificationService,
     WorkerClaimWaitService,
     WorkerOutputService,
     WorkerTerminalService,

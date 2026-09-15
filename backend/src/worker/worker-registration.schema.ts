@@ -11,6 +11,15 @@ export type WorkerState = 'enabled' | 'draining' | 'revoked';
   timestamps: true,
 })
 export class WorkerRegistration {
+  /** Set only by transactional pairing approval; runtime endpoints cannot bind it. */
+  @Prop({
+    type: String,
+    match:
+      /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+    immutable: true,
+    required: true,
+  })
+  installationId!: string;
   @Prop({
     type: String,
     required: true,
@@ -39,3 +48,11 @@ WorkerRegistrationSchema.index(
   { unique: true, name: 'worker_key_digest_unique' },
 );
 WorkerRegistrationSchema.index({ state: 1, _id: 1 }, { name: 'worker_state' });
+WorkerRegistrationSchema.index(
+  { installationId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { installationId: { $type: 'string' } },
+    name: 'worker_installation_unique',
+  },
+);

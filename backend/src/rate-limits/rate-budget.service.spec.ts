@@ -3,6 +3,18 @@ import type { Redis } from 'ioredis';
 import { RateBudgetService } from './rate-budget.service.js';
 
 describe('RateBudgetService', () => {
+  it('rejects invalid weighted quotas before contacting Redis', async () => {
+    const redis = { eval: vi.fn() };
+    const service = new RateBudgetService(redis as unknown as Redis);
+    for (const buckets of [
+      [],
+      [{ key: 'bytes', weight: 0, limit: 100, windowMs: 1000 }],
+      [{ key: 'bytes', weight: 1.5, limit: 100, windowMs: 1000 }],
+      [{ key: 'bytes', weight: 1, limit: 100, windowMs: 0 }],
+    ])
+      await expect(service.reserveWeighted(buckets)).rejects.toThrow(TypeError);
+    expect(redis.eval).not.toHaveBeenCalled();
+  });
   it('maps the atomic reservation result and passes every bucket to one eval', async () => {
     const redis = { eval: vi.fn().mockResolvedValue([1, 0]) };
     const service = new RateBudgetService(redis as unknown as Redis);

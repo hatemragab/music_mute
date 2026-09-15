@@ -1,5 +1,8 @@
+import { pairedWorkerFixture } from './helpers/paired-worker-fixture.mjs';
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
+import { accountFixture } from './helpers/account-fixture.mjs';
+import { WorkerRuntimeService } from '../dist/worker/worker-runtime.service.js';
+import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
@@ -57,7 +60,6 @@ test('fleet ownership across independent API instances', async (t) => {
     );
   }
   const config = new ConfigService({
-    PROCESSING_WORKER_AUTH_MODE: 'fleet',
     AUDIO_PROCESSING_ENABLED: true,
     PROCESSING_LEASE_SECONDS: 90,
     PROCESSING_OUTPUT_MAX_BYTES: 30_000_000,
@@ -144,23 +146,15 @@ test('fleet ownership across independent API instances', async (t) => {
   const jobs = model('Job');
   const workers = model('WorkerControl');
   const attempts = model('JobAttempt');
-  const registrations = model('WorkerRegistration');
   const reset = async () => {
     for (const { name } of PROCESSING_MODELS) await model(name).deleteMany({});
     grants.length = 0;
   };
-  const register = async (workerId) => {
-    const keySha256 = createHash('sha256')
-      .update(`synthetic-fleet-secret-${workerId}`)
-      .digest('hex');
-    await a.transactions.run(async (session) => {
-      await registrations.create(
-        [{ _id: workerId, label: workerId, keySha256, state: 'enabled' }],
-        { session },
-      );
-      await workers.create([{ _id: workerId }], { session });
-    });
-    return { workerId, mode: 'fleet', keySha256 };
+  const workerIds = new Map();
+  const register = async (label) => {
+    const identity = await pairedWorkerFixture(connections[0], { label });
+    workerIds.set(label, identity);
+    return identity;
   };
   const enqueue = async (count) => {
     const ids = [];
@@ -188,6 +182,7 @@ test('fleet ownership across independent API instances', async (t) => {
         status: 'queued',
         queueOrder: BigInt(i),
       });
+      await accountFixture(connections[0], [job.userId.toString()]);
       ids.push(job._id.toHexString());
     }
     return ids;
@@ -218,9 +213,10 @@ test('fleet ownership across independent API instances', async (t) => {
     'twenty identities own twenty distinct oldest jobs with one slot per machine',
     async () => {
       await reset();
-      const identities = await Promise.all(
-        Array.from({ length: 20 }, (_, index) => register(`machine-${index}`)),
-      );
+      const identities = [];
+      assert.equal((await auditWorkerFleet(connections[0])).consistent, true);
+      for (let index = 0; index < 20; index++)
+        identities.push(await register(`machine-${index}`));
       const queued = await enqueue(21);
       const assignments = await Promise.all(
         identities.map((identity, index) =>
@@ -368,7 +364,10 @@ test('fleet ownership across independent API instances', async (t) => {
       assert.equal(restored.status, 'queued');
       assert.equal(restored.workerId, null);
       assert.equal(restored.queueOrder, 1n);
-      assert.equal(await a.coordinator.claim(randomUUID(), owner), null);
+      await assert.rejects(
+        a.coordinator.claim(randomUUID(), owner),
+        code('WORKER_NOT_ENABLED'),
+      );
       assert.deepEqual(
         await a.recovery.reconcile(
           randomUUID(),
@@ -443,7 +442,7 @@ test('fleet ownership across independent API instances', async (t) => {
     async () => {
       await reset();
       const identity = await register('machine');
-      assert.equal((await a.identity.describe(identity)).protocolVersion, 2);
+      assert.equal((await a.identity.describe(identity)).protocolVersion, 3);
       assert.equal(
         (await a.registry.authenticateDigest(identity.keySha256)).workerId,
         identity.workerId,
@@ -486,6 +485,7 @@ test('fleet ownership across independent API instances', async (t) => {
           { provide: WorkerTerminalService, useValue: a.terminal },
           { provide: WorkerRecoveryService, useValue: a.recovery },
           WorkerClaimWaitService,
+          { provide: WorkerRuntimeService, useValue: {} },
           { provide: APP_GUARD, useClass: WorkerAuthGuard },
         ],
       }).compile();
@@ -504,13 +504,22 @@ test('fleet ownership across independent API instances', async (t) => {
         const post = (path, body, workerId = 'http-owner') =>
           request(app.getHttpServer())
             .post(`/api/v1/worker/${path}`)
-            .set('Authorization', `Bearer synthetic-fleet-secret-${workerId}`)
+            .set(
+              'Authorization',
+              `Bearer ${workerIds.get(workerId)?.rawKey ?? 'unknown-secret'}`,
+            )
             .send(body);
         const described = await post('identity', {}).expect(200);
         assert.deepEqual(described.body, {
           workerId: owner.workerId,
           state: 'enabled',
-          protocolVersion: 2,
+          installationId: owner.installationId,
+          protocolVersion: 3,
+          mediaPolicyVersion: 2,
+          updateCapability: {
+            supported: false,
+            reasonCode: 'UPDATE_SERVICE_UNAVAILABLE',
+          },
         });
         assert.equal(described.headers['cache-control'], 'no-store');
         await post('identity', { workerId: 'http-other' }).expect(400);
@@ -541,9 +550,21 @@ test('fleet ownership across independent API instances', async (t) => {
       await reset();
       const online = await register('online');
       const offline = await register('offline');
+      await workers.updateOne(
+        { _id: offline.workerId },
+        { $set: { lastSeenAt: new Date(0) } },
+      );
+      await model('WorkerRuntime').updateOne(
+        { _id: offline.workerId },
+        { $set: { receivedAt: new Date(0) } },
+      );
       await a.coordinator.claim(randomUUID(), online);
       assert.equal(
-        await a.registry.available({ workerId: null, attemptId: null }),
+        await a.registry.available({
+          workerId: null,
+          attemptId: null,
+          inputReservation: { durationSeconds: 10, bytes: 100 },
+        }),
         true,
       );
       assert.equal(
@@ -555,7 +576,11 @@ test('fleet ownership across independent API instances', async (t) => {
       );
       await change(online, { state: 'draining' });
       assert.equal(
-        await a.registry.available({ workerId: null, attemptId: null }),
+        await a.registry.available({
+          workerId: null,
+          attemptId: null,
+          inputReservation: { durationSeconds: 10, bytes: 100 },
+        }),
         false,
       );
       assert.equal(
@@ -577,16 +602,15 @@ test('fleet ownership across independent API instances', async (t) => {
   );
 
   await t.test(
-    'migration audit reports historical gaps without rewriting them and legacy fallback stays explicit',
+    'fleet integrity audit reports missing ownership without rewriting it',
     async () => {
       await reset();
-      const identity = await register('z440');
+      const identity = await register('audit-worker');
       const initial = await auditWorkerFleet(
         connections[0],
         identity.keySha256,
       );
-      assert.equal(initial.canEnableFleet, true);
-      assert.equal(initial.legacyKeyMatches, true);
+      assert.equal(initial.consistent, true);
       assert.equal(JSON.stringify(initial).includes(identity.keySha256), false);
       await enqueue(1);
       const assignment = await a.coordinator.claim(randomUUID(), identity);
@@ -598,14 +622,18 @@ test('fleet ownership across independent API instances', async (t) => {
         { attemptId: assignment.attemptId },
         { $unset: { workerId: '' } },
       );
-      const revision = (await workers.findById('z440')).controlRevision;
+      const revision = (await workers.findById(identity.workerId))
+        .controlRevision;
       const report = await auditWorkerFleet(connections[0], identity.keySha256);
-      assert.equal(report.canEnableFleet, false);
+      assert.equal(report.consistent, false);
       assert.equal(report.missingJobOwners, 1);
       assert.equal(report.missingAttemptOwners, 1);
       assert.equal(report.activeAssignments, 1);
-      assert.equal(report.inconsistentAssignments, 0);
-      assert.equal((await workers.findById('z440')).controlRevision, revision);
+      assert.equal(report.inconsistentAssignments, 1);
+      assert.equal(
+        (await workers.findById(identity.workerId)).controlRevision,
+        revision,
+      );
       assert.equal(
         (await attempts.collection.findOne({ attemptId: assignment.attemptId }))
           .workerId,
@@ -615,22 +643,10 @@ test('fleet ownership across independent API instances', async (t) => {
         a.coordinator.heartbeat(selector(assignment), identity),
         code('STALE_ATTEMPT'),
       );
-      config.set('PROCESSING_WORKER_AUTH_MODE', 'legacy');
-      try {
-        const resumed = await a.coordinator.claim(assignment.sessionId);
-        assert.equal(resumed.workerId, 'z440');
-        assert.equal(resumed.attemptId, assignment.attemptId);
-        assert.equal(
-          (
-            await attempts.collection.findOne({
-              attemptId: assignment.attemptId,
-            })
-          ).workerId,
-          undefined,
-        );
-      } finally {
-        config.set('PROCESSING_WORKER_AUTH_MODE', 'fleet');
-      }
+      await assert.rejects(
+        a.coordinator.claim(assignment.sessionId),
+        code('UNAUTHENTICATED'),
+      );
     },
   );
 

@@ -21,7 +21,6 @@ test(
         MONGODB_URI: mongoUri,
         REDIS_URL: redisUrl,
         AUDIO_PROCESSING_ENABLED: 'true',
-        PROCESSING_WORKER_AUTH_MODE: 'fleet',
         APP_UPDATES_ENABLED: 'true',
         APK_EXPECTED_PACKAGE_ID: 'com.example.fixture',
         RELEASE_LANDING_BASE_URL: 'https://example.invalid/api/v1',

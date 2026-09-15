@@ -12,6 +12,7 @@ describe('worker registry persistence boundary', () => {
   it('requires bounded identity, label, digest and lifecycle state', () => {
     expect(
       new Registration({
+        installationId: '11111111-1111-4111-8111-111111111111',
         _id: 'machine-2',
         label: 'Machine 2',
         keySha256: 'a'.repeat(64),
@@ -26,6 +27,7 @@ describe('worker registry persistence boundary', () => {
     });
     expect(Object.keys(invalid.validateSync()!.errors).sort()).toEqual([
       '_id',
+      'installationId',
       'keySha256',
       'label',
       'state',

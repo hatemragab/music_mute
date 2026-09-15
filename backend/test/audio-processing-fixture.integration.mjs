@@ -53,7 +53,7 @@ test(
     assert.equal(await fixture.attempts.countDocuments(), 0);
     assert.equal(await fixture.errors.countDocuments(), 0);
     assert.equal(await fixture.receipts.countDocuments(), 0);
-    assert.equal(await fixture.control.countDocuments(), 0);
+    assert.equal(await fixture.control.countDocuments(), 1);
     assert.ok(fixture.fakeStorage.objects instanceof Map);
 
     await fixture.restartApi();

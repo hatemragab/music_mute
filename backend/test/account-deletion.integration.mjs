@@ -1,3 +1,5 @@
+import { pairedWorkerFixture } from './helpers/paired-worker-fixture.mjs';
+import { PROCESSING_MODELS } from '../dist/processing/processing-persistence.module.js';
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -118,7 +120,10 @@ test(
       WorkerRegistrationSchema,
     );
     await Promise.all([attempts.init(), controls.init(), registrations.init()]);
-    await controls.create({ _id: 'z440' });
+    for (const { name, schema } of PROCESSING_MODELS)
+      if (!connection.models[name]) connection.model(name, schema);
+    await Promise.all(Object.values(connection.models).map((m) => m.init()));
+    const workerIdentity = await pairedWorkerFixture(connection);
     const job = await jobs.create({
       userId: user._id,
       requestId: randomUUID(),
@@ -136,7 +141,7 @@ test(
       },
     });
     const attempt = await attempts.create({
-      workerId: 'z440',
+      workerId: workerIdentity.workerId,
       jobId: job._id,
       attemptId: randomUUID(),
       sessionId: randomUUID(),
@@ -163,7 +168,7 @@ test(
         controls,
         attempts,
         new ProcessingTransactions(connection),
-        new ConfigService({ PROCESSING_WORKER_AUTH_MODE: 'legacy' }),
+        new ConfigService(),
         null,
         null,
         null,
@@ -186,15 +191,21 @@ test(
       localDataDeleted: true,
     };
     await assert.rejects(
-      terminal.confirmLocalCleanup({
-        ...acknowledgement,
-        sessionId: randomUUID(),
-      }),
+      terminal.confirmLocalCleanup(
+        {
+          ...acknowledgement,
+          sessionId: randomUUID(),
+        },
+        workerIdentity,
+      ),
       (error) => error.status === 409,
     );
-    assert.deepEqual(await terminal.confirmLocalCleanup(acknowledgement), {
-      status: 'cleaned',
-    });
+    assert.deepEqual(
+      await terminal.confirmLocalCleanup(acknowledgement, workerIdentity),
+      {
+        status: 'cleaned',
+      },
+    );
 
     for (
       let iteration = 0;

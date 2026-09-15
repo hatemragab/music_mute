@@ -3,7 +3,6 @@ import {
   Controller,
   Header,
   HttpCode,
-  Optional,
   Post,
   Req,
   Res,
@@ -17,6 +16,7 @@ import { WorkerCoordinatorService } from './worker-coordinator.service.js';
 import { WorkerClaimWaitService } from './worker-claim-wait.service.js';
 import {
   WorkerClaimDto,
+  WorkerRecoveryClaimDto,
   WorkerSelectorDto,
   WorkerStageDto,
 } from './dto/worker-request.dto.js';
@@ -31,6 +31,11 @@ import {
   WorkerStoppedDto,
 } from './dto/worker-event.dto.js';
 import { ReconcileDto } from './dto/reconcile.dto.js';
+import { WorkerRuntimeService } from './worker-runtime.service.js';
+import {
+  InstallationReadyDto,
+  WorkerRuntimeDto,
+} from './dto/worker-runtime.dto.js';
 
 @Controller('worker')
 @WorkerOnly()
@@ -41,8 +46,31 @@ export class WorkerController {
     private readonly terminal: WorkerTerminalService,
     private readonly recovery: WorkerRecoveryService,
     private readonly claimWait: WorkerClaimWaitService,
-    @Optional() private readonly identities?: WorkerIdentityService,
+    private readonly runtime: WorkerRuntimeService,
+    private readonly identities: WorkerIdentityService,
   ) {}
+
+  @Post('runtime')
+  @WorkerCleanup()
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  runtimeReport(
+    @Body() dto: WorkerRuntimeDto,
+    @Req() req: WorkerAuthenticatedRequest,
+  ) {
+    return this.runtime.store(req.workerIdentity, dto);
+  }
+
+  @Post('installation-ready')
+  @WorkerCleanup()
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  installationReady(
+    @Body() dto: InstallationReadyDto,
+    @Req() req: WorkerAuthenticatedRequest,
+  ) {
+    return this.runtime.installationReady(req.workerIdentity, dto);
+  }
 
   @Post('identity')
   @WorkerCleanup()
@@ -57,7 +85,6 @@ export class WorkerController {
         Object.keys(body).length !== 0)
     )
       throw authError('INVALID_INPUT');
-    if (!this.identities) throw authError('SERVICE_UNAVAILABLE');
     return this.identities.describe(req.workerIdentity);
   }
 
@@ -124,6 +151,29 @@ export class WorkerController {
     );
   }
 
+  @Post('claim/recovery')
+  @WorkerCleanup()
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async recoverClaim(
+    @Body() dto: WorkerRecoveryClaimDto,
+    @Res({ passthrough: true }) response: Response,
+    @Req() req: WorkerAuthenticatedRequest,
+  ) {
+    const assignment = await this.coordinator.claim(
+      dto.sessionId,
+      req.workerIdentity,
+      dto.mediaPolicyVersion,
+      true,
+    );
+    if (!assignment) {
+      response.status(204);
+      response.setHeader('X-Worker-Reason', 'NO_OWNED_ASSIGNMENT');
+      return;
+    }
+    return assignment;
+  }
+
   @Post('claim')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
@@ -147,6 +197,7 @@ export class WorkerController {
       if (client.signal.aborted) return;
       if (!assignment) {
         response.status(204);
+        response.setHeader('X-Worker-Reason', 'IDLE_NO_JOB');
         response.setHeader('Retry-After', dto.waitSeconds > 0 ? '0' : '15');
         return;
       }

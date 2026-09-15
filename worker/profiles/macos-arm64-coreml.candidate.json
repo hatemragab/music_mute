@@ -1,0 +1,37 @@
+{
+  "profile_id": "macos-arm64-coreml-kim-ort-1-24-4",
+  "os": "macos",
+  "arch": "arm64",
+  "vendor": "apple",
+  "minimum_os": "14.0",
+  "provider": "CoreMLExecutionProvider",
+  "options": {
+    "ModelFormat": "MLProgram",
+    "MLComputeUnits": "CPUAndGPU",
+    "RequireStaticInputShapes": "1",
+    "EnableOnSubgraphs": "0",
+    "ProfileComputePlan": "1"
+  },
+  "lock_sha256": "a20b6f4c70fb81a9f620b615d2a6cfc54ec3d0c2ef96898bfa00914dafcbf0a8",
+  "model": {
+    "filename": "Kim_Vocal_2.onnx",
+    "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Vocal_2.onnx",
+    "sha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b",
+    "bytes": 66759214
+  },
+  "fixture": {
+    "filename": "kim-smoke-v1.wav",
+    "url": "builtin:kim-smoke-v1",
+    "sha256": "dffe793207240b39f03c00eae05267f29548804a985c2e3179d1669a6e0e7065",
+    "bytes": 352844
+  },
+  "reference": null,
+  "max_duration_seconds": 2,
+  "max_ram_bytes": 4294967296,
+  "max_wall_seconds": 120,
+  "reference_max_abs": 0.0001,
+  "reference_rms": 1e-05,
+  "status": "candidate",
+  "evidence_sha256": null,
+  "priority": 10
+}

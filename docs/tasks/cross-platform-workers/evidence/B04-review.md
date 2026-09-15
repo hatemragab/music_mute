@@ -1,0 +1,38 @@
+# B04 independent review
+
+Date: 2026-09-13. Verdict: changes required for two B04 defects below. Review was read-only apart from this report; no commits, publication, deployment, real database access, migrations, or device tests.
+
+## P1: Existing-runtime equality prevents runtime/model upgrades
+
+`backend/src/worker-releases/worker-rollouts.service.ts:325-337` uses one `compatible()` predicate for source selection, preparation/activation authorization, fallback eligibility, and post-activation verification. It requires the currently installed model and runtime-lock hashes to equal the candidate hashes. Artifact selection also requires the current profile ID. Consequently, an otherwise valid signed release changing its runtime lock or model cannot be selected for an existing worker: preview reports `INCOMPATIBLE_PROFILE`, and confirmation rejects it before the worker can prepare/install those new identities. A profile identity change has the same issue. Fallback across runtime/model identities is likewise excluded.
+
+This conflicts with the design's versioned environments and restoration of code/runtime/dependency/model identities together (approved design lines 111-119). It is not the deferred B05 fresh-claim gate. The receipt/transition contract needs to distinguish explicitly approved source compatibility from the exact installed target identity required for readiness/verification. Do not simply remove all target-integrity checks. Preserve signed, explicit transition authority, including safe source-profile selection and fallback compatibility.
+
+Executed adversarial probe: extended the existing native isolated integration entirely in memory, signed a new build 4 with the fixture's real Ed25519 authority and changed only runtimeLockSha256 from `c` repeated 64 times to `e` repeated 64 times. Draft creation/publication succeeded. Selecting the existing `worker-c` produced `reasonCodes: ["INCOMPATIBLE_PROFILE"]`; confirmation with fresh revisions and explicit supersession rejected. The original integration assertions also passed in this run (5.20 seconds).
+
+Required regressions: an approved old-to-new runtime/model/profile transition can be previewed, confirmed, prepared and activated while reporting its truthful old active identity; mismatched/unapproved transitions remain rejected; post-activation verification demands the exact new identity; an explicitly allowed previous recipe can be restored, while withdrawn and below-floor fallbacks remain rejected.
+
+## P2: Healthy workers become offline after their last update event
+
+`backend/src/worker-releases/worker-rollouts.service.ts:961-985` computes `counts.offline` only from `WorkerUpdatePolicy.receivedAt`, the last stage observation. Normal runtime heartbeats and policy polling do not refresh this timestamp. Once a worker reaches `verified`, there is no next ordinary ordered stage to send, so a healthy online worker becomes counted offline after 120 seconds. This also misclassifies long-running preparation or ordinary processing between stage changes. Event freshness and machine liveness must remain distinct.
+
+Executed adversarial probe: after the existing isolated integration verified worker A, aged only its update-event timestamp by 121 seconds and set its persisted runtime heartbeat timestamp to now. `detail()` returned `stage: "verified"`, `verified: 1`, and `offline: 1`, despite that fresh heartbeat. The original integration assertions also passed in this run (5.09 seconds). No source/test files were changed for either probe; test source was loaded, instrumented in memory, and imported with resolved module URLs.
+
+Required regressions: a verified or long-preparing worker with fresh authoritative liveness is not offline despite an old update event; a stale/missing heartbeat produces the appropriate offline/unknown result; update-event freshness remains separately inspectable. Retrying a candidate should not reuse an old event timestamp as evidence of new-candidate acknowledgement.
+
+## Other reviewed boundaries and validation limits
+
+Read the task, contracts, execution brief/report, receipt verifier, schemas, service, controllers, integration fixture, and B01 runtime persistence. The isolated integration runs exercised existing signature/publication, group/CAS/supersession, pause/retry, persisted ready-attempt verification, fallback withdrawal, worker authentication, hashed Redis admission, exhaustion and Redis-failure assertions. No additional security bypass was established in these reviewed paths. This is not a claim of exhaustive race coverage or production proof.
+
+An initial in-memory harness invocation failed before tests because bare package imports cannot resolve from a data URL; resolving imports to absolute module URLs corrected the harness. The two subsequent instrumented native integration runs passed assertions that reproduce the defects above. Formatter/lint/typecheck/build were not rerun by this reviewer; their green results remain implementation-report evidence, not independent reviewer execution.
+
+B05 correctly remains responsible for fresh-claim enforcement in the existing transaction, fencing both WorkerControl and ReleasePolicy. A temporary parallel B04 claim gate is not requested. H01/H02 publisher/distribution implementation and native hardware/boot proof remain downstream; real local Ed25519 fixtures and fail-closed unconfigured authority are appropriate at this boundary.
+
+## Round 1 scoped re-review — both findings addressed
+
+Reviewed the updated report, signed receipt/source contract and verifier, source/target/fallback predicates, transition authorization and runtime fences, liveness calculation, and expanded native integration assertions. No remaining critical/important defect was found within the two corrected behaviors.
+
+- **P1 addressed:** signed exact source tuples allow a different profile/model/runtime recipe to be selected and activated while the old build is truthfully reported. OS/architecture and launcher/protocol checks remain enforced, and ambiguous artifact selection fails closed. Running and verified require the exact installed target, including build; their runtime reads are fenced. Reverse fallback is explicitly authorized by the new signed target, retains release availability/floor/selection restrictions, and requires the exact restored recipe before accepting rolled_back. Tampered rollback authority, unlisted sources, incorrect platforms and incorrect target/restored identities are covered by the executed regressions.
+- **P2 addressed:** offline/unknown now uses actual runtime/control liveness with configured lease freshness, independently of update-event age. The existing event timestamp remains visible; retry resets candidate acknowledgement. Executed regressions cover a verified worker with old update event and fresh liveness, stale authoritative liveness, and missing liveness.
+
+Independently executed from backend: `npm test -- src/worker-releases/worker-rollouts.service.spec.ts` (4 tests passed) and `node --test test/worker-rollouts.integration.mjs` (expanded isolated Mongo/Redis/Nest scenario passed, 5.95 seconds). The latter includes signed profile/model/runtime upgrade, truthful old-build activation, false target startup rejection, exact target startup and persisted-attempt verification, authorized reverse rollback, forbidden rollback and ambiguity rejection, plus the prior auth/rate/withdrawal/race assertions. No reviewer source edits or additional artifact publication occurred. Build/typecheck/lint/format remain implementation-report evidence; the prior review's downstream B05/H01/H02 limits remain unchanged.

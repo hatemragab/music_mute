@@ -1,3 +1,4 @@
+import { authError } from '../auth/auth.errors.js';
 import { ConfigService } from '@nestjs/config';
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -47,22 +48,31 @@ describe('worker-only authentication', () => {
       new Reflector(),
       new ConfigService({
         AUDIO_PROCESSING_ENABLED: enabled,
-        PROCESSING_WORKER_KEY_SHA256: digest,
       }),
+      {
+        authenticateDigest: async (actual: string) => {
+          if (actual !== digest) throw authError('UNAUTHENTICATED');
+          return {
+            workerId: 'fixture-worker',
+            keySha256: actual,
+            installationId: '11111111-1111-4111-8111-111111111111',
+          };
+        },
+      } as never,
     );
     return { context, guard, handler, req };
   }
 
-  it('is inert on ordinary routes', () => {
+  it('is inert on ordinary routes', async () => {
     const f = setup({ header: undefined, enabled: false, workerOnly: false });
-    expect(f.guard.canActivate(f.context)).toBe(true);
+    expect(await f.guard.canActivate(f.context)).toBe(true);
     expect(f.req.workerId).toBeUndefined();
   });
 
-  it('accepts the configured bearer secret and attaches the server-owned identity', () => {
+  it('accepts the registered bearer secret and attaches the server-owned identity', async () => {
     const f = setup();
-    expect(f.guard.canActivate(f.context)).toBe(true);
-    expect(f.req.workerId).toBe('z440');
+    expect(await f.guard.canActivate(f.context)).toBe(true);
+    expect(f.req.workerId).toBe('fixture-worker');
   });
 
   it.each([
@@ -89,12 +99,12 @@ describe('worker-only authentication', () => {
     expect(f.req.workerId).toBeUndefined();
   });
 
-  it('rejects wrong and rotated-out secrets', () => {
+  it('rejects wrong and rotated-out secrets', async () => {
     for (const secret of ['wrong-worker-secret', 'old-worker-secret']) {
       const f = setup({ header: `Bearer ${secret}` });
-      expect(() => f.guard.canActivate(f.context)).toThrowError(
-        expect.objectContaining({ status: 401 }),
-      );
+      await expect(f.guard.canActivate(f.context)).rejects.toMatchObject({
+        status: 401,
+      });
       expect(f.req.workerId).toBeUndefined();
     }
   });
@@ -107,19 +117,11 @@ describe('worker-only authentication', () => {
     expect(f.req.workerId).toBeUndefined();
   });
 
-  it('allows authenticated cleanup while processing is disabled', () => {
+  it('allows authenticated cleanup while processing is disabled', async () => {
     const f = setup({ enabled: false });
     Reflect.defineMetadata(WORKER_CLEANUP_ROUTE, true, f.handler);
-    expect(f.guard.canActivate(f.context)).toBe(true);
-    expect(f.req.workerId).toBe('z440');
-  });
-
-  it('fails closed for an invalid runtime digest', () => {
-    const f = setup({ digest: 'not-a-sha256-digest' });
-    expect(() => f.guard.canActivate(f.context)).toThrowError(
-      expect.objectContaining({ status: 503 }),
-    );
-    expect(f.req.workerId).toBeUndefined();
+    expect(await f.guard.canActivate(f.context)).toBe(true);
+    expect(f.req.workerId).toBe('fixture-worker');
   });
 
   it('rejects contradictory public and worker-only metadata', () => {

@@ -21,21 +21,23 @@ describe('fleet authentication boundary', () => {
       authenticateDigest: async (keySha256: string) => ({
         workerId: 'machine-two',
         keySha256,
-        mode: 'fleet',
+        installationId: '11111111-1111-4111-8111-111111111111',
       }),
     };
     const guard = new WorkerAuthGuard(
       new Reflector(),
       new ConfigService({
         AUDIO_PROCESSING_ENABLED: true,
-        PROCESSING_WORKER_AUTH_MODE: 'fleet',
       }),
       identities as never,
     );
     expect(await guard.canActivate(context)).toBe(true);
     expect(req).toMatchObject({
       workerId: 'machine-two',
-      workerIdentity: { workerId: 'machine-two', mode: 'fleet' },
+      workerIdentity: {
+        workerId: 'machine-two',
+        installationId: '11111111-1111-4111-8111-111111111111',
+      },
     });
   });
 });

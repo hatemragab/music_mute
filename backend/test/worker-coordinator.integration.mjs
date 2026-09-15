@@ -1,3 +1,4 @@
+import { pairedWorkerFixture } from './helpers/paired-worker-fixture.mjs';
 import { accountFixture } from './helpers/account-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -9,7 +10,7 @@ import { PROCESSING_MODELS } from '../dist/processing/processing-persistence.mod
 import { ProcessingTransactions } from '../dist/processing/processing-transactions.js';
 import { WorkerCoordinatorService } from '../dist/worker/worker-coordinator.service.js';
 
-test('concurrent claims hold one global slot and expired assignments cannot renew', async (t) => {
+test('concurrent claims hold one registered worker slot and expired assignments cannot renew', async (t) => {
   const native = await IsolatedServices.create();
   t.after(() => native.stop());
   const { mongoUri } = await native.startDatabases({ replicaSet: true });
@@ -20,6 +21,7 @@ test('concurrent claims hold one global slot and expired assignments cannot rene
   await Promise.all(
     PROCESSING_MODELS.map(({ name }) => connection.model(name).init()),
   );
+  const workerIdentity = await pairedWorkerFixture(connection);
   const jobs = connection.model('Job');
   const workers = connection.model('WorkerControl');
   const attempts = connection.model('JobAttempt');
@@ -75,36 +77,68 @@ test('concurrent claims hold one global slot and expired assignments cannot rene
     connection,
     (await jobs.find().lean()).map((job) => job.userId.toString()),
   );
+  assert.equal(
+    await service.claim(randomUUID(), workerIdentity, 2, true),
+    null,
+  );
+  assert.equal(await attempts.countDocuments(), 0);
+  assert.equal(await jobs.countDocuments({ status: 'queued' }), 2);
+  const runtime = connection.model('WorkerRuntime');
+  const readyRuntime = await runtime.findById(workerIdentity.workerId).lean();
+  assert.ok(readyRuntime);
+  await runtime.deleteOne({ _id: readyRuntime._id });
+  assert.equal(
+    await service.claim(randomUUID(), workerIdentity, 2, true),
+    null,
+  );
+  await assert.rejects(
+    service.claim(randomUUID(), workerIdentity, 2),
+    (error) =>
+      error.getResponse().reasonCodes.includes('RUNTIME_REPORT_REQUIRED'),
+  );
+  await runtime.create(readyRuntime);
   const results = await Promise.allSettled([
-    service.claim(randomUUID()),
-    service.claim(randomUUID()),
+    service.claim(randomUUID(), workerIdentity, 2),
+    service.claim(randomUUID(), workerIdentity, 2),
   ]);
   const wins = results.filter((result) => result.status === 'fulfilled');
   assert.equal(wins.length, 1);
   const assignment = wins[0].value;
   assert.equal(assignment.jobId, first._id.toString());
   assert.equal(await attempts.countDocuments(), 1);
-  const repeat = await service.claim(assignment.sessionId);
+  const repeat = await service.claim(assignment.sessionId, workerIdentity, 2);
   assert.equal(repeat.attemptId, assignment.attemptId);
-  await service.heartbeat(assignment);
+  await runtime.deleteOne({ _id: readyRuntime._id });
+  const recovered = await service.claim(
+    assignment.sessionId,
+    workerIdentity,
+    2,
+    true,
+  );
+  assert.equal(recovered.attemptId, assignment.attemptId);
+  await assert.rejects(
+    service.claim(randomUUID(), workerIdentity, 2, true),
+    (error) => error.getResponse().code === 'WORKER_RECOVERY_REQUIRED',
+  );
+  await service.heartbeat(assignment, workerIdentity);
   await jobs.updateOne(
     { _id: first._id },
     { $set: { leaseExpiresAt: new Date(0) } },
   );
   await workers.updateOne(
-    { _id: 'z440' },
+    { _id: workerIdentity.workerId },
     { $set: { leaseExpiresAt: new Date(0) } },
   );
   await assert.rejects(
-    service.heartbeat(assignment),
+    service.heartbeat(assignment, workerIdentity),
     (error) => error.getStatus() === 409,
   );
   await assert.rejects(
-    service.claim(randomUUID()),
+    service.claim(randomUUID(), workerIdentity, 2),
     (error) => error.getStatus() === 409,
   );
   assert.equal(
-    (await workers.findById('z440')).activeJobId.toString(),
+    (await workers.findById(workerIdentity.workerId)).activeJobId.toString(),
     first._id.toString(),
   );
   assert.equal(await jobs.countDocuments({ status: 'queued' }), 1);

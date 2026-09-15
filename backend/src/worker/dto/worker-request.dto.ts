@@ -18,10 +18,12 @@ const lowercase = ({ value }: { value: unknown }) =>
 export class ClaimDto {
   @Transform(lowercase) @IsUUID('4') sessionId!: string;
 }
-export class WorkerClaimDto extends ClaimDto {
+export class WorkerRecoveryClaimDto extends ClaimDto {
   @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsIn([2])
   mediaPolicyVersion?: 2;
+}
+export class WorkerClaimDto extends WorkerRecoveryClaimDto {
   @IsInt() @Min(0) @Max(25) waitSeconds = 0;
 }
 export class WorkerSelectorDto extends ClaimDto {

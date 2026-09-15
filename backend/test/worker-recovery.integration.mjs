@@ -56,13 +56,13 @@ test('expired worker holds slot across restart and reconciliation resumes the sa
     { $set: { leaseExpiresAt: new Date(0) } },
   );
   await f.control.updateOne(
-    { _id: 'z440' },
+    { _id: f.workerId },
     { $set: { leaseExpiresAt: new Date(0) } },
   );
   await f.restartApi();
   assert.equal((await f.jobs.findById(first)).status, 'interrupted');
   assert.equal(
-    (await f.control.findById('z440')).activeJobId.toString(),
+    (await f.control.findById(f.workerId)).activeJobId.toString(),
     first,
   );
   assert.equal(
@@ -107,7 +107,7 @@ test('expired worker holds slot across restart and reconciliation resumes the sa
     { $set: { leaseExpiresAt: new Date(0) } },
   );
   await f.control.updateOne(
-    { _id: 'z440' },
+    { _id: f.workerId },
     { $set: { leaseExpiresAt: new Date(0) } },
   );
   const lostResponse = await f.request(
