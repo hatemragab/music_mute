@@ -24,7 +24,7 @@ function fixture() {
   const actions = {
     cancelAsAdmin: vi.fn().mockResolvedValue({
       jobId: sourceId,
-      status: 'cancel_requested',
+      status: 'cancelled',
       revision: 4,
     }),
     administrativeState: vi.fn().mockResolvedValue({
@@ -61,7 +61,7 @@ describe('administrative job actions', () => {
       body = dto();
     await expect(f.service.cancel(actor, sourceId, body)).resolves.toEqual({
       jobId: sourceId,
-      status: 'cancel_requested',
+      status: 'cancelled',
       revision: 4,
     });
     expect(f.actions.cancelAsAdmin).toHaveBeenCalledWith(

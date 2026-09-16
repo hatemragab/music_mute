@@ -31,7 +31,7 @@ function actionsFixture() {
   const jobs = {
     findOne: vi.fn(() => query(job)),
     findOneAndUpdate: vi.fn(() =>
-      query({ ...job, status: 'cancel_requested', adminRevision: 4 }),
+      query({ ...job, status: 'cancelled', adminRevision: 4 }),
     ),
   };
   const transactions = { run: vi.fn() };

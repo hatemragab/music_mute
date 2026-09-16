@@ -42,6 +42,21 @@ test("owner can open every dashboard area without runtime errors", async ({
   expect(runtimeErrors).toEqual([]);
 });
 
+test("removed worker routes render not found without worker API requests", async ({
+  page,
+}) => {
+  await setDashboardRole(page, "owner");
+  const fixture = await installDashboardFixture(page);
+
+  await page.goto("/" + "workers");
+  await expect(
+    page.getByRole("heading", { name: "Page not found", exact: true }),
+  ).toBeVisible();
+  expect(
+    fixture.requests.some(({ url }) => url.includes("/admin/" + "workers")),
+  ).toBe(false);
+});
+
 test("support reviews a high-priority account recovery request", async ({
   page,
 }) => {
@@ -300,10 +315,8 @@ test("support suspends processing, requests media deliberately, and cancels a jo
   await dialog.getByLabel("Reason").fill("User requested cancellation");
   await dialog.getByRole("button", { name: "Request cancellation" }).click();
   await expect(dialog).toHaveCount(0);
-  expect(fixture.job.status).toBe("cancel_requested");
-  await expect(
-    page.getByText("cancel requested", { exact: true }),
-  ).toBeVisible();
+  expect(fixture.job.status).toBe("cancelled");
+  await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
 });
 
 test("owner uploads a direct APK, publishes verified policy, and saves settings", async ({

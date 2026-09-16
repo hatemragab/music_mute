@@ -22,7 +22,7 @@ describe('administrative job action HTTP boundary', () => {
     const actions = {
       cancel: vi.fn().mockResolvedValue({
         jobId: id,
-        status: 'cancel_requested',
+        status: 'cancelled',
         revision: 1,
       }),
       retry: vi.fn().mockResolvedValue({

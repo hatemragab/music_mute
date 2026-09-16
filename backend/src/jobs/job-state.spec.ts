@@ -56,20 +56,17 @@ describe('processing input boundaries', () => {
 });
 
 describe('cancellation state rules', () => {
-  it.each(['awaiting_upload', 'queued', 'cancelled'] as const)(
-    'immediately cancels %s',
-    (state) => {
-      expect(nextCancellationState(state)).toBe('cancelled');
-    },
-  );
   it.each([
+    'awaiting_upload',
+    'queued',
     'validating',
     'processing',
     'uploading_result',
     'interrupted',
     'cancel_requested',
-  ] as const)('holds the slot for %s', (state) => {
-    expect(nextCancellationState(state)).toBe('cancel_requested');
+    'cancelled',
+  ] as const)('immediately cancels %s', (state) => {
+    expect(nextCancellationState(state)).toBe('cancelled');
   });
   it.each(['ready', 'failed'] as const)('preserves terminal %s', (state) => {
     expect(() => nextCancellationState(state)).toThrow();

@@ -460,7 +460,8 @@ export class DashboardFixture {
     if (path === `/admin/jobs/${this.job.id}/cancel` && method === "POST") {
       this.job = {
         ...this.job,
-        status: "cancel_requested",
+        status: "cancelled",
+        finishedAt: NOW,
         revision: this.job.revision + 1,
       };
       return {

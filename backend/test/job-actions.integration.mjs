@@ -66,9 +66,11 @@ test('job cancellation preserves owner and state boundaries', async (t) => {
   const active = await createJob({ status: 'processing' });
   assert.deepEqual(
     await actions.cancel(ownerId.toHexString(), active._id.toHexString()),
-    { id: active._id.toHexString(), status: 'cancel_requested' },
+    { id: active._id.toHexString(), status: 'cancelled' },
   );
-  assert.equal((await jobs.findById(active._id).lean()).finishedAt, null);
+  assert.ok(
+    (await jobs.findById(active._id).lean()).finishedAt instanceof Date,
+  );
 
   const cancelled = await createJob({
     status: 'cancelled',

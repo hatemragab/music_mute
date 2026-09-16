@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUTH_OPERATION } from '../auth/auth.decorators.js';
+import { AUTH_OPERATION, PROCESSING_ACCESS } from '../auth/auth.decorators.js';
 import type { AuthRequest } from '../auth/auth-request.js';
 import { ProcessingUnavailableService } from '../processing/processing-unavailable.service.js';
 import type { JobActionsService } from './job-actions.service.js';
@@ -64,6 +64,18 @@ describe('JobsController burst classes', () => {
 });
 
 describe('JobsController clean-slate boundary', () => {
+  it.each(['create', 'retry', 'renew', 'confirm'] as const)(
+    'preserves processing access protection on %s',
+    (method) => {
+      expect(
+        Reflect.getMetadata(
+          PROCESSING_ACCESS,
+          JobsController.prototype[method],
+        ),
+      ).toBe(true);
+    },
+  );
+
   it.each([
     ['create', () => controller().create(request, {} as never)],
     ['retry', () => controller().retry(request, 'job-id', {} as never)],

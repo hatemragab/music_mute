@@ -93,6 +93,17 @@ function HomeRedirect() {
   return <Navigate to={first?.to ?? "/not-authorized"} replace />;
 }
 
+function NotFoundPage() {
+  return (
+    <div className="rounded-xl border bg-card p-8">
+      <h1 className="text-2xl font-semibold">Page not found</h1>
+      <p className="mt-2 text-muted-foreground">
+        The requested dashboard area does not exist.
+      </p>
+    </div>
+  );
+}
+
 export function AppRouter() {
   return (
     <Routes>
@@ -216,7 +227,7 @@ export function AppRouter() {
             </div>
           }
         />
-        <Route path="*" element={<HomeRedirect />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
   );

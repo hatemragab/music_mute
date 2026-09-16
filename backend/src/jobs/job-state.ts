@@ -64,17 +64,18 @@ export function assertMeasuredDuration(
 }
 
 export function nextCancellationState(status: JobStatus): JobStatus {
-  if (['awaiting_upload', 'queued', 'cancelled'].includes(status))
-    return 'cancelled';
   if (
     [
+      'awaiting_upload',
+      'queued',
       'validating',
       'processing',
       'uploading_result',
       'interrupted',
       'cancel_requested',
+      'cancelled',
     ].includes(status)
   )
-    return 'cancel_requested';
+    return 'cancelled';
   throw jobError('JOB_STATE_CONFLICT');
 }

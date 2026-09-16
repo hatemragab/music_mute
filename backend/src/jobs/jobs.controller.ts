@@ -13,7 +13,10 @@ import {
 } from '@nestjs/common';
 import type { AuthRequest } from '../auth/auth-request.js';
 import { SkipThrottle } from '@nestjs/throttler';
-import { LimitOperation } from '../auth/auth.decorators.js';
+import {
+  LimitOperation,
+  RequireProcessingAccess,
+} from '../auth/auth.decorators.js';
 import { EmptyBodyPipe } from '../auth/dto/empty-body.pipe.js';
 import { ProcessingUnavailableService } from '../processing/processing-unavailable.service.js';
 import { CreateJobDto } from './dto/create-job.dto.js';
@@ -74,6 +77,7 @@ export class JobsController {
 
   @Post(':id/retry')
   @LimitOperation('processing-create')
+  @RequireProcessingAccess()
   retry(
     @Req() _req: AuthRequest,
     @Param('id') _id: string,
@@ -115,6 +119,7 @@ export class JobsController {
 
   @Post()
   @LimitOperation('processing-create')
+  @RequireProcessingAccess()
   @Header('Cache-Control', 'no-store')
   create(@Req() _req: AuthRequest, @Body() _dto: CreateJobDto) {
     return this.unavailable.reject();
@@ -122,6 +127,7 @@ export class JobsController {
 
   @Post(':id/upload-url')
   @LimitOperation('processing-grant')
+  @RequireProcessingAccess()
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   renew(
@@ -134,6 +140,7 @@ export class JobsController {
 
   @Post(':id/upload-complete')
   @LimitOperation('processing-grant')
+  @RequireProcessingAccess()
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   confirm(
