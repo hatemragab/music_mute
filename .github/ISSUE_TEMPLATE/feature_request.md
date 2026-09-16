@@ -14,7 +14,7 @@ Give a concrete example of how the improvement would work.
 
 ## Affected component
 
-Android / iOS / backend / dashboard / Windows worker / documentation
+Android / iOS / backend / dashboard / documentation
 
 ## Alternatives and context
 

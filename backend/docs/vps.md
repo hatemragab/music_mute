@@ -37,9 +37,9 @@ a container solely because its healthcheck is unhealthy.
 ## Migration, update and recovery
 
 Set `REDIS_URL` before upgrading. The old separate Redis settings and queue prefix
-are unused. The worker and bundled Redis service have been removed from Compose.
+are unused. The bundled Redis service has been removed from Compose.
 If upgrading an existing stack, keep its Redis service/volume running independently
-until the external connection is verified, and stop its old worker separately.
+until the external connection is verified, and stop any obsolete processing app separately.
 Do not use `--remove-orphans`, `down -v` or data deletion as part of this migration.
 This repository change does not stop existing deployed services.
 

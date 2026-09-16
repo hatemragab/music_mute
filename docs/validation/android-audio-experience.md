@@ -50,7 +50,7 @@ Result: `BUILD SUCCESSFUL`; 132 unit tests passed with zero failures, errors, or
 skips, and both lint and debug APK assembly completed. The notification/source
 policy suite contributed 8 passing tests and input preparation contributed 10.
 Coverage includes API metadata/rename/delete
-contracts, durable intake and recovery, source/worker identity fences,
+contracts, durable intake and recovery, source identity fences,
 notification projection and action ownership, presentation mapping, artifact
 cache deletion races, sharing intent shape, and the diagnostic outbox.
 
@@ -92,7 +92,7 @@ performed.
 
 The Android contract is checked against the repository backend API document and
 fixtures. This is local source/fixture evidence. It does not prove that the
-matching backend version, S3 integration, or Z440 worker is deployed and
+matching backend version or S3 integration is deployed and
 reachable in production.
 
 ## Runtime scenarios still required
@@ -106,7 +106,7 @@ cases remain unrun:
 - network loss/switching, force-stop, relaunch, and process death at each stage;
 - real system file picker, document save picker, and share chooser;
 - two simultaneous long tasks and cancellation of only one;
-- real production API, S3, push notification, and Z440 worker completion;
+- real production API, S3, and push notification behavior;
 - Arabic RTL, large text, TalkBack, dark/light themes, and reduced motion;
 - output playback through Media3 and cache cleanup after remote deletion.
 

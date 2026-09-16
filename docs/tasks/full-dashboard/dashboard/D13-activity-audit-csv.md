@@ -7,7 +7,7 @@
 **Architecture:** Build one React + TypeScript single-page web application with Vite against the verified NestJS contract; use TanStack Query for server state, React Router for navigation, reusable Tailwind CSS + shadcn/ui components and server-enforced permissions.
 **Tech Stack:** React, TypeScript, Vite, Tailwind CSS, shadcn/ui, React Router, TanStack Query, Firebase Web Authentication (Google), native fetch/XHR, Vitest, React Testing Library, MSW and Playwright. Verify compatible versions and lock them during D01.
 **Spec:** [Approved scope](../scope.md), [API contracts](../contracts.md).\
-**Dependencies:** [D03](../dashboard/D03-overview-page.md), [D06](../dashboard/D06-jobs-queue-operations.md), [B02](../backend/B02-audit-operation-receipts.md), [B17](../backend/B17-csv-exports.md).
+**Dependencies:** [D03](../dashboard/D03-overview-page.md), [B02](../backend/B02-audit-operation-receipts.md), [B17](../backend/B17-csv-exports.md).
 
 ## Global constraints
 
@@ -41,7 +41,7 @@ GET /admin/audit owner-only; jobs/overview CSV endpoints require exports.read pl
 These are concrete test scenarios to encode in the listed test files before implementation. They describe expected results, not completed tests.
 
 ```gherkin
-Scenario 1: CSV uses the currently selected date and worker filters, not a default all-time dataset.
+Scenario 1: CSV uses the currently selected date and job-status filters, not a default all-time dataset.
 Scenario 2: 10,001-row rejection produces an actionable error instead of a partial download.
 Scenario 3: A non-owner with export permission can export jobs but cannot open the Activity Log.
 ```

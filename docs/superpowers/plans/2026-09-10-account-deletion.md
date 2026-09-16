@@ -32,20 +32,20 @@ Persist states `accepted | cancelling | purging | completed`, retry metadata and
 
 ## Task 2: Recoverable cleanup across storage, jobs and identity
 
-**Modify:** `backend/src/jobs/job-deletion.service.ts`, `job-actions.service.ts`; `backend/src/storage/storage-transfers.service.ts`; `backend/src/processing/processing-maintenance.service.ts`; relevant `backend/src/worker/` completion/claim paths; `backend/src/users/users.module.ts`.
+**Modify:** `backend/src/jobs/job-deletion.service.ts`, `job-actions.service.ts`; `backend/src/storage/storage-transfers.service.ts`; `backend/src/processing/processing-maintenance.service.ts`; `backend/src/users/users.module.ts`.
 
 **Create:** `backend/src/users/account-deletion-maintenance.service.ts`, `account-deletion-maintenance.service.spec.ts`; `backend/test/account-deletion.integration.mjs`; `backend/docs/account-deletion.md`.
 
 **Interfaces:** maintenance consumes `advanceDeletion(now)` from Task 1. Add narrow internal adapters around existing cancellation and cleanup rather than accepting job IDs or S3 keys from a deletion client. Reuse `deleteVersionsForKey(key)` and the existing grant grace policy.
 
-- [ ] Inventory account-linked profile, devices, installation ownership, push installations/deliveries/outbox, jobs, attempts, receipts, errors/reports, S3 versions, worker temporary files, caches and operational logs. Identify shared installation records and delete only entries still owned by this account.
+- [ ] Inventory account-linked profile, devices, installation ownership, push installations/deliveries/outbox, jobs, errors/reports, S3 versions, caches and operational logs. Identify shared installation records and delete only entries still owned by this account.
 - [ ] Write failing lifecycle tests: accepted request survives restart; concurrent replicas do not double-own cleanup; queued and active jobs stop; a completion racing deletion cannot restore a result; an S3/Firebase outage retries without declaring completion.
-- [ ] Revoke refresh tokens and disable Firebase after durable fencing. Cancel work using existing worker protocol; reject new claims/grants for deleting accounts and fence existing completions. Never treat a timeout as proof the Windows process exited.
+- [ ] Revoke refresh tokens and disable Firebase after durable fencing. Cancel retained work, reject new grants for deleting accounts, and fence late completions.
 - [ ] Add bounded leased deletion sweeps that run even when audio processing is disabled. Preserve the API-only architecture and retry/backoff conventions.
 - [ ] After active ownership and outstanding signed grants are safely resolved, sweep all account-owned S3 versions, including unconfirmed upload/output attempts. Ensure late uploads cannot recreate retained data after the final sweep.
-- [ ] Purge associated database data in bounded batches after storage cleanup no longer needs its keys. Delete the Firebase user idempotently (already absent is success); retain the account fence until stale-token reprovisioning is impossible, then remove the profile. Treat unresolved worker copies/provider errors as incomplete cleanup.
+- [ ] Purge associated database data in bounded batches after storage cleanup no longer needs its keys. Delete the Firebase user idempotently (already absent is success); retain the account fence until stale-token reprovisioning is impossible, then remove the profile. Treat unresolved provider errors as incomplete cleanup.
 - [ ] Define finite receipt/log retention, backup expiry and restore-time deletion replay in the runbook. Set the public completion timeframe only after the operator confirms these limits.
-- [ ] Run `cd backend && npm run build && node --test test/account-deletion.integration.mjs` against isolated services, plus `npm run test:processing:integration` for cancellation/worker/storage regressions.
+- [ ] Run `cd backend && npm run build && node --test test/account-deletion.integration.mjs` against isolated services, plus `npm run test:processing:integration` for cancellation and storage regressions.
 
 ## Task 3: Native deletion controls and local cleanup
 
@@ -81,7 +81,7 @@ Persist states `accepted | cancelling | purging | completed`, retry metadata and
 - [ ] Backend: `cd backend && npm run verify`, `npm run test:auth:integration`, and the isolated deletion/processing integration commands above. Use scoped formatting; do not format unrelated dirty files.
 - [ ] Android: `cd android && ./gradlew :app:assembleDebug :app:lintDebug :app:testDebugUnitTest`. No Android emulator/device substitution is permitted by the current user instruction; report runtime UI proof as outstanding.
 - [ ] iOS: `cd ios && xcodebuild -project MusicMute.xcodeproj -scheme MusicMute -destination "platform=iOS Simulator,id=$IOS_SIMULATOR_UDID" test`. If unavailable, report that blocker.
-- [ ] With separately authorized disposable staging accounts: prove in-app request and support-assisted request both remove identity, jobs, object versions and worker temp data. Exercise one active job and one interrupted cleanup. Record backend/S3/Firebase evidence separately from mocked/unit results.
+- [ ] With separately authorized disposable staging accounts: prove in-app request and support-assisted request both remove identity, jobs, and object versions. Exercise one active job and one interrupted cleanup. Record backend/S3/Firebase evidence separately from mocked/unit results.
 - [ ] Review diff and API docs, public-page accessibility, retention commitments and release disclosures. Do not claim Play approval or production deletion from local tests.
 
 No tests in this document have been executed as part of drafting it.

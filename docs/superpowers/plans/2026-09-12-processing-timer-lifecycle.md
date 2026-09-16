@@ -6,7 +6,7 @@ Status: investigated and planned; implementation has not started.
 
 ## Goal
 
-Timers must represent work that actually started. Waiting for consent, an app update, account access, connectivity, a local slot, retry backoff, or a worker must not appear as ongoing processing. Pausing, reopening, restoring, and retrying must not silently add idle time. A cloud job may continue independently of a blocked or backgrounded client; its authoritative processing measurement remains valid.
+Timers must represent work that actually started. Waiting for consent, an app update, account access, connectivity, a local slot, retry backoff, or remote processing must not appear as ongoing processing. Pausing, reopening, restoring, and retrying must not silently add idle time. A cloud job may continue independently of a blocked or backgrounded client; its authoritative processing measurement remains valid.
 
 ## Evidence from the current checkout
 
@@ -25,26 +25,26 @@ Existing uncommitted Android update-installer, update-gate, manifest, build, and
 
 Keep three meanings distinct:
 
-| Measurement | Meaning | Display rule |
-| --- | --- | --- |
-| Processing time | Backend-measured audio separation intervals | Unavailable until measured; use server values, including approximation flags. Never derive from task creation. |
+| Measurement      | Meaning                                                                        | Display rule                                                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Processing time  | Backend-measured audio separation intervals                                    | Unavailable until measured; use server values, including approximation flags. Never derive from task creation.                                       |
 | Active task time | Time spent executing local intake/upload work and confirmed server work stages | Start at actual execution; accumulate intervals; freeze during idle or blocked states. This replaces the misleading continuously growing card timer. |
-| Total elapsed | Existing backend wall-clock lifecycle age, including waiting | Preserve API meaning. If retained in detail, explicitly label it as including waiting and keep it separate from active task time. |
+| Total elapsed    | Existing backend wall-clock lifecycle age, including waiting                   | Preserve API meaning. If retained in detail, explicitly label it as including waiting and keep it separate from active task time.                    |
 
 Audio/media duration remains independent of all three.
 
 Recommended state rules:
 
-| State | Active task clock | Processing clock |
-| --- | --- | --- |
-| Not started, consent/review, local slot queue | Not started, or frozen if earlier work exists | Unavailable unless a prior measured server interval exists |
-| Source download, input preparation, reservation request, input upload, confirmation request | Runs only while the executor owns and is performing that stage | Unchanged |
-| Update/account/access block, offline wait, retry delay, awaiting app resume | Frozen | Preserve measured server work; never fabricate client processing |
-| Server queue, interrupted/worker unavailable | Frozen | Preserve accumulated processing; no speculative increment |
-| Confirmed server validation, processing, result upload | Use authoritative measured stage intervals; never count the same local/server interval twice | Changes only for actual separation |
-| Cancellation requested | Stop client-owned work timing when that work stops; keep cancellation pending | Server may finish stopping; use its authoritative measurement until acknowledgement |
-| Ready, failed, cancelled | Frozen permanently for that attempt | Frozen server measurement |
-| Unknown/stale state or missing timestamps | Freeze last known measurement or show unavailable | Freeze last server sample; do not infer activity from an old status |
+| State                                                                                       | Active task clock                                                                            | Processing clock                                                                    |
+| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Not started, consent/review, local slot queue                                               | Not started, or frozen if earlier work exists                                                | Unavailable unless a prior measured server interval exists                          |
+| Source download, input preparation, reservation request, input upload, confirmation request | Runs only while the executor owns and is performing that stage                               | Unchanged                                                                           |
+| Update/account/access block, offline wait, retry delay, awaiting app resume                 | Frozen                                                                                       | Preserve measured server work; never fabricate client processing                    |
+| Server queue, interrupted/processing unavailable                                            | Frozen                                                                                       | Preserve accumulated processing; no speculative increment                           |
+| Confirmed server validation, processing, result upload                                      | Use authoritative measured stage intervals; never count the same local/server interval twice | Changes only for actual separation                                                  |
+| Cancellation requested                                                                      | Stop client-owned work timing when that work stops; keep cancellation pending                | Server may finish stopping; use its authoritative measurement until acknowledgement |
+| Ready, failed, cancelled                                                                    | Frozen permanently for that attempt                                                          | Frozen server measurement                                                           |
+| Unknown/stale state or missing timestamps                                                   | Freeze last known measurement or show unavailable                                            | Freeze last server sample; do not infer activity from an old status                 |
 
 The backend currently provides processing intervals, not a complete active-task interval aggregate for every server stage. Do not pretend stage start timestamps alone prove uninterrupted activity. Initially, use measured local intervals plus backend processing intervals, with clear labeling (for example, “Measured work time”) and leave unavailable server overhead uncounted. If a full all-stage active duration is required later, add explicit server accounting in a separate contract change. Avoid a broad backend timing redesign for this bug.
 
@@ -87,7 +87,7 @@ Introduce explicit timer state (not started/running/paused/finished/unavailable)
 
 Use the same timing projection for cards and detail. Include job ID as well as operation ID in Android ticker identity so server-only cards cannot share a null identity. Reset samples on new authoritative observations/attempts. Stop extrapolation when evidence is stale; prefer server processing samples over inventing an unbounded processing ticker. Wall-clock changes must not make local active time jump backward or forward.
 
-Show a specific waiting reason such as “Update required”, “Waiting for confirmation”, or “Waiting for worker”. Do not render a waiting policy block as generic failure or animate it as ongoing processing. Preserve terminal server precedence when stale local failures or pause markers arrive later.
+Show a specific waiting reason such as “Update required”, “Waiting for confirmation”, or “Processing unavailable”. Do not render a waiting policy block as generic failure or animate it as ongoing processing. Preserve terminal server precedence when stale local failures or pause markers arrive later.
 
 Update existing English/Arabic strings in Android resources and iOS localization files. Use “Processing time” only for separation; label the card's measured-work value truthfully. Explain any remaining wall-clock total in detail as including waiting.
 
@@ -95,11 +95,11 @@ Update existing English/Arabic strings in Android resources and iOS localization
 
 Extend `backend/src/jobs/job-timing.spec.ts` and `jobs.presenter.spec.ts` for not-started, queued, interrupted, terminal, and repeated observations. Verify update admission rejection does not start a job/interval using the existing `backend/test/admin-update-admission.integration.mjs` harness in its isolated test environment.
 
-Review interval opening/closing at worker transitions before claiming backend correctness beyond the current unit tests. Keep `totalElapsedMs`, queue ordering, leases, and `clientStartedAt` compatibility unchanged. No database migration or production operation is part of this repair. Modify backend runtime code only if a regression exposes an independent defect; document an additive API change if one proves necessary.
+Review interval opening/closing at authoritative processing transitions before claiming backend correctness beyond the current unit tests. Keep `totalElapsedMs`, queue ordering, and `clientStartedAt` compatibility unchanged. No database migration or production operation is part of this repair. Modify backend runtime code only if a regression exposes an independent defect; document an additive API change if one proves necessary.
 
 ### 5. Validate lifecycle and recovery
 
-Required scenarios: blocked before intake; block during URL download/import/upload; consent wait; local concurrency wait; offline/backoff; queue/worker interruption; pause for several minutes then resume; background/foreground; process restoration; signed-out owner change; cancellation race; server completes while client is update-blocked; terminal reopen; repeated identical snapshots; missing legacy timestamps; new attempt identity; device wall-clock changes.
+Required scenarios: blocked before intake; block during URL download/import/upload; consent wait; local concurrency wait; offline/backoff; queue/processing interruption; pause for several minutes then resume; background/foreground; process restoration; signed-out owner change; cancellation race; server completes while client is update-blocked; terminal reopen; repeated identical snapshots; missing legacy timestamps; device wall-clock changes.
 
 Concrete assertion: 10 seconds of measured local work + 5 minutes paused + 5 seconds resumed must display 15 seconds of local work, including after reopening. Processing time must remain unstarted until backend separation begins. A backend job actually processing while the app is blocked must retain its real server measurement.
 

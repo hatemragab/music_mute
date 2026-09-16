@@ -42,7 +42,7 @@ describe('durable job schema boundaries', () => {
       new Job({ status: 'deleted' }).validateSync()?.errors,
     ).toHaveProperty('status');
   });
-  it('contains no worker ownership or claim queue fields and indexes', () => {
+  it('contains no execution ownership or claim queue fields and indexes', () => {
     for (const path of [
       'workerId',
       'attemptId',

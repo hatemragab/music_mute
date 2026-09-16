@@ -32,7 +32,7 @@ describe('admin audit HTTP boundary', () => {
         ) => ({
           operationId: '1c2a047d-e63e-40d5-8a71-22ee3b65d804',
           status: 'succeeded',
-          resourceId: 'worker-one',
+          resourceId: 'job-one',
           revision: 2,
         }),
       ),

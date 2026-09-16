@@ -26,7 +26,7 @@ Use a recording created for this test or a documented licensed fixture. Preserve
 
 1. Home: show Import audio first and the visible secondary YouTube option.
 2. Review: show the owned fixture, measured size/duration, cloud explanation and unchecked rights checkbox. Selecting a file must not create a cloud job.
-3. Confirmation: check rights and tap Remove music. Show actual transfer/processing states; do not invent queue timing or worker availability.
+3. Confirmation: check rights and tap Remove music. Show actual transfer/processing states; do not invent queue timing or processing availability.
 4. Result: demonstrate vocals-only output, explicit-tap playback, save and share.
 5. Account: show reauthentication, destructive confirmation and accepted-request wording. Do not label acceptance as completed erasure.
 6. Secondary source: demonstrate YouTube permission/download and separate cloud confirmation. Do not conceal this feature or use a review-only configuration.

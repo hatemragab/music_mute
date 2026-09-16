@@ -7,7 +7,7 @@
 **Architecture:** Extend existing NestJS feature services and shared lifecycle authority; keep controllers thin and permission checks server-side.\
 **Tech Stack:** NestJS, strict TypeScript ESM, Mongoose/MongoDB transactions, existing Firebase/S3/Redis services, Vitest and compiled-node isolated integrations.\
 **Spec:** [Approved scope](../scope.md), [API contracts](../contracts.md).\
-**Dependencies:** [B02](../backend/B02-audit-operation-receipts.md), [B07](../backend/B07-user-search-processing-suspension.md), [B08](../backend/B08-job-search-detail-attempts.md).
+**Dependencies:** [B02](../backend/B02-audit-operation-receipts.md), [B07](../backend/B07-user-search-processing-suspension.md).
 
 ## Global constraints
 
@@ -42,7 +42,7 @@ POST /admin/jobs/:id/media-grants with asset=input|result, purpose=play|download
 These are concrete test scenarios to encode in the listed test files before implementation. They describe expected results, not completed tests.
 
 ```gherkin
-Scenario 1: Support can obtain a verified result grant; Worker Manager and Viewer get 403.
+Scenario 1: Support can obtain a verified result grant; Viewer gets 403.
 Scenario 2: A raw object key in the body is rejected, and no grant is signed during account deletion.
 Scenario 3: A download uses attachment disposition and expires after 300 seconds; no audit event contains its URL.
 ```

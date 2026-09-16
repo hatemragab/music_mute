@@ -9,15 +9,15 @@ used only the authorized iPhone 17 Pro, iOS 26.0 simulator
 
 ## Implementation coverage
 
-| Requirement | Implemented behavior | Main source |
-| --- | --- | --- |
-| I01 contract and durable metadata | Backward-compatible job metadata/timing, request identity, rename/delete/client-error contracts, UTC millisecond encoding, owner-scoped v2 pipeline persistence, and attempt/cancel/retry state. | `ios/Vocal/Processing/JobModels.swift`, `JobsAPIClient.swift`, `ProcessingStore.swift`, `ProcessingRepository.swift`, `UnavailableJobsAPI.swift` |
-| I02 automatic intake | Paste, typed URL commit, and selected files create durable operations before work and automatically chain through download/copy, validation, reservation, upload, and confirmation. Event deduplication and a shared two-run cap keep simultaneous operations independent. | `ios/Vocal/Processing/AudioInputPreparer.swift`, `AudioPipelineCoordinator.swift`, `ios/Vocal/State/DownloadModel.swift`, `ProcessingModel.swift`, `ios/Vocal/UI/HomeView.swift`, `ProcessingRootView.swift` |
-| I03 background and restoration | Background source download uses stable owner/operation/task identity, durable receipts, duplicate/late callback fencing, account-change cancellation, app-delegate restoration, and persisted continuation. Existing file-backed S3 upload restoration remains integrated. | `ios/Vocal/Processing/AudioPipelineRestoration.swift`, `BackgroundTransferCoordinator.swift`, `ProcessingAppDelegate.swift`, `S3MultipartFile.swift`, `NotificationDelegate.swift`, `PushRegistrationCoordinator.swift` |
-| I04 task UX | Merged local/cloud cards, full timelines, reference/job IDs, total and processing clocks, output-fetch state, processed-only library behavior, rename-aware presentation, RTL/localization, Dynamic Type, reduced motion, and stable accessibility identifiers. | `ios/Vocal/Processing/AudioTaskPresentation.swift`, `ios/Vocal/UI/AudioTaskCard.swift`, `AudioStepTimeline.swift`, `ProcessingHistoryView.swift`, `ProcessingDetailView.swift` |
-| I05 actions and diagnostics | Cancellation waits for local shutdown and persists intent through acknowledgement. Retries persist delay/attempt state and fence stale runs. A bounded sanitized owner-scoped error outbox retains stable event IDs and flushes only for the matching session. | `ios/Vocal/Processing/ClientErrorOutbox.swift`, `ProcessingRepository.swift`, `ProcessingStore.swift`, `ios/Vocal/State/ProcessingModel.swift` |
-| I06 processed media actions | Ready does not fetch output. Play, native Share, and Save to Files share one verified cached result. Rename controls player/export naming. Confirmed terminal deletion stops playback and removes private artifacts with tombstone fencing. | `ios/Vocal/Processing/JobArtifactRepository.swift`, `ArtifactDownloadTransport.swift`, `ios/Vocal/Playback/AudioPlayer.swift`, `ios/Vocal/UI/ProcessedAudioShareSheet.swift`, `ProcessingDetailView.swift` |
-| I07 fixtures | Isolated DEBUG graph with synthetic MP3 data, deterministic jobs/transfers, request counters, pasteboard input, and UI flows for intake and media actions. | `ios/Vocal/UI/ProcessingUITestHarness.swift`, `ios/VocalUITests/ProcessingUITests.swift` |
+| Requirement                       | Implemented behavior                                                                                                                                                                                                                                                       | Main source                                                                                                                                                                                                             |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I01 contract and durable metadata | Backward-compatible job metadata/timing, request identity, rename/delete/client-error contracts, UTC millisecond encoding, owner-scoped v2 pipeline persistence, and attempt/cancel/retry state.                                                                           | `ios/Vocal/Processing/JobModels.swift`, `JobsAPIClient.swift`, `ProcessingStore.swift`, `ProcessingRepository.swift`, `UnavailableJobsAPI.swift`                                                                        |
+| I02 automatic intake              | Paste, typed URL commit, and selected files create durable operations before work and automatically chain through download/copy, validation, reservation, upload, and confirmation. Event deduplication and a shared two-run cap keep simultaneous operations independent. | `ios/Vocal/Processing/AudioInputPreparer.swift`, `AudioPipelineCoordinator.swift`, `ios/Vocal/State/DownloadModel.swift`, `ProcessingModel.swift`, `ios/Vocal/UI/HomeView.swift`, `ProcessingRootView.swift`            |
+| I03 background and restoration    | Background source download uses stable owner/operation/task identity, durable receipts, duplicate/late callback fencing, account-change cancellation, app-delegate restoration, and persisted continuation. Existing file-backed S3 upload restoration remains integrated. | `ios/Vocal/Processing/AudioPipelineRestoration.swift`, `BackgroundTransferCoordinator.swift`, `ProcessingAppDelegate.swift`, `S3MultipartFile.swift`, `NotificationDelegate.swift`, `PushRegistrationCoordinator.swift` |
+| I04 task UX                       | Merged local/cloud cards, full timelines, reference/job IDs, total and processing clocks, output-fetch state, processed-only library behavior, rename-aware presentation, RTL/localization, Dynamic Type, reduced motion, and stable accessibility identifiers.            | `ios/Vocal/Processing/AudioTaskPresentation.swift`, `ios/Vocal/UI/AudioTaskCard.swift`, `AudioStepTimeline.swift`, `ProcessingHistoryView.swift`, `ProcessingDetailView.swift`                                          |
+| I05 actions and diagnostics       | Cancellation waits for local shutdown and persists intent through acknowledgement. Retries persist delay/attempt state and fence stale runs. A bounded sanitized owner-scoped error outbox retains stable event IDs and flushes only for the matching session.             | `ios/Vocal/Processing/ClientErrorOutbox.swift`, `ProcessingRepository.swift`, `ProcessingStore.swift`, `ios/Vocal/State/ProcessingModel.swift`                                                                          |
+| I06 processed media actions       | Ready does not fetch output. Play, native Share, and Save to Files share one verified cached result. Rename controls player/export naming. Confirmed terminal deletion stops playback and removes private artifacts with tombstone fencing.                                | `ios/Vocal/Processing/JobArtifactRepository.swift`, `ArtifactDownloadTransport.swift`, `ios/Vocal/Playback/AudioPlayer.swift`, `ios/Vocal/UI/ProcessedAudioShareSheet.swift`, `ProcessingDetailView.swift`              |
+| I07 fixtures                      | Isolated DEBUG graph with synthetic MP3 data, deterministic jobs/transfers, request counters, pasteboard input, and UI flows for intake and media actions.                                                                                                                 | `ios/Vocal/UI/ProcessingUITestHarness.swift`, `ios/VocalUITests/ProcessingUITests.swift`                                                                                                                                |
 
 English and Arabic localization each contain 257 unique keys, with no key
 missing on either side.
@@ -26,13 +26,13 @@ missing on either side.
 
 Focused unit evidence totals **44 passed tests** with zero failures:
 
-| Suite | Result | Evidence |
-| --- | ---: | --- |
-| `AudioPipelineCoordinatorTests` | 4 passed | `/tmp/musicmute-ios-focused-tests.log` |
-| `AudioPipelineRestorationTests` | 4 passed | `/tmp/musicmute-ios-focused-tests.log` |
-| `AudioTaskPresentationTests` | 10 passed | `/tmp/musicmute-ios-focused-tests.log` |
-| `ClientErrorOutboxTests` | 2 passed | `/tmp/musicmute-ios-focused-tests.log` |
-| `JobActionsTests` | 8 passed | `/tmp/musicmute-ios-job-actions-tests.log` |
+| Suite                                           |    Result | Evidence                                        |
+| ----------------------------------------------- | --------: | ----------------------------------------------- |
+| `AudioPipelineCoordinatorTests`                 |  4 passed | `/tmp/musicmute-ios-focused-tests.log`          |
+| `AudioPipelineRestorationTests`                 |  4 passed | `/tmp/musicmute-ios-focused-tests.log`          |
+| `AudioTaskPresentationTests`                    | 10 passed | `/tmp/musicmute-ios-focused-tests.log`          |
+| `ClientErrorOutboxTests`                        |  2 passed | `/tmp/musicmute-ios-focused-tests.log`          |
+| `JobActionsTests`                               |  8 passed | `/tmp/musicmute-ios-job-actions-tests.log`      |
 | `JobArtifactTests` and `ProcessingHistoryTests` | 16 passed | `/tmp/musicmute-ios-artifact-history-tests.log` |
 
 Five distinct exact-simulator UI scenarios passed:
@@ -88,7 +88,7 @@ No Files provider indexing failure is inferred from the earlier results.
 ## Proof boundaries
 
 Deterministic fixtures do not establish deployed rename/delete/report endpoints,
-real S3 transfer, Z440 separation output, APNs delivery, real-account behavior,
+real S3 transfer, APNs delivery, real-account behavior,
 or production compatibility.
 
 Background restoration is unit- and simulator-covered. Physical-device

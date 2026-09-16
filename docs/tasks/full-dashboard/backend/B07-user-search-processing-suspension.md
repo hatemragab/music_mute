@@ -25,7 +25,7 @@ GET /admin/users, GET /admin/users/:id, suspend-processing/resume-processing rou
 
 ## Steps
 
-- [ ] 1. Write tests for exact UID/email and escaped prefix search, pagination/filter consistency, users.read restrictions and no personal expansion for worker managers/viewers.
+- [ ] 1. Write tests for exact UID/email and escaped prefix search, pagination/filter consistency, users.read restrictions and no personal expansion for viewers.
 
 - [ ] 2. Add nullable/default processing restriction metadata and revision without rewriting existing records. Missing suspension means false; public user response does not leak operator notes.
 

@@ -48,22 +48,22 @@ System document picker, Android share sheet, Google account chooser, runtime per
 
 ## State coverage and behavior contract
 
-| Existing or requested flow | Design coverage |
-|---|---|
-| Login, registration, password reset | Approved auth board; full name added for registration. Auth form validation, busy and request feedback use shared state treatment 21. |
-| Import picker and review | Native picker, board 01 review. Supported-file validation and errors remain real; no automatic cloud submission. |
-| YouTube entry, permission confirmation, source transfer | Boards 02, 03, 24. Continue in 02 opens 03; download starts only after confirmation. Finished audio enters 01 separately before upload. |
-| Home jobs, cancelled/failed/queued/worker-offline | Approved Home A; active details 04, result 05, shared states 21. Retry/cancel only when supported by actual task. Local source transfers join Home jobs. |
-| Library and track details | Approved Library B and Details C. Processed results only; search/filter/star and mini-player. Missing job metadata is unavailable, not fabricated. Empty/search-no-results/offline use 21. |
-| Playback and queue | Approved Player A; queue 06 A; board 07 C compact audio adaptation only. Complete acquired files persist for offline playback. No audio download just for preview. |
-| Settings, accents, language, About | Approved Settings C and Color A; About 18. Profile first, accent entry added below; language inline; no theme-mode setting. |
-| Profile, linked methods, devices | Approved C, B, C respectively. Read-only devices, Load more and Refresh. No per-device revoke feature inferred from icons. |
-| Verification and linking | 08 unverified account; 10 reauthentication; 11 add password; 12 disconnect. Native Google UI. Already-linked Apple managed on iOS per source, not offered as new Android method. |
-| Account recovery | 09 request and 23 pending. Rejected shows actual review reason; expired hides submission; approved refreshes account access. No review completion guarantee. |
-| Account deletion and global sign-out | 13 review, 14 final, 15 global sign-out. Preserve two stages, actual auth requirements and three-month recovery policy. Current-device sign-out remains the existing direct action, no added confirmation mandated. |
-| Rename/delete audio | 16 and 17. Existing media deletion scope illustrated; separate job-only deletion is not silently introduced. |
-| Updates | 19 required, 20 optional, 22 download progress. Restoring/verifying/installer-waiting use indeterminate loading from 21; failure uses concrete actual reason and permitted retry. Cancelling download never bypasses mandatory update gate. |
-| Notifications and platform operations | Existing optional completion-notification entry can use shared inline treatment; Android owns permission dialog. File export/share/install/Google account surfaces stay native. |
+| Existing or requested flow                              | Design coverage                                                                                                                                                                                                                             |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Login, registration, password reset                     | Approved auth board; full name added for registration. Auth form validation, busy and request feedback use shared state treatment 21.                                                                                                       |
+| Import picker and review                                | Native picker, board 01 review. Supported-file validation and errors remain real; no automatic cloud submission.                                                                                                                            |
+| YouTube entry, permission confirmation, source transfer | Boards 02, 03, 24. Continue in 02 opens 03; download starts only after confirmation. Finished audio enters 01 separately before upload.                                                                                                     |
+| Home jobs, cancelled/failed/queued/unavailable          | Approved Home A; active details 04, result 05, shared states 21. Retry/cancel only when supported by actual task. Local source transfers join Home jobs.                                                                                    |
+| Library and track details                               | Approved Library B and Details C. Processed results only; search/filter/star and mini-player. Missing job metadata is unavailable, not fabricated. Empty/search-no-results/offline use 21.                                                  |
+| Playback and queue                                      | Approved Player A; queue 06 A; board 07 C compact audio adaptation only. Complete acquired files persist for offline playback. No audio download just for preview.                                                                          |
+| Settings, accents, language, About                      | Approved Settings C and Color A; About 18. Profile first, accent entry added below; language inline; no theme-mode setting.                                                                                                                 |
+| Profile, linked methods, devices                        | Approved C, B, C respectively. Read-only devices, Load more and Refresh. No per-device revoke feature inferred from icons.                                                                                                                  |
+| Verification and linking                                | 08 unverified account; 10 reauthentication; 11 add password; 12 disconnect. Native Google UI. Already-linked Apple managed on iOS per source, not offered as new Android method.                                                            |
+| Account recovery                                        | 09 request and 23 pending. Rejected shows actual review reason; expired hides submission; approved refreshes account access. No review completion guarantee.                                                                                |
+| Account deletion and global sign-out                    | 13 review, 14 final, 15 global sign-out. Preserve two stages, actual auth requirements and three-month recovery policy. Current-device sign-out remains the existing direct action, no added confirmation mandated.                         |
+| Rename/delete audio                                     | 16 and 17. Existing media deletion scope illustrated; separate job-only deletion is not silently introduced.                                                                                                                                |
+| Updates                                                 | 19 required, 20 optional, 22 download progress. Restoring/verifying/installer-waiting use indeterminate loading from 21; failure uses concrete actual reason and permitted retry. Cancelling download never bypasses mandatory update gate. |
+| Notifications and platform operations                   | Existing optional completion-notification entry can use shared inline treatment; Android owns permission dialog. File export/share/install/Google account surfaces stay native.                                                             |
 
 ## Review caveats: artwork is not an implementation specification
 

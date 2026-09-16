@@ -101,7 +101,7 @@ describe('Public account deletion and privacy pages', () => {
     await request(app.getHttpServer()).delete('/delete-account').expect(404);
   });
 
-  it('discloses real cloud, authentication, local processor and retained YouTube behavior', async () => {
+  it('discloses cloud, authentication, temporary processing availability and retained YouTube behavior', async () => {
     const response = await request(app.getHttpServer())
       .get('/privacy')
       .expect(200);
@@ -109,7 +109,7 @@ describe('Public account deletion and privacy pages', () => {
       'Firebase',
       'MongoDB',
       'S3',
-      'Z440',
+      'temporarily unavailable',
       '24 hours',
       'YouTube',
       'vocals-only',

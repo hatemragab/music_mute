@@ -42,7 +42,7 @@ Inspected on 2026-09-08:
 - `src/http/security.module.ts` uses the built-in, per-process Nest throttler.
 - `src/app.module.ts` exposes only health routes. No Firebase Admin dependency,
   auth guards, users, devices, or application policies exist.
-- `src/worker.module.ts` is separate from the HTTP API and has no processors.
+- Background infrastructure is separate from the HTTP API and has no processors.
 - Production automatic collection/index creation is disabled.
 - Vitest unit/HTTP tests and an opt-in native MongoDB/Redis integration runner
   already exist. Existing mobile edits and legacy deletions are unrelated.
@@ -259,7 +259,7 @@ Never disclose whether a password-reset address exists.
 ## Abuse limits and mail delivery
 
 Use one bounded Redis client for shared security counters; do not import an
-undeclared transitive Redis dependency or alter BullMQ worker retry behavior.
+undeclared transitive Redis dependency or alter unrelated retry behavior.
 Use project-scoped keys, atomic Lua reservations, Redis server time, and expiring
 keys. The API IP allowance is shared across routes, rather than multiplied by
 the number of endpoints. Rolling 24-hour windows implement the agreed daily email allowances more

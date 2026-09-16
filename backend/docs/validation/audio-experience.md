@@ -7,14 +7,13 @@ live AWS cleanup, or the new mobile UX is available in installed apps.
 
 - Optional source title/kind/client intake time, stable request references, safe renamed
   display names, retry name inheritance, and compatible old create payloads.
-- Measured processing intervals from the existing Z440 callbacks; approximate client
-  total elapsed time; explicit missing timing for legacy jobs and conservative recovery.
+- Retained processing intervals for existing jobs; approximate client total elapsed
+  time and explicit missing timing for legacy jobs.
 - Authenticated bounded mobile diagnostic reports, including pre-job operation references,
   owner/event idempotency and Redis-backed rate limiting.
 - Terminal-only account deletion, persistent tombstones, blocked new artifact grants,
   exact-key version cleanup with retry/backoff, and protection for shared retry inputs.
-- Native-client contract documentation and fixtures. No worker protocol change or new
-  embedded Redis/separation worker was added.
+- Native-client contract documentation and fixtures.
 
 ## Commands actually run
 

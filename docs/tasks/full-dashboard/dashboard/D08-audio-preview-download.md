@@ -7,7 +7,7 @@
 **Architecture:** Build one React + TypeScript single-page web application with Vite against the verified NestJS contract; use TanStack Query for server state, React Router for navigation, reusable Tailwind CSS + shadcn/ui components and server-enforced permissions.
 **Tech Stack:** React, TypeScript, Vite, Tailwind CSS, shadcn/ui, React Router, TanStack Query, Firebase Web Authentication (Google), native fetch/XHR, Vitest, React Testing Library, MSW and Playwright. Verify compatible versions and lock them during D01.
 **Spec:** [Approved scope](../scope.md), [API contracts](../contracts.md).\
-**Dependencies:** [D06](../dashboard/D06-jobs-queue-operations.md), [B10](../backend/B10-private-media-access.md).
+**Dependencies:** [D01](../dashboard/D01-dashboard-foundation-auth.md), [B10](../backend/B10-private-media-access.md).
 
 ## Global constraints
 

@@ -1,6 +1,6 @@
 # Backend contributor guide
 
-Read README.md, docs/starter-plan.md, package.json and the affected modules before
+Read README.md, package.json and the affected modules before
 editing. Scope includes infrastructure and the approved auth/users/devices feature;
 follow docs/auth-api.md and its implementation plan for those contracts.
 Preserve unrelated mobile work and deleted legacy backend files in the parent repo.

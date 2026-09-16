@@ -77,9 +77,9 @@ Execution order: B01/B02 and A01 first; then B03/B04, D01/D02, A02, I01; then B0
 }
 ```
 
-- [ ] Add integration scenarios using isolated MongoDB replica-set/Redis helpers: allowlisted admin publishes; revision changes once; device below minimum gets `APP_UPDATE_REQUIRED`; already-submitted job completes through existing worker endpoints; result remains present; newer valid policy withdraws the block. Assert no publication calls cancellation or lease-recovery APIs.
+- [ ] Add integration scenarios using isolated MongoDB replica-set/Redis helpers: allowlisted admin publishes; revision changes once; device below minimum gets `APP_UPDATE_REQUIRED`; an existing result remains present; newer valid policy withdraws the block. Assert no publication calls cancellation APIs.
 - [ ] Run the new integration test before wiring missing behavior and observe a meaningful failure; implement only the cross-component fixes it exposes. Keep S3 emulator/adapter results labelled simulated until real S3 validation is authorized.
-- [ ] Build dashboard assets into the backend image and serve `/admin/` with deep-link fallback confined to that path. Never rewrite `/api/v1/*`, health, worker or missing asset requests to HTML. Add focused CSP rules for Firebase login without weakening API security headers globally.
+- [ ] Build dashboard assets into the backend image and serve `/admin/` with deep-link fallback confined to that path. Never rewrite `/api/v1/*`, health, or missing asset requests to HTML. Add focused CSP rules for Firebase login without weakening API security headers globally.
 - [ ] Extend the CapRover allowlist to include dashboard source/manifests/lockfile and verifier setup files. Exclude secrets, dotenvs, signing keys, local APKs, node_modules and local build output. Preserve root `captain-definition`, port 80 and `backend/...` archive shape.
 - [ ] Run backend `npm run verify`, `npm run test:auth:integration`, `npm run test:processing:integration`, and `npm run build && node --test test/app-updates.integration.mjs` from `backend/` against isolated services only.
 - [ ] Run dashboard `npm run verify` and `npm run test:e2e` from `dashboard/`; the dashboard task must define both scripts. Web browser tests do not replace mobile device tests.

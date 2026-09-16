@@ -15,7 +15,7 @@ See the [execution record](../../tasks/automatic-audio-experience-execution.md).
 
 **Tech Stack:** Swift, SwiftUI, structured concurrency/actors, URLSession background transfer, existing extractor, AVAudioPlayer, native file importer and share sheet.
 
-**Spec:** [Agreed automatic audio experience](../specs/2026-09-10-automatic-audio-experience.md). Backend dependencies: [B01–B05](2026-09-10-backend-audio-experience.md).
+**Spec:** [Agreed automatic audio experience](../specs/2026-09-10-automatic-audio-experience.md). Current backend behavior is documented in `backend/docs/api/audio-processing.md`.
 
 ## Global constraints
 
@@ -84,7 +84,7 @@ For each task, add its named failing tests, run the focused suite on the exact a
 
 **Files:** modify UI/{HomeView.swift,ProcessingRootView.swift,ProcessingHistoryView.swift,ProcessingDetailView.swift}, State/{ProcessingModel.swift,ProcessingHistoryModel.swift}, existing theme and English/Arabic localization resources. Create UI/AudioTaskCard.swift, UI/AudioStepTimeline.swift, and Processing/AudioTaskPresentation.swift; create AudioTaskPresentationTests.swift; extend ProcessingHistoryTests.swift and ios/VocalUITests/ProcessingUITests.swift.
 
-- [ ] Add presentation tests covering all specified phases, pre-job Reference, full Job ID, legacy missing title/timing, interrupted worker, output-download failure while Ready, and merged local/cloud identity.
+- [ ] Add presentation tests covering all specified phases, pre-job Reference, full Job ID, legacy missing title/timing, interrupted processing, output-download failure while Ready, and merged local/cloud identity.
 - [ ] Build intake, active cards, and processed-only library around current navigation. Keep existing originals stored without presenting them as processed results. Keep cancelled/failed work understandable and deletable as specified.
 - [ ] Add detail timeline, copy actions, safe error guidance, separate total and actual processing time. Stop processing clocks at Ready and show artifact-fetch progress independently. Handle client/server clock skew and inaccessible legacy timing gracefully.
 - [ ] Preserve display name across views/player/notifications. Use existing design tokens, rounded audio-oriented typography, decorative waveform motion and 150–250 ms text crossfades. Avoid animated text that obscures the actual current step.
@@ -133,6 +133,6 @@ For each task, add its named failing tests, run the focused suite on the exact a
 - [ ] Run xcodebuild -project MusicMute.xcodeproj -scheme MusicMute -destination "platform=iOS Simulator,id=$IOS_SIMULATOR_UDID" -derivedDataPath DerivedData-audio-experience -parallel-testing-enabled NO test CODE_SIGNING_ALLOWED=NO from ios. If the exact simulator is unavailable, record the blocker and run only checks not requiring another runtime.
 - [ ] Build unsigned Release with xcodebuild -project MusicMute.xcodeproj -scheme MusicMute -configuration Release -destination 'generic/platform=iOS' -derivedDataPath DerivedData-audio-experience-release build CODE_SIGNING_ALLOWED=NO. Use existing valid nonsecret configuration; do not publish or install on another device.
 - [ ] Review English/Arabic large-text, light/dark, reduced-motion and VoiceOver behavior on the authorized simulator. Record native importer/share proof separately from fake API fixture proof.
-- [ ] Run git diff --check and review intended changes. Document live S3/Z440/APNs and physical-device background behavior as unverified unless separately exercised with appropriate authorization. No simulator test proves force-quit execution that iOS does not allow.
+- [ ] Run git diff --check and review intended changes. Document live S3/APNs and physical-device background behavior as unverified unless separately exercised with appropriate authorization. No simulator test proves force-quit execution that iOS does not allow.
 
 **Completion evidence:** focused tests plus exact-simulator UI proof, formatter and unsigned build results, honest live-service/background limitations. None of these implementation validations were run during planning.

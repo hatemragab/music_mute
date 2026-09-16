@@ -66,9 +66,9 @@ Run from `backend/` on 2026-09-09:
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `npm run format`                | Passed                                                                                                                                       |
 | `npm run verify`                | Formatting, lint, TypeScript and build passed; 147 unit tests and 23 HTTP tests passed                                                       |
-| `npm run test:integration`      | 1 native infrastructure test passed, including API/Redis crashes, queue AOF recovery and worker startup failure                              |
+| `npm run test:integration`      | 1 native infrastructure test passed, including API/Redis crashes and queue AOF recovery                                                      |
 | `npm run test:auth:integration` | 15 native tests passed with isolated MongoDB, Redis, Firebase Auth Emulator, compiled operator CLI and production-verifier signature fixture |
-| `npm run build` again           | Passed; nonempty API, worker and operations CLI entry points verified                                                                        |
+| `npm run build` again           | Passed; nonempty API and operations CLI entry points verified                                                                                |
 | `git diff --check`              | Passed; new backend files also covered by formatting and scoped source reviews                                                               |
 | `npm ls --omit=dev --depth=0`   | Passed with no invalid runtime dependency tree                                                                                               |
 | `npm audit --omit=dev`          | Exit 1: six moderate package findings from one transitive uuid advisory; zero high/critical runtime findings                                 |

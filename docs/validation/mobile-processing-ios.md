@@ -7,7 +7,7 @@ Date: 2026-09-10. Local implementation and simulator validation complete.
 Processing supports a Files import followed by explicit submission, or Remove music
 on a saved original. Codable jobs, immutable validated inputs, file-backed signed
 S3 multipart upload tasks, durable operation/retry records, cloud history/detail,
-worker interruption, cancel/retry, private MP3 caching, playback/export, and optional
+processing interruption, cancel/retry, private MP3 caching, playback/export, and optional
 FCM/APNs registration are integrated. Originals never automatically submit.
 
 Account changes cancel/fence old work, clear visible private metadata and stop private
@@ -65,7 +65,7 @@ Passing screenshots: `/tmp/ios-i08-verified-attachments/arabic-ready-large.png`,
 ## Proof boundaries
 
 Simulator/unit fixtures verify client behavior, not acoustic separation or real
-S3/Z440 results. Live APNs/FCM delivery, provisioning and production credentials,
+S3 results. Live APNs/FCM delivery, provisioning and production credentials,
 device background-transfer survival, real Files-provider export, and deployed API
 integration remain separate operational checks. Simulator push transport is disabled;
 sanitized local hints still exercise authenticated routing logic. No alternate device,

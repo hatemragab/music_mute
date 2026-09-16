@@ -24,9 +24,9 @@ GET /admin/overview with explicit from,to,bucket=day. Fields are those finalized
 
 ## Steps
 
-- [x] 1. Write fixtures for empty, healthy, no-workers, degraded and legacy-missing-timing responses. Verify cards never convert unknown timing into zero or show forbidden release data.
+- [x] 1. Write fixtures for empty, healthy, processing-unavailable, degraded and legacy-missing-timing responses. Verify cards never convert unknown timing into zero or show forbidden release data.
 
-- [x] 2. Build submitted/completed/failed/cancelled cards, current queue/worker summary and historical daily chart. Label current values and date-range values separately, with last-updated time and timezone.
+- [x] 2. Build submitted/completed/failed/cancelled cards, current job-stage summary and historical daily chart. Label current values and date-range values separately, with last-updated time and timezone.
 
 - [x] 3. Implement date presets Today/7 days/30 days/custom <=90 days as URL-backed filters and UTC interval requests. Preserve selected range on navigation and validate invalid/backward dates.
 

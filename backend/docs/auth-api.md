@@ -77,7 +77,7 @@ maintenance changes the account to `purging` before any irreversible provider or
 data cleanup and recovery is no longer available.
 
 After the three-month deadline, the API revokes sessions, cancels jobs, waits for
-worker-local cleanup proof and outstanding signed grants, removes private S3
+outstanding signed grants and storage cleanup state, removes private S3
 versions and related records, then deletes Firebase identity/profile. A hash-only
 replay fence remains for 24 hours after successful deletion. Pending cleanup keeps
 the fence until completion.

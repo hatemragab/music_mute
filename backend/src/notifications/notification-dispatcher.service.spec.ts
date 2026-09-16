@@ -87,7 +87,7 @@ describe('NotificationDispatcherService', () => {
         outcome,
         inputName: 'private-recording.mp3',
         downloadUrl: 'https://private.invalid/signed',
-        errorMessage: 'private worker diagnostics',
+        errorMessage: 'private processing diagnostics',
       };
       const message = buildNotificationMessage(target, event);
       const alert = { title: 'Vocal', body };

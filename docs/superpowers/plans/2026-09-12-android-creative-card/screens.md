@@ -100,7 +100,7 @@ Parent: [implementation plan](../2026-09-12-android-creative-card-redesign.md). 
 **Modify:** `K/ui/ProcessingDetailScreen.kt`, `K/ui/AudioStepTimeline.kt`; extract **new** `K/ui/jobs/ActiveJobScreen.kt` if needed.
 
 - [ ] Shared title/wave, media summary and timeline using real task stages. Keep job/reference copy, source metadata, duration and total/processing elapsed with approximate flags where supplied.
-- [ ] Reflect queued, preparing/uploading/processing, worker-offline, cancel-requested, cancelled and failed states. Do not infer worker capacity, ETA or per-stage timings from art.
+- [ ] Reflect queued, preparing/uploading/processing, processing-unavailable, cancel-requested, cancelled and failed states. Do not infer execution capacity, ETA or per-stage timings from art.
 - [ ] Wire valid cancel/retry/refresh actions to current ViewModel; while cancellation is pending, keep truthful status until confirmed. Preserve selected task across refresh and navigation.
 - [ ] Ready transition routes/presents S08 using the same selected ID. Offline view retains last-known metadata with a clear stale/offline treatment.
 
@@ -126,7 +126,7 @@ Parent: [implementation plan](../2026-09-12-android-creative-card-redesign.md). 
 **Modify:** `K/ui/DownloadHistoryScreen.kt`; extract **new** `K/ui/jobs/SourceDownloadDetailScreen.kt`.
 
 - [ ] Use real download record and transfer timeline, title/source, bytes/total when known and meaningful current stage. Unknown totals remain indeterminate.
-- [ ] Preserve existing cancel/retry/readiness actions and worker/source errors. Distinguish source download from processed-result download and cloud processing.
+- [ ] Preserve existing cancel/retry/readiness actions and processing/source errors. Distinguish source download from processed-result download and cloud processing.
 - [ ] Completion offers the pipeline's next consent/review step. Do not add this original source to processed-only Library or present it as an offline voice result.
 - [ ] Keep copy/open-source actions only where currently supported. No invented bandwidth, remaining-time or progress estimates.
 
@@ -351,20 +351,20 @@ Parent: [implementation plan](../2026-09-12-android-creative-card-redesign.md). 
 
 Run only after the user explicitly authorizes an Android target. Current iOS-only simulator permission cannot provide this proof. Record target/build and actual observed outcomes; do not install/uninstall or replace device data outside authorization.
 
-| Area | Scenario | Required observation |
-|---|---|---|
-| Offline core | Download full voice result, airplane mode, play to end and seek near end | Complete local playback without server/token/download calls |
-| Offline restart | Kill/relaunch app; also reboot target while offline | Same signed-in owner's catalog and full audio remain available |
-| Remote-only offline | Tap an undownloaded result offline | Clear need-to-download message; no false offline badge |
-| Interrupted acquisition | Interrupt download/process, reopen | Partial is never playable/Available offline; safe explicit retry |
-| Offline queue | Mix available/unavailable items, shuffle/repeat/auto-next combinations | Bounded skip/stop, no loop or wrong-owner playback |
-| Background | Lock screen, leave app, use system controls/headphone unplug | Correct single media session, expected focus behavior, no decorative UI work |
-| Identity | Sign out/switch account during download/playback | Old private playback stops, no old catalog/file exposed |
-| Deletion | Delete playing audio and test account deletion cleanup in safe test account | Correct cloud outcome handling and local queue/file cleanup |
-| Theme/motion | Several custom accents, navigate/sheets/presses; disable system animations | Legible consistent dark theme, A motion/static fallback, no stuck presses |
-| Performance | Representative low-resource authorized device, long Library, repeated navigation | Profile frame timing/memory; no growing retained screens or offscreen wave work |
-| Accessibility | Arabic RTL, largest practical font, TalkBack, keyboard, landscape | Controls reachable/readable, correct order/labels, no clipped confirmation |
-| Auth/account | Register/name retry, reset, verify, link/unlink, recovery | Existing security gates and real feedback preserved |
-| Updates | Direct/play optional/required/progress/error return paths | No mandatory gate bypass or false install success |
+| Area                    | Scenario                                                                         | Required observation                                                            |
+| ----------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Offline core            | Download full voice result, airplane mode, play to end and seek near end         | Complete local playback without server/token/download calls                     |
+| Offline restart         | Kill/relaunch app; also reboot target while offline                              | Same signed-in owner's catalog and full audio remain available                  |
+| Remote-only offline     | Tap an undownloaded result offline                                               | Clear need-to-download message; no false offline badge                          |
+| Interrupted acquisition | Interrupt download/process, reopen                                               | Partial is never playable/Available offline; safe explicit retry                |
+| Offline queue           | Mix available/unavailable items, shuffle/repeat/auto-next combinations           | Bounded skip/stop, no loop or wrong-owner playback                              |
+| Background              | Lock screen, leave app, use system controls/headphone unplug                     | Correct single media session, expected focus behavior, no decorative UI work    |
+| Identity                | Sign out/switch account during download/playback                                 | Old private playback stops, no old catalog/file exposed                         |
+| Deletion                | Delete playing audio and test account deletion cleanup in safe test account      | Correct cloud outcome handling and local queue/file cleanup                     |
+| Theme/motion            | Several custom accents, navigate/sheets/presses; disable system animations       | Legible consistent dark theme, A motion/static fallback, no stuck presses       |
+| Performance             | Representative low-resource authorized device, long Library, repeated navigation | Profile frame timing/memory; no growing retained screens or offscreen wave work |
+| Accessibility           | Arabic RTL, largest practical font, TalkBack, keyboard, landscape                | Controls reachable/readable, correct order/labels, no clipped confirmation      |
+| Auth/account            | Register/name retry, reset, verify, link/unlink, recovery                        | Existing security gates and real feedback preserved                             |
+| Updates                 | Direct/play optional/required/progress/error return paths                        | No mandatory gate bypass or false install success                               |
 
 Use actual measurements for performance: inspect janky frames against the target refresh interval (16.7 ms at 60 Hz), compare animated/static idle CPU and memory after repeated navigation, and investigate sustained allocations/leaks. These are evaluation criteria, not a promise that every device will meet a fixed budget. Keep measured results separate from previews and JVM/build validation.

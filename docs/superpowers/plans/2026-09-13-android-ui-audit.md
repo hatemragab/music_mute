@@ -37,7 +37,7 @@ they do not mean Android runtime verification.
 - [x] Import review, rights confirmation and submission failure
 - [x] Source download/preparation detail and missing-source fallback
 - [x] Processing detail: waiting, transfer, queue, validation, processing, result
-- [x] Cancellation, retry, interruption, worker offline and unavailable result
+- [x] Cancellation, retry, interruption, processing unavailable and unavailable result
 - [x] Completed result: explicit play, download, save and share
 - [x] Processing timeline and task cards
 - [x] Legacy processing-history composable (not a current navigation destination)

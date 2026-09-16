@@ -7,8 +7,8 @@ const messages: Record<JobFailureCode, string> = {
   INPUT_CHECKSUM_MISMATCH: 'The audio file failed its integrity check.',
   SEPARATOR_FAILED: 'Voice separation failed. You can retry this job.',
   OUTPUT_INVALID: 'The voice-only result could not be validated.',
-  DOWNLOAD_FAILED: 'The worker could not download the audio.',
-  OUTPUT_UPLOAD_FAILED: 'The worker could not upload the result.',
+  DOWNLOAD_FAILED: 'The audio could not be downloaded for processing.',
+  OUTPUT_UPLOAD_FAILED: 'The processed result could not be uploaded.',
 };
 export function safeJobMessage(code: JobFailureCode): string {
   return messages[code];

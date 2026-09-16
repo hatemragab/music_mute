@@ -111,13 +111,9 @@ describe('account deletion cleanup', () => {
     expect(f.users.deleteOne).not.toHaveBeenCalled();
     expect(f.users.updateOne).toHaveBeenCalled();
   });
-  it('never treats expired worker ownership as proof the process stopped', async () => {
+  it('keeps the profile while active retained work still exists', async () => {
     const f = fixture();
     f.jobs.exists.mockResolvedValue({ _id: f.user._id } as never);
-    f.collection.findOne.mockResolvedValue({
-      activeJobId: new Types.ObjectId(),
-      leaseExpiresAt: new Date(0),
-    } as never);
     await f.service.advanceDeletion();
     expect(f.auth.deleteUser).not.toHaveBeenCalled();
     expect(f.users.deleteOne).not.toHaveBeenCalled();

@@ -486,12 +486,6 @@
             "status": "healthy",
             "checkedAt": "2026-01-01T00:00:00.000Z",
             "code": null
-          },
-          {
-            "name": "workers",
-            "status": "healthy",
-            "checkedAt": "2026-01-01T00:00:00.000Z",
-            "code": null
           }
         ],
         "activeAlertCount": 0
@@ -665,53 +659,6 @@
             "at": "2026-01-01T00:00:00.000Z",
             "previousRevision": 0,
             "nextRevision": 1,
-            "outcome": "succeeded"
-          },
-          {
-            "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
-            "action": "workers.release-stopped",
-            "resourceType": "worker",
-            "resourceId": "fixture-worker",
-            "operationId": "00000000-0000-4000-8000-000000000001",
-            "reason": "Owned dashboard integration fixture",
-            "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": 4,
-            "nextRevision": 5,
-            "outcome": "succeeded",
-            "stopEvidence": {
-              "attestation": "Owned fixture worker process terminated; PID 4321 verified exited.",
-              "stoppedAt": "2026-01-01T00:00:00.000Z",
-              "jobId": "000000000000000000000001",
-              "attemptId": "00000000-0000-4000-8000-000000000001",
-              "sessionId": "00000000-0000-4000-8000-000000000001",
-              "generation": 1
-            }
-          },
-          {
-            "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
-            "action": "workers.drain",
-            "resourceType": "worker",
-            "resourceId": "fixture-worker",
-            "operationId": "00000000-0000-4000-8000-000000000001",
-            "reason": "Owned dashboard integration fixture",
-            "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": 3,
-            "nextRevision": 4,
-            "outcome": "succeeded"
-          },
-          {
-            "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
-            "action": "workers.create",
-            "resourceType": "worker",
-            "resourceId": "fixture-worker",
-            "operationId": "00000000-0000-4000-8000-000000000001",
-            "reason": "Owned dashboard integration fixture",
-            "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": null,
-            "nextRevision": 0,
             "outcome": "succeeded"
           },
           {

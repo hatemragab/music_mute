@@ -5,7 +5,7 @@ Started 2026-09-10. Goal: implement both approved native mobile plans and MOB-B0
 ## Decisions
 
 - Ruling: work in the current checkout on codex/backend-auth-users-devices — the user requests work directly here and the current native/backend sources are untracked alongside preserved legacy deletions. Moving to a clean worktree would omit the actual baseline. No commits, pushes, deployment or unrelated restoration.
-- Ruling: retain the full implementation scope while separating local validation from external runtime gates. Android device testing is unavailable under the iPhone-only restriction; JVM/lint/build still run. Live S3/Z440/FCM/APNs evidence requires its own environment and is never inferred from fixtures.
+- Ruling: retain the mobile implementation scope while separating local validation from external runtime gates. Android device testing is unavailable under the iPhone-only restriction; JVM/lint/build still run. Live S3/FCM/APNs evidence requires its own environment and is never inferred from fixtures.
 - Ruling: use separate task agents for independent platform contracts and notification changes as required by the execution skill; root owns integration and final verification.
 
 ## Current tasks

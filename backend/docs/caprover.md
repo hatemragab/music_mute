@@ -137,10 +137,10 @@ on that service so restarts and eviction do not silently reset security counters
 Keep its port private and enable TLS when connecting across an untrusted network.
 Back up persistent data; rebuilding the API must not recreate Redis storage.
 
-Deploy only the API. The worker entry point and BullMQ queue have been removed.
+Deploy only the API. BullMQ is not part of the current runtime.
 Before upgrading, configure `REDIS_URL` in App Configs; the old `REDIS_HOST`,
 `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_TLS` and `QUEUE_PREFIX` settings are unused.
-If an old worker app exists, stop it separately during the rollout. This source
+If an obsolete processing app exists, stop it separately during the rollout. This source
 change does not stop deployed services or remove existing Redis data.
 
 ## Verify after deployment

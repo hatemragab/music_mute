@@ -16,14 +16,14 @@ The wire contract is:
 
 ```ts
 interface UploadGrant {
-  method: 'PUT';
+  method: "PUT";
   url: string;
   headers: Record<string, string>;
   expiresAt: string;
 }
 ```
 
-Clients reject any other method, HTTPS violation, unexpected redirect or invalid required header. Browser code lets the user agent calculate `Content-Length`; native and worker clients set the exact file length. API bearer credentials are never sent to the storage host. Existing checksum verification and version pinning remain authoritative after upload.
+Clients reject any other method, HTTPS violation, unexpected redirect or invalid required header. Browser code lets the user agent calculate `Content-Length`; native clients set the exact file length. API bearer credentials are never sent to the storage host. Existing checksum verification and version pinning remain authoritative after upload.
 
 ### Durable orphan cleanup
 

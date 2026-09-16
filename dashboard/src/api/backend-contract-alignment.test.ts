@@ -68,17 +68,15 @@ describe("dashboard/backend contract alignment", () => {
     });
   });
 
-  it("contains no removed machine administration contract", () => {
+  it("exposes the current administrator roles and navigation", () => {
     expect(ADMIN_ROLES).toEqual([
       "owner",
       "release_manager",
       "support",
       "viewer",
     ]);
-    expect(
-      PERMISSIONS.some((permission) => permission.startsWith("workers.")),
-    ).toBe(false);
-    expect(NAV_ITEMS.map((item) => item.to)).not.toContain("/workers");
+    expect(PERMISSIONS).toContain("jobs.read");
+    expect(NAV_ITEMS.map((item) => item.to)).toContain("/jobs");
   });
 
   it("removes immutable fields from release edits", async () => {

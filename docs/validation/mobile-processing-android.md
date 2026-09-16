@@ -7,7 +7,7 @@ Date: 2026-09-10. Local source/build evidence; no release or deployment.
 The production Processing tab accepts an explicitly submitted local import or a
 saved original selected with Remove music. Typed authenticated jobs, immutable
 input validation, signed S3 multipart uploads, durable WorkManager recovery,
-cloud pagination/detail, worker availability, cancel/retry, per-account result
+cloud pagination/detail, processing availability, cancel/retry, per-account result
 caching, native playback/export, and optional push registration are integrated.
 Original YouTube downloads never automatically create a processing job.
 
@@ -42,7 +42,7 @@ identifier format.
 No Android device or emulator was used: the user's authorized device/UI target is
 the existing iPhone 17 Pro iOS 26.0 simulator only. Android layout, system picker,
 background execution, real media output and notification delivery remain runtime
-validation gates. JVM fixtures and APK assembly are not live S3/Z440/FCM evidence.
+validation gates. JVM fixtures and APK assembly are not live S3/FCM evidence.
 No live account was created, no retained user data was removed, and no commit,
 push, publication or deployment was performed.
 

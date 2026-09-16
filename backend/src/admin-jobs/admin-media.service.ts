@@ -50,7 +50,7 @@ export class AdminMediaService {
         if (!object || !object.versionId || object.versionId === 'null')
           throw adminError('MEDIA_UNAVAILABLE');
         await this.accounts.assertActive(job.userId, session);
-        // Conflict with deletion/rename or worker writes before exposing the URL.
+        // Conflict with deletion or rename before exposing the URL.
         const touched = await this.jobs.updateOne(
           { _id: job._id, deletedAt: null, revision: job.revision },
           { $inc: { revision: 1 } },

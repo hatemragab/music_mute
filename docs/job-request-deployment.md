@@ -19,7 +19,7 @@ seven production files changed:
 - `backend/src/rate-limits/api-throttler.guard.ts`
 
 Only the processing-read allowance and overall IP ceiling additions were taken
-from environment.ts. Unrelated workspace worker-fleet changes were excluded.
+from environment.ts. Unrelated workspace changes were excluded.
 No environment values, credentials, database migrations, Git commits or Git
 pushes were included or performed.
 
@@ -45,11 +45,11 @@ Against the isolated deployment source in
 
 Public read-back at 2026-09-14T15:42:17Z from `https://api.music-mute.com`:
 
-| Request | Status | Evidence |
-| --- | --- | --- |
-| `/api/v1/health/live` | 200 | `status: ok`, exempt from both IP buckets |
-| `/api/v1/health/ready` | 200 | `status: ok`, default limit 60 and overall limit 600 |
-| `/api/v1/jobs?limit=1` without credentials | 401 | `UNAUTHENTICATED`, overall limit 600, no legacy default read bucket |
+| Request                                    | Status | Evidence                                                            |
+| ------------------------------------------ | ------ | ------------------------------------------------------------------- |
+| `/api/v1/health/live`                      | 200    | `status: ok`, exempt from both IP buckets                           |
+| `/api/v1/health/ready`                     | 200    | `status: ok`, default limit 60 and overall limit 600                |
+| `/api/v1/jobs?limit=1` without credentials | 401    | `UNAUTHENTICATED`, overall limit 600, no legacy default read bucket |
 
 Production was not load-tested to trigger 429. Per-user bucket behavior and
 Retry-After were validated locally. Mobile request-coordination changes need

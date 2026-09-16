@@ -21,7 +21,7 @@ Read the [execution rules](../README.md) and scope before starting. Preserve unr
 
 ## Interfaces
 
-GET/POST /admin/access and PATCH /admin/access/:uid. One admin_access collection is authoritative for both worker and release permissions. Roles are the five names in scope.md; changing a record requires its revision.
+GET/POST /admin/access and PATCH /admin/access/:uid. One admin_access collection is authoritative for administrator permissions. Roles are the four names in scope.md; changing a record requires its revision.
 
 ## Steps
 
@@ -33,7 +33,7 @@ GET/POST /admin/access and PATCH /admin/access/:uid. One admin_access collection
 
 - [ ] 4. Create explicit trusted bootstrap dry-run/apply operation: privately supplied existing Google identity, empty-store precondition, no automatic startup seed, no hardcoded owner email, and refusal to overwrite existing access.
 
-- [ ] 5. Write compatibility instructions for existing allowlist/worker-access records: inspect read-only and propose a dry-run migration mapping; apply requires separate explicit authorization. Do not auto-migrate records while starting the API.
+- [ ] 5. Write compatibility instructions for existing allowlist records: inspect read-only and propose a dry-run migration mapping; apply requires separate explicit authorization. Do not auto-migrate records while starting the API.
 
 - [ ] 6. Run auth/access HTTP tests, concurrent-owner integration and operations command tests. Do not bootstrap a real owner during implementation validation.
 

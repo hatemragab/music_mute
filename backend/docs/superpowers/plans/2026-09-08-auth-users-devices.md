@@ -35,7 +35,7 @@ Redis, Firebase Admin, Vitest, Supertest, and Firebase Authentication Emulator.
 - Persist the client-provided installation UUID and each installation's version.
 - Apple distribution decisions and all mobile implementation are deferred.
 - Keep Node `>=24 <25`, npm `>=11 <12`, `.js` ESM imports, strict DTOs, sanitized
-  errors, trusted-proxy restrictions, and separate API/worker entry points.
+  errors and trusted-proxy restrictions.
 - Update only safe environment examples; do not read or change real dotenv files.
 - No commits, pushes, deployment, cloud settings changes, or real account/mail
   tests without a separate explicit user instruction. Do not run production
@@ -64,7 +64,7 @@ or under the existing `test/` HTTP/native integration layout.
 | Documentation        | `docs/auth-api.md`, `docs/auth-operations.md`, `README.md`, `AGENTS.md`, safe environment examples                                                                                    |
 
 Do not create a second database/queue abstraction, migrate the existing directory
-layout, or create controllers in the worker. `auth.types.ts` contains only the
+layout. `auth.types.ts` contains only the
 small identity/request contracts shared by these feature modules.
 
 ## Common contracts
@@ -234,7 +234,7 @@ expect(
 - [ ] Declare `ioredis@5.11.1` directly with
       `npm install --save-exact ioredis@5.11.1`; this is the version already in the
       lockfile through BullMQ. Create a separate bounded security connection with
-      shutdown cleanup; do not change BullMQ worker connections or their retries.
+      shutdown cleanup; do not change unrelated Redis connections or their retries.
 - [ ] Implement rolling reservations as one Lua script exported from
       `quota-script.ts`, so Nest compilation needs no copied `.lua` asset. Use
       Redis `TIME`, remove expired sorted-set members, inspect every bucket,
@@ -667,7 +667,7 @@ expect(policyCollection.updateOne).not.toHaveBeenCalled();
 - [ ] Add a production startup check of the two critical named unique indexes.
       It must be read-only and fail if an index is missing or incompatible. In
       local/test mode await model index initialization using the existing auto-index
-      policy. Keep the independent infrastructure-only worker free of API guards
+      policy. Keep non-HTTP infrastructure processes free of API guards
       and Firebase initialization. Document index preparation before feature rollout.
 - [ ] Implement policy compare-and-set using `_id` and expected `revision`; missing
       defaults have revision `0`. The CLI accepts only a validated policy-field
@@ -758,7 +758,7 @@ assert.equal(updatedDevice.versionHistory.length, 2);
       an arbitrary JWKS URL or signature bypass to production configuration.
 - [ ] Refactor only the existing native integration fixture setup needed to supply
       new safe test config and shared process helpers. Preserve its API/Redis crash,
-      queue durability, worker startup failure, and synthetic-job assertions.
+      queue durability and synthetic-job assertions.
       Add HTTP/SDK failure injection tests without changing any live dependency.
 - [ ] Write `docs/auth-api.md` with every request/response/error example from the
       spec, bearer and installation requirements, revision/retry rules, optional
@@ -775,7 +775,6 @@ npm run test:integration
 npm run test:auth:integration
 npm run build
 test -s dist/main.js
-test -s dist/worker.js
 test -s dist/operations/cli.js
 npm audit --omit=dev
 git diff --check

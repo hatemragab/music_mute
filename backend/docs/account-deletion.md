@@ -27,23 +27,9 @@ database batches and provider cleanup retry after failures. The user stays fence
 while cleanup is incomplete. No error detail, token, email, object key or audio path
 is logged by the deletion maintenance service.
 
-Queued work is cancelled. Active or lost-worker work retains its slot until the
-worker proves it stopped; a lease timeout is not proof. `/worker/local-cleanup`
-requires an authenticated worker selector and `localDataDeleted:true` after the
-worker deletes its entire confined job directory. Every recorded attempt needs
-local deletion proof before account cleanup can remove the parent job.
-
-The updated Windows worker journals pending cleanup, closes its engine, deletes
-owned local files and retries acknowledgement after restart before claiming new
-work. This closes the model process between jobs; cross-job warm-engine reuse is
-therefore reduced. Test output is local Python evidence, not native Windows proof.
-
-Deploy the updated backend before the updated worker. Against an old backend, the
-worker deliberately remains at pending acknowledgement rather than silently taking
-another job. Historical attempts lacking proof remain pending until the operator
-verifies termination and removes the matching directory on the original worker,
-then follows the authenticated cleanup protocol. Do not synthesize proof merely
-because the machine is unavailable or its lease expired.
+Queued work is cancelled. New processing cannot start during the clean-slate
+period. Existing retained job records and storage cleanup tasks are settled by the
+API without an external execution acknowledgement.
 
 Existing signed storage grants may remain usable until expiry. Job deletion waits
 the configured `PROCESSING_URL_SECONDS` plus the existing safety window and sweeps
@@ -97,6 +83,6 @@ when they next validate the invalidated session; user-exported copies and origin
 in external file providers are outside MusicMute's deletion control.
 
 Use disposable staging accounts to verify Firebase deletion, every S3 version,
-worker temp cleanup and the public support path. Local mocks/emulators do not prove
-production IAM, original worker state, inbox monitoring, backup expiry or store
+and the public support path. Local mocks/emulators do not prove
+production IAM, inbox monitoring, backup expiry or store
 acceptance. Google Play review risk from the retained YouTube downloader remains.

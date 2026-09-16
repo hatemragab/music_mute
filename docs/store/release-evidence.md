@@ -1,6 +1,6 @@
 # MusicMute release evidence
 
-Local implementation snapshot, 2026-09-10. No deployment, store submission, production deletion or store approval is claimed. The [consolidated validation record](../validation/2026-09-10-store-readiness.md) contains final backend, worker and iOS evidence and supersedes preliminary counts below.
+Local implementation snapshot, 2026-09-10. No deployment, store submission, production deletion or store approval is claimed. The [consolidated validation record](../validation/2026-09-10-store-readiness.md) contains final backend and iOS evidence and supersedes preliminary counts below.
 
 ## Android snapshot
 
@@ -39,14 +39,13 @@ The public pages contain semantic headings, labelled navigation, visible keyboar
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | iOS                    | 136 unit tests and final Home/settings UI passed, plus targeted native Files/consent/deletion-cancel scenarios; real provider authentication and release signing remain |
 | Backend                | Final verification passed: 432 unit tests, 38 HTTP tests, integration suites and build; live disposable deletion remains                                                |
-| Disposable lifecycle   | Accepted request through safe worker/storage cleanup, Firebase deletion and finite replay-fence expiry                                                                  |
-| Worker                 | Native Z440 cancellation/temporary-file cleanup and lost-lease containment proof                                                                                        |
+| Disposable lifecycle   | Accepted request through safe storage cleanup, Firebase deletion and finite replay-fence expiry                                                                         |
 | Public resource        | Actual domain, developer identity, monitored mailbox, verified ownership process, supported timing/retention and live URL verification                                  |
 | Android store artifact | Exact signed bundle inspection and truthful foreground-service demonstration using owned/licensed audio                                                                 |
 | Listing                | Owned-audio screenshots/video, visible secondary YouTube flow and matching features/privacy/deletion URLs                                                               |
 | Data Safety            | Verified collected/shared categories, provider destinations, operational logs, backups and actual finite retention                                                      |
 
-Do not mark the final Data Safety form from a source-code inventory alone. Firebase identity/profile, installation/device/push records, audio inputs/vocals results, source/job metadata, bounded diagnostics, infrastructure logs and backup/support retention need operational reconciliation. The public privacy draft describes Firebase, MongoDB, S3 and the Z440 processor, plus the 24-hour pseudonymous security replay fence; operator-supplied retention must reflect actual infrastructure.
+Do not mark the final Data Safety form from a source-code inventory alone. Firebase identity/profile, installation/device/push records, audio inputs/vocals results, source/job metadata, bounded diagnostics, infrastructure logs and backup/support retention need operational reconciliation. The public privacy draft describes Firebase, MongoDB and S3, plus the 24-hour pseudonymous security replay fence; operator-supplied retention must reflect actual infrastructure.
 
 ## Policy sources checked 2026-09-10
 

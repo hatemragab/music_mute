@@ -44,7 +44,7 @@ These are concrete test scenarios to encode in the listed test files before impl
 ```gherkin
 Scenario 1: An audit insert failure rolls back the state mutation in the same MongoDB transaction.
 Scenario 2: Two concurrent requests with one operationId produce one event and one state change.
-Scenario 3: A worker manager cannot read another actor's receipt; no receipt contains rawKey or url.
+Scenario 3: A non-owner cannot read another actor's receipt; no receipt contains a signed URL.
 ```
 
 ## Validation

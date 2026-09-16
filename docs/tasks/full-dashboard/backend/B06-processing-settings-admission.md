@@ -16,7 +16,7 @@ Read the [execution rules](../README.md) and scope before starting. Preserve unr
 ## Files and responsibility
 
 - Create backend/src/admin-settings/processing-settings.schema.ts, processing-settings.service.ts, admin-settings.controller.ts, admin-settings.module.ts, dto/processing-settings.dto.ts and processing-settings.service.spec.ts.
-- Modify backend/src/jobs/jobs.service.ts, job-actions.service.ts, job-state.ts, job.schema.ts, enqueue.service.ts; backend/src/worker/worker-coordinator.service.ts for measured-duration validation; backend/src/processing/processing-transactions.ts and compatible public availability presentation.
+- Modify backend/src/jobs/jobs.service.ts, job-actions.service.ts, job-state.ts, job.schema.ts, enqueue.service.ts; backend/src/processing/processing-transactions.ts and compatible public availability presentation.
 - Create backend/test/admin-settings.e2e-spec.ts, backend/test/admin-admission.integration.mjs; modify existing job admission tests.
 
 ## Interfaces
@@ -25,13 +25,13 @@ GET/PUT /admin/settings/processing -> ProcessingSettings. A shared admission ser
 
 ## Steps
 
-- [ ] 1. Write boundary tests for exclusive byte/duration maxima, optional Arabic message, null versus finite active-job limit and invalid attempts to exceed current worker/mobile limits. Seed current behavior, not new restrictive defaults.
+- [ ] 1. Write boundary tests for exclusive byte/duration maxima, optional Arabic message, null versus finite active-job limit and invalid attempts to exceed current mobile limits. Seed current behavior, not new restrictive defaults.
 
 - [ ] 2. Implement a revisioned settings record with audited owner updates. On missing stored settings, use current behavior without writing automatic migrations. Preserve environment feature/readiness switches as stronger technical gates.
 
 - [ ] 3. Enforce admission in creation, renewal and retry paths with a shared writable admission/fence record per user and policy revision touch. Concurrent submissions must serialize before checking active count; terminal/deletion transitions must not leave stale quota accounting.
 
-- [ ] 4. Snapshot limits on accepted reservations. Validate declared size/duration at admission, actual pinned upload size at confirmation, and worker-measured duration against the same snapshot before separation; client declarations alone cannot enforce a lowered duration ceiling. Maintenance/suspension closes new reservations and renewal/retry; a valid previously issued reservation can confirm/queue within its recorded expiry. Do not cancel queued/active jobs or block existing downloads.
+- [ ] 4. Snapshot limits on accepted reservations. Validate declared size/duration at admission and actual pinned upload size at confirmation. Maintenance/suspension closes new reservations and renewal/retry; a valid previously issued reservation can confirm/queue within its recorded expiry. Do not cancel queued/active jobs or block existing downloads.
 
 - [ ] 5. Expose GET /processing-policy with the additive contract in contracts.md, reusing effective settings and existing readiness authority. Keep strict existing client JSON unchanged. The endpoint supplies future mobile policy consumers; mobile adoption is recorded in linked mobile work and is not part of this dashboard task.
 
@@ -60,7 +60,7 @@ node --test test/admin-admission.integration.mjs
 
 ## Completion evidence
 
-- [ ] Settings are transactional, backward-compatible and cannot silently increase worker/mobile limits.
+- [ ] Settings are transactional, backward-compatible and cannot silently increase mobile limits.
 - [ ] Attach changed-file list, exact validation commands/results and tested revision.
 - [ ] Review diff for contract drift, unrelated changes, unsafe data exposure and lifecycle regressions.
 - [ ] Record remaining external/mobile/Windows limitations separately; do not mark simulated behavior as live proof.

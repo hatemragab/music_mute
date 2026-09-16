@@ -11,9 +11,9 @@ history polling on Home, Library and job details, and pauses its allowance timer
 while the activity is not resumed. Push refresh hints do not fetch hidden history.
 
 The history controllers serialize list, pagination and detail reads. They reuse a
-fresh list entry when it includes worker availability or has a terminal state.
-Active entries without worker availability still need a detail request: retaining
-that check avoids presenting stale worker availability. The normal history rate is
+fresh list entry when it includes processing availability or has a terminal state.
+Active entries without processing availability still need a detail request: retaining
+that check avoids presenting stale availability. The normal history rate is
 approximately six list requests per minute, plus up to six detail requests for an
 active selected job. Allowance checks and explicit operations are additional calls.
 

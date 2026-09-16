@@ -33,13 +33,13 @@ Settings → Account → Delete account → explanation → provider reauthentic
 
 The backend owns deletion. A recent-authenticated, idempotent request first writes a durable deletion marker that blocks provisioning, job creation, new signed grants, device registration and profile writes. Deletion remains reachable despite email-verification or processing-access restrictions. A disabled account needs a verified support route.
 
-After acceptance: revoke sessions, disable the Firebase identity, stop account work, cancel queued/active jobs using existing worker fencing, remove notifications and push registrations, sweep S3 object versions after all existing grants expire, purge account-linked MongoDB records, then delete the Firebase identity. Do not remove the account marker early and permit automatic reprovisioning from stale tokens. Mark completion only after all owned cleanup succeeds; retries and restart recovery must be durable.
+After acceptance: revoke sessions, disable the Firebase identity, stop account work, cancel queued/active jobs, remove notifications and push registrations, sweep S3 object versions after all existing grants expire, purge account-linked MongoDB records, then delete the Firebase identity. Do not remove the account marker early and permit automatic reprovisioning from stale tokens. Mark completion only after all owned cleanup succeeds; retries and restart recovery must be durable.
 
-The new lifecycle is control-plane cleanup integrated into the API process, not a new audio worker or Redis job queue. Use bounded, replica-safe leased batches. It must run independently of `AUDIO_PROCESSING_ENABLED`.
+The new lifecycle is control-plane cleanup integrated into the API process, not a Redis job queue. Use bounded, replica-safe leased batches. It must run independently of processing availability.
 
 Maintain only the minimum restricted deletion receipt needed for recovery and verification. Document a finite retention period before release. Logs, database backups and provider retention need an explicit inventory and expiry policy; do not claim instant erasure from backups. A restore procedure must replay deletion requests before exposing restored data.
 
-Already-issued signed S3 grants cannot be assumed revoked by a database flag. Stop new grants, fence uploads/completions and wait for maximum outstanding grant validity plus the existing safety window before the final sweep. A lost Z440 lease is not proof the worker stopped: preserve quarantine/fencing and escalate until worker termination or safe containment is proven. Include worker temp inputs/outputs in completion evidence.
+Already-issued signed S3 grants cannot be assumed revoked by a database flag. Stop new grants, fence uploads/completions and wait for maximum outstanding grant validity plus the existing safety window before the final sweep.
 
 Public `/delete-account` page: clearly identify MusicMute and the developer, explain scope/timeframes, and offer an actionable support-email request without reinstalling the app. The public page does not delete accounts merely from a supplied email address. Support verifies ownership and uses the same durable backend lifecycle through an authenticated operator procedure. No passwords or ID tokens are requested by email. A monitored inbox and verified ownership procedure are release prerequisites.
 
@@ -65,8 +65,7 @@ Keep foreground-service types needed by real transfers and playback. Review the 
 - Work in the current repository; preserve unrelated edits, secrets and generated files.
 - No commits, pushes, publishing, deployments or real-user deletion without explicit authorization.
 - Reuse Kotlin/Compose, Swift/SwiftUI, NestJS, Firebase Auth, MongoDB, external Redis and private S3.
-- Keep API-only runtime and the single external Windows worker slot; no new processing queue.
-- Never unlock a lost worker lease solely because time elapsed.
+- Keep the API-only runtime; no new processing queue is introduced by store-readiness work.
 - UI/device tests only on existing iPhone 17 Pro, iOS 26.0, UDID `$IOS_SIMULATOR_UDID`. Android device/UI validation is blocked under this restriction unless explicitly changed. Android static/unit/build checks remain allowed.
 - Preserve vocals-only MP3 output and explicit-tap playback.
 - Verify primary policy sources again at implementation/release time.

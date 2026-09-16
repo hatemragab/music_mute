@@ -62,7 +62,7 @@ describe('admin health HTTP boundary', () => {
     expect(health.read).toHaveBeenCalledOnce();
   });
 
-  it('allows owner and worker manager acknowledgment and validates the body', async () => {
+  it('allows owner acknowledgment and validates the body', async () => {
     const { harness, alerts } = await setup();
     const path = '/admin/alerts/64b000000000000000000001/acknowledge';
     const body = {

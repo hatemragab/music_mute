@@ -6,8 +6,6 @@ export type AdminErrorCode =
   | 'MEDIA_UNAVAILABLE'
   | 'EXPORT_TOO_LARGE'
   | 'JOB_STATE_CONFLICT'
-  | 'WORKER_NOT_IDLE'
-  | 'RECOVERY_PROOF_REQUIRED'
   | 'INVALID_UPDATE_POLICY'
   | 'INVALID_REQUEST'
   | 'INVALID_CURSOR'
@@ -36,15 +34,7 @@ const definitions: Record<AdminErrorCode, { status: number; message: string }> =
     },
     JOB_STATE_CONFLICT: {
       status: HttpStatus.CONFLICT,
-      message: 'Worker state conflict',
-    },
-    WORKER_NOT_IDLE: {
-      status: HttpStatus.CONFLICT,
-      message: 'Worker must be idle',
-    },
-    RECOVERY_PROOF_REQUIRED: {
-      status: HttpStatus.CONFLICT,
-      message: 'Exact stopped process evidence required',
+      message: 'Job state conflict',
     },
     INVALID_UPDATE_POLICY: {
       status: HttpStatus.UNPROCESSABLE_ENTITY,

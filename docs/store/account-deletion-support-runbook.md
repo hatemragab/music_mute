@@ -8,12 +8,12 @@ The existing backend serves `GET /delete-account` and `GET /privacy` outside `/a
 
 The backend remains usable without these optional fields, but both pages return HTTP 503 until all publication information is supplied:
 
-| Field | Required publication value |
-| --- | --- |
-| `PUBLIC_SUPPORT_EMAIL` | Actual monitored mailbox; plain valid email address, no URL or mail headers |
-| `PUBLIC_DEVELOPER_NAME` | Actual developer identity matching the listing |
+| Field                       | Required publication value                                                                   |
+| --------------------------- | -------------------------------------------------------------------------------------------- |
+| `PUBLIC_SUPPORT_EMAIL`      | Actual monitored mailbox; plain valid email address, no URL or mail headers                  |
+| `PUBLIC_DEVELOPER_NAME`     | Actual developer identity matching the listing                                               |
 | `PUBLIC_DELETION_TIMEFRAME` | Supported completion expectations, including when measurement begins and escalation handling |
-| `PUBLIC_RETENTION_NOTICE` | Actual log, provider, backup and legitimate retention scope with finite expiry periods |
+| `PUBLIC_RETENTION_NOTICE`   | Actual log, provider, backup and legitimate retention scope with finite expiry periods       |
 
 Configured prose is HTML escaped; email configuration rejects unsafe characters and header injection. No contact, public domain or deletion deadline is invented. Populated fields prove only configuration, not mailbox monitoring or supported promises.
 
@@ -47,19 +47,17 @@ npm run ops:auth -- delete-account --apply --ownership-verified --file /private/
 
 These commands are instructions, not evidence of a production run. Do not execute apply without the request, ownership proof and action authorization. The flag attests to an operator check; it does not perform identity verification. Keep actual identifiers out of command arguments.
 
-Store the returned request reference in the restricted case record. Repeated requests use the same durable lifecycle, including verified support requests for disabled accounts. Never update MongoDB status directly, delete Firebase first, remove the deletion marker early, or bypass worker/storage cleanup.
+Store the returned request reference in the restricted case record. Repeated requests use the same durable lifecycle, including verified support requests for disabled accounts. Never update MongoDB status directly, delete Firebase first, remove the deletion marker early, or bypass storage cleanup.
 
 ## Acceptance and completion
 
 Acceptance durably blocks normal account work. Background cleanup revokes sessions, cancels jobs, fences late completions, resolves outstanding signed grants, removes account-owned storage versions/records and removes Firebase identity. Inspect the durable stage and retry conditions through authorized backend operations. An HTTP 202, timeout, absent session or failed login is not completion proof.
 
-A lost or expired Z440 lease does not prove its process stopped. Preserve quarantine/fencing and obtain termination proof or approved containment before closing cleanup. Include worker temporary inputs/results in evidence. Never auto-unlock a lost lease to make deletion appear finished.
-
 The public pages disclose a 24-hour pseudonymous security replay fence after deletion. Verify its finite expiry in the release backend. Inventory log, database-backup, storage-provider and support-case/mailbox retention separately and reflect the actual finite periods in the configured notice. Do not describe backups as instantly erased. Restore procedures must replay deletion restrictions before exposing restored data.
 
 The receiving app purges its private account data after acceptance. Imported originals and user-exported copies remain under user control. Offline installations may retain copies until reconnection or local app-data removal; the API cannot erase an offline device immediately.
 
-If providers or cleanup fail, preserve the request and retry state. Escalate using a restricted reference and safe error code, never bearer tokens, signed URLs or media. Send status messages only through an authorized support channel. Confirm completion only after backend and provider/worker checks prove it, explaining any legitimate retained data.
+If providers or cleanup fail, preserve the request and retry state. Escalate using a restricted reference and safe error code, never bearer tokens, signed URLs or media. Send status messages only through an authorized support channel. Confirm completion only after backend and provider checks prove it, explaining any legitimate retained data.
 
 ## Required operator evidence before release
 

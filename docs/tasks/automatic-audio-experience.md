@@ -2,13 +2,13 @@
 
 Status: implementation authorized 2026-09-10; backend complete locally and packaged,
 Android and iOS complete locally. The user reports the existing full
-upload/S3/Z440/result flow works; that baseline does not validate the new tasks.
+upload/S3/result-history flow works; that baseline does not validate the new tasks.
 See the [execution record](automatic-audio-experience-execution.md) for actual evidence.
 
 ## Documents
 
 - [Shared design and contract](../superpowers/specs/2026-09-10-automatic-audio-experience.md)
-- [Backend plan](../superpowers/plans/2026-09-10-backend-audio-experience.md)
+- Current backend behavior: `backend/docs/api/audio-processing.md`
 - [Android plan](../superpowers/plans/2026-09-10-android-audio-experience.md)
 - [iOS plan](../superpowers/plans/2026-09-10-ios-audio-experience.md)
 
@@ -46,23 +46,23 @@ See the [execution record](automatic-audio-experience-execution.md) for actual e
 2. Android A01 and iOS I01 consume that contract. Platform-local coordinator/UI work can proceed with deterministic fixtures once the contract is fixed.
 3. Each platform follows its plan's internal dependencies. No task may silently change the public contract for only one platform.
 4. B05 closes backend compatibility. A07/I07 close mobile integration; new APIs must be deployed under separate authorization before claiming live new-flow success.
-5. The Z440 algorithm/protocol is reused; worker-code changes are not assumed. Any discovered worker dependency is separately surfaced.
+5. Processing-runtime changes are outside this mobile experience task.
 
 ## Design coverage
 
-| User requirement | Backend | Android | iOS |
-| --- | --- | --- | --- |
-| Start immediately for URL/import; no second button | B01 identity | A02 | I02 |
-| Multiple individual submissions | Existing queue + B01 | A01–A03 | I01–I03 |
-| Background transfer and automatic handoff | Existing queue | A02/A03 | I02/I03 |
-| Current stage, timing, ID and diagnostics | B01–B03 | A04/A05 | I04/I05 |
-| Cancellation at all active stages | Existing cancel semantics | A05 | I05 |
-| Bounded transient retry, any network | Existing idempotency | A02/A03/A05 | I02/I03/I05 |
-| Preserved title and rename | B01 | A01/A06 | I01/I06 |
-| User deletion | B04 | A06 | I06 |
-| Processed media only; fetch on user tap; sharing | Existing output grants | A04/A06 | I04/I06 |
-| Audio styling, text/waveform animation, light/dark | No backend dependency | A04 | I04 |
-| Silent progress and detail timeline | B02 timing | A03/A04 | I03/I04 |
+| User requirement                                   | Backend                   | Android     | iOS         |
+| -------------------------------------------------- | ------------------------- | ----------- | ----------- |
+| Start immediately for URL/import; no second button | B01 identity              | A02         | I02         |
+| Multiple individual submissions                    | Existing queue + B01      | A01–A03     | I01–I03     |
+| Background transfer and automatic handoff          | Existing queue            | A02/A03     | I02/I03     |
+| Current stage, timing, ID and diagnostics          | B01–B03                   | A04/A05     | I04/I05     |
+| Cancellation at all active stages                  | Existing cancel semantics | A05         | I05         |
+| Bounded transient retry, any network               | Existing idempotency      | A02/A03/A05 | I02/I03/I05 |
+| Preserved title and rename                         | B01                       | A01/A06     | I01/I06     |
+| User deletion                                      | B04                       | A06         | I06         |
+| Processed media only; fetch on user tap; sharing   | Existing output grants    | A04/A06     | I04/I06     |
+| Audio styling, text/waveform animation, light/dark | No backend dependency     | A04         | I04         |
+| Silent progress and detail timeline                | B02 timing                | A03/A04     | I03/I04     |
 
 ## Planning decisions and limitations
 

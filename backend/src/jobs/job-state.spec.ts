@@ -77,7 +77,7 @@ describe('cancellation state rules', () => {
 });
 
 describe('captured duration limits', () => {
-  it('uses the accepted exclusive ceiling for worker measurements', () => {
+  it('uses the accepted exclusive ceiling for measured duration', () => {
     expect(() => assertMeasuredDuration(299.9, 300)).not.toThrow();
     expect(() => assertMeasuredDuration(300, 300)).toThrow();
     expect(() => assertMeasuredDuration(500, 600)).not.toThrow();

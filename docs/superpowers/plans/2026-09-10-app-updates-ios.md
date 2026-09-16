@@ -15,7 +15,7 @@
 - Read `ios/README.md`, `ios/project.yml`, `VocalApp.swift`, current auth, processing and playback source before editing.
 - Launch/reconnect checks, **15-minute** foreground/online checks, due foreground entry, no background polling; optional Later defers **24 hours**.
 - English-only changelog; preserve EN/AR UI localization and accessibility.
-- Whole-app required gate includes local playback, navigation, imports and notification taps. Do not logout, delete files, cancel submitted cloud jobs or modify server worker state.
+- Whole-app required gate includes local playback, navigation, imports and notification taps. Do not logout, delete files, cancel submitted cloud jobs or modify server processing state.
 - Offline with no known required policy preserves existing auth/offline behavior; known required state persists and request failures do not clear it.
 - Device/UI tests only on **iPhone 17 Pro, iOS 26.0**, UDID **$IOS_SIMULATOR_UDID**. Report absence rather than substituting.
 - Plan-only turn; no code changes, commits, store publication or deployment authorized here.

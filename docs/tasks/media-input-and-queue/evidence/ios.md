@@ -17,7 +17,7 @@ Only existing **iPhone 17 Pro, iOS 26.0**, UDID **3CC14436-EC3C-4419-A079-C84951
 
 - Tests were introduced before the policy/selection and YouTube parser implementations; both initial targeted test builds failed on the missing implementation as expected.
 - Native synthetic default-second MP4 test passed: first track 440 Hz, default second track 880 Hz; the prepared audio measured approximately 880 Hz and contained no video. Missing-audio rejection and WAV-to-M4A/source preservation passed.
-- Real generated 30-minute AAC fixture `artifacts/media-input/long/audio-1800s.m4a` passed native v2 preparation: 1,800.0 seconds and more than 30 MB. This validates local audio preparation, not AI throughput or worker readiness.
+- Real generated 30-minute AAC fixture `artifacts/media-input/long/audio-1800s.m4a` passed native v2 preparation: 1,800.0 seconds and more than 30 MB. This validates local audio preparation, not AI throughput or remote execution readiness.
 - 153 unit tests passed, covering inclusive/legacy boundaries, accepted upload version, source preparation, rolling allowance parsing, account isolation, consent/restoration, safe errors and confirmed-input cleanup, plus deterministic YouTube metadata cases.
 - Full platform suite executed: 150 then-current unit tests passed; seven of eight offline UI tests passed, and two opt-in live YouTube tests were skipped. The Files test failed because its caption tap did not activate the native file icon. The native picker screenshot/hierarchy confirmed it was still in Files; the helper was changed to target the labelled cell's icon.
 - Focused rerun then passed all 151 then-current unit tests plus `ProcessingUITests/testExplicitDownloadAndNativeFileRequireRightsAndCloudConfirmation`, proving actual Files selection, rights/cloud review and submission. Other offline UI checks include Arabic RTL/dark/large text, offline cache, cancellation/retry, playback, export and deletion.
@@ -36,7 +36,7 @@ Local result bundles/logs:
 
 No physical iPhone, real iCloud/provider transfer, Photos-picker runtime scenario, actual OS background-expiration event, live YouTube extraction/download, Firebase/backend/S3 production session, or AI processing benchmark was exercised. Photos/provider cancellation is implementation evidence; it is not a physical-device promise. The public YouTube page can change and must fail safely when its verified metadata is unavailable. No audio is transferred before the metadata check in new live service calls.
 
-No unsupported codec/container matrix or all-device compatibility is claimed. Source/default-track fixtures are small and synthetic; the generated 30-minute fixture remains outside tracked iOS resources. Native evidence does not authorize backend expansion or worker slots; server readiness remains authoritative. Force-quit does not guarantee continuation.
+No unsupported codec/container matrix or all-device compatibility is claimed. Source/default-track fixtures are small and synthetic; the generated 30-minute fixture remains outside tracked iOS resources. Native evidence does not authorize backend expansion or execution capacity; server readiness remains authoritative. Force-quit does not guarantee continuation.
 
 ## Final post-review validation
 

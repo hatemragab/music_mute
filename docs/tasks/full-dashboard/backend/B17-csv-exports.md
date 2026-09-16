@@ -7,7 +7,7 @@
 **Architecture:** Extend existing NestJS feature services and shared lifecycle authority; keep controllers thin and permission checks server-side.\
 **Tech Stack:** NestJS, strict TypeScript ESM, Mongoose/MongoDB transactions, existing Firebase/S3/Redis services, Vitest and compiled-node isolated integrations.\
 **Spec:** [Approved scope](../scope.md), [API contracts](../contracts.md).\
-**Dependencies:** [B02](../backend/B02-audit-operation-receipts.md), [B08](../backend/B08-job-search-detail-attempts.md), [B15](../backend/B15-overview-statistics.md).
+**Dependencies:** [B02](../backend/B02-audit-operation-receipts.md), [B15](../backend/B15-overview-statistics.md).
 
 ## Global constraints
 
@@ -64,7 +64,6 @@ node --test test/admin-exports.integration.mjs
 - [x] Attach changed-file list, exact validation commands/results and tested revision.
 - [x] Review diff for contract drift, unrelated changes, unsafe data exposure and lifecycle regressions.
 - [x] Record remaining external/mobile/Windows limitations separately; do not mark simulated behavior as live proof.
-
 
 Local evidence (2026-09-11, working tree based on `719b39be0d8d0a3b01a94d43ee66cfc039651e7c`; no commit/deployment):
 

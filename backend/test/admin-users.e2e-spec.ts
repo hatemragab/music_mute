@@ -34,7 +34,7 @@ describe('admin users HTTP boundary', () => {
     return { harness, users };
   }
 
-  it('allows support reads and denies viewer and worker-manager reads', async () => {
+  it('allows support reads and denies viewer reads', async () => {
     const { harness, users } = await setup();
     await harness
       .request('get', '/admin/users', undefined, harness.signInAs('support'))

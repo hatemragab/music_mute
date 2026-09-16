@@ -26,7 +26,7 @@ GET/PUT /admin/settings/processing. Values use exclusive bytes/seconds; maxActiv
 
 - [x] 1. Test initial 30,000,000-byte/600-second exclusive ceilings, null/unlimited active limit, invalid numerics, Arabic optional message and English required message when admissions are closed.
 
-- [x] 2. Build form with exact units and exclusive-bound helper text, retaining exact bytes in submitted data. Show worker/mobile maximums so users understand lowering is supported but raising above existing capability is rejected.
+- [x] 2. Build form with exact units and exclusive-bound helper text, retaining exact bytes in submitted data. Show current mobile maximums so users understand lowering is supported but raising above existing capability is rejected.
 
 - [x] 3. Add admission open/paused control, English message and optional Arabic translation. Explain that valid already accepted reservations/jobs continue and existing results remain available.
 
@@ -57,7 +57,7 @@ npm run test:e2e -- e2e/settings.spec.ts
 
 ## Completion evidence
 
-- [x] Processing settings communicate exact admission effects and respect backend/worker limits.
+- [x] Processing settings communicate exact admission effects and respect backend limits.
 - [x] Attach changed-file list, exact validation commands/results and tested revision.
 - [x] Review diff for contract drift, unrelated changes, unsafe data exposure and lifecycle regressions.
 - [x] Record remaining external/mobile/Windows limitations separately; do not mark simulated behavior as live proof.

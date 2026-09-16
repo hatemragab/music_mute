@@ -50,7 +50,7 @@ List/detail return these additional fields, alongside all existing fields:
 Names/source kind and unavailable stage dates are null for legacy records.
 Processing timing is null if the full job was not measured by this version; otherwise
 it sums separation intervals and excludes queueing, validation, output upload, and
-worker downtime. An active interval is extrapolated using `serverTime` only while its
+remote execution downtime. An active interval is extrapolated using `serverTime` only while its
 lease is live. Interruption uses the last observation and marks the value approximate.
 
 Total elapsed is approximate because it starts at `clientStartedAt`. It is null if
@@ -118,7 +118,7 @@ STORAGE, SERVER, JOB_NOT_FOUND, JOB_CONFLICT, CHECKSUM_MISMATCH, LOCAL_IO.
 
 Map unrecognized exceptions to UNKNOWN, and share/export errors to EXPORTING. The
 endpoint rejects raw messages, exceptions, tokens, URLs, audio bytes, local paths, and
-client-supplied owner/receivedAt. Reports never change job state or overwrite worker
+client-supplied owner/receivedAt. Reports never change job state or overwrite execution
 errors. Before-reservation reports remain linked through owner plus operationId,
 returned later by job detail as requestId. Normal cancellation/share dismissal is not
 an error. There is no public diagnostic listing endpoint.

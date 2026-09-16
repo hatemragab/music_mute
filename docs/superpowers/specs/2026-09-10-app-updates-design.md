@@ -40,7 +40,7 @@ These resolve details not separately chosen in conversation; they are not additi
 | Concern                | Current files                                                                                                                  | Consequence                                                                                                                                                           |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Legacy policy          | `backend/src/app-policy/{app-policy.schema,access-policy,app-policy.service,app-policy.presenter}.ts`                          | Preserve `minimumBuild`, `latestBuild`, `downloadUrl`, email policy and revision semantics. Current validation rejects unknown stored fields; update it deliberately. |
-| Enforcement            | `backend/src/app-policy/processing-access.guard.ts`, `backend/src/jobs/jobs.controller.ts`                                     | Creation, retry, upload renewal and upload confirmation already have processing guards. Worker completion must stay independent.                                      |
+| Enforcement            | `backend/src/app-policy/processing-access.guard.ts`, `backend/src/jobs/jobs.controller.ts`                                     | Creation, retry, upload renewal and upload confirmation already have processing guards. Existing history and results stay independently readable.                     |
 | Operator policy writes | `backend/src/operations/policy-command.ts`                                                                                     | Once release management is enabled, prevent this CLI from bypassing release validation for version fields; keep email-policy operations working.                      |
 | Authentication         | `backend/src/auth/{auth.guard,firebase-identity.service,firebase.module}.ts`                                                   | Reuse Firebase revocation/disabled-account checks. Dashboard login must not require a mobile installation bootstrap.                                                  |
 | Storage                | `backend/src/infrastructure/storage.module.ts`, `backend/src/storage/{storage-preflight.service,storage-transfers.service}.ts` | Private, versioned S3 primitives exist. Keep release objects outside media retention/cleanup.                                                                         |
@@ -57,11 +57,11 @@ Reinspect these files before implementation: other work in this checkout is acti
 All paths below are relative to `/api/v1`. IDs are server-issued opaque strings. Integer builds are in `1..2147483647`; never compare marketing versions lexically.
 
 ```ts
-type Platform = 'android' | 'ios';
-type Distribution = 'direct' | 'play' | 'app_store';
-type UpdateSource = 'direct_apk' | 'google_play' | 'app_store';
-type ArtifactState = 'awaiting_upload' | 'verifying' | 'verified' | 'rejected';
-type ReleaseState = 'draft' | 'published' | 'withdrawn';
+type Platform = "android" | "ios";
+type Distribution = "direct" | "play" | "app_store";
+type UpdateSource = "direct_apk" | "google_play" | "app_store";
+type ArtifactState = "awaiting_upload" | "verifying" | "verified" | "rejected";
+type ReleaseState = "draft" | "published" | "withdrawn";
 
 interface ReleaseTarget {
   id: string;
@@ -93,7 +93,7 @@ interface ReleaseDownloadGrant {
   sha256Hex: string;
   signerSha256Hex: string;
 }
-type UpdateDecision = 'none' | 'optional' | 'required';
+type UpdateDecision = "none" | "optional" | "required";
 ```
 
 - `GET /app-updates/policy?platform=android&distribution=direct`: public, rate-limited, `Cache-Control: no-store`; no Firebase account needed. iOS accepts only `app_store`; Android accepts `direct` or `play`. Invalid combinations return 400.
@@ -121,7 +121,7 @@ Add an optional stored `releaseSelection` to each platform in the existing `app_
 New collections:
 
 - `app_releases`: platform/source, version/build, English changelog, release/artifact states, immutable S3 key/version/checksum/signing metadata, creation actor and timestamps. Unique platform/source/build; published content is immutable.
-- `release_uploads`: reservation ID, release ID, expected size/checksum, server-generated key, expiry, pinned S3 version, verification lease and result. Lease is for bounded APK inspection only, never a media worker lease.
+- `release_uploads`: reservation ID, release ID, expected size/checksum, server-generated key, expiry, pinned S3 version, verification lease and result. The lease is only for bounded APK inspection.
 - `dashboard_admins`: one revisioned allowlist document; entries bind a Firebase UID to its verified Google email, with active status. No wildcard/domain access and no automatic registration based on a client email string.
 - `release_audit_events`: actor UID, action, IDs, old/new policy revision, time. No bearer tokens, signed URLs, APK bytes, user media, or credentials.
 
@@ -159,7 +159,7 @@ Dashboard sends Firebase tokens in Authorization headers, never query strings. K
 3. Confirmation pins `VersionId`, streams that exact object into a private temporary file with an upper byte bound, and independently recomputes SHA-256.
 4. Run trusted, pinned `apksigner` and `aapt2` executables using an argument array, bounded output, timeout, and no shell. Never execute APK content. Extract application ID, integer build, version name, minimum SDK, signer digest and debuggable status. Reject package mismatch, invalid signature, unapproved signer, debug APK, size/checksum mismatch or unsupported minimum SDK.
 5. Initial signer allowlist is private deployment configuration, derived from the maintained release key's public certificate. An uploaded APK cannot authorize its own signer. Accept no key rotation automatically.
-6. Verification is synchronous and bounded, with a per-upload CAS lease; no BullMQ/audio-worker dependency. Expired verification can be retried only after its deadline and against the same immutable object version. Always terminate child processes and clean temporary files on cancellation/error.
+6. Verification is synchronous and bounded, with a per-upload CAS lease and no BullMQ dependency. Expired verification can be retried only after its deadline and against the same immutable object version. Always terminate child processes and clean temporary files on cancellation/error.
 7. Only `verified` artifacts are publishable. Rejected uploads remain unpublished. Do not delete S3 objects or change retention automatically as part of this feature.
 8. Download grants reference the verified `VersionId`. Refresh an expired link by release ID, never by a persisted signed URL. Partial downloads are reused only after identity checks and final whole-file verification.
 
@@ -173,7 +173,7 @@ Root state machine: `checking`, `allowed`, `optional`, `required`, plus transpor
 
 Required UI shows current/target version, English changelog, Update, Retry, and useful download/permission errors. No Later/back/swipe escape into the app. External installer/store UI remains reachable. Dismissing installation returns to the required screen. Re-read the installed build and current policy before unlocking; clicking Update is not proof of installation.
 
-Gate playback service/remote transport controls, share/import entry, deep links and pending notification taps, not just visible tabs. Stop local playback and pause resumable local work without firing cloud cancellation, deletion, logout, worker lease recovery, or data migration. Preserve server job IDs and account ownership. Completion notifications may arrive but cannot bypass the gate.
+Gate playback service/remote transport controls, share/import entry, deep links and pending notification taps, not just visible tabs. Stop local playback and pause resumable local work without firing cloud cancellation, deletion, logout, or data migration. Preserve server job IDs and account ownership. Completion notifications may arrive but cannot bypass the gate.
 
 Android direct: custom MusicMute UI and gate; azhon/AppUpdate adapter for download/install. Disable automatic installation until SHA-256, package/build and signer checks finish. If its callback API cannot guarantee verification before install, use its custom downloader boundary and explicit install handoff; never silently skip verification or change libraries.
 

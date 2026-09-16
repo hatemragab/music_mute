@@ -4,7 +4,7 @@
 
 **Goal:** Authorize dashboard administrators, verify APKs in private S3, publish consistent update policies, and preserve running media jobs.
 
-**Architecture:** Extend existing policy storage and reuse Firebase/S3 infrastructure. Keep release management in a new cohesive `releases` module and administrator access in an `admin` module. Publication uses the existing MongoDB replica-set transaction support; binary inspection is a bounded request operation, not a media worker job.
+**Architecture:** Extend existing policy storage and reuse Firebase/S3 infrastructure. Keep release management in a new cohesive `releases` module and administrator access in an `admin` module. Publication uses the existing MongoDB replica-set transaction support; binary inspection is a bounded request operation, not a media-processing job.
 
 **Tech Stack:** Existing NestJS, TypeScript ESM, Mongoose, AWS SDK, Firebase Admin, Vitest and isolated MongoDB/Redis integration helpers; trusted Android APK inspection executables.
 
@@ -17,7 +17,7 @@
 - Changelog **English only**; platform-wide minimum enforced server-side; submitted jobs continue.
 - Google allowlist starts with the privately supplied owner identity and is expandable. No personal email or credentials in source/fixtures.
 - Uploads stay private/version-pinned; no cloud configuration/deletion or production writes without explicit authorization.
-- No new audio worker/BullMQ queue. Do not alter the Z440 lease/cancellation protocol.
+- Do not introduce a new processing runtime or BullMQ queue in this update feature.
 - Plans only in the current turn; no implementation or commits. Execution follows the master plan's device and authorization constraints.
 
 ---
@@ -33,16 +33,28 @@ Existing modules own Firebase verification, legacy policy persistence, storage c
 Define in `release.types.ts` the exact spec types plus:
 
 ```ts
-interface UploadReservationInput { bytes: number; sha256Hex: string }
+interface UploadReservationInput {
+  bytes: number;
+  sha256Hex: string;
+}
 interface ApkInspection {
-  packageName: string; versionName: string; buildNumber: number;
-  minimumSdk: number; debuggable: boolean; signerSha256Hex: string;
+  packageName: string;
+  versionName: string;
+  buildNumber: number;
+  minimumSdk: number;
+  debuggable: boolean;
+  signerSha256Hex: string;
 }
 interface PublicationInput {
-  minimumBuild: number | null; source: UpdateSource;
-  expectedRevision: number; availabilityConfirmed: boolean;
+  minimumBuild: number | null;
+  source: UpdateSource;
+  expectedRevision: number;
+  availabilityConfirmed: boolean;
 }
-interface AdminActor { uid: string; email: string }
+interface AdminActor {
+  uid: string;
+  email: string;
+}
 ```
 
 `UpdateSource`, `UpdatePolicySnapshot`, `ReleaseTarget`, `ReleaseDownloadGrant` and `UpdateDecision` are copied exactly from the spec. `decideUpdate(installedBuild: number, snapshot: UpdatePolicySnapshot): UpdateDecision` is pure and exported by `release-policy.ts`. These contracts are fixed across subsystem plans.
@@ -62,10 +74,12 @@ interface AdminActor { uid: string; email: string }
 
 ```ts
 // Observable behavior in the service spec, using its injected fake store/Firebase directory.
-await expect(service.remove('only-admin', 1, actor))
-  .rejects.toMatchObject({ code: 'LAST_ADMIN_REQUIRED' });
-await expect(service.authorize('ordinary-user', 'user@example.invalid'))
-  .rejects.toMatchObject({ status: 403 });
+await expect(service.remove("only-admin", 1, actor)).rejects.toMatchObject({
+  code: "LAST_ADMIN_REQUIRED",
+});
+await expect(
+  service.authorize("ordinary-user", "user@example.invalid"),
+).rejects.toMatchObject({ status: 403 });
 ```
 
 - [ ] Run `npm test -- src/admin src/operations/admin-command.spec.ts` then `npm run test:e2e -- test/admin.e2e-spec.ts` from `backend/`. Implement until the new expectations pass; run the existing auth guard tests after shared guard changes.
@@ -81,10 +95,10 @@ await expect(service.authorize('ordinary-user', 'user@example.invalid'))
 - [ ] Write pure decision tests first, using the exact snapshot from the shared design and these boundaries:
 
 ```ts
-expect(decideUpdate(9, snapshot)).toBe('required');
-expect(decideUpdate(10, snapshot)).toBe('optional');
-expect(decideUpdate(12, snapshot)).toBe('none');
-expect(decideUpdate(13, snapshot)).toBe('none');
+expect(decideUpdate(9, snapshot)).toBe("required");
+expect(decideUpdate(10, snapshot)).toBe("optional");
+expect(decideUpdate(12, snapshot)).toBe("none");
+expect(decideUpdate(13, snapshot)).toBe("none");
 ```
 
 - [ ] Test legacy records without release selections, exact legacy JSON output, preserved `requireVerifiedEmail`, invalid integer builds, unknown platform/source combinations and inconsistent minimum/target. Add 400 tests for bad public query parameters and `no-store` header tests.
@@ -107,13 +121,15 @@ expect(decideUpdate(13, snapshot)).toBe('none');
 - [ ] Implement private presigned POST and pinning using the existing `StorageClient`. Never use media upload ownership fields or media-object cleanup for release artifacts. Canonical hash on the wire is lowercase hexadecimal; convert to S3 base64 only inside the storage adapter.
 - [ ] Stream the pinned object with byte/time limits into a private temporary directory. Calculate SHA-256 independently. Use `execFile`/`spawn` with fixed executable and argument arrays for `apksigner verify --verbose --print-certs` and `aapt2 dump badging`; bound output and reject ambiguous/multiple signer output unless explicitly supported by validated lineage code.
 - [ ] Implement inspection parsing and enforce `com.hatem.musicmute`, increasing channel build numbers, approved signer, release/debug status, and SDK compatibility. The operator-provided display version must match APK metadata; correct the draft from verified metadata rather than accepting a conflicting value.
-- [ ] Claim verification by CAS, include a deadline, and return safe 409 `VERIFICATION_IN_PROGRESS` for duplicates. Successful confirmation is idempotent. On timeout/error terminate inspection children, release/expire only this verification lease and clean temporary bytes. Do not touch media worker leases.
+- [ ] Claim verification by CAS, include a deadline, and return safe 409 `VERIFICATION_IN_PROGRESS` for duplicates. Successful confirmation is idempotent. On timeout/error terminate inspection children, release/expire only this verification lease and clean temporary bytes. Do not touch media processing state.
 
 ```ts
 expect(verified.artifact.versionId).toBe(uploadedVersionId);
 expect(verified.artifact.sha256Hex).toBe(expectedSha256Hex);
-await expect(confirmWrongSigner()).rejects.toMatchObject({ code: 'APK_SIGNER_REJECTED' });
-expect(await readReleaseState()).toBe('draft');
+await expect(confirmWrongSigner()).rejects.toMatchObject({
+  code: "APK_SIGNER_REJECTED",
+});
+expect(await readReleaseState()).toBe("draft");
 ```
 
 Define `confirmWrongSigner()` and `readReleaseState()` as fixture helpers in `release-upload.service.spec.ts`, wrapping the real service with fake object storage/inspection. They must not bypass the service state machine.
@@ -140,7 +156,7 @@ const results = await Promise.allSettled([
   service.publish(releaseA, { ...input, expectedRevision: 4 }, actor),
   service.publish(releaseB, { ...input, expectedRevision: 4 }, actor),
 ]);
-expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
 expect((await policies.current()).revision).toBe(5);
 ```
 
@@ -150,20 +166,20 @@ expect((await policies.current()).revision).toBe(5);
 
 ## Task UPD-B05: Reject outdated processing without cancelling submitted work
 
-**Files:** Modify `backend/src/app-policy/{access-policy,processing-access.guard}.ts` only where needed, `backend/src/jobs/jobs.controller.ts`, and associated specs. Create `backend/test/update-processing.integration.mjs`. Read `backend/src/worker/` and existing job action tests before touching shared behavior.
+**Files:** Modify `backend/src/app-policy/{access-policy,processing-access.guard}.ts` only where needed, `backend/src/jobs/jobs.controller.ts`, and associated specs. Create `backend/test/update-processing.integration.mjs`. Read existing job action tests before touching shared behavior.
 
-**Interfaces:** Preserve `evaluateProcessingAccess` and `APP_UPDATE_REQUIRED`. Fresh policy changes affect guarded create/retry/renew/confirm requests. Worker heartbeat/completion and already-submitted job status/results are not reclassified as new submissions.
+**Interfaces:** Preserve `evaluateProcessingAccess` and `APP_UPDATE_REQUIRED`. Fresh policy changes affect guarded create/retry/renew/confirm requests. Already-submitted job status/results are not reclassified as new submissions.
 
 - [ ] Write HTTP tests: below-minimum installation cannot create, retry, renew upload URL or confirm upload; current build succeeds. Derive platform/build from the authenticated owned installation, not arbitrary request body or unsigned headers.
 - [ ] Add a race test for publishing during upload: bytes already sent to S3 do not imply submission permission; confirmation after publication is rejected. A job confirmed before the update remains submitted and finishes normally.
-- [ ] Add integration proof for a submitted/claimed job: publish a higher minimum, complete the normal worker flow, retain output/history, and access after device metadata reports the upgraded build.
-- [ ] Keep auth/bootstrap/policy/update-download paths reachable so blocked clients can recover. Do not attach a blanket processing guard to worker routes or job completion/read paths.
+- [ ] Add integration proof for a retained job: publish a higher minimum, retain output/history, and access it after device metadata reports the upgraded build.
+- [ ] Keep auth/bootstrap/policy/update-download paths reachable so blocked clients can recover. Do not attach a blanket processing guard to job read or completed-result paths.
 - [ ] If validation reveals bypasses, change only the relevant route guards and return the existing typed error. A blocked media request should trigger the native update coordinator through its error adapter.
 
 ```text
 create@build9 after minimum10        => 403 APP_UPDATE_REQUIRED
 upload-complete@build9 after publish => 403 APP_UPDATE_REQUIRED
-worker completes previously queued  => normal success; output retained
+previously completed output          => normal access; output retained
 device syncs build12                 => new submissions allowed
 ```
 

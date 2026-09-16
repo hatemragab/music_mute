@@ -145,7 +145,7 @@ test(
         code: 'DEPENDENCY_UNAVAILABLE',
       });
       assert.equal(
-        (await values.findOne({ _id: 'worker-one' })).revision,
+        (await values.findOne({ _id: 'job-one' })).revision,
         1,
         'audit failure rolls domain changes back',
       );
@@ -179,7 +179,7 @@ test(
         ),
         (error) => error.getStatus() === 403,
       );
-      assert.equal((await values.findOne({ _id: 'worker-one' })).revision, 1);
+      assert.equal((await values.findOne({ _id: 'job-one' })).revision, 1);
     } finally {
       await connection?.close();
       await fixture.stop();

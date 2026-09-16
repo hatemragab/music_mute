@@ -13,19 +13,19 @@
 - Work only on `codex/security-cost-hardening` in the isolated worktree from `origin/main`.
 - Do not add tokens, monthly quotas, subscriptions or lifetime usage limits.
 - Do not mutate production infrastructure or credentials.
-- Preserve version-pinned downloads, worker fencing, account-deletion durability and existing API error safety.
+- Preserve version-pinned downloads, account-deletion durability and existing API error safety.
 - Add failing tests before implementation; run focused checks after every task and full checks before completion.
 
 ## Task 1: Conditional whole-object uploads
 
 **Backend files:** `backend/src/storage/storage-transfers.service.ts`, `backend/src/releases/release-artifact-storage.service.ts`, `backend/src/jobs/job.types.ts`, related specs.
 
-**Client files:** Android `processing/{JobModels,S3FormUploader}.kt`; iOS `Processing/{JobModels,S3MultipartFile,BackgroundTransferCoordinator}.swift`; Windows worker `musicmute_worker/transport.py`; dashboard release contracts/uploader and their tests.
+**Client files:** Android `processing/{JobModels,S3FormUploader}.kt`; iOS `Processing/{JobModels,S3MultipartFile,BackgroundTransferCoordinator}.swift`; dashboard release contracts/uploader and their tests.
 
 - [x] Specify `method: PUT`, allowlisted `headers`, exact checksum/content type and `If-None-Match: *` in backend tests.
 - [x] Generate `PutObjectCommand` grants with signed content length, type, checksum and conditional-create semantics.
 - [x] Migrate every client to stream the raw file using the returned method/headers, reject redirects and never attach API auth.
-- [x] Verify backend, dashboard, Android, iOS and worker focused tests.
+- [x] Verify backend, dashboard, Android and iOS focused tests.
 
 ## Task 2: Durable exact-key cleanup
 
@@ -59,5 +59,5 @@
 
 - [x] Test true positives, safe placeholders and value-redacting output.
 - [x] Add the tracked-source scan to `npm run verify`.
-- [x] Review the complete diff and run backend verify, dashboard format/lint/tests/deployment build, Windows worker tests, Android unit/lint/assemble and iOS tests on simulator `3CC14436-EC3C-4419-A079-C84951E5FA07` only.
+- [x] Review the complete diff and run backend verify, dashboard format/lint/tests/deployment build, Android unit/lint/assemble and iOS tests on simulator `3CC14436-EC3C-4419-A079-C84951E5FA07` only.
 - [x] Report any pre-existing failures separately; do not claim deployment or live infrastructure proof.

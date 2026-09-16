@@ -10,51 +10,51 @@ Use one Creative Card dark theme. Remove light/system appearance choices. Preser
 
 ## Main screen selections
 
-| Screen | Approved direction | Required behavior |
-|---|---|---|
-| Login | Creative Card auth board | Email/password and existing Google sign-in; registration/reset navigation |
-| Create account | Creative Card auth board | Full name, email, password and confirm password |
-| Forgot password | Creative Card auth board | Existing reset flow and request feedback |
-| Home | A Compact | Import, secondary YouTube entry, jobs list with Load more inside that list; no recent-audio section |
-| Library | B Audio cards | Processed results only, search, filters, stars, offline availability and mini-player |
-| Player | A Wave card | Audio only, seeking, previous/next, queue, auto-next, shuffle, repeat off/all/one, background/system controls |
-| Track details | C Media/Job tabs | Local availability/media metadata and actual originating job information |
-| Settings | C | Profile first, accent entry, inline language choices, About |
-| Profile | C Compact | Real account identity/access/verification state and existing account actions |
-| Connection methods | B Simple list | Existing provider capabilities and last-method safeguards |
-| Devices | C Grouped | Current installation grouping, real metadata, refresh and pagination; read only |
-| Accent picker | A Palette | Presets plus custom primary color, persistent and accessible |
+| Screen             | Approved direction       | Required behavior                                                                                             |
+| ------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Login              | Creative Card auth board | Email/password and existing Google sign-in; registration/reset navigation                                     |
+| Create account     | Creative Card auth board | Full name, email, password and confirm password                                                               |
+| Forgot password    | Creative Card auth board | Existing reset flow and request feedback                                                                      |
+| Home               | A Compact                | Import, secondary YouTube entry, jobs list with Load more inside that list; no recent-audio section           |
+| Library            | B Audio cards            | Processed results only, search, filters, stars, offline availability and mini-player                          |
+| Player             | A Wave card              | Audio only, seeking, previous/next, queue, auto-next, shuffle, repeat off/all/one, background/system controls |
+| Track details      | C Media/Job tabs         | Local availability/media metadata and actual originating job information                                      |
+| Settings           | C                        | Profile first, accent entry, inline language choices, About                                                   |
+| Profile            | C Compact                | Real account identity/access/verification state and existing account actions                                  |
+| Connection methods | B Simple list            | Existing provider capabilities and last-method safeguards                                                     |
+| Devices            | C Grouped                | Current installation grouping, real metadata, refresh and pagination; read only                               |
+| Accent picker      | A Palette                | Presets plus custom primary color, persistent and accessible                                                  |
 
 References: [saved gallery](GALLERY.md), [motion examples](motion/README.md).
 
 ## All 24 numbered selections
 
-| Board | Surface | Selection | Interpretation |
-|---|---|---|---|
-| 01 | Import review | C | Bottom sheet; preserve rights and private-cloud disclosure |
-| 02 | YouTube link | C | Input sheet; validation and explicit continue |
-| 03 | YouTube confirmation | B | Confirmation sheet before source download |
-| 04 | Active job | A | Timeline with actual progress and valid retry/cancel actions |
-| 05 | Completed result | C | Timeline/result presentation with lazy output actions |
-| 06 | Expanded playback queue | A | Sheet backed by the single audio session |
-| 07 | Former video concept | C layout only | Audio-only compact adaptation inside player presentation; no video page, video filter or second player |
-| 08 | Email verification | C | Sheet with resend/check/cooldown states |
-| 09 | Account recovery request | A | Card; reason, actual deadline and feedback |
-| 10 | Reauthentication | C | Full-page card, provider-aware |
-| 11 | Add password sign-in | C | Full-page card |
-| 12 | Disconnect method | B | Sheet with actual method safeguards |
-| 13 | Account deletion review | B | Sections describing real consequences |
-| 14 | Final account deletion | A | Dialog, preserve fresh-auth and durable deletion flow |
-| 15 | Sign out all devices | B | Sheet, preserve existing global sign-out semantics |
-| 16 | Rename audio | B | Sheet |
-| 17 | Delete audio | B | Sheet; explicit cloud/account and private-copy consequences |
-| 18 | About | C | Workflow explanation using implemented behavior |
-| 19 | Required update | A | Blocking card |
-| 20 | Optional update | C | Inline banner |
-| 21 | Shared states | Contextual C/B | Preserve selected page structure; C for otherwise empty pages, B inline when content exists |
-| 22 | Update progress | C | Compact progress |
-| 23 | Recovery pending | C | Steps; no invented approval date |
-| 24 | Source download details | B | Actual transfer timeline |
+| Board | Surface                  | Selection      | Interpretation                                                                                         |
+| ----- | ------------------------ | -------------- | ------------------------------------------------------------------------------------------------------ |
+| 01    | Import review            | C              | Bottom sheet; preserve rights and private-cloud disclosure                                             |
+| 02    | YouTube link             | C              | Input sheet; validation and explicit continue                                                          |
+| 03    | YouTube confirmation     | B              | Confirmation sheet before source download                                                              |
+| 04    | Active job               | A              | Timeline with actual progress and valid retry/cancel actions                                           |
+| 05    | Completed result         | C              | Timeline/result presentation with lazy output actions                                                  |
+| 06    | Expanded playback queue  | A              | Sheet backed by the single audio session                                                               |
+| 07    | Former video concept     | C layout only  | Audio-only compact adaptation inside player presentation; no video page, video filter or second player |
+| 08    | Email verification       | C              | Sheet with resend/check/cooldown states                                                                |
+| 09    | Account recovery request | A              | Card; reason, actual deadline and feedback                                                             |
+| 10    | Reauthentication         | C              | Full-page card, provider-aware                                                                         |
+| 11    | Add password sign-in     | C              | Full-page card                                                                                         |
+| 12    | Disconnect method        | B              | Sheet with actual method safeguards                                                                    |
+| 13    | Account deletion review  | B              | Sections describing real consequences                                                                  |
+| 14    | Final account deletion   | A              | Dialog, preserve fresh-auth and durable deletion flow                                                  |
+| 15    | Sign out all devices     | B              | Sheet, preserve existing global sign-out semantics                                                     |
+| 16    | Rename audio             | B              | Sheet                                                                                                  |
+| 17    | Delete audio             | B              | Sheet; explicit cloud/account and private-copy consequences                                            |
+| 18    | About                    | C              | Workflow explanation using implemented behavior                                                        |
+| 19    | Required update          | A              | Blocking card                                                                                          |
+| 20    | Optional update          | C              | Inline banner                                                                                          |
+| 21    | Shared states            | Contextual C/B | Preserve selected page structure; C for otherwise empty pages, B inline when content exists            |
+| 22    | Update progress          | C              | Compact progress                                                                                       |
+| 23    | Recovery pending         | C              | Steps; no invented approval date                                                                       |
+| 24    | Source download details  | B              | Actual transfer timeline                                                                               |
 
 ## Library and durable offline playback
 
@@ -82,21 +82,21 @@ The local-hide/restoration contract is an implementation default for the request
 
 ## Motion: all recommended A
 
-| Interaction | Shared motion contract |
-|---|---|
-| Decorative wave | Approximately 12-second seamless phase cycle, small displacement; accent driven |
-| Bottom sheet | Approximately 340 ms open, 300 ms close, cubic easing, no visible overshoot |
-| Primary button | Press scale to 0.975 with ripple, return smoothly; no delayed action dispatch |
-| Star | Restrained approximately 300 ms state feedback; immediately update accessible selected state |
-| Navigation | Approximately 230 ms fade and small logical slide; start with 16 dp, mirror where appropriate in RTL |
-| Ordinary rows/toolbars | Standard native ripple/feedback |
+| Interaction            | Shared motion contract                                                                               |
+| ---------------------- | ---------------------------------------------------------------------------------------------------- |
+| Decorative wave        | Approximately 12-second seamless phase cycle, small displacement; accent driven                      |
+| Bottom sheet           | Approximately 340 ms open, 300 ms close, cubic easing, no visible overshoot                          |
+| Primary button         | Press scale to 0.975 with ripple, return smoothly; no delayed action dispatch                        |
+| Star                   | Restrained approximately 300 ms state feedback; immediately update accessible selected state         |
+| Navigation             | Approximately 230 ms fade and small logical slide; start with 16 dp, mirror where appropriate in RTL |
+| Ordinary rows/toolbars | Standard native ripple/feedback                                                                      |
 
 Centralize values and animation lifecycle. Native gestures, focus and accessibility remain authoritative. Pause decorative motion when hidden/backgrounded; obey disabled/reduced system motion with a static wave and immediate transitions. Avoid per-frame repository reads, list-wide recomposition, bitmap allocation, blur stacks or one animation clock per row. Actual Android profiling determines final tuning; demo videos do not prove performance.
 
 ## Behavior that redesign must preserve
 
 - Rights confirmation and private-cloud disclosure remain before upload; YouTube remains a visible secondary flow with its existing download confirmation. Pasting and previews do not authorize cloud upload.
-- Preserve audio input validation, individual job identity, cancellation rules, bounded retry, truthful worker-offline/error states and real timestamps. Unknown progress is indeterminate; duration and processing elapsed are different values.
+- Preserve audio input validation, individual job identity, cancellation rules, bounded retry, truthful processing-unavailable/error states and real timestamps. Unknown progress is indeterminate; duration and processing elapsed are different values.
 - Preserve account recovery, verification cooldowns, provider reauthentication, last-method protections, account deletion recovery period and durable deletion journal. Use actual strings/contracts, not sample image copy.
 - Required updates remain non-bypassable. Optional banners preserve current content. Do not alter release enforcement or distribution behavior.
 - Android owns the document picker, share sheet, Google chooser, permission dialogs and installer. No custom replicas.

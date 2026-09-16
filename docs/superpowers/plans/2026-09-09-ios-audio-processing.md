@@ -11,31 +11,35 @@
 **Spec:** [Approved mobile design](../specs/2026-09-09-mobile-audio-processing.md)
 
 ## Global constraints
+
 - Explicit Remove music; local imports and completed YouTube files; voice-only MP3 fetched on demand.
 - Input bytes 1..29,999,999; duration finite, >0 and <600 seconds; padded base64 SHA-256.
 - Preserve exact signed form fields, immutable input and UUIDv4 idempotency across retries.
 - Owner-isolated cloud storage; retain existing local original history; no automatic retained-file deletion.
 - Backend owns FIFO, state, cancellation acknowledgement and retry eligibility; no invented percentages/ETA.
-- Never expose tokens, grants, keys or worker credentials; no user bearer on storage transfers.
+- Never expose tokens, grants, or keys; no user bearer on storage transfers.
 - English/Arabic, RTL, accessibility and existing auth/processing-policy rules apply throughout.
 - No commit, push, deploy, release or real-account creation without explicit authorization.
 - Only authorized UI/device target: iPhone 17 Pro iOS 26.0, $IOS_SIMULATOR_UDID.
 - Tests listed below are future execution instructions, not claims of completed validation.
 
 ## Execution method
+
 For each task, add the named focused regression tests first, run the focused suite and observe the new behavior failing, implement the listed contract, then rerun until green and review the diff. Use injected network/token/file/clock boundaries; never point fixtures at production. Test snippets below anchor the proposed interfaces; fill out each named scenario with deterministic fixtures within that task. Leave unrelated existing edits intact. Do not commit automatically.
 
-
 ## File roots and focused validation
+
 Production paths below are relative to ios/Vocal. VocalTests, VocalUITests and project.yml are relative to ios. No new minimum OS version is proposed; preserve iOS 17.
 
 From ios, run each new test class before and after implementing its task:
+
 ```sh
 xcodebuild -project MusicMute.xcodeproj -scheme MusicMute \
   -destination "platform=iOS Simulator,id=$IOS_SIMULATOR_UDID" \
   -derivedDataPath DerivedData-processing -parallel-testing-enabled NO \
   -only-testing:VocalTests/JobsAPIClientTests test CODE_SIGNING_ALLOWED=NO
 ```
+
 Substitute the named test class. If the exact simulator is absent, record the blocker; do not substitute or create a simulator.
 
 ## I01: Codable job contract and authenticated API
@@ -49,6 +53,7 @@ Substitute the named test class. If the exact simulator is absent, record the bl
 - [ ] Implement: Reuse IDTokenSource/current installation and validated origin. Keep JSON API session separate from file transfer sessions. Follow exact safe API projection; no output checksum, queue position or separation progress fields may be fabricated.
 
 Contract/test anchor:
+
 ```swift
 @MainActor protocol JobsAPI {
   func create(requestId: UUID, input: InputDeclaration) async throws -> CreateReservation
@@ -75,6 +80,7 @@ Contract/test anchor:
 - [ ] Implement: Use SwiftUI fileImporter/system document picker with audio UTTypes, security-scoped access and coordinated bounded file copy into no-backup UID staging. Inspect actual media using existing AVFoundation conventions; stream CryptoKit SHA256 over final bytes and base64-encode the digest. Accept only supported, inspectable audio pairs; show a clear unsupported-format error instead of transcoding.
 
 Contract/test anchor:
+
 ```swift
 func validProcessingInput(bytes: Int64, duration: Double) -> Bool {
   (1...29_999_999).contains(bytes) && duration.isFinite && duration > 0 && duration < 600
@@ -94,6 +100,7 @@ func validProcessingInput(bytes: Int64, duration: Double) -> Bool {
 - [ ] Implement: Persist UploadIntent before POST. Build a file-backed multipart body with every grant field verbatim and file part last; guard available disk because the spool duplicates input bytes. Use URLSession background uploadTask(fromFile:) for S3 bytes with a stable session ID and restored delegates. Keep short authenticated API calls on foreground/available background execution; if confirm cannot run, persist needs-confirmation for next foreground. On uncertainty attempt confirmation/refetch before whole-file retry. There is no signed POST range resume. Implement bounded renew/retry and atomic state transitions; user force-quit can defer recovery until reopen. Wire UIApplicationDelegateAdaptor background-session completion handling and drain each completion handler once.
 
 Contract/test anchor:
+
 ```swift
 struct UploadIntent: Codable {
   let operationId: UUID
@@ -115,9 +122,10 @@ struct UploadIntent: Codable {
 
 - [ ] Add focused tests: Test opaque paging, duplicate IDs, refresh discarding stale page responses, all state labels, out-of-order detail requests, retained offline list, workerUnavailable without failure, background task cancellation and unknown-status read-only rendering.
 - [ ] Run named test classes and observe the expected new failure.
-- [ ] Implement: Add Processing alongside original download History. Refresh every 10 seconds while active work is visible, back off transient failures to 60 seconds and refresh on scene activation/manual action. Do not run indefinite background polling. Display accurate indeterminate stages and worker availability only from detail. Persist safe metadata, never temporary signed grants.
+- [ ] Implement: Add Processing alongside original download History. Refresh every 10 seconds while active work is visible, back off transient failures to 60 seconds and refresh on scene activation/manual action. Do not run indefinite background polling. Display accurate indeterminate stages and processing availability only from detail. Persist safe metadata, never temporary signed grants.
 
 Contract/test anchor:
+
 ```swift
 func shouldPollJob(_ status: String) -> Bool {
   ["awaiting_upload", "queued", "validating", "processing",
@@ -133,11 +141,12 @@ func shouldPollJob(_ status: String) -> Bool {
 
 **Interfaces:** Consumes stable upload/retry intents and API mutations. Produces cancel(jobId:), retry(jobId:) and session-epoch fencing for model, file transfer and player callbacks.
 
-- [ ] Add focused tests: Test cancellation during create/upload/confirm, failed network cancel, ready race, offline-worker pending cancellation, retry response loss, invalid-input retry, double tap and late upload/result completion after UID change.
+- [ ] Add focused tests: Test cancellation during create/upload/confirm, failed network cancel, ready race, processing-unavailable cancellation, retry response loss, invalid-input retry, double tap and late upload/result completion after UID change.
 - [ ] Run named test classes and observe the expected new failure.
-- [ ] Implement: Stop/fence local work and resolve an uncertain reservation before server cancel. Render cancel_requested until the API changes it. Persist a fresh retry requestId before sending; keep the old failed job and link the new job. Handle NEW_INPUT_REQUIRED through picker flow and leave interrupted to worker recovery. Session switch clears visible cloud state and stops old playback/transfers without cancelling server jobs or deleting retained files.
+- [ ] Implement: Stop/fence local work and resolve an uncertain reservation before server cancel. Render cancel_requested until the API changes it. Persist a fresh retry requestId before sending; keep the old failed job and link the new job. Handle NEW_INPUT_REQUIRED through picker flow and keep interrupted state server-authoritative. Session switch clears visible cloud state and stops old playback/transfers without cancelling server jobs or deleting retained files.
 
 Contract/test anchor:
+
 ```swift
 struct SessionFence: Equatable {
   let uid: String
@@ -161,6 +170,7 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool {
 - [ ] Implement: Use file-based download through the transfer coordinator, verify playable MP3 before atomic promotion, and expose real byte progress. Reuse AVAudioPlayer/Now Playing for ready output, with original and voice labels. Save to Files exports unchanged MP3 bytes. Do not persist grants, auto-download completed jobs, auto-delete cache or treat missing HTTP Content-Length as corruption.
 
 Contract/test anchor:
+
 ```swift
 enum ArtifactIntent {
   case play
@@ -182,6 +192,7 @@ enum ArtifactIntent {
 - [ ] Implement: Add FirebaseMessaging from the pinned Firebase package; integrate delegates through the app's single UIApplicationDelegateAdaptor. Explicitly define APNs token forwarding/delegate behavior and avoid duplicate swizzling/manual delivery. Ask notification permission contextually; application remains usable if denied. Device sync precedes backend token binding. Deactivate best-effort before sign-out; preserve privacy/session fencing. Visible background alerts require MOB-B01 and valid APNs provisioning; do not claim the current data-only backend is sufficient.
 
 Contract/test anchor:
+
 ```swift
 func isJobHint(_ data: [AnyHashable: Any]) -> Bool {
   guard data["type"] as? String == "audio_job_outcome",
@@ -202,9 +213,10 @@ func isJobHint(_ data: [AnyHashable: Any]) -> Bool {
 
 - [ ] Add focused tests: Build isolated injected job/storage fixtures for source → upload → queued/offline → processing → ready → Play/Save, cancellation, retry and relaunch recovery. Verify English/Arabic RTL, Dynamic Type, VoiceOver identifiers, denied notifications, account switch and original-download regression.
 - [ ] Run named test classes and observe the expected new failure.
-- [ ] Implement: Remove production demo navigation after real flow integration. Regenerate MusicMute.xcodeproj from project.yml if source/target wiring requires it; inspect only intended changes and do not edit unrelated generated assets. Run swift-format lint and the commands below. Record simulator injection separately from real Firebase/APNs/S3/Z440 proof.
+- [ ] Implement: Remove production demo navigation after real flow integration. Regenerate MusicMute.xcodeproj from project.yml if source/target wiring requires it; inspect only intended changes and do not edit unrelated generated assets. Run swift-format lint and the commands below. Record simulator injection separately from real Firebase/APNs/S3 proof.
 
 Contract/test anchor:
+
 ```swift
 func testInputLimits() {
   XCTAssertTrue(validProcessingInput(bytes: 29_999_999, duration: 599.999))
@@ -216,9 +228,11 @@ func testInputLimits() {
 - [ ] Run focused tests, fix regressions and review this task's diff.
 
 ## Dependencies and final checks
+
 I01/I02 → I03 → I04 → I05 → I06. I07 requires I01/I04/I05; visible alerts also require MOB-B01. I08 closes the flow.
 
 Run from ios:
+
 ```sh
 xcrun swift-format lint --recursive Vocal VocalTests VocalUITests scripts
 xcodebuild -project MusicMute.xcodeproj -scheme MusicMute \
@@ -230,4 +244,5 @@ xcodebuild -project MusicMute.xcodeproj -scheme MusicMute -configuration Release
   build CODE_SIGNING_ALLOWED=NO
 git diff --check
 ```
+
 Supply existing validated API-origin build configuration for Release; do not write credentials/config secrets into the plan. Explicitly report skips/opt-in live tests. A generic unsigned build does not run another device. Do not claim real APNs reception, uninterrupted background execution or acoustic separation from fixture/simulator results.

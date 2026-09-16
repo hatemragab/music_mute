@@ -1,9 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { setDashboardRole } from "./helpers/session";
 
-test("compiled backend accepts basic processing settings and exposes no removed policy routes", async ({
-  page,
-}) => {
+test("compiled backend accepts basic processing settings", async ({ page }) => {
   await setDashboardRole(page, "owner");
   await page.goto("/overview");
   const result = await page.evaluate(async () => {
@@ -40,8 +38,6 @@ test("compiled backend accepts basic processing settings and exposes no removed 
       ...command,
       operationId: crypto.randomUUID(),
     });
-    const removedPolicy = await request("GET", "/admin/settings/processing-v2");
-    const removedQueue = await request("GET", "/admin/jobs/queue-summary");
     const allowance = await request(
       "PUT",
       "/admin/users/missing-user/processing-allowance",
@@ -58,8 +54,6 @@ test("compiled backend accepts basic processing settings and exposes no removed 
       save,
       after,
       conflict,
-      removedPolicy,
-      removedQueue,
       allowance,
     };
   });
@@ -68,7 +62,5 @@ test("compiled backend accepts basic processing settings and exposes no removed 
   expect(result.after.value.revision).toBe(result.before.value.revision + 1);
   expect(result.after.value.acceptNewJobs).toBe(false);
   expect(result.conflict.status).toBe(409);
-  expect(result.removedPolicy.status).toBe(404);
-  expect(result.removedQueue.status).toBe(404);
   expect(result.allowance.status).toBe(404);
 });

@@ -15,7 +15,7 @@ See the [execution record](../../tasks/automatic-audio-experience-execution.md).
 
 **Tech Stack:** Kotlin, Compose, StateFlow, WorkManager, existing downloader, DataStore/local storage, Media3, current HTTP/S3 clients.
 
-**Spec:** [Agreed automatic audio experience](../specs/2026-09-10-automatic-audio-experience.md). Backend dependencies: [B01–B05](2026-09-10-backend-audio-experience.md).
+**Spec:** [Agreed automatic audio experience](../specs/2026-09-10-automatic-audio-experience.md). Current backend behavior is documented in `backend/docs/api/audio-processing.md`.
 
 ## Global constraints
 
@@ -84,7 +84,7 @@ For each task, first add its named failure cases, run the focused test to observ
 
 **Files:** modify ui/{VocalApp.kt,ProcessingHistoryScreen.kt,ProcessingDetailScreen.kt,ProcessingLabels.kt,Theme.kt,Previews.kt}, state/ProcessingViewModel.kt, processing/JobHistoryController.kt, existing android/app/src/main/res/values*/strings.xml. Create ui/AudioTaskCard.kt, ui/AudioStepTimeline.kt, and processing/AudioTaskPresentation.kt; create processing/AudioTaskPresentationTest.kt and extend processing/JobHistoryControllerTest.kt.
 
-- [ ] Add pure presentation tests for every state in the spec, active versus output-fetch phases, null/approximate timings, worker offline, missing names, and local/cloud row merging.
+- [ ] Add pure presentation tests for every state in the spec, active versus output-fetch phases, null/approximate timings, processing unavailable, missing names, and local/cloud row merging.
 - [ ] Replace the separate manual download-then-remove-music journey with URL/import intake, active tasks, and a processed-only library. Preserve legacy originals privately; do not expose original playback through the new result flow.
 - [ ] Build compact cards with preserved name, actual stage, elapsed time, and measured transfer progress. Tap opens timeline, separate total/processing duration, full copyable Job ID (or pre-job Reference), and safe error/retry details.
 - [ ] Anchor running timers to persisted local/server clocks, stop at Ready, label approximations, and never infer timing from audio duration. A failed Play download leaves the job Ready with a separate artifact error.
@@ -128,7 +128,7 @@ For each task, first add its named failure cases, run the focused test to observ
 
 **Dependencies:** A01–A06 plus B05 for real contract integration. **Files:** extend existing unit tests; create docs/validation/android-audio-experience.md at the repository root during implementation; update the shared task tracker.
 
-- [ ] Add deterministic end-to-end orchestration tests with fake downloader/API/storage for one URL, one import, two concurrent submissions, interruption/restart, cancellation, rename, deletion, share, and diagnostics. Keep fixture proof separate from live backend/S3/Z440 proof.
+- [ ] Add deterministic end-to-end orchestration tests with fake downloader/API/storage for one URL, one import, two concurrent submissions, interruption/restart, cancellation, rename, deletion, share, and diagnostics. Keep fixture proof separate from live backend/S3 proof.
 - [ ] From android, run ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug. Fix change-induced failures; review strings, merged foreground-service manifest, and cache/file-provider scope.
 - [ ] Run git diff --check and review only the intended implementation diff. Record formatter availability rather than inventing a Gradle formatter task or introducing a dependency solely for this plan.
 - [ ] Document unrun Android UI/device scenarios: locked/background downloads and handoff, notification permission/dismissal/timeout, force-stop/relaunch, real picker/share sheet, Arabic large text, and process-death recovery. No Android device is authorized currently.

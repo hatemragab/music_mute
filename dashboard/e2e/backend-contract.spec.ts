@@ -265,13 +265,11 @@ test("every dashboard mutation payload passes compiled backend strict validation
         revision(),
       );
     }
-    for (const action of ["cancel", "retry"] as const) {
-      results[`job-${action}`] = await request(
-        "POST",
-        `/admin/jobs/${missingId}/${action}`,
-        revision(),
-      );
-    }
+    results.jobCancel = await request(
+      "POST",
+      `/admin/jobs/${missingId}/cancel`,
+      revision(),
+    );
     results.alertAcknowledge = await request(
       "POST",
       `/admin/alerts/${missingId}/acknowledge`,
