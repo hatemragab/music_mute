@@ -1,5 +1,3 @@
-import { QueuePolicyService } from './queue-policy.service.js';
-import { UpdateQueuePolicyDto } from './dto/queue-policy.dto.js';
 import { Body, Controller, Get, Header, Put, Query, Req } from '@nestjs/common';
 import type { AuthRequest } from '../auth/auth-request.js';
 import { Public } from '../auth/auth.decorators.js';
@@ -12,23 +10,7 @@ import { ProcessingSettingsService } from './processing-settings.service.js';
 
 @Controller('admin/settings')
 export class AdminSettingsController {
-  constructor(
-    private readonly settings: ProcessingSettingsService,
-    private readonly queuePolicy: QueuePolicyService,
-  ) {}
-
-  @Get('processing-v2')
-  @RequireAdminPermission('settings.read')
-  queueCurrent() {
-    return this.queuePolicy.current();
-  }
-
-  @Put('processing-v2')
-  @RequireAdminPermission('settings.manage')
-  @RequireFreshAdminAuth()
-  queueUpdate(@Req() request: AuthRequest, @Body() dto: UpdateQueuePolicyDto) {
-    return this.queuePolicy.update(request.adminActor!, dto);
-  }
+  constructor(private readonly settings: ProcessingSettingsService) {}
 
   @Get('processing')
   @RequireAdminPermission('settings.read')

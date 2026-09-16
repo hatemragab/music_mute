@@ -1,4 +1,3 @@
-import { ConfigService } from '@nestjs/config';
 import { model } from 'mongoose';
 import {
   DEFAULT_PROCESSING_SETTINGS,
@@ -16,7 +15,6 @@ describe('processing settings', () => {
       { findById } as never,
       {} as never,
       {} as never,
-      new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
     );
     await expect(service.current()).resolves.toMatchObject({
       revision: 0,
@@ -95,7 +93,6 @@ describe('processing settings', () => {
       { findById, findOneAndUpdate } as never,
       fences as never,
       operations as never,
-      new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
     );
     await expect(
       service.update({ uid: 'owner' } as never, {
@@ -149,7 +146,6 @@ describe('processing settings', () => {
       } as never,
       { updateOne: vi.fn().mockResolvedValue({ acknowledged: true }) } as never,
       operations as never,
-      new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
     );
     const response = await service.update({ uid: 'owner' } as never, {
       ...DEFAULT_PROCESSING_SETTINGS,

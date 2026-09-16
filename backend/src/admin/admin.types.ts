@@ -1,11 +1,7 @@
-export type AdminRole =
-  'owner' | 'release_manager' | 'worker_manager' | 'support' | 'viewer';
+export type AdminRole = 'owner' | 'release_manager' | 'support' | 'viewer';
 
 export type AdminPermission =
   | 'overview.read'
-  | 'workers.read'
-  | 'workers.manage'
-  | 'workers.recover'
   | 'jobs.read'
   | 'jobs.manage'
   | 'users.read'

@@ -36,7 +36,6 @@ describe('overview HTTP permission and interval boundaries', () => {
     for (const role of [
       'owner',
       'release_manager',
-      'worker_manager',
       'support',
       'viewer',
     ] as const) {

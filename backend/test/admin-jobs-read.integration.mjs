@@ -77,7 +77,7 @@ test(
         ),
         actor = {
           uid: 'fixture-admin',
-          role: 'worker_manager',
+          role: 'support',
           permissions: ['jobs.read'],
         };
       const query = { userId: userId.toString(), limit: '2' };

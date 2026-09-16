@@ -10,9 +10,6 @@
         "role": "owner",
         "permissions": [
           "overview.read",
-          "workers.read",
-          "workers.manage",
-          "workers.recover",
           "jobs.read",
           "jobs.manage",
           "users.read",
@@ -55,7 +52,6 @@
         "role": "support",
         "permissions": [
           "overview.read",
-          "workers.read",
           "jobs.read",
           "jobs.manage",
           "users.read",
@@ -67,162 +63,6 @@
         "accessRevision": 0,
         "authTimeSec": 1789079284,
         "serverTime": "2026-01-01T00:00:00.000Z"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/workers",
-      "response": {
-        "worker": {
-          "id": "fixture-worker",
-          "label": "Fixture worker",
-          "state": "enabled",
-          "online": false,
-          "lastSeenAt": null,
-          "activeJobId": null,
-          "activeAttemptId": null,
-          "recoveryRequired": false,
-          "revision": 0
-        },
-        "rawKey": "<one-time-fixture-key>"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/admin/workers/fixture-worker",
-      "response": {
-        "id": "fixture-worker",
-        "label": "Fixture worker",
-        "state": "enabled",
-        "online": true,
-        "lastSeenAt": "2026-01-01T00:00:00.000Z",
-        "activeJobId": "000000000000000000000001",
-        "activeAttemptId": "00000000-0000-4000-8000-000000000001",
-        "recoveryRequired": false,
-        "revision": 3,
-        "protocolVersion": 2,
-        "slotState": "active",
-        "assignment": {
-          "jobId": "000000000000000000000001",
-          "attemptId": "00000000-0000-4000-8000-000000000001",
-          "sessionId": "00000000-0000-4000-8000-000000000001",
-          "generation": 1,
-          "leaseExpiresAt": "2026-01-01T00:00:00.000Z"
-        },
-        "recentEvents": [
-          {
-            "id": "000000000000000000000001",
-            "action": "workers.create",
-            "at": "2026-01-01T00:00:00.000Z",
-            "outcome": "succeeded"
-          }
-        ]
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/workers/fixture-worker/drain",
-      "response": {
-        "id": "fixture-worker",
-        "label": "Fixture worker",
-        "state": "draining",
-        "online": true,
-        "lastSeenAt": "2026-01-01T00:00:00.000Z",
-        "activeJobId": "000000000000000000000001",
-        "activeAttemptId": "00000000-0000-4000-8000-000000000001",
-        "recoveryRequired": false,
-        "revision": 4
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/admin/workers/fixture-worker",
-      "response": {
-        "id": "fixture-worker",
-        "label": "Fixture worker",
-        "state": "draining",
-        "online": true,
-        "lastSeenAt": "2026-01-01T00:00:00.000Z",
-        "activeJobId": "000000000000000000000001",
-        "activeAttemptId": "00000000-0000-4000-8000-000000000001",
-        "recoveryRequired": false,
-        "revision": 4,
-        "protocolVersion": 2,
-        "slotState": "active",
-        "assignment": {
-          "jobId": "000000000000000000000001",
-          "attemptId": "00000000-0000-4000-8000-000000000001",
-          "sessionId": "00000000-0000-4000-8000-000000000001",
-          "generation": 1,
-          "leaseExpiresAt": "2026-01-01T00:00:00.000Z"
-        },
-        "recentEvents": [
-          {
-            "id": "000000000000000000000001",
-            "action": "workers.drain",
-            "at": "2026-01-01T00:00:00.000Z",
-            "outcome": "succeeded"
-          },
-          {
-            "id": "000000000000000000000001",
-            "action": "workers.create",
-            "at": "2026-01-01T00:00:00.000Z",
-            "outcome": "succeeded"
-          }
-        ]
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/workers/fixture-worker/release-stopped",
-      "response": {
-        "id": "fixture-worker",
-        "label": "Fixture worker",
-        "state": "draining",
-        "online": true,
-        "lastSeenAt": "2026-01-01T00:00:00.000Z",
-        "activeJobId": null,
-        "activeAttemptId": null,
-        "recoveryRequired": false,
-        "revision": 5
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/admin/workers/fixture-worker",
-      "response": {
-        "id": "fixture-worker",
-        "label": "Fixture worker",
-        "state": "draining",
-        "online": true,
-        "lastSeenAt": "2026-01-01T00:00:00.000Z",
-        "activeJobId": null,
-        "activeAttemptId": null,
-        "recoveryRequired": false,
-        "revision": 5,
-        "protocolVersion": 2,
-        "slotState": "idle",
-        "assignment": null,
-        "recentEvents": [
-          {
-            "id": "000000000000000000000001",
-            "action": "workers.release-stopped",
-            "at": "2026-01-01T00:00:00.000Z",
-            "outcome": "succeeded"
-          },
-          {
-            "id": "000000000000000000000001",
-            "action": "workers.drain",
-            "at": "2026-01-01T00:00:00.000Z",
-            "outcome": "succeeded"
-          },
-          {
-            "id": "000000000000000000000001",
-            "action": "workers.create",
-            "at": "2026-01-01T00:00:00.000Z",
-            "outcome": "succeeded"
-          }
-        ]
       }
     },
     {
@@ -257,7 +97,6 @@
         "id": "000000000000000000000001",
         "userId": "000000000000000000000001",
         "status": "queued",
-        "workerId": null,
         "createdAt": "2026-01-01T00:00:00.000Z",
         "queuedAt": "2026-01-01T00:00:00.000Z",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -307,9 +146,7 @@
           "resultAvailable": false
         },
         "userEmail": "user@example.invalid",
-        "userDisplayName": "Fixture user",
-        "recoveryRequired": false,
-        "activeAttemptId": null
+        "userDisplayName": "Fixture user"
       }
     },
     {
@@ -483,10 +320,6 @@
             "processing": 0
           }
         },
-        "workers": {
-          "total": 1,
-          "online": 1
-        },
         "series": [
           {
             "start": "2026-01-01T00:00:00.000Z",
@@ -541,27 +374,6 @@
     },
     {
       "method": "GET",
-      "path": "/admin/workers",
-      "response": {
-        "items": [
-          {
-            "id": "fixture-worker",
-            "label": "Fixture worker",
-            "state": "draining",
-            "online": true,
-            "lastSeenAt": "2026-01-01T00:00:00.000Z",
-            "activeJobId": null,
-            "activeAttemptId": null,
-            "recoveryRequired": false,
-            "revision": 5
-          }
-        ],
-        "nextCursor": null,
-        "asOf": "2026-01-01T00:00:00.000Z"
-      }
-    },
-    {
-      "method": "GET",
       "path": "/admin/jobs",
       "response": {
         "items": [
@@ -569,7 +381,6 @@
             "id": "000000000000000000000001",
             "userId": "000000000000000000000001",
             "status": "queued",
-            "workerId": null,
             "createdAt": "2026-01-01T00:00:00.000Z",
             "queuedAt": "2026-01-01T00:00:00.000Z",
             "startedAt": "2026-01-01T00:00:00.000Z",
@@ -691,35 +502,6 @@
       "path": "/admin/alerts",
       "response": {
         "items": [],
-        "nextCursor": null,
-        "asOf": "2026-01-01T00:00:00.000Z"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/admin/jobs/000000000000000000000001/attempts",
-      "response": {
-        "items": [
-          {
-            "id": "00000000-0000-4000-8000-000000000001",
-            "jobId": "000000000000000000000001",
-            "workerId": "fixture-worker",
-            "sessionId": "00000000-0000-4000-8000-000000000001",
-            "generation": 1,
-            "outcome": "interrupted",
-            "startedAt": "2026-01-01T00:00:00.000Z",
-            "endedAt": "2026-01-01T00:00:00.000Z",
-            "interruptedAt": "2026-01-01T00:00:00.000Z",
-            "releasedAt": "2026-01-01T00:00:00.000Z",
-            "recoveryRequired": false,
-            "processingStartedAt": null,
-            "processingEndedAt": null,
-            "processingElapsedApproximate": false,
-            "replacementAttemptId": null,
-            "localDataDeletedAt": null,
-            "durationSeconds": null
-          }
-        ],
         "nextCursor": null,
         "asOf": "2026-01-01T00:00:00.000Z"
       }

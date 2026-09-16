@@ -43,12 +43,7 @@ describe('admin users HTTP boundary', () => {
       .request('get', '/admin/users', undefined, harness.signInAs('viewer'))
       .expect(403);
     await harness
-      .request(
-        'get',
-        '/admin/users',
-        undefined,
-        harness.signInAs('worker_manager'),
-      )
+      .request('get', '/admin/users', undefined, harness.signInAs('viewer'))
       .expect(403);
     expect(users.list).toHaveBeenCalledOnce();
   });

@@ -34,16 +34,11 @@ describe('administrative job read HTTP permission', () => {
       .expect(403);
     expect(jobs.list).not.toHaveBeenCalled();
     const result = await harness
-      .request(
-        'get',
-        '/admin/jobs',
-        undefined,
-        harness.signInAs('worker_manager'),
-      )
+      .request('get', '/admin/jobs', undefined, harness.signInAs('support'))
       .expect(200);
     expect(result.headers['cache-control']).toBe('no-store');
     expect(jobs.list.mock.calls[0]?.[0]).toMatchObject({
-      role: 'worker_manager',
+      role: 'support',
     });
   });
 });

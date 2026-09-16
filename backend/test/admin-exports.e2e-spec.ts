@@ -34,7 +34,7 @@ describe('CSV export HTTP boundary', () => {
   }
   it('requires exports plus dataset permission and returns UTF-8 attachments without cache', async () => {
     const exports = await setup();
-    for (const role of ['owner', 'worker_manager', 'support'] as const) {
+    for (const role of ['owner', 'support'] as const) {
       const token = harness.signInAs(role);
       for (const dataset of ['jobs', 'overview']) {
         const result = await harness

@@ -41,9 +41,9 @@ describe('administrative job action HTTP boundary', () => {
     return { harness, actions };
   }
 
-  it('permits owner, support and worker manager while rejecting viewer and release manager', async () => {
+  it('permits owner and support while rejecting viewer and release manager', async () => {
     const f = await fixture();
-    for (const role of ['owner', 'support', 'worker_manager'] as const) {
+    for (const role of ['owner', 'support'] as const) {
       for (const operation of ['cancel', 'retry']) {
         await f.harness
           .request(

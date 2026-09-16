@@ -53,7 +53,7 @@ describe('admin health HTTP boundary', () => {
         'get',
         '/admin/alerts?state=active',
         undefined,
-        harness.signInAs('worker_manager'),
+        harness.signInAs('owner'),
       )
       .expect(200);
     await harness
@@ -68,10 +68,10 @@ describe('admin health HTTP boundary', () => {
     const body = {
       expectedRevision: 0,
       operationId: 'e183f234-ac55-4d06-9d08-b92d5d829ed8',
-      reason: 'Investigating worker outage',
+      reason: 'Investigating service incident',
     };
     await harness
-      .request('post', path, body, harness.signInAs('worker_manager'))
+      .request('post', path, body, harness.signInAs('owner'))
       .expect(201)
       .expect((response) => expect(response.body.state).toBe('active'));
     await harness

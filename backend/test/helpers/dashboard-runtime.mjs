@@ -1,11 +1,11 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { Test } from '@nestjs/testing';
-import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { assertLoopbackUrl } from './isolated-services.mjs';
 
@@ -25,8 +25,6 @@ const { ReleaseArtifactStorageService } =
   await import('../../dist/releases/release-artifact-storage.service.js');
 const { ApkVerifierService } =
   await import('../../dist/releases/apk-verifier.service.js');
-const { WorkerCoordinatorService } =
-  await import('../../dist/worker/worker-coordinator.service.js');
 const { authError } = await import('../../dist/auth/auth.errors.js');
 
 const useCurl = process.env.DASHBOARD_HTTP_CLIENT === 'curl';
@@ -114,12 +112,7 @@ const routeEndpoint = (route) =>
     .replace(':operationId', '2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29')
     .replace(':uploadId', 'bbbbbbbbbbbbbbbbbbbbbbbb')
     .replace(':uid', 'synthetic-target-uid')
-    .replace(
-      ':id',
-      route.path.startsWith('/admin/workers/')
-        ? 'fixture-worker'
-        : 'aaaaaaaaaaaaaaaaaaaaaaaa',
-    );
+    .replace(':id', 'aaaaaaaaaaaaaaaaaaaaaaaa');
 
 const profile = (uid) => ({
   uid,
@@ -191,7 +184,6 @@ try {
   configureHttp(app);
   await app.listen(requestedPort, '127.0.0.1');
   const base = `${await app.getUrl()}/api/v1`;
-  const db = app.get(getConnectionToken());
   const accesses = app.get(getModelToken('AdminAccess'));
   await accesses.create({
     uid: 'owner-fixture',
@@ -285,19 +277,6 @@ try {
     (await api('GET', '/admin/session', undefined, 'support-fixture')).role,
     'support',
   );
-  const worker = await api(
-    'POST',
-    '/admin/workers',
-    command({ id: 'fixture-worker', label: 'Fixture worker' }),
-  );
-  assert.equal(worker.rawKey.length, 64);
-  await api(
-    'POST',
-    '/admin/workers',
-    command({ id: 'forbidden-worker', label: 'Forbidden' }),
-    'support-fixture',
-    403,
-  );
   const users = model('User'),
     jobs = model('Job');
   const userId = new Types.ObjectId(),
@@ -351,42 +330,6 @@ try {
     },
     inputObject: input,
   });
-  const identity = {
-    workerId: 'fixture-worker',
-    mode: 'fleet',
-    keySha256: createHash('sha256').update(worker.rawKey).digest('hex'),
-  };
-  const assignment = await app
-    .get(WorkerCoordinatorService)
-    .claim(randomUUID(), identity);
-  assert.equal(assignment.jobId, jobId.toString());
-  const beforeDrain = await api('GET', '/admin/workers/fixture-worker');
-  await api(
-    'POST',
-    '/admin/workers/fixture-worker/drain',
-    command({ expectedRevision: beforeDrain.revision }),
-  );
-  const draining = await api('GET', '/admin/workers/fixture-worker');
-  assert.equal(draining.state, 'draining');
-  assert.equal(draining.activeJobId, jobId.toString());
-  await api(
-    'POST',
-    '/admin/workers/fixture-worker/release-stopped',
-    command({
-      expectedRevision: draining.revision,
-      jobId: assignment.jobId,
-      attemptId: assignment.attemptId,
-      sessionId: assignment.sessionId,
-      generation: assignment.generation,
-      stoppedAt: new Date().toISOString(),
-      stopEvidence:
-        'Owned fixture worker process terminated; PID 4321 verified exited.',
-    }),
-  );
-  assert.equal((await jobs.findById(jobId)).status, 'queued');
-  const released = await api('GET', '/admin/workers/fixture-worker');
-  assert.equal(released.slotState, 'idle');
-  assert.equal(released.assignment, null);
   const suspended = await api(
     'POST',
     `/admin/users/${userId}/suspend-processing`,
@@ -470,7 +413,6 @@ try {
   assert.equal(overview.counts.submitted, 1);
   for (const path of [
     '/admin/access',
-    '/admin/workers',
     '/admin/jobs',
     '/admin/users',
     '/admin/releases',
@@ -479,7 +421,6 @@ try {
     '/admin/alerts',
   ])
     await api('GET', path);
-  await api('GET', `/admin/jobs/${jobId}/attempts`);
   await api('GET', `/admin/users/${userId}`);
   await api(
     'GET',
@@ -512,19 +453,8 @@ try {
     ),
   );
   const persisted = JSON.stringify([recordedEvents, recordedOperations]);
-  assert.equal(persisted.includes(worker.rawKey), false);
   assert.equal(persisted.includes(media.url), false);
   assert.equal(persisted.includes(input.key), false);
-  assert.equal(
-    await model('WorkerRegistration').countDocuments({
-      _id: 'forbidden-worker',
-    }),
-    0,
-  );
-  assert.equal(
-    await db.collection('audio_job_attempts').countDocuments({ jobId }),
-    1,
-  );
   console.log(
     `DASHBOARD_RUNTIME_OK requests=${requests} auditedEvents=${await model('AdminAuditEvent').countDocuments()}`,
   );

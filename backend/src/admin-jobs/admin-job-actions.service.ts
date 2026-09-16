@@ -1,6 +1,5 @@
 import { HttpException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { AdminAuditService } from '../admin/admin-audit.service.js';
 import { AdminOperationsService } from '../admin/admin-operations.service.js';
 import type { AdminActor } from '../admin/admin.types.js';
 import { JobActionsService } from '../jobs/job-actions.service.js';
@@ -8,6 +7,7 @@ import { adminError } from '../admin/admin-errors.js';
 import { jobError, type JobHttpErrorCode } from '../jobs/job-errors.js';
 import { adminJobId } from './admin-jobs-query.js';
 import type { AdminJobActionDto } from './dto/admin-job-action.dto.js';
+import { ProcessingUnavailableService } from '../processing/processing-unavailable.service.js';
 
 const safeDomainCodes: readonly JobHttpErrorCode[] = [
   'JOB_STATE_CONFLICT',
@@ -23,7 +23,7 @@ export class AdminJobActionsService {
   constructor(
     private readonly actions: JobActionsService,
     private readonly operations: AdminOperationsService,
-    private readonly audit: AdminAuditService,
+    private readonly unavailable: ProcessingUnavailableService,
   ) {}
 
   async cancel(actor: AdminActor, id: string, dto: AdminJobActionDto) {
@@ -60,63 +60,8 @@ export class AdminJobActionsService {
 
   async retry(actor: AdminActor, id: string, dto: AdminJobActionDto) {
     this.validate(actor, id);
-    return this.withAdministrativeErrors(async () => {
-      await this.actions.prepareRetry();
-      const requestId = randomUUID();
-      const result = await this.operations.run(
-        actor,
-        {
-          operationId: dto.operationId,
-          route: 'POST /admin/jobs/:id/retry',
-          request: { jobId: id, expectedRevision: dto.expectedRevision },
-          action: 'jobs.retry',
-          resourceType: 'job',
-          reason: dto.reason,
-        },
-        async (session) => {
-          const retried = await this.actions.retryAsAdmin(
-            actor,
-            id,
-            dto.expectedRevision,
-            requestId,
-            session,
-          );
-          await this.audit.record(
-            {
-              actorUid: actor.uid,
-              action: 'jobs.retry.source',
-              resourceType: 'job',
-              resourceId: id,
-              operationId: dto.operationId,
-              reason: dto.reason,
-              previousRevision: dto.expectedRevision,
-              nextRevision: retried.sourceRevision,
-              outcome: 'succeeded',
-            },
-            session,
-          );
-          return {
-            resourceId: retried.newJobId,
-            previousRevision: null,
-            revision: retried.revision,
-            value: {
-              sourceJobId: id,
-              newJobId: retried.newJobId,
-              status: 'queued' as const,
-            },
-          };
-        },
-      );
-      if (result.value) return result.value;
-      if (!result.receipt.resourceId)
-        throw adminError('DEPENDENCY_UNAVAILABLE');
-      adminJobId(result.receipt.resourceId);
-      return {
-        sourceJobId: id,
-        newJobId: result.receipt.resourceId,
-        status: 'queued' as const,
-      };
-    });
+    void dto;
+    return this.unavailable.reject();
   }
 
   private validate(actor: AdminActor, id: string): void {

@@ -1,4 +1,3 @@
-import { QueuePolicyService } from '../src/admin-settings/queue-policy.service.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AdminSettingsController,
@@ -31,7 +30,7 @@ describe('processing settings HTTP boundary', () => {
       publicPolicy: vi.fn().mockResolvedValue({
         schemaVersion: 1,
         revision: 0,
-        acceptNewJobs: true,
+        acceptNewJobs: false,
         messageEn: '',
         messageAr: null,
         limits: {
@@ -44,13 +43,7 @@ describe('processing settings HTTP boundary', () => {
     };
     harness = await createAdminHarness({
       controllers: [AdminSettingsController, ProcessingPolicyController],
-      providers: [
-        { provide: ProcessingSettingsService, useValue: settings },
-        {
-          provide: QueuePolicyService,
-          useValue: { current: vi.fn(), update: vi.fn() },
-        },
-      ],
+      providers: [{ provide: ProcessingSettingsService, useValue: settings }],
     });
     return { harness, settings };
   }
@@ -73,8 +66,20 @@ describe('processing settings HTTP boundary', () => {
       .request('get', '/processing-policy')
       .expect(200);
     expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.body.acceptNewJobs).toBe(false);
     expect(response.body).not.toHaveProperty('updatedBy');
     expect(response.body.limits.maxActiveJobsPerUser).toBeNull();
+  });
+
+  it('does not expose the removed processing-v2 administrator routes', async () => {
+    const { harness } = await setup();
+    const token = harness.signInAs('owner');
+    await harness
+      .request('get', '/admin/settings/processing-v2', undefined, token)
+      .expect(404);
+    await harness
+      .request('put', '/admin/settings/processing-v2', {}, token)
+      .expect(404);
   });
 
   it('enforces settings permissions and fresh owner writes', async () => {

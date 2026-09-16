@@ -19,7 +19,6 @@ import { AdminAccessController } from '../src/admin/admin-access.controller.js';
 import { AdminAuditController } from '../src/admin/admin-audit.controller.js';
 import { AdminOperationsController } from '../src/admin/admin-operations.controller.js';
 import { AdminSessionController } from '../src/admin/admin-session.controller.js';
-import { AdminWorkersController } from '../src/admin-workers/admin-workers.controller.js';
 import { AdminUsersController } from '../src/admin-users/admin-users.controller.js';
 import { AdminAccountRecoveryController } from '../src/admin-users/admin-account-recovery.controller.js';
 import { AdminJobsController } from '../src/admin-jobs/admin-jobs.controller.js';
@@ -71,7 +70,6 @@ const controllers: Type[] = [
   AdminAccessController,
   AdminAuditController,
   AdminOperationsController,
-  AdminWorkersController,
   AdminUsersController,
   AdminAccountRecoveryController,
   AdminJobsController,
@@ -90,12 +88,7 @@ const endpoint = (route: RouteFixture) =>
     .replace(':operationId', '2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29')
     .replace(':uploadId', 'bbbbbbbbbbbbbbbbbbbbbbbb')
     .replace(':uid', 'synthetic-target-uid')
-    .replace(
-      ':id',
-      route.path.startsWith('/admin/workers/')
-        ? 'node-a'
-        : 'aaaaaaaaaaaaaaaaaaaaaaaa',
-    );
+    .replace(':id', 'aaaaaaaaaaaaaaaaaaaaaaaa');
 const budgetsByClass = {
   read: { limit: 120, windowMs: 60000 },
   write: { limit: 30, windowMs: 60000 },
@@ -339,8 +332,6 @@ describe('complete administration route authorization contract', () => {
     const realQueries = new AdminJobsQueryService(
       database as never,
       database as never,
-      database as never,
-      database as never,
     );
     const queryHarness = await createAdminHarness({
       controllers: [AdminJobsController],
@@ -352,10 +343,7 @@ describe('complete administration route authorization contract', () => {
     try {
       await queryHarness.app.listen(0, '127.0.0.1');
       const owner = queryHarness.signInAs('owner');
-      for (const path of [
-        '/admin/jobs',
-        '/admin/jobs/aaaaaaaaaaaaaaaaaaaaaaaa/attempts',
-      ]) {
+      for (const path of ['/admin/jobs']) {
         for (const query of [
           'cursor=invalid',
           'limit=1000',

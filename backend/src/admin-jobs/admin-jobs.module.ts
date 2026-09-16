@@ -11,6 +11,7 @@ import { EnqueueService } from '../jobs/enqueue.service.js';
 import { ProcessingTransactions } from '../processing/processing-transactions.js';
 import { UsersModule } from '../users/users.module.js';
 import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js';
+import { ProcessingUnavailableService } from '../processing/processing-unavailable.service.js';
 @Module({
   imports: [
     AdminModule,
@@ -25,6 +26,7 @@ import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js'
     JobActionsService,
     EnqueueService,
     ProcessingTransactions,
+    ProcessingUnavailableService,
   ],
   controllers: [AdminJobsController],
   exports: [AdminJobsQueryService],

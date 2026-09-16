@@ -9,22 +9,19 @@ import { JOB_STATUSES } from '../jobs/job.types.js';
 import type { Job } from '../jobs/job.schema.js';
 import type { AdminActor } from '../admin/admin.types.js';
 describe('admin job queries and privacy', () => {
-  it('uses the first attempt for queue timing when recovery happened before processing', () => {
+  it('uses job timestamps for stage timing', () => {
     const job = {
       _id: new Types.ObjectId(),
       userId: new Types.ObjectId(),
       status: 'validating',
       createdAt: new Date(0),
       queuedAt: new Date(0),
-      validatingAt: new Date(100000),
+      validatingAt: new Date(10000),
       processingStartedAt: null,
       inputReservation: {},
     } as unknown as Job;
     const actor = { permissions: ['jobs.read'] } as unknown as AdminActor;
-    const shown = presentAdminJob(job, actor, null, new Date(110000), true, {
-      startedAt: new Date(10000),
-      processingStartedAt: null,
-    });
+    const shown = presentAdminJob(job, actor, null, new Date(110000), true);
     expect(
       shown.stageTimings?.find((stage) => stage.stage === 'queued')
         ?.durationSeconds,
@@ -51,37 +48,6 @@ describe('admin job queries and privacy', () => {
     const before = JSON.stringify(query.filter);
     sanitizeFilter(query.filter);
     expect(JSON.stringify(query.filter)).toBe(before);
-  });
-  it('does not combine validation and processing timestamps across recovery attempts', () => {
-    const job = {
-      _id: new Types.ObjectId(),
-      userId: new Types.ObjectId(),
-      status: 'validating',
-      createdAt: new Date(0),
-      queuedAt: new Date(1000),
-      processingStartedAt: new Date(2000),
-      validatingAt: new Date(10000),
-      inputReservation: {},
-      processingAccumulatedMs: 500,
-    } as unknown as Job;
-    const actor = { permissions: ['jobs.read'] } as unknown as AdminActor;
-    const shown = presentAdminJob(job, actor, null, new Date(11000), true);
-    expect(
-      shown.stageTimings?.find((stage) => stage.stage === 'queued'),
-    ).toEqual({
-      stage: 'queued',
-      startedAt: new Date(1000).toISOString(),
-      finishedAt: null,
-      durationSeconds: null,
-    });
-    expect(
-      shown.stageTimings?.find((stage) => stage.stage === 'validating'),
-    ).toEqual({
-      stage: 'validating',
-      startedAt: new Date(10000).toISOString(),
-      finishedAt: null,
-      durationSeconds: null,
-    });
   });
   it('accepts every real state and rejects injection, wrong IDs and dates', () => {
     for (const status of JOB_STATUSES)
@@ -132,13 +98,14 @@ describe('admin job queries and privacy', () => {
     const actor: AdminActor = {
       uid: 'fixture-admin',
       verifiedEmail: 'admin@example.invalid',
-      role: 'worker_manager',
+      role: 'support',
       accessRevision: 0,
       authTimeSec: 1,
       permissions: ['jobs.read'],
     };
     const shown = presentAdminJob(job, actor, null, new Date(2000), true);
     expect(shown.revision).toBe(2);
+    expect(shown).not.toHaveProperty('workerId');
     expect(JSON.stringify(shown)).not.toContain('private');
     const media = presentAdminJob(
       job,

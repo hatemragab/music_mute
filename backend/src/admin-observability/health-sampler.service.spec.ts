@@ -1,4 +1,3 @@
-import { ConfigService } from '@nestjs/config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HealthSamplerService } from './health-sampler.service.js';
 
@@ -9,9 +8,6 @@ function setup() {
   };
   const redis = { ping: vi.fn().mockResolvedValue('PONG') };
   const storage = { assertReady: vi.fn().mockResolvedValue(undefined) };
-  const registrations = {
-    aggregate: vi.fn(() => ({ option: vi.fn().mockResolvedValue([]) })),
-  };
   const releases = {
     find: vi.fn(() => ({
       select: () => ({
@@ -27,12 +23,10 @@ function setup() {
     database as never,
     redis as never,
     storage as never,
-    registrations as never,
     releases as never,
     alerts as never,
-    new ConfigService({ PROCESSING_LEASE_SECONDS: 60 }),
   );
-  return { service, database, redis, storage, registrations, releases, alerts };
+  return { service, database, redis, storage, releases, alerts };
 }
 
 describe('HealthSamplerService', () => {
@@ -53,62 +47,11 @@ describe('HealthSamplerService', () => {
     expect(f.database.db.command).toHaveBeenCalledOnce();
     expect(f.redis.ping).toHaveBeenCalledOnce();
     expect(f.storage.assertReady).toHaveBeenCalledOnce();
-  });
-
-  it('alerts for enabled offline and recovery slots but not draining or revoked idle workers', async () => {
-    const f = setup();
-    const expired = new Date(Date.now() - 120_000);
-    f.registrations.aggregate.mockReturnValue({
-      option: vi.fn().mockResolvedValue([
-        {
-          _id: 'enabled-offline',
-          state: 'enabled',
-          control: { lastSeenAt: expired, activeJobId: null },
-        },
-        {
-          _id: 'draining-offline',
-          state: 'draining',
-          control: { lastSeenAt: expired, activeJobId: null },
-        },
-        {
-          _id: 'stuck-worker',
-          state: 'enabled',
-          control: {
-            lastSeenAt: expired,
-            activeJobId: 'job',
-            leaseExpiresAt: expired,
-          },
-        },
-        {
-          _id: 'revoked-idle',
-          state: 'revoked',
-          control: { lastSeenAt: expired, activeJobId: null },
-        },
-        {
-          _id: 'revoked-active',
-          state: 'revoked',
-          control: {
-            lastSeenAt: new Date(),
-            activeJobId: 'job',
-            leaseExpiresAt: new Date(Date.now() + 120_000),
-          },
-        },
-      ]),
-    });
-    const result = await f.service.sample();
-    expect(
-      result.components.find((item) => item.name === 'workers')?.status,
-    ).toBe('unavailable');
-    const conditions = f.alerts.reconcile.mock.calls[0]![0];
-    expect(
-      conditions.map(
-        (item: { type: string; resourceId: string }) =>
-          `${item.type}:${item.resourceId}`,
-      ),
-    ).toEqual([
-      'worker_offline:enabled-offline',
-      'worker_recovery_required:stuck-worker',
-      'worker_recovery_required:revoked-active',
+    expect(first.components.map((item) => item.name)).toEqual([
+      'api',
+      'mongodb',
+      'redis',
+      'storage',
     ]);
   });
 

@@ -32,7 +32,7 @@ describe('admin media HTTP admission', () => {
       reason: 'Support investigation',
       operationId: randomUUID(),
     };
-    for (const role of ['viewer', 'worker_manager', 'release_manager'] as const)
+    for (const role of ['viewer', 'release_manager'] as const)
       await harness
         .request('post', path, body, harness.signInAs(role))
         .expect(403);

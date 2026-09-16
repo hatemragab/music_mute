@@ -16,22 +16,16 @@ export function encodeAdminJobCursor(
     JSON.stringify({ scope, at: at.toISOString(), id }),
   ).toString('base64url');
 }
-export function parseAdminJobQuery(
-  raw: Record<string, unknown>,
-  attemptsJobId?: string,
-) {
-  const allowed = attemptsJobId
-    ? ['limit', 'cursor']
-    : [
-        'limit',
-        'cursor',
-        'status',
-        'userId',
-        'workerId',
-        'jobId',
-        'from',
-        'to',
-      ];
+export function parseAdminJobQuery(raw: Record<string, unknown>) {
+  const allowed = [
+    'limit',
+    'cursor',
+    'status',
+    'userId',
+    'jobId',
+    'from',
+    'to',
+  ];
   if (Object.keys(raw).some((k) => !allowed.includes(k)))
     throw adminError('INVALID_REQUEST');
   const limit = raw.limit === undefined ? 25 : Number(raw.limit);
@@ -43,12 +37,8 @@ export function parseAdminJobQuery(
     limit > 100
   )
     throw adminError('INVALID_REQUEST');
-  const scopeValues: Record<string, unknown> = attemptsJobId
-    ? { attemptsJobId }
-    : {};
-  const filter: Record<string, unknown> = attemptsJobId
-    ? { jobId: adminJobId(attemptsJobId) }
-    : { deletedAt: null };
+  const scopeValues: Record<string, unknown> = {};
+  const filter: Record<string, unknown> = { deletedAt: null };
   if (raw.status !== undefined) {
     if (!JOB_STATUSES.includes(raw.status as JobStatus))
       throw adminError('INVALID_REQUEST');
@@ -60,15 +50,6 @@ export function parseAdminJobQuery(
       filter[key === 'jobId' ? '_id' : key] = adminJobId(raw[key]);
       scopeValues[key] = raw[key];
     }
-  if (raw.workerId !== undefined) {
-    if (
-      typeof raw.workerId !== 'string' ||
-      !/^[a-z0-9][a-z0-9-]{0,63}$/.test(raw.workerId)
-    )
-      throw adminError('INVALID_REQUEST');
-    filter.workerId = raw.workerId;
-    scopeValues.workerId = raw.workerId;
-  }
   const dates: { from?: Date; to?: Date } = {};
   for (const key of ['from', 'to'] as const)
     if (raw[key] !== undefined) {
@@ -122,10 +103,9 @@ export function parseAdminJobQuery(
       )
         throw new Error();
       after = { at, id: c.id };
-      const field = attemptsJobId ? 'startedAt' : 'createdAt';
       filter.$or = [
-        { [field]: trusted({ $lt: at }) },
-        { [field]: at, _id: trusted({ $lt: adminJobId(c.id) }) },
+        { createdAt: trusted({ $lt: at }) },
+        { createdAt: at, _id: trusted({ $lt: adminJobId(c.id) }) },
       ];
     } catch {
       throw adminError('INVALID_CURSOR');

@@ -1,8 +1,6 @@
-import { QueuePolicyService } from './queue-policy.service.js';
-import { normalizeProcessingPolicyV2 } from './processing-policy-v2.js';
+import { PREPARATION_PROFILE_ID } from './processing-policy-v2.js';
 import { jobError } from '../jobs/job-errors.js';
-import { Injectable, Optional, type OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { ClientSession, Model } from 'mongoose';
 import { AdminOperationsService } from '../admin/admin-operations.service.js';
@@ -75,8 +73,6 @@ export class ProcessingSettingsService implements OnModuleInit {
     @InjectModel(ProcessingAdmissionFence.name)
     private readonly fences: Model<ProcessingAdmissionFence>,
     private readonly operations: AdminOperationsService,
-    private readonly config: ConfigService,
-    @Optional() private readonly queuePolicy?: QueuePolicyService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -118,38 +114,51 @@ export class ProcessingSettingsService implements OnModuleInit {
     if (!['1', '2'].includes(schemaVersion))
       throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
     const settings = await this.effective();
-    const queuePolicy = await this.queuePolicy?.current();
-    if (schemaVersion === '2')
-      return normalizeProcessingPolicyV2(
-        {
-          revision: settings.revision + (queuePolicy?.revision ?? 0),
-          acceptNewJobs: settings.acceptNewJobs,
-          messageEn: settings.maintenanceMessageEn,
-          messageAr: settings.maintenanceMessageAr,
+    if (schemaVersion === '2') {
+      return {
+        schemaVersion: 2 as const,
+        revision: settings.revision,
+        acceptNewJobs: false,
+        acceptLongJobs: false,
+        checkedAt: new Date().toISOString(),
+        messageEn: settings.maintenanceMessageEn,
+        messageAr: settings.maintenanceMessageAr,
+        limits: {
+          maxDurationSeconds: settings.maxDurationSecondsExclusive,
+          maxPreparedAudioBytes: settings.maxInputBytesExclusive,
+          maxActiveJobsPerUser: settings.maxActiveJobsPerUser,
+          allowanceAudioSeconds: 0,
+          allowanceWindowSeconds: 86400,
+          maxLocalSourceBytes: null,
+          longJobThresholdSeconds: Math.min(
+            600,
+            settings.maxDurationSecondsExclusive,
+          ),
+          maxSourceDownloadBytes: null,
+          maxPreparationSeconds: null,
+          maxSourceDownloadSeconds: null,
         },
-        queuePolicy,
-        queuePolicy?.readiness.expandedAdmissionAvailable === true &&
-          this.config.get<boolean>('AUDIO_PROCESSING_ENABLED') === true,
-      );
+        preparationProfile: {
+          id: PREPARATION_PROFILE_ID,
+          preserveCompatibleAudio: true as const,
+          fallbackConversion: {
+            outputContentType: 'audio/mp4' as const,
+            codec: 'aac-lc' as const,
+            targetBitrate: 256000 as const,
+          },
+          compatibilityRevision: 'unavailable',
+        },
+      };
+    }
     return {
       schemaVersion: 1 as const,
       revision: settings.revision,
-      acceptNewJobs:
-        settings.acceptNewJobs &&
-        queuePolicy?.acceptNewJobs !== false &&
-        this.config.get<boolean>('AUDIO_PROCESSING_ENABLED') === true,
+      acceptNewJobs: false,
       messageEn: settings.maintenanceMessageEn,
       messageAr: settings.maintenanceMessageAr,
       limits: {
-        maxInputBytesExclusive: Math.min(
-          settings.maxInputBytesExclusive,
-          queuePolicy?.maxPreparedAudioBytes ?? settings.maxInputBytesExclusive,
-        ),
-        maxDurationSecondsExclusive: Math.min(
-          settings.maxDurationSecondsExclusive,
-          queuePolicy?.maxDurationSeconds ??
-            settings.maxDurationSecondsExclusive,
-        ),
+        maxInputBytesExclusive: settings.maxInputBytesExclusive,
+        maxDurationSecondsExclusive: settings.maxDurationSecondsExclusive,
         maxActiveJobsPerUser: settings.maxActiveJobsPerUser,
       },
       checkedAt: new Date().toISOString(),

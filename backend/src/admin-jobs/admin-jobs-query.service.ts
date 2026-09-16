@@ -1,35 +1,23 @@
-import { QueueCapacityService } from '../processing-queue/queue-capacity.service.js';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { trusted, type Model } from 'mongoose';
 import { adminError } from '../admin/admin-errors.js';
 import type { AdminActor } from '../admin/admin.types.js';
 import { Job } from '../jobs/job.schema.js';
-import { JobAttempt } from '../jobs/job-attempt.schema.js';
 import { User } from '../users/user.schema.js';
-import { WorkerControl } from '../worker/worker-control.schema.js';
 import {
   adminJobId,
   encodeAdminJobCursor,
   parseAdminJobQuery,
 } from './admin-jobs-query.js';
-import {
-  presentAdminAttempt,
-  presentAdminJob,
-} from './admin-jobs.presenter.js';
+import { presentAdminJob } from './admin-jobs.presenter.js';
 
 @Injectable()
 export class AdminJobsQueryService {
   constructor(
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
-    @InjectModel(JobAttempt.name) private readonly attempts: Model<JobAttempt>,
     @InjectModel(User.name) private readonly users: Model<User>,
-    @InjectModel(WorkerControl.name)
-    private readonly controls: Model<WorkerControl>,
   ) {}
-  queueSummary() {
-    return new QueueCapacityService(this.jobs).readSummary();
-  }
 
   private async present(
     records: Job[],
@@ -39,71 +27,22 @@ export class AdminJobsQueryService {
   ) {
     const ids = records.map((j) => j.userId),
       personal = actor.permissions.includes('users.read');
-    const [users, controls, firstAttempts] = await Promise.all([
-      this.users
-        .find({ _id: trusted({ $in: ids }) })
-        .select(personal ? '_id status email displayName' : '_id status')
-        .maxTimeMS(5000)
-        .lean(),
-      this.controls
-        .find({ activeJobId: trusted({ $in: records.map((j) => j._id) }) })
-        .select('_id activeJobId attemptId leaseExpiresAt')
-        .maxTimeMS(5000)
-        .lean(),
-      this.attempts
-        .aggregate<{
-          _id: Job['userId'];
-          first: Pick<JobAttempt, 'startedAt' | 'processingStartedAt'>;
-        }>([
-          { $match: { jobId: { $in: records.map((job) => job._id) } } },
-          { $sort: { jobId: 1, startedAt: 1, _id: 1 } },
-          {
-            $group: {
-              _id: '$jobId',
-              first: {
-                $first: {
-                  startedAt: '$startedAt',
-                  processingStartedAt: '$processingStartedAt',
-                },
-              },
-            },
-          },
-        ])
-        .option({ maxTimeMS: 5000 }),
-    ]);
+    const users = await this.users
+      .find({ _id: trusted({ $in: ids }) })
+      .select(personal ? '_id status email displayName' : '_id status')
+      .maxTimeMS(5000)
+      .lean();
     const owners = new Map(users.map((u) => [u._id.toString(), u]));
-    const reserved = new Map(
-      controls.map((c) => [c.activeJobId!.toString(), c]),
-    );
-    const starts = new Map(
-      firstAttempts.map((row) => [row._id.toString(), row.first]),
-    );
     // A fair scheduler has no stable FIFO position; expose nullable estimates instead.
     return records.map((job) => {
-      const owner = owners.get(job.userId.toString()),
-        control = reserved.get(job._id.toString());
-      const recoveryRequired =
-        !!control &&
-        (job.status === 'interrupted' ||
-          !control.leaseExpiresAt ||
-          control.leaseExpiresAt.getTime() <= now.getTime());
+      const owner = owners.get(job.userId.toString());
       return {
-        ...presentAdminJob(
-          job,
-          actor,
-          null,
-          now,
-          detail,
-          starts.get(job._id.toString()),
-        ),
+        ...presentAdminJob(job, actor, null, now, detail),
         ...(personal
           ? {
               userEmail: owner?.email ?? null,
               userDisplayName: owner?.displayName ?? null,
             }
-          : {}),
-        ...(detail
-          ? { recoveryRequired, activeAttemptId: control?.attemptId ?? null }
           : {}),
       };
     });
@@ -141,48 +80,5 @@ export class AdminJobsQueryService {
       .lean();
     if (!record) throw adminError('RESOURCE_NOT_FOUND');
     return (await this.present([record], actor, new Date(), true))[0]!;
-  }
-  async history(id: string, raw: Record<string, unknown>) {
-    const query = parseAdminJobQuery(raw, id);
-    if (
-      !(await this.jobs
-        .exists({ _id: adminJobId(id), deletedAt: null })
-        .maxTimeMS(5000))
-    )
-      throw adminError('RESOURCE_NOT_FOUND');
-    const [records, control] = await Promise.all([
-      this.attempts
-        .find(query.filter)
-        .sort({ startedAt: -1, _id: -1 })
-        .limit(query.limit + 1)
-        .maxTimeMS(5000)
-        .lean(),
-      this.controls
-        .findOne({ activeJobId: adminJobId(id) })
-        .maxTimeMS(5000)
-        .lean(),
-    ]);
-    const page = records.slice(0, query.limit),
-      last = page.at(-1),
-      now = new Date();
-    return {
-      items: page.map((a) =>
-        presentAdminAttempt(
-          a,
-          !!control &&
-            control.attemptId === a.attemptId &&
-            (!control.leaseExpiresAt || control.leaseExpiresAt <= now),
-        ),
-      ),
-      nextCursor:
-        records.length > query.limit && last
-          ? encodeAdminJobCursor(
-              query.scope,
-              last.startedAt,
-              last._id.toString(),
-            )
-          : null,
-      asOf: now.toISOString(),
-    };
   }
 }

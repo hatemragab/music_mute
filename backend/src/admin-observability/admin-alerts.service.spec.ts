@@ -15,9 +15,9 @@ describe('AdminAlertsService', () => {
     const id = new Types.ObjectId('64b000000000000000000001');
     const current = {
       _id: id,
-      type: 'worker_recovery_required',
+      type: 'apk_rejected',
       severity: 'critical',
-      resourceId: 'worker-a',
+      resourceId: 'release-a',
       state: 'active',
       firstSeenAt: new Date('2026-09-11T00:00:00Z'),
       lastSeenAt: new Date('2026-09-11T00:01:00Z'),
@@ -25,7 +25,7 @@ describe('AdminAlertsService', () => {
       acknowledgedAt: null,
       acknowledgedBy: null,
       revision: 0,
-      message: 'Worker recovery is required',
+      message: 'APK verification was rejected',
     };
     const alerts = {
       findOne: vi.fn(() => chain(current)),
@@ -52,7 +52,7 @@ describe('AdminAlertsService', () => {
       operations as never,
     );
     const result = await service.acknowledge(
-      { uid: 'manager', role: 'worker_manager', accessRevision: 0 } as never,
+      { uid: 'manager', role: 'support', accessRevision: 0 } as never,
       id.toHexString(),
       {
         expectedRevision: 0,
@@ -95,7 +95,7 @@ describe('AdminAlertsService', () => {
     );
     await expect(
       service.acknowledge(
-        { uid: 'manager', role: 'worker_manager', accessRevision: 0 } as never,
+        { uid: 'manager', role: 'support', accessRevision: 0 } as never,
         id.toHexString(),
         {
           expectedRevision: 1,
@@ -110,9 +110,9 @@ describe('AdminAlertsService', () => {
     const firstId = new Types.ObjectId('64b000000000000000000002');
     const row = {
       _id: firstId,
-      type: 'worker_offline',
+      type: 'apk_rejected',
       severity: 'warning',
-      resourceId: 'worker-a',
+      resourceId: 'release-a',
       state: 'active',
       firstSeenAt: new Date('2026-09-11T00:00:00Z'),
       lastSeenAt: new Date('2026-09-11T00:01:00Z'),
@@ -120,7 +120,7 @@ describe('AdminAlertsService', () => {
       acknowledgedAt: null,
       acknowledgedBy: null,
       revision: 0,
-      message: 'Enabled worker is offline',
+      message: 'APK verification was rejected',
     };
     const service = new AdminAlertsService(
       {
