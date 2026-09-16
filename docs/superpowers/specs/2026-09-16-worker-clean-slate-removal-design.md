@@ -13,9 +13,9 @@ fleet abstractions.
 The current cross-platform implementation remains available only as the remote
 reference branch `origin/codex/cross-platform-worker-fleet`. It is not merged
 into this cleanup branch. After the cleanup is implemented, validated, reviewed,
-and locally committed, create a new branch from that clean commit for the worker
-redesign. The recommended name is `codex/worker-redesign`; branch creation is not
-part of this removal step.
+and locally committed, remain on `codex/worker-clean-slate`. Do not create a
+redesign branch or plan replacement work until the user completes a separate
+architecture discussion and explicitly authorizes the next task.
 
 ## Confirmed decisions
 
@@ -295,5 +295,5 @@ verify there are no changes under `android/` or `ios/`, and verify
 - Editing Android or iOS.
 - Modifying or deleting MongoDB data or indexes.
 - Pushing, opening a pull request, merging, or deploying.
-- Creating the future worker-redesign branch before this cleanup is implemented,
-  validated, reviewed, and committed.
+- Creating a worker-redesign branch or planning/implementing any replacement
+  before a separate architecture discussion and explicit authorization.

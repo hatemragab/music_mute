@@ -1030,10 +1030,9 @@ git commit -m "chore(worker): remove legacy package and documentation"
 
 **Interfaces:**
 
-- Produces a verified local cleanup branch suitable as the base of
-  `codex/worker-redesign`.
-- Does not push, merge, deploy, modify a database, or create the redesign branch
-  before the cleanup review is complete.
+- Produces a verified local cleanup branch and stops there.
+- Does not push, merge, deploy, modify a database, create a redesign branch, or
+  plan/implement replacement worker work.
 
 - [ ] **Step 1: Run the full backend verification through context-mode**
 
@@ -1130,9 +1129,10 @@ Confirm the only untracked files are the pre-existing diagnostic artifacts:
 - `old-extractor-test.webm`
 - `youtube-diagnostic.webm`
 
-- [ ] **Step 8: Stop for cleanup review before creating the rebuild branch**
+- [ ] **Step 8: Stop after the cleanup review**
 
 Report the commits, deletions, surviving API behavior, test results, integration
-prerequisites, protected-path proof, and remaining risks. After the user accepts
-the completed cleanup, create and check out `codex/worker-redesign` from the
-verified cleanup HEAD. Do not merge the old reference branch into it.
+prerequisites, protected-path proof, and remaining risks. Remain on
+`codex/worker-clean-slate`. Do not create a redesign branch, write a replacement
+plan, or implement a new worker until the user completes a separate architecture
+discussion and explicitly authorizes that work.
