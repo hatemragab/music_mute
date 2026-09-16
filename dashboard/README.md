@@ -1,6 +1,6 @@
 # MusicMute administrator dashboard
 
-Private React + TypeScript + Vite operations console for the MusicMute NestJS API. The dashboard covers administrator access, fleet workers, jobs and attempts, user processing controls, private media grants, releases and APK verification, update policy, processing settings, health alerts, audit history, and bounded CSV exports.
+Private React + TypeScript + Vite operations console for the MusicMute NestJS API. The dashboard covers administrator access, jobs, user processing controls, private media grants, releases and APK verification, update policy, processing settings, health alerts, audit history, and bounded CSV exports.
 
 ## Local setup
 
@@ -44,14 +44,13 @@ npm run build
 
 `npm run test:e2e` uses installed Google Chrome. It starts the Vite app plus a compiled NestJS fixture backed by test-owned, loopback-only MongoDB and Redis processes. It requires `mongod` and `redis-server` locally, uses synthetic Firebase/storage/APK-verifier doubles, and removes its temporary database files when the run ends.
 
-The browser suite also uses deterministic route fixtures for UI states. Those fixtures prove browser behavior but do not prove live Firebase, S3 CORS/IAM, production data, Windows-worker operation, or deployment.
+The browser suite also uses deterministic route fixtures for UI states. Those fixtures prove browser behavior but do not prove live Firebase, S3 CORS/IAM, production data, or deployment.
 
 ## Security and behavior
 
 - The backend derives every permission from the admitted administrator role.
 - Mutation requests carry revision fences and operation IDs. Ambiguous responses are reconciled through the durable operation receipt and a server read-back without resending the write. One-time keys, upload grants and short-lived media URLs report a safe recovery action when their response cannot be recovered.
 - Private media URLs are requested only after a deliberate reviewed action, remain in memory, and expire after five minutes.
-- Worker keys are displayed once, never written to browser storage, and disappear when cleared or when the session shell unmounts.
 - Page modules load on demand so the initial application bundle stays bounded.
 
 ## CapRover package
@@ -93,27 +92,10 @@ Configure the backend `CORS_ORIGINS` with the exact public HTTPS dashboard origi
 
 See the [approved scope](../docs/tasks/full-dashboard/scope.md), [API contracts](../docs/tasks/full-dashboard/contracts.md), and [local validation record](../docs/validation/full-dashboard-local.md).
 
-## Media and fair queue administration (v2)
-
-The existing Settings page includes a separate version 2 editor backed by
-`GET/PUT /admin/settings/processing-v2`. It preserves the legacy settings document.
-Display minutes and decimal MB are submitted as exact seconds and bytes; the
-inclusive upper limits are 1,800 seconds and 100,000,000 prepared bytes. New
-long-job admission requires server-reported verified readiness. Measured
-qualification must be supplied explicitly, including evidence identity, expiry,
-qualified workers, source/preparation bounds and cost model. Missing evidence is
-never populated with guessed capacity. Existing qualification is preserved on an
-unrelated edit, or explicitly removed from the reviewed draft.
-
-Jobs and Overview show queued versus all outstanding reserved workload, snapshot
-freshness and nullable estimates. Job and worker details separate declared media,
-measured media, actual separator execution and reported capability. Missing
-physical ceilings and estimates are unavailable. Existing cancellation, drain and
-recovery actions retain their permissions and confirmation semantics.
+## Processing administration
 
 User detail includes rolling usage, reservation holds, individual replenishments,
 and temporary allowance increases/revocation. Expiry, reason, operation ID,
 expected revision and fresh authentication are required for allowance changes.
 Suspensions can have an optional expiry; effective access comes from the server,
-not a client timer. Policy and allowance writes perform authoritative read-back;
-policy conflicts retain the draft and require an explicit refreshed review.
+not a client timer. Allowance writes perform authoritative read-back.

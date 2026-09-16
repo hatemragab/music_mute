@@ -21,8 +21,6 @@ import {
   updateProcessingSettings,
 } from "./settings-api";
 
-import { ProcessingPolicyEditor } from "./processing-policy-editor";
-
 const toDraft = (value: ProcessingSettings): ProcessingSettingsDraft => ({
   acceptNewJobs: value.acceptNewJobs,
   maintenanceMessageEn: value.maintenanceMessageEn,
@@ -38,7 +36,6 @@ export function ProcessingSettingsPage() {
   const { can, reauthenticate } = useAdminSession();
   const [editedDraft, setEditedDraft] =
     useState<ProcessingSettingsDraft | null>(null);
-  const [policyDirty, setPolicyDirty] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const settings = useQuery({
     queryKey: ["processing-settings"],
@@ -84,10 +81,10 @@ export function ProcessingSettingsPage() {
   const errors = validateProcessingSettings(draft);
   return (
     <div className="space-y-6">
-      <UnsavedChangesGuard enabled={dirty || policyDirty} />
+      <UnsavedChangesGuard enabled={dirty} />
       <PageHeader
         title="Processing settings"
-        description="Admission and workload ceilings. Model, output stem, retention, billing and host power are fixed outside this dashboard."
+        description="Processing availability, media limits and per-user admission controls."
         actions={
           manage ? (
             <Button
@@ -122,7 +119,6 @@ export function ProcessingSettingsPage() {
           ) : null}
         </CardContent>
       </Card>
-      <ProcessingPolicyEditor onDirtyChange={setPolicyDirty} />
       <ReasonDialog
         open={confirming}
         onOpenChange={setConfirming}

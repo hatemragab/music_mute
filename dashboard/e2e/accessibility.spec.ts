@@ -6,8 +6,6 @@ import { installDashboardFixture, setDashboardRole } from "./helpers/session";
 
 const dashboardPages = [
   "/overview",
-  "/workers",
-  `/workers/${FIXTURE_IDS.worker}`,
   "/jobs",
   `/jobs/${FIXTURE_IDS.job}`,
   "/users",

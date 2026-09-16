@@ -13,11 +13,7 @@ export function OverviewCards({ data }: { data: OverviewSnapshot }) {
       data.queue.waiting,
       `Oldest ${formatDuration(data.queue.oldestWaitSeconds)}`,
     ],
-    [
-      "Processing now",
-      data.queue.processing,
-      `${data.workers.online}/${data.workers.total} workers online`,
-    ],
+    ["Processing now", data.queue.processing, "Active job stages"],
   ] as const;
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

@@ -16,27 +16,3 @@ export const updateProcessingSettings = (
       client.put<ProcessingSettings>("/admin/settings/processing", settings),
     readResult: () => getProcessingSettings(client),
   });
-
-export const getProcessingPolicyV2 = (client: ApiClient) =>
-  client.get<import("@/api/contracts").ProcessingPolicyV2>(
-    "/admin/settings/processing-v2",
-  );
-
-export const updateProcessingPolicyV2 = (
-  client: ApiClient,
-  policy: Omit<
-    import("@/api/contracts").ProcessingPolicyV2,
-    "revision" | "updatedAt" | "readiness" | "shortLongThresholdSeconds"
-  > &
-    RevisionCommand,
-) =>
-  submitWithReceiptReadBack({
-    client,
-    operationId: policy.operationId,
-    submit: () =>
-      client.put<import("@/api/contracts").ProcessingPolicyV2>(
-        "/admin/settings/processing-v2",
-        policy,
-      ),
-    readResult: () => getProcessingPolicyV2(client),
-  }).then(() => getProcessingPolicyV2(client));

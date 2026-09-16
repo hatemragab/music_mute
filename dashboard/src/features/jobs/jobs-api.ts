@@ -4,7 +4,6 @@ import {
   submitWithReceiptReadBack,
 } from "@/api/api-client";
 import type {
-  AttemptSummary,
   JobDetail,
   JobSummary,
   MediaGrant,
@@ -16,7 +15,6 @@ import { withQuery, type QueryValue } from "@/api/query-string";
 export interface JobFilters {
   status?: string;
   userId?: string;
-  workerId?: string;
   jobId?: string;
   from?: string;
   to?: string;
@@ -30,15 +28,6 @@ export const listJobs = (client: ApiClient, filters: JobFilters = {}) =>
 
 export const getJob = (client: ApiClient, id: string) =>
   client.get<JobDetail>(`/admin/jobs/${encodeURIComponent(id)}`);
-
-export const getJobAttempts = (
-  client: ApiClient,
-  id: string,
-  cursor?: string | null,
-) =>
-  client.get<Page<AttemptSummary>>(
-    withQuery(`/admin/jobs/${encodeURIComponent(id)}/attempts`, { cursor }),
-  );
 
 export const cancelJob = (
   client: ApiClient,
@@ -54,36 +43,6 @@ export const cancelJob = (
         input,
       ),
     readResult: (receipt) => getJob(client, receipt.resourceId ?? id),
-  });
-
-export const retryJob = (
-  client: ApiClient,
-  id: string,
-  input: RevisionCommand,
-) =>
-  submitWithReceiptReadBack<{
-    sourceJobId: string;
-    newJobId: string;
-    status: "queued";
-  }>({
-    client,
-    operationId: input.operationId,
-    submit: () =>
-      client.post<{
-        sourceJobId: string;
-        newJobId: string;
-        status: "queued";
-      }>(`/admin/jobs/${encodeURIComponent(id)}/retry`, input),
-    readResult: async (receipt) => {
-      if (!receipt.resourceId)
-        throw new Error("The retry receipt has no new job identifier.");
-      await getJob(client, receipt.resourceId);
-      return {
-        sourceJobId: id,
-        newJobId: receipt.resourceId,
-        status: "queued",
-      };
-    },
   });
 
 export const requestMediaGrant = (

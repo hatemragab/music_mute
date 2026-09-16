@@ -7,21 +7,17 @@ import type {
   JobDetail,
   Permission,
   ProcessingSettings,
-  ProcessingPolicyV2,
   ProcessingUsage,
   RevisionCommand,
   ReleaseDetail,
   UpdatePolicy,
   UserDetail,
-  WorkerDetail,
 } from "../api/contracts";
 import { ROLE_DETAILS } from "../features/administrators/role-permissions";
 
 const NOW = "2026-09-11T00:00:00.000Z";
 export const FIXTURE_IDS = {
-  worker: "z440-fixture",
   job: "000000000000000000000001",
-  retryJob: "000000000000000000000002",
   user: "000000000000000000000010",
   release: "000000000000000000000020",
   publishedRelease: "000000000000000000000021",
@@ -101,11 +97,6 @@ const permissionFor = (method: string, path: string): Permission | null => {
     return method === "GET" ? "settings.read" : "settings.manage";
   if (path.startsWith("/admin/releases") || path === "/admin/update-policy")
     return method === "GET" ? "releases.read" : "releases.manage";
-  if (path.startsWith("/admin/workers")) {
-    if (method === "GET") return "workers.read";
-    if (path.endsWith("/release-stopped")) return "workers.recover";
-    return "workers.manage";
-  }
   if (path.startsWith("/admin/jobs")) {
     if (method === "GET") return "jobs.read";
     if (path.endsWith("/media-grants")) return "media.read";
@@ -130,29 +121,6 @@ export const sessionForRole = (role: AdminRole): AdminSession => ({
 
 export class DashboardFixture {
   readonly requests: FixtureRequest[] = [];
-  mediaPolicy: ProcessingPolicyV2 = {
-    schemaVersion: 2,
-    revision: 1,
-    updatedAt: NOW,
-    acceptNewJobs: true,
-    acceptLongJobs: false,
-    maxDurationSeconds: 1800,
-    maxPreparedAudioBytes: 100_000_000,
-    maxActiveJobsPerUser: 1,
-    allowanceAudioSeconds: 3600,
-    allowanceWindowSeconds: 86400,
-    maxOutstandingJobs: 100,
-    maxOutstandingAudioSeconds: 60000,
-    agingThresholdSeconds: 900,
-    qualification: null,
-    readiness: {
-      evidenceStatus: "unavailable",
-      expandedAdmissionAvailable: false,
-      capableWorkerIds: [],
-      costModelRevision: null,
-      maxOutstandingEstimatedWorkerSeconds: null,
-    },
-  };
   processingUsage: ProcessingUsage = {
     revision: 1,
     policyRevision: 1,
@@ -188,34 +156,10 @@ export class DashboardFixture {
     },
     ios: { minimumBuild: 10, storeReleaseId: null },
   };
-  worker: WorkerDetail = {
-    id: FIXTURE_IDS.worker,
-    label: "Studio Z440",
-    state: "enabled",
-    online: false,
-    lastSeenAt: NOW,
-    activeJobId: FIXTURE_IDS.job,
-    activeAttemptId: "attempt-fixture",
-    recoveryRequired: true,
-    revision: 1,
-    protocolVersion: 1,
-    slotState: "recovery_required",
-    assignment: {
-      jobId: FIXTURE_IDS.job,
-      attemptId: "attempt-fixture",
-      sessionId: "session-fixture",
-      generation: 1,
-      leaseExpiresAt: NOW,
-    },
-    recentEvents: [
-      { id: "worker-event-1", action: "assigned", at: NOW, outcome: "ok" },
-    ],
-  };
   job: JobDetail = {
     id: FIXTURE_IDS.job,
     userId: FIXTURE_IDS.user,
     status: "processing",
-    workerId: FIXTURE_IDS.worker,
     createdAt: NOW,
     queuedAt: NOW,
     startedAt: NOW,
@@ -239,8 +183,6 @@ export class DashboardFixture {
     declaredDurationSeconds: 120,
     measuredDurationSeconds: 119.5,
     media: { inputAvailable: true, resultAvailable: true },
-    recoveryRequired: false,
-    activeAttemptId: "attempt-fixture",
   };
   user: UserDetail = {
     id: FIXTURE_IDS.user,
@@ -316,9 +258,9 @@ export class DashboardFixture {
   ];
   alert: AlertRecord = {
     id: FIXTURE_IDS.alert,
-    type: "worker_offline",
-    severity: "warning",
-    resourceId: FIXTURE_IDS.worker,
+    type: "dependency_probe_failed",
+    severity: "critical",
+    resourceId: "storage",
     state: "active",
     firstSeenAt: NOW,
     lastSeenAt: NOW,
@@ -326,7 +268,7 @@ export class DashboardFixture {
     acknowledgedAt: null,
     acknowledgedBy: null,
     revision: 1,
-    message: "The fixture worker needs attention.",
+    message: "The storage dependency needs attention.",
   };
 
   async handle(input: FixtureRequest): Promise<FixtureResponse> {
@@ -345,56 +287,6 @@ export class DashboardFixture {
 
     if (method === "GET" && path === "/admin/session")
       return { status: 200, body: sessionForRole(role) };
-    if (path === "/admin/settings/processing-v2") {
-      if (method === "GET") return { status: 200, body: this.mediaPolicy };
-      const body = input.body as Omit<
-        ProcessingPolicyV2,
-        "readiness" | "revision" | "updatedAt"
-      > &
-        RevisionCommand;
-      if (body.expectedRevision !== this.mediaPolicy.revision)
-        return error(
-          409,
-          "REVISION_CONFLICT",
-          "The server revision changed; your draft was not saved.",
-        );
-      if (!body.reason || !body.operationId || body.schemaVersion !== 2)
-        return error(
-          400,
-          "INVALID_REQUEST",
-          "Audited versioned settings are required.",
-        );
-      const fields = { ...body } as Partial<typeof body>;
-      delete fields.expectedRevision;
-      delete fields.operationId;
-      delete fields.reason;
-      this.mediaPolicy = {
-        ...this.mediaPolicy,
-        ...fields,
-        revision: this.mediaPolicy.revision + 1,
-        updatedAt: new Date().toISOString(),
-      };
-      return { status: 200, body: this.mediaPolicy };
-    }
-    if (path === "/admin/jobs/queue-summary" && method === "GET")
-      return {
-        status: 200,
-        body: {
-          outstandingJobs: 3,
-          outstandingAudioSeconds: 1920,
-          queuedJobs: 2,
-          queuedAudioSeconds: 1860,
-          oldestQueuedAt: NOW,
-          limits: {
-            maxOutstandingJobs: 100,
-            maxOutstandingAudioSeconds: 60000,
-          },
-          estimatedWorkerSeconds: null,
-          estimatedWaitRange: null,
-          evidenceStatus: "unavailable",
-          checkedAt: new Date().toISOString(),
-        },
-      };
     if (
       path === `/admin/users/${FIXTURE_IDS.user}/processing-usage` &&
       method === "GET"
@@ -484,7 +376,6 @@ export class DashboardFixture {
             meanProcessingSeconds: 42,
             sampleCount: { queueWait: 3, processing: 2 },
           },
-          workers: { total: 1, online: 0 },
           series: [
             { start: NOW, submitted: 4, completed: 2, failed: 1, cancelled: 0 },
           ],
@@ -502,7 +393,7 @@ export class DashboardFixture {
         status: 200,
         body: overview
           ? "bucketStart,submitted,completed,failed,cancelled\r\n2026-09-11T00:00:00.000Z,4,2,1,0\r\n"
-          : `id,userId,status,workerId,createdAt,queuedAt,startedAt,finishedAt,elapsedSeconds,errorCode\r\n${FIXTURE_IDS.job},${FIXTURE_IDS.user},processing,${FIXTURE_IDS.worker},${NOW},${NOW},${NOW},,42,\r\n`,
+          : `id,userId,status,createdAt,queuedAt,startedAt,finishedAt,elapsedSeconds,errorCode\r\n${FIXTURE_IDS.job},${FIXTURE_IDS.user},processing,${NOW},${NOW},${NOW},,42,\r\n`,
         headers: {
           "content-type": "text/csv; charset=utf-8",
           "content-disposition": `attachment; filename="musicmute-${overview ? "overview" : "jobs"}.csv"`,
@@ -562,94 +453,10 @@ export class DashboardFixture {
         },
       };
 
-    if (path === "/admin/workers") {
-      if (method === "GET") return { status: 200, body: page([this.worker]) };
-      const body = input.body as { id: string; label: string };
-      return {
-        status: 201,
-        body: {
-          worker: {
-            ...this.worker,
-            id: body.id,
-            label: body.label,
-            activeJobId: null,
-            activeAttemptId: null,
-            recoveryRequired: false,
-            assignment: null,
-          },
-          rawKey: "one-time-fixture-key",
-        },
-      };
-    }
-    if (path === `/admin/workers/${this.worker.id}` && method === "GET")
-      return { status: 200, body: this.worker };
-    if (path === `/admin/workers/${this.worker.id}` && method === "PATCH") {
-      const body = input.body as { label: string };
-      this.worker = {
-        ...this.worker,
-        label: body.label,
-        revision: this.worker.revision + 1,
-      };
-      return { status: 200, body: this.worker };
-    }
-    if (
-      path.startsWith(`/admin/workers/${this.worker.id}/`) &&
-      method === "POST"
-    ) {
-      const action = path.split("/").at(-1);
-      if (action === "rotate-key")
-        return {
-          status: 201,
-          body: {
-            worker: { ...this.worker, revision: this.worker.revision + 1 },
-            rawKey: "rotated-one-time-fi-key",
-          },
-        };
-      this.worker = {
-        ...this.worker,
-        state:
-          action === "revoke"
-            ? "revoked"
-            : action === "drain"
-              ? "draining"
-              : "enabled",
-        recoveryRequired:
-          action === "release-stopped" ? false : this.worker.recoveryRequired,
-        assignment:
-          action === "release-stopped" ? null : this.worker.assignment,
-        activeJobId:
-          action === "release-stopped" ? null : this.worker.activeJobId,
-        activeAttemptId:
-          action === "release-stopped" ? null : this.worker.activeAttemptId,
-        revision: this.worker.revision + 1,
-      };
-      return { status: 201, body: this.worker };
-    }
-
     if (path === "/admin/jobs" && method === "GET")
       return { status: 200, body: page([this.job]) };
     if (path === `/admin/jobs/${this.job.id}` && method === "GET")
       return { status: 200, body: this.job };
-    if (path === `/admin/jobs/${this.job.id}/attempts` && method === "GET")
-      return {
-        status: 200,
-        body: page([
-          {
-            id: "attempt-fixture",
-            jobId: this.job.id,
-            workerId: this.worker.id,
-            sessionId: "session-fixture",
-            generation: 1,
-            outcome: null,
-            startedAt: NOW,
-            endedAt: null,
-            interruptedAt: null,
-            releasedAt: null,
-            recoveryRequired: false,
-            durationSeconds: 42,
-          },
-        ]),
-      };
     if (path === `/admin/jobs/${this.job.id}/cancel` && method === "POST") {
       this.job = {
         ...this.job,
@@ -665,15 +472,6 @@ export class DashboardFixture {
         },
       };
     }
-    if (path === `/admin/jobs/${this.job.id}/retry` && method === "POST")
-      return {
-        status: 201,
-        body: {
-          sourceJobId: this.job.id,
-          newJobId: FIXTURE_IDS.retryJob,
-          status: "queued",
-        },
-      };
     if (
       path === `/admin/jobs/${this.job.id}/media-grants` &&
       method === "POST"
@@ -945,10 +743,10 @@ export class DashboardFixture {
           asOf: NOW,
           components: [
             {
-              name: "worker-fleet",
-              status: "degraded",
+              name: "storage",
+              status: "unavailable",
               checkedAt: NOW,
-              code: "NO_ONLINE_WORKER",
+              code: "DEPENDENCY_UNAVAILABLE",
             },
             { name: "mongodb", status: "healthy", checkedAt: NOW, code: null },
           ],
@@ -973,9 +771,9 @@ export class DashboardFixture {
       const event: AuditEvent = {
         id: "audit-fixture",
         actorUid: "owner-fixture",
-        action: "workers.drain",
-        resourceType: "worker",
-        resourceId: this.worker.id,
+        action: "jobs.cancel",
+        resourceType: "job",
+        resourceId: this.job.id,
         operationId: "00000000-0000-4000-8000-000000000001",
         reason: "Fixture audit event",
         at: NOW,

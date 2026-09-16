@@ -1,7 +1,6 @@
 export const ADMIN_ROLES = [
   "owner",
   "release_manager",
-  "worker_manager",
   "support",
   "viewer",
 ] as const;
@@ -10,9 +9,6 @@ export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export const PERMISSIONS = [
   "overview.read",
-  "workers.read",
-  "workers.manage",
-  "workers.recover",
   "jobs.read",
   "jobs.manage",
   "users.read",
@@ -58,42 +54,6 @@ export interface AdminAccess {
   updatedAt: string;
 }
 
-export type WorkerState = "enabled" | "draining" | "revoked";
-
-export interface WorkerSummary {
-  id: string;
-  label: string;
-  state: WorkerState;
-  online: boolean;
-  lastSeenAt: string | null;
-  activeJobId: string | null;
-  activeAttemptId: string | null;
-  recoveryRequired: boolean;
-  revision: number;
-}
-
-export interface WorkerAssignment {
-  jobId: string;
-  attemptId: string;
-  sessionId: string;
-  generation: number;
-  leaseExpiresAt: string;
-}
-
-export interface WorkerDetail extends WorkerSummary {
-  protocolVersion: number;
-  mediaPolicyVersion?: 2 | null;
-  mediaCapabilitySeenAt?: string | null;
-  slotState: "idle" | "active" | "reserved" | "recovery_required";
-  assignment: WorkerAssignment | null;
-  recentEvents: Array<{
-    id: string;
-    action: string;
-    at: string;
-    outcome: string;
-  }>;
-}
-
 export const JOB_STATUSES = [
   "awaiting_upload",
   "queued",
@@ -113,7 +73,6 @@ export interface JobSummary {
   id: string;
   userId: string;
   status: JobStatus;
-  workerId: string | null;
   createdAt: string;
   queuedAt: string | null;
   startedAt: string | null;
@@ -133,7 +92,6 @@ export interface JobDetail extends JobSummary {
   declaredBytes?: number | null;
   measuredBytes?: number | null;
   policyVersion?: number;
-  estimatedWorkerSeconds?: number | null;
   retryOfJobId: string | null;
   stageTimings: Array<{
     stage: string;
@@ -144,26 +102,6 @@ export interface JobDetail extends JobSummary {
   declaredDurationSeconds: number | null;
   measuredDurationSeconds: number | null;
   media: { inputAvailable: boolean; resultAvailable: boolean };
-  recoveryRequired: boolean;
-  activeAttemptId: string | null;
-}
-
-export interface AttemptSummary {
-  separatorExecutionSeconds?: number | null;
-  stoppedConfirmed?: boolean;
-  separationCompleted?: boolean;
-  id: string;
-  jobId: string;
-  workerId: string | null;
-  sessionId: string | null;
-  generation: number;
-  outcome: string | null;
-  startedAt: string | null;
-  endedAt: string | null;
-  interruptedAt: string | null;
-  releasedAt: string | null;
-  recoveryRequired: boolean;
-  durationSeconds: number | null;
 }
 
 export interface UserSummary {
@@ -301,7 +239,6 @@ export interface OverviewSnapshot {
     meanProcessingSeconds: number | null;
     sampleCount: { queueWait: number; processing: number };
   };
-  workers: { total: number; online: number };
   series: Array<{
     start: string;
     submitted: number;
@@ -386,71 +323,6 @@ export interface RevisionCommand {
   expectedRevision: number;
   operationId: string;
   reason: string;
-}
-
-export interface ProcessingQualification {
-  evidenceReference: string;
-  compatibilityRevision: string;
-  measuredAt: string;
-  expiresAt: string;
-  qualifiedWorkerIds: string[];
-  maxLocalSourceBytes: number;
-  maxSourceDownloadBytes: number;
-  maxPreparationSeconds: number;
-  maxSourceDownloadSeconds: number;
-  maxOutputBytes: number;
-  probeTimeoutSeconds: number;
-  processingTimeoutSeconds: number;
-  maxOutstandingEstimatedWorkerSeconds: number;
-  costModelRevision: string;
-  referenceProcessingSecondsPerAudioSecond: number;
-  fixedJobOverheadSeconds: number;
-}
-
-export interface ProcessingReadiness {
-  evidenceStatus: "verified" | "stale" | "unavailable";
-  expandedAdmissionAvailable: boolean;
-  capableWorkerIds?: string[];
-  costModelRevision: string | null;
-  maxOutstandingEstimatedWorkerSeconds: number | null;
-}
-
-export interface ProcessingPolicyV2 {
-  shortLongThresholdSeconds?: number;
-  schemaVersion: 2;
-  revision: number;
-  updatedAt: string;
-  acceptNewJobs: boolean;
-  acceptLongJobs: boolean;
-  maxDurationSeconds: number;
-  maxPreparedAudioBytes: number;
-  maxActiveJobsPerUser: 1;
-  allowanceAudioSeconds: number;
-  allowanceWindowSeconds: 86400;
-  maxOutstandingJobs: number;
-  maxOutstandingAudioSeconds: number;
-  agingThresholdSeconds: number;
-  qualification: ProcessingQualification | null;
-  readiness: ProcessingReadiness;
-}
-
-export interface QueueWorkload {
-  shortLongThresholdSeconds?: number;
-  distribution?: {
-    short: { jobs: number; audioSeconds: number };
-    long: { jobs: number; audioSeconds: number };
-  };
-  rejectionSummary?: null;
-  outstandingJobs: number;
-  outstandingAudioSeconds: number;
-  queuedJobs: number;
-  queuedAudioSeconds: number;
-  oldestQueuedAt: string | null;
-  limits: { maxOutstandingJobs: number; maxOutstandingAudioSeconds: number };
-  estimatedWorkerSeconds: number | null;
-  estimatedWaitRange: { minSeconds: number; maxSeconds: number } | null;
-  evidenceStatus: "verified" | "stale" | "unavailable";
-  checkedAt: string;
 }
 
 export interface ProcessingUsage {

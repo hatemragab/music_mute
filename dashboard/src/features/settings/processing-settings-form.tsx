@@ -110,8 +110,8 @@ export function ProcessingSettingsForm({
             }
           />
           <p className="text-xs text-muted-foreground">
-            Audio must be shorter than this value. Worker/mobile capability
-            maximum: 600 seconds.
+            Audio must be shorter than this value. Supported maximum: 600
+            seconds.
           </p>
         </div>
         <div className="space-y-2">

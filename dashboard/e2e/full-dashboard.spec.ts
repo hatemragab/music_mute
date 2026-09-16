@@ -19,8 +19,6 @@ test("owner can open every dashboard area without runtime errors", async ({
 
   const pages = [
     ["/overview", "Operations overview"],
-    ["/workers", "Workers"],
-    [`/workers/${FIXTURE_IDS.worker}`, "Studio Z440"],
     ["/jobs", "Jobs"],
     [`/jobs/${FIXTURE_IDS.job}`, "Fixture song"],
     ["/users", "Users"],
@@ -154,16 +152,16 @@ test("unsaved settings require a decision before in-app navigation", async ({
   await page.goto("/settings");
   await page.getByRole("switch", { name: "Accept new jobs" }).click();
 
-  await page.getByRole("link", { name: "Workers" }).click();
+  await page.getByRole("link", { name: "Jobs" }).click();
   let dialog = page.getByRole("alertdialog");
   await expect(dialog).toContainText("Discard unsaved changes?");
   await dialog.getByRole("button", { name: "Keep editing" }).click();
   await expect(page).toHaveURL(/\/settings$/);
 
-  await page.getByRole("link", { name: "Workers" }).click();
+  await page.getByRole("link", { name: "Jobs" }).click();
   dialog = page.getByRole("alertdialog");
   await dialog.getByRole("button", { name: "Discard changes" }).click();
-  await expect(page).toHaveURL(/\/workers$/);
+  await expect(page).toHaveURL(/\/jobs$/);
 });
 
 test("CSV downloads retain the active jobs and overview filters", async ({
@@ -171,7 +169,7 @@ test("CSV downloads retain the active jobs and overview filters", async ({
 }) => {
   await setDashboardRole(page, "owner");
   const fixture = await installDashboardFixture(page);
-  await page.goto(`/jobs?status=processing&workerId=${FIXTURE_IDS.worker}`);
+  await page.goto("/jobs?status=processing");
   await expect(page.getByRole("heading", { name: "Jobs" })).toBeVisible();
   const jobsDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export CSV" }).click();
@@ -180,8 +178,7 @@ test("CSV downloads retain the active jobs and overview filters", async ({
     fixture.requests.some(
       ({ url }) =>
         url.includes("/admin/exports/jobs.csv") &&
-        url.includes("status=processing") &&
-        url.includes(`workerId=${FIXTURE_IDS.worker}`),
+        url.includes("status=processing"),
     ),
   ).toBe(true);
 
@@ -209,9 +206,7 @@ test("CSV downloads retain the active jobs and overview filters", async ({
   ).toBe(true);
 });
 
-test("owner completes administrator, worker recovery, and alert workflows", async ({
-  page,
-}) => {
+test("owner completes administrator and alert workflows", async ({ page }) => {
   await setDashboardRole(page, "owner");
   const fixture = await installDashboardFixture(page);
 
@@ -233,37 +228,6 @@ test("owner completes administrator, worker recovery, and alert workflows", asyn
     ),
   ).toBe(true);
 
-  await page.goto("/workers");
-  await page.getByRole("button", { name: "Register worker" }).click();
-  dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Worker ID").fill("spare-worker");
-  await dialog.getByLabel("Label").fill("Spare worker");
-  await dialog.getByLabel("Reason").fill("Add spare test capacity");
-  await dialog
-    .getByRole("button", { name: "Reauthenticate and review" })
-    .click();
-  await dialog.getByRole("button", { name: "Confirm registration" }).click();
-  dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("one-time-fixture-key");
-  await dialog.getByLabel(/I saved this key securely/).check();
-  await dialog.getByRole("button", { name: "Close and clear key" }).click();
-  await expect(page.getByText("one-time-fixture-key")).toHaveCount(0);
-
-  await page.goto(`/workers/${FIXTURE_IDS.worker}`);
-  await page.getByRole("button", { name: "Release stopped work" }).click();
-  dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Observed stopped time").fill("2026-09-11T00:00");
-  await dialog
-    .getByLabel("Detailed stop evidence")
-    .fill("PID 4242 was absent after a repeated process check.");
-  await dialog.getByLabel("Reason").fill("Recover confirmed stopped work");
-  await dialog
-    .getByRole("button", { name: "Reauthenticate and review" })
-    .click();
-  await dialog.getByRole("button", { name: "Acknowledge and release" }).click();
-  await expect(dialog).toHaveCount(0);
-  expect(fixture.worker.assignment).toBeNull();
-
   await page.goto("/health");
   await page.getByRole("button", { name: "Acknowledge" }).click();
   dialog = page.getByRole("dialog");
@@ -273,35 +237,19 @@ test("owner completes administrator, worker recovery, and alert workflows", asyn
   expect(fixture.alert.acknowledgedBy).toBe("owner-fixture");
 });
 
-test("owner drains an idle worker and withdraws a release with a replacement policy", async ({
+test("owner withdraws a release with a replacement policy", async ({
   page,
 }) => {
   await setDashboardRole(page, "owner");
   const fixture = createDashboardFixture();
-  fixture.worker = {
-    ...fixture.worker,
-    activeJobId: null,
-    activeAttemptId: null,
-    assignment: null,
-    recoveryRequired: false,
-    slotState: "idle",
-  };
   await installDashboardFixture(page, fixture);
-
-  await page.goto(`/workers/${FIXTURE_IDS.worker}`);
-  await page.getByRole("button", { name: "Drain" }).click();
-  let dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Reason").fill("Drain before planned maintenance");
-  await dialog.getByRole("button", { name: "Confirm drain" }).click();
-  await expect(dialog).toHaveCount(0);
-  expect(fixture.worker.state).toBe("draining");
 
   await page.goto(`/update-policy?releaseId=${FIXTURE_IDS.publishedRelease}`);
   await page.getByLabel("Direct release ID").fill(FIXTURE_IDS.release);
   await page.getByRole("button", { name: "Preview policy" }).click();
   await expect(page.getByText("Policy is valid")).toBeVisible();
   await page.getByRole("button", { name: "Withdraw with replacement" }).click();
-  dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason").fill("Replace the superseded direct build");
   await dialog
     .getByRole("button", { name: "Reauthenticate with Google" })
@@ -458,90 +406,6 @@ test("expired media requires a new reviewed grant", async ({ page }) => {
   expect(
     fixture.requests.filter(({ url }) => url.includes("media-grants")),
   ).toHaveLength(2);
-});
-
-test("retry opens a distinct queued job and recovery-required work cannot retry", async ({
-  page,
-}) => {
-  await setDashboardRole(page, "owner");
-  const fixture = createDashboardFixture();
-  fixture.job.status = "failed";
-  fixture.job.recoveryRequired = false;
-  await installDashboardFixture(page, fixture);
-  await page.route(
-    `**/api/v1/admin/jobs/${FIXTURE_IDS.retryJob}/attempts`,
-    (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ items: [], nextCursor: null }),
-      }),
-  );
-  await page.route(`**/api/v1/admin/jobs/${FIXTURE_IDS.retryJob}`, (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        ...fixture.job,
-        id: FIXTURE_IDS.retryJob,
-        status: "queued",
-        revision: 1,
-        retryOfJobId: FIXTURE_IDS.job,
-      }),
-    }),
-  );
-  await page.goto(`/jobs/${FIXTURE_IDS.job}`);
-
-  await page.getByRole("button", { name: "Retry as new job" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Reason").fill("Retry verified pinned input");
-  await dialog.getByRole("button", { name: "Create retry job" }).click();
-  await expect(page).toHaveURL(new RegExp(`/jobs/${FIXTURE_IDS.retryJob}$`));
-  await expect(page.getByText("queued", { exact: true })).toBeVisible();
-  expect(
-    fixture.requests.some(
-      ({ method, url }) =>
-        method === "POST" && url.includes(`/${FIXTURE_IDS.job}/retry`),
-    ),
-  ).toBe(true);
-
-  fixture.job.recoveryRequired = true;
-  await page.goto(`/jobs/${FIXTURE_IDS.job}`);
-  await expect(page.getByText("Recovery required.")).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Retry as new job" }),
-  ).toHaveCount(0);
-});
-
-test("sign out clears an undisclosed one-time worker key", async ({ page }) => {
-  await setDashboardRole(page, "owner");
-  await installDashboardFixture(page);
-  await page.goto("/workers");
-  await page.getByRole("button", { name: "Register worker" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Worker ID").fill("session-clear-worker");
-  await dialog.getByLabel("Label").fill("Session clear worker");
-  await dialog.getByLabel("Reason").fill("Verify secret session cleanup");
-  await dialog
-    .getByRole("button", { name: "Reauthenticate and review" })
-    .click();
-  await dialog.getByRole("button", { name: "Confirm registration" }).click();
-  await expect(page.getByText("one-time-fixture-key")).toBeVisible();
-
-  const browserStorage = await page.evaluate(() => ({
-    local: JSON.stringify(localStorage),
-    session: JSON.stringify(sessionStorage),
-  }));
-  expect(browserStorage.local).not.toContain("one-time-fixture-key");
-  expect(browserStorage.session).not.toContain("one-time-fixture-key");
-  await page
-    .locator("header button")
-    .filter({ hasText: "Sign out" })
-    .evaluate((button: HTMLButtonElement) => button.click());
-  await expect(
-    page.getByRole("heading", { name: "MusicMute Operations" }),
-  ).toBeVisible();
-  await expect(page.getByText("one-time-fixture-key")).toHaveCount(0);
 });
 
 test("a lost settings response is reconciled through the operation receipt", async ({

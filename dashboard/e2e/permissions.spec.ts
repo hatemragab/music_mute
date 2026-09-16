@@ -6,7 +6,6 @@ import { installDashboardFixture, setDashboardRole } from "./helpers/session";
 const expectedNavigation: Record<AdminRole, string[]> = {
   owner: [
     "Overview",
-    "Workers",
     "Jobs",
     "Users",
     "Account recovery",
@@ -18,29 +17,8 @@ const expectedNavigation: Record<AdminRole, string[]> = {
     "Administrators",
   ],
   release_manager: ["Overview", "Releases", "Update policy"],
-  worker_manager: [
-    "Overview",
-    "Workers",
-    "Jobs",
-    "Settings",
-    "Health & alerts",
-  ],
-  support: [
-    "Overview",
-    "Workers",
-    "Jobs",
-    "Users",
-    "Account recovery",
-    "Settings",
-  ],
-  viewer: [
-    "Overview",
-    "Workers",
-    "Jobs",
-    "Releases",
-    "Update policy",
-    "Settings",
-  ],
+  support: ["Overview", "Jobs", "Users", "Account recovery", "Settings"],
+  viewer: ["Overview", "Jobs", "Releases", "Update policy", "Settings"],
 };
 
 for (const [role, links] of Object.entries(expectedNavigation) as Array<

@@ -258,42 +258,6 @@ test("every dashboard mutation payload passes compiled backend strict validation
     });
     const results: Record<string, { status: number; code: string | null }> = {};
 
-    results.workerCreate = await request("POST", "/admin/workers", {
-      id: `contract-worker-${crypto.randomUUID().slice(0, 8)}`,
-      label: "Contract worker",
-      operationId: crypto.randomUUID(),
-      reason: "Validate worker registration contract",
-    });
-    results.workerRename = await request(
-      "PATCH",
-      "/admin/workers/missing-worker",
-      { ...revision(), label: "Renamed worker" },
-    );
-    for (const action of ["drain", "enable", "rotate-key"] as const) {
-      results[`worker-${action}`] = await request(
-        "POST",
-        `/admin/workers/missing-worker/${action}`,
-        revision(),
-      );
-    }
-    results.workerRevoke = await request(
-      "POST",
-      "/admin/workers/missing-worker/revoke",
-      { ...revision(), emergency: false },
-    );
-    results.workerReleaseStopped = await request(
-      "POST",
-      "/admin/workers/missing-worker/release-stopped",
-      {
-        ...revision(),
-        jobId: missingId,
-        attemptId: crypto.randomUUID(),
-        sessionId: crypto.randomUUID(),
-        generation: 1,
-        stoppedAt: new Date().toISOString(),
-        stopEvidence: "Verified process stop evidence",
-      },
-    );
     for (const action of ["suspend-processing", "resume-processing"] as const) {
       results[`user-${action}`] = await request(
         "POST",

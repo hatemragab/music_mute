@@ -203,7 +203,7 @@ export function SystemHealthPage() {
           if (!open) setAcknowledging(null);
         }}
         title="Acknowledge alert"
-        description="This records awareness only. It does not resolve the condition, resume a worker or release an interrupted slot."
+        description="This records operator awareness only; it does not resolve the underlying condition."
         confirmLabel="Acknowledge"
         summary={
           acknowledging ? (

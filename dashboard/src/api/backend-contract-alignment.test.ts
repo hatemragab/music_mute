@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "./api-client";
-import { ALERT_SEVERITIES, JOB_STATUSES } from "./contracts";
+import {
+  ADMIN_ROLES,
+  ALERT_SEVERITIES,
+  JOB_STATUSES,
+  PERMISSIONS,
+} from "./contracts";
+import { NAV_ITEMS } from "@/app/app-shell";
 import { requestMediaGrant } from "@/features/jobs/jobs-api";
 import {
   getReleaseProposal,
@@ -10,7 +16,6 @@ import {
   updateRelease,
   withdrawRelease,
 } from "@/features/releases/releases-api";
-import { workerAction } from "@/features/workers/workers-api";
 import {
   decideAccountRecoveryRequest,
   getAccountRecoverySummary,
@@ -63,27 +68,17 @@ describe("dashboard/backend contract alignment", () => {
     });
   });
 
-  it("sends the required emergency decision only for worker revocation", async () => {
-    const api = client();
-    const revision = {
-      expectedRevision: 4,
-      operationId: "operation-worker",
-      reason: "Revoke a compromised worker credential",
-    };
-
-    await workerAction(api, "worker-1", "revoke", revision);
-    await workerAction(api, "worker-1", "drain", revision);
-
-    expect(api.post).toHaveBeenNthCalledWith(
-      1,
-      "/admin/workers/worker-1/revoke",
-      { ...revision, emergency: false },
-    );
-    expect(api.post).toHaveBeenNthCalledWith(
-      2,
-      "/admin/workers/worker-1/drain",
-      revision,
-    );
+  it("contains no removed machine administration contract", () => {
+    expect(ADMIN_ROLES).toEqual([
+      "owner",
+      "release_manager",
+      "support",
+      "viewer",
+    ]);
+    expect(
+      PERMISSIONS.some((permission) => permission.startsWith("workers.")),
+    ).toBe(false);
+    expect(NAV_ITEMS.map((item) => item.to)).not.toContain("/workers");
   });
 
   it("removes immutable fields from release edits", async () => {

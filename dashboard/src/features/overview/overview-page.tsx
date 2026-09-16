@@ -1,4 +1,3 @@
-import { QueueSummarySection } from "@/features/jobs/queue-summary-panel";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -57,7 +56,7 @@ export function OverviewPage() {
     <div className="space-y-6">
       <PageHeader
         title="Operations overview"
-        description="Current capacity and job outcomes for the selected UTC interval."
+        description="Job activity and outcomes for the selected UTC interval."
         actions={
           <div className="flex flex-wrap items-start justify-end gap-2">
             <DateRangeFilter range={range} onChange={setRange} />
@@ -73,7 +72,6 @@ export function OverviewPage() {
           </div>
         }
       />
-      <QueueSummarySection />
       {overview.isLoading ? (
         <LoadingState rows={6} />
       ) : overview.isError ? (

@@ -4,7 +4,6 @@ import {
   BriefcaseBusiness,
   ChevronRight,
   CircleGauge,
-  HardDrive,
   HeartPulse,
   LogOut,
   Menu,
@@ -51,12 +50,6 @@ export const NAV_ITEMS: NavItem[] = [
     to: "/overview",
     permission: "overview.read",
     icon: CircleGauge,
-  },
-  {
-    label: "Workers",
-    to: "/workers",
-    permission: "workers.read",
-    icon: HardDrive,
   },
   {
     label: "Jobs",

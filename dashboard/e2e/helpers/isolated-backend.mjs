@@ -39,7 +39,6 @@ try {
       REDIS_URL: `redis://127.0.0.1:${databases.redisPort}`,
       CORS_ORIGINS: "http://127.0.0.1:4173",
       AUDIO_PROCESSING_ENABLED: "true",
-      PROCESSING_WORKER_AUTH_MODE: "fleet",
       APP_UPDATES_ENABLED: "true",
       APK_EXPECTED_PACKAGE_ID: "com.example.fixture",
       RELEASE_LANDING_BASE_URL: "https://example.invalid/api/v1",

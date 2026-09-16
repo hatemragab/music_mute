@@ -63,7 +63,7 @@ export function AlertDetail({
             </dl>
             <p className="rounded-lg border bg-muted/20 p-3 text-muted-foreground">
               Acknowledgment records operator awareness. It does not resolve the
-              condition or release worker ownership.
+              underlying condition.
             </p>
           </div>
         ) : null}

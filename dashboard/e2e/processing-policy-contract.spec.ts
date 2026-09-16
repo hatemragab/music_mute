@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { setDashboardRole } from "./helpers/session";
 
-test("compiled backend accepts v2 policy command and reports unqualified capacity", async ({
+test("compiled backend accepts basic processing settings and exposes no removed policy routes", async ({
   page,
 }) => {
   await setDashboardRole(page, "owner");
@@ -17,26 +17,31 @@ test("compiled backend accepts v2 policy command and reports unqualified capacit
         },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
-      return { status: response.status, value: await response.json() };
+      return {
+        status: response.status,
+        value: await response.json().catch(() => null),
+      };
     };
-    const before = await request("GET", "/admin/settings/processing-v2");
+    const before = await request("GET", "/admin/settings/processing");
     const command = {
-      ...before.value,
+      acceptNewJobs: false,
+      maintenanceMessageEn: "Processing redesign in progress",
+      maintenanceMessageAr: null,
+      maxInputBytesExclusive: before.value.maxInputBytesExclusive,
+      maxDurationSecondsExclusive: before.value.maxDurationSecondsExclusive,
+      maxActiveJobsPerUser: before.value.maxActiveJobsPerUser,
       expectedRevision: before.value.revision,
       operationId: crypto.randomUUID(),
-      reason: "Validate exact dashboard v2 contract in isolated backend",
+      reason: "Validate the basic settings contract",
     };
-    delete command.revision;
-    delete command.updatedAt;
-    delete command.readiness;
-    delete command.shortLongThresholdSeconds;
-    const save = await request("PUT", "/admin/settings/processing-v2", command);
-    const after = await request("GET", "/admin/settings/processing-v2");
-    const conflict = await request("PUT", "/admin/settings/processing-v2", {
+    const save = await request("PUT", "/admin/settings/processing", command);
+    const after = await request("GET", "/admin/settings/processing");
+    const conflict = await request("PUT", "/admin/settings/processing", {
       ...command,
       operationId: crypto.randomUUID(),
     });
-    const queue = await request("GET", "/admin/jobs/queue-summary");
+    const removedPolicy = await request("GET", "/admin/settings/processing-v2");
+    const removedQueue = await request("GET", "/admin/jobs/queue-summary");
     const allowance = await request(
       "PUT",
       "/admin/users/missing-user/processing-allowance",
@@ -48,17 +53,22 @@ test("compiled backend accepts v2 policy command and reports unqualified capacit
         expiresAt: new Date(Date.now() + 86400000).toISOString(),
       },
     );
-    return { before, save, after, conflict, queue, allowance };
+    return {
+      before,
+      save,
+      after,
+      conflict,
+      removedPolicy,
+      removedQueue,
+      allowance,
+    };
   });
   expect(result.before.status).toBe(200);
   expect(result.save.status).toBe(200);
   expect(result.after.value.revision).toBe(result.before.value.revision + 1);
-  expect(result.after.value.qualification).toBeNull();
-  expect(result.after.value.readiness.expandedAdmissionAvailable).toBe(false);
+  expect(result.after.value.acceptNewJobs).toBe(false);
   expect(result.conflict.status).toBe(409);
-  expect(result.queue.status).toBe(200);
-  expect(result.queue.value.estimatedWaitRange).toBeNull();
-  expect(result.queue.value.shortLongThresholdSeconds).toBe(600);
-  expect(result.queue.value.distribution.short.jobs).toBeGreaterThanOrEqual(0);
+  expect(result.removedPolicy.status).toBe(404);
+  expect(result.removedQueue.status).toBe(404);
   expect(result.allowance.status).toBe(404);
 });
