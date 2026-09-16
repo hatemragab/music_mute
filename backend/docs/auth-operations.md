@@ -25,13 +25,13 @@ The authentication feature uses these exact indexes:
 Inspect definitions and duplicate identity counts without writing:
 
 ```sh
-npm run ops:auth -- indexes --dry-run
+pnpm run ops:auth -- indexes --dry-run
 ```
 
 After reviewing a clean inspection, create only missing required indexes:
 
 ```sh
-npm run ops:auth -- indexes --apply
+pnpm run ops:auth -- indexes --apply
 ```
 
 Apply refuses duplicate identity records and any index with a conflicting name,
@@ -71,8 +71,8 @@ Example `policy.json`:
 Preview revision `4` without writing, then apply that exact compare-and-set:
 
 ```sh
-npm run ops:auth -- policy --dry-run --file ./policy.json --expected-revision 4
-npm run ops:auth -- policy --apply --file ./policy.json --expected-revision 4
+pnpm run ops:auth -- policy --dry-run --file ./policy.json --expected-revision 4
+pnpm run ops:auth -- policy --apply --file ./policy.json --expected-revision 4
 ```
 
 Missing policy storage uses the optional-verification default at revision `0` and
@@ -85,8 +85,8 @@ The default activity window is 30 days; an explicit value must be an integer fro
 1 through 365:
 
 ```sh
-npm run ops:auth -- stats
-npm run ops:auth -- stats --days 30
+pnpm run ops:auth -- stats
+pnpm run ops:auth -- stats --days 30
 ```
 
 Output contains recent installation records and distinct MongoDB user counts,

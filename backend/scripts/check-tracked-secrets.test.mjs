@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
-import { scanText } from './check-tracked-secrets.mjs';
+import { scanText, scanTrackedFiles } from './check-tracked-secrets.mjs';
 
 test('detects credential forms without returning their values', () => {
   const pem = ['-----BEGIN ', 'PRIVATE KEY-----', 'private-material'].join('');
@@ -41,4 +45,18 @@ test('detects an embedded Firebase service-account private key', () => {
     scanText(JSON.stringify({ type: 'service_account', private_key: key })),
     ['firebase-service-account-private-key', 'private-key-block'],
   );
+});
+
+test('skips tracked files deleted from the working tree', () => {
+  const root = mkdtempSync(join(tmpdir(), 'musicmute-secret-scan-'));
+  try {
+    execFileSync('git', ['init', '--quiet'], { cwd: root });
+    writeFileSync(join(root, 'removed.lock'), 'safe dependency lock');
+    execFileSync('git', ['add', 'removed.lock'], { cwd: root });
+    rmSync(join(root, 'removed.lock'));
+
+    assert.deepEqual(scanTrackedFiles(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

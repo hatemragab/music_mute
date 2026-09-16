@@ -64,8 +64,8 @@ email. The authenticated infrastructure operator then prepares a private JSON fi
 with exactly `userId` and `firebaseUid` from that verified account. Commands:
 
 ```sh
-npm run ops:auth -- delete-account --file /private/verified-request.json --dry-run
-npm run ops:auth -- delete-account --file /private/verified-request.json --apply --ownership-verified
+pnpm run ops:auth -- delete-account --file /private/verified-request.json --dry-run
+pnpm run ops:auth -- delete-account --file /private/verified-request.json --apply --ownership-verified
 ```
 
 The CLI checks both identifiers match and uses the same durable deletion lifecycle,

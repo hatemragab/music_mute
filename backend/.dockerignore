@@ -1,6 +1,6 @@
 *
 !package.json
-!package-lock.json
+!pnpm-lock.yaml
 !.npmrc
 !nest-cli.json
 !tsconfig*.json

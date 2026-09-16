@@ -27,7 +27,7 @@ CapRover does not deploy that Compose file automatically.
 From `backend/`, run:
 
 ```sh
-npm run package:caprover
+pnpm run package:caprover
 ```
 
 Upload the printed `api.tar` file through the API app's Deployment tab. Use

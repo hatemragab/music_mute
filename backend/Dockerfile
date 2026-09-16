@@ -2,12 +2,14 @@ FROM node:24.21.0-bookworm-slim AS build
 
 WORKDIR /app
 
-COPY backend/package.json backend/package-lock.json backend/.npmrc ./
-RUN npm ci
+COPY backend/package.json backend/pnpm-lock.yaml backend/.npmrc ./
+RUN corepack enable \
+    && corepack install --global pnpm@10.14.0 \
+    && pnpm install --frozen-lockfile
 
 COPY backend/nest-cli.json backend/tsconfig*.json ./
 COPY backend/src ./src
-RUN npm run build
+RUN pnpm run build
 
 FROM node:24.21.0-bookworm-slim AS apk-verifier
 
@@ -38,8 +40,11 @@ ENV APP_ENV=production \
 
 WORKDIR /app
 
-COPY backend/package.json backend/package-lock.json backend/.npmrc ./
-RUN npm ci --omit=dev && npm cache clean --force
+COPY backend/package.json backend/pnpm-lock.yaml backend/.npmrc ./
+RUN corepack enable \
+    && corepack install --global pnpm@10.14.0 \
+    && pnpm install --prod --frozen-lockfile \
+    && pnpm store prune
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \

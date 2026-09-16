@@ -84,10 +84,16 @@ export function scanTrackedFiles(cwd = process.cwd()) {
     const path = resolve(root, name);
     if (isAbsolute(name) || relative(root, path).startsWith('..'))
       throw new Error('Tracked path escaped repository root');
-    const stat = lstatSync(path);
-    const contents = stat.isSymbolicLink()
-      ? readlinkSync(path, 'utf8')
-      : readFileSync(path, 'utf8');
+    let contents;
+    try {
+      const stat = lstatSync(path);
+      contents = stat.isSymbolicLink()
+        ? readlinkSync(path, 'utf8')
+        : readFileSync(path, 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw error;
+    }
     for (const rule of scanText(contents)) findings.push({ file: name, rule });
   }
   return findings;

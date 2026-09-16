@@ -30,7 +30,7 @@ logged or included in support records.
 
 ## Validation boundary
 
-`npm run verify` and the isolated integration suites exercise local code with
+`pnpm run verify` and the isolated integration suites exercise local code with
 test-owned services and provider doubles. They do not modify a developer or
 production database and do not establish live Firebase, S3, notification, or
 deployment readiness.

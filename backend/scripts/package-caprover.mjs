@@ -10,7 +10,7 @@ const files = [
   '.dockerignore',
   'backend/Dockerfile',
   'backend/package.json',
-  'backend/package-lock.json',
+  'backend/pnpm-lock.yaml',
   'backend/.npmrc',
   'backend/nest-cli.json',
   'backend/scripts/install-apk-verifier.sh',

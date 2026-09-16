@@ -16,17 +16,17 @@ is redesigned.
 
 ## Requirements and local run
 
-- Node.js 24 LTS, npm 11. The lockfile defines reproducible dependency versions.
+- Node.js 24 LTS and pnpm 10. The lockfile defines reproducible dependency versions.
 - Independently running MongoDB 8 and Redis 7.4 or later.
 - Run all commands from this directory. Scripts target macOS/Linux and the VPS.
 
 ```sh
-npm ci
+pnpm install --frozen-lockfile
 cp -n .env.local.example .env.local
 cp -n .env.production.example .env.production
 chmod 600 .env.local .env.production
 # Configure MONGODB_URI and REDIS_URL in .env.local before starting.
-npm run start:dev
+pnpm run start:dev
 ```
 
 The API connects to existing MongoDB and Redis services; it does not start either
@@ -146,11 +146,11 @@ exceptions containing secrets.
 ## Verify
 
 ```sh
-npm run verify
-npm run test:integration
-npm run test:auth:integration
-npm run test:processing:integration
-npm audit --omit=dev
+pnpm run verify
+pnpm run test:integration
+pnpm run test:auth:integration
+pnpm run test:processing:integration
+pnpm audit --prod
 ```
 
 `verify` runs formatting checks, lint, TypeScript checks, a tracked-file credential
@@ -183,7 +183,7 @@ derived budget namespace and requires operational coordination. Auth emulator
 configuration is accepted only in test mode with a loopback host and a `demo-*`
 project.
 
-`npm run test:auth:integration` uses the pinned Firebase CLI, isolated MongoDB and
+`pnpm run test:auth:integration` uses the pinned Firebase CLI, isolated MongoDB and
 Redis, synthetic accounts and emulator-only email actions. It checks compiled API
 behavior without touching the real Firebase project, Atlas, S3 or a mailbox.
 
@@ -196,7 +196,7 @@ override has been applied. Recheck and address the audit before release.
 
 The official CLI scaffold was adapted to NestJS 11.2.3 because the current
 `@nestjs/throttler` 6.5.0 peer range does not support NestJS 12. Integration packages
-whose major is 12 explicitly support NestJS 11; npm resolves without peer bypasses.
+whose major is 12 explicitly support NestJS 11; pnpm resolves without peer bypasses.
 
 - [Nest configuration](https://docs.nestjs.com/techniques/configuration)
 - [Nest MongoDB](https://docs.nestjs.com/techniques/mongodb)

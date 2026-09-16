@@ -28,11 +28,11 @@ direct request. Never read or print real dotenv values, AWS keys or connection U
 
 ## Commands
 
-From backend/: `npm ci`, `npm run start:dev` with external MongoDB and Redis URLs.
-After edits: `npm run format`, `npm run verify`.
-After infrastructure/runtime changes: `npm run test:integration` with isolated
+From backend/: `pnpm install --frozen-lockfile`, `pnpm run start:dev` with external MongoDB and Redis URLs.
+After edits: `pnpm run format`, `pnpm run verify`.
+After infrastructure/runtime changes: `pnpm run test:integration` with isolated
 local mongod/redis-server. Never substitute live production services for tests.
-Audit dependencies with `npm audit --omit=dev`. Preserve package-lock.json and
+Audit dependencies with `pnpm audit --prod`. Preserve pnpm-lock.yaml and
 do not use `--force` or `--legacy-peer-deps` to hide incompatibility.
 
 Tests belong beside configuration (`*.spec.ts`), in test/ for HTTP policies
