@@ -31,6 +31,7 @@ import { ClientErrorsService } from '../client-errors/client-errors.service.js';
 import { JobsQueryService } from '../jobs/jobs-query.service.js';
 import { EnqueueService } from '../jobs/enqueue.service.js';
 import { ProcessingEnabledGuard } from './processing-enabled.guard.js';
+import { ProcessingUnavailableService } from './processing-unavailable.service.js';
 import { ProcessingTransactions } from './processing-transactions.js';
 import { ProcessingPersistenceModule } from './processing-persistence.module.js';
 import { ProcessingStartupService } from './processing-startup.service.js';
@@ -61,6 +62,7 @@ import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js'
     AccountDeletionMaintenanceService,
     ProcessingStartupService,
     ProcessingEnabledGuard,
+    ProcessingUnavailableService,
     ProcessingTransactions,
     JobsService,
     JobsQueryService,
