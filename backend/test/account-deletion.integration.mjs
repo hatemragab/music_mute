@@ -2,31 +2,14 @@ import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createConnection, Types } from 'mongoose';
-import { ConfigService } from '@nestjs/config';
 import { IsolatedServices } from './helpers/isolated-services.mjs';
 import { User, UserSchema } from '../dist/users/user.schema.js';
 import { Job, JobSchema } from '../dist/jobs/job.schema.js';
-import {
-  JobAttempt,
-  JobAttemptSchema,
-} from '../dist/jobs/job-attempt.schema.js';
-import {
-  WorkerControl,
-  WorkerControlSchema,
-} from '../dist/worker/worker-control.schema.js';
-import { WorkerTerminalService } from '../dist/worker/worker-terminal.service.js';
-import { WorkerCoordinatorService } from '../dist/worker/worker-coordinator.service.js';
-import {
-  WorkerRegistration,
-  WorkerRegistrationSchema,
-} from '../dist/worker/worker-registration.schema.js';
-import { ProcessingTransactions } from '../dist/processing/processing-transactions.js';
 import {
   UserIdentityFence,
   UserIdentityFenceSchema,
 } from '../dist/users/user-identity-fence.schema.js';
 import { UserIdentityFenceService } from '../dist/users/user-identity-fence.service.js';
-import { randomUUID } from 'node:crypto';
 import { AccountAccessService } from '../dist/users/account-access.service.js';
 import { AccountDeletionCleanupService } from '../dist/users/account-deletion-cleanup.service.js';
 
@@ -111,17 +94,9 @@ test(
       await connection.collection('client_errors').countDocuments(),
       0,
     );
-    const attempts = connection.model(JobAttempt.name, JobAttemptSchema);
-    const controls = connection.model(WorkerControl.name, WorkerControlSchema);
-    const registrations = connection.model(
-      WorkerRegistration.name,
-      WorkerRegistrationSchema,
-    );
-    await Promise.all([attempts.init(), controls.init(), registrations.init()]);
-    await controls.create({ _id: 'z440' });
-    const job = await jobs.create({
+    await jobs.create({
       userId: user._id,
-      requestId: randomUUID(),
+      requestId: '00000000-0000-4000-8000-000000000002',
       requestHash: '0'.repeat(64),
       status: 'cancelled',
       deletedAt: new Date(),
@@ -135,67 +110,11 @@ test(
         durationSeconds: 1,
       },
     });
-    const attempt = await attempts.create({
-      workerId: 'z440',
-      jobId: job._id,
-      attemptId: randomUUID(),
-      sessionId: randomUUID(),
-      generation: 1,
-      startedAt: new Date(),
-      endedAt: new Date(),
-      outcome: 'cancelled',
-    });
     unavailable = false;
     await users.updateOne(
       { _id: user._id },
       { $set: { deletionNextAt: new Date(0) } },
     );
-    await cleanup().advanceDeletion();
-    assert.equal(
-      deleted,
-      false,
-      'missing local file acknowledgement must block completion',
-    );
-    assert.ok(await attempts.exists({ _id: attempt._id }));
-    const terminal = new WorkerTerminalService(
-      new WorkerCoordinatorService(
-        jobs,
-        controls,
-        attempts,
-        new ProcessingTransactions(connection),
-        new ConfigService({ PROCESSING_WORKER_AUTH_MODE: 'legacy' }),
-        null,
-        null,
-        null,
-      ),
-      new ProcessingTransactions(connection),
-      null,
-      attempts,
-      null,
-      null,
-      controls,
-      null,
-      null,
-    );
-    const acknowledgement = {
-      jobId: job._id.toHexString(),
-      attemptId: attempt.attemptId,
-      sessionId: attempt.sessionId,
-      generation: 1,
-      eventId: randomUUID(),
-      localDataDeleted: true,
-    };
-    await assert.rejects(
-      terminal.confirmLocalCleanup({
-        ...acknowledgement,
-        sessionId: randomUUID(),
-      }),
-      (error) => error.status === 409,
-    );
-    assert.deepEqual(await terminal.confirmLocalCleanup(acknowledgement), {
-      status: 'cleaned',
-    });
-
     for (
       let iteration = 0;
       iteration < 10 && (await users.exists({ _id: user._id }));

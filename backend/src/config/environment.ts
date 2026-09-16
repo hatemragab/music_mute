@@ -103,24 +103,7 @@ const schema = Joi.object({
   RELEASE_LANDING_BASE_URL: Joi.string()
     .uri({ scheme: ['https'] })
     .optional(),
-  PROCESSING_WORKER_KEY_SHA256: Joi.string()
-    .pattern(/^[a-f0-9]{64}$/)
-    .optional(),
-  PROCESSING_WORKER_AUTH_MODE: Joi.string()
-    .valid('legacy', 'fleet')
-    .default('legacy'),
-  PROCESSING_WORKER_MAX_WAITERS: Joi.number()
-    .integer()
-    .min(1)
-    .max(1024)
-    .default(32),
-  PROCESSING_LEASE_SECONDS: Joi.number().integer().min(60).max(600).default(90),
   PROCESSING_URL_SECONDS: Joi.number().integer().min(60).max(900).default(900),
-  PROCESSING_OUTPUT_MAX_BYTES: Joi.number()
-    .integer()
-    .min(1024)
-    .max(100_000_000)
-    .default(30_000_000),
   CORS_ORIGINS: Joi.string().allow('').default(''),
   PUBLIC_SUPPORT_EMAIL: Joi.string()
     .email({ tlds: { allow: false } })
@@ -213,12 +196,6 @@ export function validateEnvironment(
     );
   }
   const env = result.value as Record<string, unknown>;
-  if (
-    env.AUDIO_PROCESSING_ENABLED &&
-    env.PROCESSING_WORKER_AUTH_MODE === 'legacy' &&
-    !env.PROCESSING_WORKER_KEY_SHA256
-  )
-    throw new Error('Invalid environment: PROCESSING_WORKER_KEY_SHA256');
   const production = env.APP_ENV === 'production';
   if (production !== (env.NODE_ENV === 'production'))
     throw new Error('APP_ENV and NODE_ENV disagree');

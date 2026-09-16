@@ -10,16 +10,11 @@ describe('administrator role permissions', () => {
       'support',
       'viewer',
     ]);
-    expect(isAdminRole('worker_manager')).toBe(false);
-    for (const role of ADMIN_ROLES) {
-      expect(permissionsForRole(role)).not.toEqual(
-        expect.arrayContaining([
-          'workers.read',
-          'workers.manage',
-          'workers.recover',
-        ]),
-      );
-    }
+    expect(permissionsForRole('release_manager')).toEqual([
+      'overview.read',
+      'releases.read',
+      'releases.manage',
+    ]);
   });
 
   it.each([

@@ -22,7 +22,6 @@ import {
 import type { AuthRequest } from './auth-request.js';
 import type { RateBucket } from './auth.types.js';
 import { authError } from './auth.errors.js';
-import { WORKER_ONLY_ROUTE } from '../worker/worker-routes.js';
 import { ADMIN_ROUTE } from '../admin/admin.decorators.js';
 import { adminError, adminRequestId } from '../admin/admin-errors.js';
 
@@ -41,18 +40,10 @@ export class AuthGuard implements CanActivate {
     const targets = [context.getHandler(), context.getClass()];
     const publicRoute =
       this.reflector.getAllAndOverride<boolean>(PUBLIC_ROUTE, targets) === true;
-    const workerOnly =
-      this.reflector.getAllAndOverride<boolean>(WORKER_ONLY_ROUTE, targets) ===
-      true;
     const adminRoute =
       this.reflector.getAllAndOverride<boolean>(ADMIN_ROUTE, targets) === true;
-    if (
-      (publicRoute && workerOnly) ||
-      (publicRoute && adminRoute) ||
-      (workerOnly && adminRoute)
-    )
-      throw authError('UNAUTHENTICATED');
-    if (workerOnly || publicRoute) return true;
+    if (publicRoute && adminRoute) throw authError('UNAUTHENTICATED');
+    if (publicRoute) return true;
     const req = context.switchToHttp().getRequest<AuthRequest>();
     const response = context.switchToHttp().getResponse<Response>();
     const requestId = adminRoute ? adminRequestId(req) : undefined;

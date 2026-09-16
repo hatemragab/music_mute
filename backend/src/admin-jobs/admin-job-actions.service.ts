@@ -11,11 +11,7 @@ import { ProcessingUnavailableService } from '../processing/processing-unavailab
 
 const safeDomainCodes: readonly JobHttpErrorCode[] = [
   'JOB_STATE_CONFLICT',
-  'WORKER_RECOVERY_REQUIRED',
-  'NEW_INPUT_REQUIRED',
   'PROCESSING_UNAVAILABLE',
-  'PROCESSING_LIMIT_REACHED',
-  'IDEMPOTENCY_CONFLICT',
 ];
 
 @Injectable()
@@ -61,7 +57,7 @@ export class AdminJobActionsService {
   async retry(actor: AdminActor, id: string, dto: AdminJobActionDto) {
     this.validate(actor, id);
     void dto;
-    return this.unavailable.reject();
+    return this.withAdministrativeErrors(async () => this.unavailable.reject());
   }
 
   private validate(actor: AdminActor, id: string): void {
@@ -93,7 +89,7 @@ export class AdminJobActionsService {
             };
             throw new HttpException(
               { code, message, requestId: randomUUID() },
-              code === 'NEW_INPUT_REQUIRED' ? 422 : safe.getStatus(),
+              safe.getStatus(),
             );
           }
         }

@@ -39,7 +39,6 @@ describe('overview date and cache boundaries', () => {
     });
     expect(first.series).toHaveLength(2);
     expect(first).not.toHaveProperty('releaseSummary');
-    expect(first).not.toHaveProperty('workers');
     expect(await service.read(actor, range)).toEqual(first);
     expect(jobs.aggregate).toHaveBeenCalledTimes(3);
     expect(releases.aggregate).not.toHaveBeenCalled();

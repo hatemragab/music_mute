@@ -318,7 +318,6 @@ try {
     requestHash: 'a'.repeat(64),
     status: 'queued',
     queuedAt: new Date(),
-    queueOrder: 1n,
     processingAccumulatedMs: 0,
     inputReservation: {
       key: input.key,

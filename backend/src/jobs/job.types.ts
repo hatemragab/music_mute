@@ -1,5 +1,5 @@
-import type { ProcessingQualification } from '../admin-settings/processing-qualification.js';
-import type { InputSource } from '../admin-settings/processing-policy-v2.js';
+export type InputSource = 'audio_file' | 'video_file' | 'youtube';
+export const PREPARATION_PROFILE_ID = 'preserve-or-aac-lc-256-v1';
 export const JOB_STATUSES = [
   'awaiting_upload',
   'queued',
@@ -37,14 +37,8 @@ export interface AdmissionSnapshot {
   policyVersion?: 1 | 2;
   maxDurationSeconds?: number;
   maxInputBytes?: number;
-  qualification?: ProcessingQualification | null;
   preparationProfileId?: string;
   source?: InputSource;
-  queueLimits?: {
-    maxOutstandingJobs: number;
-    maxOutstandingAudioSeconds: number;
-  };
-  estimatedWorkerSeconds?: number;
 
   settingsRevision: number;
   maxInputBytesExclusive: number;
@@ -52,32 +46,12 @@ export interface AdmissionSnapshot {
   maxActiveJobsPerUser: number | null;
   reservationExpiresAt: Date;
 }
-export interface OutputReservation {
-  key: string;
-  bytes: number;
-  durationSeconds: number;
-  sha256: string;
-  contentType: 'audio/mpeg';
-  attemptId: string;
-}
 export interface ObjectIdentity {
   key: string;
   versionId: string;
   bytes: number;
   sha256: string;
   contentType: string;
-}
-export interface WorkerSelector {
-  jobId: string;
-  attemptId: string;
-  sessionId: string;
-  generation: number;
-}
-export interface WorkerAssignment extends WorkerSelector {
-  leaseExpiresAt: string;
-}
-export interface WorkerEvent extends WorkerSelector {
-  eventId: string;
 }
 export interface UploadGrant {
   method: 'PUT';
@@ -101,16 +75,6 @@ export const JOB_FAILURE_CODES = [
   'OUTPUT_UPLOAD_FAILED',
 ] as const;
 export type JobFailureCode = (typeof JOB_FAILURE_CODES)[number];
-export const WORKER_FAILURE_CODES = [
-  'INVALID_AUDIO',
-  'INPUT_TOO_LONG',
-  'INPUT_CHECKSUM_MISMATCH',
-  'SEPARATOR_FAILED',
-  'OUTPUT_INVALID',
-  'DOWNLOAD_FAILED',
-  'OUTPUT_UPLOAD_FAILED',
-] as const satisfies readonly JobFailureCode[];
-export type WorkerFailureCode = (typeof WORKER_FAILURE_CODES)[number];
 export interface SafeJobError {
   code: JobFailureCode;
   message: string;

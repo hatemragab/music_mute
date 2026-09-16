@@ -7,12 +7,10 @@ import {
   Post,
   Put,
   Req,
-  UseGuards,
 } from '@nestjs/common';
 import { LimitOperation } from '../auth/auth.decorators.js';
 import { authError } from '../auth/auth.errors.js';
 import type { AuthRequest } from '../auth/auth-request.js';
-import { ProcessingEnabledGuard } from '../processing/processing-enabled.guard.js';
 import {
   PushDeactivationDto,
   PushRegistrationDto,
@@ -26,7 +24,6 @@ const installationIdPipe = new ParseUUIDPipe({
 });
 
 @Controller('devices')
-@UseGuards(ProcessingEnabledGuard)
 export class PushRegistrationController {
   constructor(private readonly registrations: PushRegistrationsService) {}
 

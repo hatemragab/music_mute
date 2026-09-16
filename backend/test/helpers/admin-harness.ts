@@ -23,7 +23,6 @@ import { FirebaseIdentityService } from '../../src/auth/firebase-identity.servic
 import { UsersService } from '../../src/users/users.service.js';
 import { RateBudgetService } from '../../src/rate-limits/rate-budget.service.js';
 import { RateLimitKeys } from '../../src/rate-limits/rate-limit-keys.js';
-import { WorkerAuthGuard } from '../../src/worker/worker-auth.guard.js';
 import { AdminAccess } from '../../src/admin/admin-access.schema.js';
 import {
   AdminRoute,
@@ -187,7 +186,6 @@ export async function createAdminHarness(
   const config = new ConfigService({
     ADMIN_REAUTH_MAX_AGE_SECONDS: 300,
     AUDIO_PROCESSING_ENABLED: true,
-    PROCESSING_WORKER_KEY_SHA256: '0'.repeat(64),
   });
 
   @Module({
@@ -205,7 +203,6 @@ export async function createAdminHarness(
       { provide: getModelToken(AdminAccess.name), useValue: model },
       AdminRateLimitService,
       { provide: APP_GUARD, useClass: AuthGuard },
-      { provide: APP_GUARD, useClass: WorkerAuthGuard },
       { provide: APP_GUARD, useClass: AdminGuard },
       ...(options.providers ?? []),
     ],

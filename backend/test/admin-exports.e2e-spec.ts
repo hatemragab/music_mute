@@ -58,7 +58,7 @@ describe('CSV export HTTP boundary', () => {
           )
           .expect(403);
     }
-    expect(exports.export).toHaveBeenCalledTimes(6);
+    expect(exports.export).toHaveBeenCalledTimes(4);
   });
   it('fails before CSV headers or bytes on cap/audit errors and rejects revoked sessions', async () => {
     const exports = await setup();

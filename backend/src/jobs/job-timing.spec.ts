@@ -9,8 +9,7 @@ const base = {
   processingAccumulatedMs: 0,
   processingIntervalStartedAt: at(35),
   processingObservedAt: at(45),
-  leaseExpiresAt: at(100),
-} as Job;
+} as unknown as Job;
 
 describe('processing interval accounting', () => {
   it('counts only separation, closes once, and survives repeated presentation', () => {
@@ -31,7 +30,7 @@ describe('processing interval accounting', () => {
     const resumed = {
       ...interrupted,
       processingIntervalStartedAt: at(200),
-      leaseExpiresAt: at(260),
+      processingObservedAt: null,
     };
     const done = { ...resumed, ...closeProcessingInterval(resumed, at(220)) };
     expect(presentJobTiming(done, at(240))).toMatchObject({
@@ -39,7 +38,7 @@ describe('processing interval accounting', () => {
       processingElapsedApproximate: true,
     });
   });
-  it('does not extrapolate active progress past an expired lease', () => {
+  it('does not extrapolate active progress past the last observation', () => {
     expect(presentJobTiming(base, at(150))).toMatchObject({
       processingElapsedMs: 10_000,
       processingElapsedApproximate: true,

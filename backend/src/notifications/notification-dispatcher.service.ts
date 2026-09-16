@@ -509,12 +509,10 @@ export class NotificationDispatcherService {
             $setOnInsert: {
               jobId: event.jobId,
               eventId,
-              attemptId: null,
               classification: 'notification',
               code: 'NOTIFICATION_FAILED',
               message: 'A push notification could not be delivered.',
               stage: 'notification',
-              exitCode: null,
               createdAt,
             },
           },

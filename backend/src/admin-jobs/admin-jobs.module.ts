@@ -7,7 +7,6 @@ import { AdminJobsQueryService } from './admin-jobs-query.service.js';
 import { AdminJobsController } from './admin-jobs.controller.js';
 import { AdminJobActionsService } from './admin-job-actions.service.js';
 import { JobActionsService } from '../jobs/job-actions.service.js';
-import { EnqueueService } from '../jobs/enqueue.service.js';
 import { ProcessingTransactions } from '../processing/processing-transactions.js';
 import { UsersModule } from '../users/users.module.js';
 import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js';
@@ -24,7 +23,6 @@ import { ProcessingUnavailableService } from '../processing/processing-unavailab
     AdminJobsQueryService,
     AdminJobActionsService,
     JobActionsService,
-    EnqueueService,
     ProcessingTransactions,
     ProcessingUnavailableService,
   ],

@@ -4,8 +4,6 @@ import {
   type OnApplicationBootstrap,
   type OnModuleDestroy,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { WorkerRecoveryService } from '../worker/worker-recovery.service.js';
 import { JobDeletionService } from '../jobs/job-deletion.service.js';
 import { ProcessingStorageCleanupService } from './processing-storage-cleanup.service.js';
 
@@ -17,31 +15,25 @@ export class ProcessingMaintenanceService
   private timer?: ReturnType<typeof setInterval>;
   private running?: Promise<void>;
   constructor(
-    private readonly config: ConfigService,
-    private readonly recovery: WorkerRecoveryService,
     private readonly deletion: JobDeletionService,
     private readonly storageCleanup: ProcessingStorageCleanupService,
   ) {}
   async onApplicationBootstrap(): Promise<void> {
-    if (this.config.get<boolean>('AUDIO_PROCESSING_ENABLED'))
-      await this.recovery.markExpiredAssignments();
-    this.tick(false);
+    this.tick();
     this.timer = setInterval(() => this.tick(), 15_000);
     this.timer.unref();
   }
-  private tick(includeRecovery = true): void {
+  private tick(): void {
     if (this.running) return;
-    this.running = this.maintain(includeRecovery)
+    this.running = this.maintain()
       .catch(() => {
-        this.logger.warn('Processing recovery maintenance unavailable');
+        this.logger.warn('Processing maintenance unavailable');
       })
       .finally(() => {
         this.running = undefined;
       });
   }
-  private async maintain(includeRecovery = true): Promise<void> {
-    if (includeRecovery && this.config.get<boolean>('AUDIO_PROCESSING_ENABLED'))
-      await this.recovery.markExpiredAssignments();
+  private async maintain(): Promise<void> {
     for (let processed = 0; processed < 100; processed += 1) {
       if (!(await this.storageCleanup.scheduleDue())) break;
     }

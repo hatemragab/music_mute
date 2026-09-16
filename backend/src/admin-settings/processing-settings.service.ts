@@ -1,4 +1,3 @@
-import { PREPARATION_PROFILE_ID } from './processing-policy-v2.js';
 import { jobError } from '../jobs/job-errors.js';
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -12,6 +11,7 @@ import {
   ProcessingAdmissionFence,
   ProcessingSettings,
 } from './processing-settings.schema.js';
+import { PREPARATION_PROFILE_ID } from '../jobs/job.types.js';
 
 export interface EffectiveProcessingSettings {
   revision: number;

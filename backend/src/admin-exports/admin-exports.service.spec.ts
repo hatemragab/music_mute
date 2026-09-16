@@ -19,7 +19,7 @@ describe('bounded export filters', () => {
     expect(() => exportQuery('jobs', { limit: '1' }, now)).toThrow();
     expect(() => exportQuery('jobs', { fields: 'email' }, now)).toThrow();
     expect(() =>
-      exportQuery('overview', { workerId: 'node-a' }, now),
+      exportQuery('overview', { unexpected: 'value' }, now),
     ).toThrow();
   });
   it('accepts exact 90 days and rejects reversed or oversized intervals', () => {

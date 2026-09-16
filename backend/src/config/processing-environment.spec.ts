@@ -13,40 +13,22 @@ const base = {
 };
 
 describe('processing configuration', () => {
-  it('keeps processing disabled without a worker credential', () => {
+  it('keeps processing disabled by default', () => {
     expect(validateEnvironment(base).AUDIO_PROCESSING_ENABLED).toBe(false);
   });
-  it('requires a digest when processing is enabled without exposing its value', () => {
-    expect(() =>
-      validateEnvironment({ ...base, AUDIO_PROCESSING_ENABLED: 'true' }),
-    ).toThrow('PROCESSING_WORKER_KEY_SHA256');
-    expect(() =>
-      validateEnvironment({
-        ...base,
-        AUDIO_PROCESSING_ENABLED: true,
-        PROCESSING_WORKER_KEY_SHA256: 'secret',
-      }),
-    ).toThrow('PROCESSING_WORKER_KEY_SHA256');
-  });
-  it('parses a enabled deployment with bounded transfer and lease defaults', () => {
+  it('parses an enabled deployment with a bounded transfer default', () => {
     expect(
       validateEnvironment({
         ...base,
         AUDIO_PROCESSING_ENABLED: 'true',
-        PROCESSING_WORKER_KEY_SHA256: 'a'.repeat(64),
       }),
     ).toMatchObject({
       AUDIO_PROCESSING_ENABLED: true,
-      PROCESSING_LEASE_SECONDS: 90,
       PROCESSING_URL_SECONDS: 900,
-      PROCESSING_OUTPUT_MAX_BYTES: 30_000_000,
     });
   });
-  it.each([
-    'PROCESSING_LEASE_SECONDS',
-    'PROCESSING_URL_SECONDS',
-    'PROCESSING_OUTPUT_MAX_BYTES',
-  ])('rejects invalid %s', (key) => {
+  it('rejects an invalid transfer lifetime', () => {
+    const key = 'PROCESSING_URL_SECONDS';
     expect(() => validateEnvironment({ ...base, [key]: -1 })).toThrow(key);
   });
 });

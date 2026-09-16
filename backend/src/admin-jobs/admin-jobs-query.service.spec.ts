@@ -56,7 +56,7 @@ describe('admin job queries and privacy', () => {
       { status: 'done' },
       { status: { $ne: null } },
       { jobId: 'invalid' },
-      { workerId: '../worker' },
+      { unexpected: 'value' },
       { from: 'bad' },
       { from: '2026-09-11T00:00:00.000Z', to: '2026-09-10T00:00:00.000Z' },
       { limit: '0' },
@@ -82,7 +82,6 @@ describe('admin job queries and privacy', () => {
       _id: new Types.ObjectId(),
       userId: new Types.ObjectId(),
       status: 'processing',
-      workerId: 'fixture-worker',
       createdAt: new Date(0),
       revision: 4,
       adminRevision: 2,
@@ -105,7 +104,6 @@ describe('admin job queries and privacy', () => {
     };
     const shown = presentAdminJob(job, actor, null, new Date(2000), true);
     expect(shown.revision).toBe(2);
-    expect(shown).not.toHaveProperty('workerId');
     expect(JSON.stringify(shown)).not.toContain('private');
     const media = presentAdminJob(
       job,

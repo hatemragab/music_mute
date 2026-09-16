@@ -7,18 +7,15 @@ import { ProcessingTransactions } from '../processing/processing-transactions.js
 import { StorageTransfersService } from '../storage/storage-transfers.service.js';
 import { NotificationOutbox } from '../notifications/notification-outbox.schema.js';
 import { Job } from './job.schema.js';
-import { JobAttempt } from './job-attempt.schema.js';
 import { objectId } from './job-request.js';
 import { jobError } from './job-errors.js';
 
 const CLEANUP_LEASE_MS = 60_000;
-const ATTEMPTS_PER_SWEEP = 10;
 
 @Injectable()
 export class JobDeletionService {
   constructor(
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
-    @InjectModel(JobAttempt.name) private readonly attempts: Model<JobAttempt>,
     @InjectModel(NotificationOutbox.name)
     private readonly outbox: Model<NotificationOutbox>,
     private readonly transactions: ProcessingTransactions,
@@ -54,7 +51,6 @@ export class JobDeletionService {
             cleanupLeaseUntil: null,
             cleanupToken: null,
             cleanupAttempts: 0,
-            cleanupCursor: null,
           },
           $inc: { revision: 1 },
         },
@@ -102,25 +98,11 @@ export class JobDeletionService {
       .lean();
     if (!job) return false;
     try {
-      const attempts = await this.attempts
-        .find({
-          jobId: job._id,
-          ...(job.cleanupCursor
-            ? { _id: trusted({ $gt: job.cleanupCursor }) }
-            : {}),
-        })
-        .sort({ _id: 1 })
-        .limit(ATTEMPTS_PER_SWEEP + 1)
-        .select('_id outputReservation.key')
-        .lean();
-      const page = attempts.slice(0, ATTEMPTS_PER_SWEEP);
       const keys = new Set(
         [
           job.inputReservation.key,
           job.inputObject?.key,
-          job.outputReservation?.key,
           job.outputObject?.key,
-          ...page.map((attempt) => attempt.outputReservation?.key),
         ].filter((key): key is string => Boolean(key)),
       );
       let complete = true;
@@ -145,7 +127,6 @@ export class JobDeletionService {
           $or: [
             { 'inputReservation.key': key },
             { 'inputObject.key': key },
-            { 'outputReservation.key': key },
             { 'outputObject.key': key },
           ],
         });
@@ -155,7 +136,7 @@ export class JobDeletionService {
           break;
         }
       }
-      const finished = complete && attempts.length <= ATTEMPTS_PER_SWEEP;
+      const finished = complete;
       await this.jobs.updateOne(
         { _id: job._id, cleanupToken: token },
         {
@@ -165,9 +146,6 @@ export class JobDeletionService {
             cleanupAttempts: 0,
             cleanupNextAt: finished ? null : new Date(now.getTime() + 1_000),
             cleanupCompletedAt: finished ? new Date() : null,
-            ...(complete && page.length
-              ? { cleanupCursor: page.at(-1)!._id }
-              : {}),
           },
         },
       );

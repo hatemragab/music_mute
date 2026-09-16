@@ -158,15 +158,6 @@ export class AccountDeletionCleanupService {
         }
       }
       if (live.length) return true;
-      // A lost lease does not establish that the process or its copies stopped.
-      const control = await this.connection
-        .collection('audio_worker_control')
-        .findOne({ activeJobId: { $ne: null } });
-      if (
-        control &&
-        (await this.jobs.exists({ _id: control.activeJobId, userId: user._id }))
-      )
-        return true;
       if (
         await this.jobs.exists({ userId: user._id, cleanupCompletedAt: null })
       )
@@ -180,17 +171,7 @@ export class AccountDeletionCleanupService {
         .lean();
       for (const job of jobs) {
         await renew();
-        if (
-          await this.connection
-            .collection('audio_job_attempts')
-            .findOne({ jobId: job._id, localDataDeletedAt: null })
-        )
-          return true;
-        for (const name of [
-          'audio_job_attempts',
-          'audio_job_receipts',
-          'audio_job_errors',
-        ]) {
+        for (const name of ['audio_job_errors']) {
           if (await this.purgeBatch(name, { jobId: job._id })) return true;
         }
         if (await this.purgeOutbox({ jobId: job._id }, renew)) return true;
@@ -209,7 +190,6 @@ export class AccountDeletionCleanupService {
         'client_errors',
         'account_recovery_requests',
         'processing_usage_ledger',
-        'processing_execution_usage',
       ]) {
         await renew();
         if (await this.purgeBatch(name, { userId: user._id })) return true;

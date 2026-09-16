@@ -2,12 +2,11 @@ import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { ConfigService } from '@nestjs/config';
 import { createConnection, Types } from 'mongoose';
 import { IsolatedServices } from './helpers/isolated-services.mjs';
 
 test(
-  'processing suspension shares admission authority and preserves account and existing jobs',
+  'processing suspension preserves account and existing jobs',
   { timeout: 30000 },
   async () => {
     const fixture = await IsolatedServices.create();
@@ -23,14 +22,7 @@ test(
         { UserIdentityFence, UserIdentityFenceSchema },
         { UserIdentityFenceService },
         { Job, JobSchema },
-        {
-          ProcessingSettings,
-          ProcessingSettingsSchema,
-          ProcessingAdmissionFence,
-          ProcessingAdmissionFenceSchema,
-        },
-        { ProcessingSettingsService },
-        { ProcessingAdmissionService },
+        { ProcessingAdmissionFence, ProcessingAdmissionFenceSchema },
         { AdminUsersService },
       ] = await Promise.all([
         import('../dist/users/user.schema.js'),
@@ -38,8 +30,6 @@ test(
         import('../dist/users/user-identity-fence.service.js'),
         import('../dist/jobs/job.schema.js'),
         import('../dist/admin-settings/processing-settings.schema.js'),
-        import('../dist/admin-settings/processing-settings.service.js'),
-        import('../dist/admin-settings/processing-admission.service.js'),
         import('../dist/admin-users/admin-users.service.js'),
       ]);
       const users = connection.model(User.name, UserSchema);
@@ -48,10 +38,6 @@ test(
         UserIdentityFenceSchema,
       );
       const jobs = connection.model(Job.name, JobSchema);
-      const settingsModel = connection.model(
-        ProcessingSettings.name,
-        ProcessingSettingsSchema,
-      );
       const admissionFences = connection.model(
         ProcessingAdmissionFence.name,
         ProcessingAdmissionFenceSchema,
@@ -60,7 +46,6 @@ test(
         users.init(),
         identityFences.init(),
         jobs.init(),
-        settingsModel.init(),
         admissionFences.init(),
       ]);
 
@@ -108,18 +93,6 @@ test(
           sha256: Buffer.alloc(32).toString('base64'),
         },
       });
-      await settingsModel.create({
-        _id: 'processing',
-        revision: 1,
-        acceptNewJobs: true,
-        maintenanceMessageEn: '',
-        maintenanceMessageAr: null,
-        maxInputBytesExclusive: 30_000_000,
-        maxDurationSecondsExclusive: 600,
-        maxActiveJobsPerUser: null,
-        updatedAt: now,
-      });
-
       const transactionalOperations = {
         async run(_actor, _command, mutate) {
           const session = await connection.startSession();
@@ -131,23 +104,6 @@ test(
           }
         },
       };
-      const config = new ConfigService({
-        AUDIO_PROCESSING_ENABLED: true,
-        PROCESSING_URL_SECONDS: 900,
-      });
-      const settings = new ProcessingSettingsService(
-        settingsModel,
-        admissionFences,
-        transactionalOperations,
-        config,
-      );
-      const admission = new ProcessingAdmissionService(
-        admissionFences,
-        users,
-        jobs,
-        settings,
-        config,
-      );
       const adminUsers = new AdminUsersService(
         users,
         jobs,
@@ -171,17 +127,6 @@ test(
         (await jobs.findById(existingJobId).lean()).status,
         'processing',
       );
-      await assert.rejects(
-        connection.transaction((session) =>
-          admission.assertNewWork(
-            userId,
-            { bytes: 100, durationSeconds: 10 },
-            session,
-          ),
-        ),
-        (error) => error?.getResponse?.().code === 'PROCESSING_UNAVAILABLE',
-      );
-
       await users.updateOne({ _id: userId }, { $set: { status: 'deleting' } });
       const resumed = await adminUsers.resume(actor, userId.toHexString(), {
         expectedRevision: 1,
@@ -190,16 +135,6 @@ test(
       });
       assert.equal(resumed.processingSuspended, false);
       assert.equal((await users.findById(userId).lean()).status, 'deleting');
-      await assert.rejects(
-        connection.transaction((session) =>
-          admission.assertNewWork(
-            userId,
-            { bytes: 100, durationSeconds: 10 },
-            session,
-          ),
-        ),
-        (error) => error?.getResponse?.().code === 'PROCESSING_UNAVAILABLE',
-      );
     } finally {
       await connection?.close();
       await fixture.stop();

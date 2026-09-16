@@ -1,7 +1,3 @@
-import {
-  PREPARATION_PROFILE_ID,
-  type InputSource,
-} from '../../admin-settings/processing-policy-v2.js';
 import { Transform, Type } from 'class-transformer';
 import {
   IsDefined,
@@ -20,7 +16,12 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { AUDIO_TYPES, type InputDeclaration } from '../job.types.js';
+import {
+  AUDIO_TYPES,
+  PREPARATION_PROFILE_ID,
+  type InputDeclaration,
+  type InputSource,
+} from '../job.types.js';
 import { isSha256 } from '../job-state.js';
 import {
   AUDIO_NAME_PATTERN,

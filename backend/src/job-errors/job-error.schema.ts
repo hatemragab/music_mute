@@ -8,47 +8,23 @@ export class JobError {
   @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
   jobId!: Types.ObjectId;
   @Prop({ required: true, immutable: true, maxlength: 100 }) eventId!: string;
-  @Prop({ type: String, default: null, maxlength: 36 }) attemptId!:
-    string | null;
-  @Prop({
-    type: Number,
-    default: null,
-    min: 1,
-    validate: (value: number | null) =>
-      value === null || Number.isSafeInteger(value),
-  })
-  generation!: number | null;
   @Prop({
     type: String,
     required: true,
-    enum: ['processing', 'interruption', 'notification'],
+    enum: ['processing', 'notification'],
   })
   classification!: string;
   @Prop({
     required: true,
-    enum: [...JOB_FAILURE_CODES, 'WORKER_INTERRUPTED', 'NOTIFICATION_FAILED'],
+    enum: [...JOB_FAILURE_CODES, 'NOTIFICATION_FAILED'],
   })
   code!: string;
   @Prop({ required: true, maxlength: 200 }) message!: string;
   @Prop({
     required: true,
-    enum: [
-      'validating',
-      'processing',
-      'uploading_result',
-      'notification',
-      'interrupted',
-    ],
+    enum: ['validating', 'processing', 'uploading_result', 'notification'],
   })
   stage!: string;
-  @Prop({
-    type: Number,
-    default: null,
-    min: -2147483648,
-    max: 4294967295,
-    validate: (v: number | null) => v === null || Number.isInteger(v),
-  })
-  exitCode!: number | null;
   @Prop({ required: true, type: Date }) createdAt!: Date;
 }
 export const JobErrorSchema = SchemaFactory.createForClass(JobError);

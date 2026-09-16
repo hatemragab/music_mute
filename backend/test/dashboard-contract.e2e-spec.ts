@@ -2,7 +2,6 @@ import 'reflect-metadata';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 import { RequestMethod, type Type } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants.js';
@@ -107,7 +106,6 @@ describe('complete administration route authorization contract', () => {
     allowed: true,
     retryAfterSeconds: 0,
   }));
-  const workerKey = 'synthetic-worker-key';
   beforeAll(async () => {
     const services = new Set<Type>();
     for (const controller of controllers) {
@@ -146,9 +144,6 @@ describe('complete administration route authorization contract', () => {
           useValue: new ConfigService({
             ADMIN_REAUTH_MAX_AGE_SECONDS: 300,
             AUDIO_PROCESSING_ENABLED: true,
-            PROCESSING_WORKER_KEY_SHA256: createHash('sha256')
-              .update(workerKey)
-              .digest('hex'),
           }),
         },
       ],
@@ -230,7 +225,7 @@ describe('complete administration route authorization contract', () => {
   });
 
   for (const route of inventory.routes) {
-    it(`${route.method} ${route.path}: credentials, five roles, freshness, rate limit and validation`, async () => {
+    it(`${route.method} ${route.path}: credentials, roles, freshness, rate limit and validation`, async () => {
       const method = route.method.toLowerCase() as
         'get' | 'post' | 'put' | 'patch';
       const send = (token?: string, body: unknown = route.requestBody) =>
@@ -240,7 +235,6 @@ describe('complete administration route authorization contract', () => {
         'ordinary-google-token',
         'password-token',
         'revoked-token',
-        workerKey,
       ]) {
         domainCalls.length = 0;
         const response = await send(token);
@@ -250,13 +244,8 @@ describe('complete administration route authorization contract', () => {
         ).toContain(response.status);
         expect(response.headers['cache-control']).toBe('no-store');
         expect(domainCalls).toEqual([]);
-        expect(response.text).not.toMatch(
-          /contractFixture|fixture\.csv|synthetic-worker-key/,
-        );
+        expect(response.text).not.toMatch(/contractFixture|fixture\.csv/);
       }
-      const workerResponse = await send().set('X-Worker-Key', workerKey);
-      expect(workerResponse.status).toBe(401);
-      expect(domainCalls).toEqual([]);
       for (const role of inventory.roles) {
         domainCalls.length = 0;
         const token = harness.signInAs(role);

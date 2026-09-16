@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AdminJobsController } from '../src/admin-jobs/admin-jobs.controller.js';
 import { AdminJobsQueryService } from '../src/admin-jobs/admin-jobs-query.service.js';
 import { AdminJobActionsService } from '../src/admin-jobs/admin-job-actions.service.js';
-import { jobError } from '../src/jobs/job-errors.js';
+import { ProcessingUnavailableService } from '../src/processing/processing-unavailable.service.js';
 import {
   createAdminHarness,
   type AdminHarness,
@@ -67,8 +67,8 @@ describe('administrative job action HTTP boundary', () => {
           .expect(403);
       }
     }
-    expect(f.actions.cancel).toHaveBeenCalledTimes(3);
-    expect(f.actions.retry).toHaveBeenCalledTimes(3);
+    expect(f.actions.cancel).toHaveBeenCalledTimes(2);
+    expect(f.actions.retry).toHaveBeenCalledTimes(2);
     expect(f.actions.cancel.mock.calls[0]![0]).toMatchObject({
       uid: 'owner-uid',
       role: 'owner',
@@ -102,22 +102,11 @@ describe('administrative job action HTTP boundary', () => {
     expect(f.actions.retry).not.toHaveBeenCalled();
   });
 
-  it('returns administrative NEW_INPUT_REQUIRED as 422 without changing the mobile domain error', async () => {
+  it('returns the processing-unavailable boundary for retry', async () => {
     const actions = new AdminJobActionsService(
-      {
-        prepareRetry: async () => undefined,
-        retryAsAdmin: async () => {
-          throw jobError('NEW_INPUT_REQUIRED');
-        },
-      } as never,
-      {
-        run: async (
-          _actor: unknown,
-          _command: unknown,
-          mutate: (session: unknown) => Promise<unknown>,
-        ) => mutate({}),
-      } as never,
       {} as never,
+      {} as never,
+      new ProcessingUnavailableService(),
     );
     harness = await createAdminHarness({
       controllers: [AdminJobsController],
@@ -133,12 +122,11 @@ describe('administrative job action HTTP boundary', () => {
         body,
         harness.signInAs('support'),
       )
-      .expect(422);
+      .expect(503);
     expect(response.body).toEqual({
-      code: 'NEW_INPUT_REQUIRED',
-      message: 'Submit a corrected audio file',
+      code: 'PROCESSING_UNAVAILABLE',
+      message: 'New audio processing work is unavailable',
       requestId: expect.any(String),
     });
-    expect(jobError('NEW_INPUT_REQUIRED').getStatus()).toBe(409);
   });
 });

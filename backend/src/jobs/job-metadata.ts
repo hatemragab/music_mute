@@ -1,7 +1,4 @@
-import {
-  PREPARATION_PROFILE_ID,
-  type InputSource,
-} from '../admin-settings/processing-policy-v2.js';
+import { PREPARATION_PROFILE_ID, type InputSource } from './job.types.js';
 import { jobError } from './job-errors.js';
 import { authError } from '../auth/auth.errors.js';
 

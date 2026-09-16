@@ -6,7 +6,6 @@ import type {
   AdmissionSnapshot,
   JobStatus,
   ObjectIdentity,
-  OutputReservation,
   SafeJobError,
 } from './job.types.js';
 import { isSha256 } from './job-state.js';
@@ -64,11 +63,8 @@ const admissionSnapshot = new MongoSchema<AdmissionSnapshot>(
       max: 100_000_000,
       validate: Number.isSafeInteger,
     },
-    qualification: { type: MongoSchema.Types.Mixed },
     preparationProfileId: { type: String, maxlength: 100 },
     source: { type: String, enum: ['audio_file', 'video_file', 'youtube'] },
-    queueLimits: { type: MongoSchema.Types.Mixed },
-    estimatedWorkerSeconds: { type: Number, min: 1 },
     settingsRevision: {
       type: Number,
       required: true,
@@ -101,28 +97,6 @@ const admissionSnapshot = new MongoSchema<AdmissionSnapshot>(
   { _id: false, strict: 'throw' },
 );
 
-export const OutputReservationSchema = new MongoSchema<OutputReservation>(
-  {
-    key: { type: String, required: true, maxlength: 1024 },
-    attemptId: { type: String, required: true, maxlength: 36 },
-    bytes: {
-      type: Number,
-      required: true,
-      min: 1,
-      max: 100_000_000,
-      validate: Number.isInteger,
-    },
-    durationSeconds: {
-      type: Number,
-      required: true,
-      validate: (v: number) => Number.isFinite(v) && v > 0 && v <= 1800,
-    },
-    sha256: { type: String, required: true, validate: isSha256 },
-    contentType: { type: String, required: true, enum: ['audio/mpeg'] },
-  },
-  { _id: false, strict: 'throw' },
-);
-
 const safeError = new MongoSchema<SafeJobError>(
   {
     code: { type: String, required: true, enum: JOB_FAILURE_CODES },
@@ -140,8 +114,6 @@ const safeError = new MongoSchema<SafeJobError>(
 })
 export class Job {
   _id!: Types.ObjectId;
-  @Prop({ type: String, default: null, match: /^[a-z0-9][a-z0-9-]{0,63}$/ })
-  workerId!: string | null;
   @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
   userId!: Types.ObjectId;
   @Prop({ required: true, immutable: true, maxlength: 36 }) requestId!: string;
@@ -180,8 +152,6 @@ export class Job {
     string | null;
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
   cleanupAttempts!: number;
-  @Prop({ type: MongoSchema.Types.ObjectId, default: null })
-  cleanupCursor!: Types.ObjectId | null;
   @Prop({ type: Date, default: null }) cleanupCompletedAt!: Date | null;
   @Prop({
     type: String,
@@ -196,19 +166,9 @@ export class Job {
   admissionSnapshot!: AdmissionSnapshot | null;
   @Prop({ type: objectIdentity, default: null })
   inputObject!: ObjectIdentity | null;
-  @Prop({ type: OutputReservationSchema, default: null })
-  outputReservation!: OutputReservation | null;
   @Prop({ type: objectIdentity, default: null })
   outputObject!: ObjectIdentity | null;
-  @Prop({ type: BigInt, default: null }) queueOrder!: bigint | null;
   @Prop({ type: Date, default: null }) queuedAt!: Date | null;
-  @Prop({ type: String, default: null, maxlength: 36 }) attemptId!:
-    string | null;
-  @Prop({ type: String, default: null, maxlength: 36 }) sessionId!:
-    string | null;
-  @Prop({ min: 0, default: 0, validate: Number.isSafeInteger })
-  generation!: number;
-  @Prop({ type: Date, default: null }) leaseExpiresAt!: Date | null;
   @Prop({ type: safeError, default: null }) lastError!: SafeJobError | null;
   @Prop({ type: Date, default: null }) finishedAt!: Date | null;
   @Prop({ type: Date, default: null }) validatingAt!: Date | null;
@@ -248,19 +208,13 @@ const adminVisibleFields = new Set([
   'revision',
   'status',
   'deletedAt',
-  'workerId',
-  'attemptId',
-  'sessionId',
-  'generation',
   'inputObject',
   'outputObject',
-  'outputReservation',
   'admissionSnapshot',
   'displayName',
   'sourceTitle',
   'sourceUrl',
   'queuedAt',
-  'queueOrder',
   'finishedAt',
   'validatingAt',
   'processingStartedAt',
@@ -268,7 +222,6 @@ const adminVisibleFields = new Set([
   'measuredDurationSeconds',
   'uploadingResultAt',
   'lastError',
-  'leaseExpiresAt',
 ]);
 JobSchema.pre('save', function () {
   if (
@@ -303,10 +256,6 @@ JobSchema.index(
   { name: 'admin_jobs_status_created' },
 );
 JobSchema.index(
-  { workerId: 1, createdAt: -1, _id: -1 },
-  { name: 'admin_jobs_worker_created' },
-);
-JobSchema.index(
   { userId: 1, requestId: 1 },
   { unique: true, name: 'jobs_owner_request_unique' },
 );
@@ -315,7 +264,6 @@ JobSchema.index(
   { name: 'jobs_owner_history' },
 );
 JobSchema.index({ userId: 1, status: 1 }, { name: 'jobs_owner_running' });
-JobSchema.index({ status: 1, queueOrder: 1 }, { name: 'jobs_fifo' });
 JobSchema.index(
   {
     status: 1,

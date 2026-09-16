@@ -44,24 +44,24 @@ test(
         active: true,
       });
       const values = connection.db.collection('fixture_admin_changes');
-      await values.insertOne({ _id: 'worker-one', revision: 0 });
+      await values.insertOne({ _id: 'job-one', revision: 0 });
       const operationId = randomUUID();
       const command = {
         operationId,
-        route: 'POST /admin/workers/worker-one/drain',
+        route: 'POST /admin/jobs/job-one/cancel',
         request: { expectedRevision: 0 },
-        action: 'workers.drain',
-        reason: 'Fixture maintenance',
-        resourceType: 'worker',
+        action: 'jobs.cancel',
+        reason: 'Customer support request',
+        resourceType: 'job',
       };
       const mutate = async (session) => {
         await values.updateOne(
-          { _id: 'worker-one' },
+          { _id: 'job-one' },
           { $inc: { revision: 1 } },
           { session },
         );
         return {
-          resourceId: 'worker-one',
+          resourceId: 'job-one',
           previousRevision: 0,
           revision: 1,
           value: { rawKey: 'fixture-one-time-secret' },
@@ -92,7 +92,7 @@ test(
         firstResult,
         await operations.run(actor, command, mutate),
       ];
-      assert.equal((await values.findOne({ _id: 'worker-one' })).revision, 1);
+      assert.equal((await values.findOne({ _id: 'job-one' })).revision, 1);
       assert.equal(results.filter((result) => result.value?.rawKey).length, 1);
       assert.equal(await events.countDocuments(), 1);
       assert.equal(await receipts.countDocuments(), 1);

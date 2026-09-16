@@ -13,7 +13,6 @@ import {
   AUTH_OPERATION,
   PUBLIC_ROUTE,
 } from './auth.decorators.js';
-import { WORKER_ONLY_ROUTE } from '../worker/worker-routes.js';
 import { ADMIN_ROUTE } from '../admin/admin.decorators.js';
 
 describe('private request trust order', () => {
@@ -199,13 +198,6 @@ describe('private request trust order', () => {
       disabled.guard.canActivate(disabled.context),
     ).rejects.toMatchObject({ status: 403 });
   });
-  it('leaves worker-only routes to the worker guard without consulting Firebase', async () => {
-    const f = setup(undefined);
-    Reflect.defineMetadata(WORKER_ONLY_ROUTE, true, f.handler);
-    expect(await f.guard.canActivate(f.context)).toBe(true);
-    expect(f.firebase.verifySignature).not.toHaveBeenCalled();
-    expect(f.budgets.reserve).not.toHaveBeenCalled();
-  });
   it('verifies admin identity without requiring a mobile profile', async () => {
     const f = setup();
     Reflect.defineMetadata(ADMIN_ROUTE, true, f.handler);
@@ -232,19 +224,11 @@ describe('private request trust order', () => {
     f.firebase.verifySession.mockRejectedValue(new Error('revoked'));
     await expect(f.guard.canActivate(f.context)).rejects.toThrow('revoked');
   });
-  it('keeps public routes public but rejects contradictory public and worker metadata', async () => {
+  it('keeps public routes public but rejects contradictory public and admin metadata', async () => {
     const publicRoute = setup(undefined);
     Reflect.defineMetadata(PUBLIC_ROUTE, true, publicRoute.handler);
     expect(await publicRoute.guard.canActivate(publicRoute.context)).toBe(true);
     expect(publicRoute.firebase.verifySignature).not.toHaveBeenCalled();
-
-    const contradictory = setup(undefined);
-    Reflect.defineMetadata(PUBLIC_ROUTE, true, contradictory.handler);
-    Reflect.defineMetadata(WORKER_ONLY_ROUTE, true, contradictory.handler);
-    await expect(
-      contradictory.guard.canActivate(contradictory.context),
-    ).rejects.toMatchObject({ status: 401 });
-    expect(contradictory.firebase.verifySignature).not.toHaveBeenCalled();
 
     const publicAdmin = setup(undefined);
     Reflect.defineMetadata(PUBLIC_ROUTE, true, publicAdmin.handler);
