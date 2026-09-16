@@ -29,9 +29,6 @@ Thumbs.db
 *.swp
 *.swo
 
-# Code review / analysis artifacts
-.code-review-graph/
-
 # Generated release packages
 /artifacts/
 
