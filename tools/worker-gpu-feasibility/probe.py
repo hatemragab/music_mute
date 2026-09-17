@@ -139,6 +139,12 @@ def windows_peak_working_set_bytes() -> int:
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     psapi = ctypes.WinDLL("psapi", use_last_error=True)
     kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    psapi.GetProcessMemoryInfo.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(_ProcessMemoryCountersEx),
+        ctypes.c_ulong,
+    ]
+    psapi.GetProcessMemoryInfo.restype = ctypes.c_int
     succeeded = psapi.GetProcessMemoryInfo(
         kernel32.GetCurrentProcess(),
         ctypes.byref(counters),
