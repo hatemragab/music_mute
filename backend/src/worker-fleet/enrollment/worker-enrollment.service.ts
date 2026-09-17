@@ -166,6 +166,58 @@ export class WorkerEnrollmentService {
     };
   }
 
+  async revokeInvitation(
+    actor: AdminActor,
+    id: string,
+    dto: WorkerLifecycleDto,
+  ) {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw adminError('INVALID_REQUEST');
+    const result = await this.operations.run(
+      actor,
+      {
+        operationId: dto.operationId,
+        route: 'POST /admin/workers/invitations/:id/revoke',
+        request: { id, expectedRevision: dto.expectedRevision },
+        action: 'workers.invitation.revoke',
+        resourceType: 'worker_invitation',
+        reason: dto.reason,
+      },
+      async (session) => {
+        const now = new Date();
+        const invitation = await this.invitations
+          .findById(id)
+          .session(session)
+          .lean();
+        if (!invitation) throw adminError('RESOURCE_NOT_FOUND');
+        if (invitation.revision !== dto.expectedRevision)
+          throw adminError('REVISION_CONFLICT');
+        if (invitation.state !== 'active' || invitation.expiresAt <= now)
+          throw adminError('INVALID_REQUEST');
+        const updated = await this.invitations.updateOne(
+          { _id: id, state: 'active', revision: dto.expectedRevision },
+          {
+            $set: { state: 'revoked', revokedAt: now },
+            $inc: { revision: 1 },
+          },
+          { session, runValidators: true },
+        );
+        if (updated.modifiedCount !== 1) throw adminError('REVISION_CONFLICT');
+        return {
+          resourceId: id,
+          previousRevision: dto.expectedRevision,
+          revision: dto.expectedRevision + 1,
+          value: { state: 'revoked' as const },
+        };
+      },
+    );
+    return {
+      invitationId: result.receipt.resourceId,
+      revision: result.receipt.revision,
+      state: result.value?.state ?? 'revoked',
+      replayed: result.replayed,
+    };
+  }
+
   async exchange(principal: WorkerPrincipal, dto: ExchangeWorkerInvitationDto) {
     if (principal.kind !== 'enrollment')
       throw workerError('WORKER_UNAUTHENTICATED');
@@ -403,6 +455,10 @@ export class WorkerEnrollmentService {
     return this.changeMachine(actor, id, dto, 'paused');
   }
 
+  drain(actor: AdminActor, id: string, dto: WorkerLifecycleDto) {
+    return this.changeMachine(actor, id, dto, 'draining');
+  }
+
   resume(actor: AdminActor, id: string, dto: WorkerLifecycleDto) {
     return this.changeMachine(actor, id, dto, 'active');
   }
@@ -415,7 +471,7 @@ export class WorkerEnrollmentService {
     actor: AdminActor,
     id: string,
     dto: WorkerLifecycleDto,
-    target: 'active' | 'paused' | 'revoked',
+    target: 'active' | 'paused' | 'draining' | 'revoked',
   ) {
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw adminError('INVALID_REQUEST');
     const action = `workers.machine.${target === 'active' ? 'resume' : target}`;
@@ -443,7 +499,7 @@ export class WorkerEnrollmentService {
   private async mutateMachine(
     id: string,
     expectedRevision: number,
-    target: 'active' | 'paused' | 'revoked',
+    target: 'active' | 'paused' | 'draining' | 'revoked',
     session: ClientSession,
   ) {
     const machine = await this.machines.findById(id).session(session).lean();
@@ -453,7 +509,9 @@ export class WorkerEnrollmentService {
     const allowed =
       (target === 'paused' &&
         ['active', 'draining'].includes(machine.status)) ||
+      (target === 'draining' && machine.status === 'active') ||
       (target === 'active' && machine.status === 'paused') ||
+      (target === 'active' && machine.status === 'draining') ||
       (target === 'revoked' && machine.status !== 'revoked');
     if (!allowed) throw adminError('INVALID_REQUEST');
     const now = new Date();

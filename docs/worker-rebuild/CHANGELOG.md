@@ -1,5 +1,26 @@
 # Package changes
 
+## Revision 3.8
+
+- Completed C6 with machine/session/slot/attempt status reads, invitation
+  lifecycle reads and audited invitation revocation, plus drain/pause/resume/
+  revoke controls.
+- Added versioned fleet policy reads and optimistic updates. A changed policy is
+  published as a desired machine revision and claims remain closed until the
+  current supervisor acknowledges that exact revision.
+- Added durable typed doctor/benchmark requests, current-session configuration
+  reconciliation, replay-safe command results, bounded sanitized runtime logs
+  and separately authorized diagnostic reads.
+- Extended the independent admin route/permission contract and added focused
+  policy, command, runtime-log, invitation and persistence coverage. The full
+  local backend and processing-integration gates pass.
+
+The control plane intentionally does not include a worker process, dashboard,
+installer, live WebSocket client, automatic updater, deployment or production
+mutation. Durable HTTPS/MongoDB reconciliation is authoritative; transient
+socket hints may be added with the runtime consumer without changing ownership
+semantics.
+
 ## Revision 3.7
 
 - Completed C5 with attempt-scoped pinned input downloads and backend-derived,
@@ -12,8 +33,8 @@
 - Added focused transfer, stale-owner, replay, failure and cleanup tests and
   passed the complete local backend and processing-integration gates.
 
-C6 status/policy APIs, runtime workers, deployment and production mutation
-remain unimplemented or unclaimed.
+Runtime workers, dashboard UI, deployment and production mutation remain
+unimplemented or unclaimed.
 
 ## Revision 3.6
 

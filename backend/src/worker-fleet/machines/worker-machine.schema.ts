@@ -205,6 +205,8 @@ export class WorkerMachine {
   desiredRevision!: number;
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
   appliedRevision!: number;
+  @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
+  acknowledgedDiagnosticSequence!: number;
   @Prop({ type: Date, default: null }) lastSeenAt!: Date | null;
   @Prop({ type: Date, default: null }) revokedAt!: Date | null;
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })

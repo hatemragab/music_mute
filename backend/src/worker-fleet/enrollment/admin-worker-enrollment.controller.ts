@@ -26,6 +26,18 @@ export class AdminWorkerEnrollmentController {
     return this.enrollment.createInvitation(request.adminActor!, dto);
   }
 
+  @Post('invitations/:id/revoke')
+  @RequireAdminPermission('workers.enroll')
+  @RequireFreshAdminAuth()
+  @LimitAdmin('sensitive')
+  revokeInvitation(
+    @Req() request: AuthRequest,
+    @Param('id') id: string,
+    @Body() dto: WorkerLifecycleDto,
+  ) {
+    return this.enrollment.revokeInvitation(request.adminActor!, id, dto);
+  }
+
   @Post('machines/:id/pause')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
@@ -36,6 +48,18 @@ export class AdminWorkerEnrollmentController {
     @Body() dto: WorkerLifecycleDto,
   ) {
     return this.enrollment.pause(request.adminActor!, id, dto);
+  }
+
+  @Post('machines/:id/drain')
+  @RequireAdminPermission('workers.manage')
+  @RequireFreshAdminAuth()
+  @LimitAdmin('sensitive')
+  drain(
+    @Req() request: AuthRequest,
+    @Param('id') id: string,
+    @Body() dto: WorkerLifecycleDto,
+  ) {
+    return this.enrollment.drain(request.adminActor!, id, dto);
   }
 
   @Post('machines/:id/resume')

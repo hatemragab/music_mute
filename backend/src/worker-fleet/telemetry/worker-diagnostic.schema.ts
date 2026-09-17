@@ -106,6 +106,17 @@ WorkerDiagnosticSchema.index(
   { expireAfterSeconds: 0, name: 'worker_diagnostic_expiry' },
 );
 WorkerDiagnosticSchema.index(
+  { machineId: 1, kind: 1, sequenceStart: 1 },
+  {
+    unique: true,
+    name: 'worker_diagnostic_machine_sequence_unique',
+    partialFilterExpression: {
+      machineId: { $type: 'string' },
+      kind: 'runtime_log',
+    },
+  },
+);
+WorkerDiagnosticSchema.index(
   { machineId: 1, createdAt: -1, _id: -1 },
   {
     name: 'worker_diagnostic_machine_history',

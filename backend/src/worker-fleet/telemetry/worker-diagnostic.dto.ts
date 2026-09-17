@@ -4,6 +4,7 @@ import {
   IsArray,
   IsInt,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
@@ -24,4 +25,9 @@ export class AppendInstallationLogsDto {
   @IsString({ each: true })
   @MaxLength(1000, { each: true })
   lines!: string[];
+}
+
+export class AppendRuntimeLogsDto extends AppendInstallationLogsDto {
+  @IsUUID('4') sessionId!: string;
+  @IsUUID('4') incarnation!: string;
 }

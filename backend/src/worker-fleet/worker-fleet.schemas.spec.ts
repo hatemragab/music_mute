@@ -10,6 +10,7 @@ import { WorkerMachineSchema } from './machines/worker-machine.schema.js';
 import { WorkerSlotSchema } from './machines/worker-slot.schema.js';
 import { WorkerFleetPolicySchema } from './policy/worker-fleet-policy.schema.js';
 import { WorkerDiagnosticSchema } from './telemetry/worker-diagnostic.schema.js';
+import { WorkerCommandSchema } from './control/worker-command.schema.js';
 
 function indexNames(schema: Schema): string[] {
   return schema
@@ -28,6 +29,7 @@ describe('worker fleet persistence contract', () => {
       WorkerAttemptSchema,
       WorkerFleetPolicySchema,
       WorkerDiagnosticSchema,
+      WorkerCommandSchema,
     ];
     expect(schemas.every((schema) => schema.get('strict') === 'throw')).toBe(
       true,
@@ -69,6 +71,11 @@ describe('worker fleet persistence contract', () => {
       'worker_diagnostic_expiry',
       'worker_diagnostic_installation_sequence_unique',
       'worker_diagnostic_machine_history',
+      'worker_diagnostic_machine_sequence_unique',
+    ]);
+    expect(indexNames(WorkerCommandSchema)).toEqual([
+      'worker_command_expiry',
+      'worker_command_machine_pending',
     ]);
   });
 

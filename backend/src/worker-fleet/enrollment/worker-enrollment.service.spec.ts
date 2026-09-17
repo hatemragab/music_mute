@@ -115,6 +115,39 @@ describe('worker enrollment lifecycle', () => {
     expect(stored.codeDigest).not.toBe(result.credential);
   });
 
+  it('revokes an unused invitation through the audited revision boundary', async () => {
+    const f = fixture();
+    const invitationId = 'd4cb613b-6f58-4f0d-b35f-cc49707488f7';
+    f.invitations.findById.mockReturnValue(
+      chain({
+        _id: invitationId,
+        state: 'active',
+        revision: 2,
+        expiresAt: new Date(Date.now() + 60_000),
+      }),
+    );
+    f.invitations.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    const result = await f.service.revokeInvitation(actor, invitationId, {
+      operationId: '57dd6c3a-40c4-4aaa-a04f-9854cf30f8c5',
+      expectedRevision: 2,
+      reason: 'Invitation is no longer needed',
+    });
+    expect(result).toMatchObject({
+      invitationId,
+      revision: 3,
+      state: 'revoked',
+      replayed: false,
+    });
+    expect(f.invitations.updateOne).toHaveBeenCalledWith(
+      { _id: invitationId, state: 'active', revision: 2 },
+      {
+        $set: { state: 'revoked', revokedAt: expect.any(Date) },
+        $inc: { revision: 1 },
+      },
+      expect.any(Object),
+    );
+  });
+
   it('atomically consumes an invitation and returns a restricted credential', async () => {
     const f = fixture();
     const invitationId = '790fb01e-6026-4fd1-8f77-8c584aa10f37';

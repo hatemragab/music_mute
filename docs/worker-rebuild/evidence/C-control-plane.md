@@ -14,7 +14,7 @@ The local environment was Darwin 25.6 ARM64 with Node.js 24.18.0 and pnpm
 | C3 admission and claims | PASS | Feature-gated public admission, immutable verified-input recipes, exact-version upload verification, durable sessions/slots and policy/capability-matched transactional claims with same-request replay. |
 | C4 leases and recovery | PASS | Backend-time batch renewal, exact ownership fences, fixed deadlines, cancellation/session/revocation fences and race-safe bounded recovery with focused/full test coverage. |
 | C5 storage and finalization | PASS | Attempt-scoped input/output grants, exact-version verification, idempotent completion/failure, coherent usage/notification/slot updates and orphan cleanup. |
-| C6 machine/status/policy APIs | NOT_RUN | Reserved for the later checkpoint. |
+| C6 machine/status/policy APIs | PASS | Durable machine/invitation/policy reads and controls, policy acknowledgement, typed commands, runtime diagnostics and independent route-authorization coverage. |
 
 ## Implemented boundary
 
@@ -138,6 +138,35 @@ which permits same-request response recovery without storing plaintext.
   exact-version S3 HEAD, mismatch rejection, successful replay, expired-owner
   rejection, terminal failure replay and orphan-cleanup cancellation.
 
+## C6 machine, status and policy APIs
+
+- Added machine list/detail APIs with bounded slot, current/recent attempt,
+  installation, command and diagnostic metadata. Credential digests and raw log
+  lines are excluded from ordinary machine reads; sanitized diagnostic content
+  requires the separate `workers.logs.read` permission.
+- Added invitation lifecycle listing and an audited, expected-revision revoke
+  action. Expired active invitations are presented as expired without causing
+  an unaudited write during a GET request.
+- Added audited drain alongside pause/resume/revoke. Drain stops new claims and
+  preserves active work; machine revocation continues to fence current leases
+  and credentials.
+- Added versioned recipe/capacity policy reads and optimistic updates. Policy
+  changes advance each non-revoked machine's desired revision, and claims stay
+  closed until the current session acknowledges the exact policy revision.
+- Added current-session configuration reconciliation and a durable
+  `worker_commands` collection for typed doctor/benchmark requests. Results are
+  bounded, sanitized, session-authenticated and replay safe; arbitrary remote
+  shell commands and remote update commands do not exist.
+- Added ordered machine runtime-log batches with exact-sequence replay,
+  credential/path redaction, 14-day retention and current-session/incarnation
+  fencing. The machine stores the highest acknowledged diagnostic sequence.
+- Extended the independent dashboard-route inventory with all C6 permissions,
+  role boundaries, fresh-auth requirements, rate classes and DTO validation.
+- No WebSocket/Redis delivery path was made authoritative. The runtime branch
+  can add bounded presence/progress/cancellation hints when it has a real
+  consumer; configuration, commands, claims, leases and results already
+  reconcile durably over HTTPS and MongoDB.
+
 ## Verification
 
 The backend verification command was run with only repository rate-limit
@@ -180,8 +209,8 @@ Result: PASS.
 - lint: PASS, zero warnings and errors
 - TypeScript typecheck: PASS
 - tracked-secret scan: PASS, 4/4 tests
-- unit tests: PASS, 106 files and 721 tests
-- E2E tests: PASS, 22 files and 125 tests
+- unit tests: PASS, 107 files and 727 tests
+- E2E tests: PASS, 22 files and 135 tests
 - processing integration tests: PASS, 12 tests against isolated local services
 - NestJS production build: PASS
 

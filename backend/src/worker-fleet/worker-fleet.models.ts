@@ -21,8 +21,13 @@ import {
   WorkerDiagnostic,
   WorkerDiagnosticSchema,
 } from './telemetry/worker-diagnostic.schema.js';
+import {
+  WorkerCommand,
+  WorkerCommandSchema,
+} from './control/worker-command.schema.js';
 
 export const WORKER_FLEET_MODELS = [
+  { name: WorkerCommand.name, schema: WorkerCommandSchema },
   {
     name: WorkerEnrollmentInvitation.name,
     schema: WorkerEnrollmentInvitationSchema,
