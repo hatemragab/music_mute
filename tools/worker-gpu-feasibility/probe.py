@@ -397,6 +397,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             "host": {
                 "os": platform.system(),
                 "os_release": platform.release(),
+                "os_version": platform.version(),
                 "architecture": platform.machine(),
                 "python": platform.python_version(),
                 "gpu_inventory": sanitized_gpu_inventory(),
@@ -408,6 +409,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                 "onnxruntime_distributions": installed_ort_distributions(),
                 "soundfile": package_version("soundfile"),
                 "torch": package_version("torch"),
+                "torch-directml": package_version("torch-directml"),
             },
             "available_providers": ort.get_available_providers(),
             "active_session_providers": active_providers,
