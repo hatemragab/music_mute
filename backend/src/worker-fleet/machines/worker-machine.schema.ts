@@ -73,7 +73,7 @@ const gpuIdentity = new MongoSchema<WorkerGpuIdentity>(
   { _id: false, strict: 'throw' },
 );
 
-const hardwareReport = new MongoSchema<WorkerHardwareReport>(
+export const WorkerHardwareReportSchema = new MongoSchema<WorkerHardwareReport>(
   {
     os: { type: String, required: true, maxlength: 100 },
     osBuild: { type: String, required: true, maxlength: 100 },
@@ -95,30 +95,31 @@ const hardwareReport = new MongoSchema<WorkerHardwareReport>(
   { _id: false, strict: 'throw' },
 );
 
-const runtimeIdentity = new MongoSchema<WorkerRuntimeIdentity>(
-  {
-    workerVersion: { type: String, required: true, maxlength: 100 },
-    protocolVersion: {
-      type: Number,
-      required: true,
-      enum: [WORKER_PROTOCOL_VERSION],
+export const WorkerRuntimeIdentitySchema =
+  new MongoSchema<WorkerRuntimeIdentity>(
+    {
+      workerVersion: { type: String, required: true, maxlength: 100 },
+      protocolVersion: {
+        type: Number,
+        required: true,
+        enum: [WORKER_PROTOCOL_VERSION],
+      },
+      manifestDigest: {
+        type: String,
+        required: true,
+        match: SHA256_HEX_PATTERN,
+      },
+      modelDigest: { type: String, required: true, match: SHA256_HEX_PATTERN },
+      providerRuntimeVersion: {
+        type: String,
+        required: true,
+        maxlength: 100,
+      },
     },
-    manifestDigest: {
-      type: String,
-      required: true,
-      match: SHA256_HEX_PATTERN,
-    },
-    modelDigest: { type: String, required: true, match: SHA256_HEX_PATTERN },
-    providerRuntimeVersion: {
-      type: String,
-      required: true,
-      maxlength: 100,
-    },
-  },
-  { _id: false, strict: 'throw' },
-);
+    { _id: false, strict: 'throw' },
+  );
 
-const capability = new MongoSchema<WorkerCapability>(
+export const WorkerCapabilitySchema = new MongoSchema<WorkerCapability>(
   {
     platform: { type: String, required: true, enum: WORKER_PLATFORMS },
     provider: { type: String, required: true, enum: WORKER_PROVIDERS },
@@ -182,7 +183,7 @@ export class WorkerMachine {
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
   policyRevision!: number;
   @Prop({
-    type: [capability],
+    type: [WorkerCapabilitySchema],
     default: [],
     validate: (value: WorkerCapability[]) =>
       Array.isArray(value) &&
@@ -192,9 +193,9 @@ export class WorkerMachine {
       ).size === value.length,
   })
   approvedCapabilities!: WorkerCapability[];
-  @Prop({ type: hardwareReport, default: null })
+  @Prop({ type: WorkerHardwareReportSchema, default: null })
   hardwareReport!: WorkerHardwareReport | null;
-  @Prop({ type: runtimeIdentity, default: null })
+  @Prop({ type: WorkerRuntimeIdentitySchema, default: null })
   runtimeIdentity!: WorkerRuntimeIdentity | null;
   @Prop({ type: sessionIdentity, default: null })
   currentSession!: WorkerSessionIdentity | null;

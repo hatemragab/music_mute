@@ -49,7 +49,7 @@
   },
   "control_plane": {
     "c1_persistence_protocol_authorization": "PASS",
-    "c2_enrollment_lifecycle": "NOT_RUN",
+    "c2_enrollment_lifecycle": "PASS",
     "c3_admission_and_claims": "NOT_RUN",
     "c4_leases_and_recovery": "NOT_RUN",
     "c5_storage_and_finalization": "NOT_RUN",

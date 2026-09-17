@@ -1,5 +1,16 @@
 # Package changes
 
+## Revision 3.4
+
+- Added the C2 enrollment lifecycle with backend-generated high-entropy one-use invitations, bounded expiry, atomic exchange and deterministic same-request replay.
+- Added restricted installation authentication, structured hardware/runtime/capability reports, exact accepted Kim model identity and qualification for the verified CoreML and DirectML MVP pairs.
+- Added activation with a derived machine credential, plus audited and revision-fenced admin pause, resume and revoke operations.
+- Added bounded, sequence-acknowledged installation diagnostics with transactionally durable batches and server-side credential/path redaction.
+- Revocation now invalidates machine authentication, revokes its installation session and expires any current job lease so ownership cannot continue silently.
+- Extended the independent admin route security inventory and focused lifecycle/authentication tests.
+
+Only credential digests are stored. No runtime process, dashboard UI, live machine enrollment, database mutation or deployment was performed.
+
 ## Revision 3.3
 
 - Added the C1 worker-fleet persistence boundary: machine identity, installation sessions, slots, attempts, policy and bounded diagnostic schemas with explicit indexes and optimistic revisions.

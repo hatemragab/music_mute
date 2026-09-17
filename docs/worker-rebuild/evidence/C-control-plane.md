@@ -10,7 +10,7 @@ The local environment was Darwin 25.6 ARM64 with Node.js 24.18.0 and pnpm
 | Checkpoint | Status | Evidence |
 | --- | --- | --- |
 | C1 persistence, protocol and authorization | PASS | Worker-fleet schemas, explicit indexes, existing-job execution fields, protocol-v1 validation, fail-closed worker guard, startup initialization and focused/full test coverage. |
-| C2 enrollment lifecycle | NOT_RUN | Reserved for the next checkpoint. |
+| C2 enrollment lifecycle | PASS | One-use invitation exchange, restricted installation report, qualified activation, scoped authentication and audited machine pause/resume/revoke with ownership fencing. |
 | C3 admission and claims | NOT_RUN | Reserved for the later checkpoint. |
 | C4 leases and recovery | NOT_RUN | Reserved for the later checkpoint. |
 | C5 storage and finalization | NOT_RUN | Reserved for the later checkpoint. |
@@ -34,8 +34,35 @@ The local environment was Darwin 25.6 ARM64 with Node.js 24.18.0 and pnpm
   index failure stops startup with the fixed redacted message
   `Worker fleet schema initialization failed`.
 
-No HTTP worker controller, plaintext credential, enrollment exchange, job
-claim, S3 grant, runtime process, dashboard UI or deployment was added.
+At C1 no HTTP worker controller or usable credential existed. C2 below adds
+only the enrollment lifecycle; job claims, S3 grants, runtime processes,
+dashboard UI and deployment remain absent.
+
+## C2 enrollment and revocation
+
+- Added `POST /worker/v1/installations` for atomic one-use invitation exchange.
+  A replay with the same request ID derives the same restricted installation
+  credential without storing recoverable plaintext; a different replay is a
+  conflict.
+- Added authenticated installation report and activation routes. Reports are
+  revision-fenced, bounded and replay-safe. Activation accepts only protocol v1,
+  the exact qualified Kim Vocal 2 digest and the verified MVP pairs:
+  Darwin ARM64/CoreML or Windows AMD64/DirectML.
+- Added bounded installation log batches with contiguous sequence validation,
+  idempotent acknowledgements, TTL retention and server-side redaction of
+  bearer values, secret assignments, credential-bearing URLs and home paths.
+- Added admin invitation creation and machine pause/resume/revoke routes with
+  explicit permissions, recent-auth requirements, sensitive rate limits,
+  operation receipts and audit records.
+- Revocation rejects the machine credential, clears its durable session,
+  revokes its installation session and expires current audio-job ownership.
+  Restricted, failed, expired and revoked installations cannot authenticate as
+  machines or claim work.
+
+Invitation, installation and machine secrets are 256-bit opaque values. The
+database contains only SHA-256 digests. Installation and machine credentials
+are domain-separated HMAC derivations of an already high-entropy parent secret,
+which permits same-request response recovery without storing plaintext.
 
 ## Verification
 
@@ -79,8 +106,8 @@ Result: PASS.
 - lint: PASS, zero warnings and errors
 - TypeScript typecheck: PASS
 - tracked-secret scan: PASS, 4/4 tests
-- unit tests: PASS, 97 files and 684 tests
-- E2E tests: PASS, 22 files and 121 tests
+- unit tests: PASS, 99 files and 694 tests
+- E2E tests: PASS, 22 files and 125 tests
 - NestJS production build: PASS
 
 This is local implementation evidence only. It is not proof of production

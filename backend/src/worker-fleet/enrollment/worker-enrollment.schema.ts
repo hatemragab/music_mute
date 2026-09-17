@@ -5,6 +5,14 @@ import {
   WORKER_INSTALLATION_PHASES,
   type WorkerInstallationPhase,
 } from '../worker-fleet.types.js';
+import {
+  WorkerCapabilitySchema,
+  WorkerHardwareReportSchema,
+  WorkerRuntimeIdentitySchema,
+  type WorkerCapability,
+  type WorkerHardwareReport,
+  type WorkerRuntimeIdentity,
+} from '../machines/worker-machine.schema.js';
 
 export const WORKER_INVITATION_STATES = [
   'active',
@@ -39,7 +47,18 @@ export class WorkerEnrollmentInvitation {
   @Prop({ required: true, immutable: true }) expiresAt!: Date;
   @Prop({ type: Date, default: null }) consumedAt!: Date | null;
   @Prop({ type: Date, default: null }) revokedAt!: Date | null;
-  @Prop({ type: Number, default: 0, min: 0, max: 1 }) useCount!: number;
+  @Prop({
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 1,
+    validate: Number.isSafeInteger,
+  })
+  useCount!: number;
+  @Prop({ type: String, default: null, match: UUID_V4_PATTERN })
+  exchangeRequestId!: string | null;
+  @Prop({ type: String, default: null, match: UUID_V4_PATTERN })
+  installationSessionId!: string | null;
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
   revision!: number;
   createdAt!: Date;
@@ -76,6 +95,8 @@ export class WorkerInstallationSession {
   invitationId!: string;
   @Prop({ required: true, immutable: true, match: SHA256_HEX_PATTERN })
   credentialDigest!: string;
+  @Prop({ required: true, immutable: true, match: UUID_V4_PATTERN })
+  exchangeRequestId!: string;
   @Prop({ type: String, required: true, enum: WORKER_INSTALLATION_PHASES })
   phase!: WorkerInstallationPhase;
   @Prop({ type: String, default: null, maxlength: 100 })
@@ -85,8 +106,34 @@ export class WorkerInstallationSession {
   @Prop({ type: Date, default: null }) lastSeenAt!: Date | null;
   @Prop({ type: String, default: null, maxlength: 2000 })
   reportSummary!: string | null;
+  @Prop({ type: String, default: null, match: SHA256_HEX_PATTERN })
+  reportDigest!: string | null;
+  @Prop({ type: String, default: null, match: UUID_V4_PATTERN })
+  reportRequestId!: string | null;
+  @Prop({ type: String, default: null, maxlength: 120 }) label!: string | null;
+  @Prop({ type: String, default: null, maxlength: 100 }) groupId!:
+    string | null;
+  @Prop({ type: WorkerHardwareReportSchema, default: null })
+  hardwareReport!: WorkerHardwareReport | null;
+  @Prop({ type: WorkerRuntimeIdentitySchema, default: null })
+  runtimeIdentity!: WorkerRuntimeIdentity | null;
+  @Prop({
+    type: [WorkerCapabilitySchema],
+    default: [],
+    validate: (value: WorkerCapability[]) =>
+      Array.isArray(value) &&
+      value.length <= 16 &&
+      new Set(
+        value.map((item) => `${item.platform}:${item.provider}:${item.gpuId}`),
+      ).size === value.length,
+  })
+  capabilities!: WorkerCapability[];
   @Prop({ type: String, default: null, match: UUID_V4_PATTERN })
   machineId!: string | null;
+  @Prop({ type: String, default: null, match: UUID_V4_PATTERN })
+  activationRequestId!: string | null;
+  @Prop({ type: Date, default: null }) activatedAt!: Date | null;
+  @Prop({ type: Date, default: null }) revokedAt!: Date | null;
   @Prop({ required: true, immutable: true }) expiresAt!: Date;
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
   revision!: number;

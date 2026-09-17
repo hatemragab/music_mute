@@ -691,6 +691,74 @@
       "responseCategory": "resource",
       "validationOwner": "dto",
       "successStatus": 200
+    },
+    {
+      "controller": "AdminWorkerEnrollmentController",
+      "method": "POST",
+      "path": "/admin/workers/invitations",
+      "permissions": ["workers.enroll"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expiresInSeconds": 900,
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminWorkerEnrollmentController",
+      "method": "POST",
+      "path": "/admin/workers/machines/:id/pause",
+      "permissions": ["workers.manage"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminWorkerEnrollmentController",
+      "method": "POST",
+      "path": "/admin/workers/machines/:id/resume",
+      "permissions": ["workers.manage"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminWorkerEnrollmentController",
+      "method": "POST",
+      "path": "/admin/workers/machines/:id/revoke",
+      "permissions": ["workers.manage"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
     }
   ]
 }
