@@ -1,0 +1,45 @@
+{
+  "all_passed": true,
+  "validated_on": "2026-09-17",
+  "branch_count": 7,
+  "checkpoint_count": 36,
+  "package_file_count_including_sha256sums": 34,
+  "sha256_covered_file_count": 33,
+  "relative_markdown_links_checked": 44,
+  "reference_sha256": "b376a185d24811560fbc6cc681542517e61130a6d737077360ace5f502a32f1d",
+  "reference_line_ranges_verified": {
+    "trim_vocal_gaps": [
+      19,
+      114
+    ],
+    "prepare_audio": [
+      117,
+      164
+    ],
+    "load_separator": [
+      167,
+      183
+    ],
+    "process_audio": [
+      186,
+      279
+    ],
+    "_write_message": [
+      282,
+      288
+    ],
+    "_read_request": [
+      291,
+      302
+    ],
+    "serve": [
+      305,
+      391
+    ],
+    "main": [
+      394,
+      483
+    ]
+  },
+  "scope": "Documentation/source-reference packaging checks in assistant sandbox; no user infrastructure tests."
+}

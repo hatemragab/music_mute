@@ -1,0 +1,67 @@
+{
+  "description": "Expected sequential worker rebuild ancestry in an isolated dummy repository",
+  "entryBranch": "codex/worker-rebuild",
+  "prBase": "codex/worker-rebuild",
+  "expected": [
+    {
+      "order": 1,
+      "branch": "codex/worker-architecture",
+      "parent": "codex/worker-rebuild",
+      "checkpointRange": "A1-A4"
+    },
+    {
+      "order": 2,
+      "branch": "codex/worker-gpu-feasibility",
+      "parent": "codex/worker-architecture",
+      "checkpointRange": "B1-B4"
+    },
+    {
+      "order": 3,
+      "branch": "codex/worker-control-plane",
+      "parent": "codex/worker-gpu-feasibility",
+      "checkpointRange": "C1-C6"
+    },
+    {
+      "order": 4,
+      "branch": "codex/worker-runtime",
+      "parent": "codex/worker-control-plane",
+      "checkpointRange": "D1-D6"
+    },
+    {
+      "order": 5,
+      "branch": "codex/worker-dashboard",
+      "parent": "codex/worker-runtime",
+      "checkpointRange": "E1-E5"
+    },
+    {
+      "order": 6,
+      "branch": "codex/worker-integration",
+      "parent": "codex/worker-dashboard",
+      "checkpointRange": "F1-F6"
+    },
+    {
+      "order": 7,
+      "branch": "codex/worker-release-readiness",
+      "parent": "codex/worker-integration",
+      "checkpointRange": "G1-G5"
+    }
+  ],
+  "rules": [
+    "Every feature branch opens a pull request to codex/worker-rebuild",
+    "The maintainer merges and accepts a branch before its successor starts",
+    "The successor starts from the exact accepted collection checkpoint",
+    "No feature branch targets main directly",
+    "Automatic fleet updates are post-MVP"
+  ],
+  "verification": {
+    "date": "2026-09-17",
+    "environment": "isolated temporary Git repository",
+    "branchesCompleted": 7,
+    "regularMerges": 7,
+    "successorFastForwards": 6,
+    "mainPreserved": true,
+    "cleanSlatePreserved": true,
+    "localEnvIgnoreCheck": true
+  },
+  "result": "PASS for the documented Git topology only; no real repository branch or PR operation was performed"
+}

@@ -1,0 +1,108 @@
+{
+  "packageVersion": "3.0",
+  "repository": "hatemragab/music_mute",
+  "entryBranch": "codex/worker-rebuild",
+  "baselineCommit": "a786a1773a3c72fb09d1b02def1ae39330561892",
+  "frozenBranches": ["main", "codex/worker-clean-slate"],
+  "agentMay": [
+    "create_assigned_branch",
+    "commit",
+    "push_assigned_branch",
+    "open_or_update_pull_request"
+  ],
+  "agentMayNotWithoutAdditionalApproval": [
+    "merge",
+    "deploy",
+    "publish_package",
+    "start_next_branch",
+    "reboot_or_log_out_host"
+  ],
+  "totalCheckpoints": 36,
+  "branches": [
+    {
+      "order": 1,
+      "branch": "codex/worker-architecture",
+      "parent": "codex/worker-rebuild",
+      "parentRule": "accepted previous checkpoint synchronized to origin/codex/worker-rebuild",
+      "prBase": "codex/worker-rebuild",
+      "taskFile": "tasks/01-worker-architecture.md",
+      "checkpoints": ["A1", "A2", "A3", "A4"],
+      "status": "not_started",
+      "requiresImplementation": false,
+      "purpose": "Documentation, MVP scope and stable contracts"
+    },
+    {
+      "order": 2,
+      "branch": "codex/worker-gpu-feasibility",
+      "parent": "codex/worker-architecture",
+      "parentRule": "accepted previous checkpoint synchronized to origin/codex/worker-rebuild",
+      "prBase": "codex/worker-rebuild",
+      "taskFile": "tasks/02-worker-gpu-feasibility.md",
+      "checkpoints": ["B1", "B2", "B3", "B4"],
+      "status": "not_started",
+      "requiresImplementation": true,
+      "purpose": "Real Kim GPU/provider feasibility and package pins"
+    },
+    {
+      "order": 3,
+      "branch": "codex/worker-control-plane",
+      "parent": "codex/worker-gpu-feasibility",
+      "parentRule": "accepted previous checkpoint synchronized to origin/codex/worker-rebuild",
+      "prBase": "codex/worker-rebuild",
+      "taskFile": "tasks/03-worker-control-plane.md",
+      "checkpoints": ["C1", "C2", "C3", "C4", "C5", "C6"],
+      "status": "not_started",
+      "requiresImplementation": true,
+      "purpose": "Minimal durable enrollment, ownership, S3 and policy control plane"
+    },
+    {
+      "order": 4,
+      "branch": "codex/worker-runtime",
+      "parent": "codex/worker-control-plane",
+      "parentRule": "accepted previous checkpoint synchronized to origin/codex/worker-rebuild",
+      "prBase": "codex/worker-rebuild",
+      "taskFile": "tasks/04-worker-runtime.md",
+      "checkpoints": ["D1", "D2", "D3", "D4", "D5", "D6"],
+      "status": "not_started",
+      "requiresImplementation": true,
+      "purpose": "Supervisor, Python processing, platform packaging and services"
+    },
+    {
+      "order": 5,
+      "branch": "codex/worker-dashboard",
+      "parent": "codex/worker-runtime",
+      "parentRule": "accepted previous checkpoint synchronized to origin/codex/worker-rebuild",
+      "prBase": "codex/worker-rebuild",
+      "taskFile": "tasks/05-worker-dashboard.md",
+      "checkpoints": ["E1", "E2", "E3", "E4", "E5"],
+      "status": "not_started",
+      "requiresImplementation": true,
+      "purpose": "Minimum safe enrollment, status and machine controls"
+    },
+    {
+      "order": 6,
+      "branch": "codex/worker-integration",
+      "parent": "codex/worker-dashboard",
+      "parentRule": "accepted previous checkpoint synchronized to origin/codex/worker-rebuild",
+      "prBase": "codex/worker-rebuild",
+      "taskFile": "tasks/06-worker-integration.md",
+      "checkpoints": ["F1", "F2", "F3", "F4", "F5", "F6"],
+      "status": "not_started",
+      "requiresImplementation": true,
+      "purpose": "Complete flow, races, failure recovery and real-service evidence"
+    },
+    {
+      "order": 7,
+      "branch": "codex/worker-release-readiness",
+      "parent": "codex/worker-integration",
+      "parentRule": "accepted previous checkpoint synchronized to origin/codex/worker-rebuild",
+      "prBase": "codex/worker-rebuild",
+      "taskFile": "tasks/07-worker-release-readiness.md",
+      "checkpoints": ["G1", "G2", "G3", "G4", "G5"],
+      "status": "not_started",
+      "requiresImplementation": true,
+      "purpose": "Candidate packaging, manual lifecycle, final hardware and release gates"
+    }
+  ],
+  "postMvp": "POST-MVP.md"
+}
