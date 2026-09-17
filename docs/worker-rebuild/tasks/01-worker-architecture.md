@@ -20,7 +20,7 @@ Verify a clean working tree and correct repository. Inspect inherited automation
 
 Before copying or staging anything, check whether `.local.env` is tracked. If tracked, stop and report without printing its contents. The current tracked ignore rules do not cover this filename. Protect it immediately through this checkout's `.git/info/exclude` as shown in the agent rules. This local safety measure is not a runtime implementation or a tracked `.gitignore` change. The tracked fix belongs to C1.
 
-Copy the package into `docs/worker-rebuild/` after creating the branch. Stage that explicit directory only. No root `AGENTS.md` replacement, no global configuration changes and no broad `git add .`.
+Confirm the committed package is present at `docs/worker-rebuild/` on the accepted collection tip. Reconcile it in place and stage explicit documentation paths only. No root `AGENTS.md` replacement, no global configuration changes and no broad `git add .`.
 
 **Checkpoint evidence:** actual base SHA, clean-slate preservation, tracked-file scan result, ignore check result, intended changed-path list. Never attach environment contents.
 

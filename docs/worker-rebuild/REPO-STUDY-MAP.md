@@ -24,7 +24,7 @@ Read existing `AGENTS.md` files if present. No source file may be treated as an 
 | `backend/package.json` | READ | Nest/Mongoose/S3/Redis dependencies and actual verification commands |
 | `dashboard/package.json` | READ | React/Vite stack and format/lint/typecheck/test/build scripts |
 
-The backend manifest specifies Node 24, pnpm 10 and `packageManager: pnpm@10.14.0`; the older README uses npm-oriented commands. Reconcile against the current checked-out manifest and tracked lockfiles. Do not generate a second lockfile simply by following a stale README command. This is a worker task, not a reason to migrate all components to one package manager.
+The backend manifest specifies Node 24, pnpm 10 and `packageManager: pnpm@10.14.0`; the root/backend setup documentation must use the same pnpm workflow. Reconcile against the current checked-out manifest and tracked lockfiles. Do not generate a second lockfile or migrate the independently managed dashboard merely for consistency.
 
 ## 2. Backend entry points and configuration
 

@@ -1,5 +1,13 @@
 # Package changes
 
+## Revision 3.1
+
+- Reconciled the committed package from `codex/worker-rebuild` on the documentation-only architecture branch.
+- Confirmed the retained job, persistence, storage, usage, notification, and dashboard contracts against the current source tree without changing application behavior.
+- Updated the architecture-start instructions to reflect that the package is already committed on the collection branch.
+- Corrected root backend setup prose to use the manifest-pinned pnpm workflow; the dashboard remains independently npm-managed.
+- Added checkpoint evidence for A1–A4 and kept real GPU/provider proof in branch B.
+
 ## Revision 3.0
 
 - Replaced the earlier eight-branch implementation plan with seven sequential branches after the existing collection: architecture, GPU feasibility, control plane, runtime, dashboard, integration, and release readiness.
