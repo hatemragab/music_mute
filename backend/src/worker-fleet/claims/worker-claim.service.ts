@@ -43,8 +43,15 @@ export class WorkerClaimService {
     if (
       machine.currentSession?.sessionId === dto.sessionId &&
       machine.currentSession.incarnation === dto.incarnation
-    )
+    ) {
+      await this.fenceSupersededSessions(
+        machineId,
+        dto.sessionId,
+        dto.incarnation,
+        new Date(),
+      );
       return this.presentSession(machine, true);
+    }
     const now = new Date();
     const generation = machine.supervisorGeneration + 1;
     const updated = await this.machines
@@ -72,12 +79,56 @@ export class WorkerClaimService {
       )
       .lean();
     if (!updated) throw workerError('WORKER_CONFLICT');
+    await this.fenceSupersededSessions(
+      machineId,
+      dto.sessionId,
+      dto.incarnation,
+      now,
+    );
     await this.slots.updateMany(
       { machineId, currentAttemptId: null },
       { $set: { state: 'offline', lastSeenAt: now }, $inc: { revision: 1 } },
       { runValidators: true },
     );
     return this.presentSession(updated, false);
+  }
+
+  private async fenceSupersededSessions(
+    machineId: string,
+    sessionId: string,
+    incarnation: string,
+    now: Date,
+  ): Promise<void> {
+    const superseded = {
+      machineId,
+      $or: [
+        { sessionId: trusted({ $ne: sessionId }) },
+        { incarnation: trusted({ $ne: incarnation }) },
+      ],
+    };
+    await this.attempts.updateMany(
+      {
+        ...superseded,
+        state: trusted({ $in: ACTIVE_ATTEMPT_STATES }),
+      },
+      { $set: { leaseExpiresAt: now }, $inc: { revision: 1 } },
+      { runValidators: true },
+    );
+    await this.jobs.updateMany(
+      {
+        'currentExecution.machineId': machineId,
+        $or: [
+          {
+            'currentExecution.sessionId': trusted({ $ne: sessionId }),
+          },
+          {
+            'currentExecution.incarnation': trusted({ $ne: incarnation }),
+          },
+        ],
+      },
+      { $set: { 'currentExecution.leaseExpiresAt': now } },
+      { runValidators: true },
+    );
   }
 
   async registerSlot(principal: WorkerPrincipal, dto: RegisterWorkerSlotDto) {

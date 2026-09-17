@@ -38,7 +38,11 @@ function fixture() {
     updateOne: vi.fn(),
     updateMany: vi.fn(),
   };
-  const attempts = { findOne: vi.fn(), create: vi.fn() };
+  const attempts = {
+    findOne: vi.fn(),
+    create: vi.fn(),
+    updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }),
+  };
   const policies = {
     findById: vi.fn(() =>
       sessionLean({
@@ -61,6 +65,7 @@ function fixture() {
     findById: vi.fn(),
     findOne: vi.fn(),
     findOneAndUpdate: vi.fn(),
+    updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }),
   };
   const service = new WorkerClaimService(
     { startSession: vi.fn().mockResolvedValue(transaction) } as never,
@@ -334,5 +339,43 @@ describe('worker atomic claims', () => {
     });
     expect(result).toMatchObject({ replayed: true, policyRevision: 0 });
     expect(f.machines.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('expires ownership from a superseded supervisor session', async () => {
+    const f = fixture();
+    const nextSessionId = '9b03e310-4bde-4569-bef0-7f90f4c82670';
+    const nextIncarnation = '036a9f59-07fa-41d9-be35-57f0b046bf2d';
+    f.machines.findById.mockReturnValue(maxLean(activeMachine));
+    f.machines.findOneAndUpdate.mockReturnValue(
+      updateLean({
+        ...activeMachine,
+        revision: 4,
+        currentSession: {
+          sessionId: nextSessionId,
+          incarnation: nextIncarnation,
+          generation: 2,
+        },
+      }),
+    );
+    f.slots.updateMany.mockResolvedValue({ modifiedCount: 1 });
+    await f.service.openSession(principal, {
+      sessionId: nextSessionId,
+      incarnation: nextIncarnation,
+    });
+    expect(f.attempts.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        machineId,
+        state: expect.anything(),
+      }),
+      expect.objectContaining({
+        $set: { leaseExpiresAt: expect.any(Date) },
+      }),
+      expect.any(Object),
+    );
+    expect(f.jobs.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ 'currentExecution.machineId': machineId }),
+      { $set: { 'currentExecution.leaseExpiresAt': expect.any(Date) } },
+      expect.any(Object),
+    );
   });
 });

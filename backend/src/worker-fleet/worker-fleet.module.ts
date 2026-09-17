@@ -9,6 +9,10 @@ import { WorkerEnrollmentService } from './enrollment/worker-enrollment.service.
 import { WorkerDiagnosticsService } from './telemetry/worker-diagnostics.service.js';
 import { WorkerClaimController } from './claims/worker-claim.controller.js';
 import { WorkerClaimService } from './claims/worker-claim.service.js';
+import { WorkerLeaseController } from './leases/worker-lease.controller.js';
+import { WorkerLeaseService } from './leases/worker-lease.service.js';
+import { WorkerRecoveryService } from './leases/worker-recovery.service.js';
+import { WorkerRecoveryMaintenanceService } from './leases/worker-recovery-maintenance.service.js';
 import { WorkerFleetStartupService } from './worker-fleet-startup.service.js';
 import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
 
@@ -21,12 +25,16 @@ import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
   controllers: [
     WorkerEnrollmentController,
     WorkerClaimController,
+    WorkerLeaseController,
     AdminWorkerEnrollmentController,
   ],
   providers: [
     WorkerAuthGuard,
     WorkerDiagnosticsService,
     WorkerClaimService,
+    WorkerLeaseService,
+    WorkerRecoveryService,
+    WorkerRecoveryMaintenanceService,
     WorkerEnrollmentService,
     WorkerFleetStartupService,
   ],

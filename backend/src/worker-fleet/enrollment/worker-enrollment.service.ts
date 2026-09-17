@@ -7,6 +7,7 @@ import { adminError } from '../../admin/admin-errors.js';
 import type { AdminActor } from '../../admin/admin.types.js';
 import { Job } from '../../jobs/job.schema.js';
 import type { WorkerPrincipal } from '../auth/worker-auth.types.js';
+import { WorkerAttempt } from '../jobs/worker-attempt.schema.js';
 import { workerError } from '../worker-errors.js';
 import {
   WorkerEnrollmentInvitation,
@@ -112,6 +113,8 @@ export class WorkerEnrollmentService {
     private readonly installations: Model<WorkerInstallationSession>,
     @InjectModel(WorkerMachine.name)
     private readonly machines: Model<WorkerMachine>,
+    @InjectModel(WorkerAttempt.name)
+    private readonly attempts: Model<WorkerAttempt>,
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
     private readonly operations: AdminOperationsService,
   ) {}
@@ -488,6 +491,17 @@ export class WorkerEnrollmentService {
           $set: {
             'currentExecution.leaseExpiresAt': now,
           },
+        },
+        { session, runValidators: true },
+      );
+      await this.attempts.updateMany(
+        {
+          machineId: id,
+          state: { $in: ['claimed', 'running', 'uploading'] },
+        },
+        {
+          $set: { leaseExpiresAt: now },
+          $inc: { revision: 1 },
         },
         { session, runValidators: true },
       );

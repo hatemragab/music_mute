@@ -12,7 +12,7 @@ The local environment was Darwin 25.6 ARM64 with Node.js 24.18.0 and pnpm
 | C1 persistence, protocol and authorization | PASS | Worker-fleet schemas, explicit indexes, existing-job execution fields, protocol-v1 validation, fail-closed worker guard, startup initialization and focused/full test coverage. |
 | C2 enrollment lifecycle | PASS | One-use invitation exchange, restricted installation report, qualified activation, scoped authentication and audited machine pause/resume/revoke with ownership fencing. |
 | C3 admission and claims | PASS | Feature-gated public admission, immutable verified-input recipes, exact-version upload verification, durable sessions/slots and policy/capability-matched transactional claims with same-request replay. |
-| C4 leases and recovery | NOT_RUN | Reserved for the later checkpoint. |
+| C4 leases and recovery | PASS | Backend-time batch renewal, exact ownership fences, fixed deadlines, cancellation/session/revocation fences and race-safe bounded recovery with focused/full test coverage. |
 | C5 storage and finalization | NOT_RUN | Reserved for the later checkpoint. |
 | C6 machine/status/policy APIs | NOT_RUN | Reserved for the later checkpoint. |
 
@@ -90,6 +90,29 @@ which permits same-request response recovery without storing plaintext.
   explicitly enabled and only when no policy exists. Later policy APIs may
   revise it without overwriting stored policy.
 
+## C4 leases, cancellation and recovery
+
+- Added machine-authenticated `POST /worker/v1/leases/renew` with bounded
+  batches and per-item `accepted`, `expired`, `cancelled` or `revoked`
+  dispositions. Renewals use backend time, require the exact job/attempt/
+  machine/worker/session/incarnation tuple, and never revive an expired lease.
+- Every accepted renewal conditionally advances the attempt, job ownership and
+  slot in one MongoDB transaction. The renewed expiry is capped at the fixed
+  attempt deadline rather than extending total processing time indefinitely.
+- Added a single-flight recovery scanner that runs every ten seconds while
+  processing is enabled. It compares the observed attempt revision and exact
+  lease timestamp, so a racing successful renewal wins instead of being reset.
+- Lost attempts release their slot and either requeue after bounded exponential
+  backoff or fail finally. Eligibility is capped by the durable fleet policy's
+  maximum attempts and the job's remaining-attempt snapshot.
+- Owner/admin/account-deletion cancellation, terminal-job deletion, supervisor
+  session replacement and machine revocation now fence active attempts and
+  leases. Late renewal is rejected; C5 will apply the same ownership tuple to
+  output grants and finalization.
+- Focused tests cover accepted/deadline-capped renewal, refusal to revive,
+  cancellation/revocation dispositions, renewal/recovery races, retry backoff,
+  final failure, session replacement, machine revocation and deletion fencing.
+
 ## Verification
 
 The backend verification command was run with only repository rate-limit
@@ -132,7 +155,7 @@ Result: PASS.
 - lint: PASS, zero warnings and errors
 - TypeScript typecheck: PASS
 - tracked-secret scan: PASS, 4/4 tests
-- unit tests: PASS, 102 files and 706 tests
+- unit tests: PASS, 105 files and 715 tests
 - E2E tests: PASS, 22 files and 125 tests
 - processing integration tests: PASS, 12 tests against isolated local services
 - NestJS production build: PASS

@@ -13,6 +13,9 @@ import { nextCancellationState } from './job-state.js';
 import { jobError } from './job-errors.js';
 import { isDuplicateKey, objectId, requestHash } from './job-request.js';
 import type { JobFailureCode } from './job.types.js';
+import type { WorkerExecutionOwnership } from './job.types.js';
+import { WorkerAttempt } from '../worker-fleet/jobs/worker-attempt.schema.js';
+import { WorkerSlot } from '../worker-fleet/machines/worker-slot.schema.js';
 import { adminError } from '../admin/admin-errors.js';
 import type { AdminActor } from '../admin/admin.types.js';
 
@@ -72,14 +75,26 @@ export class JobActionsService {
         session,
       );
       const status = nextCancellationState(current.status);
-      if (status === current.status) return current;
+      if (status === current.status && !current.currentExecution)
+        return current;
+      const execution = current.currentExecution;
+      const now = new Date();
       const updated = await this.jobs
         .findOneAndUpdate(
           this.writeAuthority(current, principal),
           {
             $set: {
               status,
-              ...(status === 'cancelled' ? { finishedAt: new Date() } : {}),
+              currentExecution: null,
+              retryEligibility: current.retryEligibility
+                ? {
+                    ...current.retryEligibility,
+                    eligible: false,
+                    attemptsRemaining: 0,
+                    nextAttemptAt: null,
+                  }
+                : null,
+              ...(status === 'cancelled' ? { finishedAt: now } : {}),
             },
             $inc: { revision: 1 },
           },
@@ -87,6 +102,7 @@ export class JobActionsService {
         )
         .lean();
       if (!updated) throw jobError('JOB_STATE_CONFLICT');
+      await this.fenceAttempt(execution, now, session);
       await this.usage.settleJob(updated, session);
       return updated;
     });
@@ -117,15 +133,31 @@ export class JobActionsService {
     const job = await this.findForAction(principal, id, session);
     const status = nextCancellationState(job.status);
     await this.accountAccess.assertActive(job.userId, session);
-    if (status === job.status && principal.kind === 'owner') return job;
+    if (
+      status === job.status &&
+      principal.kind === 'owner' &&
+      !job.currentExecution
+    )
+      return job;
+    const execution = job.currentExecution;
+    const now = new Date();
     const updated = await this.jobs
       .findOneAndUpdate(
         this.writeAuthority(job, principal),
         {
           $set: {
             status,
+            currentExecution: null,
+            retryEligibility: job.retryEligibility
+              ? {
+                  ...job.retryEligibility,
+                  eligible: false,
+                  attemptsRemaining: 0,
+                  nextAttemptAt: null,
+                }
+              : null,
             ...(status === 'cancelled' && status !== job.status
-              ? { finishedAt: new Date() }
+              ? { finishedAt: now }
               : {}),
           },
           $inc: { revision: 1 },
@@ -134,6 +166,7 @@ export class JobActionsService {
       )
       .lean();
     if (!updated) this.changed(principal);
+    await this.fenceAttempt(execution, now, session);
     await this.usage.settleJob(updated, session);
     return updated;
   }
@@ -346,5 +379,44 @@ export class JobActionsService {
       status: job.status,
       retryOfJobId: job.retryOfJobId?.toHexString() ?? null,
     };
+  }
+
+  private async fenceAttempt(
+    execution: WorkerExecutionOwnership | null,
+    now: Date,
+    session: ClientSession,
+  ): Promise<void> {
+    if (!execution) return;
+    await this.jobs.db.model<WorkerAttempt>(WorkerAttempt.name).updateOne(
+      {
+        _id: execution.attemptId,
+        state: trusted({ $in: ['claimed', 'running', 'uploading'] }),
+      },
+      {
+        $set: {
+          state: 'cancelled',
+          terminalCode: 'CANCELLED',
+          terminalSummary: 'Job ownership was cancelled',
+          finishedAt: now,
+          leaseExpiresAt: now,
+        },
+        $inc: { revision: 1 },
+      },
+      { session, runValidators: true },
+    );
+    await this.jobs.db.model<WorkerSlot>(WorkerSlot.name).updateOne(
+      {
+        _id: execution.workerId,
+        machineId: execution.machineId,
+        sessionId: execution.sessionId,
+        incarnation: execution.incarnation,
+        currentAttemptId: execution.attemptId,
+      },
+      {
+        $set: { state: 'idle', currentAttemptId: null, lastSeenAt: now },
+        $inc: { revision: 1 },
+      },
+      { session, runValidators: true },
+    );
   }
 }

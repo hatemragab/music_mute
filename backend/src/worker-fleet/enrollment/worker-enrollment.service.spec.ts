@@ -51,6 +51,7 @@ function fixture() {
     },
   );
   const jobs = { updateMany: vi.fn() };
+  const attempts = { updateMany: vi.fn() };
   const operations = {
     run: vi.fn(
       async (
@@ -81,6 +82,7 @@ function fixture() {
     invitations as never,
     installations as never,
     MachineModel as never,
+    attempts as never,
     jobs as never,
     operations as never,
   );
@@ -92,6 +94,7 @@ function fixture() {
     MachineModel,
     savedMachine,
     jobs,
+    attempts,
     operations,
   };
 }
@@ -258,6 +261,7 @@ describe('worker enrollment lifecycle', () => {
     );
     f.installations.updateMany.mockResolvedValue({ modifiedCount: 1 });
     f.jobs.updateMany.mockResolvedValue({ modifiedCount: 1 });
+    f.attempts.updateMany.mockResolvedValue({ modifiedCount: 1 });
     const result = await f.service.revoke(actor, id, {
       operationId: '89ba667e-940b-465b-927b-495a291b19c1',
       expectedRevision: 4,
@@ -271,6 +275,13 @@ describe('worker enrollment lifecycle', () => {
           'currentExecution.leaseExpiresAt': expect.any(Date),
         },
       },
+      expect.any(Object),
+    );
+    expect(f.attempts.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ machineId: id }),
+      expect.objectContaining({
+        $set: { leaseExpiresAt: expect.any(Date) },
+      }),
       expect.any(Object),
     );
   });

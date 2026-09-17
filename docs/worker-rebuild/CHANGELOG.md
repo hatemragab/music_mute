@@ -1,5 +1,19 @@
 # Package changes
 
+## Revision 3.6
+
+- Completed C4 with exact-tuple, backend-time batched lease renewal and
+  deadline-capped per-item dispositions.
+- Added a single-flight recovery scanner with observed-revision/expiry fences,
+  bounded backoff, policy-capped attempts, final failure and slot release.
+- Fenced cancellation, terminal deletion, supervisor-session replacement and
+  machine revocation so stale workers cannot renew ownership.
+- Added focused race, expiry, retry and lifecycle tests and passed the complete
+  local backend and processing-integration gates.
+
+C5 output grants/finalization, runtime workers, live S3, deployment and
+production mutation remain unimplemented or unclaimed.
+
 ## Revision 3.5
 
 - Completed C3 with feature-gated public job admission, durable account/settings
