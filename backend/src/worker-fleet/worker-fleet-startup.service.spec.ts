@@ -5,10 +5,12 @@ import { WorkerFleetStartupService } from './worker-fleet-startup.service.js';
 
 function fixture(enabled: boolean) {
   const init = vi.fn().mockResolvedValue(undefined);
-  const model = vi.fn(() => ({ init }));
+  const updateOne = vi.fn().mockResolvedValue({ acknowledged: true });
+  const model = vi.fn(() => ({ init, updateOne }));
   return {
     init,
     model,
+    updateOne,
     startup: new WorkerFleetStartupService(
       { model } as never,
       new ConfigService({ AUDIO_PROCESSING_ENABLED: enabled }),
@@ -26,8 +28,18 @@ describe('worker fleet startup', () => {
   it('initializes every declared worker collection while enabled', async () => {
     const f = fixture(true);
     await expect(f.startup.onModuleInit()).resolves.toBeUndefined();
-    expect(f.model).toHaveBeenCalledTimes(WORKER_FLEET_MODELS.length);
+    expect(f.model).toHaveBeenCalledTimes(WORKER_FLEET_MODELS.length + 1);
     expect(f.init).toHaveBeenCalledTimes(WORKER_FLEET_MODELS.length);
+    expect(f.updateOne).toHaveBeenCalledWith(
+      { _id: 'worker-fleet' },
+      expect.objectContaining({
+        $setOnInsert: expect.objectContaining({
+          revision: 0,
+          acceptClaims: true,
+        }),
+      }),
+      { upsert: true, setDefaultsOnInsert: true },
+    );
   });
 
   it('fails with a fixed redacted startup stage', async () => {

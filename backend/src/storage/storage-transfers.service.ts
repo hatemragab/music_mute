@@ -9,8 +9,16 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { StorageClient } from '../infrastructure/storage.module.js';
-import type { DownloadGrant, ObjectIdentity } from '../jobs/job.types.js';
+import { jobError } from '../jobs/job-errors.js';
+import type {
+  AdmissionSnapshot,
+  DownloadGrant,
+  InputReservation,
+  ObjectIdentity,
+  UploadGrant,
+} from '../jobs/job.types.js';
 import { StoragePreflightService } from './storage-preflight.service.js';
+import { createImmutableUploadGrant } from './immutable-upload-grant.js';
 
 const REQUEST_TIMEOUT_MILLISECONDS = 5_000;
 const MISSING_OBJECT_NAMES = new Set([
@@ -27,6 +35,17 @@ function confirmedMissing(error: unknown): boolean {
   return metadata?.httpStatusCode === 404;
 }
 
+export interface InputTransferJob {
+  inputReservation: InputReservation;
+  admissionSnapshot?: AdmissionSnapshot | null;
+  inputObject: ObjectIdentity | null;
+}
+
+type ObjectReservation = Pick<
+  InputReservation,
+  'key' | 'bytes' | 'sha256' | 'contentType'
+>;
+
 @Injectable()
 export class StorageTransfersService {
   private readonly bucket: string;
@@ -39,6 +58,19 @@ export class StorageTransfersService {
   ) {
     this.bucket = config.getOrThrow<string>('S3_BUCKET');
     this.grantSeconds = config.getOrThrow<number>('PROCESSING_URL_SECONDS');
+  }
+
+  async createInputGrant(job: InputTransferJob): Promise<UploadGrant> {
+    return this.createUploadGrant(
+      job.inputReservation,
+      job.admissionSnapshot?.reservationExpiresAt,
+    );
+  }
+
+  async verifyInput(job: InputTransferJob): Promise<ObjectIdentity> {
+    const identity = await this.inspect(job.inputReservation);
+    if (!identity) throw jobError('UPLOAD_NOT_READY');
+    return identity;
   }
 
   /** A bounded sweep of versions for one exact reservation key, never a prefix delete. */
@@ -149,6 +181,67 @@ export class StorageTransfersService {
     return {
       url,
       expiresAt: new Date(now + expiresIn * 1_000).toISOString(),
+    };
+  }
+
+  private async createUploadGrant(
+    reservation: ObjectReservation,
+    fixedExpiry?: Date,
+  ): Promise<UploadGrant> {
+    await this.preflight.assertReady();
+    const now = Date.now();
+    const expiresIn = fixedExpiry
+      ? Math.min(
+          this.grantSeconds,
+          Math.floor((fixedExpiry.getTime() - now) / 1000),
+        )
+      : this.grantSeconds;
+    if (expiresIn < 1) throw jobError('UPLOAD_RESERVATION_EXPIRED');
+    return createImmutableUploadGrant({
+      storage: this.storage,
+      bucket: this.bucket,
+      key: reservation.key,
+      bytes: reservation.bytes,
+      contentType: reservation.contentType,
+      checksumSha256: reservation.sha256,
+      expiresIn,
+      expiresAt: new Date(now + expiresIn * 1000),
+    });
+  }
+
+  private async inspect(
+    reservation: ObjectReservation,
+  ): Promise<ObjectIdentity | null> {
+    let latest: HeadObjectCommandOutput;
+    try {
+      latest = await this.head(reservation.key);
+    } catch (error) {
+      if (confirmedMissing(error)) return null;
+      throw error;
+    }
+    if (!latest.VersionId || latest.VersionId === 'null')
+      throw jobError('UPLOAD_NOT_READY');
+
+    let pinned: HeadObjectCommandOutput;
+    try {
+      pinned = await this.head(reservation.key, latest.VersionId);
+    } catch (error) {
+      if (confirmedMissing(error)) return null;
+      throw error;
+    }
+    if (
+      pinned.VersionId !== latest.VersionId ||
+      pinned.ContentLength !== reservation.bytes ||
+      pinned.ContentType !== reservation.contentType ||
+      pinned.ChecksumSHA256 !== reservation.sha256
+    )
+      throw jobError('UPLOAD_NOT_READY');
+    return {
+      key: reservation.key,
+      versionId: latest.VersionId,
+      bytes: reservation.bytes,
+      sha256: reservation.sha256,
+      contentType: reservation.contentType,
     };
   }
 

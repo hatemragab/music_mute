@@ -1,7 +1,11 @@
-import { ProcessingSettings } from '../admin-settings/processing-settings.schema.js';
+import {
+  DEFAULT_PROCESSING_SETTINGS,
+  ProcessingSettings,
+} from '../admin-settings/processing-settings.schema.js';
 import { effectiveAllowance } from './processing-allowance.js';
 import { User } from '../users/user.schema.js';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { trusted, type ClientSession, type Model, type Types } from 'mongoose';
 import { ProcessingUsageLedger } from './processing-usage.schema.js';
@@ -16,6 +20,7 @@ export class ProcessingUsageService {
     @InjectModel(ProcessingUsageLedger.name)
     private readonly ledger: Model<ProcessingUsageLedger>,
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
+    @Optional() private readonly config?: ConfigService,
   ) {}
 
   async readUsage(userId: Types.ObjectId, session?: ClientSession) {
@@ -54,14 +59,25 @@ export class ProcessingUsageService {
         status: trusted({ $in: ACTIVE_ADMISSION_STATUSES }),
       })
       .session(session ?? null);
+    const maxActiveJobs = legacySettings?.maxActiveJobsPerUser ?? 1;
+    const processingEnabled =
+      this.config?.get<boolean>('AUDIO_PROCESSING_ENABLED') ?? true;
+    const availability =
+      !processingEnabled ||
+      (legacySettings?.acceptNewJobs ??
+        DEFAULT_PROCESSING_SETTINGS.acceptNewJobs) === false
+        ? ('paused' as const)
+        : activeJobs >= maxActiveJobs
+          ? ('busy' as const)
+          : ('available' as const);
     return {
       policyRevision: legacySettings?.revision ?? 0,
       allowanceAudioSeconds,
       ...summary,
       activeJobs,
-      maxActiveJobs: legacySettings?.maxActiveJobsPerUser ?? 1,
+      maxActiveJobs,
       nextReplenishmentAt: summary.replenishments[0]?.at ?? null,
-      availability: 'paused' as const,
+      availability,
       checkedAt: now.toISOString(),
     };
   }

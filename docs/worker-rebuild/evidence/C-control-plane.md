@@ -1,4 +1,4 @@
-# C1 control-plane evidence
+# C control-plane evidence
 
 Observed 2026-09-17 in Africa/Cairo on `codex/worker-control-plane`, created from
 accepted feasibility commit `ae1e954eff9d77e83b0b1d90446ac51c985af1bc`.
@@ -11,7 +11,7 @@ The local environment was Darwin 25.6 ARM64 with Node.js 24.18.0 and pnpm
 | --- | --- | --- |
 | C1 persistence, protocol and authorization | PASS | Worker-fleet schemas, explicit indexes, existing-job execution fields, protocol-v1 validation, fail-closed worker guard, startup initialization and focused/full test coverage. |
 | C2 enrollment lifecycle | PASS | One-use invitation exchange, restricted installation report, qualified activation, scoped authentication and audited machine pause/resume/revoke with ownership fencing. |
-| C3 admission and claims | NOT_RUN | Reserved for the later checkpoint. |
+| C3 admission and claims | PASS | Feature-gated public admission, immutable verified-input recipes, exact-version upload verification, durable sessions/slots and policy/capability-matched transactional claims with same-request replay. |
 | C4 leases and recovery | NOT_RUN | Reserved for the later checkpoint. |
 | C5 storage and finalization | NOT_RUN | Reserved for the later checkpoint. |
 | C6 machine/status/policy APIs | NOT_RUN | Reserved for the later checkpoint. |
@@ -64,6 +64,32 @@ database contains only SHA-256 digests. Installation and machine credentials
 are domain-separated HMAC derivations of an already high-entropy parent secret,
 which permits same-request response recovery without storing plaintext.
 
+## C3 admission and atomic claims
+
+- Restored public create, upload-renewal, upload-confirmation and retry flows
+  behind `AUDIO_PROCESSING_ENABLED` and the durable processing settings fence.
+  Account state, per-user active limits, rolling usage reservation and request
+  idempotency execute in the existing MongoDB transaction boundary.
+- Each new job freezes the verified MVP Kim recipe, exact model digest and byte
+  size, trim/denoise choices, protocol revision and MP3 output settings before
+  an upload grant is issued. Admission and recipe snapshots are immutable.
+- Input grants bind the exact key, size, media type, checksum and create-only
+  condition. Upload confirmation verifies and pins the S3 version before the
+  job can enter `queued`; historical jobs without a recipe snapshot remain
+  ineligible for claims.
+- Added machine session opening and logical slot registration. New sessions
+  increment the supervisor generation and free stale slots are taken offline.
+- Added one-at-a-time transactional claims. Eligibility is the intersection of
+  active machine/session state, applied policy revision, enabled fleet recipe,
+  slot capacity/capability, retry limits and the job's frozen recipe.
+- Claim creation conditionally fences the machine, slot and job before writing
+  one attempt. A lost response replayed with the same machine/request/session/
+  slot identity returns the same active claim, including while new work is
+  paused; a different identity is rejected.
+- A default revision-zero fleet policy is inserted only when processing is
+  explicitly enabled and only when no policy exists. Later policy APIs may
+  revise it without overwriting stored policy.
+
 ## Verification
 
 The backend verification command was run with only repository rate-limit
@@ -106,10 +132,11 @@ Result: PASS.
 - lint: PASS, zero warnings and errors
 - TypeScript typecheck: PASS
 - tracked-secret scan: PASS, 4/4 tests
-- unit tests: PASS, 99 files and 694 tests
+- unit tests: PASS, 102 files and 706 tests
 - E2E tests: PASS, 22 files and 125 tests
+- processing integration tests: PASS, 12 tests against isolated local services
 - NestJS production build: PASS
 
 This is local implementation evidence only. It is not proof of production
-deployment, live MongoDB migration, real worker authentication, machine
-enrollment, job execution or hardware processing.
+deployment, live MongoDB migration, live S3 transfer, real machine claim,
+worker execution or hardware processing.

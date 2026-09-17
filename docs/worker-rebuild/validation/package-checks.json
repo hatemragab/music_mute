@@ -5,7 +5,7 @@
   "checkpoint_count": 36,
   "package_file_count_including_sha256sums": 40,
   "sha256_covered_file_count": 39,
-  "relative_markdown_links_checked": 45,
+  "relative_markdown_links_checked": 46,
   "reference_sha256": "b376a185d24811560fbc6cc681542517e61130a6d737077360ace5f502a32f1d",
   "reference_line_ranges_verified": {
     "trim_vocal_gaps": [
@@ -50,11 +50,11 @@
   "control_plane": {
     "c1_persistence_protocol_authorization": "PASS",
     "c2_enrollment_lifecycle": "PASS",
-    "c3_admission_and_claims": "NOT_RUN",
+    "c3_admission_and_claims": "PASS",
     "c4_leases_and_recovery": "NOT_RUN",
     "c5_storage_and_finalization": "NOT_RUN",
     "c6_machine_status_policy_apis": "NOT_RUN",
     "evidence": "../evidence/C-control-plane.md"
   },
-  "scope": "Documentation/source-reference checks, sanitized real M4 Pro/CoreML and Z440 RX 580/DirectML feasibility runs, and local C1 backend verification; no production infrastructure tests."
+  "scope": "Documentation/source-reference checks, sanitized real M4 Pro/CoreML and Z440 RX 580/DirectML feasibility runs, and local C1-C3 backend verification; no production infrastructure tests."
 }

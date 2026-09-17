@@ -243,13 +243,13 @@ export class Job {
   status!: JobStatus;
   @Prop({ type: inputReservation, required: true, immutable: true })
   inputReservation!: InputReservation;
-  @Prop({ type: admissionSnapshot, default: null })
+  @Prop({ type: admissionSnapshot, default: null, immutable: true })
   admissionSnapshot!: AdmissionSnapshot | null;
   @Prop({ type: objectIdentity, default: null })
   inputObject!: ObjectIdentity | null;
   @Prop({ type: objectIdentity, default: null })
   outputObject!: ObjectIdentity | null;
-  @Prop({ type: workerRecipeSnapshot, default: null })
+  @Prop({ type: workerRecipeSnapshot, default: null, immutable: true })
   recipeSnapshot!: WorkerRecipeSnapshot | null;
   @Prop({ type: workerRetryEligibility, default: null })
   retryEligibility!: WorkerRetryEligibility | null;

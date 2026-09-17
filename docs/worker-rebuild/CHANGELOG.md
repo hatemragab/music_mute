@@ -1,5 +1,22 @@
 # Package changes
 
+## Revision 3.5
+
+- Completed C3 with feature-gated public job admission, durable account/settings
+  fences, active-job limits, usage reservation and request idempotency.
+- Restored immutable input upload grants and exact-version verification before
+  queue admission; new and retried jobs retain a frozen qualified Kim recipe.
+- Added durable machine sessions, logical slot registration and one-at-a-time
+  capability/policy-matched MongoDB transactional claims.
+- Same-request claim retries return the existing active attempt, while changed
+  session/slot identity, stale policy, paused admission and exhausted attempts
+  fail closed.
+- Updated public processing policy/usage availability and processing-route E2E
+  coverage, then passed the full local backend verification gate.
+
+No runtime worker, live S3 transfer, database migration, deployment or
+production mutation was performed.
+
 ## Revision 3.4
 
 - Added the C2 enrollment lifecycle with backend-generated high-entropy one-use invitations, bounded expiry, atomic exchange and deterministic same-request replay.

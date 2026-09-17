@@ -29,14 +29,18 @@ The package build contains no environment files, credentials, models, audio fixt
   `pip check` and its full lock was captured.
 - The package manifest was refreshed after adding the B evidence; SHA256SUMS
   again covers every package file except itself.
+- C1-C3 backend implementation passed formatting, lint, typecheck, tracked
+  secret scanning, 102 unit-test files with 706 tests, 22 E2E files with 125
+  tests, 12 processing integration tests against isolated local services, and
+  a production NestJS build. See [C evidence](../evidence/C-control-plane.md).
 
 ## Not executed or claimed
 
-No worker service installation, actual S3 integration, listening-quality review,
-npm publication, signing with production keys or deployment has occurred. No
-backend, dashboard, Android or iOS implementation is part of the feasibility
-branch. B3 and B4 are complete, but Linux/NVIDIA and all other hardware remain
-unverified until later actual hardware evidence.
+No worker service installation, live S3 integration, listening-quality review,
+npm publication, signing with production keys or deployment has occurred. The
+C1-C3 backend work is locally verified only; dashboard, Android and iOS were
+not changed. Linux/NVIDIA and all other hardware remain unverified until later
+actual hardware evidence.
 
 ## Source/consistency caveats
 

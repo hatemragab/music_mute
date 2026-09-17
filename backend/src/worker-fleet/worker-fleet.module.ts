@@ -7,6 +7,8 @@ import { AdminWorkerEnrollmentController } from './enrollment/admin-worker-enrol
 import { WorkerEnrollmentController } from './enrollment/worker-enrollment.controller.js';
 import { WorkerEnrollmentService } from './enrollment/worker-enrollment.service.js';
 import { WorkerDiagnosticsService } from './telemetry/worker-diagnostics.service.js';
+import { WorkerClaimController } from './claims/worker-claim.controller.js';
+import { WorkerClaimService } from './claims/worker-claim.service.js';
 import { WorkerFleetStartupService } from './worker-fleet-startup.service.js';
 import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
 
@@ -16,10 +18,15 @@ import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
     ProcessingPersistenceModule,
     MongooseModule.forFeature(WORKER_FLEET_MODELS),
   ],
-  controllers: [WorkerEnrollmentController, AdminWorkerEnrollmentController],
+  controllers: [
+    WorkerEnrollmentController,
+    WorkerClaimController,
+    AdminWorkerEnrollmentController,
+  ],
   providers: [
     WorkerAuthGuard,
     WorkerDiagnosticsService,
+    WorkerClaimService,
     WorkerEnrollmentService,
     WorkerFleetStartupService,
   ],

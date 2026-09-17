@@ -4,6 +4,7 @@ import { InjectConnection } from '@nestjs/mongoose';
 import type { Connection } from 'mongoose';
 import { StartupDependencyError } from '../startup-error.js';
 import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
+import { WorkerFleetPolicy } from './policy/worker-fleet-policy.schema.js';
 
 @Injectable()
 export class WorkerFleetStartupService implements OnModuleInit {
@@ -20,6 +21,30 @@ export class WorkerFleetStartupService implements OnModuleInit {
           this.connection.model(name).init(),
         ),
       );
+      await this.connection
+        .model<WorkerFleetPolicy>(WorkerFleetPolicy.name)
+        .updateOne(
+          { _id: 'worker-fleet' },
+          {
+            $setOnInsert: {
+              revision: 0,
+              acceptClaims: true,
+              recipes: [
+                {
+                  recipeId: 'kim-vocal-2-v1',
+                  enabled: true,
+                  maxSlotsPerMachine: 1,
+                },
+              ],
+              leaseSeconds: 60,
+              processingDeadlineSeconds: 7200,
+              maxAttempts: 3,
+              updatedAt: new Date(),
+              updatedByUid: 'system-bootstrap',
+            },
+          },
+          { upsert: true, setDefaultsOnInsert: true },
+        );
     } catch (error) {
       throw new StartupDependencyError(
         'Worker fleet schema initialization failed',

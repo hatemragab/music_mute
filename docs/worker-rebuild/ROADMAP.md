@@ -76,7 +76,7 @@ All PRs use `codex/worker-rebuild` as their base. A feature branch begins from t
 
 - [x] **C1:** Add persistence, versioned protocol validation, indexes and authorization boundaries.
 - [x] **C2:** Add enrollment, restricted installation, activation, pause and revocation.
-- [ ] **C3:** Restore guarded admission and idempotent capability-matched atomic claims.
+- [x] **C3:** Restore guarded admission and idempotent capability-matched atomic claims.
 - [ ] **C4:** Add leases, attempt fencing, cancellation, bounded retry and recovery.
 - [ ] **C5:** Add exact-version S3 grants and idempotent finalization/usage/cleanup.
 - [ ] **C6:** Add minimum machine/status/policy APIs without making transient transport authoritative.
