@@ -9,15 +9,17 @@ worker enrollment, queues, supervisors, installers, dashboard pages or services.
 | --- | --- | --- |
 | B1 reproducible harness | PASS | Isolated probe, deterministic owned fixture, output validation, package lock and focused tests are under `tools/worker-gpu-feasibility/`. |
 | B2 Mac mini M4/CoreML | PASS | Native ARM64 M4 Pro run produced valid output and six profiled CoreML provider node events with zero profiled CPU provider node events. |
-| B3 Z440/RX 580/DirectML | BLOCKED | The owner has not yet supplied the Windows SSH endpoint, user and trusted host-key information. No connection was guessed or scanned. |
-| B4 decision and pins | PARTIAL | CoreML pins are frozen. DirectML pins and the two-platform decision remain open until B3 runs or the maintainer explicitly chooses a one-platform MVP. |
+| B3 Z440/RX 580/DirectML | PASS | The real Kim graph produced two valid outputs on adapter 0 and the profile assigned 672 node events to DirectML with no profiled CPU-provider node events. |
+| B4 decision and pins | PASS | Both intended MVP platforms passed on their real hosts. Platform-specific direct pins and complete passing-environment locks are frozen. |
 
 The target classifications required by B4 are therefore:
 
 - Mac mini M4/CoreML: `PASS`.
-- Windows Z440/RX 580/DirectML: `BLOCKED`.
+- Windows Z440/RX 580/DirectML: `PASS`.
 
-Windows/DirectML must not be advertised as supported from this evidence.
+Both targets may proceed to the runtime implementation branch as qualified MVP
+targets. This feasibility result is not service, installer, fleet, deployment,
+quality-listening or production-support evidence.
 
 ## B1 harness
 
@@ -79,6 +81,56 @@ python-audio-separator. The source repository has no license file or useful
 redistribution grant, so the artifact is deliberately excluded from Git and
 redistribution remains unresolved for a later release gate.
 
+## B3 Windows/DirectML result
+
+Sanitized machine evidence is committed in
+`gpu-feasibility/windows-directml-2026-09-17.json` and the independent repeat
+`gpu-feasibility/windows-directml-repeat-2026-09-17.json`. The runs used native
+Python 3.12.10 on Windows 11 Pro build 26200, an Intel Xeon E5-1660 v3, 24 GB
+RAM and a Radeon RX 580 with driver `31.0.21925.1001`.
+
+The isolated environment contained only `onnxruntime-directml==1.24.4` as its
+ONNX Runtime distribution. The instrumented session used explicit DirectML
+device ID 0 followed by the CPU fallback provider, `ORT_SEQUENTIAL` execution
+and disabled memory patterns. The ONNX Runtime profile assigned all 672 node
+events to `DmlExecutionProvider`, covering 0.283309 seconds, with no profiled
+CPU-provider node events. Provider availability alone was not used as proof.
+
+Observed measurements:
+
+| Measurement | Result |
+| --- | ---: |
+| Cold model load | 17.508 s |
+| First end-to-end separation | 16.974 s |
+| Warm end-to-end separation | 1.808 s |
+| Peak working set after load | 465,854,464 bytes |
+| Peak working set after inference | 695,123,968 bytes |
+| Output | 8.0 s stereo, 44.1 kHz, PCM 16-bit WAV, finite and non-zero |
+
+Both output runs were byte-identical with SHA-256
+`a5a893182f04273f61a77048364813f4dccac3db7a1cb7c07e216b5a2347f6b8`.
+The model and fixture identities exactly match B2. Measurements are not treated
+as an equivalent cross-platform benchmark: host hardware, provider partitioning
+and cold-start behavior differ. A new-process confirmation also passed with 672
+DirectML events, 2.120 s model load, 2.375 s first separation, 1.711 s warm
+separation and a 711,569,408-byte peak working set; the improvement reflects
+machine/provider caches and is not presented as a fresh-machine cold result.
+
+## B4 decision
+
+The accepted feasibility baseline is:
+
+- Mac mini M4/CoreML: Python 3.13, `audio-separator==0.47.0`,
+  `onnxruntime==1.30.0` and the complete CoreML lock.
+- Windows Z440/RX 580/DirectML: Python 3.12,
+  `audio-separator==0.47.0`, `onnxruntime-directml==1.24.4`,
+  `torch-directml==0.2.5.dev240914` transitively and the complete DirectML lock.
+- Both platforms use the exact Kim Vocal 2 artifact and owned fixture identities
+  recorded above.
+
+These pins are inputs to the later runtime branch, not a compatibility promise
+for newer packages or other Apple, AMD, NVIDIA, Linux or Windows machines.
+
 ## Reproduction
 
 Follow `tools/worker-gpu-feasibility/README.md`. The sanitized proof command was:
@@ -104,10 +156,17 @@ Primary references:
 - [python-audio-separator upstream](https://github.com/nomadkaraoke/python-audio-separator)
 - [Kim Vocal 2 public model asset](https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Vocal_2.onnx)
 
-## Required B3 input
+The Windows proof used an isolated directory under `%TEMP%` and this command:
 
-To continue safely, the owner must provide the Windows Z440 SSH host or IP,
-SSH username and the expected host-key fingerprint (or another trusted
-host-key enrollment method). Credentials stay outside Git. Once connected, the
-same model and fixture will be used with an explicit DirectML adapter ID; mere
-presence of `DmlExecutionProvider` will not pass B3.
+```powershell
+$root = "$env:TEMP\musicmute-gpu-feasibility"
+& "$root\.venv\Scripts\python.exe" "$root\probe.py" `
+  --provider directml `
+  --model-dir "$root\models" `
+  --output-dir "$root\run-20260917-b3-2" `
+  --report "$root\directml-report.json" `
+  --directml-device-id 0 `
+  --runs 2
+```
+
+The SSH endpoint, username, host identity and credentials are not committed.

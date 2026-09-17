@@ -69,8 +69,8 @@ All PRs use `codex/worker-rebuild` as their base. A feature branch begins from t
 
 - [x] **B1:** Build a reproducible model/provider probe with valid output checks.
 - [x] **B2:** Prove or block native M4/CoreML Kim execution.
-- [ ] **B3:** Prove or block Z440 RX 580/DirectML Kim execution.
-- [ ] **B4:** Freeze only proven package/model pins and declared MVP support.
+- [x] **B3:** Prove or block Z440 RX 580/DirectML Kim execution.
+- [x] **B4:** Freeze only proven package/model pins and declared MVP support.
 
 ### C. Control plane
 

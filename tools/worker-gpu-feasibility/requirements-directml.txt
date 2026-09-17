@@ -1,0 +1,5 @@
+# B3 direct pins proven on the real Z440 / RX 580 host. The lock freezes transitives.
+audio-separator[dml]==0.47.0
+# audio-separator 0.47.0 imports audioread but omits it from package metadata.
+audioread==3.1.0
+onnxruntime-directml==1.24.4

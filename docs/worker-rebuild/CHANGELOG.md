@@ -1,5 +1,12 @@
 # Package changes
 
+## Revision 3.2
+
+- Added reproducible real-host GPU feasibility evidence for M4/CoreML and Z440
+  RX 580/DirectML using the same Kim model and deterministic owned fixture.
+- Froze separate proven dependency sets for macOS and Windows and completed
+  checkpoints B1–B4 without implementing worker services or fleet behavior.
+
 ## Revision 3.1
 
 - Reconciled the committed package from `codex/worker-rebuild` on the documentation-only architecture branch.

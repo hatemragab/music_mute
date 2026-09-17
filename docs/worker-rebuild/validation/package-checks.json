@@ -3,8 +3,8 @@
   "validated_on": "2026-09-17",
   "branch_count": 7,
   "checkpoint_count": 36,
-  "package_file_count_including_sha256sums": 37,
-  "sha256_covered_file_count": 36,
+  "package_file_count_including_sha256sums": 39,
+  "sha256_covered_file_count": 38,
   "relative_markdown_links_checked": 45,
   "reference_sha256": "b376a185d24811560fbc6cc681542517e61130a6d737077360ace5f502a32f1d",
   "reference_line_ranges_verified": {
@@ -44,8 +44,8 @@
   "feasibility": {
     "b1_probe_harness": "PASS",
     "macos_coreml": "PASS",
-    "windows_directml": "BLOCKED",
+    "windows_directml": "PASS",
     "evidence": "../evidence/B-gpu-feasibility.md"
   },
-  "scope": "Documentation/source-reference checks plus a sanitized real M4 Pro/CoreML feasibility run; no Windows or production infrastructure tests."
+  "scope": "Documentation/source-reference checks plus sanitized real M4 Pro/CoreML and Z440 RX 580/DirectML feasibility runs; no production infrastructure tests."
 }

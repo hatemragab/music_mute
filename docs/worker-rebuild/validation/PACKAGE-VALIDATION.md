@@ -18,25 +18,26 @@ The package build contains no environment files, credentials, models, audio fixt
 
 - The architecture contracts were reconciled to the clean-slate source, validated,
   reviewed and merged through PR #6.
-- The B1 isolated probe and its four focused unit tests pass on native ARM64
+- The B1 isolated probe and its five focused unit tests pass on native ARM64
   Python 3.13.7.
 - The real `Kim_Vocal_2.onnx` graph produced valid output on the M4 Pro, with
   ONNX Runtime profiling assigning six model node events to CoreML and none to
   the CPU provider. See [B evidence](../evidence/B-gpu-feasibility.md).
+- The same model and deterministic fixture produced two valid outputs on the
+  real Z440/RX 580. The ONNX Runtime profile assigned 672 model node events to
+  DirectML and none to the CPU provider; the isolated environment passed
+  `pip check` and its full lock was captured.
 - The package manifest was refreshed after adding the B evidence; SHA256SUMS
   again covers every package file except itself.
 
 ## Not executed or claimed
 
-No RX 580/DirectML inference, Windows SSH access, service installation, actual
-S3 integration, listening-quality review, npm publication, signing with
-production keys or deployment has occurred. No backend, dashboard, Android or
-iOS implementation is part of the feasibility branch.
-
-B3 remains blocked on owner-supplied Windows connection and trusted host-key
-details. B4 remains open; Windows support is not claimed. Linux/NVIDIA support
-also remains unverified until later actual hardware evidence.
+No worker service installation, actual S3 integration, listening-quality review,
+npm publication, signing with production keys or deployment has occurred. No
+backend, dashboard, Android or iOS implementation is part of the feasibility
+branch. B3 and B4 are complete, but Linux/NVIDIA and all other hardware remain
+unverified until later actual hardware evidence.
 
 ## Source/consistency caveats
 
-Repository inspection was targeted and pinned to the recorded clean-slate/rebuild commit, not a whole-codebase audit. Paths discovered through imports are marked separately in the study map. Missing future host credentials, real performance figures, final compatible package versions and production domains are not fabricated. The chosen optional denoise preset is a documented MVP design decision, not a proven universal quality optimum.
+Repository inspection was targeted and pinned to the recorded clean-slate/rebuild commit, not a whole-codebase audit. Paths discovered through imports are marked separately in the study map. Credentials, production domains and performance claims beyond the two recorded hosts are not fabricated. The chosen optional denoise preset is a documented MVP design decision, not a proven universal quality optimum.
