@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import gc
 import hashlib
 import importlib.metadata
@@ -116,11 +117,45 @@ def sanitized_gpu_inventory() -> list[dict[str, object]]:
     return parsed if isinstance(parsed, list) else [parsed]
 
 
+class _ProcessMemoryCountersEx(ctypes.Structure):
+    _fields_ = [
+        ("cb", ctypes.c_ulong),
+        ("page_fault_count", ctypes.c_ulong),
+        ("peak_working_set_size", ctypes.c_size_t),
+        ("working_set_size", ctypes.c_size_t),
+        ("quota_peak_paged_pool_usage", ctypes.c_size_t),
+        ("quota_paged_pool_usage", ctypes.c_size_t),
+        ("quota_peak_non_paged_pool_usage", ctypes.c_size_t),
+        ("quota_non_paged_pool_usage", ctypes.c_size_t),
+        ("pagefile_usage", ctypes.c_size_t),
+        ("peak_pagefile_usage", ctypes.c_size_t),
+        ("private_usage", ctypes.c_size_t),
+    ]
+
+
+def windows_peak_working_set_bytes() -> int:
+    counters = _ProcessMemoryCountersEx()
+    counters.cb = ctypes.sizeof(counters)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    succeeded = psapi.GetProcessMemoryInfo(
+        kernel32.GetCurrentProcess(),
+        ctypes.byref(counters),
+        counters.cb,
+    )
+    if not succeeded:
+        raise ctypes.WinError(ctypes.get_last_error())
+    return int(counters.peak_working_set_size)
+
+
 def max_rss_bytes() -> int:
+    if platform.system() == "Windows":
+        return windows_peak_working_set_bytes()
     if resource is None:
         raise RuntimeError("max RSS through the resource module is unavailable on this platform")
     value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    # Darwin reports bytes; Linux reports KiB. Windows probes do not use resource.
+    # Darwin reports bytes; Linux reports KiB.
     return int(value if platform.system() == "Darwin" else value * 1024)
 
 
@@ -285,7 +320,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         args.output_dir,
         args.directml_device_id,
     )
-    before_rss = max_rss_bytes() if platform.system() != "Windows" else None
+    before_rss = max_rss_bytes()
 
     try:
         from audio_separator.separator import Separator
@@ -303,7 +338,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         load_started = time.perf_counter()
         separator.load_model(MODEL_FILENAME)
         load_seconds = time.perf_counter() - load_started
-        after_load_rss = max_rss_bytes() if platform.system() != "Windows" else None
+        after_load_rss = max_rss_bytes()
 
         separations = []
         output_paths: list[Path] = []
@@ -324,7 +359,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                 }
             )
 
-        after_inference_rss = max_rss_bytes() if platform.system() != "Windows" else None
+        after_inference_rss = max_rss_bytes()
 
         profiles = []
         model_run_seconds = []

@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import soundfile as sf
@@ -79,6 +80,15 @@ class OutputTests(unittest.TestCase):
             {"outputs": [{"valid": True, "duration_seconds": 7.5}]},
         ]
         self.assertFalse(probe.outputs_are_valid(separations, 8.0, 2))
+
+
+class MemoryTests(unittest.TestCase):
+    def test_windows_max_rss_uses_peak_working_set(self) -> None:
+        with (
+            mock.patch.object(probe.platform, "system", return_value="Windows"),
+            mock.patch.object(probe, "windows_peak_working_set_bytes", return_value=123_456),
+        ):
+            self.assertEqual(probe.max_rss_bytes(), 123_456)
 
 
 if __name__ == "__main__":
