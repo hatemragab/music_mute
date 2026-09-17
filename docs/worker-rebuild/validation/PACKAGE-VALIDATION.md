@@ -2,7 +2,8 @@
 
 ## Executed during preparation
 
-The following were checked in the assistant's sandbox, not on the owner's machines:
+The following historical checks were completed while preparing the original
+documentation package:
 
 - All seven branch task files exist and their ordered checkpoint headings match the manifest and roadmap: **36 unique checkpoints**.
 - JSON documents parse; local Markdown links resolve; fenced code blocks are balanced.
@@ -13,12 +14,30 @@ The following were checked in the assistant's sandbox, not on the owner's machin
 
 The package build contains no environment files, credentials, models, audio fixtures, installed dependencies or service binaries. The only Python file is the unchanged user-provided archival reference. Obvious placeholders and synthetic identifiers are intentional documentation, not deployment settings.
 
+## Executed after preparation
+
+- The architecture contracts were reconciled to the clean-slate source, validated,
+  reviewed and merged through PR #6.
+- The B1 isolated probe and its five focused unit tests pass on native ARM64
+  Python 3.13.7.
+- The real `Kim_Vocal_2.onnx` graph produced valid output on the M4 Pro, with
+  ONNX Runtime profiling assigning six model node events to CoreML and none to
+  the CPU provider. See [B evidence](../evidence/B-gpu-feasibility.md).
+- The same model and deterministic fixture produced two valid outputs on the
+  real Z440/RX 580. The ONNX Runtime profile assigned 672 model node events to
+  DirectML and none to the CPU provider; the isolated environment passed
+  `pip check` and its full lock was captured.
+- The package manifest was refreshed after adding the B evidence; SHA256SUMS
+  again covers every package file except itself.
+
 ## Not executed or claimed
 
-No implementation branch was created, pushed or merged in the actual repository. No pull request was opened by this assistant. No application code was implemented, compiled or tested for this package. No M4/RX 580 inference, service installation, SSH access, actual S3 integration, listening quality review, npm publication, signing with production keys or deployment occurred.
-
-All implementation checkpoints remain initially unaccepted. Architecture documents are supplied in full, but the architecture branch still requires source reconciliation and maintainer review. Linux/NVIDIA support remains unverified until later actual hardware evidence.
+No worker service installation, actual S3 integration, listening-quality review,
+npm publication, signing with production keys or deployment has occurred. No
+backend, dashboard, Android or iOS implementation is part of the feasibility
+branch. B3 and B4 are complete, but Linux/NVIDIA and all other hardware remain
+unverified until later actual hardware evidence.
 
 ## Source/consistency caveats
 
-Repository inspection was targeted and pinned to the recorded clean-slate/rebuild commit, not a whole-codebase audit. Paths discovered through imports are marked separately in the study map. Missing future host credentials, real performance figures, final compatible package versions and production domains are not fabricated. The chosen optional denoise preset is a documented MVP design decision, not a proven universal quality optimum.
+Repository inspection was targeted and pinned to the recorded clean-slate/rebuild commit, not a whole-codebase audit. Paths discovered through imports are marked separately in the study map. Credentials, production domains and performance claims beyond the two recorded hosts are not fabricated. The chosen optional denoise preset is a documented MVP design decision, not a proven universal quality optimum.

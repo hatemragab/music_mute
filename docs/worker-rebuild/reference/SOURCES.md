@@ -56,4 +56,8 @@ Runtime source checks and package documentation should be recorded with the exac
 
 ## Evidence generated here
 
-Only the original trimmer's eight synthetic cases, archive consistency checks and an isolated dummy Git workflow test are executed during package preparation. See [package validation](../validation/PACKAGE-VALIDATION.md). No actual M4/RX 580 processing, service testing, SSH, live S3, repository write, npm publication or production deployment occurred.
+The original package preparation executed the trimmer's eight synthetic cases,
+archive consistency checks and an isolated dummy Git workflow test. The later B
+feasibility branch also ran the real Kim model and owned fixture on M4/CoreML and
+Z440 RX 580/DirectML. See [package validation](../validation/PACKAGE-VALIDATION.md).
+No service testing, live S3, npm publication or production deployment occurred.

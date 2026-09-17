@@ -60,17 +60,17 @@ All PRs use `codex/worker-rebuild` as their base. A feature branch begins from t
 
 ### A. Architecture: documentation only
 
-- [ ] **A1:** Reconcile architecture documents with the current repository and public contracts.
-- [ ] **A2:** Freeze machine/supervisor/child boundaries, identity, attempts, leases, S3 and protocol invariants.
-- [ ] **A3:** Freeze the narrow MVP recipe, platform targets, trust model, installation boundary and post-MVP list.
-- [ ] **A4:** Approve the updated manifest, tests, risks and handoff to feasibility.
+- [x] **A1:** Reconcile architecture documents with the current repository and public contracts.
+- [x] **A2:** Freeze machine/supervisor/child boundaries, identity, attempts, leases, S3 and protocol invariants.
+- [x] **A3:** Freeze the narrow MVP recipe, platform targets, trust model, installation boundary and post-MVP list.
+- [x] **A4:** Approve the updated manifest, tests, risks and handoff to feasibility.
 
 ### B. GPU feasibility
 
-- [ ] **B1:** Build a reproducible model/provider probe with valid output checks.
-- [ ] **B2:** Prove or block native M4/CoreML Kim execution.
-- [ ] **B3:** Prove or block Z440 RX 580/DirectML Kim execution.
-- [ ] **B4:** Freeze only proven package/model pins and declared MVP support.
+- [x] **B1:** Build a reproducible model/provider probe with valid output checks.
+- [x] **B2:** Prove or block native M4/CoreML Kim execution.
+- [x] **B3:** Prove or block Z440 RX 580/DirectML Kim execution.
+- [x] **B4:** Freeze only proven package/model pins and declared MVP support.
 
 ### C. Control plane
 
