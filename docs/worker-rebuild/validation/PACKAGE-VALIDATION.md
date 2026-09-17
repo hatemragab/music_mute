@@ -2,7 +2,8 @@
 
 ## Executed during preparation
 
-The following were checked in the assistant's sandbox, not on the owner's machines:
+The following historical checks were completed while preparing the original
+documentation package:
 
 - All seven branch task files exist and their ordered checkpoint headings match the manifest and roadmap: **36 unique checkpoints**.
 - JSON documents parse; local Markdown links resolve; fenced code blocks are balanced.
@@ -13,11 +14,28 @@ The following were checked in the assistant's sandbox, not on the owner's machin
 
 The package build contains no environment files, credentials, models, audio fixtures, installed dependencies or service binaries. The only Python file is the unchanged user-provided archival reference. Obvious placeholders and synthetic identifiers are intentional documentation, not deployment settings.
 
+## Executed after preparation
+
+- The architecture contracts were reconciled to the clean-slate source, validated,
+  reviewed and merged through PR #6.
+- The B1 isolated probe and its four focused unit tests pass on native ARM64
+  Python 3.13.7.
+- The real `Kim_Vocal_2.onnx` graph produced valid output on the M4 Pro, with
+  ONNX Runtime profiling assigning six model node events to CoreML and none to
+  the CPU provider. See [B evidence](../evidence/B-gpu-feasibility.md).
+- The package manifest was refreshed after adding the B evidence; SHA256SUMS
+  again covers every package file except itself.
+
 ## Not executed or claimed
 
-No implementation branch was created, pushed or merged in the actual repository. No pull request was opened by this assistant. No application code was implemented, compiled or tested for this package. No M4/RX 580 inference, service installation, SSH access, actual S3 integration, listening quality review, npm publication, signing with production keys or deployment occurred.
+No RX 580/DirectML inference, Windows SSH access, service installation, actual
+S3 integration, listening-quality review, npm publication, signing with
+production keys or deployment has occurred. No backend, dashboard, Android or
+iOS implementation is part of the feasibility branch.
 
-All implementation checkpoints remain initially unaccepted. Architecture documents are supplied in full, but the architecture branch still requires source reconciliation and maintainer review. Linux/NVIDIA support remains unverified until later actual hardware evidence.
+B3 remains blocked on owner-supplied Windows connection and trusted host-key
+details. B4 remains open; Windows support is not claimed. Linux/NVIDIA support
+also remains unverified until later actual hardware evidence.
 
 ## Source/consistency caveats
 
