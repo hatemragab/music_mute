@@ -34,7 +34,7 @@ Store logs/evidence with query strings and account secrets redacted. Backend cre
 
 ## 4. Backend and runtime startup
 
-Read actual component scripts. The inspected backend manifest uses pnpm; older prose mentions npm. Follow the current committed lockfile and do not generate another lockfile. Run the branch's new fleet integration commands only after they exist and are documented.
+Read actual component scripts. The backend manifest and reconciled setup documentation use pnpm. Follow the current committed lockfile and do not generate another lockfile. Run the branch's new fleet integration commands only after they exist and are documented.
 
 Start the local backend bound to loopback by default. Enable worker processing only for the isolated test configuration. Register a scoped test machine using real enrollment. Start one M4 worker slot, test `doctor`/benchmark, then process a real S3 job.
 

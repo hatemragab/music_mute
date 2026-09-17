@@ -14,7 +14,7 @@ Each component owns its dependencies and commands; there is no root package inst
 | --------- | ---------------------------- | ------------------------------------------------ |
 | Android   | [Setup](android/README.md)   | Gradle build, lint, and unit tests               |
 | iOS       | [Setup](ios/README.md)       | Xcode build/tests and Swift formatting           |
-| Backend   | [Setup](backend/README.md)   | `npm run verify`; relevant infrastructure suites |
+| Backend   | [Setup](backend/README.md)   | `pnpm run verify`; relevant infrastructure suites |
 | Dashboard | [Setup](dashboard/README.md) | Format, lint, typecheck, tests, and build        |
 
 Run commands from the component directory. Follow the existing simulator policy

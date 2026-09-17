@@ -1,14 +1,14 @@
 # Music Mute worker rebuild: start here
 
-**Package revision:** 3.0. **Prepared:** September 17, 2026.
+**Package revision:** 3.1. **Prepared:** September 17, 2026.
 
 This package contains completed design documents and implementation instructions for the Music Mute worker rebuild. It is not an implemented worker, an instruction to deploy immediately, or evidence that GPU tests have passed.
 
 ## First assignment to the coding agent
 
-> Work in `hatemragab/music_mute`. Read this file, `AGENT-RULES.md`, `ROADMAP.md`, and `REPO-STUDY-MAP.md`. The existing entry/collection branch is `codex/worker-rebuild`; do not recreate or reset it. Create `codex/worker-architecture` from the current accepted `origin/codex/worker-rebuild`. Follow `tasks/01-worker-architecture.md` only. Import and review the supplied design documents rather than designing the system again. Keep this branch documentation-only. Commit, push, and open a pull request with base `codex/worker-rebuild`. Stop for review. Do not merge, deploy, publish packages, change `main`, or begin the next branch without the maintainer accepting the previous branch and authorizing continuation.
+> Work in `hatemragab/music_mute`. Read this file, `AGENT-RULES.md`, `ROADMAP.md`, and `REPO-STUDY-MAP.md`. The existing entry/collection branch is `codex/worker-rebuild`; do not recreate or reset it. Confirm the documentation package is committed on the current accepted `origin/codex/worker-rebuild`, then create `codex/worker-architecture` from that exact tip. Follow `tasks/01-worker-architecture.md` only. Review and reconcile the committed design documents rather than designing the system again. Keep this branch documentation-only. Commit, push, and open a pull request with base `codex/worker-rebuild`. Stop for review. Do not merge, deploy, publish packages, change `main`, or begin the next branch without the maintainer accepting the previous branch and authorizing continuation.
 
-When this directory is copied into the repository, use **`docs/worker-rebuild/`**. Preserve the directory structure so the relative links work. Extract the archive outside the repository first, create the architecture branch, and only then copy the package into that path. Do not copy files over existing work without inspecting the differences.
+The committed package lives at **`docs/worker-rebuild/`**. Preserve the directory structure so the relative links work. If an external archive is ever used to refresh it, extract outside the repository and inspect differences before copying; never overwrite existing work blindly.
 
 The only Python file supplied is the maintainer's unchanged historical reference, `reference/separate.py`. It is documentation evidence, not the new runtime. Do not install it, register it as a service, or import it from production code.
 

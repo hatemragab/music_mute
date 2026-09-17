@@ -52,10 +52,10 @@ cd music_mute
 
 Choose the component you want to work on; there is no root-level install command.
 
-1. **API:** install Node.js 24 and npm 11, and provide independently running
+1. **API:** install Node.js 24 and pnpm 10, and provide independently running
    MongoDB 8 and Redis 7.4 or later. Follow the [backend setup](backend/README.md)
-   to configure an ignored local environment file, then run `npm ci` and
-   `npm run start:dev` from `backend/`.
+   to configure an ignored local environment file, then run
+   `pnpm install --frozen-lockfile` and `pnpm run start:dev` from `backend/`.
 2. **Dashboard:** follow the [dashboard setup](dashboard/README.md) for its API
    origin and Firebase configuration. Administrator access requires backend
    authorization.
@@ -160,7 +160,8 @@ for the authorized iPhone 17 Pro simulator and the opt-in real download test.
 
 ## Validate the API and dashboard
 
-From `backend/`, run `npm ci` followed by `npm run verify`. Infrastructure
+From `backend/`, run `pnpm install --frozen-lockfile` followed by
+`pnpm run verify`. Infrastructure
 integration suites have additional requirements documented in the backend guide.
 
 From `dashboard/`, run `npm ci`, then:
