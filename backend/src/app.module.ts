@@ -14,6 +14,7 @@ import { AdminMediaModule } from './admin-jobs/admin-media.module.js';
 import { AdminObservabilityModule } from './admin-observability/admin-observability.module.js';
 import { AdminExportsModule } from './admin-exports/admin-exports.module.js';
 import { AdminHealthModule } from './admin-observability/admin-health.module.js';
+import { WorkerFleetModule } from './worker-fleet/worker-fleet.module.js';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { AdminHealthModule } from './admin-observability/admin-health.module.js'
     AdminObservabilityModule,
     AdminExportsModule,
     AdminHealthModule,
+    WorkerFleetModule,
   ],
   controllers: [HealthController],
 })

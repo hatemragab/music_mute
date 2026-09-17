@@ -23,7 +23,11 @@ describe('administrator role permissions', () => {
     ['release_manager', 'jobs.read', false],
     ['support', 'media.read', true],
     ['support', 'users.account-recovery.manage', true],
+    ['support', 'workers.logs.read', true],
+    ['support', 'workers.manage', false],
     ['viewer', 'overview.read', true],
+    ['viewer', 'workers.read', true],
+    ['viewer', 'workers.logs.read', false],
     ['viewer', 'jobs.manage', false],
   ] as const)('maps %s permission %s to %s', (role, permission, expected) => {
     expect(permissionsForRole(role).includes(permission)).toBe(expected);

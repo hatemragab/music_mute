@@ -57,4 +57,21 @@ describe('audio experience job presentation', () => {
       } as Job),
     ).toMatchObject({ timing: { totalElapsedMs: null } });
   });
+
+  it('never exposes worker ownership or frozen internal recipe fields', () => {
+    const presented = presentJob({
+      ...job,
+      attemptNumber: 2,
+      recipeSnapshot: { recipeId: 'kim-vocal-2-v1' },
+      retryEligibility: { eligible: true, attemptsRemaining: 1 },
+      currentExecution: {
+        attemptId: '75438e3a-bda0-4521-a789-2b46473080e3',
+        machineId: 'a4262cac-424d-495e-8ead-d04e19fab479',
+      },
+    } as Job) as Record<string, unknown>;
+    expect(presented).not.toHaveProperty('attemptNumber');
+    expect(presented).not.toHaveProperty('recipeSnapshot');
+    expect(presented).not.toHaveProperty('retryEligibility');
+    expect(presented).not.toHaveProperty('currentExecution');
+  });
 });

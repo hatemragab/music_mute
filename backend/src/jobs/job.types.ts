@@ -80,3 +80,31 @@ export interface SafeJobError {
   message: string;
   at: Date;
 }
+
+export interface WorkerRecipeSnapshot {
+  recipeId: 'kim-vocal-2-v1';
+  recipeRevision: number;
+  protocolVersion: 1;
+  modelDigest: string;
+  modelBytes: number;
+  trimEnabled: boolean;
+  denoiseEnabled: boolean;
+  outputFormat: 'mp3';
+  outputBitrateKbps: 192;
+}
+
+export interface WorkerRetryEligibility {
+  eligible: boolean;
+  attemptsRemaining: number;
+  nextAttemptAt: Date | null;
+}
+
+export interface WorkerExecutionOwnership {
+  attemptId: string;
+  machineId: string;
+  workerId: string;
+  sessionId: string;
+  incarnation: string;
+  leaseExpiresAt: Date;
+  deadlineAt: Date;
+}

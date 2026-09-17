@@ -20,6 +20,7 @@ const SAFE_STARTUP_MESSAGES = new Set([
   'Audio processing MongoDB capability check failed',
   'Audio processing requires a writable MongoDB replica set with sessions',
   'Audio processing schema initialization failed',
+  'Worker fleet schema initialization failed',
   'Storage bucket preflight failed',
 ]);
 
@@ -29,6 +30,7 @@ const SAFE_ENVIRONMENT_FAILURE =
 const SAFE_DEPENDENCY_STAGES = new Set([
   'Audio processing MongoDB capability check failed',
   'Audio processing schema initialization failed',
+  'Worker fleet schema initialization failed',
   'User schema initialization failed',
   'Device schema initialization failed',
   'Device installation owner schema initialization failed',

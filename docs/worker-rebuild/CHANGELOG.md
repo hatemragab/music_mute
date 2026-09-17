@@ -1,5 +1,15 @@
 # Package changes
 
+## Revision 3.3
+
+- Added the C1 worker-fleet persistence boundary: machine identity, installation sessions, slots, attempts, policy and bounded diagnostic schemas with explicit indexes and optimistic revisions.
+- Extended the existing audio-job record with immutable-at-claim recipe and retry snapshots plus fenced execution ownership, without creating a second public job collection.
+- Added the versioned, allowlisted and bounded worker protocol parser and a worker-only authorization boundary that fails closed until C2 installs credential verification.
+- Registered the worker models in backend startup so index initialization failures stop startup with a redacted error.
+- Added focused schema, protocol, authorization and startup coverage, public-serializer leak coverage, and a complete local backend verification record.
+
+No worker routes or credentials are active at C1. No database data, deployment, dashboard, worker runtime or production infrastructure was changed.
+
 ## Revision 3.2
 
 - Added reproducible real-host GPU feasibility evidence for M4/CoreML and Z440
