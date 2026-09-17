@@ -17,6 +17,15 @@ export interface WorkerStageTiming {
   elapsedMs: number | null;
 }
 
+export interface WorkerOutputReservation {
+  key: string;
+  bytes: number;
+  sha256: string;
+  contentType: 'audio/mpeg';
+  measuredDurationSeconds: number;
+  grantExpiresAt: Date;
+}
+
 const stageTiming = new MongoSchema<WorkerStageTiming>(
   {
     stage: { type: String, required: true, enum: WORKER_ATTEMPT_STAGES },
@@ -45,6 +54,29 @@ const outputObject = new MongoSchema<ObjectIdentity>(
     },
     sha256: { type: String, required: true, validate: isSha256 },
     contentType: { type: String, required: true, maxlength: 100 },
+  },
+  { _id: false, strict: 'throw' },
+);
+
+const outputReservation = new MongoSchema<WorkerOutputReservation>(
+  {
+    key: { type: String, required: true, maxlength: 1024 },
+    bytes: {
+      type: Number,
+      required: true,
+      min: 1,
+      max: 30_000_000,
+      validate: Number.isSafeInteger,
+    },
+    sha256: { type: String, required: true, validate: isSha256 },
+    contentType: { type: String, required: true, enum: ['audio/mpeg'] },
+    measuredDurationSeconds: {
+      type: Number,
+      required: true,
+      min: 0.001,
+      max: 1800,
+    },
+    grantExpiresAt: { type: Date, required: true },
   },
   { _id: false, strict: 'throw' },
 );
@@ -98,6 +130,8 @@ export class WorkerAttempt {
   timings!: WorkerStageTiming[];
   @Prop({ type: outputObject, default: null })
   outputObject!: ObjectIdentity | null;
+  @Prop({ type: outputReservation, default: null })
+  outputReservation!: WorkerOutputReservation | null;
   @Prop({ type: String, default: null, maxlength: 100 })
   terminalCode!: string | null;
   @Prop({ type: String, default: null, maxlength: 500 })

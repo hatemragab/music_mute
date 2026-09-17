@@ -2,6 +2,10 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module.js';
 import { ProcessingPersistenceModule } from '../processing/processing-persistence.module.js';
+import { StorageTransfersModule } from '../storage/storage-transfers.module.js';
+import { UsersModule } from '../users/users.module.js';
+import { WorkerAttemptController } from './attempts/worker-attempt.controller.js';
+import { WorkerAttemptService } from './attempts/worker-attempt.service.js';
 import { WorkerAuthGuard } from './auth/worker-auth.guard.js';
 import { AdminWorkerEnrollmentController } from './enrollment/admin-worker-enrollment.controller.js';
 import { WorkerEnrollmentController } from './enrollment/worker-enrollment.controller.js';
@@ -20,12 +24,15 @@ import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
   imports: [
     AdminModule,
     ProcessingPersistenceModule,
+    StorageTransfersModule,
+    UsersModule,
     MongooseModule.forFeature(WORKER_FLEET_MODELS),
   ],
   controllers: [
     WorkerEnrollmentController,
     WorkerClaimController,
     WorkerLeaseController,
+    WorkerAttemptController,
     AdminWorkerEnrollmentController,
   ],
   providers: [
@@ -33,6 +40,7 @@ import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
     WorkerDiagnosticsService,
     WorkerClaimService,
     WorkerLeaseService,
+    WorkerAttemptService,
     WorkerRecoveryService,
     WorkerRecoveryMaintenanceService,
     WorkerEnrollmentService,

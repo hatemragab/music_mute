@@ -13,7 +13,7 @@ The local environment was Darwin 25.6 ARM64 with Node.js 24.18.0 and pnpm
 | C2 enrollment lifecycle | PASS | One-use invitation exchange, restricted installation report, qualified activation, scoped authentication and audited machine pause/resume/revoke with ownership fencing. |
 | C3 admission and claims | PASS | Feature-gated public admission, immutable verified-input recipes, exact-version upload verification, durable sessions/slots and policy/capability-matched transactional claims with same-request replay. |
 | C4 leases and recovery | PASS | Backend-time batch renewal, exact ownership fences, fixed deadlines, cancellation/session/revocation fences and race-safe bounded recovery with focused/full test coverage. |
-| C5 storage and finalization | NOT_RUN | Reserved for the later checkpoint. |
+| C5 storage and finalization | PASS | Attempt-scoped input/output grants, exact-version verification, idempotent completion/failure, coherent usage/notification/slot updates and orphan cleanup. |
 | C6 machine/status/policy APIs | NOT_RUN | Reserved for the later checkpoint. |
 
 ## Implemented boundary
@@ -113,6 +113,31 @@ which permits same-request response recovery without storing plaintext.
   cancellation/revocation dispositions, renewal/recovery races, retry backoff,
   final failure, session replacement, machine revocation and deletion fencing.
 
+## C5 exact-version transfers and finalization
+
+- Added current-attempt input grants that expose only the already pinned S3 key
+  and immutable version. The grant is signed before a second ownership/account
+  check, so a concurrent fence prevents the URL from being returned.
+- Added output declaration and grant refresh with a backend-derived
+  user/job/attempt key, exact MP3 media type, byte/checksum/duration bounds,
+  create-only signed headers and expiry capped at the attempt deadline.
+- The declaration is frozen on the attempt. Conflicting refreshes fail closed;
+  abandoned attempt keys receive durable exact-key cleanup scheduled after the
+  deadline and grant-settlement window.
+- Completion HEADs the worker-declared immutable S3 version outside the MongoDB
+  transaction, verifies key/version/bytes/checksum/media type, then rechecks
+  ownership, lease, deadline, account state and the frozen recipe inside it.
+- One successful transaction publishes `ready`, records the attempt output,
+  disables retry, releases the slot, settles usage, inserts the durable ready
+  notification and cancels orphan cleanup. Identical completion replays return
+  the same terminal result; conflicting or stale completion cannot publish.
+- Categorized worker failure is also idempotent. Transient failures use the
+  same bounded policy/backoff rules as lease recovery; terminal failure settles
+  usage, releases the slot and inserts one failed notification.
+- Focused tests cover attempt-key derivation, immutable output declarations,
+  exact-version S3 HEAD, mismatch rejection, successful replay, expired-owner
+  rejection, terminal failure replay and orphan-cleanup cancellation.
+
 ## Verification
 
 The backend verification command was run with only repository rate-limit
@@ -155,7 +180,7 @@ Result: PASS.
 - lint: PASS, zero warnings and errors
 - TypeScript typecheck: PASS
 - tracked-secret scan: PASS, 4/4 tests
-- unit tests: PASS, 105 files and 715 tests
+- unit tests: PASS, 106 files and 721 tests
 - E2E tests: PASS, 22 files and 125 tests
 - processing integration tests: PASS, 12 tests against isolated local services
 - NestJS production build: PASS

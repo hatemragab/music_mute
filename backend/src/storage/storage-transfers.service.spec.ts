@@ -164,6 +164,39 @@ describe('StorageTransfersService', () => {
     client.destroy();
   });
 
+  it('verifies only the worker-declared immutable output version', async () => {
+    const { service, client, send } = fixture();
+    const reservation = {
+      key: object.key,
+      bytes: object.bytes,
+      sha256: object.sha256,
+      contentType: object.contentType,
+    };
+    send.mockResolvedValueOnce({
+      VersionId: 'worker-version',
+      ContentLength: object.bytes,
+      ContentType: object.contentType,
+      ChecksumSHA256: object.sha256,
+    } as never);
+    await expect(
+      service.verifyUploadedVersion(reservation, 'worker-version'),
+    ).resolves.toEqual({ ...reservation, versionId: 'worker-version' });
+    expect((send.mock.calls[0][0] as HeadObjectCommand).input.VersionId).toBe(
+      'worker-version',
+    );
+
+    send.mockResolvedValueOnce({
+      VersionId: 'worker-version',
+      ContentLength: object.bytes + 1,
+      ContentType: object.contentType,
+      ChecksumSHA256: object.sha256,
+    } as never);
+    await expect(
+      service.verifyUploadedVersion(reservation, 'worker-version'),
+    ).rejects.toMatchObject({ response: { code: 'UPLOAD_NOT_READY' } });
+    client.destroy();
+  });
+
   it('deletes only exact-key versions and delete markers', async () => {
     const { service, client, send } = fixture();
     send

@@ -122,6 +122,35 @@ export class StorageTransfersService {
     return this.signDownload(object, this.grantSeconds);
   }
 
+  async createWorkerOutputGrant(
+    reservation: ObjectReservation,
+    deadlineAt: Date,
+  ): Promise<UploadGrant> {
+    return this.createUploadGrant(reservation, deadlineAt);
+  }
+
+  async verifyUploadedVersion(
+    reservation: ObjectReservation,
+    versionId: string,
+  ): Promise<ObjectIdentity> {
+    if (!versionId || versionId === 'null') throw jobError('UPLOAD_NOT_READY');
+    let pinned: HeadObjectCommandOutput;
+    try {
+      pinned = await this.head(reservation.key, versionId);
+    } catch (error) {
+      if (confirmedMissing(error)) throw jobError('UPLOAD_NOT_READY');
+      throw error;
+    }
+    if (
+      pinned.VersionId !== versionId ||
+      pinned.ContentLength !== reservation.bytes ||
+      pinned.ContentType !== reservation.contentType ||
+      pinned.ChecksumSHA256 !== reservation.sha256
+    )
+      throw jobError('UPLOAD_NOT_READY');
+    return { ...reservation, versionId };
+  }
+
   async isPinnedObjectAvailable(object: ObjectIdentity): Promise<boolean> {
     if (!object.versionId || object.versionId === 'null') return false;
     try {

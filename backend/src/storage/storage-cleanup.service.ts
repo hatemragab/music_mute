@@ -58,6 +58,10 @@ export class StorageCleanupService implements OnModuleInit {
     return Boolean(await this.tasks.exists({ ownerUserId, completedAt: null }));
   }
 
+  async cancelScheduled(key: string, session?: ClientSession): Promise<void> {
+    await this.tasks.deleteOne({ key, leaseToken: null }, { session });
+  }
+
   /** Claims and advances one bounded task. Safe across API replicas. */
   async cleanupDue(now = new Date()): Promise<boolean> {
     const token = randomUUID();

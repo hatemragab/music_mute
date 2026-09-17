@@ -52,9 +52,9 @@
     "c2_enrollment_lifecycle": "PASS",
     "c3_admission_and_claims": "PASS",
     "c4_leases_and_recovery": "PASS",
-    "c5_storage_and_finalization": "NOT_RUN",
+    "c5_storage_and_finalization": "PASS",
     "c6_machine_status_policy_apis": "NOT_RUN",
     "evidence": "../evidence/C-control-plane.md"
   },
-  "scope": "Documentation/source-reference checks, sanitized real M4 Pro/CoreML and Z440 RX 580/DirectML feasibility runs, and local C1-C4 backend verification; no production infrastructure tests."
+  "scope": "Documentation/source-reference checks, sanitized real M4 Pro/CoreML and Z440 RX 580/DirectML feasibility runs, and local C1-C5 backend verification; no production infrastructure tests."
 }

@@ -141,7 +141,7 @@ export class WorkerLeaseService {
           {
             _id: job._id,
             revision: job.revision,
-            status: 'processing',
+            status: trusted({ $in: ['processing', 'uploading_result'] }),
             'currentExecution.attemptId': attempt._id,
             'currentExecution.machineId': machineId,
             'currentExecution.workerId': item.workerId,

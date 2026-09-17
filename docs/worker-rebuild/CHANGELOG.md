@@ -1,5 +1,20 @@
 # Package changes
 
+## Revision 3.7
+
+- Completed C5 with attempt-scoped pinned input downloads and backend-derived,
+  declaration-bound output uploads capped by the fixed attempt deadline.
+- Added exact immutable-version output verification and transactional,
+  idempotent success/failure finalization across attempts, jobs, slots, usage
+  and durable notifications.
+- Added exact-key orphan cleanup for abandoned attempt uploads and cancellation
+  of that cleanup only after accepted finalization.
+- Added focused transfer, stale-owner, replay, failure and cleanup tests and
+  passed the complete local backend and processing-integration gates.
+
+C6 status/policy APIs, runtime workers, deployment and production mutation
+remain unimplemented or unclaimed.
+
 ## Revision 3.6
 
 - Completed C4 with exact-tuple, backend-time batched lease renewal and
