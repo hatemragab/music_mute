@@ -91,6 +91,15 @@ class TasksFixture {
       ) ?? null
     );
   }
+
+  async deleteOne(filter: { key: string; leaseToken: null }) {
+    const index = this.records.findIndex(
+      (entry) => entry.key === filter.key && entry.leaseToken === null,
+    );
+    if (index < 0) return { deletedCount: 0 };
+    this.records.splice(index, 1);
+    return { deletedCount: 1 };
+  }
 }
 
 function setup(
@@ -120,6 +129,19 @@ describe('StorageCleanupService', () => {
     await service.onModuleInit();
 
     expect(tasks.init).toHaveBeenCalledOnce();
+  });
+
+  it('cancels an unclaimed orphan cleanup after successful finalization', async () => {
+    const { service, tasks } = setup();
+    await service.schedule({
+      key,
+      ownerUserId: owner,
+      reason: 'AUDIO_OUTPUT_ORPHANED',
+      nextAt: due,
+      settleUntil: due,
+    });
+    await service.cancelScheduled(key);
+    expect(tasks.records).toHaveLength(0);
   });
 
   it('validates ownership and schedules each immutable key idempotently', async () => {

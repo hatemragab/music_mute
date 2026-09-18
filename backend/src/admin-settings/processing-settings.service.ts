@@ -1,5 +1,6 @@
 import { jobError } from '../jobs/job-errors.js';
 import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import type { ClientSession, Model } from 'mongoose';
 import { AdminOperationsService } from '../admin/admin-operations.service.js';
@@ -73,6 +74,7 @@ export class ProcessingSettingsService implements OnModuleInit {
     @InjectModel(ProcessingAdmissionFence.name)
     private readonly fences: Model<ProcessingAdmissionFence>,
     private readonly operations: AdminOperationsService,
+    private readonly config: ConfigService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -114,11 +116,14 @@ export class ProcessingSettingsService implements OnModuleInit {
     if (!['1', '2'].includes(schemaVersion))
       throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
     const settings = await this.effective();
+    const acceptNewJobs =
+      this.config.get<boolean>('AUDIO_PROCESSING_ENABLED') === true &&
+      settings.acceptNewJobs;
     if (schemaVersion === '2') {
       return {
         schemaVersion: 2 as const,
         revision: settings.revision,
-        acceptNewJobs: false,
+        acceptNewJobs,
         acceptLongJobs: false,
         checkedAt: new Date().toISOString(),
         messageEn: settings.maintenanceMessageEn,
@@ -126,7 +131,7 @@ export class ProcessingSettingsService implements OnModuleInit {
         limits: {
           maxDurationSeconds: settings.maxDurationSecondsExclusive,
           maxPreparedAudioBytes: settings.maxInputBytesExclusive,
-          maxActiveJobsPerUser: settings.maxActiveJobsPerUser,
+          maxActiveJobsPerUser: settings.maxActiveJobsPerUser ?? 1,
           allowanceAudioSeconds: 0,
           allowanceWindowSeconds: 86400,
           maxLocalSourceBytes: null,
@@ -153,13 +158,13 @@ export class ProcessingSettingsService implements OnModuleInit {
     return {
       schemaVersion: 1 as const,
       revision: settings.revision,
-      acceptNewJobs: false,
+      acceptNewJobs,
       messageEn: settings.maintenanceMessageEn,
       messageAr: settings.maintenanceMessageAr,
       limits: {
         maxInputBytesExclusive: settings.maxInputBytesExclusive,
         maxDurationSecondsExclusive: settings.maxDurationSecondsExclusive,
-        maxActiveJobsPerUser: settings.maxActiveJobsPerUser,
+        maxActiveJobsPerUser: settings.maxActiveJobsPerUser ?? 1,
       },
       checkedAt: new Date().toISOString(),
     };

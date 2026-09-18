@@ -17,6 +17,10 @@ const permissions: Readonly<Record<AdminRole, readonly AdminPermission[]>> = {
     'alerts.manage',
     'audit.read',
     'exports.read',
+    'workers.read',
+    'workers.manage',
+    'workers.enroll',
+    'workers.logs.read',
     'admin.access.manage',
   ],
   release_manager: ['overview.read', 'releases.read', 'releases.manage'],
@@ -30,8 +34,16 @@ const permissions: Readonly<Record<AdminRole, readonly AdminPermission[]>> = {
     'media.read',
     'settings.read',
     'exports.read',
+    'workers.read',
+    'workers.logs.read',
   ],
-  viewer: ['overview.read', 'jobs.read', 'releases.read', 'settings.read'],
+  viewer: [
+    'overview.read',
+    'jobs.read',
+    'releases.read',
+    'settings.read',
+    'workers.read',
+  ],
 };
 
 for (const value of Object.values(permissions)) Object.freeze(value);

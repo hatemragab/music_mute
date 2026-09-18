@@ -11,23 +11,31 @@ import { JobDeletionService } from '../src/jobs/job-deletion.service.js';
 import { JobMetadataService } from '../src/jobs/job-metadata.service.js';
 import { JobsQueryService } from '../src/jobs/jobs-query.service.js';
 import { JobsController } from '../src/jobs/jobs.controller.js';
-import { ProcessingUnavailableService } from '../src/processing/processing-unavailable.service.js';
+import { JobsService } from '../src/jobs/jobs.service.js';
 
-describe('processing clean-slate HTTP boundary', () => {
+describe('processing admission HTTP boundary', () => {
   let app: INestApplication;
   afterEach(async () => app?.close());
 
-  it('returns 503 for every processing-start route without invoking domain services', async () => {
+  it('routes validated processing-start requests to the guarded domain services', async () => {
     const query = { list: vi.fn(), detail: vi.fn(), download: vi.fn() };
-    const actions = { cancel: vi.fn() };
+    const actions = {
+      cancel: vi.fn(),
+      retry: vi.fn().mockResolvedValue({ status: 'queued' }),
+    };
+    const jobs = {
+      create: vi.fn().mockResolvedValue({ status: 'awaiting_upload' }),
+      renewUpload: vi.fn().mockResolvedValue({ method: 'PUT' }),
+      confirmUpload: vi.fn().mockResolvedValue({ status: 'queued' }),
+    };
     const module = await Test.createTestingModule({
       controllers: [JobsController],
       providers: [
         { provide: JobsQueryService, useValue: query },
+        { provide: JobsService, useValue: jobs },
         { provide: JobActionsService, useValue: actions },
         { provide: JobMetadataService, useValue: { rename: vi.fn() } },
         { provide: JobDeletionService, useValue: { delete: vi.fn() } },
-        ProcessingUnavailableService,
       ],
     }).compile();
     app = module.createNestApplication();
@@ -57,7 +65,7 @@ describe('processing clean-slate HTTP boundary', () => {
       durationSeconds: 10,
       sha256: Buffer.alloc(32).toString('base64'),
     };
-    for (const response of [
+    const responses = [
       await request(server).post('/api/v1/jobs').send({
         requestId: '14b2d476-e40e-4aeb-a8dd-24db12337695',
         input,
@@ -67,10 +75,14 @@ describe('processing clean-slate HTTP boundary', () => {
         .send({ requestId: '24b2d476-e40e-4aeb-a8dd-24db12337695' }),
       await request(server).post(`/api/v1/jobs/${id}/upload-url`).send({}),
       await request(server).post(`/api/v1/jobs/${id}/upload-complete`).send({}),
-    ]) {
-      expect(response.status).toBe(503);
-      expect(response.body.code).toBe('PROCESSING_UNAVAILABLE');
-    }
+    ];
+    expect(responses.map((response) => response.status)).toEqual([
+      201, 201, 200, 200,
+    ]);
+    expect(jobs.create).toHaveBeenCalledOnce();
+    expect(actions.retry).toHaveBeenCalledOnce();
+    expect(jobs.renewUpload).toHaveBeenCalledOnce();
+    expect(jobs.confirmUpload).toHaveBeenCalledOnce();
     expect(query.list).not.toHaveBeenCalled();
     expect(actions.cancel).not.toHaveBeenCalled();
   });

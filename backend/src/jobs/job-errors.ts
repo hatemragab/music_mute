@@ -13,6 +13,11 @@ const errors = {
     409,
     'Refresh the processing policy before continuing',
   ],
+  PROCESSING_LIMIT_REACHED: [
+    409,
+    'The active processing job limit was reached',
+  ],
+  NEW_INPUT_REQUIRED: [409, 'A new input upload is required for this retry'],
   JOB_NOT_FOUND: [404, 'Job not found'],
   JOB_ACTIVE: [409, 'Cancel this job before deleting it'],
   JOB_STATE_CONFLICT: [409, 'This action is not available for this job'],

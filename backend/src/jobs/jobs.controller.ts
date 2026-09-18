@@ -18,8 +18,8 @@ import {
   RequireProcessingAccess,
 } from '../auth/auth.decorators.js';
 import { EmptyBodyPipe } from '../auth/dto/empty-body.pipe.js';
-import { ProcessingUnavailableService } from '../processing/processing-unavailable.service.js';
 import { CreateJobDto } from './dto/create-job.dto.js';
+import { JobsService } from './jobs.service.js';
 import { JobsQueryService } from './jobs-query.service.js';
 import { DownloadJobDto } from './dto/download-job.dto.js';
 import { JobActionsService } from './job-actions.service.js';
@@ -31,11 +31,11 @@ import { JobDeletionService } from './job-deletion.service.js';
 @Controller('jobs')
 export class JobsController {
   constructor(
+    private readonly jobs: JobsService,
     private readonly query: JobsQueryService,
     private readonly actions: JobActionsService,
     private readonly metadata: JobMetadataService,
     private readonly deletion: JobDeletionService,
-    private readonly unavailable: ProcessingUnavailableService,
   ) {}
 
   @Delete(':id')
@@ -79,11 +79,11 @@ export class JobsController {
   @LimitOperation('processing-create')
   @RequireProcessingAccess()
   retry(
-    @Req() _req: AuthRequest,
-    @Param('id') _id: string,
-    @Body() _dto: RetryJobDto,
+    @Req() req: AuthRequest,
+    @Param('id') id: string,
+    @Body() dto: RetryJobDto,
   ) {
-    return this.unavailable.reject();
+    return this.actions.retry(req.user!._id.toHexString(), id, dto.requestId);
   }
 
   @Get()
@@ -121,8 +121,14 @@ export class JobsController {
   @LimitOperation('processing-create')
   @RequireProcessingAccess()
   @Header('Cache-Control', 'no-store')
-  create(@Req() _req: AuthRequest, @Body() _dto: CreateJobDto) {
-    return this.unavailable.reject();
+  create(@Req() req: AuthRequest, @Body() dto: CreateJobDto) {
+    const { input, requestId, ...metadata } = dto;
+    return this.jobs.create(
+      req.user!._id.toHexString(),
+      input,
+      requestId,
+      metadata,
+    );
   }
 
   @Post(':id/upload-url')
@@ -131,11 +137,11 @@ export class JobsController {
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   renew(
-    @Req() _req: AuthRequest,
-    @Param('id') _id: string,
+    @Req() req: AuthRequest,
+    @Param('id') id: string,
     @Body(EmptyBodyPipe) _body: unknown,
   ) {
-    return this.unavailable.reject();
+    return this.jobs.renewUpload(req.user!._id.toHexString(), id);
   }
 
   @Post(':id/upload-complete')
@@ -144,10 +150,10 @@ export class JobsController {
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   confirm(
-    @Req() _req: AuthRequest,
-    @Param('id') _id: string,
+    @Req() req: AuthRequest,
+    @Param('id') id: string,
     @Body(EmptyBodyPipe) _body: unknown,
   ) {
-    return this.unavailable.reject();
+    return this.jobs.confirmUpload(req.user!._id.toHexString(), id);
   }
 }

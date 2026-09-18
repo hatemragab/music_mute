@@ -42,6 +42,10 @@ describe('durable job schema boundaries', () => {
       new Job({ status: 'deleted' }).validateSync()?.errors,
     ).toHaveProperty('status');
   });
+  it('freezes admission and recipe snapshots once the job is created', () => {
+    expect(JobSchema.path('admissionSnapshot')?.options.immutable).toBe(true);
+    expect(JobSchema.path('recipeSnapshot')?.options.immutable).toBe(true);
+  });
   it('contains no execution ownership or claim queue fields and indexes', () => {
     for (const path of [
       'workerId',

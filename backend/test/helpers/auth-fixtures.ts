@@ -281,7 +281,12 @@ export async function authFixture() {
     providers: [
       {
         provide: getConnectionToken(),
-        useValue: { readyState: 1, db: { command: async () => ({ ok: 1 }) } },
+        useValue: {
+          readyState: 1,
+          db: { command: async () => ({ ok: 1 }) },
+          models: {},
+          model: vi.fn(() => ({ init: vi.fn().mockResolvedValue(undefined) })),
+        },
       },
     ],
     exports: [getConnectionToken()],

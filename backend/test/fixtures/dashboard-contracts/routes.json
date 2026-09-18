@@ -691,6 +691,238 @@
       "responseCategory": "resource",
       "validationOwner": "dto",
       "successStatus": 200
+    },
+    {
+      "controller": "AdminWorkerEnrollmentController",
+      "method": "POST",
+      "path": "/admin/workers/invitations",
+      "permissions": ["workers.enroll"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expiresInSeconds": 900,
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminWorkerEnrollmentController",
+      "method": "POST",
+      "path": "/admin/workers/invitations/:id/revoke",
+      "permissions": ["workers.enroll"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminWorkerEnrollmentController",
+      "method": "POST",
+      "path": "/admin/workers/machines/:id/pause",
+      "permissions": ["workers.manage"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminWorkerEnrollmentController",
+      "method": "POST",
+      "path": "/admin/workers/machines/:id/drain",
+      "permissions": ["workers.manage"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminWorkerEnrollmentController",
+      "method": "POST",
+      "path": "/admin/workers/machines/:id/resume",
+      "permissions": ["workers.manage"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminWorkerEnrollmentController",
+      "method": "POST",
+      "path": "/admin/workers/machines/:id/revoke",
+      "permissions": ["workers.manage"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminWorkerControlController",
+      "method": "GET",
+      "path": "/admin/worker-fleet/machines",
+      "permissions": ["workers.read"],
+      "roles": ["owner", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "page",
+      "validationOwner": "controller-query",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminWorkerControlController",
+      "method": "GET",
+      "path": "/admin/worker-fleet/machines/:id",
+      "permissions": ["workers.read"],
+      "roles": ["owner", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminWorkerControlController",
+      "method": "GET",
+      "path": "/admin/worker-fleet/machines/:id/diagnostics",
+      "permissions": ["workers.logs.read"],
+      "roles": ["owner", "support"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "page",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminWorkerControlController",
+      "method": "POST",
+      "path": "/admin/worker-fleet/machines/:id/doctor",
+      "permissions": ["workers.manage"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "checks": ["service", "provider"],
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminWorkerControlController",
+      "method": "POST",
+      "path": "/admin/worker-fleet/machines/:id/benchmark",
+      "permissions": ["workers.manage"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "recipeId": "kim-vocal-2-v1",
+        "iterations": 1,
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminWorkerControlController",
+      "method": "GET",
+      "path": "/admin/worker-fleet/invitations",
+      "permissions": ["workers.enroll"],
+      "roles": ["owner"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "page",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminWorkerControlController",
+      "method": "GET",
+      "path": "/admin/worker-fleet/policy",
+      "permissions": ["workers.read"],
+      "roles": ["owner", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminWorkerControlController",
+      "method": "PUT",
+      "path": "/admin/worker-fleet/policy",
+      "permissions": ["workers.manage"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "acceptClaims": true,
+        "recipes": [
+          {
+            "recipeId": "kim-vocal-2-v1",
+            "enabled": true,
+            "maxSlotsPerMachine": 1
+          }
+        ],
+        "leaseSeconds": 60,
+        "processingDeadlineSeconds": 900,
+        "maxAttempts": 3,
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 200
     }
   ]
 }

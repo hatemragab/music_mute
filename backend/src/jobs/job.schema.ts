@@ -7,6 +7,9 @@ import type {
   JobStatus,
   ObjectIdentity,
   SafeJobError,
+  WorkerExecutionOwnership,
+  WorkerRecipeSnapshot,
+  WorkerRetryEligibility,
 } from './job.types.js';
 import { isSha256 } from './job-state.js';
 import { isAudioName, YOUTUBE_SOURCE_URL_PATTERN } from './job-metadata.js';
@@ -106,6 +109,84 @@ const safeError = new MongoSchema<SafeJobError>(
   { _id: false, strict: 'throw' },
 );
 
+const workerRecipeSnapshot = new MongoSchema<WorkerRecipeSnapshot>(
+  {
+    recipeId: { type: String, required: true, enum: ['kim-vocal-2-v1'] },
+    recipeRevision: {
+      type: Number,
+      required: true,
+      min: 1,
+      validate: Number.isSafeInteger,
+    },
+    protocolVersion: { type: Number, required: true, enum: [1] },
+    modelDigest: { type: String, required: true, match: /^[a-f0-9]{64}$/ },
+    modelBytes: {
+      type: Number,
+      required: true,
+      min: 1,
+      validate: Number.isSafeInteger,
+    },
+    trimEnabled: { type: Boolean, required: true },
+    denoiseEnabled: { type: Boolean, required: true },
+    outputFormat: { type: String, required: true, enum: ['mp3'] },
+    outputBitrateKbps: { type: Number, required: true, enum: [192] },
+  },
+  { _id: false, strict: 'throw' },
+);
+
+const workerRetryEligibility = new MongoSchema<WorkerRetryEligibility>(
+  {
+    eligible: { type: Boolean, required: true },
+    attemptsRemaining: {
+      type: Number,
+      required: true,
+      min: 0,
+      max: 10,
+      validate: Number.isSafeInteger,
+    },
+    nextAttemptAt: { type: Date, default: null },
+  },
+  { _id: false, strict: 'throw' },
+);
+
+const workerExecutionOwnership = new MongoSchema<WorkerExecutionOwnership>(
+  {
+    attemptId: {
+      type: String,
+      required: true,
+      match:
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    },
+    machineId: {
+      type: String,
+      required: true,
+      match:
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    },
+    workerId: {
+      type: String,
+      required: true,
+      match:
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    },
+    sessionId: {
+      type: String,
+      required: true,
+      match:
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    },
+    incarnation: {
+      type: String,
+      required: true,
+      match:
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    },
+    leaseExpiresAt: { type: Date, required: true },
+    deadlineAt: { type: Date, required: true },
+  },
+  { _id: false, strict: 'throw' },
+);
+
 @Schema({
   collection: 'audio_jobs',
   strict: 'throw',
@@ -162,12 +243,20 @@ export class Job {
   status!: JobStatus;
   @Prop({ type: inputReservation, required: true, immutable: true })
   inputReservation!: InputReservation;
-  @Prop({ type: admissionSnapshot, default: null })
+  @Prop({ type: admissionSnapshot, default: null, immutable: true })
   admissionSnapshot!: AdmissionSnapshot | null;
   @Prop({ type: objectIdentity, default: null })
   inputObject!: ObjectIdentity | null;
   @Prop({ type: objectIdentity, default: null })
   outputObject!: ObjectIdentity | null;
+  @Prop({ type: workerRecipeSnapshot, default: null, immutable: true })
+  recipeSnapshot!: WorkerRecipeSnapshot | null;
+  @Prop({ type: workerRetryEligibility, default: null })
+  retryEligibility!: WorkerRetryEligibility | null;
+  @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
+  attemptNumber!: number;
+  @Prop({ type: workerExecutionOwnership, default: null })
+  currentExecution!: WorkerExecutionOwnership | null;
   @Prop({ type: Date, default: null }) queuedAt!: Date | null;
   @Prop({ type: safeError, default: null }) lastError!: SafeJobError | null;
   @Prop({ type: Date, default: null }) finishedAt!: Date | null;
@@ -222,6 +311,10 @@ const adminVisibleFields = new Set([
   'measuredDurationSeconds',
   'uploadingResultAt',
   'lastError',
+  'recipeSnapshot',
+  'retryEligibility',
+  'attemptNumber',
+  'currentExecution',
 ]);
 JobSchema.pre('save', function () {
   if (
@@ -277,5 +370,34 @@ JobSchema.index(
   {
     name: 'jobs_cleanup_due',
     partialFilterExpression: { deletedAt: { $type: 'date' } },
+  },
+);
+JobSchema.index(
+  {
+    status: 1,
+    queuedAt: 1,
+    'recipeSnapshot.recipeId': 1,
+    'currentExecution.attemptId': 1,
+    _id: 1,
+  },
+  { name: 'jobs_worker_claim_eligibility' },
+);
+JobSchema.index(
+  { 'currentExecution.leaseExpiresAt': 1, _id: 1 },
+  {
+    name: 'jobs_worker_lease_expiry',
+    partialFilterExpression: {
+      'currentExecution.leaseExpiresAt': { $type: 'date' },
+    },
+  },
+);
+JobSchema.index(
+  { 'currentExecution.attemptId': 1 },
+  {
+    unique: true,
+    name: 'jobs_worker_attempt_unique',
+    partialFilterExpression: {
+      'currentExecution.attemptId': { $type: 'string' },
+    },
   },
 );

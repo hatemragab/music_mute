@@ -32,6 +32,8 @@ import { AdminOverviewController } from '../src/admin-observability/admin-overvi
 import { AdminHealthController } from '../src/admin-observability/admin-health.controller.js';
 import { AdminAlertsController } from '../src/admin-observability/admin-alerts.controller.js';
 import { AdminExportsController } from '../src/admin-exports/admin-exports.controller.js';
+import { AdminWorkerEnrollmentController } from '../src/worker-fleet/enrollment/admin-worker-enrollment.controller.js';
+import { AdminWorkerControlController } from '../src/worker-fleet/control/admin-worker-control.controller.js';
 import {
   ADMIN_FRESH_AUTH,
   ADMIN_PERMISSION,
@@ -81,6 +83,8 @@ const controllers: Type[] = [
   AdminHealthController,
   AdminAlertsController,
   AdminExportsController,
+  AdminWorkerEnrollmentController,
+  AdminWorkerControlController,
 ];
 const endpoint = (route: RouteFixture) =>
   route.path

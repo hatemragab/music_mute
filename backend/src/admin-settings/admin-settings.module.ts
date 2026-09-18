@@ -14,6 +14,7 @@ import {
   ProcessingSettingsSchema,
 } from './processing-settings.schema.js';
 import { ProcessingSettingsService } from './processing-settings.service.js';
+import { ProcessingAdmissionService } from './processing-admission.service.js';
 
 @Module({
   imports: [
@@ -29,7 +30,11 @@ import { ProcessingSettingsService } from './processing-settings.service.js';
     ]),
   ],
   controllers: [AdminSettingsController, ProcessingPolicyController],
-  providers: [ProcessingSettingsService],
-  exports: [MongooseModule, ProcessingSettingsService],
+  providers: [ProcessingSettingsService, ProcessingAdmissionService],
+  exports: [
+    MongooseModule,
+    ProcessingSettingsService,
+    ProcessingAdmissionService,
+  ],
 })
 export class AdminSettingsModule {}

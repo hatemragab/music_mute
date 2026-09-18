@@ -2,13 +2,16 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
-import { trusted, type Model } from 'mongoose';
+import { trusted, type ClientSession, type Model } from 'mongoose';
 import { ProcessingTransactions } from '../processing/processing-transactions.js';
 import { StorageTransfersService } from '../storage/storage-transfers.service.js';
 import { NotificationOutbox } from '../notifications/notification-outbox.schema.js';
 import { Job } from './job.schema.js';
 import { objectId } from './job-request.js';
 import { jobError } from './job-errors.js';
+import type { WorkerExecutionOwnership } from './job.types.js';
+import { WorkerAttempt } from '../worker-fleet/jobs/worker-attempt.schema.js';
+import { WorkerSlot } from '../worker-fleet/machines/worker-slot.schema.js';
 
 const CLEANUP_LEASE_MS = 60_000;
 
@@ -35,6 +38,7 @@ export class JobDeletionService {
       if (!['ready', 'failed', 'cancelled'].includes(job.status))
         throw jobError('JOB_ACTIVE');
       const now = new Date();
+      const execution = job.currentExecution;
       // Allow existing upload grants to expire before sweeping unconfirmed versions.
       const graceMs =
         (this.config.getOrThrow<number>('PROCESSING_URL_SECONDS') + 300) *
@@ -51,12 +55,22 @@ export class JobDeletionService {
             cleanupLeaseUntil: null,
             cleanupToken: null,
             cleanupAttempts: 0,
+            currentExecution: null,
+            retryEligibility: job.retryEligibility
+              ? {
+                  ...job.retryEligibility,
+                  eligible: false,
+                  attemptsRemaining: 0,
+                  nextAttemptAt: null,
+                }
+              : null,
           },
           $inc: { revision: 1 },
         },
         { session, runValidators: true },
       );
       if (changed.modifiedCount !== 1) throw jobError('JOB_STATE_CONFLICT');
+      await this.fenceAttempt(execution, now, session);
       await this.outbox.updateMany(
         { jobId: id, userId: owner },
         {
@@ -71,6 +85,45 @@ export class JobDeletionService {
         { session },
       );
     });
+  }
+
+  private async fenceAttempt(
+    execution: WorkerExecutionOwnership | null,
+    now: Date,
+    session: ClientSession,
+  ): Promise<void> {
+    if (!execution) return;
+    await this.jobs.db.model<WorkerAttempt>(WorkerAttempt.name).updateOne(
+      {
+        _id: execution.attemptId,
+        state: trusted({ $in: ['claimed', 'running', 'uploading'] }),
+      },
+      {
+        $set: {
+          state: 'cancelled',
+          terminalCode: 'CANCELLED',
+          terminalSummary: 'Job was deleted',
+          finishedAt: now,
+          leaseExpiresAt: now,
+        },
+        $inc: { revision: 1 },
+      },
+      { session, runValidators: true },
+    );
+    await this.jobs.db.model<WorkerSlot>(WorkerSlot.name).updateOne(
+      {
+        _id: execution.workerId,
+        machineId: execution.machineId,
+        sessionId: execution.sessionId,
+        incarnation: execution.incarnation,
+        currentAttemptId: execution.attemptId,
+      },
+      {
+        $set: { state: 'idle', currentAttemptId: null, lastSeenAt: now },
+        $inc: { revision: 1 },
+      },
+      { session, runValidators: true },
+    );
   }
 
   /** Claims one bounded cleanup batch. Safe to run in several API replicas. */

@@ -43,6 +43,7 @@ function actionsFixture() {
       jobs as never,
       transactions as never,
       access as never,
+      {} as never,
     ),
   };
 }

@@ -1,4 +1,5 @@
 import { model } from 'mongoose';
+import { ConfigService } from '@nestjs/config';
 import {
   DEFAULT_PROCESSING_SETTINGS,
   ProcessingSettingsSchema,
@@ -15,12 +16,35 @@ describe('processing settings', () => {
       { findById } as never,
       {} as never,
       {} as never,
+      new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
     );
     await expect(service.current()).resolves.toMatchObject({
       revision: 0,
       ...DEFAULT_PROCESSING_SETTINGS,
     });
     expect(findById).toHaveBeenCalledOnce();
+  });
+
+  it('publishes admission availability only when settings and the feature gate allow it', async () => {
+    const findById = vi.fn(() => ({ lean: vi.fn().mockResolvedValue(null) }));
+    const disabled = new ProcessingSettingsService(
+      { findById } as never,
+      {} as never,
+      {} as never,
+      new ConfigService({ AUDIO_PROCESSING_ENABLED: false }),
+    );
+    const enabled = new ProcessingSettingsService(
+      { findById } as never,
+      {} as never,
+      {} as never,
+      new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
+    );
+    await expect(disabled.publicPolicy()).resolves.toMatchObject({
+      acceptNewJobs: false,
+    });
+    await expect(enabled.publicPolicy()).resolves.toMatchObject({
+      acceptNewJobs: true,
+    });
   });
 
   it('validates exclusive ceilings, optional Arabic, and maintenance text', () => {
@@ -93,6 +117,7 @@ describe('processing settings', () => {
       { findById, findOneAndUpdate } as never,
       fences as never,
       operations as never,
+      new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
     );
     await expect(
       service.update({ uid: 'owner' } as never, {
@@ -146,6 +171,7 @@ describe('processing settings', () => {
       } as never,
       { updateOne: vi.fn().mockResolvedValue({ acknowledged: true }) } as never,
       operations as never,
+      new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
     );
     const response = await service.update({ uid: 'owner' } as never, {
       ...DEFAULT_PROCESSING_SETTINGS,

@@ -18,7 +18,8 @@ import { JobDeletionService } from '../jobs/job-deletion.service.js';
 import { ClientErrorsController } from '../client-errors/client-errors.controller.js';
 import { ClientErrorsService } from '../client-errors/client-errors.service.js';
 import { JobsQueryService } from '../jobs/jobs-query.service.js';
-import { ProcessingUnavailableService } from './processing-unavailable.service.js';
+import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js';
+import { JobsService } from '../jobs/jobs.service.js';
 import { ProcessingTransactions } from './processing-transactions.js';
 import { ProcessingPersistenceModule } from './processing-persistence.module.js';
 import { ProcessingStartupService } from './processing-startup.service.js';
@@ -32,6 +33,7 @@ import { AccountDeletionMaintenanceService } from '../users/account-deletion-mai
     FirebaseModule,
     UsersModule,
     DevicesModule,
+    AdminSettingsModule,
   ],
   controllers: [
     ProcessingUsageController,
@@ -44,7 +46,7 @@ import { AccountDeletionMaintenanceService } from '../users/account-deletion-mai
     AccountDeletionCleanupService,
     AccountDeletionMaintenanceService,
     ProcessingStartupService,
-    ProcessingUnavailableService,
+    JobsService,
     ProcessingTransactions,
     JobsQueryService,
     JobActionsService,

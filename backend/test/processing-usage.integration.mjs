@@ -51,7 +51,7 @@ test('usage reservations are idempotent and terminal failure releases them', asy
   });
   const reserved = await usage.readUsage(owner);
   assert.equal(reserved.reservedAudioSeconds, 30);
-  assert.equal(reserved.availability, 'paused');
+  assert.equal(reserved.availability, 'busy');
   assert.equal(await ledger.countDocuments(), 1);
 
   await transactions.run(async (session) => {

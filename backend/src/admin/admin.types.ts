@@ -16,6 +16,10 @@ export type AdminPermission =
   | 'alerts.manage'
   | 'audit.read'
   | 'exports.read'
+  | 'workers.read'
+  | 'workers.manage'
+  | 'workers.enroll'
+  | 'workers.logs.read'
   | 'admin.access.manage';
 
 export interface AdminActor {

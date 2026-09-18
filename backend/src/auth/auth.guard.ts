@@ -24,6 +24,7 @@ import type { RateBucket } from './auth.types.js';
 import { authError } from './auth.errors.js';
 import { ADMIN_ROUTE } from '../admin/admin.decorators.js';
 import { adminError, adminRequestId } from '../admin/admin-errors.js';
+import { WORKER_ROUTE } from '../worker-fleet/auth/worker-auth.decorators.js';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -42,8 +43,14 @@ export class AuthGuard implements CanActivate {
       this.reflector.getAllAndOverride<boolean>(PUBLIC_ROUTE, targets) === true;
     const adminRoute =
       this.reflector.getAllAndOverride<boolean>(ADMIN_ROUTE, targets) === true;
-    if (publicRoute && adminRoute) throw authError('UNAUTHENTICATED');
+    const workerRoute =
+      this.reflector.getAllAndOverride<boolean>(WORKER_ROUTE, targets) === true;
+    if ([publicRoute, adminRoute, workerRoute].filter(Boolean).length > 1)
+      throw authError('UNAUTHENTICATED');
     if (publicRoute) return true;
+    // WorkerRoute always installs the fail-closed WorkerAuthGuard. C2 replaces
+    // its rejection path with scoped enrollment/installation/machine auth.
+    if (workerRoute) return true;
     const req = context.switchToHttp().getRequest<AuthRequest>();
     const response = context.switchToHttp().getResponse<Response>();
     const requestId = adminRoute ? adminRequestId(req) : undefined;

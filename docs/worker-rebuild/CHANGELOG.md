@@ -1,5 +1,93 @@
 # Package changes
 
+## Revision 3.8
+
+- Completed C6 with machine/session/slot/attempt status reads, invitation
+  lifecycle reads and audited invitation revocation, plus drain/pause/resume/
+  revoke controls.
+- Added versioned fleet policy reads and optimistic updates. A changed policy is
+  published as a desired machine revision and claims remain closed until the
+  current supervisor acknowledges that exact revision.
+- Added durable typed doctor/benchmark requests, current-session configuration
+  reconciliation, replay-safe command results, bounded sanitized runtime logs
+  and separately authorized diagnostic reads.
+- Extended the independent admin route/permission contract and added focused
+  policy, command, runtime-log, invitation and persistence coverage. The full
+  local backend and processing-integration gates pass.
+
+The control plane intentionally does not include a worker process, dashboard,
+installer, live WebSocket client, automatic updater, deployment or production
+mutation. Durable HTTPS/MongoDB reconciliation is authoritative; transient
+socket hints may be added with the runtime consumer without changing ownership
+semantics.
+
+## Revision 3.7
+
+- Completed C5 with attempt-scoped pinned input downloads and backend-derived,
+  declaration-bound output uploads capped by the fixed attempt deadline.
+- Added exact immutable-version output verification and transactional,
+  idempotent success/failure finalization across attempts, jobs, slots, usage
+  and durable notifications.
+- Added exact-key orphan cleanup for abandoned attempt uploads and cancellation
+  of that cleanup only after accepted finalization.
+- Added focused transfer, stale-owner, replay, failure and cleanup tests and
+  passed the complete local backend and processing-integration gates.
+
+Runtime workers, dashboard UI, deployment and production mutation remain
+unimplemented or unclaimed.
+
+## Revision 3.6
+
+- Completed C4 with exact-tuple, backend-time batched lease renewal and
+  deadline-capped per-item dispositions.
+- Added a single-flight recovery scanner with observed-revision/expiry fences,
+  bounded backoff, policy-capped attempts, final failure and slot release.
+- Fenced cancellation, terminal deletion, supervisor-session replacement and
+  machine revocation so stale workers cannot renew ownership.
+- Added focused race, expiry, retry and lifecycle tests and passed the complete
+  local backend and processing-integration gates.
+
+C5 output grants/finalization, runtime workers, live S3, deployment and
+production mutation remain unimplemented or unclaimed.
+
+## Revision 3.5
+
+- Completed C3 with feature-gated public job admission, durable account/settings
+  fences, active-job limits, usage reservation and request idempotency.
+- Restored immutable input upload grants and exact-version verification before
+  queue admission; new and retried jobs retain a frozen qualified Kim recipe.
+- Added durable machine sessions, logical slot registration and one-at-a-time
+  capability/policy-matched MongoDB transactional claims.
+- Same-request claim retries return the existing active attempt, while changed
+  session/slot identity, stale policy, paused admission and exhausted attempts
+  fail closed.
+- Updated public processing policy/usage availability and processing-route E2E
+  coverage, then passed the full local backend verification gate.
+
+No runtime worker, live S3 transfer, database migration, deployment or
+production mutation was performed.
+
+## Revision 3.4
+
+- Added the C2 enrollment lifecycle with backend-generated high-entropy one-use invitations, bounded expiry, atomic exchange and deterministic same-request replay.
+- Added restricted installation authentication, structured hardware/runtime/capability reports, exact accepted Kim model identity and qualification for the verified CoreML and DirectML MVP pairs.
+- Added activation with a derived machine credential, plus audited and revision-fenced admin pause, resume and revoke operations.
+- Added bounded, sequence-acknowledged installation diagnostics with transactionally durable batches and server-side credential/path redaction.
+- Revocation now invalidates machine authentication, revokes its installation session and expires any current job lease so ownership cannot continue silently.
+- Extended the independent admin route security inventory and focused lifecycle/authentication tests.
+
+Only credential digests are stored. No runtime process, dashboard UI, live machine enrollment, database mutation or deployment was performed.
+
+## Revision 3.3
+
+- Added the C1 worker-fleet persistence boundary: machine identity, installation sessions, slots, attempts, policy and bounded diagnostic schemas with explicit indexes and optimistic revisions.
+- Extended the existing audio-job record with immutable-at-claim recipe and retry snapshots plus fenced execution ownership, without creating a second public job collection.
+- Added the versioned, allowlisted and bounded worker protocol parser and a worker-only authorization boundary that fails closed until C2 installs credential verification.
+- Registered the worker models in backend startup so index initialization failures stop startup with a redacted error.
+- Added focused schema, protocol, authorization and startup coverage, public-serializer leak coverage, and a complete local backend verification record.
+
+No worker routes or credentials are active at C1. No database data, deployment, dashboard, worker runtime or production infrastructure was changed.
+
 ## Revision 3.2
 
 - Added reproducible real-host GPU feasibility evidence for M4/CoreML and Z440

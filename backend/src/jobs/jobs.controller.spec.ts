@@ -1,18 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { AUTH_OPERATION, PROCESSING_ACCESS } from '../auth/auth.decorators.js';
 import type { AuthRequest } from '../auth/auth-request.js';
-import { ProcessingUnavailableService } from '../processing/processing-unavailable.service.js';
 import type { JobActionsService } from './job-actions.service.js';
 import type { JobDeletionService } from './job-deletion.service.js';
 import type { JobMetadataService } from './job-metadata.service.js';
 import { JobsController } from './jobs.controller.js';
 import type { JobsQueryService } from './jobs-query.service.js';
+import type { JobsService } from './jobs.service.js';
 
 const request = {
   user: { _id: { toHexString: () => 'owner-id' } },
 } as AuthRequest;
 
 function controller() {
+  const jobs = {
+    create: (
+      ownerId: string,
+      input: object,
+      requestId: string,
+      metadata: object,
+    ) => ({
+      ownerId,
+      input,
+      requestId,
+      metadata,
+    }),
+    renewUpload: (ownerId: string, id: string) => ({ ownerId, id }),
+    confirmUpload: (ownerId: string, id: string) => ({ ownerId, id }),
+  } as unknown as JobsService;
   const query = {
     list: (ownerId: string, value: object) => ({ ownerId, value }),
     detail: (ownerId: string, id: string) => ({ ownerId, id }),
@@ -24,6 +39,11 @@ function controller() {
   } as unknown as JobsQueryService;
   const actions = {
     cancel: (ownerId: string, id: string) => ({ ownerId, id }),
+    retry: (ownerId: string, id: string, requestId: string) => ({
+      ownerId,
+      id,
+      requestId,
+    }),
   } as unknown as JobActionsService;
   const metadata = {
     rename: (ownerId: string, id: string, displayName: string) => ({
@@ -35,13 +55,7 @@ function controller() {
   const deletion = {
     delete: async (ownerId: string, id: string) => ({ ownerId, id }),
   } as unknown as JobDeletionService;
-  return new JobsController(
-    query,
-    actions,
-    metadata,
-    deletion,
-    new ProcessingUnavailableService(),
-  );
+  return new JobsController(jobs, query, actions, metadata, deletion);
 }
 
 describe('JobsController burst classes', () => {
@@ -63,7 +77,7 @@ describe('JobsController burst classes', () => {
   });
 });
 
-describe('JobsController clean-slate boundary', () => {
+describe('JobsController processing boundary', () => {
   it.each(['create', 'retry', 'renew', 'confirm'] as const)(
     'preserves processing access protection on %s',
     (method) => {
@@ -76,22 +90,30 @@ describe('JobsController clean-slate boundary', () => {
     },
   );
 
-  it.each([
-    ['create', () => controller().create(request, {} as never)],
-    ['retry', () => controller().retry(request, 'job-id', {} as never)],
-    ['renew', () => controller().renew(request, 'job-id', {})],
-    ['confirm', () => controller().confirm(request, 'job-id', {})],
-  ])('%s rejects before processing state can be created', (_name, invoke) => {
-    try {
-      invoke();
-      throw new Error('expected processing route to throw');
-    } catch (error) {
-      expect((error as { getResponse(): unknown }).getResponse()).toMatchObject(
-        {
-          code: 'PROCESSING_UNAVAILABLE',
-        },
-      );
-    }
+  it('routes guarded mutations to the admission services', () => {
+    expect(
+      controller().create(request, {
+        requestId: 'request-id',
+        input: { bytes: 10 },
+        source: 'audio_file',
+      } as never),
+    ).toEqual({
+      ownerId: 'owner-id',
+      input: { bytes: 10 },
+      requestId: 'request-id',
+      metadata: { source: 'audio_file' },
+    });
+    expect(
+      controller().retry(request, 'job-id', { requestId: 'retry-id' }),
+    ).toEqual({ ownerId: 'owner-id', id: 'job-id', requestId: 'retry-id' });
+    expect(controller().renew(request, 'job-id', {})).toEqual({
+      ownerId: 'owner-id',
+      id: 'job-id',
+    });
+    expect(controller().confirm(request, 'job-id', {})).toEqual({
+      ownerId: 'owner-id',
+      id: 'job-id',
+    });
   });
 
   it('keeps job history, result access, rename, cancellation, and deletion', async () => {
