@@ -1,5 +1,141 @@
 # Package changes
 
+## Revision 4.7
+
+- Audited the D5 installer transaction and fixed rollback so a failed candidate
+  cannot leave the prior service using candidate config or credentials.
+- The installer now snapshots and restores config, credential, wrapper and XML,
+  rejects incomplete installed state before activation, and verifies the prior
+  runtime after rollback.
+- Passed focused Windows fixtures plus portable PowerShell 7.6.6 syntax parsing,
+  non-Windows fail-closed behavior and executable rollback-helper checks. Native
+  Windows service, DirectML and Z440 acceptance remain not run.
+
+## Revision 4.6
+
+- Rebuilt the complete Mac package from the final D6 runtime and found that
+  `audio-separator` could not discover FFmpeg under the service-minimal `PATH`.
+- Fixed the supervisor to prepend only the qualified packaged FFmpeg directory
+  to each processing child and added regression coverage for the exact child
+  environment and invalid relative directories.
+- The fresh 33,828-entry ARM64 package passed its runtime doctor, a real
+  CoreML/Kim-to-MP3 job and post-run manifest verification. D4 remains blocked
+  on the actual LaunchDaemon, enrolled machine, logged-out, live S3 and reboot
+  acceptance gates.
+
+## Revision 4.5
+
+- Completed the local D6 safety boundary with attempt-only trusted paths,
+  input/intermediate/output caps, host disk/memory admission and bounded tool
+  output capture.
+- Added an 8 MiB ordered private diagnostic spool that redacts signed URLs and
+  secrets, writes a visible failure marker and blocks new claims on exhaustion.
+- Extracted explicit CoreML and DirectML discovery/session adapters, froze the
+  macOS/Windows service and credential policies, and kept every unqualified
+  platform/provider disabled.
+- Passed 62 TypeScript and 28 Python tests, including successive warm-model job
+  isolation, plus the full backend verification with 731 Vitest and 135 E2E
+  tests. D4 and D5 remain open for their real private-package and system-service
+  acceptance gates.
+
+## Revision 4.4
+
+- Started D5 with a native x86_64 PE audit, immutable Windows release format
+  and private package builder for Node, Python/DirectML, media and service
+  wrapper roots.
+- Pinned and digest-verified WinSW 2.12.0, added a password-free LocalService
+  definition and an elevated PowerShell install/repair/doctor/uninstall flow
+  with restrictive ACLs and local rollback.
+- Extended the runtime doctor to enforce the accepted Windows x86_64, Python
+  3.12, DirectML 1.24.4 and adapter-provider boundary while retaining exact
+  macOS checks.
+- Passed 49 TypeScript and 21 Python tests, but kept D5 unchecked because no
+  Windows package, PowerShell execution or real Z440 service run occurred.
+
+## Revision 4.3
+
+- Added a reproducible native ARM64 media-runtime build pinned to FFmpeg 8.0.3
+  and LAME 3.100, with source hashes, official FFmpeg signature verification,
+  offline protocol enforcement and bundled license/source provenance.
+- Built and verified the complete 33,798-entry private macOS release with exact
+  Python, CoreML, model and media diagnostics.
+- Redirected Python/library/compiler caches to protected service state so a real
+  packaged CoreML denoise/trim job leaves the immutable release unchanged.
+- Kept D4 open for the remaining enrolled LaunchDaemon, logged-out, live S3 and
+  reboot acceptance evidence.
+
+## Revision 4.2
+
+- Added the D4 macOS private release format, complete content/mode/symlink
+  manifest, ARM64 Mach-O dependency/RPATH audit and immutable version install.
+- Added dedicated-account LaunchDaemon install/repair/doctor/uninstall
+  boundaries, protected persistent state, exact model provisioning and
+  previous-release rollback without global Node/Python changes.
+- Passed the complete local worker suite plus real standalone Python 3.13.7 /
+  CoreML Kim execution and a provider profile assigning all six model node
+  events to CoreML.
+- Kept D4 blocked instead of packaging the host's Homebrew FFmpeg: its mutable
+  absolute dependencies fail the private-runtime audit. System-service,
+  logged-out, live S3 and reboot evidence remains not run.
+
+## Revision 4.1
+
+- Completed D3 with a runnable TypeScript machine loop for machine sessions,
+  config acknowledgement, stable slot registration, same-request claims,
+  batched lease ownership, cancellation and restart-from-input recovery.
+- Added strict bounded control-plane response parsing, dual-clock lease safety,
+  attempt-scoped local workspaces, exact checked downloads, signed-header
+  uploads and fenced completion/failure reporting.
+- Added replay recovery for an S3 PUT whose successful response was lost: the
+  backend returns the already-uploaded exact immutable version only when its
+  key, bytes, media type and checksum match the frozen attempt declaration.
+- Added a strict runtime config/credential boundary and the built
+  `musicmute-worker run --config ...` entry point.
+- Passed the complete worker verification, local HTTP full-path integration,
+  focused backend gates, all 731 backend unit/package tests and all 135 E2E
+  tests.
+
+This checkpoint does not claim live S3, WebSocket hint delivery, OS service
+installation, logged-out/reboot behavior, DirectML service execution or
+production readiness. Those remain D4-D6 and later integration gates.
+
+## Revision 4.0
+
+- Completed checkpoint D2 with the four frozen Kim recipe combinations, a
+  deterministic cross-language recipe digest and `kim-vocals-trim-v1` as the
+  initial default.
+- Added exact content-addressed model verification/installation, bounded local
+  media probing, PCM16 stereo 44.1 kHz preparation, the qualified CoreML/
+  DirectML adapter, optional allowlisted FFmpeg denoise, the reference-compatible
+  gap trimmer, MP3 encoding, final validation/hash, stage timing and a bounded
+  edit map.
+- Expanded the backend recipe snapshot and policy contract to use the same four
+  recipe identities and immutable step configuration.
+- Proved the default recipe through the real framed Node-to-Python child on the
+  M4/CoreML host with the qualified Kim artifact and owned fixture. The run also
+  exposed and fixed third-party stdout corrupting the binary child protocol.
+
+This checkpoint does not claim backend polling/S3 execution, service
+installation, reboot recovery, denoise listening quality, Windows service
+execution or production readiness. Those remain D3-D6.
+
+## Revision 3.9
+
+- Started the accepted runtime branch from merged control-plane commit
+  `1cd22912` and completed checkpoint D1.
+- Added a standalone pnpm-managed `worker/` component with a lightweight
+  TypeScript machine supervisor and an isolated Python processing child.
+- Added a strict 64 KiB length-prefixed protocol with schema version, UUID
+  request/incarnation identity, bounded payloads, timeouts, cancellation,
+  explicit processing-unavailable behavior and clean shutdown.
+- Added an allowlisted child environment, sanitized bounded stderr, one initial
+  child per GPU, canonical backend protocol copying with SHA-256 drift checks,
+  cross-language tests and a built `protocol-doctor` command.
+
+This checkpoint does not claim Kim processing, CoreML/DirectML execution,
+backend job ownership, S3 transfers, service installation or production use.
+Those remain D2-D6.
+
 ## Revision 3.8
 
 - Completed C6 with machine/session/slot/attempt status reads, invitation

@@ -12,6 +12,10 @@ import {
   Min,
 } from 'class-validator';
 import type { JobFailureCode } from '../../jobs/job.types.js';
+import {
+  WORKER_RECIPE_IDS,
+  type WorkerRecipeId,
+} from '../protocol/v1/protocol.js';
 
 export class WorkerAttemptOwnershipDto {
   @IsUUID('4') requestId!: string;
@@ -34,8 +38,9 @@ export class WorkerOutputGrantDto extends WorkerAttemptOwnershipDto {
 
 export class CompleteWorkerAttemptDto extends WorkerAttemptOwnershipDto {
   @IsString() @MaxLength(1024) versionId!: string;
-  @Equals('kim-vocal-2-v1') recipeId!: 'kim-vocal-2-v1';
+  @IsIn(WORKER_RECIPE_IDS) recipeId!: WorkerRecipeId;
   @IsInt() @Min(0) recipeRevision!: number;
+  @Matches(/^[a-f0-9]{64}$/) recipeDigest!: string;
   @Matches(/^[a-f0-9]{64}$/) modelDigest!: string;
   @IsBoolean() trimEnabled!: boolean;
   @IsBoolean() denoiseEnabled!: boolean;

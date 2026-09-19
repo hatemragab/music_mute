@@ -197,6 +197,33 @@ describe('StorageTransfersService', () => {
     client.destroy();
   });
 
+  it('recovers an exact immutable output after the PUT response is lost', async () => {
+    const { service, client, send } = fixture();
+    const reservation = {
+      key: object.key,
+      bytes: object.bytes,
+      sha256: object.sha256,
+      contentType: object.contentType,
+    };
+    send
+      .mockResolvedValueOnce({ VersionId: 'worker-version' } as never)
+      .mockResolvedValueOnce({
+        VersionId: 'worker-version',
+        ContentLength: object.bytes,
+        ContentType: object.contentType,
+        ChecksumSHA256: object.sha256,
+      } as never);
+
+    await expect(service.findUploadedVersion(reservation)).resolves.toEqual({
+      ...reservation,
+      versionId: 'worker-version',
+    });
+    expect((send.mock.calls[1][0] as HeadObjectCommand).input.VersionId).toBe(
+      'worker-version',
+    );
+    client.destroy();
+  });
+
   it('deletes only exact-key versions and delete markers', async () => {
     const { service, client, send } = fixture();
     send

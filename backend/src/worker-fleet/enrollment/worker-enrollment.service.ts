@@ -27,10 +27,12 @@ import type {
   WorkerLifecycleDto,
 } from './worker-enrollment.dto.js';
 import { sanitizeWorkerDiagnosticLine } from '../telemetry/worker-diagnostic-sanitizer.js';
+import {
+  DEFAULT_WORKER_RECIPE_ID,
+  QUALIFIED_MODEL_DIGEST,
+} from '../../jobs/worker-recipes.js';
 
 const INSTALLATION_TTL_MS = 60 * 60 * 1000;
-const QUALIFIED_MODEL_DIGEST =
-  'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b';
 
 function digest(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -85,7 +87,7 @@ function isQualified(dto: {
   const os = dto.hardware.os.toLowerCase();
   return dto.capabilities.every((capability) => {
     if (!gpuIds.has(capability.gpuId)) return false;
-    if (!capability.recipeIds.includes('kim-vocal-2-v1')) return false;
+    if (!capability.recipeIds.includes(DEFAULT_WORKER_RECIPE_ID)) return false;
     if (
       capability.platform === 'darwin-arm64' &&
       capability.provider === 'coreml'

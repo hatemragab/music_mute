@@ -51,6 +51,9 @@ These support implementation constraints, not blanket hardware compatibility. Re
 | T9 | [The Update Framework specification](https://theupdateframework.github.io/specification/latest/) | Authenticated metadata, hashes, freshness and rollback threats; the MVP is not a claim of full TUF compliance |
 | T10 | [git merge](https://git-scm.com/docs/git-merge), [GitHub CLI PR create](https://cli.github.com/manual/gh_pr_create) | Explicit merge/fast-forward rules and PR base selection |
 | T11 | [python-audio-separator upstream](https://github.com/nomadkaraoke/python-audio-separator) | Separation integration to evaluate and pin; no assumption that all architectures/backends work |
+| T12 | [FFmpeg official downloads](https://ffmpeg.org/download.html), [release archive](https://ffmpeg.org/releases/) | Pinned FFmpeg source archive, detached signature and official signer fingerprint for the private media build |
+| T13 | [LAME official release archive](https://sourceforge.net/projects/lame/files/lame/3.100/) | Pinned LAME 3.100 source used for the static MP3 encoder build |
+| T14 | [WinSW 2.12.0 release](https://github.com/winsw/winsw/releases/tag/v2.12.0), [2.12.0 XML configuration](https://github.com/winsw/winsw/blob/v2.12.0/doc/xmlConfigFile.md), [2.12.0 CLI](https://github.com/winsw/winsw/blob/v2.12.0/README.md#usage) | Pinned Windows service wrapper, LocalService configuration, lifecycle commands and failure recovery behavior |
 
 Runtime source checks and package documentation should be recorded with the exact chosen version in B. GitHub repository references above are the user's connected content; external library documentation is outside research. Recommendation defaults such as 20-second renewals, 90-second leases, one initial child, the afftdn preset and rollout budgets are design choices, not performance measurements.
 

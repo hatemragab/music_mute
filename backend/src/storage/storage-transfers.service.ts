@@ -151,6 +151,13 @@ export class StorageTransfersService {
     return { ...reservation, versionId };
   }
 
+  /** Recovers the immutable version after a successful PUT response was lost. */
+  async findUploadedVersion(
+    reservation: ObjectReservation,
+  ): Promise<ObjectIdentity | null> {
+    return this.inspect(reservation);
+  }
+
   async isPinnedObjectAvailable(object: ObjectIdentity): Promise<boolean> {
     if (!object.versionId || object.versionId === 'null') return false;
     try {

@@ -5,6 +5,7 @@ import type { Connection } from 'mongoose';
 import { StartupDependencyError } from '../startup-error.js';
 import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
 import { WorkerFleetPolicy } from './policy/worker-fleet-policy.schema.js';
+import { WORKER_RECIPE_IDS } from './protocol/v1/protocol.js';
 
 @Injectable()
 export class WorkerFleetStartupService implements OnModuleInit {
@@ -29,13 +30,11 @@ export class WorkerFleetStartupService implements OnModuleInit {
             $setOnInsert: {
               revision: 0,
               acceptClaims: true,
-              recipes: [
-                {
-                  recipeId: 'kim-vocal-2-v1',
-                  enabled: true,
-                  maxSlotsPerMachine: 1,
-                },
-              ],
+              recipes: WORKER_RECIPE_IDS.map((recipeId) => ({
+                recipeId,
+                enabled: true,
+                maxSlotsPerMachine: 1,
+              })),
               leaseSeconds: 60,
               processingDeadlineSeconds: 7200,
               maxAttempts: 3,

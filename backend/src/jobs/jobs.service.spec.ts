@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import { JobsService } from './jobs.service.js';
+import { workerRecipeSnapshot } from './worker-recipes.js';
 
 const ownerId = new Types.ObjectId('64b000000000000000000002');
 const jobId = new Types.ObjectId('64b000000000000000000001');
@@ -102,25 +103,16 @@ describe('public job admission', () => {
       upload: { method: 'PUT' },
     });
     const created = f.jobs.create.mock.calls[0]?.[0][0];
-    expect(created.recipeSnapshot).toEqual({
-      recipeId: 'kim-vocal-2-v1',
-      recipeRevision: 1,
-      protocolVersion: 1,
-      modelDigest:
-        'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b',
-      modelBytes: 66_759_214,
-      trimEnabled: true,
-      denoiseEnabled: false,
-      outputFormat: 'mp3',
-      outputBitrateKbps: 192,
-    });
+    expect(created.recipeSnapshot).toEqual(
+      workerRecipeSnapshot('kim-vocals-trim-v1'),
+    );
     expect(f.storage.createInputGrant).toHaveBeenCalledOnce();
   });
 
   it('queues only the exact verified object and preserves the frozen recipe', async () => {
     const f = fixture();
     const recipeSnapshot = {
-      recipeId: 'kim-vocal-2-v1',
+      recipeId: 'kim-vocals-trim-v1',
       recipeRevision: 1,
     };
     const job = {

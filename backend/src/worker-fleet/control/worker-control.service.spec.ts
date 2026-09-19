@@ -116,7 +116,7 @@ function policy(revision = 3) {
     revision,
     acceptClaims: true,
     recipes: [
-      { recipeId: 'kim-vocal-2-v1', enabled: true, maxSlotsPerMachine: 1 },
+      { recipeId: 'kim-vocals-trim-v1', enabled: true, maxSlotsPerMachine: 1 },
     ],
     leaseSeconds: 60,
     processingDeadlineSeconds: 900,
@@ -202,7 +202,7 @@ describe('worker control plane', () => {
       acceptClaims: true,
       recipes: [
         {
-          recipeId: 'kim-vocal-2-v1',
+          recipeId: 'kim-vocals-trim-v1',
           enabled: true,
           maxSlotsPerMachine: 2,
         },

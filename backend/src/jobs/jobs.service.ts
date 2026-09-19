@@ -14,24 +14,11 @@ import { normalizeJobMetadata, type JobMetadata } from './job-metadata.js';
 import { isDuplicateKey, objectId, requestHash } from './job-request.js';
 import { Job } from './job.schema.js';
 import { assertInputDeclaration } from './job-state.js';
-import type {
-  InputDeclaration,
-  WorkerRecipeSnapshot,
-  WorkerRetryEligibility,
-} from './job.types.js';
-
-const MVP_RECIPE: Readonly<WorkerRecipeSnapshot> = Object.freeze({
-  recipeId: 'kim-vocal-2-v1',
-  recipeRevision: 1,
-  protocolVersion: 1,
-  modelDigest:
-    'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b',
-  modelBytes: 66_759_214,
-  trimEnabled: true,
-  denoiseEnabled: false,
-  outputFormat: 'mp3',
-  outputBitrateKbps: 192,
-});
+import type { InputDeclaration, WorkerRetryEligibility } from './job.types.js';
+import {
+  DEFAULT_WORKER_RECIPE_ID,
+  workerRecipeSnapshot,
+} from './worker-recipes.js';
 
 const INITIAL_RETRY_ELIGIBILITY: Readonly<WorkerRetryEligibility> =
   Object.freeze({
@@ -103,7 +90,7 @@ export class JobsService {
                   key: `users/${owner.toHexString()}/jobs/${id.toHexString()}/input/${randomUUID()}.${input.extension}`,
                 },
                 admissionSnapshot,
-                recipeSnapshot: { ...MVP_RECIPE },
+                recipeSnapshot: workerRecipeSnapshot(DEFAULT_WORKER_RECIPE_ID),
                 retryEligibility: { ...INITIAL_RETRY_ELIGIBILITY },
               },
             ],

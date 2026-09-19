@@ -33,14 +33,60 @@ The package build contains no environment files, credentials, models, audio fixt
   secret scanning, 107 unit-test files with 727 tests, 22 E2E files with 135
   tests, 12 processing integration tests against isolated local services, and
   a production NestJS build. See [C evidence](../evidence/C-control-plane.md).
+- D1 added the standalone worker package and passed protocol drift, formatting,
+  lint, typecheck, 10 TypeScript tests, 4 Python IPC tests, production build and
+  built-CLI/Python-child handshake checks. See [D evidence](../evidence/D-runtime.md).
+- D2 added the four immutable recipe snapshots and safe ordered pipeline. It
+  passed 13 Python engine tests, 10 TypeScript tests, 42 focused backend tests,
+  the full 729 backend unit and 135 E2E tests under the env-isolated procedure
+  recorded in the evidence, reference PCM parity and a real framed M4/CoreML
+  Kim-to-MP3 child run. See [D evidence](../evidence/D-runtime.md).
+- D3 added authoritative HTTPS reconciliation, ownership safety, exact transfer
+  execution and lost-response recovery. It passed 25 TypeScript worker tests,
+  13 Python engine tests, a local real-HTTP full runtime sequence, 13 focused
+  backend tests, the complete 731 backend unit/package tests and 135 backend
+  E2E tests under the recorded env-isolated procedure. See
+  [D evidence](../evidence/D-runtime.md).
+- D4 implementation now covers deterministic native ARM64 release manifests,
+  private dependency auditing, dedicated-account LaunchDaemon files, secure
+  state/model provisioning, repair/rollback and safe uninstall boundaries. Its
+  reproducible network-disabled FFmpeg 8.0.3/LAME 3.100 build, complete private
+  package, local tests, packaged runtime doctor, post-run immutability check and
+  real CoreML pipeline pass. A fresh package from the final D6 runtime also
+  proved the qualified child `PATH` fix, runtime doctor, real CoreML job and all
+  33,828 immutable entries. The checkpoint remains BLOCKED only on the enrolled
+  system-service acceptance flow. See [D evidence](../evidence/D-runtime.md).
+- D5 implementation now covers x86_64 PE and immutable release validation,
+  pinned WinSW acquisition, password-free LocalService configuration,
+  SID-scoped ACL/install/repair/rollback/uninstall tooling and an exact
+  DirectML runtime doctor. Rollback now restores candidate-overwritten config,
+  credential, wrapper and XML state before restarting and verifying the prior
+  release. Five focused TypeScript files with ten tests, portable PowerShell
+  7.6.6 parsing and rollback-helper execution, the complete 49-test worker
+  suite and the 21-test engine suite pass locally. No native Windows
+  PowerShell execution, Windows package, service-context DirectML job or Z440
+  acceptance is claimed. See [D evidence](../evidence/D-runtime.md).
+- D6 locally verifies attempt isolation, trusted filenames, bounded
+  media/subprocess/resource behavior, signed-URL and secret redaction, an
+  admission-blocking 8 MiB diagnostic spool, one-job capacity, warm-model
+  cross-job cleanup, explicit CoreML/DirectML session adapters and explicit
+  macOS/Windows service/credential policies. The complete 62-test TypeScript
+  suite and 28-test Python engine suite pass. The backend also passes its full
+  verification after the final runtime-contract changes: 108 Vitest files/731
+  tests, 22 E2E files/135 tests and production build. See
+  [D evidence](../evidence/D-runtime.md).
 
 ## Not executed or claimed
 
-No worker service installation, live S3 integration, listening-quality review,
+No worker system-service installation, live S3 integration, WebSocket hint transport,
+listening-quality review,
 npm publication, signing with production keys or deployment has occurred. The
-C1-C6 backend work is locally verified only; dashboard, Android and iOS were
-not changed. Linux/NVIDIA and all other hardware remain unverified until later
-actual hardware evidence.
+C1-C6 backend and D1-D3 runtime work are locally verified only; D4 tooling,
+private package and CoreML execution are locally verified but the D4 system
+service checkpoint is not complete; D5 tooling has local fixture evidence only;
+D6 has local safety/adapter evidence only; dashboard, Android and iOS were not
+changed. D4 system-service acceptance, the D5 Windows service, Linux/NVIDIA and
+all other hardware remain unverified until later actual hardware evidence.
 
 ## Source/consistency caveats
 

@@ -62,7 +62,7 @@ describe('audio experience job presentation', () => {
     const presented = presentJob({
       ...job,
       attemptNumber: 2,
-      recipeSnapshot: { recipeId: 'kim-vocal-2-v1' },
+      recipeSnapshot: { recipeId: 'kim-vocals-trim-v1' },
       retryEligibility: { eligible: true, attemptsRemaining: 1 },
       currentExecution: {
         attemptId: '75438e3a-bda0-4521-a789-2b46473080e3',
