@@ -11,8 +11,9 @@
   macOS/Windows service and credential policies, and kept every unqualified
   platform/provider disabled.
 - Passed 62 TypeScript and 28 Python tests, including successive warm-model job
-  isolation. D4 and D5 remain open for their real private-package and
-  system-service acceptance gates.
+  isolation, plus the full backend verification with 731 Vitest and 135 E2E
+  tests. D4 and D5 remain open for their real private-package and system-service
+  acceptance gates.
 
 ## Revision 4.4
 

@@ -362,6 +362,8 @@ prepared private Windows runtime are still required for service acceptance.
 
 ### D6 verification
 
+- complete backend verification after the final runtime-contract changes:
+  PASS, 108 Vitest files/731 tests, 22 E2E files/135 tests and production build;
 - full protocol drift, formatting, lint, typecheck and production build: PASS;
 - complete TypeScript worker suite: PASS, 23 files and 62 tests;
 - complete Python engine suite: PASS, 28 tests;

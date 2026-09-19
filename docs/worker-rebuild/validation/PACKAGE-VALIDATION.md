@@ -66,7 +66,9 @@ The package build contains no environment files, credentials, models, audio fixt
   admission-blocking 8 MiB diagnostic spool, one-job capacity, warm-model
   cross-job cleanup, explicit CoreML/DirectML session adapters and explicit
   macOS/Windows service/credential policies. The complete 62-test TypeScript
-  suite and 28-test Python engine suite pass. See
+  suite and 28-test Python engine suite pass. The backend also passes its full
+  verification after the final runtime-contract changes: 108 Vitest files/731
+  tests, 22 E2E files/135 tests and production build. See
   [D evidence](../evidence/D-runtime.md).
 
 ## Not executed or claimed
