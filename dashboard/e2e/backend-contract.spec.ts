@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { setDashboardRole } from "./helpers/session";
+import { E2E_API_ORIGIN } from "./helpers/urls";
 
 test("browser enforces session, permission, receipt, concurrency, and revision contracts through compiled Nest", async ({
   page,
@@ -11,8 +12,7 @@ test("browser enforces session, permission, receipt, concurrency, and revision c
     page.getByRole("heading", { name: "Operations overview" }),
   ).toBeVisible();
 
-  const result = await page.evaluate(async () => {
-    const api = "http://127.0.0.1:3100/api/v1";
+  const result = await page.evaluate(async (api) => {
     const request = async (
       method: string,
       path: string,
@@ -119,7 +119,7 @@ test("browser enforces session, permission, receipt, concurrency, and revision c
       stale,
       supportSession,
     };
-  });
+  }, E2E_API_ORIGIN);
 
   expect(result.ownerSession.status).toBe(200);
   expect(result.ownerSession.cacheControl).toBe("no-store");
@@ -142,8 +142,7 @@ test("dashboard media and release payloads pass compiled backend validation", as
   await setDashboardRole(page, "owner");
   await page.goto("/overview");
 
-  const result = await page.evaluate(async () => {
-    const api = "http://127.0.0.1:3100/api/v1";
+  const result = await page.evaluate(async (api) => {
     const request = async (method: string, path: string, body?: unknown) => {
       const response = await fetch(`${api}${path}`, {
         method,
@@ -213,7 +212,7 @@ test("dashboard media and release payloads pass compiled backend validation", as
       },
     );
     return { media, edit, current, preview, publish, withdraw };
-  });
+  }, E2E_API_ORIGIN);
 
   expect(result.current.status).toBe(200);
   expect(result.preview.status).toBe(201);
@@ -233,8 +232,7 @@ test("every dashboard mutation payload passes compiled backend strict validation
   await setDashboardRole(page, "owner");
   await page.goto("/overview");
 
-  const responses = await page.evaluate(async () => {
-    const api = "http://127.0.0.1:3100/api/v1";
+  const responses = await page.evaluate(async (api) => {
     const missingId = "000000000000000000000098";
     const request = async (method: string, path: string, body?: unknown) => {
       const response = await fetch(`${api}${path}`, {
@@ -276,29 +274,29 @@ test("every dashboard mutation payload passes compiled backend strict validation
       revision(),
     );
 
-    const settings = await request("GET", "/admin/settings/processing");
-    const settingsResponse = await fetch(`${api}/admin/settings/processing`, {
-      headers: {
-        accept: "application/json",
-        authorization: "Bearer owner-fixture",
+    const settings = await request("GET", "/admin/settings/account-policy");
+    const settingsResponse = await fetch(
+      `${api}/admin/settings/account-policy`,
+      {
+        headers: {
+          accept: "application/json",
+          authorization: "Bearer owner-fixture",
+        },
       },
-    });
+    );
     const currentSettings = await settingsResponse.json();
     results.settingsRead = settings;
     results.settingsUpdate = await request(
       "PUT",
-      "/admin/settings/processing",
+      "/admin/settings/account-policy",
       {
         acceptNewJobs: currentSettings.acceptNewJobs,
         maintenanceMessageEn: currentSettings.maintenanceMessageEn,
         maintenanceMessageAr: currentSettings.maintenanceMessageAr,
-        maxInputBytesExclusive: currentSettings.maxInputBytesExclusive,
-        maxDurationSecondsExclusive:
-          currentSettings.maxDurationSecondsExclusive,
-        maxActiveJobsPerUser: currentSettings.maxActiveJobsPerUser,
+        ...currentSettings.values,
         expectedRevision: currentSettings.revision,
         operationId: crypto.randomUUID(),
-        reason: "Validate processing settings contract",
+        reason: "Validate the standard account policy contract",
       },
     );
 
@@ -339,7 +337,7 @@ test("every dashboard mutation payload passes compiled backend strict validation
     );
 
     return results;
-  });
+  }, E2E_API_ORIGIN);
 
   for (const [route, response] of Object.entries(responses)) {
     expect(response.status, `${route}: ${response.code}`).not.toBe(400);

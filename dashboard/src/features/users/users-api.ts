@@ -37,28 +37,31 @@ export const setProcessingSuspended = (
     readResult: (receipt) => getUser(client, receipt.resourceId ?? id),
   });
 
-export const getProcessingUsage = (client: ApiClient, id: string) =>
-  client.get<import("@/api/contracts").ProcessingUsage>(
-    `/admin/users/${encodeURIComponent(id)}/processing-usage`,
+export const getAccountUsage = (client: ApiClient, id: string) =>
+  client.get<import("@/api/contracts").AccountUsage>(
+    `/admin/users/${encodeURIComponent(id)}/account-usage`,
   );
 
-export const setProcessingAllowance = (
+export const setAccountPolicyOverride = (
   client: ApiClient,
   id: string,
-  input: RevisionCommand & { allowanceAudioSeconds: number; expiresAt: string },
+  input: RevisionCommand & {
+    values: { monthlyProcessingSeconds: number };
+    expiresAt: string | null;
+  },
 ) =>
   submitWithReceiptReadBack({
     client,
     operationId: input.operationId,
     submit: () =>
       client.put(
-        `/admin/users/${encodeURIComponent(id)}/processing-allowance`,
+        `/admin/users/${encodeURIComponent(id)}/account-policy-override`,
         input,
       ),
-    readResult: () => getProcessingUsage(client, id),
-  }).then(() => getProcessingUsage(client, id));
+    readResult: () => getAccountUsage(client, id),
+  }).then(() => getAccountUsage(client, id));
 
-export const clearProcessingAllowance = (
+export const clearAccountPolicyOverride = (
   client: ApiClient,
   id: string,
   input: RevisionCommand,
@@ -67,9 +70,9 @@ export const clearProcessingAllowance = (
     client,
     operationId: input.operationId,
     submit: () =>
-      client.post(
-        `/admin/users/${encodeURIComponent(id)}/clear-processing-allowance`,
+      client.delete(
+        `/admin/users/${encodeURIComponent(id)}/account-policy-override`,
         input,
       ),
-    readResult: () => getProcessingUsage(client, id),
-  }).then(() => getProcessingUsage(client, id));
+    readResult: () => getAccountUsage(client, id),
+  }).then(() => getAccountUsage(client, id));

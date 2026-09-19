@@ -5,38 +5,35 @@ import {
   RequireAdminPermission,
   RequireFreshAdminAuth,
 } from '../admin/admin.decorators.js';
-import { UpdateProcessingSettingsDto } from './dto/processing-settings.dto.js';
-import { ProcessingSettingsService } from './processing-settings.service.js';
+import { UpdateAccountPolicyDto } from './dto/account-policy.dto.js';
+import { AccountPolicyService } from './account-policy.service.js';
 
 @Controller('admin/settings')
 export class AdminSettingsController {
-  constructor(private readonly settings: ProcessingSettingsService) {}
+  constructor(private readonly policies: AccountPolicyService) {}
 
-  @Get('processing')
+  @Get('account-policy')
   @RequireAdminPermission('settings.read')
   current() {
-    return this.settings.current();
+    return this.policies.current();
   }
 
-  @Put('processing')
+  @Put('account-policy')
   @RequireAdminPermission('settings.manage')
   @RequireFreshAdminAuth()
-  update(
-    @Req() request: AuthRequest,
-    @Body() dto: UpdateProcessingSettingsDto,
-  ) {
-    return this.settings.update(request.adminActor!, dto);
+  update(@Req() request: AuthRequest, @Body() dto: UpdateAccountPolicyDto) {
+    return this.policies.update(request.adminActor!, dto);
   }
 }
 
 @Controller('processing-policy')
 export class ProcessingPolicyController {
-  constructor(private readonly settings: ProcessingSettingsService) {}
+  constructor(private readonly policies: AccountPolicyService) {}
 
   @Get()
   @Public()
   @Header('Cache-Control', 'no-store')
   current(@Query('schemaVersion') schemaVersion?: string) {
-    return this.settings.publicPolicy(schemaVersion);
+    return this.policies.publicPolicy(schemaVersion);
   }
 }

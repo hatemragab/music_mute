@@ -44,6 +44,7 @@ function actionsFixture() {
       transactions as never,
       access as never,
       {} as never,
+      {} as never,
     ),
   };
 }

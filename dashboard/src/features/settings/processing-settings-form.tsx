@@ -1,36 +1,129 @@
-import type { ProcessingSettings } from "@/api/contracts";
+import type { AccountPolicyValues } from "@/api/contracts";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
-export type ProcessingSettingsDraft = Omit<
-  ProcessingSettings,
-  "revision" | "updatedAt"
->;
+export interface AccountPolicyDraft {
+  acceptNewJobs: boolean;
+  maintenanceMessageEn: string;
+  maintenanceMessageAr: string | null;
+  values: AccountPolicyValues;
+}
 
-export const validateProcessingSettings = (value: ProcessingSettingsDraft) => {
+const numericFields: Array<{
+  key: keyof AccountPolicyValues;
+  label: string;
+  help: string;
+  min?: number;
+  max?: number;
+}> = [
+  {
+    key: "monthlyProcessingSeconds",
+    label: "Successful processing seconds / UTC month",
+    help: "7,200 seconds equals 120 minutes. Only successful processing is consumed.",
+  },
+  {
+    key: "maxDurationSeconds",
+    label: "Maximum audio duration seconds",
+    help: "Inclusive backend-owned media ceiling.",
+  },
+  {
+    key: "maxPreparedAudioBytes",
+    label: "Maximum prepared audio bytes",
+    help: "Decimal bytes; the accepted launch default is 50,000,000.",
+  },
+  {
+    key: "dailyUploadGrants",
+    label: "Upload grants / UTC day",
+    help: "Activated by the media-cost branch.",
+  },
+  {
+    key: "monthlyUploadGrants",
+    label: "Upload grants / UTC month",
+    help: "Activated by the media-cost branch.",
+  },
+  {
+    key: "monthlyConfirmedUploadBytes",
+    label: "Confirmed upload bytes / UTC month",
+    help: "Activated by the media-cost branch.",
+  },
+  {
+    key: "maxWaitingJobs",
+    label: "Maximum waiting jobs / account",
+    help: "Activated by the queue branch.",
+    min: 0,
+  },
+  {
+    key: "maxProcessingJobs",
+    label: "Maximum processing jobs / account",
+    help: "Launch default is one.",
+  },
+  {
+    key: "maxInfrastructureAttempts",
+    label: "Infrastructure attempts / job",
+    help: "Total attempts, including the first.",
+  },
+  {
+    key: "maxClientInputAttempts",
+    label: "Client/input attempts / logical audio",
+    help: "Total attempts, including the first.",
+  },
+  {
+    key: "monthlyDownloadGrants",
+    label: "Download grants / UTC month",
+    help: "Activated by the media-cost branch.",
+  },
+  {
+    key: "monthlyEstimatedDownloadBytes",
+    label: "Estimated download bytes / UTC month",
+    help: "Activated by the media-cost branch.",
+  },
+  {
+    key: "maxRetainedOutputBytes",
+    label: "Retained successful output bytes / account",
+    help: "Activated by the media-cost branch.",
+  },
+  {
+    key: "signedUrlTtlSeconds",
+    label: "Signed URL validity seconds",
+    help: "Cannot exceed 600 seconds.",
+    max: 600,
+  },
+  {
+    key: "monthlyServiceOutboundBytes",
+    label: "Service outbound safety bytes / UTC month",
+    help: "Activated by the media-cost branch.",
+  },
+  {
+    key: "deletionGraceHours",
+    label: "Account deletion grace hours",
+    help: "360 hours equals fifteen exact 24-hour periods.",
+    min: 24,
+  },
+];
+
+// Kept with the form so field labels and validation cannot drift.
+// eslint-disable-next-line react-refresh/only-export-components
+export const validateAccountPolicy = (value: AccountPolicyDraft) => {
   const errors: string[] = [];
+  for (const field of numericFields) {
+    const amount = value.values[field.key];
+    if (
+      !Number.isSafeInteger(amount) ||
+      amount < (field.min ?? 1) ||
+      (field.max !== undefined && amount > field.max)
+    )
+      errors.push(`${field.label} has an invalid value.`);
+  }
+  if (value.values.monthlyUploadGrants < value.values.dailyUploadGrants)
+    errors.push("Monthly upload grants cannot be lower than daily grants.");
   if (
-    !Number.isInteger(value.maxInputBytesExclusive) ||
-    value.maxInputBytesExclusive < 2 ||
-    value.maxInputBytesExclusive > 30_000_000
-  )
-    errors.push("Input bytes must be an integer from 2 through 30,000,000.");
-  if (
-    !Number.isFinite(value.maxDurationSecondsExclusive) ||
-    value.maxDurationSecondsExclusive <= 0 ||
-    value.maxDurationSecondsExclusive > 600
-  )
-    errors.push("Duration must be greater than 0 and at most 600 seconds.");
-  if (
-    value.maxActiveJobsPerUser !== null &&
-    (!Number.isInteger(value.maxActiveJobsPerUser) ||
-      value.maxActiveJobsPerUser < 1 ||
-      value.maxActiveJobsPerUser > 100)
+    value.values.monthlyEstimatedDownloadBytes >
+    value.values.monthlyServiceOutboundBytes
   )
     errors.push(
-      "Active jobs must be Unlimited or an integer from 1 through 100.",
+      "The service outbound ceiling cannot be below the account download estimate.",
     );
   if (!value.acceptNewJobs && !value.maintenanceMessageEn.trim())
     errors.push(
@@ -39,16 +132,16 @@ export const validateProcessingSettings = (value: ProcessingSettingsDraft) => {
   return errors;
 };
 
-export function ProcessingSettingsForm({
+export function AccountPolicyForm({
   value,
   onChange,
   disabled,
 }: {
-  value: ProcessingSettingsDraft;
-  onChange(value: ProcessingSettingsDraft): void;
+  value: AccountPolicyDraft;
+  onChange(value: AccountPolicyDraft): void;
   disabled?: boolean;
 }) {
-  const errors = validateProcessingSettings(value);
+  const errors = validateAccountPolicy(value);
   return (
     <fieldset disabled={disabled} className="space-y-6">
       <div className="flex items-start justify-between gap-4 rounded-xl border p-4">
@@ -57,8 +150,8 @@ export function ProcessingSettingsForm({
             Accept new jobs
           </Label>
           <p className="mt-1 text-sm text-muted-foreground">
-            Pausing blocks new reservations. Already accepted jobs continue and
-            results remain available.
+            Pausing blocks new reservations. Already accepted work keeps its
+            policy snapshot.
           </p>
         </div>
         <Switch
@@ -69,74 +162,33 @@ export function ProcessingSettingsForm({
           }
         />
       </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="input-bytes">Maximum input bytes, exclusive</Label>
-          <Input
-            id="input-bytes"
-            type="number"
-            min="2"
-            max="30000000"
-            step="1"
-            value={value.maxInputBytesExclusive}
-            onChange={(event) =>
-              onChange({
-                ...value,
-                maxInputBytesExclusive: Number(event.target.value),
-              })
-            }
-          />
-          <p className="text-xs text-muted-foreground">
-            Files must be smaller than this exact byte value. Server capability
-            maximum: 30,000,000.
-          </p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="duration-seconds">
-            Maximum duration seconds, exclusive
-          </Label>
-          <Input
-            id="duration-seconds"
-            type="number"
-            min="0.001"
-            max="600"
-            step="0.1"
-            value={value.maxDurationSecondsExclusive}
-            onChange={(event) =>
-              onChange({
-                ...value,
-                maxDurationSecondsExclusive: Number(event.target.value),
-              })
-            }
-          />
-          <p className="text-xs text-muted-foreground">
-            Audio must be shorter than this value. Supported maximum: 600
-            seconds.
-          </p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="active-jobs">Maximum active jobs per user</Label>
-          <Input
-            id="active-jobs"
-            type="number"
-            min="1"
-            max="100"
-            step="1"
-            value={value.maxActiveJobsPerUser ?? ""}
-            placeholder="Unlimited"
-            onChange={(event) =>
-              onChange({
-                ...value,
-                maxActiveJobsPerUser:
-                  event.target.value === "" ? null : Number(event.target.value),
-              })
-            }
-          />
-          <p className="text-xs text-muted-foreground">
-            Leave empty for Unlimited. Empty submits null, never zero.
-          </p>
-        </div>
+        {numericFields.map((field) => (
+          <div key={field.key} className="space-y-2">
+            <Label htmlFor={`policy-${field.key}`}>{field.label}</Label>
+            <Input
+              id={`policy-${field.key}`}
+              type="number"
+              min={field.min ?? 1}
+              max={field.max}
+              step="1"
+              value={value.values[field.key]}
+              onChange={(event) =>
+                onChange({
+                  ...value,
+                  values: {
+                    ...value.values,
+                    [field.key]: Number(event.target.value),
+                  },
+                })
+              }
+            />
+            <p className="text-xs text-muted-foreground">{field.help}</p>
+          </div>
+        ))}
       </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="maintenance-en">Maintenance message, English</Label>
@@ -165,6 +217,7 @@ export function ProcessingSettingsForm({
           />
         </div>
       </div>
+
       {errors.length ? (
         <ul className="space-y-1 text-sm text-destructive" role="alert">
           {errors.map((error) => (

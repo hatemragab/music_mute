@@ -58,18 +58,20 @@ class JobsApiClientTest {
         assertFalse(error.message.orEmpty().contains("private"))
     }
 
-    @Test fun usageResponseIsPrivateTypedAndKeepsPartialReplenishments() = runTest {
+    @Test fun usageResponseIsPrivateTypedAndKeepsMonthlyCounters() = runTest {
         val api = client(AuthHttpTransport { url, _, headers, _ ->
             assertTrue(url.endsWith("/processing-usage"))
             assertEquals("Bearer token", headers["Authorization"])
-            AuthHttpResponse(200, """{"policyRevision":1,"allowanceAudioSeconds":3600,"usedAudioSeconds":600,"reservedAudioSeconds":300,
-              "remainingAudioSeconds":2700,"activeJobs":0,"maxActiveJobs":1,"nextReplenishmentAt":"2026-09-14T12:00:00Z",
-              "replenishments":[{"at":"2026-09-14T12:00:00Z","audioSeconds":600}],"availability":"available","checkedAt":"2026-09-13T12:00:00Z"}""")
+            AuthHttpResponse(200, """{"schemaVersion":2,"plan":"standard","policyRevision":1,"overrideRevision":null,
+              "effectivePolicySource":"global","overrideExpiresAt":null,"period":{"key":"2026-09","start":"2026-09-01T00:00:00Z",
+              "end":"2026-10-01T00:00:00Z","nextResetAt":"2026-10-01T00:00:00Z"},"processing":{"limitSeconds":7200,
+              "usedSeconds":600,"reservedSeconds":300,"releasedSeconds":100,"remainingSeconds":6300},"usageRevision":3,
+              "activeJobs":0,"maxProcessingJobs":1,"availability":{"status":"available","reason":null},"checkedAt":"2026-09-13T12:00:00Z"}""")
         })
         val usage = api.processingUsage()!!
-        assertEquals(600.0, usage.usedAudioSeconds, 0.0)
-        assertEquals(300.0, usage.reservedAudioSeconds, 0.0)
-        assertEquals(1, usage.replenishments.size)
+        assertEquals(600.0, usage.processing.usedSeconds, 0.0)
+        assertEquals(300.0, usage.processing.reservedSeconds, 0.0)
+        assertEquals("2026-10-01T00:00:00Z", usage.period.nextResetAt)
     }
 
     @Test fun allRoutesPreserveBodiesAndInstallationHeaders() = runTest {

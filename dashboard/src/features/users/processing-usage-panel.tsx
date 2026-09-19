@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ProcessingUsage } from "@/api/contracts";
+import type { AccountUsage } from "@/api/contracts";
 import { createOperationId } from "@/api/api-client";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { ErrorState, LoadingState, PageSection } from "@/components/page";
@@ -9,23 +9,26 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format";
 import {
-  getProcessingUsage,
-  setProcessingAllowance,
-  clearProcessingAllowance,
+  clearAccountPolicyOverride,
+  getAccountUsage,
+  setAccountPolicyOverride,
 } from "./users-api";
-import { ProcessingAllowanceDialog } from "./processing-allowance-dialog";
+import { AccountPolicyOverrideDialog } from "./account-policy-override-dialog";
 
 const minutes = (value: number) =>
   `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value / 60)} min`;
-export function ProcessingUsagePanel({ usage }: { usage: ProcessingUsage }) {
+
+export function ProcessingUsagePanel({ usage }: { usage: AccountUsage }) {
+  const processing = usage.processing;
   return (
     <div className="space-y-4">
-      <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {[
-          ["Used audio", minutes(usage.usedAudioSeconds)],
-          ["Reserved audio", minutes(usage.reservedAudioSeconds)],
-          ["Remaining allowance", minutes(usage.remainingAudioSeconds)],
-          ["Unfinished jobs", `${usage.activeJobs} / ${usage.maxActiveJobs}`],
+          ["Monthly limit", minutes(processing.limitSeconds)],
+          ["Used", minutes(processing.usedSeconds)],
+          ["Reserved", minutes(processing.reservedSeconds)],
+          ["Refunded / released", minutes(processing.releasedSeconds)],
+          ["Remaining", minutes(processing.remainingSeconds)],
         ].map(([label, value]) => (
           <div key={label}>
             <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -34,44 +37,43 @@ export function ProcessingUsagePanel({ usage }: { usage: ProcessingUsage }) {
         ))}
       </dl>
       <p className="text-sm">
-        Availability: {usage.availability} · Rolling allowance:{" "}
-        {minutes(usage.allowanceAudioSeconds)}
+        UTC period {usage.period.key}: {formatDateTime(usage.period.start)} →{" "}
+        {formatDateTime(usage.period.end)}. Next reset{" "}
+        {formatDateTime(usage.period.nextResetAt)}.
       </p>
       <p className="text-sm">
-        Next replenishment:{" "}
-        {usage.nextReplenishmentAt
-          ? formatDateTime(usage.nextReplenishmentAt)
-          : "Unavailable"}
+        Policy source: {usage.effectivePolicySource.replaceAll("_", " ")} ·{" "}
+        availability {usage.availability.status}
+        {usage.availability.reason
+          ? ` (${usage.availability.reason.replaceAll("_", " ")})`
+          : ""}
+        .
       </p>
-      {usage.replenishments.length ? (
-        <ul className="space-y-1 text-sm">
-          {usage.replenishments.map((entry, index) => (
-            <li key={`${entry.at}-${index}`}>
-              {formatDateTime(entry.at)}: {minutes(entry.audioSeconds)}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {usage.allowanceOverride ? (
+      {usage.policyOverride ? (
         <p className="rounded-lg border p-3 text-sm">
-          Temporary total allowance:{" "}
-          {minutes(usage.allowanceOverride.allowanceAudioSeconds)} · Expires{" "}
-          {formatDateTime(usage.allowanceOverride.expiresAt)}. Effective access
-          is confirmed by the server.
+          Account override revision {usage.policyOverride.revision}:{" "}
+          {minutes(
+            usage.policyOverride.values.monthlyProcessingSeconds ??
+              processing.limitSeconds,
+          )}
+          {usage.policyOverride.expiresAt
+            ? ` · Expires ${formatDateTime(usage.policyOverride.expiresAt)}`
+            : " · No expiry"}
+          .
         </p>
       ) : (
         <p className="text-sm text-muted-foreground">
-          No temporary allowance override.
+          No account policy override. The global standard policy applies.
         </p>
       )}
       <p className="text-xs text-muted-foreground">
-        Checked {formatDateTime(usage.checkedAt)} · Policy revision{" "}
-        {usage.policyRevision} · Account revision {usage.revision}
+        Checked {formatDateTime(usage.checkedAt)} · policy revision{" "}
+        {usage.policyRevision} · usage revision {usage.usageRevision}. Active
+        jobs {usage.activeJobs} / {usage.maxProcessingJobs}.
       </p>
       <p className="text-sm text-muted-foreground">
-        Unfinished and unresolved cancellation holds remain reserved until
-        authoritative settlement. A rolling window has multiple replenishments;
-        deleting history does not restore allowance.
+        Usage belongs to the account and is shared by all installations. Devices
+        do not split or renew this allowance.
       </p>
     </div>
   );
@@ -82,30 +84,34 @@ export function ProcessingUsageSection({ userId }: { userId: string }) {
   const queryClient = useQueryClient();
   const { can, reauthenticate } = useAdminSession();
   const usage = useQuery({
-    queryKey: ["processing-usage", userId],
-    queryFn: () => getProcessingUsage(client, userId),
+    queryKey: ["account-usage", userId],
+    queryFn: () => getAccountUsage(client, userId),
     enabled: can("users.read"),
   });
   const [editingRevision, setEditingRevision] = useState<number | null>(null);
   const [clearingRevision, setClearingRevision] = useState<number | null>(null);
   const update = useMutation({
     mutationFn: (input: {
-      allowanceAudioSeconds: number;
-      expiresAt: string;
+      monthlyProcessingSeconds: number;
+      expiresAt: string | null;
       reason: string;
     }) => {
       if (!can("users.processing.manage") || editingRevision == null)
         throw new Error(
-          "Permission and a current account revision are required.",
+          "Permission and a current override revision are required.",
         );
-      return setProcessingAllowance(client, userId, {
-        ...input,
+      return setAccountPolicyOverride(client, userId, {
+        values: {
+          monthlyProcessingSeconds: input.monthlyProcessingSeconds,
+        },
+        expiresAt: input.expiresAt,
+        reason: input.reason,
         operationId: createOperationId(),
         expectedRevision: editingRevision,
       });
     },
     onSuccess: async (result) => {
-      queryClient.setQueryData(["processing-usage", userId], result);
+      queryClient.setQueryData(["account-usage", userId], result);
       await queryClient.invalidateQueries({ queryKey: ["user", userId] });
       await queryClient.invalidateQueries({ queryKey: ["users"] });
       await queryClient.invalidateQueries({ queryKey: ["audit"] });
@@ -114,14 +120,14 @@ export function ProcessingUsageSection({ userId }: { userId: string }) {
   const clear = async (reason: string) => {
     if (!can("users.processing.manage") || clearingRevision == null)
       throw new Error(
-        "Permission and a current account revision are required.",
+        "Permission and a current override revision are required.",
       );
-    const result = await clearProcessingAllowance(client, userId, {
+    const result = await clearAccountPolicyOverride(client, userId, {
       operationId: createOperationId(),
       expectedRevision: clearingRevision,
       reason,
     });
-    queryClient.setQueryData(["processing-usage", userId], result);
+    queryClient.setQueryData(["account-usage", userId], result);
     await queryClient.invalidateQueries({ queryKey: ["user", userId] });
     await queryClient.invalidateQueries({ queryKey: ["audit"] });
   };
@@ -129,7 +135,7 @@ export function ProcessingUsageSection({ userId }: { userId: string }) {
   return (
     <Card>
       <CardContent className="space-y-4 p-5">
-        <PageSection title="Rolling processing allowance">
+        <PageSection title="UTC monthly account usage">
           {usage.isLoading ? (
             <LoadingState />
           ) : usage.isError ? (
@@ -147,29 +153,38 @@ export function ProcessingUsageSection({ userId }: { userId: string }) {
                 {can("users.processing.manage") ? (
                   <>
                     <Button
-                      onClick={() => setEditingRevision(usage.data!.revision)}
+                      onClick={() =>
+                        setEditingRevision(
+                          usage.data!.policyOverride?.revision ?? 0,
+                        )
+                      }
                     >
-                      Temporary allowance increase
+                      {usage.data.policyOverride
+                        ? "Edit account override"
+                        : "Add account override"}
                     </Button>
-                    {usage.data.allowanceOverride ? (
+                    {usage.data.policyOverride ? (
                       <Button
                         variant="outline"
                         onClick={() =>
-                          setClearingRevision(usage.data!.revision)
+                          setClearingRevision(
+                            usage.data!.policyOverride!.revision,
+                          )
                         }
                       >
-                        Revoke allowance override
+                        Clear account override
                       </Button>
                     ) : null}
                   </>
                 ) : null}
               </div>
-              <ProcessingAllowanceDialog
+              <AccountPolicyOverrideDialog
                 open={editingRevision != null}
                 onOpenChange={(open) => {
                   if (!open) setEditingRevision(null);
                 }}
-                currentSeconds={usage.data.allowanceAudioSeconds}
+                currentSeconds={usage.data.processing.limitSeconds}
+                currentExpiry={usage.data.policyOverride?.expiresAt ?? null}
                 reauthenticate={reauthenticate}
                 onSave={(input) =>
                   update.mutateAsync(input).then(() => undefined)
@@ -180,9 +195,9 @@ export function ProcessingUsageSection({ userId }: { userId: string }) {
                 onOpenChange={(open) => {
                   if (!open) setClearingRevision(null);
                 }}
-                title="Revoke allowance override"
-                description="Return to the regular rolling allowance. Already accepted reservations remain held and media safety limits are unchanged."
-                confirmLabel="Revoke override"
+                title="Clear account policy override"
+                description="Return this account to the global standard policy. Existing usage and accepted reservations are not changed."
+                confirmLabel="Clear override"
                 destructive
                 freshAuth
                 onReauthenticate={reauthenticate}

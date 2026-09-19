@@ -7,31 +7,76 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class ProcessingReplenishment(val at: String, val audioSeconds: Double)
+data class ProcessingUsagePeriod(
+    val key: String,
+    val start: String,
+    val end: String,
+    val nextResetAt: String,
+)
+
+@Serializable
+data class ProcessingUsageAmounts(
+    val limitSeconds: Double,
+    val usedSeconds: Double,
+    val reservedSeconds: Double,
+    val releasedSeconds: Double,
+    val remainingSeconds: Double,
+)
+
+@Serializable
+data class ProcessingAvailability(val status: String, val reason: String? = null)
+
 @Serializable
 data class ProcessingUsage(
-    val policyRevision: Int, val allowanceAudioSeconds: Double, val usedAudioSeconds: Double,
-    val reservedAudioSeconds: Double, val remainingAudioSeconds: Double, val activeJobs: Int,
-    val maxActiveJobs: Int, val nextReplenishmentAt: String? = null,
-    val replenishments: List<ProcessingReplenishment> = emptyList(), val availability: String,
+    val schemaVersion: Int,
+    val plan: String,
+    val policyRevision: Int,
+    val overrideRevision: Int? = null,
+    val effectivePolicySource: String,
+    val overrideExpiresAt: String? = null,
+    val period: ProcessingUsagePeriod,
+    val processing: ProcessingUsageAmounts,
+    val usageRevision: Int,
+    val activeJobs: Int,
+    val maxProcessingJobs: Int,
+    val availability: ProcessingAvailability,
     val checkedAt: String,
 ) {
     fun validate() {
-        if (listOf(allowanceAudioSeconds, usedAudioSeconds, reservedAudioSeconds, remainingAudioSeconds).any { !it.isFinite() || it < 0 } ||
-            activeJobs < 0 || maxActiveJobs < 1 || replenishments.size > 100 ||
-            availability !in setOf("available", "busy", "paused", "unavailable")) throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE)
+        val amounts = listOf(
+            processing.limitSeconds,
+            processing.usedSeconds,
+            processing.reservedSeconds,
+            processing.releasedSeconds,
+            processing.remainingSeconds,
+        )
+        if (schemaVersion != 2 || plan != "standard" || policyRevision < 0 ||
+            overrideRevision?.let { it < 1 } == true || usageRevision < 0 ||
+            effectivePolicySource !in setOf("global", "account_override") ||
+            amounts.any { !it.isFinite() || it < 0 } ||
+            processing.remainingSeconds > processing.limitSeconds ||
+            activeJobs < 0 || maxProcessingJobs < 1 ||
+            availability.status !in setOf("available", "blocked") ||
+            availability.reason !in setOf(null, "paused", "monthly_limit_reached", "active_job_limit") ||
+            (availability.status == "available") != (availability.reason == null)) {
+            throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE)
+        }
         try {
-            Instant.parse(checkedAt); nextReplenishmentAt?.let(Instant::parse)
-            replenishments.forEach { require(it.audioSeconds.isFinite() && it.audioSeconds >= 0); Instant.parse(it.at) }
+            val start = Instant.parse(period.start)
+            val end = Instant.parse(period.end)
+            require(start < end && Instant.parse(period.nextResetAt) == end)
+            Instant.parse(checkedAt)
+            overrideExpiresAt?.let(Instant::parse)
         } catch (_: Exception) { throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE) }
     }
     fun requireAvailable(checkAvailability: Boolean = true) {
-        if (activeJobs >= maxActiveJobs) throw JobsFailure(JobsProblem.PROCESSING_LIMIT_REACHED)
-        if (remainingAudioSeconds <= 0) throw JobsFailure(JobsProblem.PROCESSING_ALLOWANCE_EXHAUSTED)
+        if (activeJobs >= maxProcessingJobs) throw JobsFailure(JobsProblem.PROCESSING_LIMIT_REACHED)
+        if (processing.remainingSeconds <= 0) throw JobsFailure(JobsProblem.PROCESSING_ALLOWANCE_EXHAUSTED)
         if (!checkAvailability) return
-        when (availability) {
-            "busy" -> throw JobsFailure(JobsProblem.PROCESSING_QUEUE_FULL)
-            "paused", "unavailable" -> throw JobsFailure(JobsProblem.PROCESSING_CAPACITY_UNAVAILABLE)
+        when (availability.reason) {
+            "monthly_limit_reached" -> throw JobsFailure(JobsProblem.PROCESSING_ALLOWANCE_EXHAUSTED)
+            "active_job_limit" -> throw JobsFailure(JobsProblem.PROCESSING_LIMIT_REACHED)
+            "paused" -> throw JobsFailure(JobsProblem.PROCESSING_CAPACITY_UNAVAILABLE)
         }
     }
 }

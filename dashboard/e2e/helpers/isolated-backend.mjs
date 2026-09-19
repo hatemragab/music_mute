@@ -45,7 +45,8 @@ try {
       RATE_LIMIT: "10000",
       ADMIN_SENSITIVE_OPERATIONS_PER_MINUTE: "100",
       DASHBOARD_SERVE_FOR_BROWSER: "1",
-      DASHBOARD_SERVE_PORT: "3100",
+      DASHBOARD_SERVE_PORT:
+        process.env.DASHBOARD_E2E_API_PORT?.trim() || "3100",
     },
     services.directory,
   );

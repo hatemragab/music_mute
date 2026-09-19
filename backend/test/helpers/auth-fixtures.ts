@@ -40,10 +40,11 @@ import { Release } from '../../src/releases/release.schema.js';
 import { ReleaseUpload } from '../../src/releases/release-upload.schema.js';
 import { AdminAlert } from '../../src/admin-observability/admin-alert.schema.js';
 import { AdminAlertObservation } from '../../src/admin-observability/admin-alert-observation.schema.js';
+import { ProcessingAdmissionFence } from '../../src/admin-settings/processing-settings.schema.js';
 import {
-  ProcessingAdmissionFence,
-  ProcessingSettings,
-} from '../../src/admin-settings/processing-settings.schema.js';
+  AccountPolicy,
+  AccountPolicyOverride,
+} from '../../src/admin-settings/account-policy.schema.js';
 import type {
   DeviceReport,
   VerifiedIdentity,
@@ -340,7 +341,8 @@ export async function authFixture() {
     ReleaseUpload.name,
     AdminAlert.name,
     AdminAlertObservation.name,
-    ProcessingSettings.name,
+    AccountPolicy.name,
+    AccountPolicyOverride.name,
     ProcessingAdmissionFence.name,
     StorageCleanupTask.name,
     ...PROCESSING_MODELS.map(({ name }) => name),

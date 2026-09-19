@@ -27,7 +27,7 @@ test("owner can open every dashboard area without runtime errors", async ({
     ["/releases", "Releases"],
     [`/releases/${FIXTURE_IDS.release}`, "2.0.0 (20)"],
     ["/update-policy", "Update policy"],
-    ["/settings", "Processing settings"],
+    ["/settings", "Standard account policy"],
     ["/health", "System health"],
     ["/activity", "Activity log"],
     ["/administrators", "Administrators"],
@@ -370,7 +370,7 @@ test("owner uploads a direct APK, publishes verified policy, and saves settings"
   await dialog
     .getByRole("button", { name: "Reauthenticate with Google" })
     .click();
-  await dialog.getByRole("button", { name: "Save settings" }).click();
+  await dialog.getByRole("button", { name: "Save policy" }).click();
   await expect(dialog).toHaveCount(0);
   expect(fixture.settings.acceptNewJobs).toBe(false);
   expect(fixture.settings.maintenanceMessageEn).toBe(
@@ -428,7 +428,7 @@ test("a lost settings response is reconciled through the operation receipt", asy
   const fixture = await installDashboardFixture(page);
   let committedOperationId: string | null = null;
   await page.route(
-    "**/api/v1/admin/settings/processing",
+    "**/api/v1/admin/settings/account-policy",
     async (route, request) => {
       if (request.method() !== "PUT" || committedOperationId) {
         await route.fallback();
@@ -470,10 +470,10 @@ test("a lost settings response is reconciled through the operation receipt", asy
   await dialog
     .getByRole("button", { name: "Reauthenticate with Google" })
     .click();
-  await dialog.getByRole("button", { name: "Save settings" }).click();
+  await dialog.getByRole("button", { name: "Save policy" }).click();
 
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByText("Revision 2")).toBeVisible();
+  await expect(page.getByText(/revision 2/i)).toBeVisible();
   expect(committedOperationId).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
   );

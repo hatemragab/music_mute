@@ -1,30 +1,53 @@
 import Foundation
 
 struct ProcessingUsage: Decodable, Equatable, Sendable {
-  struct Replenishment: Decodable, Equatable, Sendable {
-    let at: Date
-    let audioSeconds: Double
+  struct Period: Decodable, Equatable, Sendable {
+    let key: String
+    let start: Date
+    let end: Date
+    let nextResetAt: Date
   }
+  struct Processing: Decodable, Equatable, Sendable {
+    let limitSeconds: Double
+    let usedSeconds: Double
+    let reservedSeconds: Double
+    let releasedSeconds: Double
+    let remainingSeconds: Double
+  }
+  struct Availability: Decodable, Equatable, Sendable {
+    let status: String
+    let reason: String?
+  }
+  let schemaVersion: Int
+  let plan: String
   let policyRevision: Int
-  let allowanceAudioSeconds: Double
-  let usedAudioSeconds: Double
-  let reservedAudioSeconds: Double
-  let remainingAudioSeconds: Double
+  let overrideRevision: Int?
+  let effectivePolicySource: String
+  let overrideExpiresAt: Date?
+  let period: Period
+  let processing: Processing
+  let usageRevision: Int
   let activeJobs: Int
-  let maxActiveJobs: Int
-  let nextReplenishmentAt: Date?
-  let replenishments: [Replenishment]
-  let availability: String
+  let maxProcessingJobs: Int
+  let availability: Availability
   let checkedAt: Date
 
   func validate() throws {
+    let amounts = [
+      processing.limitSeconds, processing.usedSeconds, processing.reservedSeconds,
+      processing.releasedSeconds, processing.remainingSeconds,
+    ]
     guard
-      [allowanceAudioSeconds, usedAudioSeconds, reservedAudioSeconds, remainingAudioSeconds]
-        .allSatisfy({ $0.isFinite && $0 >= 0 }), activeJobs >= 0, maxActiveJobs > 0,
-      remainingAudioSeconds <= allowanceAudioSeconds,
-      ["available", "busy", "paused", "unavailable"].contains(availability),
-      replenishments.count <= 100,
-      replenishments.allSatisfy({ $0.audioSeconds.isFinite && $0.audioSeconds > 0 })
+      schemaVersion == 2, plan == "standard", policyRevision >= 0,
+      overrideRevision.map({ $0 > 0 }) ?? true, usageRevision >= 0,
+      ["global", "account_override"].contains(effectivePolicySource),
+      amounts.allSatisfy({ $0.isFinite && $0 >= 0 }),
+      processing.remainingSeconds <= processing.limitSeconds,
+      activeJobs >= 0, maxProcessingJobs > 0, period.start < period.end,
+      period.nextResetAt == period.end,
+      ["available", "blocked"].contains(availability.status),
+      [nil, "paused", "monthly_limit_reached", "active_job_limit"].contains(availability.reason),
+      (availability.status == "available") == (availability.reason == nil)
     else { throw JobsFailure.malformedResponse }
   }
 }
@@ -52,15 +75,21 @@ struct ProcessingUsage: Decodable, Equatable, Sendable {
   }
   func checkAvailability() throws {
     guard let usage, let receivedAt, abs(receivedAt.timeIntervalSinceNow) < 120 else { return }
-    if usage.activeJobs >= usage.maxActiveJobs {
+    if usage.activeJobs >= usage.maxProcessingJobs {
       throw JobsFailure.conflict(code: "PROCESSING_LIMIT_REACHED")
     }
-    if usage.remainingAudioSeconds <= 0 {
+    if usage.processing.remainingSeconds <= 0 {
       throw JobsFailure.conflict(code: "PROCESSING_ALLOWANCE_EXHAUSTED")
     }
-    if usage.availability == "busy" { throw JobsFailure.conflict(code: "PROCESSING_QUEUE_FULL") }
-    if usage.availability != "available" {
+    switch usage.availability.reason {
+    case "monthly_limit_reached":
+      throw JobsFailure.conflict(code: "PROCESSING_ALLOWANCE_EXHAUSTED")
+    case "active_job_limit":
+      throw JobsFailure.conflict(code: "PROCESSING_LIMIT_REACHED")
+    case "paused":
       throw JobsFailure.conflict(code: "PROCESSING_CAPACITY_UNAVAILABLE")
+    default:
+      break
     }
   }
 }

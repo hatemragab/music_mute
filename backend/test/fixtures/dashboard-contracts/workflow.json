@@ -444,15 +444,33 @@
     },
     {
       "method": "GET",
-      "path": "/admin/settings/processing",
+      "path": "/admin/settings/account-policy",
       "response": {
+        "plan": "standard",
         "revision": 0,
         "acceptNewJobs": true,
         "maintenanceMessageEn": "",
         "maintenanceMessageAr": null,
-        "maxInputBytesExclusive": 30000000,
-        "maxDurationSecondsExclusive": 600,
-        "maxActiveJobsPerUser": null,
+        "values": {
+          "monthlyProcessingSeconds": 7200,
+          "maxDurationSeconds": 1200,
+          "maxPreparedAudioBytes": 50000000,
+          "dailyUploadGrants": 30,
+          "monthlyUploadGrants": 200,
+          "monthlyConfirmedUploadBytes": 1000000000,
+          "maxWaitingJobs": 3,
+          "maxProcessingJobs": 1,
+          "maxInfrastructureAttempts": 3,
+          "maxClientInputAttempts": 5,
+          "monthlyDownloadGrants": 150,
+          "monthlyEstimatedDownloadBytes": 10000000000,
+          "maxRetainedOutputBytes": 1000000000,
+          "signedUrlTtlSeconds": 600,
+          "monthlyServiceOutboundBytes": 80000000000,
+          "deletionGraceHours": 360
+        },
+        "enforcedFeatures": ["processing_minutes"],
+        "updatedBy": "system",
         "updatedAt": "2026-01-01T00:00:00.000Z"
       }
     },

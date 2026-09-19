@@ -207,14 +207,34 @@ export interface UpdatePolicy {
   };
 }
 
-export interface ProcessingSettings {
+export interface AccountPolicyValues {
+  monthlyProcessingSeconds: number;
+  maxDurationSeconds: number;
+  maxPreparedAudioBytes: number;
+  dailyUploadGrants: number;
+  monthlyUploadGrants: number;
+  monthlyConfirmedUploadBytes: number;
+  maxWaitingJobs: number;
+  maxProcessingJobs: number;
+  maxInfrastructureAttempts: number;
+  maxClientInputAttempts: number;
+  monthlyDownloadGrants: number;
+  monthlyEstimatedDownloadBytes: number;
+  maxRetainedOutputBytes: number;
+  signedUrlTtlSeconds: number;
+  monthlyServiceOutboundBytes: number;
+  deletionGraceHours: number;
+}
+
+export interface AccountPolicy {
+  plan: "standard";
   revision: number;
   acceptNewJobs: boolean;
   maintenanceMessageEn: string;
   maintenanceMessageAr: string | null;
-  maxInputBytesExclusive: number;
-  maxDurationSecondsExclusive: number;
-  maxActiveJobsPerUser: number | null;
+  values: AccountPolicyValues;
+  enforcedFeatures: string[];
+  updatedBy: string;
   updatedAt: string;
 }
 
@@ -325,21 +345,44 @@ export interface RevisionCommand {
   reason: string;
 }
 
-export interface ProcessingUsage {
+export interface AccountPolicyOverride {
   revision: number;
+  values: { monthlyProcessingSeconds?: number };
+  expiresAt: string | null;
+  reason: string;
+  createdBy: string;
+  updatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountUsage {
+  schemaVersion: 2;
+  plan: "standard";
   policyRevision: number;
-  allowanceAudioSeconds: number;
-  usedAudioSeconds: number;
-  reservedAudioSeconds: number;
-  remainingAudioSeconds: number;
+  overrideRevision: number | null;
+  effectivePolicySource: "global" | "account_override";
+  overrideExpiresAt: string | null;
+  period: {
+    key: string;
+    start: string;
+    end: string;
+    nextResetAt: string;
+  };
+  processing: {
+    limitSeconds: number;
+    usedSeconds: number;
+    reservedSeconds: number;
+    releasedSeconds: number;
+    remainingSeconds: number;
+  };
+  usageRevision: number;
   activeJobs: number;
-  maxActiveJobs: number;
-  nextReplenishmentAt: string | null;
-  replenishments: Array<{ at: string; audioSeconds: number }>;
-  availability: "available" | "busy" | "paused" | "unavailable";
+  maxProcessingJobs: number;
+  availability: {
+    status: "available" | "blocked";
+    reason: "paused" | "monthly_limit_reached" | "active_job_limit" | null;
+  };
   checkedAt: string;
-  allowanceOverride: {
-    allowanceAudioSeconds: number;
-    expiresAt: string;
-  } | null;
+  policyOverride: AccountPolicyOverride | null;
 }

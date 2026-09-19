@@ -5,8 +5,8 @@
   "collectionBranch": "codex/backend-security-cost-hardening",
   "collectionParent": "codex/worker-rebuild",
   "baselineCommit": "947d0544a6c93aff63243770d0aba05d7e67c89d",
-  "documentationStatus": "draft_for_review",
-  "implementationStatus": "not_started",
+  "documentationStatus": "approved",
+  "implementationStatus": "branch_1_ready_for_review",
   "totalCheckpoints": 32,
   "protectedBranches": ["main", "codex/worker-rebuild"],
   "agentMayNotWithoutExplicitInstruction": [
@@ -35,8 +35,8 @@
       "architectureFile": "architecture/01-account-policy-and-usage.md",
       "evidenceFile": "evidence/01-account-quotas-admin-controls.md",
       "checkpoints": ["A1", "A2", "A3", "A4", "A5", "A6"],
-      "status": "not_started",
-      "currentCheckpoint": "A1",
+      "status": "ready_for_review",
+      "currentCheckpoint": null,
       "lastVerifiedCommit": null,
       "purpose": "Monthly account quota, policy settings, overrides, admin controls, and usage explanation"
     },

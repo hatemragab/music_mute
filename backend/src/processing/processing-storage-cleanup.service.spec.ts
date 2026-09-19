@@ -23,6 +23,7 @@ function fixture() {
     updateOne: vi.fn(async () => ({ matchedCount: 1, modifiedCount: 1 })),
   };
   const cleanup = { schedule: vi.fn(async () => undefined) };
+  const usage = { settleJob: vi.fn(async () => undefined) };
   const session = { fixture: true };
   const transactions = {
     run: <T>(action: (session: unknown) => Promise<T>) => action(session),
@@ -31,8 +32,9 @@ function fixture() {
     jobs as unknown as Model<Job>,
     transactions as unknown as ProcessingTransactions,
     cleanup as unknown as StorageCleanupService,
+    usage as never,
   );
-  return { service, jobs, cleanup, session };
+  return { service, jobs, cleanup, usage, session };
 }
 
 describe('ProcessingStorageCleanupService', () => {

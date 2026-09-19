@@ -49,7 +49,7 @@ import {
 
 interface RouteFixture {
   controller: string;
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   path: string;
   permissions: string[];
   roles: AdminRole[];
@@ -231,7 +231,7 @@ describe('complete administration route authorization contract', () => {
   for (const route of inventory.routes) {
     it(`${route.method} ${route.path}: credentials, roles, freshness, rate limit and validation`, async () => {
       const method = route.method.toLowerCase() as
-        'get' | 'post' | 'put' | 'patch';
+        'get' | 'post' | 'put' | 'patch' | 'delete';
       const send = (token?: string, body: unknown = route.requestBody) =>
         harness.request(method, endpoint(route), body, token);
       for (const token of [

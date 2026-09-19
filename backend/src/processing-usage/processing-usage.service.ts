@@ -1,184 +1,330 @@
-import {
-  DEFAULT_PROCESSING_SETTINGS,
-  ProcessingSettings,
-} from '../admin-settings/processing-settings.schema.js';
-import { effectiveAllowance } from './processing-allowance.js';
-import { User } from '../users/user.schema.js';
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { trusted, type ClientSession, type Model, type Types } from 'mongoose';
-import { ProcessingUsageLedger } from './processing-usage.schema.js';
-import { summarizeUsage } from './usage-accounting.js';
-import { jobError } from '../jobs/job-errors.js';
+import { AccountPolicyService } from '../admin-settings/account-policy.service.js';
 import { Job } from '../jobs/job.schema.js';
+import { jobError } from '../jobs/job-errors.js';
 import { ACTIVE_ADMISSION_STATUSES } from '../jobs/job-state.js';
+import { User } from '../users/user.schema.js';
+import {
+  AccountUsagePeriod,
+  ProcessingReservation,
+} from './processing-usage.schema.js';
+import {
+  summarizeMonthlyProcessing,
+  usagePeriodId,
+  utcMonthPeriod,
+} from './usage-accounting.js';
+
+const emptyCounters = () => ({
+  processingUsedSeconds: 0,
+  processingReservedSeconds: 0,
+  processingReservationCount: 0,
+  processingReleasedSeconds: 0,
+  uploadGrants: 0,
+  confirmedUploadBytes: 0,
+  downloadGrants: 0,
+  estimatedDownloadBytes: 0,
+  revision: 0,
+});
 
 @Injectable()
 export class ProcessingUsageService {
   constructor(
-    @InjectModel(ProcessingUsageLedger.name)
-    private readonly ledger: Model<ProcessingUsageLedger>,
+    @InjectModel(AccountUsagePeriod.name)
+    private readonly periods: Model<AccountUsagePeriod>,
+    @InjectModel(ProcessingReservation.name)
+    private readonly reservations: Model<ProcessingReservation>,
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
+    @InjectModel(User.name) private readonly users: Model<User>,
+    private readonly policies: AccountPolicyService,
     @Optional() private readonly config?: ConfigService,
   ) {}
 
-  async readUsage(userId: Types.ObjectId, session?: ClientSession) {
-    const now = new Date();
-    const entries = await this.ledger
-      .find({
-        userId,
-        $or: [
-          { state: 'reserved' },
-          { state: 'pending', expiresAt: null },
-          { state: 'pending', expiresAt: trusted({ $gt: now }) },
-          { state: 'used', expiresAt: trusted({ $gt: now }) },
-        ],
-      })
-      .session(session ?? null)
-      .maxTimeMS(5000)
-      .lean();
-    const user = await this.jobs.db
-      .model<User>(User.name)
-      .findById(userId)
-      .session(session ?? null)
-      .maxTimeMS(5000)
-      .lean();
-    if (!user) throw jobError('PROCESSING_UNAVAILABLE');
-    const legacySettings = await this.jobs.db
-      .model<ProcessingSettings>(ProcessingSettings.name)
-      .findById('processing')
-      .session(session ?? null)
-      .maxTimeMS(5000)
-      .lean();
-    const allowanceAudioSeconds = effectiveAllowance(user, now);
-    const summary = summarizeUsage(entries, allowanceAudioSeconds, now);
+  async readUsage(
+    accountId: Types.ObjectId,
+    session?: ClientSession,
+    now = new Date(),
+  ) {
+    const userQuery = this.users.findById(accountId);
+    if (session) userQuery.session(session);
+    if (!(await userQuery.lean())) throw jobError('PROCESSING_UNAVAILABLE');
+
+    const effective = await this.policies.effective(accountId, now, session);
+    const period = utcMonthPeriod(now);
+    let usageQuery = this.periods.findById(
+      usagePeriodId(accountId, period.key),
+    );
+    if (session) usageQuery = usageQuery.session(session);
+    const stored = await usageQuery.maxTimeMS(5000).lean();
+    const counters = stored ?? emptyCounters();
+    const processing = summarizeMonthlyProcessing(
+      counters,
+      effective.values.monthlyProcessingSeconds,
+    );
     const activeJobs = await this.jobs
       .countDocuments({
-        userId,
+        userId: accountId,
+        deletedAt: null,
         status: trusted({ $in: ACTIVE_ADMISSION_STATUSES }),
       })
       .session(session ?? null);
-    const maxActiveJobs = legacySettings?.maxActiveJobsPerUser ?? 1;
     const processingEnabled =
       this.config?.get<boolean>('AUDIO_PROCESSING_ENABLED') ?? true;
     const availability =
-      !processingEnabled ||
-      (legacySettings?.acceptNewJobs ??
-        DEFAULT_PROCESSING_SETTINGS.acceptNewJobs) === false
-        ? ('paused' as const)
-        : activeJobs >= maxActiveJobs
-          ? ('busy' as const)
-          : ('available' as const);
+      !processingEnabled || !effective.acceptNewJobs
+        ? { status: 'blocked' as const, reason: 'paused' as const }
+        : processing.remainingSeconds === 0
+          ? {
+              status: 'blocked' as const,
+              reason: 'monthly_limit_reached' as const,
+            }
+          : activeJobs >= effective.values.maxProcessingJobs
+            ? {
+                status: 'blocked' as const,
+                reason: 'active_job_limit' as const,
+              }
+            : { status: 'available' as const, reason: null };
+
     return {
-      policyRevision: legacySettings?.revision ?? 0,
-      allowanceAudioSeconds,
-      ...summary,
+      schemaVersion: 2 as const,
+      plan: effective.plan,
+      policyRevision: effective.globalRevision,
+      overrideRevision: effective.overrideRevision,
+      effectivePolicySource: effective.source,
+      overrideExpiresAt: effective.overrideExpiresAt?.toISOString() ?? null,
+      period: {
+        key: period.key,
+        start: period.start.toISOString(),
+        end: period.end.toISOString(),
+        nextResetAt: period.end.toISOString(),
+      },
+      processing: {
+        limitSeconds: effective.values.monthlyProcessingSeconds,
+        ...processing,
+      },
+      usageRevision: counters.revision,
       activeJobs,
-      maxActiveJobs,
-      nextReplenishmentAt: summary.replenishments[0]?.at ?? null,
+      maxProcessingJobs: effective.values.maxProcessingJobs,
       availability,
       checkedAt: now.toISOString(),
     };
   }
 
-  /** Caller holds the existing owner and global admission fences in this transaction. */
   async reserveForJob(
     jobId: Types.ObjectId,
-    userId: Types.ObjectId,
+    accountId: Types.ObjectId,
     duration: number,
     session: ClientSession,
+    now = new Date(),
   ) {
-    if (!session.inTransaction())
-      throw new Error('Usage admission requires a transaction');
-    const audioSeconds = Math.ceil(duration);
-    if (
-      !Number.isSafeInteger(audioSeconds) ||
-      audioSeconds < 1 ||
-      audioSeconds > 1800
-    )
+    this.assertTransaction(session);
+    const processingSeconds = Math.ceil(duration);
+    if (!Number.isSafeInteger(processingSeconds) || processingSeconds < 1)
       throw jobError('MEDIA_TOO_LONG');
-    const existing = await this.ledger.findById(jobId).session(session).lean();
+
+    const existing = await this.reservations
+      .findById(jobId)
+      .session(session)
+      .lean();
     if (existing) {
       if (
-        !existing.userId.equals(userId) ||
-        existing.audioSeconds !== audioSeconds
+        !existing.accountId.equals(accountId) ||
+        existing.processingSeconds !== processingSeconds
       )
         throw jobError('IDEMPOTENCY_CONFLICT');
-      return;
+      return existing;
     }
-    const usage = await this.readUsage(userId, session);
-    if (usage.remainingAudioSeconds < audioSeconds)
+
+    const effective = await this.policies.effective(accountId, now, session);
+    if (processingSeconds > effective.values.maxDurationSeconds)
+      throw jobError('MEDIA_TOO_LONG');
+    const period = utcMonthPeriod(now);
+    const periodId = usagePeriodId(accountId, period.key);
+    await this.ensurePeriod(accountId, periodId, period, session, now);
+    const updated = await this.periods
+      .findOneAndUpdate(
+        {
+          _id: periodId,
+          $expr: {
+            $lte: [
+              {
+                $add: [
+                  '$processingUsedSeconds',
+                  '$processingReservedSeconds',
+                  processingSeconds,
+                ],
+              },
+              effective.values.monthlyProcessingSeconds,
+            ],
+          },
+        },
+        {
+          $inc: {
+            processingReservedSeconds: processingSeconds,
+            processingReservationCount: 1,
+            revision: 1,
+          },
+          $set: { lastMutationAt: now, purgeAt: null },
+        },
+        { session, returnDocument: 'after', runValidators: true },
+      )
+      .lean();
+    if (!updated)
       throw jobError('PROCESSING_ALLOWANCE_EXHAUSTED', {
-        nextReplenishmentAt: usage.nextReplenishmentAt,
+        nextResetAt: period.end.toISOString(),
       });
-    await this.ledger.create(
+    const [reservation] = await this.reservations.create(
       [
         {
           _id: jobId,
-          userId,
-          audioSeconds,
-          allowanceAudioSeconds: usage.allowanceAudioSeconds,
+          accountId,
+          periodKey: period.key,
+          processingSeconds,
           state: 'reserved',
-          createdAt: new Date(),
+          globalPolicyRevision: effective.globalRevision,
+          overrideRevision: effective.overrideRevision,
+          acceptedLimitSeconds: effective.values.monthlyProcessingSeconds,
+          createdAt: now,
+          settledAt: null,
+          purgeAt: null,
         },
       ],
       { session },
     );
+    return reservation;
   }
 
   async reconcileMeasured(job: Job, duration: number, session: ClientSession) {
-    const entry = await this.ledger.findById(job._id).session(session);
-    if (!entry) return; // Accepted pre-ledger jobs keep their existing contract.
-    const audioSeconds = Math.ceil(duration);
-    if (
-      !Number.isSafeInteger(audioSeconds) ||
-      audioSeconds <= 0 ||
-      audioSeconds > 1800
-    )
+    this.assertTransaction(session);
+    const reservation = await this.reservations
+      .findById(job._id)
+      .session(session);
+    if (!reservation || reservation.state !== 'reserved') return;
+    const processingSeconds = Math.ceil(duration);
+    if (!Number.isSafeInteger(processingSeconds) || processingSeconds < 1)
       throw jobError('MEDIA_TOO_LONG');
-    const usage = await this.readUsage(job.userId, session);
-    if (
-      audioSeconds - entry.audioSeconds >
-      Math.max(
-        0,
-        entry.allowanceAudioSeconds -
-          usage.reservedAudioSeconds -
-          usage.usedAudioSeconds,
-      )
-    )
-      throw jobError('PROCESSING_ALLOWANCE_EXHAUSTED', {
-        nextReplenishmentAt: usage.nextReplenishmentAt,
-      });
-    entry.audioSeconds = audioSeconds;
-    await entry.save({ session });
+    const delta = processingSeconds - reservation.processingSeconds;
+    if (delta === 0) return;
+    const periodId = usagePeriodId(job.userId, reservation.periodKey);
+    const filter: Record<string, unknown> = { _id: periodId };
+    if (delta > 0)
+      filter.$expr = {
+        $lte: [
+          {
+            $add: [
+              '$processingUsedSeconds',
+              '$processingReservedSeconds',
+              delta,
+            ],
+          },
+          reservation.acceptedLimitSeconds,
+        ],
+      };
+    const updated = await this.periods.updateOne(
+      filter,
+      {
+        $inc: { processingReservedSeconds: delta, revision: 1 },
+        $set: { lastMutationAt: new Date() },
+      },
+      { session, runValidators: true },
+    );
+    if (updated.modifiedCount !== 1)
+      throw jobError('PROCESSING_ALLOWANCE_EXHAUSTED');
+    reservation.processingSeconds = processingSeconds;
+    await reservation.save({ session });
   }
 
-  async settleJob(job: Job, session: ClientSession) {
-    const entry = await this.ledger.findById(job._id).session(session);
-    if (!entry || !['reserved', 'pending'].includes(entry.state)) return;
-    if (
-      job.status === 'ready' ||
-      (job.status === 'cancelled' && job.uploadingResultAt)
-    ) {
-      if (!job.processingStartedAt || !job.measuredDurationSeconds) return;
-      entry.state = 'used';
-      entry.audioSeconds = Math.ceil(job.measuredDurationSeconds);
-      entry.expiresAt = new Date(job.processingStartedAt.getTime() + 86400_000);
-      entry.purgeAt = new Date(
-        Math.max(Date.now(), entry.expiresAt.getTime()) + 86400_000,
+  async settleJob(job: Job, session: ClientSession, now = new Date()) {
+    this.assertTransaction(session);
+    const reservation = await this.reservations
+      .findById(job._id)
+      .session(session);
+    if (!reservation || reservation.state !== 'reserved') return;
+    if (!['ready', 'failed', 'cancelled'].includes(job.status)) return;
+    const nextState = job.status === 'ready' ? 'used' : 'released';
+    const period = this.periodForKey(reservation.periodKey);
+    const changed = await this.reservations.updateOne(
+      { _id: job._id, state: 'reserved' },
+      {
+        $set: {
+          state: nextState,
+          settledAt: now,
+          purgeAt: period.purgeAt,
+        },
+      },
+      { session, runValidators: true },
+    );
+    if (changed.modifiedCount !== 1) return;
+    const counter =
+      nextState === 'used'
+        ? { processingUsedSeconds: reservation.processingSeconds }
+        : { processingReleasedSeconds: reservation.processingSeconds };
+    const usage = await this.periods
+      .findOneAndUpdate(
+        {
+          _id: usagePeriodId(job.userId, reservation.periodKey),
+          processingReservationCount: trusted({ $gt: 0 }),
+        },
+        {
+          $inc: {
+            processingReservedSeconds: -reservation.processingSeconds,
+            processingReservationCount: -1,
+            ...counter,
+            revision: 1,
+          },
+          $set: { lastMutationAt: now },
+        },
+        { session, returnDocument: 'after', runValidators: true },
+      )
+      .lean();
+    if (!usage) throw new Error('Processing reservation has no usage period');
+    if (usage.processingReservationCount === 0)
+      await this.periods.updateOne(
+        {
+          _id: usagePeriodId(job.userId, reservation.periodKey),
+          processingReservationCount: 0,
+        },
+        { $set: { purgeAt: period.purgeAt } },
+        { session, runValidators: true },
       );
-    } else if (
-      job.status === 'failed' ||
-      (job.status === 'cancelled' && !job.processingStartedAt)
-    ) {
-      entry.state = 'released';
-      entry.purgeAt = new Date(Date.now() + 2 * 86400_000);
-    } else if (job.status === 'cancelled') {
-      entry.state = 'pending';
-      entry.expiresAt ??= new Date(Date.now() + 86400_000);
-      entry.purgeAt = new Date(entry.expiresAt.getTime() + 86400_000);
-    } else return;
-    await entry.save({ session });
+  }
+
+  private async ensurePeriod(
+    accountId: Types.ObjectId,
+    periodId: string,
+    period: ReturnType<typeof utcMonthPeriod>,
+    session: ClientSession,
+    now: Date,
+  ) {
+    await this.periods.updateOne(
+      { _id: periodId },
+      {
+        $setOnInsert: {
+          _id: periodId,
+          accountId,
+          periodKey: period.key,
+          periodStart: period.start,
+          periodEnd: period.end,
+          ...emptyCounters(),
+          lastMutationAt: now,
+          purgeAt: period.purgeAt,
+        },
+      },
+      { upsert: true, session, setDefaultsOnInsert: true },
+    );
+  }
+
+  private periodForKey(key: string) {
+    const [yearText, monthText] = key.split('-');
+    const year = Number(yearText);
+    const month = Number(monthText) - 1;
+    return utcMonthPeriod(new Date(Date.UTC(year, month, 1)));
+  }
+
+  private assertTransaction(session: ClientSession) {
+    if (!session.inTransaction())
+      throw new Error('Usage accounting requires a transaction');
   }
 }

@@ -3,8 +3,10 @@ import {
   ProcessingAdmissionFenceSchema,
 } from '../admin-settings/processing-settings.schema.js';
 import {
-  ProcessingUsageLedger,
-  ProcessingUsageLedgerSchema,
+  AccountUsagePeriod,
+  AccountUsagePeriodSchema,
+  ProcessingReservation,
+  ProcessingReservationSchema,
 } from '../processing-usage/processing-usage.schema.js';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -32,7 +34,8 @@ export const PROCESSING_MODELS = [
     name: ProcessingAdmissionFence.name,
     schema: ProcessingAdmissionFenceSchema,
   },
-  { name: ProcessingUsageLedger.name, schema: ProcessingUsageLedgerSchema },
+  { name: AccountUsagePeriod.name, schema: AccountUsagePeriodSchema },
+  { name: ProcessingReservation.name, schema: ProcessingReservationSchema },
   { name: ClientError.name, schema: ClientErrorSchema },
   { name: Job.name, schema: JobSchema },
   { name: JobError.name, schema: JobErrorSchema },
