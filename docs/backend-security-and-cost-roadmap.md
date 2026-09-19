@@ -1,164 +1,59 @@
 # MusicMute backend security and cost roadmap
 
-**Status:** Discussion roadmap  
-**Scope:** User management, abuse prevention, quotas, S3, MongoDB, and job/API safeguards
+**Focus:** launch-safe user management, account limits, S3 cost control, abuse
+prevention, and MongoDB/Redis protection.
 
 ## Purpose
 
-This document divides the backend security and cost work into a small number of
-clear focus areas. Each area should be studied, planned, implemented, and
-validated separately so unrelated concerns do not become mixed together.
+Keep the launch work simple and divided into five areas. Each area has its own
+sequential branch and detailed checklist under
+[docs/backend-security/](backend-security/START-HERE.md).
 
-This is a high-level roadmap. It intentionally does not define implementation
-details, database designs, exact quota values, or infrastructure commands.
+## 1. Account quotas and administrator controls
 
-## Scope boundaries
+Replace the old quota behavior with one account-only standard plan: 120 successful
+processing minutes per UTC calendar month. Administrators can change global policy
+or one account's replacement values with an optional expiry. Usage remains clear,
+atomic, and auditable.
 
-Included:
+## 2. Media and AWS S3 cost protection
 
-- User accounts, sessions, permissions, privacy, and account deletion.
-- Abuse prevention and request-rate controls.
-- Free-user quotas and service cost protection.
-- User audio storage and transfer through AWS S3.
-- MongoDB security, capacity, and data lifecycle.
-- User-facing job and API safeguards.
+Use one 20-minute/50-MB media policy. Bound upload requests and confirmed bytes,
+download grants and estimated bandwidth, retained output storage, and service-wide
+outbound cost. Keep audio private, use short-lived exact grants, clean temporary
+objects, and retain successful results through S3 Intelligent-Tiering until the
+user deletes them.
 
-Excluded from this roadmap:
+## 3. Job queue, retries, and refunds
 
-- Worker and machine management.
-- Worker security and worker implementation.
-- Scaling work.
-- Backup and disaster-recovery planning.
+Allow one processing job and three waiting jobs per account. The backend selects
+the oldest eligible queued job. Infrastructure failures receive bounded no-cost
+retry and a full processing-minute refund when terminal; client/input attempts are
+also bounded.
 
-Monitoring and alerts are not a separate large project here. Each focus area
-should include only the monitoring needed to understand and operate that area.
+## 4. Account abuse and API limits
 
-## Recommended work order
+Reuse the existing Redis/IP/UID rate-limit foundation, add compact typed events,
+and let authorized administrators manually restrict or restore an account. Keep
+MongoDB and Redis growth bounded. Device-based enforcement and automatic bans are
+deferred.
 
-```text
-User management and access
-        ↓
-Abuse prevention and rate limiting
-        ↓
-User quotas and cost protection
-        ↓
-AWS S3 audio management
-        ↓
-MongoDB security and data lifecycle
-        ↓
-Job and API safeguards
-```
+## 5. Account deletion and permanent cleanup
 
-## 1. User management and access
+Use a fifteen-day recovery period. During grace, prevent new cost-bearing work.
+After the deadline, permanently and resumably remove owned MongoDB data, S3 audio,
+installation ownership, and Firebase identity while retaining only a minimal
+non-personal completion record.
 
-This area defines who the user is, what the user owns, and which actions the
-user or an administrator is allowed to perform.
+## Boundaries
 
-It covers:
+This roadmap does not include worker rebuilding/security, machine management,
+scaling, backups, disaster recovery, paid plans, device quotas, or automatic bans.
+Provider-console work is documented for the operator and is not executed by code
+branches.
 
-- Registration, authentication, sessions, and connected devices.
-- Active, suspended, deleting, and deleted account states.
-- User ownership of jobs, audio, and account data.
-- Administrator access and permissions.
-- Account deletion and user privacy expectations.
-- Safe handling of authentication and authorization failures.
+## Execution
 
-The expected outcome is one clear and consistent user lifecycle that every
-other backend area can rely on.
-
-## 2. Abuse prevention and rate limiting
-
-This area protects the service from excessive or intentionally harmful use
-before expensive processing or storage is allowed.
-
-It covers:
-
-- Request flooding and automated abuse.
-- Fake accounts and repeated-account abuse.
-- Excessive uploads, downloads, retries, and API calls.
-- Appropriate limits by user, device, IP address, and the whole service.
-- Redis capacity and degraded-service behavior.
-- Clear temporary-block and retry behavior for legitimate users.
-
-The expected outcome is bounded public traffic that cannot easily exhaust the
-API, Redis, MongoDB, S3, or processing capacity.
-
-## 3. User quotas and cost protection
-
-This area defines what a free user may consume and how the backend protects the
-service from unexpected operating costs.
-
-It covers:
-
-- Processing allowance and job-creation limits.
-- Upload count and uploaded-byte limits.
-- Download count and bandwidth limits.
-- Retry limits and the difference between service failures and user-caused
-  failures.
-- Total retained audio storage per user.
-- Global safety limits for the whole service.
-- A clean boundary for future paid plans without implementing them now.
-
-The expected outcome is a simple, understandable free plan with enforceable
-limits and predictable maximum cost exposure.
-
-## 4. AWS S3 audio management
-
-This area owns the complete lifecycle of user audio stored in S3.
-
-It covers:
-
-- Secure upload and download access.
-- Input and output file validation.
-- Short-lived access to private objects.
-- Storage-class and Intelligent-Tiering policy.
-- Retaining completed user audio.
-- Cleaning abandoned, cancelled, deleted, or invalid audio.
-- Deleting audio when a user deletes a job or account.
-- Protecting storage, request, and bandwidth costs.
-
-The expected outcome is private, durable audio storage with predictable access,
-cleanup, retention, and cost rules.
-
-## 5. MongoDB security and data lifecycle
-
-This area protects the database and keeps it within the capacity available to
-the project.
-
-It covers:
-
-- Secure database access and least-privilege credentials.
-- User, device, job, quota, and account-state records.
-- Minimal long-term job history.
-- Temporary diagnostics, notifications, errors, and usage records.
-- Retention and cleanup rules for operational collections.
-- Index size, query efficiency, and collection growth.
-- Protection against invalid, duplicated, or unauthorized records.
-
-The expected outcome is a secure MongoDB database whose important records are
-preserved while temporary operational data cannot grow without bounds.
-
-## 6. Job and API safeguards
-
-This area protects the normal user-facing audio workflow after identity,
-traffic, quota, storage, and database rules are established.
-
-It covers:
-
-- API request and input validation.
-- Job creation, ownership, and idempotency.
-- Upload confirmation and job-state transitions.
-- Cancellation, retry, failure, and deletion behavior.
-- Correct classification of service failures and user-caused failures.
-- Safe public errors that do not expose internal information.
-- Focused operational logging and alerts for important failures.
-
-The expected outcome is a predictable API and job lifecycle that remains safe
-during retries, duplicate requests, failures, and user actions.
-
-## Using this roadmap
-
-Work on one numbered area at a time. Before implementation, create a separate
-detailed plan for that area containing its decisions, limits, compatibility
-requirements, risks, tests, and validation evidence. Do not pull later roadmap
-areas into the current area unless they are a strict prerequisite.
+Start at [backend-security/START-HERE.md](backend-security/START-HERE.md). Follow
+the exact branch order, checkpoint evidence rules, and test gates. A branch must be
+reviewed and merged into the collection before the next branch is created.
