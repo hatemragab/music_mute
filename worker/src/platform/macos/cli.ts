@@ -20,7 +20,7 @@ import {
 const ACCOUNT_NAME = /^[A-Za-z_][A-Za-z0-9_-]{0,31}$/u;
 
 export const MACOS_USAGE = `Usage:
-  musicmute-worker macos package --worker-root <path> --output <path> --version <version> --node-root <path> --python-root <path> --ffmpeg <path> --ffprobe <path>
+  musicmute-worker macos package --worker-root <path> --output <path> --version <version> --node-root <path> --python-root <path> --media-root <path>
   musicmute-worker macos install --release <path> --config <path> --credential <path> --model-source <path> --service-user <name> --service-group <name> [--root <path>] [--launch-daemons-root <path>]
   musicmute-worker macos repair --release <path> --config <path> --credential <path> --model-source <path> --service-user <name> --service-group <name> [--root <path>] [--launch-daemons-root <path>]
   musicmute-worker macos doctor --service-user <name> --service-group <name> [--root <path>] [--launch-daemons-root <path>]
@@ -38,8 +38,7 @@ export async function runMacosCommand(arguments_: string[]): Promise<void> {
         "version",
         "node-root",
         "python-root",
-        "ffmpeg",
-        "ffprobe",
+        "media-root",
       ]),
     );
     const manifest = await buildMacRelease({
@@ -48,8 +47,7 @@ export async function runMacosCommand(arguments_: string[]): Promise<void> {
       releaseVersion: requiredFlag(flags, "version"),
       nodeRoot: absoluteFlag(flags, "node-root"),
       pythonRoot: absoluteFlag(flags, "python-root"),
-      ffmpegPath: absoluteFlag(flags, "ffmpeg"),
-      ffprobePath: absoluteFlag(flags, "ffprobe"),
+      mediaRoot: absoluteFlag(flags, "media-root"),
     });
     console.log(
       JSON.stringify({

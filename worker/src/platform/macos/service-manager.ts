@@ -91,6 +91,7 @@ export async function installMacServiceFiles(
   await ensureDirectory(options.layout.stateRoot, 0o700, options.owner);
   await ensureDirectory(options.layout.workRoot, 0o700, options.owner);
   await ensureDirectory(options.layout.modelCacheRoot, 0o700, options.owner);
+  await ensureDirectory(options.layout.runtimeCacheRoot, 0o700, options.owner);
   await ensureDirectory(options.layout.temporaryRoot, 0o700, options.owner);
   await ensureDirectory(options.layout.logRoot, 0o700, options.owner);
   await ensureDirectory(dirname(options.layout.plistPath), 0o755);
@@ -170,6 +171,7 @@ export async function inspectMacServiceInstallation(
   await assertMode(layout.stateRoot, 0o700, "directory", owner);
   await assertMode(layout.workRoot, 0o700, "directory", owner);
   await assertMode(layout.modelCacheRoot, 0o700, "directory", owner);
+  await assertMode(layout.runtimeCacheRoot, 0o700, "directory", owner);
   await assertMode(layout.temporaryRoot, 0o700, "directory", owner);
   await assertMode(layout.logRoot, 0o700, "directory", owner);
   await assertMode(layout.configPath, 0o600, "file", owner);
@@ -285,10 +287,13 @@ async function runPrivatePython(
       stdio: ["ignore", "pipe", "ignore"],
       env: {
         HOME: layout.stateRoot,
+        MPLCONFIGDIR: join(layout.runtimeCacheRoot, "matplotlib"),
+        NUMBA_CACHE_DIR: join(layout.runtimeCacheRoot, "numba"),
         PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
         PYTHONDONTWRITEBYTECODE: "1",
         PYTHONNOUSERSITE: "1",
         TMPDIR: layout.temporaryRoot,
+        XDG_CACHE_HOME: layout.runtimeCacheRoot,
       },
       ...(owner === undefined ? {} : { uid: owner.uid, gid: owner.gid }),
     });
@@ -343,9 +348,9 @@ function parseRuntimeDiagnostics(
     !/^[0-9a-f]{64}$/u.test(result.modelSha256) ||
     result.modelBytes !== 66_759_214 ||
     typeof result.ffmpeg !== "string" ||
-    !result.ffmpeg.startsWith("ffmpeg version ") ||
+    !result.ffmpeg.startsWith("ffmpeg version 8.0.3 ") ||
     typeof result.ffprobe !== "string" ||
-    !result.ffprobe.startsWith("ffprobe version ") ||
+    !result.ffprobe.startsWith("ffprobe version 8.0.3 ") ||
     typeof result.modelPath !== "string" ||
     !resolve(result.modelPath).startsWith(`${layout.modelCacheRoot}${sep}`)
   )

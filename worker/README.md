@@ -78,14 +78,16 @@ does not certify service startup, live S3, or production readiness.
 
 The macOS packager accepts only a native Darwin ARM64 host and an already
 qualified, private runtime. It copies the compiled worker, engine, standalone
-Node root, standalone Python root, FFmpeg and FFprobe into a new versioned
-directory and writes a complete content/mode/symlink manifest. The Node,
-Python and media executables must pass a Mach-O audit: ARM64 code, no mutable
-Homebrew or other non-system absolute dependencies, and no external RPATH.
+Node root, standalone Python root and a complete media-runtime root into a new
+versioned directory and writes a complete content/mode/symlink manifest. The
+Node, Python and media executables must pass a Mach-O audit: ARM64 code, no
+mutable Homebrew or other non-system absolute dependencies, and no external
+RPATH. Media provenance and LGPL notices are packaged with the binaries.
 Models, credentials, configuration and job data are never included in the
 release.
 
 ```bash
+./scripts/build-macos-media-runtime.sh /absolute/private/media-runtime
 pnpm run build
 node dist/src/cli/main.js macos package \
   --worker-root /absolute/source/worker \
@@ -93,14 +95,15 @@ node dist/src/cli/main.js macos package \
   --version 0.1.0 \
   --node-root /absolute/private/node \
   --python-root /absolute/private/python \
-  --ffmpeg /absolute/private/ffmpeg \
-  --ffprobe /absolute/private/ffprobe
+  --media-root /absolute/private/media-runtime
 ```
 
 The Python root must contain `bin/python3` and the exact CoreML lock. The Node
-root must contain `bin/node`. Never substitute a Homebrew binary just because
-it runs on the build machine; its external library paths make the release
-non-private and the packager rejects it.
+root must contain `bin/node`. The media builder verifies the official FFmpeg
+signature and pinned source hashes, then produces network-disabled FFmpeg
+8.0.3 binaries with statically linked LAME 3.100. Never substitute a Homebrew
+binary just because it runs on the build machine; its external library paths
+make the release non-private and the packager rejects it.
 
 Installation uses an existing dedicated macOS account and normal administrator
 consent. It does not create accounts, collect a password or edit global
@@ -110,8 +113,12 @@ Node/Python. The runtime config must point at these stable default paths:
 - `/Library/Application Support/MusicMuteWorker/current/runtime/python/bin/python3`
 - `/Library/Application Support/MusicMuteWorker/current/runtime/bin/ffmpeg`
 - `/Library/Application Support/MusicMuteWorker/current/runtime/bin/ffprobe`
-- `/Library/Application Support/MusicMuteWorker/state/{attempts,models}`
+- `/Library/Application Support/MusicMuteWorker/state/{attempts,cache,models,tmp}`
 - `/Library/Application Support/MusicMuteWorker/state/machine.credential`
+
+Python bytecode and library/compiler caches are redirected into the protected
+state cache. The immutable release must remain byte-for-byte unchanged after
+doctor and processing runs.
 
 ```bash
 sudo node dist/src/cli/main.js macos install \

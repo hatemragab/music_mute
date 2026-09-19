@@ -205,6 +205,10 @@ and CoreML job was claimed at D3.
   compiled worker, engine and supplied private Node/Python/FFmpeg/FFprobe
   roots; credentials, configuration, model weights, job data and logs remain
   outside the immutable release.
+- Added a reproducible native media-runtime builder pinned to FFmpeg 8.0.3 and
+  LAME 3.100. It verifies both source SHA-256 digests, the official FFmpeg GPG
+  signature and signer fingerprint, builds static LAME support, disables
+  network protocols, and records source/license provenance in the release.
 - A complete release manifest records ordered directories, regular-file bytes,
   modes and SHA-256 hashes plus bounded internal symlinks. Verification rejects
   traversal/absolute links, special files, writable release entries, content
@@ -220,6 +224,9 @@ and CoreML job was claimed at D3.
   restart and a doctor path. The LaunchDaemon receives only minimal system
   environment keys and stable private paths; no backend infrastructure or S3
   credential is placed in the plist.
+- Python bytecode, Numba and plotting caches are redirected to protected state
+  paths. A real packaged doctor and CoreML processing run left all 33,798
+  release-manifest entries unchanged.
 - Model provisioning accepts only the exact qualified source file, installs it
   into the service account's content-addressed cache and checks the sanitized
   result. Default uninstall removes only the service plist/current pointer and
@@ -243,26 +250,33 @@ the CPU provider. Result: PASS for the private Python/model/CoreML boundary.
 
 The official Node 24.18.0 Darwin ARM64 archive matched its published SHA-256 and
 both that Node binary and the standalone Python executable passed the private
-Mach-O audit. A complete private release was deliberately not built with the
-host's Homebrew FFmpeg because its absolute Cellar/Homebrew dependencies fail
-that audit.
+Mach-O audit. The reproducible native media build produced network-disabled
+FFmpeg/FFprobe 8.0.3 with statically linked LAME 3.100 and only Apple system
+dynamic dependencies; the host's Homebrew FFmpeg remains correctly rejected.
+
+A complete 33,798-entry private release then passed manifest verification and
+the packaged runtime doctor. Using only the packaged Python and media binaries,
+`kim-vocals-denoise-trim-v1` produced a valid 193,767-byte MP3 with two channels,
+44.1 kHz sample rate and 192 kb/s bitrate. A second manifest verification after
+processing passed, proving runtime caches did not mutate the release.
 
 ### D4 verification and current blocker
 
 - macOS release/manifest/Mach-O/LaunchDaemon/installation tests: PASS;
 - full worker protocol drift, formatting, lint, typecheck and build: PASS;
 - complete TypeScript worker suite: PASS, 15 files and 39 tests;
-- complete Python engine suite: PASS, 17 tests;
+- complete Python engine suite: PASS, 19 tests;
 - real private Python CoreML provider profile and Kim pipeline: PASS;
-- full private release containing portable FFmpeg/FFprobe: BLOCKED;
+- reproducible offline FFmpeg/LAME build and complete private release: PASS;
+- packaged runtime doctor, real CoreML job and post-run immutability: PASS;
 - enrolled config/credential, system LaunchDaemon install/restart, dedicated
   logged-out operation, live backend/S3 job and reboot: NOT_RUN.
 
 Normal administrator consent, a pre-existing dedicated account and an enrolled
 machine config/credential are required for system acceptance. No administrator
 password was collected or embedded, and no logout/reboot was attempted. D4
-remains unchecked until the portable media runtime and real LaunchDaemon flow
-pass; implementation/unit evidence alone is not a completed service checkpoint.
+remains unchecked until the real LaunchDaemon flow passes; portable package and
+local execution evidence alone are not a completed service checkpoint.
 
 ## Limits
 

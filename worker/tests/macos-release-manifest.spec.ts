@@ -84,5 +84,19 @@ async function fixture(): Promise<string> {
   );
   await mkdir(join(root, "app", "engine"), { recursive: true });
   await writeFile(join(root, "app", "engine", "module.py"), "VALUE = 1\n");
+  await mkdir(join(root, "runtime", "licenses", "ffmpeg"), { recursive: true });
+  await mkdir(join(root, "runtime", "licenses", "lame"), { recursive: true });
+  await writeFile(
+    join(root, "runtime", "licenses", "ffmpeg", "COPYING.LGPLv2.1"),
+    "FFmpeg license\n",
+  );
+  await writeFile(
+    join(root, "runtime", "licenses", "lame", "COPYING"),
+    "LAME license\n",
+  );
+  await writeFile(
+    join(root, "runtime", "media-source-manifest.json"),
+    '{"schemaVersion":1}\n',
+  );
   return root;
 }

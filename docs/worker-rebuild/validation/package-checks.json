@@ -65,5 +65,5 @@
     "d6_safety_and_adapter_boundaries": "NOT_RUN",
     "evidence": "../evidence/D-runtime.md"
   },
-  "scope": "Documentation/source-reference checks, sanitized real M4 Pro/CoreML and Z440 RX 580/DirectML feasibility runs, local C1-C6 backend verification, local D1-D3 runtime verification, local D4 macOS packaging/service-tool verification, local HTTP ownership/transfer integration, and real private-Python M4/CoreML pipeline/provider verification; no production infrastructure, live S3, WebSocket hints or accepted-platform system-service tests."
+  "scope": "Documentation/source-reference checks, sanitized real M4 Pro/CoreML and Z440 RX 580/DirectML feasibility runs, local C1-C6 backend verification, local D1-D3 runtime verification, reproducible offline FFmpeg/LAME and complete D4 macOS private-package verification, local D4 service-tool and post-run immutability verification, local HTTP ownership/transfer integration, and real private-Python M4/CoreML pipeline/provider verification; no production infrastructure, live S3, WebSocket hints or accepted-platform system-service tests."
 }

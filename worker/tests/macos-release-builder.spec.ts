@@ -27,8 +27,9 @@ describe("macOS release builder", () => {
     const workerRoot = join(root, "worker");
     const nodeRoot = join(root, "node");
     const pythonRoot = join(root, "python");
+    const mediaRoot = join(root, "media");
     const outputRoot = join(root, "release");
-    await executable(join(workerRoot, "dist", "src", "cli", "main.js"));
+    await compiledCli(join(workerRoot, "dist", "src", "cli", "main.js"));
     await mkdir(join(workerRoot, "engine"), { recursive: true });
     await writeFile(join(workerRoot, "engine", "module.py"), "VALUE = 1\n");
     await writeFile(join(workerRoot, "engine", "ignored.pyc"), "ignored\n");
@@ -36,10 +37,7 @@ describe("macOS release builder", () => {
     await executable(join(nodeRoot, "bin", "node"));
     await executable(join(pythonRoot, "bin", "python3.13"));
     await symlink("python3.13", join(pythonRoot, "bin", "python3"));
-    const ffmpeg = join(root, "ffmpeg");
-    const ffprobe = join(root, "ffprobe");
-    await executable(ffmpeg);
-    await executable(ffprobe);
+    await mediaRuntime(mediaRoot);
 
     const built = await buildMacRelease({
       workerRoot,
@@ -47,15 +45,24 @@ describe("macOS release builder", () => {
       releaseVersion: "0.1.0-builder.1",
       nodeRoot,
       pythonRoot,
-      ffmpegPath: ffmpeg,
-      ffprobePath: ffprobe,
+      mediaRoot,
       host: { platform: "darwin", arch: "arm64" },
       binaryAudit: async () => {},
     });
 
     expect(await verifyMacRelease(outputRoot)).toEqual(built);
+    expect(
+      (await lstat(join(outputRoot, "app", "dist", "src", "cli", "main.js")))
+        .mode & 0o777,
+    ).toBe(0o755);
     expect(built.entries.map((entry) => entry.path)).not.toContain(
       "app/engine/ignored.pyc",
+    );
+    expect(built.entries.map((entry) => entry.path)).toContain(
+      "runtime/media-source-manifest.json",
+    );
+    expect(built.entries.map((entry) => entry.path)).toContain(
+      "runtime/licenses/lame/COPYING",
     );
     await expect(lstat(join(outputRoot, "state"))).rejects.toMatchObject({
       code: "ENOENT",
@@ -71,8 +78,7 @@ describe("macOS release builder", () => {
         releaseVersion: "0.1.0-builder.2",
         nodeRoot: join(root, "node"),
         pythonRoot: join(root, "python"),
-        ffmpegPath: join(root, "ffmpeg"),
-        ffprobePath: join(root, "ffprobe"),
+        mediaRoot: join(root, "media"),
         host: { platform: "linux", arch: "x64" },
       }),
     ).rejects.toThrow("native Darwin ARM64 host");
@@ -83,6 +89,25 @@ async function executable(path: string): Promise<void> {
   await mkdir(join(path, ".."), { recursive: true });
   await writeFile(path, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   await chmod(path, 0o755);
+}
+
+async function compiledCli(path: string): Promise<void> {
+  await mkdir(join(path, ".."), { recursive: true });
+  await writeFile(path, "#!/usr/bin/env node\n", { mode: 0o644 });
+  await chmod(path, 0o644);
+}
+
+async function mediaRuntime(root: string): Promise<void> {
+  await executable(join(root, "bin", "ffmpeg"));
+  await executable(join(root, "bin", "ffprobe"));
+  await mkdir(join(root, "licenses", "ffmpeg"), { recursive: true });
+  await mkdir(join(root, "licenses", "lame"), { recursive: true });
+  await writeFile(
+    join(root, "licenses", "ffmpeg", "COPYING.LGPLv2.1"),
+    "FFmpeg license\n",
+  );
+  await writeFile(join(root, "licenses", "lame", "COPYING"), "LAME license\n");
+  await writeFile(join(root, "SOURCE-MANIFEST.json"), '{"schemaVersion":1}\n');
 }
 
 async function temporaryRoot(): Promise<string> {

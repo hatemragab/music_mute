@@ -13,6 +13,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const MAC_RELEASE_MANIFEST = "release-manifest.json";
 export const MAC_RELEASE_SCHEMA_VERSION = 1;
+const MAX_MAC_RELEASE_MANIFEST_BYTES = 16 * 1024 * 1024;
 
 const RELEASE_VERSION = /^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -24,6 +25,11 @@ const REQUIRED_EXECUTABLES = [
   "runtime/bin/ffprobe",
 ] as const;
 const REQUIRED_DIRECTORIES = ["app/engine"] as const;
+const REQUIRED_REGULAR_FILES = [
+  "runtime/media-source-manifest.json",
+  "runtime/licenses/ffmpeg/COPYING.LGPLv2.1",
+  "runtime/licenses/lame/COPYING",
+] as const;
 
 export interface MacReleaseFileEntry {
   path: string;
@@ -115,7 +121,7 @@ export async function verifyMacRelease(
     !manifestInfo.isFile() ||
     manifestInfo.isSymbolicLink() ||
     manifestInfo.size < 2 ||
-    manifestInfo.size > 4 * 1024 * 1024 ||
+    manifestInfo.size > MAX_MAC_RELEASE_MANIFEST_BYTES ||
     (manifestInfo.mode & 0o022) !== 0
   )
     throw new TypeError("Mac release manifest is unsafe");
@@ -277,6 +283,11 @@ async function assertRuntimeShape(root: string): Promise<void> {
     const info = await stat(join(root, path));
     if (!info.isDirectory())
       throw new TypeError(`Mac release directory is invalid: ${path}`);
+  }
+  for (const path of REQUIRED_REGULAR_FILES) {
+    const info = await lstat(join(root, path));
+    if (!info.isFile() || info.isSymbolicLink() || info.size < 1)
+      throw new TypeError(`Mac release file is invalid: ${path}`);
   }
 }
 

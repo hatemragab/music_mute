@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { cp, lstat, mkdir, readlink, rename, rm, stat } from "node:fs/promises";
+import {
+  chmod,
+  cp,
+  lstat,
+  mkdir,
+  readlink,
+  rename,
+  rm,
+  stat,
+} from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import {
   type MacReleaseManifest,
@@ -13,8 +22,7 @@ export interface MacReleaseBuildOptions {
   releaseVersion: string;
   nodeRoot: string;
   pythonRoot: string;
-  ffmpegPath: string;
-  ffprobePath: string;
+  mediaRoot: string;
   host?: { platform: NodeJS.Platform; arch: string };
   binaryAudit?: (path: string) => Promise<void>;
 }
@@ -29,13 +37,28 @@ export async function buildMacRelease(
   const outputRoot = safeAbsolute(options.outputRoot, "output root");
   const nodeRoot = safeAbsolute(options.nodeRoot, "Node root");
   const pythonRoot = safeAbsolute(options.pythonRoot, "Python root");
-  const ffmpeg = safeAbsolute(options.ffmpegPath, "ffmpeg path");
-  const ffprobe = safeAbsolute(options.ffprobePath, "ffprobe path");
+  const mediaRoot = safeAbsolute(options.mediaRoot, "media root");
+  const ffmpeg = join(mediaRoot, "bin", "ffmpeg");
+  const ffprobe = join(mediaRoot, "bin", "ffprobe");
   await assertDirectory(workerRoot, "worker root");
   await assertDirectory(join(workerRoot, "dist"), "compiled worker");
   await assertDirectory(join(workerRoot, "engine"), "worker engine");
   await assertDirectory(nodeRoot, "Node root");
   await assertDirectory(pythonRoot, "Python root");
+  await assertDirectory(mediaRoot, "media root");
+  await assertDirectory(join(mediaRoot, "licenses"), "media licenses");
+  await assertRegularFile(
+    join(mediaRoot, "SOURCE-MANIFEST.json"),
+    "media source manifest",
+  );
+  await assertRegularFile(
+    join(mediaRoot, "licenses", "ffmpeg", "COPYING.LGPLv2.1"),
+    "FFmpeg license",
+  );
+  await assertRegularFile(
+    join(mediaRoot, "licenses", "lame", "COPYING"),
+    "LAME license",
+  );
   await assertExecutable(
     join(nodeRoot, "bin", "node"),
     "private Node",
@@ -62,6 +85,7 @@ export async function buildMacRelease(
   await mkdir(temporary, { recursive: false, mode: 0o755 });
   try {
     await copyTree(join(workerRoot, "dist"), join(temporary, "app", "dist"));
+    await chmod(join(temporary, "app", "dist", "src", "cli", "main.js"), 0o755);
     await copyTree(
       join(workerRoot, "engine"),
       join(temporary, "app", "engine"),
@@ -74,6 +98,14 @@ export async function buildMacRelease(
     await copyTree(pythonRoot, join(temporary, "runtime", "python"));
     await copyFile(ffmpeg, join(temporary, "runtime", "bin", "ffmpeg"));
     await copyFile(ffprobe, join(temporary, "runtime", "bin", "ffprobe"));
+    await copyTree(
+      join(mediaRoot, "licenses"),
+      join(temporary, "runtime", "licenses"),
+    );
+    await copyFile(
+      join(mediaRoot, "SOURCE-MANIFEST.json"),
+      join(temporary, "runtime", "media-source-manifest.json"),
+    );
     const manifest = await writeMacReleaseManifest(
       temporary,
       options.releaseVersion,
@@ -117,6 +149,12 @@ async function copyFile(source: string, destination: string): Promise<void> {
 async function assertDirectory(path: string, label: string): Promise<void> {
   const info = await lstat(path);
   if (!info.isDirectory() || info.isSymbolicLink())
+    throw new TypeError(`${label} is unsafe`);
+}
+
+async function assertRegularFile(path: string, label: string): Promise<void> {
+  const info = await lstat(path);
+  if (!info.isFile() || info.isSymbolicLink() || info.size < 1)
     throw new TypeError(`${label} is unsafe`);
 }
 

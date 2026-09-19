@@ -1,5 +1,17 @@
 # Package changes
 
+## Revision 4.3
+
+- Added a reproducible native ARM64 media-runtime build pinned to FFmpeg 8.0.3
+  and LAME 3.100, with source hashes, official FFmpeg signature verification,
+  offline protocol enforcement and bundled license/source provenance.
+- Built and verified the complete 33,798-entry private macOS release with exact
+  Python, CoreML, model and media diagnostics.
+- Redirected Python/library/compiler caches to protected service state so a real
+  packaged CoreML denoise/trim job leaves the immutable release unchanged.
+- Kept D4 open for the remaining enrolled LaunchDaemon, logged-out, live S3 and
+  reboot acceptance evidence.
+
 ## Revision 4.2
 
 - Added the D4 macOS private release format, complete content/mode/symlink

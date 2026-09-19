@@ -296,15 +296,24 @@ function boundedTimeout(value: number | undefined, fallback: number): number {
 
 function childEnvironment(extra: NodeJS.ProcessEnv | undefined) {
   const names = [
+    "HOME",
     "PATH",
     "SYSTEMROOT",
+    "TMPDIR",
     "WINDIR",
     "TMP",
     "TEMP",
     "LANG",
     "LC_ALL",
+    "MPLCONFIGDIR",
+    "NUMBA_CACHE_DIR",
+    "XDG_CACHE_HOME",
   ] as const;
-  const env: NodeJS.ProcessEnv = { PYTHONUNBUFFERED: "1" };
+  const env: NodeJS.ProcessEnv = {
+    PYTHONDONTWRITEBYTECODE: "1",
+    PYTHONNOUSERSITE: "1",
+    PYTHONUNBUFFERED: "1",
+  };
   for (const name of names) {
     const value = process.env[name];
     if (value !== undefined) env[name] = value;

@@ -14,6 +14,7 @@ export interface MacServiceLayout {
   stateRoot: string;
   workRoot: string;
   modelCacheRoot: string;
+  runtimeCacheRoot: string;
   temporaryRoot: string;
   configPath: string;
   credentialPath: string;
@@ -51,6 +52,7 @@ export function createMacServiceLayout(
     stateRoot,
     workRoot: join(stateRoot, "attempts"),
     modelCacheRoot: join(stateRoot, "models"),
+    runtimeCacheRoot: join(stateRoot, "cache"),
     temporaryRoot: join(stateRoot, "tmp"),
     configPath: join(stateRoot, "runtime.json"),
     credentialPath: join(stateRoot, "machine.credential"),
@@ -80,6 +82,7 @@ export function renderLaunchDaemonPlist({
     layout.configPath,
     layout.engineRoot,
     layout.stateRoot,
+    layout.runtimeCacheRoot,
     layout.temporaryRoot,
     layout.stdoutPath,
     layout.stderrPath,
@@ -110,10 +113,16 @@ export function renderLaunchDaemonPlist({
   <dict>
     <key>HOME</key>
     <string>${xml(layout.stateRoot)}</string>
+    <key>MPLCONFIGDIR</key>
+    <string>${xml(join(layout.runtimeCacheRoot, "matplotlib"))}</string>
+    <key>NUMBA_CACHE_DIR</key>
+    <string>${xml(join(layout.runtimeCacheRoot, "numba"))}</string>
     <key>PATH</key>
     <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>TMPDIR</key>
     <string>${xml(layout.temporaryRoot)}</string>
+    <key>XDG_CACHE_HOME</key>
+    <string>${xml(layout.runtimeCacheRoot)}</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

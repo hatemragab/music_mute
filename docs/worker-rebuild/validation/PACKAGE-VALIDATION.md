@@ -50,8 +50,9 @@ The package build contains no environment files, credentials, models, audio fixt
 - D4 implementation now covers deterministic native ARM64 release manifests,
   private dependency auditing, dedicated-account LaunchDaemon files, secure
   state/model provisioning, repair/rollback and safe uninstall boundaries. Its
-  local tests and a real standalone-Python CoreML profile/pipeline pass, but the
-  checkpoint is BLOCKED on a portable FFmpeg/FFprobe package and the enrolled
+  reproducible network-disabled FFmpeg 8.0.3/LAME 3.100 build, complete private
+  package, local tests, packaged runtime doctor, post-run immutability check and
+  real CoreML pipeline pass. The checkpoint remains BLOCKED only on the enrolled
   system-service acceptance flow. See [D evidence](../evidence/D-runtime.md).
 
 ## Not executed or claimed
@@ -59,11 +60,11 @@ The package build contains no environment files, credentials, models, audio fixt
 No worker system-service installation, live S3 integration, WebSocket hint transport,
 listening-quality review,
 npm publication, signing with production keys or deployment has occurred. The
-C1-C6 backend and D1-D3 runtime work are locally verified only; D4 tooling and
-private CoreML execution are locally verified but the D4 service checkpoint is
-not complete; dashboard,
-Android and iOS were not changed. D4-D6, Linux/NVIDIA and all other hardware
-remain unverified until later actual hardware evidence.
+C1-C6 backend and D1-D3 runtime work are locally verified only; D4 tooling,
+private package and CoreML execution are locally verified but the D4 system
+service checkpoint is not complete; dashboard, Android and iOS were not
+changed. D4 system-service acceptance, D5-D6, Linux/NVIDIA and all other
+hardware remain unverified until later actual hardware evidence.
 
 ## Source/consistency caveats
 

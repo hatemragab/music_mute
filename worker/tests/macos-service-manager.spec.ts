@@ -149,6 +149,7 @@ describe("macOS service installation", () => {
     });
     await mkdir(layout.engineRoot, { recursive: true });
     await mkdir(layout.modelCacheRoot, { recursive: true });
+    await mkdir(layout.runtimeCacheRoot, { recursive: true });
     await mkdir(layout.temporaryRoot, { recursive: true });
     const expectedModel = join(
       layout.modelCacheRoot,
@@ -231,6 +232,20 @@ async function releaseFixture(
   );
   await mkdir(join(root, "app", "engine"), { recursive: true });
   await writeFile(join(root, "app", "engine", "module.py"), engine);
+  await mkdir(join(root, "runtime", "licenses", "ffmpeg"), { recursive: true });
+  await mkdir(join(root, "runtime", "licenses", "lame"), { recursive: true });
+  await writeFile(
+    join(root, "runtime", "licenses", "ffmpeg", "COPYING.LGPLv2.1"),
+    "FFmpeg license\n",
+  );
+  await writeFile(
+    join(root, "runtime", "licenses", "lame", "COPYING"),
+    "LAME license\n",
+  );
+  await writeFile(
+    join(root, "runtime", "media-source-manifest.json"),
+    '{"schemaVersion":1}\n',
+  );
   await writeMacReleaseManifest(root, version);
 }
 

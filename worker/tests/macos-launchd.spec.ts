@@ -25,6 +25,15 @@ describe("macOS LaunchDaemon definition", () => {
       "<string>/private/var/db/MusicMute Test/state/runtime.json</string>",
     );
     expect(plist).toContain("<string>/usr/bin:/bin:/usr/sbin:/sbin</string>");
+    expect(plist).toContain(
+      "<string>/private/var/db/MusicMute Test/state/cache/numba</string>",
+    );
+    expect(plist).toContain(
+      "<string>/private/var/db/MusicMute Test/state/cache/matplotlib</string>",
+    );
+    expect(plist).toContain(
+      "<string>/private/var/db/MusicMute Test/state/cache</string>",
+    );
     expect(plist).toContain("<key>Umask</key>\n  <integer>63</integer>");
     expect(plist).not.toContain("credential");
     expect(plist).not.toContain("AWS_");
