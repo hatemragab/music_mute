@@ -52,7 +52,7 @@
       "checkpoints": ["B1", "B2", "B3", "B4", "B5", "B6", "B7"],
       "status": "ready_for_review",
       "currentCheckpoint": null,
-      "lastVerifiedCommit": null,
+      "lastVerifiedCommit": "9b5118aa0a5b21ce459541d83480a78fe032cf07",
       "purpose": "Unified media limits, upload/download accounting, storage retention, cleanup, and S3 cost protection"
     },
     {
