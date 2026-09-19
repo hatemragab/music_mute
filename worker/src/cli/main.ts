@@ -3,13 +3,15 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WorkerChildProcess } from "../agent/child-process.js";
+import { MachineSupervisor } from "../agent/machine-supervisor.js";
+import { WorkerControlPlaneClient } from "../runtime/control-plane-client.js";
+import { loadRuntimeConfig } from "../runtime/runtime-config.js";
+import { WorkerTransferClient } from "../runtime/transfers.js";
+import { WorkerRuntime } from "../runtime/worker-runtime.js";
 
 const command = process.argv[2];
 
-if (command !== "protocol-doctor") {
-  console.error("Usage: musicmute-worker protocol-doctor");
-  process.exitCode = 2;
-} else {
+if (command === "protocol-doctor") {
   const workerRoot = resolve(
     fileURLToPath(new URL("../../..", import.meta.url)),
   );
@@ -30,4 +32,64 @@ if (command !== "protocol-doctor") {
   } finally {
     await child.stop();
   }
+} else if (command === "run") {
+  const configIndex = process.argv.indexOf("--config");
+  const configPath =
+    configIndex < 0 ? undefined : process.argv[configIndex + 1];
+  if (!configPath || process.argv.length !== 5) {
+    console.error("Usage: musicmute-worker run --config <absolute-path>");
+    process.exitCode = 2;
+  } else {
+    try {
+      const config = await loadRuntimeConfig(configPath);
+      const supervisor = new MachineSupervisor(
+        config.slots.map((slot) => ({
+          workerId: slot.workerId,
+          gpuId: slot.gpuId,
+          child: {
+            command: config.pythonPath,
+            args: ["-m", "musicmute_engine.child"],
+            cwd: config.engineRoot,
+            env: { MUSICMUTE_PROVIDER: slot.provider },
+            requestTimeoutMs: 7_200_000,
+          },
+        })),
+      );
+      const control = new WorkerControlPlaneClient({
+        baseUrl: config.backendBaseUrl,
+        credential: config.credential,
+        allowInsecureLoopback: config.allowInsecureLoopback,
+      });
+      const transfers = new WorkerTransferClient({
+        allowInsecureLoopback: config.allowInsecureLoopback,
+      });
+      const runtime = new WorkerRuntime(
+        {
+          machineId: config.machineId,
+          slots: config.slots,
+          workRoot: config.workRoot,
+          modelCacheRoot: config.modelCacheRoot,
+          ffmpegPath: config.ffmpegPath,
+          ffprobePath: config.ffprobePath,
+          onEvent: (event) => console.log(JSON.stringify(event)),
+        },
+        control,
+        transfers,
+        supervisor,
+      );
+      const stopping = new AbortController();
+      const stop = () => stopping.abort();
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+      await runtime.run(stopping.signal);
+    } catch {
+      console.error("MusicMute worker runtime: FAILED");
+      process.exitCode = 1;
+    }
+  }
+} else {
+  console.error(
+    "Usage: musicmute-worker <protocol-doctor | run --config <absolute-path>>",
+  );
+  process.exitCode = 2;
 }

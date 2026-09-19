@@ -1,5 +1,26 @@
 # Package changes
 
+## Revision 4.1
+
+- Completed D3 with a runnable TypeScript machine loop for machine sessions,
+  config acknowledgement, stable slot registration, same-request claims,
+  batched lease ownership, cancellation and restart-from-input recovery.
+- Added strict bounded control-plane response parsing, dual-clock lease safety,
+  attempt-scoped local workspaces, exact checked downloads, signed-header
+  uploads and fenced completion/failure reporting.
+- Added replay recovery for an S3 PUT whose successful response was lost: the
+  backend returns the already-uploaded exact immutable version only when its
+  key, bytes, media type and checksum match the frozen attempt declaration.
+- Added a strict runtime config/credential boundary and the built
+  `musicmute-worker run --config ...` entry point.
+- Passed the complete worker verification, local HTTP full-path integration,
+  focused backend gates, all 731 backend unit/package tests and all 135 E2E
+  tests.
+
+This checkpoint does not claim live S3, WebSocket hint delivery, OS service
+installation, logged-out/reboot behavior, DirectML service execution or
+production readiness. Those remain D4-D6 and later integration gates.
+
 ## Revision 4.0
 
 - Completed checkpoint D2 with the four frozen Kim recipe combinations, a

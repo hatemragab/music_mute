@@ -50,9 +50,9 @@ export class ChildCommandError extends Error {
 }
 
 export class WorkerChildProcess {
-  readonly incarnation = randomUUID();
+  private currentIncarnation = randomUUID();
   private child: ChildProcessWithoutNullStreams | null = null;
-  private readonly decoder = new ChildFrameDecoder();
+  private decoder = new ChildFrameDecoder();
   private readonly pending = new Map<string, PendingRequest>();
   private ready: Promise<ChildResponse> | null = null;
   private resolveReady: ((response: ChildResponse) => void) | null = null;
@@ -62,9 +62,16 @@ export class WorkerChildProcess {
 
   constructor(private readonly options: ChildProcessOptions) {}
 
+  get incarnation(): string {
+    return this.currentIncarnation;
+  }
+
   async start(): Promise<ChildResponse> {
     if (this.child || this.ready)
       throw new Error("Worker child has already been started");
+    this.currentIncarnation = randomUUID();
+    this.decoder = new ChildFrameDecoder();
+    this.stderr = "";
     const env = childEnvironment(this.options.env);
     this.ready = new Promise<ChildResponse>((resolve, reject) => {
       this.resolveReady = resolve;
@@ -75,27 +82,29 @@ export class WorkerChildProcess {
       env,
       windowsHide: true,
     };
-    this.child = spawn(
+    const child = spawn(
       this.options.command,
       [...this.options.args, "--incarnation", this.incarnation],
       spawnOptions,
     );
-    this.child.stdout.on("data", (chunk: Buffer) => this.onData(chunk));
-    this.child.stderr.on("data", (chunk: Buffer) => this.onStderr(chunk));
-    this.child.once("error", (error) => this.fail(error));
-    this.child.once("exit", (code, signal) => {
+    this.child = child;
+    child.stdout.on("data", (chunk: Buffer) => this.onData(chunk));
+    child.stderr.on("data", (chunk: Buffer) => this.onStderr(chunk));
+    child.once("error", (error) => this.fail(error, child));
+    child.once("exit", (code, signal) => {
       const detail = code === 0 ? "stopped" : `exited (${code ?? signal})`;
-      this.fail(new Error(`Worker child ${detail}`));
-      this.child = null;
+      this.fail(new Error(`Worker child ${detail}`), child);
+      if (this.child === child) this.child = null;
     });
     const timeout = setTimeout(
-      () => this.fail(new Error("Worker child startup timed out")),
+      () => this.fail(new Error("Worker child startup timed out"), child),
       boundedTimeout(this.options.startTimeoutMs, DEFAULT_START_TIMEOUT_MS),
     );
     try {
       return await this.ready;
     } finally {
       clearTimeout(timeout);
+      this.ready = null;
       this.resolveReady = null;
       this.rejectReady = null;
     }
@@ -151,7 +160,26 @@ export class WorkerChildProcess {
         ]);
     } catch {
       child.kill("SIGKILL");
+      if (child.exitCode === null && child.signalCode === null) {
+        await Promise.race([
+          once(child, "exit"),
+          new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+        ]);
+      }
     }
+  }
+
+  terminateActive(): void {
+    const child = this.child;
+    if (!child) return;
+    this.fail(
+      new Error("Worker child was terminated by the supervisor"),
+      child,
+    );
+  }
+
+  isProcessing(): boolean {
+    return this.activeProcessRequestId !== null;
   }
 
   diagnosticTail(): string {
@@ -248,20 +276,20 @@ export class WorkerChildProcess {
     this.stderr = combined.slice(-STDERR_LIMIT_BYTES);
   }
 
-  private fail(error: Error): void {
+  private fail(error: Error, child = this.child): void {
     this.rejectReady?.(error);
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
       pending.reject(error);
     }
     this.pending.clear();
-    this.child?.kill("SIGKILL");
+    child?.kill("SIGKILL");
   }
 }
 
 function boundedTimeout(value: number | undefined, fallback: number): number {
   if (value === undefined) return fallback;
-  if (!Number.isSafeInteger(value) || value < 100 || value > 3_600_000)
+  if (!Number.isSafeInteger(value) || value < 100 || value > 7_200_000)
     throw new TypeError("Worker child timeout is outside the allowed range");
   return value;
 }

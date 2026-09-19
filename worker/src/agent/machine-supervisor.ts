@@ -42,6 +42,13 @@ export class MachineSupervisor {
     return child;
   }
 
+  async restart(workerId: string): Promise<WorkerChildProcess> {
+    const child = this.child(workerId);
+    await child.stop();
+    await child.start();
+    return child;
+  }
+
   async stop(): Promise<void> {
     await Promise.allSettled(
       [...this.children.values()].map((child) => child.stop()),

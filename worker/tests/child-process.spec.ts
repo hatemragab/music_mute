@@ -48,6 +48,16 @@ describe("worker child lifecycle", () => {
     const cancellation = await child.cancel(randomUUID());
     expect(cancellation.type).toBe("cancelled");
     expect(cancellation.payload.cancelled).toBe(false);
+
+    const firstIncarnation = child.incarnation;
+    await child.stop();
+    const restarted = await child.start();
+    expect(restarted.type).toBe("ready");
+    expect(child.incarnation).not.toBe(firstIncarnation);
+    await expect(child.request("ping", {})).resolves.toMatchObject({
+      type: "result",
+      payload: { status: "ok" },
+    });
   });
 
   it("rejects a process request that does not match the D2 contract", async () => {

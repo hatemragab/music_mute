@@ -41,13 +41,20 @@ The package build contains no environment files, credentials, models, audio fixt
   the full 729 backend unit and 135 E2E tests under the env-isolated procedure
   recorded in the evidence, reference PCM parity and a real framed M4/CoreML
   Kim-to-MP3 child run. See [D evidence](../evidence/D-runtime.md).
+- D3 added authoritative HTTPS reconciliation, ownership safety, exact transfer
+  execution and lost-response recovery. It passed 25 TypeScript worker tests,
+  13 Python engine tests, a local real-HTTP full runtime sequence, 13 focused
+  backend tests, the complete 731 backend unit/package tests and 135 backend
+  E2E tests under the recorded env-isolated procedure. See
+  [D evidence](../evidence/D-runtime.md).
 
 ## Not executed or claimed
 
-No worker service installation, live S3 integration, listening-quality review,
+No worker service installation, live S3 integration, WebSocket hint transport,
+listening-quality review,
 npm publication, signing with production keys or deployment has occurred. The
-C1-C6 backend and D1-D2 runtime work are locally verified only; dashboard,
-Android and iOS were not changed. D3-D6, Linux/NVIDIA and all other hardware
+C1-C6 backend and D1-D3 runtime work are locally verified only; dashboard,
+Android and iOS were not changed. D4-D6, Linux/NVIDIA and all other hardware
 remain unverified until later actual hardware evidence.
 
 ## Source/consistency caveats

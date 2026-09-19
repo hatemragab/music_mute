@@ -29,10 +29,47 @@ The generated TypeScript protocol under `protocol/v1/` is copied from the
 backend's canonical pure-data protocol. Run `pnpm protocol:sync` after an
 intentional backend protocol change. `pnpm protocol:check` fails on drift.
 
-Checkpoint D2 implements the four immutable Kim recipes, verified model cache,
-safe local-media pipeline and exact reference trimmer. The model is not
-redistributed by this repository; it must be installed into the
-content-addressed cache and pass the frozen size and SHA-256 checks. Backend
-polling/S3 ownership, platform service installation and full safety acceptance
-remain checkpoints D3-D6. Passing local tests does not certify service startup
-or production readiness.
+Checkpoint D3 adds the authoritative HTTPS runtime loop: machine sessions,
+policy acknowledgement, stable slot registration, same-request claim replay,
+lease renewal/cancellation, attempt workspaces, exact-version transfers and
+idempotent completion/failure. WebSocket work hints may call
+`hintAvailableWork()`, but they never replace HTTPS reconciliation or MongoDB
+ownership.
+
+The service entry point reads a strict JSON config and a separate protected
+machine-credential file:
+
+```bash
+musicmute-worker run --config /absolute/path/runtime.json
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "backendBaseUrl": "https://api.example.invalid/api/v1",
+  "machineId": "00000000-0000-4000-8000-000000000000",
+  "credentialFile": "/absolute/protected/machine.credential",
+  "workRoot": "/absolute/private/attempts",
+  "modelCacheRoot": "/absolute/private/models",
+  "engineRoot": "/absolute/release/engine",
+  "pythonPath": "/absolute/release/python",
+  "ffmpegPath": "/absolute/release/ffmpeg",
+  "ffprobePath": "/absolute/release/ffprobe",
+  "slots": [
+    {
+      "workerId": "00000000-0000-4000-8000-000000000001",
+      "gpuId": "gpu-0",
+      "slotIndex": 0,
+      "recipeIds": ["kim-vocals-trim-v1"],
+      "provider": "coreml"
+    }
+  ]
+}
+```
+
+Use mode `0600` for the credential on POSIX systems. Plain HTTP is rejected
+except when `allowInsecureLoopback` is explicitly true for isolated local
+development. The model is not redistributed by this repository; it must be in
+the verified content-addressed cache. Platform service installation and the
+remaining host-safety acceptance are checkpoints D4-D6. Passing local tests
+does not certify service startup, live S3, or production readiness.

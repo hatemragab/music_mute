@@ -108,6 +108,25 @@ export class WorkerAttemptService {
     const first = await this.loadCurrent(principal, attemptId, dto);
     const reservation = this.outputReservation(first.job, first.attempt, dto);
     this.assertReservation(first.attempt.outputReservation, reservation);
+    if (first.attempt.outputReservation) {
+      const object = await this.storage.findUploadedVersion(reservation);
+      if (object) {
+        await this.accountAccess.assertActive(first.job.userId);
+        return {
+          requestId: dto.requestId,
+          attemptId,
+          reservation: {
+            key: reservation.key,
+            bytes: reservation.bytes,
+            sha256: reservation.sha256,
+            contentType: reservation.contentType,
+            measuredDurationSeconds: reservation.measuredDurationSeconds,
+          },
+          grant: null,
+          object,
+        };
+      }
+    }
     const grant = await this.storage.createWorkerOutputGrant(
       reservation,
       first.attempt.deadlineAt,
@@ -183,6 +202,7 @@ export class WorkerAttemptService {
         measuredDurationSeconds: reservation.measuredDurationSeconds,
       },
       grant,
+      object: null,
     };
   }
 

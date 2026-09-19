@@ -11,7 +11,7 @@ Darwin 25.6 ARM64 with Node.js 24.18.0, pnpm 10.14.0 and Python 3.14.4.
 | --- | --- | --- |
 | D1 supervisor and child protocol | PASS | Standalone worker package, generated backend protocol copy, bounded framed TypeScript/Python IPC, lifecycle/timeouts/cancellation and focused verification. |
 | D2 versioned Kim recipes | PASS | Four immutable recipes, model/media validation, safe ordered pipeline, reference trimmer parity, real FFmpeg option coverage and a real framed M4/CoreML Kim-to-MP3 run. |
-| D3 runtime ownership and recovery | NOT_RUN | No backend polling, claims, leases or S3 execution is claimed by D1. |
+| D3 runtime ownership and recovery | PASS | Authoritative HTTPS reconciliation, fenced leases/cancellation, safe exact transfers, lost-response recovery, restart cleanup and a complete local HTTP runtime integration path. |
 | D4 Mac service | NOT_RUN | No LaunchDaemon was installed or tested. |
 | D5 Windows service | NOT_RUN | No Windows service was installed or tested. |
 | D6 safety and adapters | NOT_RUN | Full runtime safety, provider and platform adapter acceptance remains. |
@@ -131,11 +131,80 @@ The synthetic run proves execution and output structure, not listening quality.
   temporary copy;
 - real framed M4/CoreML child pipeline: PASS.
 
+## D3 runtime ownership and recovery
+
+- Added the runnable TypeScript control-plane client and runtime loop. A boot
+  opens one machine session, reconciles and acknowledges the current policy,
+  registers stable slots and claims only idle eligible slots. An uncertain
+  claim keeps the same request ID across bounded transport retries so a lost
+  response cannot claim another job.
+- HTTPS/MongoDB responses remain authoritative. Idle reconciliation uses the
+  accepted randomized 60–120 second window, active slots do not poll for more
+  work, and `hintAvailableWork()` is a coalescing acceleration hook only. No
+  WebSocket server or hint delivery is claimed in D3.
+- Every active attempt renews its exact ownership tuple on the accepted
+  20-second cadence. Lease safety uses server-provided durations anchored to
+  both monotonic and wall elapsed time; either clock moving beyond the safety
+  window stops publication. Expired, cancelled or revoked dispositions abort
+  transfers and forcibly terminate an active synchronous Python child before
+  the backend authority becomes uncertain.
+- Child processes can now be restarted with a new local incarnation after a
+  crash, timeout or forced cancellation. A supervisor restart opens a new
+  backend session, which fences the previous session. Work never resumes from
+  a local checkpoint: stale UUID attempt directories are removed on startup
+  and a new backend attempt restarts from its pinned input.
+- Added strict bounded response parsing and a machine runtime config whose
+  credential is read from a separate non-symlink file. Non-loopback control and
+  transfer URLs require HTTPS; redirects are never followed; control responses
+  are capped at 64 KiB; attempt input is created exclusively, streamed with an
+  exact byte/checksum check and removed on failure.
+- Output publication revalidates the local regular-file path, byte count and
+  checksum, sends only the three backend-signed PUT headers, requires an S3
+  version ID and conditionally completes the same attempt/recipe. Completion
+  ambiguity never triggers a contradictory failure publication.
+- Closed the lost-PUT-response gap at the existing backend output-grant
+  boundary. Replaying the identical frozen output declaration first inspects
+  the attempt-scoped key and returns the exact matching immutable version when
+  S3 accepted the prior PUT. Otherwise it issues a fresh bounded grant. A
+  mismatched object still fails closed.
+- The CLI now supports
+  `musicmute-worker run --config /absolute/path/runtime.json`, handles graceful
+  process signals and emits only bounded structured lifecycle events. D4/D5
+  still own creation, permissions and service installation for platform config
+  and credential files.
+
+### D3 verification
+
+From `worker/`, `pnpm run verify`: PASS.
+
+- protocol drift, formatting, lint and TypeScript typecheck: PASS;
+- TypeScript worker tests: PASS, 9 files and 25 tests;
+- Python engine tests: PASS, 13 tests;
+- production build and built `protocol-doctor`: PASS;
+- local real-HTTP runtime integration: PASS. It exercised session, config,
+  slot, claim, exact download, child boundary, signed-header upload and
+  completion with real Node HTTP/fetch streams and a deterministic test child;
+- recovery coverage: PASS for same-ID lost claim response, lost PUT response,
+  cancellation without publication, ambiguous completion, child restart,
+  forward wall/sleep safety and stale workspace cleanup;
+- backend D3-focused transfer/attempt tests: PASS, 2 files and 13 tests;
+- backend format, lint, typecheck and production build: PASS;
+- backend unit tests: PASS, 107 files and 729 tests in an env-file-free
+  temporary copy, plus the 1 repository-root packaging file and its 2 tests in
+  the original checkout;
+- backend E2E tests: PASS, 22 files and 135 tests in the env-file-free copy.
+
+The HTTP integration deliberately used a loopback transfer fixture, not live
+S3, and its deterministic child is `SIMULATED` engine evidence. D2 separately
+proves the real framed M4/CoreML child pipeline. No combined live backend, S3
+and CoreML job was claimed at D3.
+
 ## Limits
 
-This is local protocol/pipeline evidence. It does not prove backend polling/S3
-integration, service-account operation, installation, logged-out behavior,
-reboot survival, DirectML service execution, denoise listening quality or
-release readiness. D4 must package the accepted native ARM64 Python
+This is local protocol/pipeline/runtime evidence. It does not prove live S3 or
+deployed-backend integration, WebSocket hints, service-account operation,
+installation, logged-out behavior, reboot survival, DirectML service
+execution, denoise listening quality or release readiness. D4 must package the
+accepted native ARM64 Python
 3.13/CoreML environment; the system Python 3.14 used for D1 protocol tests is
 not a runtime qualification.

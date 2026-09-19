@@ -130,6 +130,7 @@ function fixture() {
       },
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     }),
+    findUploadedVersion: vi.fn().mockResolvedValue(null),
     verifyUploadedVersion: vi.fn(),
   };
   const cleanup = {
@@ -213,6 +214,26 @@ describe('worker attempt transfers and finalization', () => {
     );
     expect(f.job.status).toBe('uploading_result');
     expect(f.attempt.state).toBe('uploading');
+    expect(result.object).toBeNull();
+  });
+
+  it('recovers a successful upload when the original PUT response was lost', async () => {
+    const f = fixture();
+    await f.service.outputGrant(principal, attemptId, output);
+    const object = {
+      key: f.attempt.outputReservation.key,
+      versionId: 'recovered-version',
+      bytes: output.bytes,
+      sha256: output.sha256,
+      contentType: output.contentType,
+    };
+    f.storage.findUploadedVersion.mockResolvedValue(object);
+
+    const replay = await f.service.outputGrant(principal, attemptId, output);
+
+    expect(replay).toMatchObject({ grant: null, object });
+    expect(f.storage.createWorkerOutputGrant).toHaveBeenCalledOnce();
+    expect(f.cleanup.schedule).toHaveBeenCalledOnce();
   });
 
   it('publishes one verified immutable version and replays identical completion', async () => {
