@@ -35,6 +35,7 @@ const SLOT_KEYS = new Set([
 export interface RuntimeConfig {
   backendBaseUrl: string;
   machineId: string;
+  credentialFile: string;
   credential: string;
   workRoot: string;
   modelCacheRoot: string;
@@ -111,6 +112,7 @@ export async function loadRuntimeConfig(
   return {
     backendBaseUrl: requiredText(value.backendBaseUrl, "backendBaseUrl", 2048),
     machineId: uuid(value.machineId, "machineId"),
+    credentialFile,
     credential,
     ...paths,
     allowInsecureLoopback: value.allowInsecureLoopback === true,

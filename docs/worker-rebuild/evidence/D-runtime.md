@@ -7,14 +7,14 @@ Darwin 25.6 ARM64 with Node.js 24.18.0, pnpm 10.14.0 and Python 3.14.4.
 
 ## Checkpoint status
 
-| Checkpoint | Status | Evidence |
-| --- | --- | --- |
-| D1 supervisor and child protocol | PASS | Standalone worker package, generated backend protocol copy, bounded framed TypeScript/Python IPC, lifecycle/timeouts/cancellation and focused verification. |
-| D2 versioned Kim recipes | PASS | Four immutable recipes, model/media validation, safe ordered pipeline, reference trimmer parity, real FFmpeg option coverage and a real framed M4/CoreML Kim-to-MP3 run. |
-| D3 runtime ownership and recovery | PASS | Authoritative HTTPS reconciliation, fenced leases/cancellation, safe exact transfers, lost-response recovery, restart cleanup and a complete local HTTP runtime integration path. |
-| D4 Mac service | NOT_RUN | No LaunchDaemon was installed or tested. |
-| D5 Windows service | NOT_RUN | No Windows service was installed or tested. |
-| D6 safety and adapters | NOT_RUN | Full runtime safety, provider and platform adapter acceptance remains. |
+| Checkpoint                        | Status  | Evidence                                                                                                                                                                                                         |
+| --------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1 supervisor and child protocol  | PASS    | Standalone worker package, generated backend protocol copy, bounded framed TypeScript/Python IPC, lifecycle/timeouts/cancellation and focused verification.                                                      |
+| D2 versioned Kim recipes          | PASS    | Four immutable recipes, model/media validation, safe ordered pipeline, reference trimmer parity, real FFmpeg option coverage and a real framed M4/CoreML Kim-to-MP3 run.                                         |
+| D3 runtime ownership and recovery | PASS    | Authoritative HTTPS reconciliation, fenced leases/cancellation, safe exact transfers, lost-response recovery, restart cleanup and a complete local HTTP runtime integration path.                                |
+| D4 Mac service                    | BLOCKED | Private release/service tooling and real private-Python CoreML execution pass, but no portable FFmpeg package, enrolled machine config/credential or authorized system LaunchDaemon acceptance is available yet. |
+| D5 Windows service                | NOT_RUN | No Windows service was installed or tested.                                                                                                                                                                      |
+| D6 safety and adapters            | NOT_RUN | Full runtime safety, provider and platform adapter acceptance remains.                                                                                                                                           |
 
 ## D1 supervisor and child protocol
 
@@ -198,6 +198,71 @@ The HTTP integration deliberately used a loopback transfer fixture, not live
 S3, and its deterministic child is `SIMULATED` engine evidence. D2 separately
 proves the real framed M4/CoreML child pipeline. No combined live backend, S3
 and CoreML job was claimed at D3.
+
+## D4 Mac runtime and service installation (in progress)
+
+- Added a deterministic native ARM64 release builder. It packages only the
+  compiled worker, engine and supplied private Node/Python/FFmpeg/FFprobe
+  roots; credentials, configuration, model weights, job data and logs remain
+  outside the immutable release.
+- A complete release manifest records ordered directories, regular-file bytes,
+  modes and SHA-256 hashes plus bounded internal symlinks. Verification rejects
+  traversal/absolute links, special files, writable release entries, content
+  drift and replacement of an installed version with different bytes.
+- Every runtime executable must contain ARM64 code and pass an `otool`
+  dependency and RPATH audit. System libraries and loader-relative private
+  libraries are accepted; Homebrew and other mutable absolute prefixes are
+  rejected. The installed Homebrew Node and FFmpeg on this host therefore
+  cannot be misrepresented as private package inputs.
+- Added idempotent install/repair commands, a dedicated-account system
+  LaunchDaemon definition, `0700` state/log roots, `0600` config/credential
+  files, atomic `current` activation, previous-release rollback, service
+  restart and a doctor path. The LaunchDaemon receives only minimal system
+  environment keys and stable private paths; no backend infrastructure or S3
+  credential is placed in the plist.
+- Model provisioning accepts only the exact qualified source file, installs it
+  into the service account's content-addressed cache and checks the sanitized
+  result. Default uninstall removes only the service plist/current pointer and
+  preserves releases, model, credential and state for explicitly authorized
+  recovery/deletion.
+
+### Real private-runtime evidence
+
+On the actual Apple M4 Pro, a standalone Python 3.13.7 installation was created
+under a temporary private root and populated from the frozen CoreML lock
+without modifying global Python. It reported `audio-separator==0.47.0`,
+`onnxruntime==1.30.0` and CoreML availability. The qualified local Kim artifact
+matched 66,759,214 bytes and SHA-256
+`ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b`.
+
+The standalone runtime produced a valid 193,767-byte stereo 44.1 kHz MP3 from
+the owned eight-second fixture through `kim-vocals-trim-v1`. A separate ONNX
+Runtime profile assigned all six model node events to
+`CoreMLExecutionProvider` (1,114,292 profiled microseconds) and no node event to
+the CPU provider. Result: PASS for the private Python/model/CoreML boundary.
+
+The official Node 24.18.0 Darwin ARM64 archive matched its published SHA-256 and
+both that Node binary and the standalone Python executable passed the private
+Mach-O audit. A complete private release was deliberately not built with the
+host's Homebrew FFmpeg because its absolute Cellar/Homebrew dependencies fail
+that audit.
+
+### D4 verification and current blocker
+
+- macOS release/manifest/Mach-O/LaunchDaemon/installation tests: PASS;
+- full worker protocol drift, formatting, lint, typecheck and build: PASS;
+- complete TypeScript worker suite: PASS, 15 files and 39 tests;
+- complete Python engine suite: PASS, 17 tests;
+- real private Python CoreML provider profile and Kim pipeline: PASS;
+- full private release containing portable FFmpeg/FFprobe: BLOCKED;
+- enrolled config/credential, system LaunchDaemon install/restart, dedicated
+  logged-out operation, live backend/S3 job and reboot: NOT_RUN.
+
+Normal administrator consent, a pre-existing dedicated account and an enrolled
+machine config/credential are required for system acceptance. No administrator
+password was collected or embedded, and no logout/reboot was attempted. D4
+remains unchecked until the portable media runtime and real LaunchDaemon flow
+pass; implementation/unit evidence alone is not a completed service checkpoint.
 
 ## Limits
 

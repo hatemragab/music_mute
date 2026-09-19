@@ -1,5 +1,19 @@
 # Package changes
 
+## Revision 4.2
+
+- Added the D4 macOS private release format, complete content/mode/symlink
+  manifest, ARM64 Mach-O dependency/RPATH audit and immutable version install.
+- Added dedicated-account LaunchDaemon install/repair/doctor/uninstall
+  boundaries, protected persistent state, exact model provisioning and
+  previous-release rollback without global Node/Python changes.
+- Passed the complete local worker suite plus real standalone Python 3.13.7 /
+  CoreML Kim execution and a provider profile assigning all six model node
+  events to CoreML.
+- Kept D4 blocked instead of packaging the host's Homebrew FFmpeg: its mutable
+  absolute dependencies fail the private-runtime audit. System-service,
+  logged-out, live S3 and reboot evidence remains not run.
+
 ## Revision 4.1
 
 - Completed D3 with a runnable TypeScript machine loop for machine sessions,

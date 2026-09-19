@@ -47,13 +47,21 @@ The package build contains no environment files, credentials, models, audio fixt
   backend tests, the complete 731 backend unit/package tests and 135 backend
   E2E tests under the recorded env-isolated procedure. See
   [D evidence](../evidence/D-runtime.md).
+- D4 implementation now covers deterministic native ARM64 release manifests,
+  private dependency auditing, dedicated-account LaunchDaemon files, secure
+  state/model provisioning, repair/rollback and safe uninstall boundaries. Its
+  local tests and a real standalone-Python CoreML profile/pipeline pass, but the
+  checkpoint is BLOCKED on a portable FFmpeg/FFprobe package and the enrolled
+  system-service acceptance flow. See [D evidence](../evidence/D-runtime.md).
 
 ## Not executed or claimed
 
-No worker service installation, live S3 integration, WebSocket hint transport,
+No worker system-service installation, live S3 integration, WebSocket hint transport,
 listening-quality review,
 npm publication, signing with production keys or deployment has occurred. The
-C1-C6 backend and D1-D3 runtime work are locally verified only; dashboard,
+C1-C6 backend and D1-D3 runtime work are locally verified only; D4 tooling and
+private CoreML execution are locally verified but the D4 service checkpoint is
+not complete; dashboard,
 Android and iOS were not changed. D4-D6, Linux/NVIDIA and all other hardware
 remain unverified until later actual hardware evidence.
 

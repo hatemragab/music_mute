@@ -8,6 +8,11 @@ import { WorkerControlPlaneClient } from "../runtime/control-plane-client.js";
 import { loadRuntimeConfig } from "../runtime/runtime-config.js";
 import { WorkerTransferClient } from "../runtime/transfers.js";
 import { WorkerRuntime } from "../runtime/worker-runtime.js";
+import {
+  MACOS_USAGE,
+  macosCommandErrorSummary,
+  runMacosCommand,
+} from "../platform/macos/cli.js";
 
 const command = process.argv[2];
 
@@ -31,6 +36,15 @@ if (command === "protocol-doctor") {
     process.exitCode = 1;
   } finally {
     await child.stop();
+  }
+} else if (command === "macos") {
+  try {
+    await runMacosCommand(process.argv.slice(3));
+  } catch (error) {
+    console.error(
+      `MusicMute macOS service command: FAILED (${macosCommandErrorSummary(error)})\n${MACOS_USAGE}`,
+    );
+    process.exitCode = 1;
   }
 } else if (command === "run") {
   const configIndex = process.argv.indexOf("--config");
@@ -89,7 +103,7 @@ if (command === "protocol-doctor") {
   }
 } else {
   console.error(
-    "Usage: musicmute-worker <protocol-doctor | run --config <absolute-path>>",
+    "Usage: musicmute-worker <protocol-doctor | run --config <absolute-path> | macos ...>",
   );
   process.exitCode = 2;
 }
