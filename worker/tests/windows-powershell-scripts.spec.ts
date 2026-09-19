@@ -34,6 +34,36 @@ describe("Windows PowerShell tooling", () => {
     expect(source).toContain(
       '$Slot.PSObject.Properties.Name -contains "directmlDeviceId"',
     );
+    expect(source).toContain("function Restore-ManagedFile");
+    expect(source).toContain(
+      "Restore-ManagedFile $RuntimeConfigPath $RuntimeConfigExisted $PreviousRuntimeConfig $false",
+    );
+    expect(source).toContain(
+      "Restore-ManagedFile $CredentialPath $CredentialExisted $PreviousCredential $false",
+    );
+    expect(source).toContain(
+      "Restore-ManagedFile $Wrapper $WrapperExisted $PreviousWrapper $true",
+    );
+    expect(source).toContain(
+      "Restore-ManagedFile $ServiceXml $ServiceXmlExisted $PreviousXml $false",
+    );
+    expect(source).toContain("Test-InstalledRuntime $Root $PreviousVersion");
+    const consistencyCheck = source.indexOf(
+      'throw "The installed service state is incomplete."',
+    );
+    const candidateConfigWrite = source.indexOf(
+      "Copy-PrivateFile $ConfigItem.FullName $RuntimeConfigPath",
+    );
+    const candidateCredentialWrite = source.indexOf(
+      "Copy-PrivateFile $CredentialItem.FullName $CredentialPath",
+    );
+    const rollbackConfigRestore = source.indexOf(
+      "Restore-ManagedFile $RuntimeConfigPath",
+    );
+    expect(consistencyCheck).toBeGreaterThan(-1);
+    expect(candidateConfigWrite).toBeGreaterThan(consistencyCheck);
+    expect(candidateCredentialWrite).toBeGreaterThan(candidateConfigWrite);
+    expect(rollbackConfigRestore).toBeGreaterThan(candidateCredentialWrite);
     expect(source).toContain("Remove-Item -LiteralPath $Temporary -Force");
     expect(source).toContain("stopwait");
     expect(source).not.toContain("--no-elevate");

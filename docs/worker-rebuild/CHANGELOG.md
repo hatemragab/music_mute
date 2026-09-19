@@ -1,5 +1,16 @@
 # Package changes
 
+## Revision 4.7
+
+- Audited the D5 installer transaction and fixed rollback so a failed candidate
+  cannot leave the prior service using candidate config or credentials.
+- The installer now snapshots and restores config, credential, wrapper and XML,
+  rejects incomplete installed state before activation, and verifies the prior
+  runtime after rollback.
+- Passed focused Windows fixtures plus portable PowerShell 7.6.6 syntax parsing,
+  non-Windows fail-closed behavior and executable rollback-helper checks. Native
+  Windows service, DirectML and Z440 acceptance remain not run.
+
 ## Revision 4.6
 
 - Rebuilt the complete Mac package from the final D6 runtime and found that

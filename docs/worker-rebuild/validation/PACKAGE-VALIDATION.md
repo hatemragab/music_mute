@@ -59,8 +59,11 @@ The package build contains no environment files, credentials, models, audio fixt
 - D5 implementation now covers x86_64 PE and immutable release validation,
   pinned WinSW acquisition, password-free LocalService configuration,
   SID-scoped ACL/install/repair/rollback/uninstall tooling and an exact
-  DirectML runtime doctor. Five focused TypeScript files with ten tests, the
-  complete 49-test worker suite and the 21-test engine suite pass locally. No
+  DirectML runtime doctor. Rollback now restores candidate-overwritten config,
+  credential, wrapper and XML state before restarting and verifying the prior
+  release. Five focused TypeScript files with ten tests, portable PowerShell
+  7.6.6 parsing and rollback-helper execution, the complete 49-test worker
+  suite and the 21-test engine suite pass locally. No native Windows
   PowerShell execution, Windows package, service-context DirectML job or Z440
   acceptance is claimed. See [D evidence](../evidence/D-runtime.md).
 - D6 locally verifies attempt isolation, trusted filenames, bounded

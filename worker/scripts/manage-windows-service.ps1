@@ -133,6 +133,37 @@ function Copy-PrivateFile([string]$Source, [string]$Destination) {
   }
 }
 
+function Restore-ManagedFile(
+  [string]$Path,
+  [bool]$Existed,
+  [byte[]]$Contents,
+  [bool]$Executable
+) {
+  if (-not $Existed) {
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+      Remove-Item -LiteralPath $Path -Force
+    }
+    return
+  }
+  if ($null -eq $Contents) {
+    throw "A rollback file snapshot is missing."
+  }
+  $Temporary = "$Path.$([guid]::NewGuid()).rollback"
+  try {
+    [IO.File]::WriteAllBytes($Temporary, $Contents)
+    if ($Executable) {
+      Set-ExecutableFileAcl $Temporary
+    } else {
+      Set-PrivateFileAcl $Temporary
+    }
+    Move-Item -LiteralPath $Temporary -Destination $Path -Force
+  } finally {
+    if (Test-Path -LiteralPath $Temporary -PathType Leaf) {
+      Remove-Item -LiteralPath $Temporary -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
 function Assert-RuntimeConfig(
   [string]$Path,
   [string]$InstalledRelease,
@@ -378,26 +409,55 @@ try {
     }
   }
 
-  Copy-PrivateFile $ConfigItem.FullName (Join-Path $StateRoot "runtime.json")
-  Copy-PrivateFile $CredentialItem.FullName (Join-Path $StateRoot "machine.credential")
-  Install-Model $InstalledRelease $StateRoot $ModelItem.FullName
-
   $ServiceRoot = Join-Path $Root "service"
   $Wrapper = Join-Path $ServiceRoot "MusicMuteWorkerService.exe"
   $ServiceXml = Join-Path $ServiceRoot "MusicMuteWorkerService.xml"
+  $RuntimeConfigPath = Join-Path $StateRoot "runtime.json"
+  $CredentialPath = Join-Path $StateRoot "machine.credential"
   $PreviousVersion = Read-ActiveVersion $StateRoot
+  $RuntimeConfigExisted = Test-Path -LiteralPath $RuntimeConfigPath -PathType Leaf
+  $CredentialExisted = Test-Path -LiteralPath $CredentialPath -PathType Leaf
+  $WrapperExisted = Test-Path -LiteralPath $Wrapper -PathType Leaf
+  $ServiceXmlExisted = Test-Path -LiteralPath $ServiceXml -PathType Leaf
+  [byte[]]$PreviousRuntimeConfig = $null
+  [byte[]]$PreviousCredential = $null
+  [byte[]]$PreviousWrapper = $null
   $PreviousXml = $null
-  if (Test-Path -LiteralPath $ServiceXml -PathType Leaf) {
+  if ($RuntimeConfigExisted) {
+    $PreviousRuntimeConfig = [IO.File]::ReadAllBytes($RuntimeConfigPath)
+  }
+  if ($CredentialExisted) {
+    $PreviousCredential = [IO.File]::ReadAllBytes($CredentialPath)
+  }
+  if ($WrapperExisted) {
+    $PreviousWrapper = [IO.File]::ReadAllBytes($Wrapper)
+  }
+  if ($ServiceXmlExisted) {
     $PreviousXml = [IO.File]::ReadAllBytes($ServiceXml)
   }
-  $ServiceExists = $null -ne (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)
-  if ($ServiceExists -and $null -eq $PreviousXml) {
-    throw "The installed service definition is missing."
+  $InstalledService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+  $ServiceExists = $null -ne $InstalledService
+  if (
+    $ServiceExists -and (
+      $PreviousVersion -eq "" -or
+      -not $RuntimeConfigExisted -or
+      -not $CredentialExisted -or
+      -not $WrapperExisted -or
+      -not $ServiceXmlExisted
+    )
+  ) {
+    throw "The installed service state is incomplete."
   }
+  Install-Model $InstalledRelease $StateRoot $ModelItem.FullName
   try {
-    if ($ServiceExists) {
-      & $Wrapper stopwait 2>$null
+    if (
+      $ServiceExists -and
+      $InstalledService.Status -ne [ServiceProcess.ServiceControllerStatus]::Stopped
+    ) {
+      Invoke-Checked $Wrapper @("stopwait")
     }
+    Copy-PrivateFile $ConfigItem.FullName $RuntimeConfigPath
+    Copy-PrivateFile $CredentialItem.FullName $CredentialPath
     Copy-PrivateFile (Join-Path $InstalledRelease "runtime\service\MusicMuteWorkerService.exe") $Wrapper
     Set-ExecutableFileAcl $Wrapper
     $NewXml = "$ServiceXml.$([guid]::NewGuid()).tmp"
@@ -420,16 +480,24 @@ try {
     Write-ActiveVersion $StateRoot $Version
   } catch {
     try {
-      if (Test-Path -LiteralPath $Wrapper -PathType Leaf) {
-        & $Wrapper stopwait 2>$null
+      $RollbackService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+      if (
+        $null -ne $RollbackService -and
+        $RollbackService.Status -ne [ServiceProcess.ServiceControllerStatus]::Stopped
+      ) {
+        Invoke-Checked $Wrapper @("stopwait")
       }
-      if ($null -ne $PreviousXml -and $PreviousVersion -ne "") {
-        [IO.File]::WriteAllBytes($ServiceXml, $PreviousXml)
-        Set-PrivateFileAcl $ServiceXml
+      if (-not $ServiceExists -and (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)) {
+        Invoke-Checked $Wrapper @("uninstall")
+      }
+      Restore-ManagedFile $RuntimeConfigPath $RuntimeConfigExisted $PreviousRuntimeConfig $false
+      Restore-ManagedFile $CredentialPath $CredentialExisted $PreviousCredential $false
+      Restore-ManagedFile $Wrapper $WrapperExisted $PreviousWrapper $true
+      Restore-ManagedFile $ServiceXml $ServiceXmlExisted $PreviousXml $false
+      if ($ServiceExists) {
         Invoke-Checked $Wrapper @("start")
         Write-ActiveVersion $StateRoot $PreviousVersion
-      } elseif (-not $ServiceExists) {
-        & $Wrapper uninstall 2>$null
+        Test-InstalledRuntime $Root $PreviousVersion
       }
     } catch {
       Write-Warning "Automatic rollback also failed; inspect the preserved installation."

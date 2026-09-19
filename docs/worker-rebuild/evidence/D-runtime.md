@@ -310,9 +310,12 @@ local execution evidence alone are not a completed service checkpoint.
 - Added one elevated PowerShell install/repair/doctor/uninstall entry point. It
   serializes installers, validates the immutable release and exact one-slot
   DirectML adapter-0 config, applies SID-based ACLs, installs the exact Kim
-  artifact, keeps releases versioned, and restores the prior service definition
-  when candidate diagnostics fail. Uninstall preserves releases, credentials,
-  models and job state.
+  artifact and keeps releases versioned. Candidate activation now snapshots the
+  prior config, credential, wrapper and service definition; a failed update
+  restores all four, restarts the prior version and verifies its runtime instead
+  of combining an old service definition with candidate state. Incomplete
+  existing installations fail before activation. Uninstall preserves releases,
+  credentials, models and job state.
 - Generalized the private runtime doctor without weakening macOS checks. The
   Windows path accepts only Windows x86_64, Python 3.12,
   `onnxruntime-directml==1.24.4`, `audio-separator==0.47.0`,
@@ -328,7 +331,9 @@ local execution evidence alone are not a completed service checkpoint.
 - complete Python engine suite, including accepted DirectML host selection:
   PASS, 21 tests;
 - WinSW official asset/license download and pinned digest comparison: PASS;
-- native PowerShell parsing and execution: NOT_RUN on this macOS host;
+- portable PowerShell 7.6.6 parsing, non-Windows fail-closed behavior and
+  rollback-helper restore/remove execution: PASS on this macOS host;
+- native Windows PowerShell and service execution: NOT_RUN;
 - complete private Windows package, restrictive ACL inspection, LocalService
   DirectML access, exact RX 580 selection, real inference, restart/logged-out
   behavior, live backend/S3 job, rollback and reboot: NOT_RUN.
