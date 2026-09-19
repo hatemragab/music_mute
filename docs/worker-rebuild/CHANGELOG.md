@@ -1,5 +1,22 @@
 # Package changes
 
+## Revision 3.9
+
+- Started the accepted runtime branch from merged control-plane commit
+  `1cd22912` and completed checkpoint D1.
+- Added a standalone pnpm-managed `worker/` component with a lightweight
+  TypeScript machine supervisor and an isolated Python processing child.
+- Added a strict 64 KiB length-prefixed protocol with schema version, UUID
+  request/incarnation identity, bounded payloads, timeouts, cancellation,
+  explicit processing-unavailable behavior and clean shutdown.
+- Added an allowlisted child environment, sanitized bounded stderr, one initial
+  child per GPU, canonical backend protocol copying with SHA-256 drift checks,
+  cross-language tests and a built `protocol-doctor` command.
+
+This checkpoint does not claim Kim processing, CoreML/DirectML execution,
+backend job ownership, S3 transfers, service installation or production use.
+Those remain D2-D6.
+
 ## Revision 3.8
 
 - Completed C6 with machine/session/slot/attempt status reads, invitation

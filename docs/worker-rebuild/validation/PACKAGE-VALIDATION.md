@@ -33,14 +33,17 @@ The package build contains no environment files, credentials, models, audio fixt
   secret scanning, 107 unit-test files with 727 tests, 22 E2E files with 135
   tests, 12 processing integration tests against isolated local services, and
   a production NestJS build. See [C evidence](../evidence/C-control-plane.md).
+- D1 added the standalone worker package and passed protocol drift, formatting,
+  lint, typecheck, 10 TypeScript tests, 4 Python IPC tests, production build and
+  built-CLI/Python-child handshake checks. See [D evidence](../evidence/D-runtime.md).
 
 ## Not executed or claimed
 
 No worker service installation, live S3 integration, listening-quality review,
 npm publication, signing with production keys or deployment has occurred. The
-C1-C6 backend work is locally verified only; dashboard, Android and iOS were
-not changed. Linux/NVIDIA and all other hardware remain unverified until later
-actual hardware evidence.
+C1-C6 backend and D1 protocol work are locally verified only; dashboard,
+Android and iOS were not changed. D2-D6, Linux/NVIDIA and all other hardware
+remain unverified until later actual hardware evidence.
 
 ## Source/consistency caveats
 

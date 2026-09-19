@@ -1,0 +1,35 @@
+{
+  "name": "@musicmute/worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MusicMute machine supervisor and native processing child",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=10 <11"
+  },
+  "packageManager": "pnpm@10.14.0",
+  "bin": {
+    "musicmute-worker": "./dist/src/cli/main.js"
+  },
+  "scripts": {
+    "protocol:sync": "node scripts/sync-protocol.mjs",
+    "protocol:check": "node scripts/sync-protocol.mjs --check",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "oxlint --deny-warnings src/ tests/ protocol/ scripts/",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:engine": "cd engine && python3 -m unittest discover -s tests -p 'test_*.py'",
+    "verify": "pnpm run protocol:check && pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm test && pnpm run test:engine && pnpm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxlint": "^1.58.0",
+    "prettier": "^3.4.2",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.2"
+  }
+}

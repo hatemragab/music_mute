@@ -50,6 +50,14 @@ dist/
 build/
 *.egg-info/
 
+# Worker runtime local state and private artifacts
+worker/.local.env
+worker/node_modules/
+worker/state/
+worker/cache/
+worker/models/
+worker/work/
+
 # Flutter / Dart
 .dart_tool/
 .flutter-plugins
