@@ -16,5 +16,7 @@ const frame = Buffer.alloc(4 + body.length);
 frame.writeUInt32BE(body.length, 0);
 body.copy(frame, 4);
 process.stdout.write(frame);
-process.stderr.write("token=fixture-secret /Users/hatem/fixture\n");
+process.stderr.write(
+  "token=fixture-secret /Users/hatem/fixture https://storage.invalid/object?X-Amz-Signature=fixture\n",
+);
 process.stdin.resume();

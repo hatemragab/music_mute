@@ -6,6 +6,8 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+from .limits import MAX_LOSSLESS_SAMPLES
+
 
 @dataclass(frozen=True)
 class EditRange:
@@ -42,8 +44,8 @@ def trim_vocal_gaps(
 
     with sf.SoundFile(source) as stream:
         rate, channels, samples = stream.samplerate, stream.channels, len(stream)
-        if samples <= 0:
-            raise ValueError("Vocal input is empty")
+        if samples <= 0 or samples > MAX_LOSSLESS_SAMPLES:
+            raise ValueError("Vocal input sample count is outside worker limits")
         frame = max(1, round(rate * 0.01))
         count = (samples + frame - 1) // frame
         silent = np.empty(count, dtype=np.bool_)

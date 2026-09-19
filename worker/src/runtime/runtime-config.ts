@@ -4,6 +4,10 @@ import {
   WORKER_RECIPE_IDS,
   type WorkerRecipeId,
 } from "../../protocol/v1/protocol.js";
+import {
+  runtimePlatformAdapter,
+  type RuntimePlatformAdapter,
+} from "../platform/runtime-adapter.js";
 import type { RuntimeSlotDefinition } from "./worker-runtime.js";
 
 const CONFIG_LIMIT_BYTES = 64 * 1024;
@@ -69,6 +73,7 @@ export async function loadRuntimeConfig(
   const value = strictRecord(decoded, CONFIG_KEYS, "Runtime config");
   if (value.schemaVersion !== 1)
     throw new TypeError("Runtime config schema is unsupported");
+  const adapter = runtimePlatformAdapter(host);
   const credentialFile = requiredText(
     value.credentialFile,
     "credentialFile",
@@ -81,7 +86,7 @@ export async function loadRuntimeConfig(
     credentialInfo.isSymbolicLink() ||
     credentialInfo.size < 43 ||
     credentialInfo.size > 128 ||
-    (process.platform !== "win32" && (credentialInfo.mode & 0o077) !== 0)
+    !adapter.credentialModeIsSafe(credentialInfo.mode)
   )
     throw new TypeError("Machine credential file is unsafe");
   const credential = (await readFile(credentialFile, "utf8")).trim();
@@ -93,7 +98,9 @@ export async function loadRuntimeConfig(
     value.slots.length > 16
   )
     throw new TypeError("Runtime slots are invalid");
-  const slots = value.slots.map((slot, index) => parseSlot(slot, index, host));
+  const slots = value.slots.map((slot, index) =>
+    parseSlot(slot, index, adapter),
+  );
   if (
     value.allowInsecureLoopback !== undefined &&
     typeof value.allowInsecureLoopback !== "boolean"
@@ -123,7 +130,7 @@ export async function loadRuntimeConfig(
 function parseSlot(
   value: unknown,
   index: number,
-  host: { platform: NodeJS.Platform; arch: string },
+  adapter: RuntimePlatformAdapter,
 ): RuntimeSlotDefinition {
   const slot = strictRecord(value, SLOT_KEYS, `slots[${index}]`);
   if (
@@ -145,15 +152,8 @@ function parseSlot(
   if (new Set(recipeIds).size !== recipeIds.length)
     throw new TypeError(`slots[${index}].recipeIds contains duplicates`);
   const provider = slot.provider;
-  if (provider !== "coreml" && provider !== "directml")
+  if (provider !== adapter.provider)
     throw new TypeError(`slots[${index}].provider is invalid`);
-  if (
-    (provider === "coreml" &&
-      (host.platform !== "darwin" || host.arch !== "arm64")) ||
-    (provider === "directml" &&
-      (host.platform !== "win32" || host.arch !== "x64"))
-  )
-    throw new TypeError(`slots[${index}].provider is unavailable on this host`);
   const directmlDeviceId =
     slot.directmlDeviceId === undefined
       ? undefined
@@ -163,14 +163,14 @@ function parseSlot(
           0,
           15,
         );
-  if (provider === "coreml" && directmlDeviceId !== undefined)
-    throw new TypeError(`slots[${index}].directmlDeviceId is not applicable`);
+  if (!adapter.deviceIdIsSafe(directmlDeviceId))
+    throw new TypeError(`slots[${index}].directmlDeviceId is invalid`);
   return {
     workerId: uuid(slot.workerId, `slots[${index}].workerId`),
     gpuId: requiredText(slot.gpuId, `slots[${index}].gpuId`, 128),
     slotIndex: safeInteger(slot.slotIndex, `slots[${index}].slotIndex`, 0, 15),
     recipeIds,
-    provider,
+    provider: adapter.provider,
     ...(directmlDeviceId === undefined ? {} : { directmlDeviceId }),
   };
 }

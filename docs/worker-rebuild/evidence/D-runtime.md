@@ -7,14 +7,14 @@ Darwin 25.6 ARM64 with Node.js 24.18.0, pnpm 10.14.0 and Python 3.14.4.
 
 ## Checkpoint status
 
-| Checkpoint                        | Status  | Evidence                                                                                                                                                                                                         |
-| --------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1 supervisor and child protocol  | PASS    | Standalone worker package, generated backend protocol copy, bounded framed TypeScript/Python IPC, lifecycle/timeouts/cancellation and focused verification.                                                      |
-| D2 versioned Kim recipes          | PASS    | Four immutable recipes, model/media validation, safe ordered pipeline, reference trimmer parity, real FFmpeg option coverage and a real framed M4/CoreML Kim-to-MP3 run.                                         |
-| D3 runtime ownership and recovery | PASS    | Authoritative HTTPS reconciliation, fenced leases/cancellation, safe exact transfers, lost-response recovery, restart cleanup and a complete local HTTP runtime integration path.                                |
-| D4 Mac service                    | BLOCKED | Private release/service tooling and real private-Python CoreML execution pass, but no portable FFmpeg package, enrolled machine config/credential or authorized system LaunchDaemon acceptance is available yet. |
-| D5 Windows service                | NOT_RUN | No Windows service was installed or tested.                                                                                                                                                                      |
-| D6 safety and adapters            | NOT_RUN | Full runtime safety, provider and platform adapter acceptance remains.                                                                                                                                           |
+| Checkpoint                        | Status  | Evidence                                                                                                                                                                                                   |
+| --------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1 supervisor and child protocol  | PASS    | Standalone worker package, generated backend protocol copy, bounded framed TypeScript/Python IPC, lifecycle/timeouts/cancellation and focused verification.                                                |
+| D2 versioned Kim recipes          | PASS    | Four immutable recipes, model/media validation, safe ordered pipeline, reference trimmer parity, real FFmpeg option coverage and a real framed M4/CoreML Kim-to-MP3 run.                                   |
+| D3 runtime ownership and recovery | PASS    | Authoritative HTTPS reconciliation, fenced leases/cancellation, safe exact transfers, lost-response recovery, restart cleanup and a complete local HTTP runtime integration path.                          |
+| D4 Mac service                    | BLOCKED | Complete portable release/service tooling and a packaged CoreML job pass, but enrolled config/credential and authorized system LaunchDaemon, logged-out, live S3 and reboot acceptance remain unavailable. |
+| D5 Windows service                | NOT_RUN | No Windows service was installed or tested.                                                                                                                                                                |
+| D6 safety and adapters            | PASS    | Attempt isolation, trusted paths, resource limits, redaction/spooling, single-job capacity, warm-model isolation and explicit supported adapter boundaries pass local tests.                               |
 
 ## D1 supervisor and child protocol
 
@@ -323,12 +323,60 @@ D5 remains unchecked. The code and cross-platform fixtures are implementation
 evidence only; owner-authorized access to the accepted Windows host and a fully
 prepared private Windows runtime are still required for service acceptance.
 
+## D6 runtime safety and extension boundary
+
+- Attempt workspaces are UUID-named children of one protected root. Input and
+  output names come only from the fixed content-type map and fixed
+  `vocals.mp3`; storage keys and user titles never become local filenames.
+  Startup removes only stale UUID attempt directories, and every terminal path
+  cleans only its validated attempt root.
+- FFmpeg and ffprobe remain absolute regular executables invoked with argument
+  arrays, `shell=False`, a `file`-only protocol and allowlisted MVP demuxers, no
+  stdin, a 512 MiB individual FFmpeg allocation cap and hard timeouts. Input is
+  capped at 1,000,000,000 bytes, decoded audio at 1,800 seconds/79,380,000
+  stereo samples, intermediate files at their PCM bounds, tool output at 64 KiB
+  and final MP3 at 30,000,000 bytes.
+- Before processing, the supervisor requires 2 GiB available host memory and
+  the declared input size plus a 2,300 MiB workspace reserve. Windows uses the
+  native available-memory reading; macOS counts free, inactive and speculative
+  `vm_stat` pages instead of treating reclaimable cache as exhaustion. Missing
+  probes, low resources and spool exhaustion fail closed and disable new work
+  for the affected runtime.
+- Runtime events enter an ordered private JSONL spool with a stable stream ID,
+  monotonically increasing sequence, 8 KiB record cap, 100-record pending cap
+  and 8 MiB disk quota. Bearer/credential-like values, complete HTTP(S) URLs
+  including signed S3 URLs and user-home path components are redacted before
+  persistence. Exhaustion writes `spool-full.marker` and stops admission; no
+  backend log delivery is claimed in this checkpoint.
+- The Python provider boundary now has explicit
+  `macos-arm64-coreml-v1` and `windows-x64-directml-v1` discovery/session
+  adapters. Tests pin CoreML `CPUAndGPU` settings and DirectML sequential mode,
+  disabled memory patterns and exact device selection. The TypeScript platform
+  boundary maps those adapters to launchd/POSIX owner-only credentials and the
+  Windows Service/LocalService NTFS ACL policy. Linux, CUDA, MIGraphX, Intel Mac
+  and unqualified architectures fail closed.
+- One child per unique GPU and one active process request per child remain hard
+  invariants. A successive-job separator test proves the warm inference object
+  resets per-file state, removes stale destination contents and keeps both job
+  outputs in their own attempt directories.
+
+### D6 verification
+
+- full protocol drift, formatting, lint, typecheck and production build: PASS;
+- complete TypeScript worker suite: PASS, 23 files and 62 tests;
+- complete Python engine suite: PASS, 28 tests;
+- real-FFmpeg four-recipe pipeline and reference trimmer parity: PASS;
+- real M4/CoreML packaged job: inherited PASS from D4 evidence;
+- real Windows Service/DirectML and logged-out service acceptance: NOT_RUN and
+  remains a D5 gate, not inferred from adapter tests.
+
 ## Limits
 
 This is local protocol/pipeline/runtime evidence. It does not prove live S3 or
 deployed-backend integration, WebSocket hints, accepted-platform service
 accounts, installation, logged-out behavior, reboot survival, DirectML service
-execution, denoise listening quality or release readiness. The D4 portable Mac
-runtime is qualified locally, but its LaunchDaemon acceptance is not. D5 tooling
-has only fixture/static evidence; no Windows package or service result is
-claimed.
+execution, denoise listening quality or release readiness. D6 proves local
+safety and extension boundaries, not those platform-service outcomes. The D4
+portable Mac runtime is qualified locally, but its LaunchDaemon acceptance is
+not. D5 tooling has only fixture/static evidence; no Windows package or service
+result is claimed.

@@ -70,9 +70,24 @@ musicmute-worker run --config /absolute/path/runtime.json
 Use mode `0600` for the credential on POSIX systems. Plain HTTP is rejected
 except when `allowInsecureLoopback` is explicitly true for isolated local
 development. The model is not redistributed by this repository; it must be in
-the verified content-addressed cache. Platform service installation and the
-remaining host-safety acceptance are checkpoints D4-D6. Passing local tests
-does not certify service startup, live S3, or production readiness.
+the verified content-addressed cache.
+
+The runtime also keeps an ordered private diagnostic spool beside the attempt
+root. Records are capped at 8 KiB, the spool is capped at 8 MiB and signed URLs,
+secret-like fields and user-home components are redacted before persistence.
+If resource probes or the spool fail, new claims stop instead of treating
+unknown capacity or logging loss as safe. Each job requires 2 GiB available
+host memory and its declared input size plus a 2,300 MiB disk reserve; media and
+subprocess outputs have their own hard caps. FFmpeg accepts only the fixed MVP
+container allowlist through its local `file` protocol; playlist demuxers and
+network inputs are not enabled.
+
+Only two runtime adapters are enabled: native macOS ARM64/CoreML with launchd
+and owner-only POSIX credentials, and Windows x64/DirectML adapter 0 with a
+Windows Service and LocalService NTFS ACLs. Linux, CUDA, MIGraphX, Intel Mac and
+unqualified architectures remain disabled. D6 verifies this local boundary,
+but passing local tests does not certify service startup, live S3, logged-out
+GPU execution or production readiness; those remain D4/D5 platform gates.
 
 ## macOS private release and LaunchDaemon
 

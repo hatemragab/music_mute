@@ -1,5 +1,19 @@
 # Package changes
 
+## Revision 4.5
+
+- Completed the local D6 safety boundary with attempt-only trusted paths,
+  input/intermediate/output caps, host disk/memory admission and bounded tool
+  output capture.
+- Added an 8 MiB ordered private diagnostic spool that redacts signed URLs and
+  secrets, writes a visible failure marker and blocks new claims on exhaustion.
+- Extracted explicit CoreML and DirectML discovery/session adapters, froze the
+  macOS/Windows service and credential policies, and kept every unqualified
+  platform/provider disabled.
+- Passed 62 TypeScript and 28 Python tests, including successive warm-model job
+  isolation. D4 and D5 remain open for their real private-package and
+  system-service acceptance gates.
+
 ## Revision 4.4
 
 - Started D5 with a native x86_64 PE audit, immutable Windows release format

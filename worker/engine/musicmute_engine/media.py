@@ -11,14 +11,23 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-SAMPLE_RATE = 44_100
-CHANNELS = 2
-MAX_DURATION_SECONDS = 1_800.0
-MAX_INPUT_BYTES = 2_000_000_000
-MAX_OUTPUT_BYTES = 30_000_000
+from .limits import (
+    CHANNELS,
+    MAX_DURATION_SECONDS,
+    MAX_FFMPEG_ALLOCATION_BYTES,
+    MAX_FLOAT_BYTES,
+    MAX_INPUT_BYTES,
+    MAX_LOSSLESS_SAMPLES,
+    MAX_OUTPUT_BYTES,
+    MAX_PCM16_BYTES,
+    MAX_TOOL_OUTPUT_BYTES,
+    SAMPLE_RATE,
+)
+
 FFMPEG_TIMEOUT_SECONDS = 7_200
 PROBE_TIMEOUT_SECONDS = 60
 DENOISE_FILTER = "afftdn=nr=6:nf=-50:tn=0:gs=3"
+LOCAL_MEDIA_FORMATS = "aac,flac,matroska,webm,mov,mp3,ogg,wav"
 
 
 class MediaProcessingError(RuntimeError):
@@ -71,7 +80,11 @@ def probe_audio(path: Path, ffprobe: Path) -> AudioInfo:
             "-v",
             "error",
             "-protocol_whitelist",
-            "file,pipe",
+            "file",
+            "-format_whitelist",
+            LOCAL_MEDIA_FORMATS,
+            "-max_alloc",
+            str(MAX_FFMPEG_ALLOCATION_BYTES),
             "-select_streams",
             "a:0",
             "-show_entries",
@@ -118,8 +131,9 @@ def prepare_audio(source: Path, destination: Path, ffmpeg: Path) -> Path:
             str(SAMPLE_RATE),
             "-ac",
             str(CHANNELS),
-            str(destination),
         ],
+        destination,
+        MAX_PCM16_BYTES,
         "Audio preparation failed",
     )
     info = inspect_lossless_audio(destination, require_pcm16=True)
@@ -145,8 +159,9 @@ def denoise_audio(source: Path, destination: Path, ffmpeg: Path) -> Path:
             str(SAMPLE_RATE),
             "-ac",
             str(CHANNELS),
-            str(destination),
         ],
+        destination,
+        MAX_FLOAT_BYTES,
         "Audio denoise failed",
     )
     inspect_lossless_audio(destination)
@@ -170,8 +185,9 @@ def encode_mp3(source: Path, destination: Path, ffmpeg: Path) -> Path:
             str(SAMPLE_RATE),
             "-ac",
             str(CHANNELS),
-            str(destination),
         ],
+        destination,
+        MAX_OUTPUT_BYTES,
         "MP3 encoding failed",
     )
     return destination
@@ -196,6 +212,7 @@ def inspect_lossless_audio(
     _assert_local_file(path)
     try:
         with sf.SoundFile(path) as stream:
+            size = path.stat().st_size
             if (
                 stream.samplerate != SAMPLE_RATE
                 or stream.channels != CHANNELS
@@ -206,6 +223,8 @@ def inspect_lossless_audio(
                 )
             ):
                 raise MediaProcessingError("Lossless audio format is invalid")
+            if len(stream) > MAX_LOSSLESS_SAMPLES or size > MAX_FLOAT_BYTES:
+                raise MediaProcessingError("Lossless audio exceeds worker limits")
             for block in stream.blocks(
                 blocksize=65_536, dtype="float32", always_2d=True
             ):
@@ -217,6 +236,8 @@ def inspect_lossless_audio(
                 stream.channels,
                 len(stream),
             )
+    except MediaProcessingError:
+        raise
     except (OSError, RuntimeError) as error:
         raise MediaProcessingError("Lossless audio could not be decoded") from error
 
@@ -225,6 +246,8 @@ def _run_ffmpeg(
     ffmpeg: Path,
     source: Path,
     output_arguments: list[str],
+    destination: Path,
+    maximum_output_bytes: int,
     summary: str,
 ) -> None:
     _assert_local_file(source)
@@ -237,29 +260,57 @@ def _run_ffmpeg(
             "-nostdin",
             "-y",
             "-protocol_whitelist",
-            "file,pipe",
+            "file",
+            "-format_whitelist",
+            LOCAL_MEDIA_FORMATS,
+            "-max_alloc",
+            str(MAX_FFMPEG_ALLOCATION_BYTES),
             "-i",
             str(source),
             *output_arguments,
+            "-fs",
+            str(maximum_output_bytes),
+            str(destination),
         ],
         FFMPEG_TIMEOUT_SECONDS,
         summary,
+        capture_output=False,
     )
 
 
 def _run(
-    arguments: list[str], timeout: int, summary: str
+    arguments: list[str],
+    timeout: int,
+    summary: str,
+    *,
+    capture_output: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(
+        completed = subprocess.run(
             arguments,
-            check=True,
-            capture_output=True,
-            text=True,
+            check=False,
+            stdout=subprocess.PIPE if capture_output else subprocess.DEVNULL,
+            stderr=subprocess.PIPE if capture_output else subprocess.DEVNULL,
             timeout=timeout,
             shell=False,
             env=_subprocess_environment(),
         )
+        captured_stdout = completed.stdout or b""
+        captured_stderr = completed.stderr or b""
+        if (
+            completed.returncode != 0
+            or len(captured_stdout) > MAX_TOOL_OUTPUT_BYTES
+            or len(captured_stderr) > MAX_TOOL_OUTPUT_BYTES
+        ):
+            raise MediaProcessingError(summary)
+        return subprocess.CompletedProcess(
+            arguments,
+            completed.returncode,
+            captured_stdout.decode("utf-8", errors="replace"),
+            captured_stderr.decode("utf-8", errors="replace"),
+        )
+    except MediaProcessingError:
+        raise
     except (OSError, subprocess.SubprocessError) as error:
         raise MediaProcessingError(summary) from error
 

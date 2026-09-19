@@ -104,5 +104,7 @@ describe("worker child lifecycle", () => {
     );
     expect(child.diagnosticTail()).toContain("token=[REDACTED]");
     expect(child.diagnosticTail()).toContain("/Users/[REDACTED]/fixture");
+    expect(child.diagnosticTail()).toContain("[REDACTED_URL]");
+    expect(child.diagnosticTail()).not.toContain("X-Amz-Signature");
   });
 });

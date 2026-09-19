@@ -1,5 +1,5 @@
 import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -51,16 +51,12 @@ export class WorkspaceManager {
   async create(
     attemptId: string,
     contentType: string,
-    sourceKey: string,
   ): Promise<AttemptWorkspace> {
     this.assertInitialized();
     if (!UUID_V4.test(attemptId)) throw new TypeError("Attempt ID is invalid");
     const root = this.childPath(attemptId);
     await mkdir(root, { recursive: false, mode: 0o700 });
-    const extension =
-      EXTENSIONS[contentType.toLowerCase()] ??
-      safeExtension(sourceKey) ??
-      ".bin";
+    const extension = EXTENSIONS[contentType.toLowerCase()] ?? ".bin";
     return {
       root,
       input: join(root, `input${extension}`),
@@ -94,9 +90,4 @@ export class WorkspaceManager {
   private assertInitialized(): void {
     if (!this.root) throw new Error("Worker workspace is not initialized");
   }
-}
-
-function safeExtension(key: string): string | null {
-  const extension = extname(key).toLowerCase();
-  return /^\.[a-z0-9]{1,8}$/u.test(extension) ? extension : null;
 }

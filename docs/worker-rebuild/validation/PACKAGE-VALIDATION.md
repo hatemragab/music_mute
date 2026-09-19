@@ -61,6 +61,13 @@ The package build contains no environment files, credentials, models, audio fixt
   complete 49-test worker suite and the 21-test engine suite pass locally. No
   PowerShell execution, Windows package, service-context DirectML job or Z440
   acceptance is claimed. See [D evidence](../evidence/D-runtime.md).
+- D6 locally verifies attempt isolation, trusted filenames, bounded
+  media/subprocess/resource behavior, signed-URL and secret redaction, an
+  admission-blocking 8 MiB diagnostic spool, one-job capacity, warm-model
+  cross-job cleanup, explicit CoreML/DirectML session adapters and explicit
+  macOS/Windows service/credential policies. The complete 62-test TypeScript
+  suite and 28-test Python engine suite pass. See
+  [D evidence](../evidence/D-runtime.md).
 
 ## Not executed or claimed
 
@@ -70,9 +77,9 @@ npm publication, signing with production keys or deployment has occurred. The
 C1-C6 backend and D1-D3 runtime work are locally verified only; D4 tooling,
 private package and CoreML execution are locally verified but the D4 system
 service checkpoint is not complete; D5 tooling has local fixture evidence only;
-dashboard, Android and iOS were not changed. D4 system-service acceptance, the
-D5 Windows service, D6, Linux/NVIDIA and all other hardware remain unverified
-until later actual hardware evidence.
+D6 has local safety/adapter evidence only; dashboard, Android and iOS were not
+changed. D4 system-service acceptance, the D5 Windows service, Linux/NVIDIA and
+all other hardware remain unverified until later actual hardware evidence.
 
 ## Source/consistency caveats
 

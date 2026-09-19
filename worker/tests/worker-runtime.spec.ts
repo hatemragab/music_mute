@@ -7,6 +7,7 @@ import type { ChildResponse } from "../src/agent/ipc/child-protocol.js";
 import { ControlPlaneError } from "../src/runtime/control-plane-client.js";
 import type { Claim, WorkerRecipeSnapshot } from "../src/runtime/contracts.js";
 import { TransferError } from "../src/runtime/transfers.js";
+import { RuntimeResourceLimitError } from "../src/runtime/resource-limits.js";
 import {
   WorkerRuntime,
   type RuntimeEvent,
@@ -226,7 +227,12 @@ function fixture(options: { hang?: boolean; cancelled?: boolean } = {}) {
   return { claim, control, transfers, child, supervisor };
 }
 
-async function runtimeFixture(f = fixture()) {
+async function runtimeFixture(
+  f = fixture(),
+  resources: { assertAvailable(inputBytes: number): Promise<void> } = {
+    assertAvailable: vi.fn(async () => undefined),
+  },
+) {
   const root = await mkdtemp(join(tmpdir(), "musicmute-runtime-"));
   roots.push(root);
   const events: RuntimeEvent[] = [];
@@ -250,6 +256,7 @@ async function runtimeFixture(f = fixture()) {
       leaseSafetyMarginMs: 100,
       idlePollMinimumMs: 100,
       idlePollMaximumMs: 100,
+      resources,
       onEvent: (event) => events.push(event),
     },
     f.control,
@@ -358,6 +365,33 @@ describe("worker runtime ownership", () => {
         code: "completion-uncertain",
       }),
     );
+    await f.runtime.stop();
+  });
+
+  it("fails closed and disables a slot when local resources are insufficient", async () => {
+    const resources = {
+      assertAvailable: vi.fn(async () => {
+        throw new RuntimeResourceLimitError("disk");
+      }),
+    };
+    const f = await runtimeFixture(fixture(), resources);
+    await f.runtime.start();
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(1);
+    await f.runtime.waitForIdle();
+
+    expect(resources.assertAvailable).toHaveBeenCalledWith(inputBytes.length);
+    expect(f.transfers.download).not.toHaveBeenCalled();
+    expect(f.child.processing).toBe(false);
+    expect(f.control.fail).toHaveBeenCalledWith(
+      attemptId,
+      expect.objectContaining({ workerId }),
+      expect.objectContaining({ code: "SEPARATOR_FAILED" }),
+      expect.any(AbortSignal),
+    );
+    expect(f.events).toContainEqual(
+      expect.objectContaining({ kind: "resource-blocked", code: "disk" }),
+    );
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(0);
     await f.runtime.stop();
   });
 });

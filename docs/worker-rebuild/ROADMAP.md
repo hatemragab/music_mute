@@ -88,7 +88,7 @@ All PRs use `codex/worker-rebuild` as their base. A feature branch begins from t
 - [x] **D3:** Implement polling, ownership, renewal, recovery and S3 execution.
 - [ ] **D4:** Package and prove the accepted Mac runtime as a system service.
 - [ ] **D5:** Package and prove the accepted Windows runtime as a system service.
-- [ ] **D6:** Verify local safety, one-job capacity and future provider/platform adapter boundaries.
+- [x] **D6:** Verify local safety, one-job capacity and future provider/platform adapter boundaries.
 
 ### E. Dashboard
 

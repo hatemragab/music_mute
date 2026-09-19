@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { lstat, realpath } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { ChildCommandError } from "../agent/child-process.js";
 import type { ChildResponse } from "../agent/ipc/child-protocol.js";
 import {
@@ -18,6 +18,14 @@ import {
   type WorkerRecipeId,
 } from "./contracts.js";
 import { LeaseAuthority, OwnershipLostError } from "./lease-authority.js";
+import {
+  DiagnosticSpool,
+  type RuntimeDiagnostics,
+} from "./diagnostic-spool.js";
+import {
+  RuntimeResourceGate,
+  RuntimeResourceLimitError,
+} from "./resource-limits.js";
 import { TransferError, type WorkerTransferClient } from "./transfers.js";
 import { WorkspaceManager, type AttemptWorkspace } from "./workspace.js";
 
@@ -42,6 +50,8 @@ export interface WorkerRuntimeOptions {
   idlePollMinimumMs?: number;
   idlePollMaximumMs?: number;
   uploadAttempts?: number;
+  diagnostics?: RuntimeDiagnostics;
+  resources?: Pick<RuntimeResourceGate, "assertAvailable">;
   onEvent?: (event: RuntimeEvent) => void;
 }
 
@@ -52,7 +62,8 @@ export interface RuntimeEvent {
     | "attempt-succeeded"
     | "attempt-failed"
     | "attempt-stopped"
-    | "child-unavailable";
+    | "child-unavailable"
+    | "resource-blocked";
   workerId?: string;
   attemptId?: string;
   code?: string;
@@ -104,6 +115,8 @@ export class WorkerRuntime {
   readonly sessionId = randomUUID();
   readonly incarnation = randomUUID();
   private readonly workspace: WorkspaceManager;
+  private readonly diagnostics: RuntimeDiagnostics;
+  private readonly resources: Pick<RuntimeResourceGate, "assertAvailable">;
   private readonly busy = new Map<string, Promise<void>>();
   private readonly pendingClaims = new Map<string, string>();
   private readonly unavailable = new Set<string>();
@@ -121,10 +134,16 @@ export class WorkerRuntime {
   ) {
     validateOptions(options);
     this.workspace = new WorkspaceManager(options.workRoot);
+    this.diagnostics =
+      options.diagnostics ??
+      new DiagnosticSpool(join(dirname(options.workRoot), "logs"));
+    this.resources =
+      options.resources ?? new RuntimeResourceGate(options.workRoot);
   }
 
   async start(): Promise<void> {
     if (this.started) throw new Error("Worker runtime has already started");
+    await this.diagnostics.initialize();
     await this.workspace.initialize();
     await this.supervisor.start();
     try {
@@ -178,6 +197,7 @@ export class WorkerRuntime {
   async reconcileOnce(): Promise<number> {
     this.assertStarted();
     if (this.stopping.signal.aborted) return 0;
+    if (!(await this.diagnostics.canAdmitJobs())) return 0;
     const idle = this.options.slots.filter(
       (slot) =>
         !this.busy.has(slot.workerId) && !this.unavailable.has(slot.workerId),
@@ -233,6 +253,7 @@ export class WorkerRuntime {
     }
     await this.waitForIdle();
     await this.supervisor.stop();
+    await this.diagnostics.flush();
     this.started = false;
   }
 
@@ -317,10 +338,10 @@ export class WorkerRuntime {
       attemptId: claim.attemptId,
     });
     try {
+      await this.resources.assertAvailable(claim.input.bytes);
       workspace = await this.workspace.create(
         claim.attemptId,
         claim.input.contentType,
-        claim.input.key,
       );
       const input = await this.control.inputGrant(
         claim.attemptId,
@@ -408,6 +429,15 @@ export class WorkerRuntime {
         attemptId: claim.attemptId,
       });
     } catch (error) {
+      if (error instanceof RuntimeResourceLimitError) {
+        this.unavailable.add(slot.workerId);
+        this.emit({
+          kind: "resource-blocked",
+          workerId: slot.workerId,
+          attemptId: claim.attemptId,
+          code: error.resource,
+        });
+      }
       if (
         error instanceof OwnershipLostError ||
         error instanceof PublicationUncertainError ||
@@ -602,6 +632,7 @@ export class WorkerRuntime {
 
   private emit(event: RuntimeEvent): void {
     this.options.onEvent?.(event);
+    this.diagnostics.record(event);
   }
 
   private wake(): void {
