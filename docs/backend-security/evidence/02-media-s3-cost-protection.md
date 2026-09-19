@@ -7,7 +7,8 @@
 - Merged predecessor PR: <https://github.com/hatemragab/music_mute/pull/10>
 - Starting collection commit: `e9691b2a80f7faed64b66f0800827ea545cfe728`
 - Actual tested source commit: `9b5118aa0a5b21ce459541d83480a78fe032cf07`
-- Pull request URL/base: not opened / `codex/backend-security-cost-hardening`
+- Pull request URL/base: <https://github.com/hatemragab/music_mute/pull/11> /
+  `codex/backend-security-cost-hardening`
 - Date/time with timezone: 2026-09-20 01:11:28 EEST
 - Environment: local macOS isolated worktree; no live provider or real-data access
 
