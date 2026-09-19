@@ -7,6 +7,7 @@ import type {
   JobDetail,
   Permission,
   AccountPolicy,
+  AccountPolicyOverride,
   AccountUsage,
   RevisionCommand,
   ReleaseDetail,
@@ -141,6 +142,39 @@ export class DashboardFixture {
       releasedSeconds: 0,
       remainingSeconds: 5_700,
     },
+    uploads: {
+      dailyGrantLimit: 30,
+      dailyGrants: 2,
+      dailyRemainingGrants: 28,
+      dailyResetAt: "2026-09-12T00:00:00.000Z",
+      monthlyGrantLimit: 200,
+      monthlyGrants: 12,
+      monthlyRemainingGrants: 188,
+      monthlyByteLimit: 1_000_000_000,
+      confirmedBytes: 50_000_000,
+      monthlyRemainingBytes: 950_000_000,
+      monthlyResetAt: "2026-10-01T00:00:00.000Z",
+    },
+    storage: {
+      limitBytes: 1_000_000_000,
+      retainedBytes: 100_000_000,
+      remainingBytes: 900_000_000,
+    },
+    effectiveLimits: {
+      maxDurationSeconds: 1_200,
+      maxPreparedAudioBytes: 50_000_000,
+      maxClientInputAttempts: 5,
+      signedUrlTtlSeconds: 600,
+    },
+    downloads: {
+      monthlyGrantLimit: 150,
+      monthlyGrants: 10,
+      monthlyRemainingGrants: 140,
+      monthlyByteLimit: 10_000_000_000,
+      estimatedBytes: 500_000_000,
+      monthlyRemainingBytes: 9_500_000_000,
+      monthlyResetAt: "2026-10-01T00:00:00.000Z",
+    },
     usageRevision: 1,
     activeJobs: 1,
     maxProcessingJobs: 1,
@@ -172,7 +206,14 @@ export class DashboardFixture {
       monthlyServiceOutboundBytes: 80_000_000_000,
       deletionGraceHours: 360,
     },
-    enforcedFeatures: ["processing_minutes"],
+    enforcedFeatures: [
+      "processing_minutes",
+      "media_limits",
+      "upload_limits",
+      "download_limits",
+      "retained_storage",
+      "service_outbound",
+    ],
     updatedBy: "owner-fixture",
     updatedAt: NOW,
   };
@@ -328,7 +369,7 @@ export class DashboardFixture {
       ["PUT", "DELETE"].includes(method)
     ) {
       const body = input.body as RevisionCommand & {
-        values?: { monthlyProcessingSeconds?: number };
+        values?: AccountPolicyOverride["values"];
         expiresAt?: string | null;
       };
       if (
@@ -349,8 +390,11 @@ export class DashboardFixture {
       const clear = method === "DELETE";
       if (
         !clear &&
-        (!body.values?.monthlyProcessingSeconds ||
-          body.values.monthlyProcessingSeconds < 1 ||
+        (!body.values ||
+          Object.keys(body.values).length === 0 ||
+          Object.values(body.values).some(
+            (value) => !Number.isSafeInteger(value) || value! < 1,
+          ) ||
           (body.expiresAt !== null &&
             (!body.expiresAt || Date.parse(body.expiresAt) <= Date.now())))
       )
@@ -361,7 +405,8 @@ export class DashboardFixture {
         );
       const limit = clear
         ? this.settings.values.monthlyProcessingSeconds
-        : body.values!.monthlyProcessingSeconds!;
+        : (body.values!.monthlyProcessingSeconds ??
+          this.settings.values.monthlyProcessingSeconds);
       const nextRevision =
         (this.accountUsage.policyOverride?.revision ?? 0) + 1;
       this.accountUsage = {
@@ -383,7 +428,7 @@ export class DashboardFixture {
           ? null
           : {
               revision: nextRevision,
-              values: { monthlyProcessingSeconds: limit },
+              values: body.values!,
               expiresAt: body.expiresAt ?? null,
               reason: body.reason,
               createdBy: "owner-fixture",

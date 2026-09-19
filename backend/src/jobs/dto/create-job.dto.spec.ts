@@ -2,6 +2,9 @@ import { ValidationPipe } from '@nestjs/common';
 import { CreateJobDto } from './create-job.dto.js';
 
 const payload = {
+  policyVersion: 2,
+  preparationProfileId: 'preserve-or-aac-lc-256-v1',
+  source: 'audio_file',
   requestId: '12345678-1234-4567-8123-123456789ABC',
   input: {
     extension: 'mp3',
@@ -71,17 +74,27 @@ describe('create-job HTTP declaration', () => {
       }),
     ).rejects.toThrow();
   });
-  it('does not coerce numeric strings or accept exact limits', async () => {
+  it('does not coerce numeric strings and enforces inclusive standard limits', async () => {
     await expect(
       transform({ ...payload, input: { ...payload.input, bytes: '1024' } }),
     ).rejects.toThrow();
     await expect(
-      transform({ ...payload, input: { ...payload.input, bytes: 30_000_000 } }),
+      transform({
+        ...payload,
+        input: {
+          ...payload.input,
+          bytes: 50_000_000,
+          durationSeconds: 1_200,
+        },
+      }),
+    ).resolves.toBeInstanceOf(CreateJobDto);
+    await expect(
+      transform({ ...payload, input: { ...payload.input, bytes: 50_000_001 } }),
     ).rejects.toThrow();
     await expect(
       transform({
         ...payload,
-        input: { ...payload.input, durationSeconds: 600 },
+        input: { ...payload.input, durationSeconds: 1_200.001 },
       }),
     ).rejects.toThrow();
   });

@@ -15,9 +15,9 @@ class AudioInputPreparerTest {
 
     @Test fun expandedInputIsInclusiveAndRecoveryPreservesMetadataWithoutProviderGrant() = runBlocking {
         val id = java.util.UUID.randomUUID().toString()
-        val preparer = AudioInputPreparer(temporary.root) { AudioInspection(1800.0, true, false, "audio/mp4") }
-        val input = preparer.prepare("owner", "video.m4a", id, expandedMediaPolicy(), "video_file") { ByteArrayInputStream(byteArrayOf(1, 2, 3)) }
-        val recovered = preparer.recover("owner", id, "video.mov", expandedMediaPolicy(), "video_file")
+        val preparer = AudioInputPreparer(temporary.root) { AudioInspection(1200.0, true, false, "audio/mp4") }
+        val input = preparer.prepare("owner", "video.m4a", id, standardMediaPolicy(), "video_file") { ByteArrayInputStream(byteArrayOf(1, 2, 3)) }
+        val recovered = preparer.recover("owner", id, "video.mov", standardMediaPolicy(), "video_file")
         assertEquals(input.declaration, recovered?.declaration)
         assertEquals("video_file", recovered?.mediaSource)
         assertEquals(2, recovered?.mediaPolicy?.version)
@@ -74,9 +74,10 @@ class AudioInputPreparerTest {
     }
 
     @Test fun limitsMatchServerExactly() {
-        assertTrue(validProcessingInput(29_999_999, 599.999))
-        assertFalse(validProcessingInput(30_000_000, 599.999))
-        assertFalse(validProcessingInput(1, 600.0))
+        assertTrue(validProcessingInput(50_000_000, 1_200.0))
+        assertFalse(validProcessingInput(50_000_001, 1_200.0))
+        assertFalse(validProcessingInput(1, 1_200.001))
+        assertTrue(validProcessingInput(1, 600.0))
         assertFalse(validProcessingInput(0, 1.0))
         assertFalse(validProcessingInput(1, Double.NaN))
         assertFalse(validProcessingInput(1, Double.POSITIVE_INFINITY))
@@ -133,13 +134,14 @@ class AudioInputPreparerTest {
 
     @Test fun byteLimitUsesStreamNotProviderClaim() = runBlocking {
         val preparer = AudioInputPreparer(temporary.root, maxBytes = 10) { AudioInspection(1.0, true, false, "audio/mpeg") }
+        val exact = preparer.prepare("a", "sample.mp3") { ByteArrayInputStream(ByteArray(10)) }
+        assertEquals(10, exact.declaration.bytes)
         try {
-            preparer.prepare("a", "sample.mp3") { ByteArrayInputStream(ByteArray(10)) }
-            fail("Exact limit accepted")
+            preparer.prepare("a", "sample.mp3") { ByteArrayInputStream(ByteArray(11)) }
+            fail("Above-limit input accepted")
         } catch (error: InputPreparationException) {
             assertEquals(InputPreparationError.TOO_LARGE, error.reason)
         }
-        assertFalse(temporary.root.walkTopDown().any { it.isFile })
     }
 
     @Test fun differentOwnersAndSelectionsDoNotReuseStagedFiles() = runBlocking {

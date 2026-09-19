@@ -21,7 +21,64 @@ export class ProcessingStorageCleanupService {
 
   /** Schedules one expired reservation of each kind in bounded transactions. */
   async scheduleDue(now = new Date()): Promise<boolean> {
-    return this.scheduleExpiredInput(now);
+    return (
+      (await this.scheduleTerminalInput(now)) ||
+      (await this.scheduleExpiredInput(now))
+    );
+  }
+
+  private async scheduleTerminalInput(now: Date): Promise<boolean> {
+    const candidate = await this.jobs
+      .findOne({
+        $or: [
+          { status: trusted({ $in: ['ready', 'cancelled'] }) },
+          {
+            status: 'failed',
+            'retryEligibility.eligible': trusted({ $ne: true }),
+          },
+        ],
+        reservationCleanupScheduledAt: null,
+      })
+      .sort({ finishedAt: 1, _id: 1 })
+      .lean();
+    if (!candidate) return false;
+    return this.transactions.run(async (session) => {
+      const known = candidate.inputObject;
+      const reservationExpiry =
+        candidate.admissionSnapshot?.reservationExpiresAt.getTime() ??
+        now.getTime();
+      const due = known
+        ? now
+        : new Date(
+            Math.max(now.getTime(), reservationExpiry + UPLOAD_EXPIRY_GRACE_MS),
+          );
+      await this.cleanup.schedule(
+        {
+          key: known?.key ?? candidate.inputReservation.key,
+          versionId: known?.versionId ?? null,
+          ownerUserId: candidate.userId,
+          reason: 'AUDIO_INPUT_TERMINAL',
+          nextAt: due,
+          settleUntil: known
+            ? due
+            : new Date(due.getTime() + VERSION_SETTLEMENT_MS),
+        },
+        session,
+      );
+      const changed = await this.jobs.updateOne(
+        {
+          _id: candidate._id,
+          status: candidate.status,
+          reservationCleanupScheduledAt: null,
+          revision: candidate.revision,
+        },
+        { $set: { reservationCleanupScheduledAt: now } },
+        { session, runValidators: true },
+      );
+      if (changed.modifiedCount !== 1)
+        throw new Error('Terminal input changed while scheduling cleanup');
+      return true;
+    });
   }
 
   private async scheduleExpiredInput(now: Date): Promise<boolean> {

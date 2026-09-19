@@ -94,8 +94,11 @@ See the [approved scope](../docs/tasks/full-dashboard/scope.md), [API contracts]
 
 ## Processing administration
 
-User detail includes the current UTC-month account usage, reservation holds,
-released/refunded seconds, the next reset, and an optional account policy override.
+User detail includes current UTC-month processing usage, upload grants/confirmed
+bytes, result grants/estimated bytes, retained-output bytes, effective limits, reset
+boundaries, and an optional account policy override. The override can replace selected
+processing, media, upload, download, retention, and signed-URL values while blank fields
+continue using the global standard policy.
 Reason, operation ID, expected revision and fresh authentication are required for
 override changes. Suspensions can have an optional expiry; effective access comes
 from the server, not a client timer. Override writes perform authoritative read-back.

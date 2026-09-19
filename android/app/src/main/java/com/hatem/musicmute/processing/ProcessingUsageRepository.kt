@@ -24,6 +24,47 @@ data class ProcessingUsageAmounts(
 )
 
 @Serializable
+data class ProcessingUploadUsage(
+    val dailyGrantLimit: Int,
+    val dailyGrants: Int,
+    val dailyRemainingGrants: Int,
+    val dailyResetAt: String,
+    val monthlyGrantLimit: Int,
+    val monthlyGrants: Int,
+    val monthlyRemainingGrants: Int,
+    val monthlyByteLimit: Long,
+    val confirmedBytes: Long,
+    val monthlyRemainingBytes: Long,
+    val monthlyResetAt: String,
+)
+
+@Serializable
+data class ProcessingStorageUsage(
+    val limitBytes: Long,
+    val retainedBytes: Long,
+    val remainingBytes: Long,
+)
+
+@Serializable
+data class ProcessingDownloadUsage(
+    val monthlyGrantLimit: Int,
+    val monthlyGrants: Int,
+    val monthlyRemainingGrants: Int,
+    val monthlyByteLimit: Long,
+    val estimatedBytes: Long,
+    val monthlyRemainingBytes: Long,
+    val monthlyResetAt: String,
+)
+
+@Serializable
+data class ProcessingEffectiveLimits(
+    val maxDurationSeconds: Int,
+    val maxPreparedAudioBytes: Long,
+    val maxClientInputAttempts: Int,
+    val signedUrlTtlSeconds: Int,
+)
+
+@Serializable
 data class ProcessingAvailability(val status: String, val reason: String? = null)
 
 @Serializable
@@ -36,6 +77,10 @@ data class ProcessingUsage(
     val overrideExpiresAt: String? = null,
     val period: ProcessingUsagePeriod,
     val processing: ProcessingUsageAmounts,
+    val uploads: ProcessingUploadUsage,
+    val storage: ProcessingStorageUsage,
+    val effectiveLimits: ProcessingEffectiveLimits,
+    val downloads: ProcessingDownloadUsage,
     val usageRevision: Int,
     val activeJobs: Int,
     val maxProcessingJobs: Int,
@@ -55,9 +100,32 @@ data class ProcessingUsage(
             effectivePolicySource !in setOf("global", "account_override") ||
             amounts.any { !it.isFinite() || it < 0 } ||
             processing.remainingSeconds > processing.limitSeconds ||
+            listOf(
+                uploads.dailyGrantLimit, uploads.monthlyGrantLimit,
+                downloads.monthlyGrantLimit, effectiveLimits.maxDurationSeconds,
+                effectiveLimits.maxClientInputAttempts, effectiveLimits.signedUrlTtlSeconds,
+            ).any { it < 1 } ||
+            listOf(
+                uploads.dailyGrants, uploads.dailyRemainingGrants, uploads.monthlyGrants,
+                uploads.monthlyRemainingGrants, downloads.monthlyGrants,
+                downloads.monthlyRemainingGrants,
+            ).any { it < 0 } ||
+            listOf(
+                uploads.monthlyByteLimit, uploads.confirmedBytes, uploads.monthlyRemainingBytes,
+                storage.limitBytes, storage.retainedBytes, storage.remainingBytes,
+                downloads.monthlyByteLimit, downloads.estimatedBytes,
+                downloads.monthlyRemainingBytes, effectiveLimits.maxPreparedAudioBytes,
+            ).any { it < 0 } ||
+            uploads.dailyRemainingGrants > uploads.dailyGrantLimit ||
+            uploads.monthlyRemainingGrants > uploads.monthlyGrantLimit ||
+            uploads.monthlyRemainingBytes > uploads.monthlyByteLimit ||
+            storage.remainingBytes > storage.limitBytes ||
+            downloads.monthlyRemainingGrants > downloads.monthlyGrantLimit ||
+            downloads.monthlyRemainingBytes > downloads.monthlyByteLimit ||
+            effectiveLimits.signedUrlTtlSeconds > 600 ||
             activeJobs < 0 || maxProcessingJobs < 1 ||
             availability.status !in setOf("available", "blocked") ||
-            availability.reason !in setOf(null, "paused", "monthly_limit_reached", "active_job_limit") ||
+            availability.reason !in setOf(null, "paused", "monthly_limit_reached", "active_job_limit", "storage_limit_reached") ||
             (availability.status == "available") != (availability.reason == null)) {
             throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE)
         }
@@ -65,6 +133,9 @@ data class ProcessingUsage(
             val start = Instant.parse(period.start)
             val end = Instant.parse(period.end)
             require(start < end && Instant.parse(period.nextResetAt) == end)
+            Instant.parse(uploads.dailyResetAt)
+            require(Instant.parse(uploads.monthlyResetAt) == end)
+            require(Instant.parse(downloads.monthlyResetAt) == end)
             Instant.parse(checkedAt)
             overrideExpiresAt?.let(Instant::parse)
         } catch (_: Exception) { throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE) }

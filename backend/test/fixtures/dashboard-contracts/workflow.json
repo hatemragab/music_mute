@@ -469,7 +469,14 @@
           "monthlyServiceOutboundBytes": 80000000000,
           "deletionGraceHours": 360
         },
-        "enforcedFeatures": ["processing_minutes"],
+        "enforcedFeatures": [
+          "processing_minutes",
+          "media_limits",
+          "upload_limits",
+          "download_limits",
+          "retained_storage",
+          "service_outbound"
+        ],
         "updatedBy": "system",
         "updatedAt": "2026-01-01T00:00:00.000Z"
       }

@@ -698,7 +698,13 @@
         "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
         "expectedRevision": 0,
-        "values": { "monthlyProcessingSeconds": 14400 },
+        "values": {
+          "monthlyProcessingSeconds": 14400,
+          "monthlyUploadGrants": 300,
+          "monthlyEstimatedDownloadBytes": 12000000000,
+          "maxRetainedOutputBytes": 2000000000,
+          "signedUrlTtlSeconds": 300
+        },
         "expiresAt": null
       },
       "responseCategory": "resource",

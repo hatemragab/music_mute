@@ -16,9 +16,12 @@ import {
   DEFAULT_ACCOUNT_POLICY_VALUES,
 } from '../dist/admin-settings/account-policy.schema.js';
 
-const createJob = (jobs, owner, durationSeconds) =>
-  jobs.create({
+const createJob = (jobs, owner, durationSeconds, logicalAudioId = null) => {
+  const id = new Types.ObjectId();
+  return jobs.create({
+    _id: id,
     userId: owner,
+    logicalAudioId: logicalAudioId ?? id,
     requestId: randomUUID(),
     requestHash: randomUUID().replaceAll('-', '').padEnd(64, 'a'),
     status: 'queued',
@@ -30,7 +33,18 @@ const createJob = (jobs, owner, durationSeconds) =>
       durationSeconds,
       sha256: Buffer.alloc(32).toString('base64'),
     },
+    admissionSnapshot: {
+      policyVersion: 2,
+      maxDurationSeconds: 1_200,
+      maxInputBytes: 50_000_000,
+      preparationProfileId: 'preserve-or-aac-lc-256-v1',
+      source: 'audio_file',
+      settingsRevision: 0,
+      maxActiveJobsPerUser: 1,
+      reservationExpiresAt: new Date('2026-12-01T00:00:00.000Z'),
+    },
   });
+};
 
 test('UTC-month reservations are idempotent, bounded, and fully released on failure', async (t) => {
   const native = await IsolatedServices.create();
@@ -52,7 +66,11 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
 
   const jobs = connection.model('Job');
   const periods = connection.model('AccountUsagePeriod');
+  const dailyPeriods = connection.model('AccountDailyUsagePeriod');
   const reservations = connection.model('ProcessingReservation');
+  const uploadGrants = connection.model('UploadGrantReceipt');
+  const downloadGrants = connection.model('DownloadGrantReceipt');
+  const servicePeriods = connection.model('ServiceUsagePeriod');
   const policies = connection.model(AccountPolicy.name);
   const overrides = connection.model(AccountPolicyOverride.name);
   const fences = connection.model('ProcessingAdmissionFence');
@@ -66,9 +84,30 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     {},
     new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
   );
+  await policies.create({
+    _id: 'standard',
+    revision: 1,
+    acceptNewJobs: true,
+    maintenanceMessageEn: '',
+    maintenanceMessageAr: null,
+    ...DEFAULT_ACCOUNT_POLICY_VALUES,
+    dailyUploadGrants: 2,
+    monthlyUploadGrants: 3,
+    monthlyConfirmedUploadBytes: 1_500,
+    monthlyDownloadGrants: 3,
+    monthlyEstimatedDownloadBytes: 2_500,
+    monthlyServiceOutboundBytes: 3_000,
+    maxClientInputAttempts: 3,
+    updatedBy: 'fixture-admin',
+    updatedAt: new Date(),
+  });
   const usage = new ProcessingUsageService(
     periods,
+    dailyPeriods,
     reservations,
+    uploadGrants,
+    downloadGrants,
+    servicePeriods,
     jobs,
     users,
     policy,
@@ -76,6 +115,94 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   );
   const transactions = new ProcessingTransactions(connection);
   const job = await createJob(jobs, owner, 30);
+
+  const firstGrantId = randomUUID();
+  const septemberDayOne = new Date('2026-09-10T12:00:00.000Z');
+  await transactions.run(async (session) => {
+    await usage.reserveUploadGrant(job, firstGrantId, session, septemberDayOne);
+    await usage.reserveUploadGrant(job, firstGrantId, session, septemberDayOne);
+  });
+  assert.equal(await uploadGrants.countDocuments(), 1);
+  assert.equal((await jobs.findById(job._id)).uploadAttemptCount, 1);
+
+  const concurrent = await Promise.allSettled([
+    transactions.run((session) =>
+      usage.reserveUploadGrant(job, randomUUID(), session, septemberDayOne),
+    ),
+    transactions.run((session) =>
+      usage.reserveUploadGrant(job, randomUUID(), session, septemberDayOne),
+    ),
+  ]);
+  assert.equal(
+    concurrent.filter((outcome) => outcome.status === 'fulfilled').length,
+    1,
+  );
+  assert.equal(
+    concurrent.filter((outcome) => outcome.status === 'rejected').length,
+    1,
+  );
+  assert.equal((await jobs.findById(job._id)).uploadAttemptCount, 2);
+  assert.equal(await uploadGrants.countDocuments(), 2);
+
+  const septemberDayTwo = new Date('2026-09-11T12:00:00.000Z');
+  await transactions.run((session) =>
+    usage.reserveUploadGrant(job, randomUUID(), session, septemberDayTwo),
+  );
+  const uploadOctober = new Date('2026-10-01T00:00:01.000Z');
+  const octoberJob = await createJob(jobs, owner, 30);
+  await transactions.run((session) =>
+    usage.reserveUploadGrant(octoberJob, randomUUID(), session, uploadOctober),
+  );
+  const octoberUsage = await usage.readUsage(owner, undefined, uploadOctober);
+  assert.equal(octoberUsage.uploads.dailyGrants, 1);
+  assert.equal(octoberUsage.uploads.monthlyGrants, 1);
+
+  const sameLogicalAudio = await createJob(jobs, owner, 30, job.logicalAudioId);
+  await assert.rejects(
+    transactions.run((session) =>
+      usage.reserveUploadGrant(
+        sameLogicalAudio,
+        randomUUID(),
+        session,
+        uploadOctober,
+      ),
+    ),
+    (error) => error.getResponse().code === 'UPLOAD_ATTEMPT_LIMIT_REACHED',
+  );
+  assert.equal((await jobs.findById(job._id)).uploadAttemptCount, 3);
+  assert.equal(
+    (await jobs.findById(sameLogicalAudio._id)).uploadAttemptCount,
+    0,
+  );
+  assert.equal(await uploadGrants.countDocuments(), 4);
+
+  await transactions.run(async (session) => {
+    const current = await jobs.findById(job._id).session(session);
+    await usage.confirmUploadBytes(current, 1_024, session, septemberDayTwo);
+    await usage.confirmUploadBytes(current, 1_024, session, septemberDayTwo);
+  });
+  const overLimitJob = await createJob(jobs, owner, 30);
+  await assert.rejects(
+    transactions.run(async (session) => {
+      const current = await jobs.findById(overLimitJob._id).session(session);
+      await usage.confirmUploadBytes(current, 1_024, session, septemberDayTwo);
+    }),
+    (error) => error.getResponse().code === 'UPLOAD_BYTE_LIMIT_REACHED',
+  );
+  const uploadUsage = await usage.readUsage(owner, undefined, septemberDayTwo);
+  assert.deepEqual(uploadUsage.uploads, {
+    dailyGrantLimit: 2,
+    dailyGrants: 1,
+    dailyRemainingGrants: 1,
+    dailyResetAt: '2026-09-12T00:00:00.000Z',
+    monthlyGrantLimit: 3,
+    monthlyGrants: 3,
+    monthlyRemainingGrants: 0,
+    monthlyByteLimit: 1_500,
+    confirmedBytes: 1_024,
+    monthlyRemainingBytes: 476,
+    monthlyResetAt: '2026-10-01T00:00:00.000Z',
+  });
 
   await transactions.run(async (session) => {
     await usage.reserveForJob(
@@ -160,17 +287,13 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   assert.equal(consumed.processing.remainingSeconds, 7_174);
   assert.equal((await reservations.findById(successfulJob._id)).state, 'used');
 
-  await policies.create({
-    _id: 'standard',
-    revision: 1,
-    acceptNewJobs: true,
-    maintenanceMessageEn: '',
-    maintenanceMessageAr: null,
-    ...DEFAULT_ACCOUNT_POLICY_VALUES,
-    monthlyProcessingSeconds: 60,
-    updatedBy: 'fixture-admin',
-    updatedAt: new Date(),
-  });
+  await policies.updateOne(
+    { _id: 'standard' },
+    {
+      $set: { monthlyProcessingSeconds: 60, updatedAt: new Date() },
+      $inc: { revision: 1 },
+    },
+  );
   const first = await createJob(jobs, owner, 40);
   const second = await createJob(jobs, owner, 40);
   const outcomes = await Promise.allSettled([
@@ -207,6 +330,294 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   assert.equal(independent.processing.usedSeconds, 0);
   assert.equal(independent.processing.reservedSeconds, 0);
   assert.equal(independent.processing.remainingSeconds, 60);
+  assert.deepEqual(independent.storage, {
+    limitBytes: 1_000_000_000,
+    retainedBytes: 0,
+    remainingBytes: 1_000_000_000,
+  });
+
+  const retainedObject = {
+    key: `users/${secondAccount}/jobs/output/vocals.mp3`,
+    versionId: 'retained-v1',
+    bytes: 1_000_000_001,
+    sha256: Buffer.alloc(32, 2).toString('base64'),
+    contentType: 'audio/mpeg',
+  };
+  await transactions.run((session) =>
+    usage.recordRetainedOutput(
+      {
+        userId: secondAccount,
+        outputObject: null,
+        retainedOutputAccountedAt: null,
+        retainedOutputReleasedAt: null,
+      },
+      retainedObject.bytes,
+      session,
+    ),
+  );
+  const overStorage = await usage.readUsage(secondAccount);
+  assert.equal(overStorage.storage.retainedBytes, retainedObject.bytes);
+  assert.deepEqual(overStorage.availability, {
+    status: 'blocked',
+    reason: 'storage_limit_reached',
+  });
+  await assert.rejects(
+    transactions.run((session) =>
+      usage.assertRetainedCapacity(
+        secondAccount,
+        DEFAULT_ACCOUNT_POLICY_VALUES.maxRetainedOutputBytes,
+        session,
+      ),
+    ),
+    (error) => error.getResponse().code === 'RETAINED_STORAGE_LIMIT_REACHED',
+  );
+  await transactions.run((session) =>
+    usage.releaseRetainedOutput(
+      {
+        userId: secondAccount,
+        outputObject: retainedObject,
+        retainedOutputAccountedAt: new Date(),
+        retainedOutputReleasedAt: null,
+      },
+      session,
+    ),
+  );
+  assert.equal((await usage.readUsage(secondAccount)).storage.retainedBytes, 0);
+
+  const downloadJob = await createJob(jobs, secondAccount, 30);
+  const septemberDownload = new Date('2026-09-12T12:00:00.000Z');
+  const firstDownloadRequest = randomUUID();
+  const firstResult = { versionId: 'result-v1', bytes: 1_000 };
+  const reserveFirstResult = () =>
+    transactions.run((session) =>
+      usage.reserveDownloadGrant(
+        {
+          accountId: secondAccount,
+          jobId: downloadJob._id,
+          scope: 'user_result',
+          requestId: firstDownloadRequest,
+          object: firstResult,
+        },
+        session,
+        septemberDownload,
+      ),
+    );
+  const concurrentReplay = await Promise.allSettled([
+    reserveFirstResult(),
+    reserveFirstResult(),
+  ]);
+  assert.equal(
+    concurrentReplay.filter((outcome) => outcome.status === 'fulfilled').length,
+    2,
+  );
+  await transactions.run((session) =>
+    usage.reserveDownloadGrant(
+      {
+        accountId: secondAccount,
+        jobId: downloadJob._id,
+        scope: 'user_result',
+        requestId: firstDownloadRequest,
+        object: firstResult,
+      },
+      session,
+      septemberDownload,
+    ),
+  );
+  await assert.rejects(
+    transactions.run((session) =>
+      usage.reserveDownloadGrant(
+        {
+          accountId: secondAccount,
+          jobId: downloadJob._id,
+          scope: 'user_result',
+          requestId: firstDownloadRequest,
+          object: { versionId: 'result-v2', bytes: 1_000 },
+        },
+        session,
+        septemberDownload,
+      ),
+    ),
+    (error) => error.getResponse().code === 'IDEMPOTENCY_CONFLICT',
+  );
+  assert.equal(await downloadGrants.countDocuments(), 1);
+  assert.equal(
+    (await servicePeriods.findById('2026-09')).estimatedOutboundBytes,
+    1_000,
+  );
+
+  const downloadRace = await Promise.allSettled([
+    transactions.run((session) =>
+      usage.reserveDownloadGrant(
+        {
+          accountId: secondAccount,
+          jobId: downloadJob._id,
+          scope: 'user_result',
+          requestId: randomUUID(),
+          object: { versionId: 'result-v2', bytes: 1_500 },
+        },
+        session,
+        septemberDownload,
+      ),
+    ),
+    transactions.run((session) =>
+      usage.reserveDownloadGrant(
+        {
+          accountId: secondAccount,
+          jobId: downloadJob._id,
+          scope: 'user_result',
+          requestId: randomUUID(),
+          object: { versionId: 'result-v2', bytes: 1_500 },
+        },
+        session,
+        septemberDownload,
+      ),
+    ),
+  ]);
+  assert.equal(
+    downloadRace.filter((outcome) => outcome.status === 'fulfilled').length,
+    1,
+  );
+  assert.equal(
+    downloadRace.filter(
+      (outcome) =>
+        outcome.status === 'rejected' &&
+        outcome.reason.getResponse().code === 'DOWNLOAD_BYTE_LIMIT_REACHED',
+    ).length,
+    1,
+  );
+
+  const userInputRequest = randomUUID();
+  await transactions.run((session) =>
+    usage.reserveDownloadGrant(
+      {
+        accountId: secondAccount,
+        jobId: downloadJob._id,
+        scope: 'user_input',
+        requestId: userInputRequest,
+        object: { versionId: 'input-v1', bytes: 200 },
+      },
+      session,
+      septemberDownload,
+    ),
+  );
+  const workerInputRequest = randomUUID();
+  const attemptId = randomUUID();
+  await transactions.run(async (session) => {
+    await usage.reserveDownloadGrant(
+      {
+        accountId: secondAccount,
+        jobId: downloadJob._id,
+        scope: 'worker_input',
+        requestId: workerInputRequest,
+        attemptId,
+        object: { versionId: 'input-v1', bytes: 300 },
+      },
+      session,
+      septemberDownload,
+    );
+    await usage.reserveDownloadGrant(
+      {
+        accountId: secondAccount,
+        jobId: downloadJob._id,
+        scope: 'worker_input',
+        requestId: workerInputRequest,
+        attemptId,
+        object: { versionId: 'input-v1', bytes: 300 },
+      },
+      session,
+      septemberDownload,
+    );
+  });
+  const septemberDownloads = (
+    await usage.readUsage(secondAccount, undefined, septemberDownload)
+  ).downloads;
+  assert.deepEqual(septemberDownloads, {
+    monthlyGrantLimit: 3,
+    monthlyGrants: 2,
+    monthlyRemainingGrants: 1,
+    monthlyByteLimit: 2_500,
+    estimatedBytes: 2_500,
+    monthlyRemainingBytes: 0,
+    monthlyResetAt: '2026-10-01T00:00:00.000Z',
+  });
+  assert.equal(
+    (await servicePeriods.findById('2026-09')).estimatedOutboundBytes,
+    3_000,
+  );
+  await assert.rejects(
+    transactions.run((session) =>
+      usage.reserveDownloadGrant(
+        {
+          accountId: secondAccount,
+          jobId: downloadJob._id,
+          scope: 'worker_input',
+          requestId: randomUUID(),
+          attemptId,
+          object: { versionId: 'input-v1', bytes: 1 },
+        },
+        session,
+        septemberDownload,
+      ),
+    ),
+    (error) => error.getResponse().code === 'SERVICE_BANDWIDTH_LIMIT_REACHED',
+  );
+  await assert.rejects(
+    transactions.run((session) =>
+      usage.reserveDownloadGrant(
+        {
+          accountId: secondAccount,
+          jobId: downloadJob._id,
+          scope: 'user_input',
+          requestId: userInputRequest,
+          object: { versionId: 'input-v1', bytes: 200 },
+        },
+        session,
+        new Date('2026-09-12T12:10:01.000Z'),
+      ),
+    ),
+    (error) => error.getResponse().code === 'DOWNLOAD_RESERVATION_EXPIRED',
+  );
+
+  const octoberDownload = new Date('2026-10-01T00:00:01.000Z');
+  for (let index = 0; index < 3; index += 1)
+    await transactions.run((session) =>
+      usage.reserveDownloadGrant(
+        {
+          accountId: secondAccount,
+          jobId: downloadJob._id,
+          scope: 'user_result',
+          requestId: randomUUID(),
+          object: { versionId: 'result-v3', bytes: 1 },
+        },
+        session,
+        octoberDownload,
+      ),
+    );
+  await assert.rejects(
+    transactions.run((session) =>
+      usage.reserveDownloadGrant(
+        {
+          accountId: secondAccount,
+          jobId: downloadJob._id,
+          scope: 'user_result',
+          requestId: randomUUID(),
+          object: { versionId: 'result-v3', bytes: 1 },
+        },
+        session,
+        octoberDownload,
+      ),
+    ),
+    (error) => error.getResponse().code === 'DOWNLOAD_GRANT_LIMIT_REACHED',
+  );
+  const octoberDownloads = (
+    await usage.readUsage(secondAccount, undefined, octoberDownload)
+  ).downloads;
+  assert.equal(octoberDownloads.monthlyGrants, 3);
+  assert.equal(octoberDownloads.estimatedBytes, 3);
+  assert.equal(
+    (await servicePeriods.findById('2026-10')).estimatedOutboundBytes,
+    3,
+  );
 
   await overrides.create({
     _id: new Types.ObjectId(),

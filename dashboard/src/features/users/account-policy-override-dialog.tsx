@@ -1,24 +1,94 @@
 import { useState } from "react";
+import type { AccountPolicyOverride } from "@/api/contracts";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { validateAccountPolicyOverride } from "./processing-access-validation";
 
+type OverrideValues = AccountPolicyOverride["values"];
+type OverrideKey = keyof OverrideValues;
+
+const fields: Array<{
+  key: OverrideKey;
+  label: string;
+  help: string;
+  max?: number;
+}> = [
+  {
+    key: "monthlyProcessingSeconds",
+    label: "Successful processing seconds / UTC month",
+    help: "7,200 seconds equals 120 minutes.",
+  },
+  {
+    key: "maxDurationSeconds",
+    label: "Maximum audio duration seconds",
+    help: "Inclusive prepared-audio duration limit.",
+  },
+  {
+    key: "maxPreparedAudioBytes",
+    label: "Maximum prepared audio bytes",
+    help: "Decimal bytes; 50,000,000 is the launch default.",
+  },
+  {
+    key: "dailyUploadGrants",
+    label: "Upload grants / UTC day",
+    help: "New signed upload grants, not retries of the same valid request.",
+  },
+  {
+    key: "monthlyUploadGrants",
+    label: "Upload grants / UTC month",
+    help: "Must be at least the daily grant limit.",
+  },
+  {
+    key: "monthlyConfirmedUploadBytes",
+    label: "Confirmed upload bytes / UTC month",
+    help: "Counted after exact uploaded-object verification.",
+  },
+  {
+    key: "maxClientInputAttempts",
+    label: "Input attempts / logical audio",
+    help: "Total newly issued attempts, including the first.",
+  },
+  {
+    key: "monthlyDownloadGrants",
+    label: "Result grants / UTC month",
+    help: "Locally cached playback does not consume another grant.",
+  },
+  {
+    key: "monthlyEstimatedDownloadBytes",
+    label: "Estimated result bytes / UTC month",
+    help: "Charges the immutable result size when a new grant is issued.",
+  },
+  {
+    key: "maxRetainedOutputBytes",
+    label: "Retained result bytes / account",
+    help: "Successful outputs remain until job or account deletion.",
+  },
+  {
+    key: "signedUrlTtlSeconds",
+    label: "Signed URL validity seconds",
+    help: "Cannot exceed 600 seconds.",
+    max: 600,
+  },
+];
+
 export function AccountPolicyOverrideDialog({
   open,
   onOpenChange,
-  currentSeconds,
+  currentValues,
+  currentOverride,
   currentExpiry,
   reauthenticate,
   onSave,
 }: {
   open: boolean;
   onOpenChange(open: boolean): void;
-  currentSeconds: number;
+  currentValues: OverrideValues;
+  currentOverride: OverrideValues;
   currentExpiry: string | null;
   reauthenticate(): Promise<void>;
   onSave(input: {
-    monthlyProcessingSeconds: number;
+    values: OverrideValues;
     expiresAt: string | null;
     reason: string;
   }): Promise<void>;
@@ -26,7 +96,8 @@ export function AccountPolicyOverrideDialog({
   return open ? (
     <OverrideForm
       onOpenChange={onOpenChange}
-      currentSeconds={currentSeconds}
+      currentValues={currentValues}
+      currentOverride={currentOverride}
       currentExpiry={currentExpiry}
       reauthenticate={reauthenticate}
       onSave={onSave}
@@ -36,43 +107,53 @@ export function AccountPolicyOverrideDialog({
 
 function OverrideForm({
   onOpenChange,
-  currentSeconds,
+  currentValues,
+  currentOverride,
   currentExpiry,
   reauthenticate,
   onSave,
 }: Omit<Parameters<typeof AccountPolicyOverrideDialog>[0], "open">) {
-  const [minutes, setMinutes] = useState(currentSeconds / 60);
+  const [draft, setDraft] = useState<Record<OverrideKey, string>>(
+    () =>
+      Object.fromEntries(
+        fields.map(({ key }) => [key, currentOverride[key]?.toString() ?? ""]),
+      ) as Record<OverrideKey, string>,
+  );
   const [expiry, setExpiry] = useState(
     currentExpiry ? currentExpiry.slice(0, 16) : "",
   );
-  const errors = validateAccountPolicyOverride(minutes, expiry);
+  const values = parseValues(draft);
+  const errors = validateAccountPolicyOverride(values, currentValues, expiry);
   return (
     <ReasonDialog
       open
       onOpenChange={onOpenChange}
-      title="Account processing override"
-      description="Replace this account's monthly processing limit. The value is not added to the global limit and never changes raw usage counters."
+      title="Account policy override"
+      description="Enter only values that should replace the global standard policy for this account. Blank fields continue using the global value."
       confirmLabel="Save override"
       freshAuth
       onReauthenticate={reauthenticate}
       summary={
-        <div className="space-y-3">
-          <div className="space-y-2">
-            <Label htmlFor="override-minutes">
-              Monthly successful processing minutes
-            </Label>
-            <Input
-              id="override-minutes"
-              type="number"
-              min={1 / 60}
-              step={1 / 60}
-              value={Number.isFinite(minutes) ? minutes : ""}
-              onChange={(event) =>
-                setMinutes(
-                  event.target.value === "" ? NaN : Number(event.target.value),
-                )
-              }
-            />
+        <div className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-2">
+            {fields.map((field) => (
+              <div key={field.key} className="space-y-2">
+                <Label htmlFor={`override-${field.key}`}>{field.label}</Label>
+                <Input
+                  id={`override-${field.key}`}
+                  type="number"
+                  min={1}
+                  max={field.max}
+                  step="1"
+                  value={draft[field.key]}
+                  placeholder={`Global: ${currentValues[field.key] ?? "—"}`}
+                  onChange={(event) =>
+                    setDraft({ ...draft, [field.key]: event.target.value })
+                  }
+                />
+                <p className="text-xs text-muted-foreground">{field.help}</p>
+              </div>
+            ))}
           </div>
           <div className="space-y-2">
             <Label htmlFor="override-expiry">
@@ -85,10 +166,6 @@ function OverrideForm({
               onChange={(event) => setExpiry(event.target.value)}
             />
           </div>
-          <p>
-            Effective total: {currentSeconds / 60} min →{" "}
-            {Number.isFinite(minutes) ? minutes : "—"} min
-          </p>
           {errors.length ? (
             <ul className="list-inside list-disc text-xs text-muted-foreground">
               {errors.map((error) => (
@@ -99,14 +176,28 @@ function OverrideForm({
         </div>
       }
       onConfirm={async (reason) => {
-        const currentErrors = validateAccountPolicyOverride(minutes, expiry);
+        const next = parseValues(draft);
+        const currentErrors = validateAccountPolicyOverride(
+          next,
+          currentValues,
+          expiry,
+        );
         if (currentErrors.length) throw new Error(currentErrors.join(" "));
         await onSave({
-          monthlyProcessingSeconds: minutes * 60,
+          values: next,
           expiresAt: expiry ? new Date(expiry).toISOString() : null,
           reason,
         });
       }}
     />
   );
+}
+
+function parseValues(draft: Record<OverrideKey, string>): OverrideValues {
+  return Object.fromEntries(
+    fields.flatMap(({ key }) => {
+      const raw = draft[key].trim();
+      return raw ? [[key, Number(raw)]] : [];
+    }),
+  ) as OverrideValues;
 }

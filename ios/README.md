@@ -246,9 +246,9 @@ test when that happens; do not silently add server fallback. Client-side downloa
 change the originating IP and do not guarantee availability.
 
 Processing uses `Processing/`, `State/ProcessingModel.swift`, and the Processing UI
-views. Legacy input must be nonempty, smaller than 30,000,000 bytes and shorter than 600
-seconds. Readiness-enabled version 2 input allows up to 100,000,000 bytes and 1,800
-seconds inclusively; the signed admission remains authoritative. Background URLSession uploads use file-backed signed multipart bodies;
+views. Prepared input must be nonempty and stays within the single inclusive
+50,000,000-byte and 1,200-second policy; signed admission remains authoritative.
+Background URLSession uploads use file-backed signed multipart bodies;
 durable intent reconciles uncertain create/upload/cancel/retry responses on recovery.
 Result downloads resume through an explicit later action after interruption.
 Cancellation remains pending until acknowledged and a stopped worker remains visible.
@@ -274,8 +274,8 @@ Existing uploads that had already started before this update retain their recove
 
 iOS native validation accepts playable audio-only M4A/MP4, MP3 and AAC. Although declarations
 recognize additional containers, native decoding rejects unsupported ones; the UI does not promise
-OGG/Opus/WebM support. The source must be nonempty, smaller than 30,000,000 bytes, and shorter
-than 600 seconds. These checks run before review, and again through the existing upload contract.
+OGG/Opus/WebM support. Prepared audio must be nonempty and no larger than 50,000,000
+bytes or 1,200 seconds. These checks run before review and again through the upload contract.
 Rights confirmation records user intent; it does not verify copyright ownership.
 
 On 2026-09-10 the account-deletion/owned-audio changes passed **136 unit tests** and
@@ -294,11 +294,11 @@ without full-library authorization. Provider materialization has a 60-second can
 deadline and a bounded streaming copy. Photos copies are private and discarded after use;
 original Files/Photos assets are never deleted. Lost provider access requires reselection.
 
-`ProcessingMediaPolicy` reads `/processing-policy?schemaVersion=2`. Only a validated,
-accepting response with non-null source and preparation bounds enables expanded preparation.
-Unknown readiness retains the existing exclusive 600-second/30-MB legacy path. Version 2
-supports the inclusive 1,800-second/100-MB prepared-audio ceiling. It persists policy version,
-profile ID, and source category with the immutable upload operation, including restoration.
+`ProcessingMediaPolicy` reads `/processing-policy?schemaVersion=2`. A validated,
+accepting response may lower the local ceiling but never raise the single inclusive
+1,200-second/50,000,000-byte prepared-audio policy. The same safe ceiling is retained
+when policy refresh is unavailable. Policy version, profile ID, and source category
+are persisted with the immutable upload operation, including restoration.
 
 `MediaSourceInspector` honors the container's uniquely enabled default soundtrack. It
 accepts a single audio track and rejects ambiguous multiple defaults; it never guesses
@@ -316,18 +316,22 @@ retains its immutable input until an authenticated receipt/reconciliation marks 
 only then is temporary prepared input removed. Force-quit cannot guarantee continued preparation.
 
 `ProcessingUsageRepository` fetches owner-only UTC-month used/reserved/refunded/remaining
-processing allowance, active jobs, availability, and the next reset. Reads are advisory; create-job
+processing allowance, upload grants/bytes, result grants/estimated bytes, retained
+output, effective media limits, active jobs, availability, and reset boundaries.
+Reads are advisory; create-job
 admission is authoritative. Account changes clear the snapshot, and known allowance/capacity
 rejections never become automatic rate-limit retries. English and Arabic messages accompany
 media, quota, capacity, and provider failures. Waiting and separator timers remain separate,
-and cleaned-audio results are still fetched only for Play/Download/Save.
+and cleaned-audio results are still fetched only for Play/Download/Save. Valid private
+caches bypass the grant endpoint. Uncertain result retries reuse their request identity;
+a known-expired entitlement rotates to a new identity.
 
 YouTube intake first reads the public watch page locally with a 5-MB response ceiling,
 30-second resource deadline, and no cookies/credentials/redirect fallback. A bounded JSON
 parser requires an available player response, matching video ID, explicit non-live metadata,
-and finite lengthSeconds at or below 1,800. Live/upcoming, consent/login pages, unknown
+and finite lengthSeconds at or below 1,200. Live/upcoming, consent/login pages, unknown
 metadata, and playlist context fail before audio transfer. YouTubeKit 0.4.9 then resolves
-audio-only streams locally. Source delegates enforce actual downloaded bytes (100 MB) and
+audio-only streams locally. Source delegates enforce actual downloaded bytes (50 MB) and
 600 seconds independently of response length; background retry preserves the original
 persisted deadline. Final native frame duration and prepared policy are revalidated.
 Public YouTube response markup can change; deterministic parser tests are not live service proof.

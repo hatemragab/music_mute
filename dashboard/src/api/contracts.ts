@@ -347,7 +347,22 @@ export interface RevisionCommand {
 
 export interface AccountPolicyOverride {
   revision: number;
-  values: { monthlyProcessingSeconds?: number };
+  values: Partial<
+    Pick<
+      AccountPolicyValues,
+      | "monthlyProcessingSeconds"
+      | "maxDurationSeconds"
+      | "maxPreparedAudioBytes"
+      | "dailyUploadGrants"
+      | "monthlyUploadGrants"
+      | "monthlyConfirmedUploadBytes"
+      | "maxClientInputAttempts"
+      | "monthlyDownloadGrants"
+      | "monthlyEstimatedDownloadBytes"
+      | "maxRetainedOutputBytes"
+      | "signedUrlTtlSeconds"
+    >
+  >;
   expiresAt: string | null;
   reason: string;
   createdBy: string;
@@ -376,12 +391,50 @@ export interface AccountUsage {
     releasedSeconds: number;
     remainingSeconds: number;
   };
+  uploads: {
+    dailyGrantLimit: number;
+    dailyGrants: number;
+    dailyRemainingGrants: number;
+    dailyResetAt: string;
+    monthlyGrantLimit: number;
+    monthlyGrants: number;
+    monthlyRemainingGrants: number;
+    monthlyByteLimit: number;
+    confirmedBytes: number;
+    monthlyRemainingBytes: number;
+    monthlyResetAt: string;
+  };
+  storage: {
+    limitBytes: number;
+    retainedBytes: number;
+    remainingBytes: number;
+  };
+  effectiveLimits: {
+    maxDurationSeconds: number;
+    maxPreparedAudioBytes: number;
+    maxClientInputAttempts: number;
+    signedUrlTtlSeconds: number;
+  };
+  downloads: {
+    monthlyGrantLimit: number;
+    monthlyGrants: number;
+    monthlyRemainingGrants: number;
+    monthlyByteLimit: number;
+    estimatedBytes: number;
+    monthlyRemainingBytes: number;
+    monthlyResetAt: string;
+  };
   usageRevision: number;
   activeJobs: number;
   maxProcessingJobs: number;
   availability: {
     status: "available" | "blocked";
-    reason: "paused" | "monthly_limit_reached" | "active_job_limit" | null;
+    reason:
+      | "paused"
+      | "monthly_limit_reached"
+      | "active_job_limit"
+      | "storage_limit_reached"
+      | null;
   };
   checkedAt: string;
   policyOverride: AccountPolicyOverride | null;

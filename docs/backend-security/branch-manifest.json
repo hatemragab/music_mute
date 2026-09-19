@@ -6,7 +6,7 @@
   "collectionParent": "codex/worker-rebuild",
   "baselineCommit": "947d0544a6c93aff63243770d0aba05d7e67c89d",
   "documentationStatus": "approved",
-  "implementationStatus": "branch_1_ready_for_review",
+  "implementationStatus": "branch_2_ready_for_review",
   "totalCheckpoints": 32,
   "protectedBranches": ["main", "codex/worker-rebuild"],
   "agentMayNotWithoutExplicitInstruction": [
@@ -35,7 +35,7 @@
       "architectureFile": "architecture/01-account-policy-and-usage.md",
       "evidenceFile": "evidence/01-account-quotas-admin-controls.md",
       "checkpoints": ["A1", "A2", "A3", "A4", "A5", "A6"],
-      "status": "ready_for_review",
+      "status": "merged",
       "currentCheckpoint": null,
       "lastVerifiedCommit": "e04905ecd40b10aab3d554dc3038f659ece84c21",
       "purpose": "Monthly account quota, policy settings, overrides, admin controls, and usage explanation"
@@ -50,8 +50,8 @@
       "architectureFile": "architecture/02-media-and-s3.md",
       "evidenceFile": "evidence/02-media-s3-cost-protection.md",
       "checkpoints": ["B1", "B2", "B3", "B4", "B5", "B6", "B7"],
-      "status": "not_started",
-      "currentCheckpoint": "B1",
+      "status": "ready_for_review",
+      "currentCheckpoint": null,
       "lastVerifiedCommit": null,
       "purpose": "Unified media limits, upload/download accounting, storage retention, cleanup, and S3 cost protection"
     },

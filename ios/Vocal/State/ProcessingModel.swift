@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 @MainActor final class ProcessingModel: ObservableObject {
-  @Published private(set) var photoSourceLimit: Int64 = 29_999_999
+  @Published private(set) var photoSourceLimit = ProcessingMediaPolicy.standard.maxSourceBytes!
   @Published private(set) var preparing = false
   @Published private(set) var busy = false
   @Published private(set) var pendingInputName: String?
@@ -74,8 +74,8 @@ import Foundation
     let ticket = epoch
     ownerUid = uid
     usageRepository.bind(uid)
-    photoSourceLimit = 29_999_999
-    await preparer.configure(policy: .legacy)
+    photoSourceLimit = ProcessingMediaPolicy.standard.maxSourceBytes!
+    await preparer.configure(policy: .standard)
     sessionReady = false
     for action in actions.values { action.cancel() }
     actions.removeAll()
@@ -110,17 +110,13 @@ import Foundation
       let response = try await api.processingPolicy()
       let policy = try response.validated()
       guard repository.session == captured else { return }
-      // Null evidence does not authorize expanded preparation; the established
-      // legacy path remains available under its existing exclusive limits.
-      let effective =
-        response.acceptNewJobs && policy.maxSourceBytes != nil
-          && policy.maxPreparationSeconds != nil ? policy : .legacy
-      photoSourceLimit = effective.maxSourceBytes ?? 29_999_999
+      let effective = response.acceptNewJobs ? policy : .standard
+      photoSourceLimit = effective.maxSourceBytes ?? ProcessingMediaPolicy.standard.maxSourceBytes!
       await preparer.configure(policy: effective)
     } catch {
       guard repository.session == captured else { return }
-      photoSourceLimit = 29_999_999
-      await preparer.configure(policy: .legacy)
+      photoSourceLimit = ProcessingMediaPolicy.standard.maxSourceBytes!
+      await preparer.configure(policy: .standard)
     }
   }
 

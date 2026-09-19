@@ -27,6 +27,7 @@ import { RetryJobDto } from './dto/retry-job.dto.js';
 import { RenameJobDto } from './dto/rename-job.dto.js';
 import { JobMetadataService } from './job-metadata.service.js';
 import { JobDeletionService } from './job-deletion.service.js';
+import { UploadGrantDto } from './dto/upload-grant.dto.js';
 
 @Controller('jobs')
 export class JobsController {
@@ -114,7 +115,12 @@ export class JobsController {
     @Param('id') id: string,
     @Body() dto: DownloadJobDto,
   ) {
-    return this.query.download(req.user!._id.toHexString(), id, dto.artifact);
+    return this.query.download(
+      req.user!._id.toHexString(),
+      id,
+      dto.artifact,
+      dto.requestId,
+    );
   }
 
   @Post()
@@ -139,9 +145,13 @@ export class JobsController {
   renew(
     @Req() req: AuthRequest,
     @Param('id') id: string,
-    @Body(EmptyBodyPipe) _body: unknown,
+    @Body() dto: UploadGrantDto,
   ) {
-    return this.jobs.renewUpload(req.user!._id.toHexString(), id);
+    return this.jobs.renewUpload(
+      req.user!._id.toHexString(),
+      id,
+      dto.requestId,
+    );
   }
 
   @Post(':id/upload-complete')

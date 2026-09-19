@@ -31,7 +31,7 @@ import {
 export class InputDeclarationDto implements InputDeclaration {
   @IsIn(Object.keys(AUDIO_TYPES)) extension!: keyof typeof AUDIO_TYPES;
   @IsString() @IsIn(Object.values(AUDIO_TYPES)) contentType!: string;
-  @IsInt() @Min(1) @Max(29_999_999) bytes!: number;
+  @IsInt() @Min(1) @Max(50_000_000) bytes!: number;
   @ValidateBy({
     name: 'audioDuration',
     validator: {
@@ -39,26 +39,7 @@ export class InputDeclarationDto implements InputDeclaration {
         typeof value === 'number' &&
         Number.isFinite(value) &&
         value > 0 &&
-        value < 600,
-    },
-  })
-  durationSeconds!: number;
-  @ValidateBy({ name: 'sha256', validator: { validate: isSha256 } })
-  sha256!: string;
-}
-
-export class InputDeclarationV2Dto implements InputDeclaration {
-  @IsIn(Object.keys(AUDIO_TYPES)) extension!: keyof typeof AUDIO_TYPES;
-  @IsString() @IsIn(Object.values(AUDIO_TYPES)) contentType!: string;
-  @IsInt() @Min(1) @Max(100_000_000) bytes!: number;
-  @ValidateBy({
-    name: 'audioDurationV2',
-    validator: {
-      validate: (value: unknown) =>
-        typeof value === 'number' &&
-        Number.isFinite(value) &&
-        value > 0 &&
-        value <= 1800,
+        value <= 1_200,
     },
   })
   durationSeconds!: number;
@@ -67,15 +48,15 @@ export class InputDeclarationV2Dto implements InputDeclaration {
 }
 
 export class CreateJobDto {
-  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsDefined()
   @IsIn([2])
-  policyVersion?: 2;
-  @ValidateIf((_object, value: unknown) => value !== undefined)
+  policyVersion!: 2;
+  @IsDefined()
   @IsIn([PREPARATION_PROFILE_ID])
-  preparationProfileId?: string;
-  @ValidateIf((_object, value: unknown) => value !== undefined)
+  preparationProfileId!: string;
+  @IsDefined()
   @IsIn(['audio_file', 'video_file', 'youtube'])
-  source?: InputSource;
+  source!: InputSource;
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.toLowerCase() : value,
   )
@@ -84,11 +65,7 @@ export class CreateJobDto {
   @IsDefined()
   @IsObject()
   @ValidateNested()
-  @Type((options) =>
-    options?.object?.policyVersion === 2
-      ? InputDeclarationV2Dto
-      : InputDeclarationDto,
-  )
+  @Type(() => InputDeclarationDto)
   input!: InputDeclarationDto;
 
   @ValidateIf((_object, value: unknown) => value !== undefined)

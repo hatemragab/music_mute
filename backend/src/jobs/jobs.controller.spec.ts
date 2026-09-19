@@ -25,16 +25,26 @@ function controller() {
       requestId,
       metadata,
     }),
-    renewUpload: (ownerId: string, id: string) => ({ ownerId, id }),
+    renewUpload: (ownerId: string, id: string, requestId: string) => ({
+      ownerId,
+      id,
+      requestId,
+    }),
     confirmUpload: (ownerId: string, id: string) => ({ ownerId, id }),
   } as unknown as JobsService;
   const query = {
     list: (ownerId: string, value: object) => ({ ownerId, value }),
     detail: (ownerId: string, id: string) => ({ ownerId, id }),
-    download: (ownerId: string, id: string, artifact: string) => ({
+    download: (
+      ownerId: string,
+      id: string,
+      artifact: string,
+      requestId: string,
+    ) => ({
       ownerId,
       id,
       artifact,
+      requestId,
     }),
   } as unknown as JobsQueryService;
   const actions = {
@@ -106,9 +116,12 @@ describe('JobsController processing boundary', () => {
     expect(
       controller().retry(request, 'job-id', { requestId: 'retry-id' }),
     ).toEqual({ ownerId: 'owner-id', id: 'job-id', requestId: 'retry-id' });
-    expect(controller().renew(request, 'job-id', {})).toEqual({
+    expect(
+      controller().renew(request, 'job-id', { requestId: 'grant-id' }),
+    ).toEqual({
       ownerId: 'owner-id',
       id: 'job-id',
+      requestId: 'grant-id',
     });
     expect(controller().confirm(request, 'job-id', {})).toEqual({
       ownerId: 'owner-id',
@@ -127,10 +140,16 @@ describe('JobsController processing boundary', () => {
       ownerId: 'owner-id',
       id: 'job-id',
     });
-    expect(jobs.download(request, 'job-id', { artifact: 'output' })).toEqual({
+    expect(
+      jobs.download(request, 'job-id', {
+        artifact: 'output',
+        requestId: 'download-id',
+      }),
+    ).toEqual({
       ownerId: 'owner-id',
       id: 'job-id',
       artifact: 'output',
+      requestId: 'download-id',
     });
     expect(
       jobs.rename(request, 'job-id', { displayName: 'Voice only' }),

@@ -137,7 +137,13 @@ test(
       );
 
       const created = await service.putOverride(actor, accountId, {
-        values: { monthlyProcessingSeconds: 3_600 },
+        values: {
+          monthlyProcessingSeconds: 3_600,
+          monthlyUploadGrants: 300,
+          monthlyEstimatedDownloadBytes: 12_000_000_000,
+          maxRetainedOutputBytes: 2_000_000_000,
+          signedUrlTtlSeconds: 300,
+        },
         expiresAt: null,
         expectedRevision: 0,
         operationId: randomUUID(),
@@ -145,7 +151,25 @@ test(
       });
       assert.equal(created.revision, 1);
       assert.equal(created.values.monthlyProcessingSeconds, 3_600);
+      assert.equal(created.values.monthlyUploadGrants, 300);
+      assert.equal(
+        created.values.monthlyEstimatedDownloadBytes,
+        12_000_000_000,
+      );
+      assert.equal(created.values.maxRetainedOutputBytes, 2_000_000_000);
+      assert.equal(created.values.signedUrlTtlSeconds, 300);
       assert.equal((await service.currentOverride(accountId)).revision, 1);
+
+      await assert.rejects(
+        service.putOverride(actor, accountId, {
+          values: { dailyUploadGrants: 400, monthlyUploadGrants: 200 },
+          expiresAt: null,
+          expectedRevision: 1,
+          operationId: randomUUID(),
+          reason: 'Invalid cross-field replacement must not be stored',
+        }),
+        (error) => error.getResponse().code === 'INVALID_REQUEST',
+      );
 
       const expiresAt = new Date(Date.now() + 86_400_000);
       const overrideRace = await Promise.allSettled([

@@ -1,5 +1,6 @@
 import {
   GetObjectCommand,
+  DeleteObjectCommand,
   DeleteObjectsCommand,
   ListObjectVersionsCommand,
   HeadObjectCommand,
@@ -21,6 +22,7 @@ import { StoragePreflightService } from './storage-preflight.service.js';
 import { createImmutableUploadGrant } from './immutable-upload-grant.js';
 
 const REQUEST_TIMEOUT_MILLISECONDS = 5_000;
+const MAX_SIGNED_URL_SECONDS = 600;
 const MISSING_OBJECT_NAMES = new Set([
   'NotFound',
   'NoSuchKey',
@@ -57,20 +59,41 @@ export class StorageTransfersService {
     private readonly preflight: StoragePreflightService,
   ) {
     this.bucket = config.getOrThrow<string>('S3_BUCKET');
-    this.grantSeconds = config.getOrThrow<number>('PROCESSING_URL_SECONDS');
+    this.grantSeconds = Math.min(
+      MAX_SIGNED_URL_SECONDS,
+      config.getOrThrow<number>('PROCESSING_URL_SECONDS'),
+    );
   }
 
-  async createInputGrant(job: InputTransferJob): Promise<UploadGrant> {
-    return this.createUploadGrant(
-      job.inputReservation,
-      job.admissionSnapshot?.reservationExpiresAt,
-    );
+  async createInputGrant(
+    job: InputTransferJob,
+    expiresAt = job.admissionSnapshot?.reservationExpiresAt,
+  ): Promise<UploadGrant> {
+    return this.createUploadGrant(job.inputReservation, expiresAt);
   }
 
   async verifyInput(job: InputTransferJob): Promise<ObjectIdentity> {
     const identity = await this.inspect(job.inputReservation);
     if (!identity) throw jobError('UPLOAD_NOT_READY');
     return identity;
+  }
+
+  /** Deletes one immutable version only. Missing keys/versions are already reconciled. */
+  async deleteExactVersion(key: string, versionId: string): Promise<void> {
+    if (!key || !versionId || versionId === 'null')
+      throw new TypeError('Invalid exact object identity');
+    try {
+      await this.storage.send(
+        new DeleteObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          VersionId: versionId,
+        }),
+        { abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS) },
+      );
+    } catch (error) {
+      if (!confirmedMissing(error)) throw error;
+    }
   }
 
   /** A bounded sweep of versions for one exact reservation key, never a prefix delete. */
@@ -118,15 +141,29 @@ export class StorageTransfersService {
     };
   }
 
-  async createDownloadGrant(object: ObjectIdentity): Promise<DownloadGrant> {
-    return this.signDownload(object, this.grantSeconds);
+  async createDownloadGrant(
+    object: ObjectIdentity,
+    fixedExpiry?: Date,
+  ): Promise<DownloadGrant> {
+    const expiresIn = fixedExpiry
+      ? Math.min(
+          this.grantSeconds,
+          Math.floor((fixedExpiry.getTime() - Date.now()) / 1_000),
+        )
+      : this.grantSeconds;
+    if (expiresIn < 1) throw jobError('DOWNLOAD_RESERVATION_EXPIRED');
+    return this.signDownload(object, expiresIn);
   }
 
   async createWorkerOutputGrant(
     reservation: ObjectReservation,
     deadlineAt: Date,
   ): Promise<UploadGrant> {
-    return this.createUploadGrant(reservation, deadlineAt);
+    return this.createUploadGrant(
+      reservation,
+      deadlineAt,
+      'INTELLIGENT_TIERING',
+    );
   }
 
   async verifyUploadedVersion(
@@ -216,6 +253,7 @@ export class StorageTransfersService {
   private async createUploadGrant(
     reservation: ObjectReservation,
     fixedExpiry?: Date,
+    storageClass?: 'INTELLIGENT_TIERING',
   ): Promise<UploadGrant> {
     await this.preflight.assertReady();
     const now = Date.now();
@@ -233,6 +271,7 @@ export class StorageTransfersService {
       bytes: reservation.bytes,
       contentType: reservation.contentType,
       checksumSha256: reservation.sha256,
+      storageClass,
       expiresIn,
       expiresAt: new Date(now + expiresIn * 1000),
     });

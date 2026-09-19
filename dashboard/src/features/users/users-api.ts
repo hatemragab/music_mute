@@ -1,5 +1,6 @@
 import { type ApiClient, submitWithReceiptReadBack } from "@/api/api-client";
 import type {
+  AccountPolicyOverride,
   Page,
   RevisionCommand,
   UserDetail,
@@ -46,7 +47,7 @@ export const setAccountPolicyOverride = (
   client: ApiClient,
   id: string,
   input: RevisionCommand & {
-    values: { monthlyProcessingSeconds: number };
+    values: AccountPolicyOverride["values"];
     expiresAt: string | null;
   },
 ) =>

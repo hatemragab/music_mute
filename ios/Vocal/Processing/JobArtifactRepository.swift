@@ -28,6 +28,7 @@ struct JobArtifactProgress: Equatable, Sendable {
     let task: Task<URL, Error>
   }
   private var inFlight: [String: Flight] = [:]
+  private var grantRequestIDs: [String: UUID] = [:]
 
   init(
     api: JobsAPI, root: URL, sessionProvider: @escaping @MainActor () -> SessionFence?,
@@ -45,6 +46,7 @@ struct JobArtifactProgress: Equatable, Sendable {
   func purge(ownerUid: String) async throws {
     let stopping = inFlight.values.filter { $0.fence.uid == ownerUid }
     for flight in stopping { flight.task.cancel() }
+    grantRequestIDs.removeAll()
     onSessionChanged()
     for flight in stopping { _ = try? await flight.task.value }
     let directory = root.appendingPathComponent(ProcessingStore.ownerDirectoryName(ownerUid))
@@ -61,6 +63,7 @@ struct JobArtifactProgress: Equatable, Sendable {
     inFlight.removeAll()
     progress.removeAll()
     deletedJobIDs.removeAll()
+    grantRequestIDs.removeAll()
   }
 
   func ensureOutput(jobId: String) async throws -> URL {
@@ -134,6 +137,7 @@ struct JobArtifactProgress: Equatable, Sendable {
     else { return }
     let id = jobId.lowercased()
     deletedJobIDs.insert(id)
+    grantRequestIDs[id] = nil
     let flight = inFlight.removeValue(forKey: id)
     flight?.task.cancel()
     _ = try? await flight?.task.value
@@ -152,8 +156,11 @@ struct JobArtifactProgress: Equatable, Sendable {
     try check(fence, jobId: jobId)
     if let existing = try await validCache(destination) {
       try check(fence, jobId: jobId)
+      grantRequestIDs[jobId] = nil
       return existing
     }
+    var grantRequestID = grantRequestIDs[jobId] ?? UUID()
+    grantRequestIDs[jobId] = grantRequestID
     for attempt in 0...1 {
       try check(fence, jobId: jobId)
       let job = try await api.detail(id: jobId)
@@ -161,7 +168,8 @@ struct JobArtifactProgress: Equatable, Sendable {
       guard job.status == "ready", job.canDownloadOutput else {
         throw JobArtifactFailure.unavailable
       }
-      let grant = try await api.download(id: jobId, artifact: "output")
+      let grant = try await api.download(
+        id: jobId, artifact: "output", requestId: grantRequestID)
       try check(fence, jobId: jobId)
       let partial = directory.appendingPathComponent(".download-\(UUID().uuidString).partial")
       progress[jobId] = JobArtifactProgress(receivedBytes: 0, totalBytes: nil)
@@ -182,18 +190,25 @@ struct JobArtifactProgress: Equatable, Sendable {
         if let existing = try await validCache(destination) {
           try check(fence, jobId: jobId)
           try? FileManager.default.removeItem(at: partial)
+          grantRequestIDs[jobId] = nil
           return existing
         }
         try check(fence, jobId: jobId)
         // Both files are siblings: rename/replace is atomic and contains no suspending boundary.
         try promote(partial: partial, destination: destination)
+        grantRequestIDs[jobId] = nil
         return destination
       } catch {
         // Only this call's incomplete file is disposable; retained caches remain untouched.
         try? FileManager.default.removeItem(at: partial)
         try check(fence, jobId: jobId)
-        if attempt == 0, error as? ArtifactDownloadFailure == .httpStatus(403) {
-          // Re-read authenticated job state before requesting a fresh grant. Never replay blindly.
+        if attempt == 0, error as? ArtifactDownloadFailure == .httpStatus(403),
+          grant.expiresAt <= Date()
+        {
+          // A known-expired entitlement is a new grant. Unknown transfer failures keep the same
+          // request identity for the next user retry so they cannot be charged twice.
+          grantRequestID = UUID()
+          grantRequestIDs[jobId] = grantRequestID
           continue
         }
         throw error

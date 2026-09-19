@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { Types } from 'mongoose';
+import { jobError } from '../jobs/job-errors.js';
 import { DEFAULT_ACCOUNT_POLICY_VALUES } from './account-policy.schema.js';
 import { ProcessingAdmissionService } from './processing-admission.service.js';
 
@@ -26,7 +27,10 @@ function fixture(enabled = true) {
       values: DEFAULT_ACCOUNT_POLICY_VALUES,
     }),
   };
-  const usage = { reserveForJob: vi.fn().mockResolvedValue(undefined) };
+  const usage = {
+    assertRetainedCapacity: vi.fn().mockResolvedValue(undefined),
+    reserveForJob: vi.fn().mockResolvedValue(undefined),
+  };
   return {
     service: new ProcessingAdmissionService(
       fences as never,
@@ -57,6 +61,7 @@ describe('processing admission', () => {
       ),
     ).rejects.toMatchObject({ response: { code: 'PROCESSING_UNAVAILABLE' } });
     expect(f.usage.reserveForJob).not.toHaveBeenCalled();
+    expect(f.usage.assertRetainedCapacity).not.toHaveBeenCalled();
   });
 
   it('serializes admission and reserves monthly account usage in one transaction', async () => {
@@ -69,7 +74,11 @@ describe('processing admission', () => {
         { bytes: 50_000_000, durationSeconds: 1_200 },
         session as never,
         jobId,
-        { policyVersion: 2 },
+        {
+          policyVersion: 2,
+          preparationProfileId: 'preserve-or-aac-lc-256-v1',
+          source: 'audio_file',
+        },
       ),
     ).resolves.toMatchObject({
       policyVersion: 2,
@@ -86,5 +95,34 @@ describe('processing admission', () => {
       1_200,
       session,
     );
+    expect(f.usage.assertRetainedCapacity).toHaveBeenCalledWith(
+      owner,
+      1_000_000_000,
+      session,
+    );
+  });
+
+  it('blocks later admission when retained successful output is at the ceiling', async () => {
+    const f = fixture();
+    f.usage.assertRetainedCapacity.mockRejectedValue(
+      jobError('RETAINED_STORAGE_LIMIT_REACHED'),
+    );
+
+    await expect(
+      f.service.assertNewWork(
+        new Types.ObjectId(),
+        { bytes: 1_024, durationSeconds: 30 },
+        session as never,
+        new Types.ObjectId(),
+        {
+          policyVersion: 2,
+          preparationProfileId: 'preserve-or-aac-lc-256-v1',
+          source: 'audio_file',
+        },
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'RETAINED_STORAGE_LIMIT_REACHED' },
+    });
+    expect(f.usage.reserveForJob).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,7 @@
 
 **Collection branch:** `codex/backend-security-cost-hardening`
 **Direct parent:** `codex/worker-rebuild`
-**Package status:** Branch 1 ready for review; Branch 2 is not authorized
+**Package status:** Branch 1 merged; Branch 2 is ready for review; Branch 3 is not started
 **Implementation authority:** the maintainer authorized execution on 2026-09-19
 
 ## Purpose
@@ -119,9 +119,10 @@ latest instruction and this accepted contract cannot both be satisfied.
 
 ## Current state
 
-- Branch 1 checkpoints A1–A6 are complete and ready for maintainer review.
-- Branch 1 is isolated in `hatem/account-quotas-admin-controls`.
-- Branch 2 has not been created and remains unauthorized until Branch 1 is merged.
+- Branch 1 checkpoints A1–A6 are merged into the collection branch.
+- Branch 2 is isolated in `hatem/media-s3-cost-protection`; B1–B7 are complete
+  and the branch is waiting for maintainer review.
+- Branch 3 remains unauthorized until Branch 2 is reviewed and merged.
 - No provider console, live database, Redis, S3, Firebase, deployment, or user data
   was changed.
 - Device-based quota enforcement and automatic bans remain deferred.

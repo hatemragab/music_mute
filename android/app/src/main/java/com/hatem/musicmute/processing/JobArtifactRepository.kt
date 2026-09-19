@@ -49,6 +49,7 @@ class JobArtifactRepository(
     private val lock = Any()
     private var revision = 0L
     private val requests = mutableMapOf<Request, Deferred<File>>()
+    private val grantRequestIds = mutableMapOf<String, String>()
     private val deleted = mutableSetOf<String>()
     private val mutableProgress = MutableStateFlow<Map<String, ArtifactProgress>>(emptyMap())
     val progress: StateFlow<Map<String, ArtifactProgress>> = mutableProgress.asStateFlow()
@@ -126,6 +127,7 @@ class JobArtifactRepository(
                 mutableAvailability.value = emptyMap()
             }
             owned.values.toList()
+                .also { grantRequestIds.keys.removeAll { key -> key.startsWith("$uid:") } }
         }
         // Requests stay tracked until their file-writing coroutine has actually terminated.
         pending.forEach { it.cancel(); it.join() }
@@ -140,6 +142,7 @@ class JobArtifactRepository(
         val identity = cacheIdentity(session.uid, normalized)
         val cancelled = synchronized(lock) {
             deleted += identity
+            grantRequestIds.remove(identity)
             mutableProgress.value = mutableProgress.value - normalized
             mutableAvailability.value = mutableAvailability.value + (normalized to false)
             requests.filterKeys { it.session == session && it.jobId == normalized }.values.toList().also {
@@ -173,20 +176,27 @@ class JobArtifactRepository(
         val directory = File(processingOwnerDirectory(root, request.session.uid), "outputs")
         val destination = File(directory, "${outputCacheKey(request.session.uid, request.jobId)}.mp3")
         val partial = File(directory, "${destination.name}.${UUID.randomUUID()}.partial")
+        val identity = cacheIdentity(request.session.uid, request.jobId)
+        var grantRequestId = synchronized(lock) {
+            grantRequestIds.getOrPut(identity) { UUID.randomUUID().toString() }
+        }
         try {
             if (!destination.canonicalPath.startsWith(root.canonicalPath + File.separator))
                 throw ArtifactException(ArtifactProblem.STORAGE)
             if (valid(destination)) {
                 requireCurrent(request)
+                synchronized(lock) { grantRequestIds.remove(identity) }
                 return destination
             }
             if (!directory.isDirectory && !directory.mkdirs()) throw ArtifactException(ArtifactProblem.STORAGE)
-            var grant = readyGrant(request)
+            var grant = readyGrant(request, grantRequestId)
             for (attempt in 0..1) {
                 requireCurrent(request)
                 if (!grant.expiresAt.isAfter(now())) {
                     if (attempt == 1) throw ArtifactException(ArtifactProblem.EXPIRED_GRANT)
-                    grant = readyGrant(request)
+                    grantRequestId = UUID.randomUUID().toString()
+                    synchronized(lock) { grantRequestIds[identity] = grantRequestId }
+                    grant = readyGrant(request, grantRequestId)
                     continue
                 }
                 try {
@@ -201,7 +211,9 @@ class JobArtifactRepository(
                     // Only a genuinely expired grant is renewable; an arbitrary 403 is not.
                     if (attempt == 0 && error.status == 403 && !grant.expiresAt.isAfter(now())) {
                         partial.delete()
-                        grant = readyGrant(request)
+                        grantRequestId = UUID.randomUUID().toString()
+                        synchronized(lock) { grantRequestIds[identity] = grantRequestId }
+                        grant = readyGrant(request, grantRequestId)
                         continue
                     }
                     throw ArtifactException(ArtifactProblem.TRANSFER)
@@ -218,6 +230,7 @@ class JobArtifactRepository(
                                 StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
                         } catch (_: IOException) { throw ArtifactException(ArtifactProblem.STORAGE) }
                     }
+                    grantRequestIds.remove(identity)
                     destination
                 }
             }
@@ -236,13 +249,13 @@ class JobArtifactRepository(
         }
     }
 
-    private suspend fun readyGrant(request: Request): DownloadGrant {
+    private suspend fun readyGrant(request: Request, requestId: String): DownloadGrant {
         requireCurrent(request)
         val job = api.detail(request.jobId)
         requireCurrent(request)
         if (job.id != request.jobId || job.status != "ready" || !job.canDownloadOutput)
             throw ArtifactException(ArtifactProblem.NOT_READY)
-        return api.download(request.jobId, "output").also { requireCurrent(request) }
+        return api.download(request.jobId, "output", requestId).also { requireCurrent(request) }
     }
 }
 

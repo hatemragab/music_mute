@@ -2,7 +2,7 @@
 
 **Collection:** `codex/backend-security-cost-hardening`
 **Implementation checkpoints:** 32
-**Current implementation status:** Branch 1 ready for review; Branch 2 not authorized
+**Current implementation status:** Branch 1 merged; Branch 2 ready for review; Branch 3 not started
 
 ## 1. Sequential branch contract
 
@@ -30,13 +30,13 @@ collection tip, never independently from `main` or the old parent commit.
 
 ### B. Media and S3 cost protection
 
-- [ ] **B1:** Replace all conflicting media policies with 20 minutes and 50,000,000 bytes.
-- [ ] **B2:** Enforce idempotent daily/monthly upload grants and confirmed monthly bytes.
-- [ ] **B3:** Preserve exact-key S3 verification and close abandoned/cancelled cleanup gaps.
-- [ ] **B4:** Enforce retained-output accounting and successful/temporary retention rules.
-- [ ] **B5:** Enforce download grants, estimated bytes, signed-URL age, and service ceiling.
-- [ ] **B6:** Update Android, iOS, dashboard, and public policy contracts without local duplicates.
-- [ ] **B7:** Pass storage/concurrency/client tests and finish the provider handoff checklist.
+- [x] **B1:** Replace all conflicting media policies with 20 minutes and 50,000,000 bytes.
+- [x] **B2:** Enforce idempotent daily/monthly upload grants and confirmed monthly bytes.
+- [x] **B3:** Preserve exact-key S3 verification and close abandoned/cancelled cleanup gaps.
+- [x] **B4:** Enforce retained-output accounting and successful/temporary retention rules.
+- [x] **B5:** Enforce download grants, estimated bytes, signed-URL age, and service ceiling.
+- [x] **B6:** Update Android, iOS, dashboard, and public policy contracts without local duplicates.
+- [x] **B7:** Pass storage/concurrency/client tests and finish the provider handoff checklist.
 
 ### C. Job queue, retries, and refunds
 

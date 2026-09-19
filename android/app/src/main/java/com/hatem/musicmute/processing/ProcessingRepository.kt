@@ -402,7 +402,12 @@ class ProcessingRepository(
             }
             if (operation.retryOfJobId != null) {
                 val result = api.retry(operation.retryOfJobId, operation.requestId)
-                operation = change(owner, operationId, runId) { it.copy(jobId = result.id, serverStatus = result.status) }
+                operation = change(owner, operationId, runId) {
+                    it.copy(
+                        jobId = result.id,
+                        serverStatus = result.status,
+                    )
+                }
             } else {
                 val result = api.createWithMetadata(
                     operation.requestId,
@@ -412,14 +417,20 @@ class ProcessingRepository(
                         operation.sourceKind,
                         operation.clientStartedAtMillis.takeIf { it > 0 }?.let(java.time.Instant::ofEpochMilli),
                         operation.sourceUrl,
-                        operation.mediaPolicy.version.takeIf { it == 2 },
+                        2,
                         operation.mediaPolicy.profileId,
-                        operation.mediaSource.takeIf { operation.mediaPolicy.version == 2 },
+                        operation.mediaSource,
                     ),
                 )
                 if (result.requestId != null && result.requestId != operation.requestId)
                     throw JobsFailure(JobsProblem.IDEMPOTENCY_CONFLICT)
-                operation = change(owner, operationId, runId) { it.copy(jobId = result.id, serverStatus = result.status) }
+                operation = change(owner, operationId, runId) {
+                    it.copy(
+                        jobId = result.id,
+                        serverStatus = result.status,
+                        uploadGrantRequestId = if (result.upload != null) it.requestId else it.uploadGrantRequestId,
+                    )
+                }
                 grant = result.upload
                 if (operation.displayName.isNotBlank() && operation.displayName != operation.sourceTitle) {
                     val renamed = api.rename(result.id, operation.displayName)
@@ -459,12 +470,26 @@ class ProcessingRepository(
                 throw error
             }
             if (error.problem != JobsProblem.UPLOAD_NOT_READY) throw error
+            if (operation.hasUploadedInput) {
+                change(owner, operationId, runId) { it.copy(uploadGrantRequestId = null) }
+            }
         }
         operation = current(owner, operationId, runId)
         val file = verifyInput(operation)
         current(owner, operationId, runId)
         if (grant == null) {
-            grant = api.renewUpload(jobId)
+            operation = current(owner, operationId, runId)
+            val grantRequestId = operation.uploadGrantRequestId ?: UUID.randomUUID().toString().also { id ->
+                operation = change(owner, operationId, runId) { it.copy(uploadGrantRequestId = id) }
+            }
+            grant = try {
+                api.renewUpload(jobId, grantRequestId)
+            } catch (error: JobsFailure) {
+                if (error.problem == JobsProblem.UPLOAD_RESERVATION_EXPIRED) {
+                    change(owner, operationId, runId) { it.copy(uploadGrantRequestId = null) }
+                }
+                throw error
+            }
             current(owner, operationId, runId)
         }
         val uploadGrant = grant ?: throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE)

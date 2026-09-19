@@ -3,6 +3,8 @@ import { Schema as MongoSchema, type Types } from 'mongoose';
 
 export const STORAGE_CLEANUP_REASONS = [
   'AUDIO_INPUT_EXPIRED',
+  'AUDIO_INPUT_INVALID',
+  'AUDIO_INPUT_TERMINAL',
   'AUDIO_OUTPUT_ORPHANED',
   'RELEASE_UPLOAD_ORPHANED',
 ] as const;
@@ -17,6 +19,8 @@ export type StorageCleanupReason = (typeof STORAGE_CLEANUP_REASONS)[number];
 export class StorageCleanupTask {
   _id!: Types.ObjectId;
   @Prop({ required: true, immutable: true, maxlength: 1024 }) key!: string;
+  @Prop({ type: String, default: null, immutable: true, maxlength: 1024 })
+  versionId!: string | null;
   @Prop({
     type: MongoSchema.Types.ObjectId,
     default: null,

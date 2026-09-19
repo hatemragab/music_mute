@@ -25,16 +25,17 @@ export class ReleaseArtifactStorageService {
     private readonly preflight: StoragePreflightService,
   ) {
     this.bucket = config.getOrThrow<string>('S3_BUCKET');
-    this.downloadSeconds = config.get<number>(
-      'APP_RELEASE_DOWNLOAD_SECONDS',
-      300,
+    this.downloadSeconds = Math.min(
+      600,
+      config.get<number>('APP_RELEASE_DOWNLOAD_SECONDS', 300),
     );
   }
   async grant(reservation: Reservation, expiresAt: Date) {
     await this.preflight.assertReady();
+    const now = Date.now();
     const expires = Math.max(
       1,
-      Math.min(900, Math.floor((expiresAt.getTime() - Date.now()) / 1000)),
+      Math.min(600, Math.floor((expiresAt.getTime() - now) / 1000)),
     );
     const checksum = Buffer.from(reservation.expectedSha256, 'hex').toString(
       'base64',
@@ -47,7 +48,7 @@ export class ReleaseArtifactStorageService {
       contentType: 'application/vnd.android.package-archive',
       checksumSha256: checksum,
       expiresIn: expires,
-      expiresAt,
+      expiresAt: new Date(now + expires * 1_000),
     });
   }
   async pin(reservation: Reservation, versionId?: string): Promise<string> {

@@ -73,6 +73,226 @@ AccountUsagePeriodSchema.index(
 );
 
 @Schema({
+  collection: 'account_daily_usage_periods',
+  strict: 'throw',
+  versionKey: false,
+})
+export class AccountDailyUsagePeriod {
+  @Prop({ type: String, required: true, maxlength: 160 })
+  _id!: string;
+
+  @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
+  accountId!: Types.ObjectId;
+
+  @Prop({
+    type: String,
+    required: true,
+    immutable: true,
+    match: /^\d{4}-\d{2}-\d{2}$/,
+  })
+  dayKey!: string;
+
+  @Prop({ type: Date, required: true, immutable: true })
+  dayStart!: Date;
+
+  @Prop({ type: Date, required: true, immutable: true })
+  dayEnd!: Date;
+
+  @Prop({ required: true, default: 0, min: 0, validate: Number.isSafeInteger })
+  uploadGrants!: number;
+
+  @Prop({ required: true, default: 0, min: 0, validate: Number.isSafeInteger })
+  revision!: number;
+
+  @Prop({ required: true })
+  lastMutationAt!: Date;
+
+  @Prop({ required: true })
+  purgeAt!: Date;
+}
+
+export const AccountDailyUsagePeriodSchema = SchemaFactory.createForClass(
+  AccountDailyUsagePeriod,
+);
+AccountDailyUsagePeriodSchema.index(
+  { accountId: 1, dayKey: 1 },
+  { unique: true, name: 'account_daily_usage_unique_day' },
+);
+AccountDailyUsagePeriodSchema.index(
+  { purgeAt: 1 },
+  { expireAfterSeconds: 0, name: 'account_daily_usage_ttl' },
+);
+
+@Schema({
+  collection: 'upload_grant_receipts',
+  strict: 'throw',
+  versionKey: false,
+})
+export class UploadGrantReceipt {
+  @Prop({ type: String, required: true, maxlength: 200 })
+  _id!: string;
+
+  @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
+  accountId!: Types.ObjectId;
+
+  @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
+  jobId!: Types.ObjectId;
+
+  @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
+  logicalAudioId!: Types.ObjectId;
+
+  @Prop({ required: true, immutable: true, maxlength: 36 })
+  requestId!: string;
+
+  @Prop({ required: true, immutable: true, match: /^\d{4}-\d{2}-\d{2}$/ })
+  dayKey!: string;
+
+  @Prop({ required: true, immutable: true, match: /^\d{4}-\d{2}$/ })
+  periodKey!: string;
+
+  @Prop({
+    required: true,
+    immutable: true,
+    min: 1,
+    validate: Number.isSafeInteger,
+  })
+  attemptNumber!: number;
+
+  @Prop({ required: true, immutable: true })
+  createdAt!: Date;
+
+  @Prop({ required: true, immutable: true })
+  expiresAt!: Date;
+
+  @Prop({ required: true })
+  purgeAt!: Date;
+}
+
+export const UploadGrantReceiptSchema =
+  SchemaFactory.createForClass(UploadGrantReceipt);
+UploadGrantReceiptSchema.index(
+  { accountId: 1, jobId: 1, createdAt: 1 },
+  { name: 'upload_grants_account_job_created' },
+);
+UploadGrantReceiptSchema.index(
+  { logicalAudioId: 1, attemptNumber: 1 },
+  { unique: true, name: 'upload_grants_logical_attempt_unique' },
+);
+UploadGrantReceiptSchema.index(
+  { purgeAt: 1 },
+  { expireAfterSeconds: 0, name: 'upload_grant_receipts_ttl' },
+);
+
+export const DOWNLOAD_GRANT_SCOPES = [
+  'user_result',
+  'user_input',
+  'worker_input',
+] as const;
+export type DownloadGrantScope = (typeof DOWNLOAD_GRANT_SCOPES)[number];
+
+@Schema({
+  collection: 'download_grant_receipts',
+  strict: 'throw',
+  versionKey: false,
+})
+export class DownloadGrantReceipt {
+  @Prop({ type: String, required: true, maxlength: 240 })
+  _id!: string;
+
+  @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
+  accountId!: Types.ObjectId;
+
+  @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
+  jobId!: Types.ObjectId;
+
+  @Prop({
+    type: String,
+    required: true,
+    immutable: true,
+    enum: DOWNLOAD_GRANT_SCOPES,
+  })
+  scope!: DownloadGrantScope;
+
+  @Prop({ type: String, default: null, immutable: true, maxlength: 36 })
+  attemptId!: string | null;
+
+  @Prop({ required: true, immutable: true, maxlength: 36 })
+  requestId!: string;
+
+  @Prop({ required: true, immutable: true, maxlength: 1024 })
+  objectVersionId!: string;
+
+  @Prop({
+    required: true,
+    immutable: true,
+    min: 1,
+    validate: Number.isSafeInteger,
+  })
+  estimatedBytes!: number;
+
+  @Prop({ required: true, immutable: true, match: /^\d{4}-\d{2}$/ })
+  periodKey!: string;
+
+  @Prop({ required: true, immutable: true })
+  createdAt!: Date;
+
+  @Prop({ required: true, immutable: true })
+  expiresAt!: Date;
+
+  @Prop({ required: true })
+  purgeAt!: Date;
+}
+
+export const DownloadGrantReceiptSchema =
+  SchemaFactory.createForClass(DownloadGrantReceipt);
+DownloadGrantReceiptSchema.index(
+  { accountId: 1, periodKey: 1, scope: 1 },
+  { name: 'download_grants_account_period_scope' },
+);
+DownloadGrantReceiptSchema.index(
+  { purgeAt: 1 },
+  { expireAfterSeconds: 0, name: 'download_grant_receipts_ttl' },
+);
+
+@Schema({
+  collection: 'service_usage_periods',
+  strict: 'throw',
+  versionKey: false,
+})
+export class ServiceUsagePeriod {
+  @Prop({ type: String, required: true, maxlength: 32 })
+  _id!: string;
+
+  @Prop({ required: true, immutable: true, match: /^\d{4}-\d{2}$/ })
+  periodKey!: string;
+
+  @Prop({ type: Date, required: true, immutable: true })
+  periodStart!: Date;
+
+  @Prop({ type: Date, required: true, immutable: true })
+  periodEnd!: Date;
+
+  @Prop({ required: true, default: 0, min: 0, validate: Number.isSafeInteger })
+  estimatedOutboundBytes!: number;
+
+  @Prop({ required: true, default: 0, min: 0, validate: Number.isSafeInteger })
+  revision!: number;
+
+  @Prop({ required: true })
+  lastMutationAt!: Date;
+
+  @Prop({ required: true })
+  purgeAt!: Date;
+}
+
+export const ServiceUsagePeriodSchema =
+  SchemaFactory.createForClass(ServiceUsagePeriod);
+ServiceUsagePeriodSchema.index(
+  { purgeAt: 1 },
+  { expireAfterSeconds: 0, name: 'service_usage_period_ttl' },
+);
+
+@Schema({
   collection: 'processing_reservations',
   strict: 'throw',
   versionKey: false,

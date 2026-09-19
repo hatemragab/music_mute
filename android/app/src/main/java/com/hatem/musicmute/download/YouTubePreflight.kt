@@ -13,7 +13,7 @@ object YouTubePreflight {
         if ("list" in keys || uri.path.orEmpty().trimEnd('/').endsWith("/playlist"))
             throw JobsFailure(JobsProblem.YOUTUBE_PLAYLIST_UNSUPPORTED)
     }
-    fun validateMetadata(body: String, maxDuration: Double, inclusive: Boolean = true): Double {
+    fun validateMetadata(body: String, maxDuration: Double): Double {
         if (body.length > 1024 * 1024) throw JobsFailure(JobsProblem.MEDIA_UNSUPPORTED)
         val info = try { Json.parseToJsonElement(body).jsonObject } catch (_: Exception) { throw JobsFailure(JobsProblem.MEDIA_DURATION_UNKNOWN) }
         fun text(key: String) = info[key]?.jsonPrimitive?.contentOrNull
@@ -23,7 +23,7 @@ object YouTubePreflight {
             throw JobsFailure(JobsProblem.YOUTUBE_LIVE_UNSUPPORTED)
         val duration = info["duration"]?.jsonPrimitive?.takeUnless { it.isString }?.doubleOrNull
             ?.takeIf { it.isFinite() && it > 0 } ?: throw JobsFailure(JobsProblem.MEDIA_DURATION_UNKNOWN)
-        if (duration > maxDuration || (!inclusive && duration == maxDuration)) throw JobsFailure(JobsProblem.MEDIA_TOO_LONG)
+        if (duration > maxDuration) throw JobsFailure(JobsProblem.MEDIA_TOO_LONG)
         return duration
     }
 }

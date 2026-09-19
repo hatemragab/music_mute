@@ -77,7 +77,7 @@ const schema = Joi.object({
   APP_RELEASE_DOWNLOAD_SECONDS: Joi.number()
     .integer()
     .min(60)
-    .max(900)
+    .max(600)
     .default(300),
   APP_ANDROID_CURRENT_VERSION_NAME: Joi.string()
     .pattern(/^(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,2}$/)
@@ -103,7 +103,7 @@ const schema = Joi.object({
   RELEASE_LANDING_BASE_URL: Joi.string()
     .uri({ scheme: ['https'] })
     .optional(),
-  PROCESSING_URL_SECONDS: Joi.number().integer().min(60).max(900).default(900),
+  PROCESSING_URL_SECONDS: Joi.number().integer().min(60).max(600).default(600),
   CORS_ORIGINS: Joi.string().allow('').default(''),
   PUBLIC_SUPPORT_EMAIL: Joi.string()
     .email({ tlds: { allow: false } })

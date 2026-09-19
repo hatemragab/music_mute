@@ -115,6 +115,7 @@ function fixture() {
     },
   };
   const storage = {
+    isPinnedObjectAvailable: vi.fn().mockResolvedValue(true),
     createDownloadGrant: vi.fn().mockResolvedValue({
       url: 'https://storage.invalid/input',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -137,7 +138,11 @@ function fixture() {
   };
   const accountAccess = { assertActive: vi.fn().mockResolvedValue(undefined) };
   const usage = {
+    reserveDownloadGrant: vi.fn().mockResolvedValue({
+      expiresAt: new Date(Date.now() + 60_000),
+    }),
     reconcileMeasured: vi.fn().mockResolvedValue(undefined),
+    recordRetainedOutput: vi.fn().mockResolvedValue(undefined),
     settleJob: vi.fn().mockResolvedValue(undefined),
   };
   const service = new WorkerAttemptService(
@@ -162,6 +167,7 @@ function fixture() {
     cleanup,
     accountAccess,
     outbox,
+    usage,
   };
 }
 
@@ -197,6 +203,50 @@ const completion = {
 };
 
 describe('worker attempt transfers and finalization', () => {
+  it('charges an idempotent worker input grant only to service outbound usage', async () => {
+    const f = fixture();
+
+    await expect(
+      f.service.inputGrant(principal, attemptId, ownership),
+    ).resolves.toMatchObject({
+      requestId: ownership.requestId,
+      attemptId,
+      object: f.job.inputObject,
+    });
+
+    expect(f.storage.isPinnedObjectAvailable).toHaveBeenCalledWith(
+      f.job.inputObject,
+    );
+    expect(f.usage.reserveDownloadGrant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: f.job.userId,
+        jobId: f.job._id,
+        scope: 'worker_input',
+        requestId: ownership.requestId,
+        attemptId,
+        object: f.job.inputObject,
+      }),
+      expect.any(Object),
+    );
+    expect(f.storage.createDownloadGrant).toHaveBeenCalledWith(
+      f.job.inputObject,
+      expect.any(Date),
+    );
+  });
+
+  it('does not charge or sign a missing pinned worker input', async () => {
+    const f = fixture();
+    f.storage.isPinnedObjectAvailable.mockResolvedValue(false);
+
+    await expect(
+      f.service.inputGrant(principal, attemptId, ownership),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+    });
+    expect(f.usage.reserveDownloadGrant).not.toHaveBeenCalled();
+    expect(f.storage.createDownloadGrant).not.toHaveBeenCalled();
+  });
+
   it('derives and stores one attempt-scoped output reservation', async () => {
     const f = fixture();
     const result = await f.service.outputGrant(principal, attemptId, output);
@@ -239,6 +289,13 @@ describe('worker attempt transfers and finalization', () => {
 
     expect(f.storage.verifyUploadedVersion).toHaveBeenCalledOnce();
     expect(f.job.outputObject).toEqual(object);
+    expect(f.job.retainedOutputAccountedAt).toEqual(expect.any(Date));
+    expect(f.usage.recordRetainedOutput).toHaveBeenCalledOnce();
+    expect(f.usage.recordRetainedOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: f.job._id }),
+      object.bytes,
+      expect.any(Object),
+    );
     expect(f.job.currentExecution).toBeNull();
     expect(f.outbox.updateOne).toHaveBeenCalledOnce();
     expect(f.cleanup.cancelScheduled).toHaveBeenCalledWith(

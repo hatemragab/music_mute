@@ -6,44 +6,40 @@ import kotlinx.serialization.json.*
 /** Server policy is an admission hint; accepted job snapshots remain authoritative. */
 @Serializable
 data class ProcessingMediaPolicy(
-    val version: Int = 1,
+    val version: Int = 2,
     val revision: Int = 0,
-    val maxDurationSeconds: Double = 600.0,
-    val maxPreparedAudioBytes: Long = 30_000_000,
-    val profileId: String? = null,
-    val maxLocalSourceBytes: Long? = null,
-    val maxPreparationSeconds: Long? = null,
-    val maxSourceDownloadBytes: Long? = null,
-    val maxSourceDownloadSeconds: Long? = null,
+    val maxDurationSeconds: Double = 1_200.0,
+    val maxPreparedAudioBytes: Long = 50_000_000,
+    val profileId: String = "preserve-or-aac-lc-256-v1",
+    val maxLocalSourceBytes: Long? = 200_000_000,
+    val maxPreparationSeconds: Long? = 120,
+    val maxSourceDownloadBytes: Long? = 50_000_000,
+    val maxSourceDownloadSeconds: Long? = 120,
     val acceptNewJobs: Boolean = true,
     val acceptLongJobs: Boolean = true,
     val longJobThresholdSeconds: Double? = null,
 ) {
     val localPreparationReady get() = (maxLocalSourceBytes ?: 0) > 0 && (maxPreparationSeconds ?: 0) > 0
-    val localExpansionReady get() = version == 2 && localPreparationReady
-    val youtubeExpansionReady get() = localExpansionReady && maxSourceDownloadBytes != null && maxSourceDownloadSeconds != null
+    val youtubePreparationReady get() = localPreparationReady && maxSourceDownloadBytes != null && maxSourceDownloadSeconds != null
     fun acceptsPrepared(bytes: Long, durationSeconds: Double): Boolean = bytes > 0 &&
-        durationSeconds.isFinite() && durationSeconds > 0 && if (version == 2)
+        durationSeconds.isFinite() && durationSeconds > 0 &&
         bytes <= maxPreparedAudioBytes && durationSeconds <= maxDurationSeconds
-        else bytes < maxPreparedAudioBytes && durationSeconds < maxDurationSeconds
     fun acceptsDuration(seconds: Double) = acceptsPrepared(1, seconds)
     fun requireLongJobAvailable(seconds: Double) {
-        if (version == 2 && !acceptLongJobs && (longJobThresholdSeconds == null || seconds > longJobThresholdSeconds))
+        if (!acceptLongJobs && (longJobThresholdSeconds == null || seconds > longJobThresholdSeconds))
             throw JobsFailure(JobsProblem.PROCESSING_CAPACITY_UNAVAILABLE)
     }
 
     companion object {
-        // On-device extraction does not expand server admission or establish worker capacity.
-        // Keep the standard exclusive audio limits and submit without v2 qualification metadata.
-        val LEGACY = ProcessingMediaPolicy(maxLocalSourceBytes = 200_000_000, maxPreparationSeconds = 120)
+        /** Safe offline ceiling. A valid backend response may only reduce these limits. */
+        val STANDARD = ProcessingMediaPolicy()
         fun parse(body: String): ProcessingMediaPolicy {
             try {
                 val root = Json.parseToJsonElement(body).jsonObject
                 fun JsonObject.number(key: String) = get(key)?.jsonPrimitive?.takeUnless { it.isString }?.doubleOrNull
-                val rawVersion = root.number("schemaVersion") ?: 1.0
-                require(rawVersion == 1.0 || rawVersion == 2.0)
+                val rawVersion = root.number("schemaVersion") ?: error("Missing version")
+                require(rawVersion == 2.0)
                 val version = rawVersion.toInt()
-                if (version == 1) return LEGACY
                 val limits = root.getValue("limits").jsonObject
                 val profile = root.getValue("preparationProfile").jsonObject
                 val fallback = profile.getValue("fallbackConversion").jsonObject
@@ -61,10 +57,19 @@ data class ProcessingMediaPolicy(
                 }
                 val duration = limits.number("maxDurationSeconds") ?: error("Missing duration")
                 val bytes = positiveBound("maxPreparedAudioBytes") ?: error("Missing size")
-                require(duration.isFinite() && duration > 0 && duration <= 1800 && bytes <= 100_000_000)
+                require(duration.isFinite() && duration > 0 && duration <= STANDARD.maxDurationSeconds)
+                require(bytes <= STANDARD.maxPreparedAudioBytes)
+                val localBytes = positiveBound("maxLocalSourceBytes")
+                val preparationSeconds = positiveBound("maxPreparationSeconds")
+                val sourceBytes = positiveBound("maxSourceDownloadBytes")
+                val sourceSeconds = positiveBound("maxSourceDownloadSeconds")
+                require(localBytes != null && localBytes <= STANDARD.maxLocalSourceBytes!!)
+                require(preparationSeconds != null && preparationSeconds <= STANDARD.maxPreparationSeconds!!)
+                require(sourceBytes != null && sourceBytes <= STANDARD.maxSourceDownloadBytes!!)
+                require(sourceSeconds != null && sourceSeconds <= STANDARD.maxSourceDownloadSeconds!!)
                 return ProcessingMediaPolicy(2, root.number("revision")?.toInt() ?: error("Missing revision"),
-                    duration, bytes, id, positiveBound("maxLocalSourceBytes"), positiveBound("maxPreparationSeconds"),
-                    positiveBound("maxSourceDownloadBytes"), positiveBound("maxSourceDownloadSeconds"),
+                    duration, bytes, id, localBytes, preparationSeconds,
+                    sourceBytes, sourceSeconds,
                     root.getValue("acceptNewJobs").jsonPrimitive.boolean,
                     root["acceptLongJobs"]?.jsonPrimitive?.booleanOrNull ?: false,
                     limits.number("longJobThresholdSeconds")?.takeIf { it.isFinite() && it > 0 && it <= duration })

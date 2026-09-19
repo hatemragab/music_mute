@@ -21,9 +21,12 @@ import type {
 import {
   AccountPolicy,
   AccountPolicyOverride,
+  ACCOUNT_POLICY_OVERRIDE_VALUE_KEYS,
   DEFAULT_ACCOUNT_POLICY_VALUES,
   STANDARD_ACCOUNT_POLICY_ID,
   type AccountPolicyValues,
+  type AccountPolicyOverrideValueKey,
+  type AccountPolicyOverrideValues,
   type AccountPolicyValueKey,
 } from './account-policy.schema.js';
 import { ProcessingAdmissionFence } from './processing-settings.schema.js';
@@ -32,7 +35,14 @@ const POLICY_VALUE_KEYS = Object.freeze(
   Object.keys(DEFAULT_ACCOUNT_POLICY_VALUES) as AccountPolicyValueKey[],
 );
 
-const BRANCH_ONE_ENFORCED_FEATURES = Object.freeze(['processing_minutes']);
+const ENFORCED_FEATURES = Object.freeze([
+  'processing_minutes',
+  'media_limits',
+  'upload_limits',
+  'download_limits',
+  'retained_storage',
+  'service_outbound',
+]);
 
 export interface StoredAccountPolicy extends AccountPolicyValues {
   revision: number;
@@ -59,6 +69,24 @@ function pickValues(value: AccountPolicyValues): AccountPolicyValues {
   return Object.fromEntries(
     POLICY_VALUE_KEYS.map((key) => [key, value[key]]),
   ) as unknown as AccountPolicyValues;
+}
+
+function pickOverrideValues(
+  value: Partial<
+    Record<AccountPolicyOverrideValueKey, number | null | undefined>
+  >,
+): AccountPolicyOverrideValues {
+  return Object.fromEntries(
+    ACCOUNT_POLICY_OVERRIDE_VALUE_KEYS.flatMap((key) =>
+      value[key] == null ? [] : [[key, value[key]]],
+    ),
+  ) as AccountPolicyOverrideValues;
+}
+
+function storedOverrideValues(value: AccountPolicyOverrideValues) {
+  return Object.fromEntries(
+    ACCOUNT_POLICY_OVERRIDE_VALUE_KEYS.map((key) => [key, value[key] ?? null]),
+  ) as Record<AccountPolicyOverrideValueKey, number | null>;
 }
 
 export function validateAccountPolicyValues(value: AccountPolicyValues): void {
@@ -102,7 +130,7 @@ function presentGlobal(value: StoredAccountPolicy) {
     maintenanceMessageEn: value.maintenanceMessageEn,
     maintenanceMessageAr: value.maintenanceMessageAr,
     values: pickValues(value),
-    enforcedFeatures: BRANCH_ONE_ENFORCED_FEATURES,
+    enforcedFeatures: ENFORCED_FEATURES,
     updatedBy: value.updatedBy,
     updatedAt: value.updatedAt.toISOString(),
   };
@@ -112,10 +140,7 @@ function presentOverride(value: AccountPolicyOverride | null) {
   if (!value) return null;
   return {
     revision: value.revision,
-    values:
-      value.monthlyProcessingSeconds === null
-        ? {}
-        : { monthlyProcessingSeconds: value.monthlyProcessingSeconds },
+    values: pickOverrideValues(value),
     expiresAt: value.expiresAt?.toISOString() ?? null,
     reason: value.reason,
     createdBy: value.createdBy,
@@ -196,9 +221,7 @@ export class AccountPolicyService implements OnModuleInit {
         : null;
     const values = {
       ...pickValues(global),
-      ...(active?.monthlyProcessingSeconds == null
-        ? {}
-        : { monthlyProcessingSeconds: active.monthlyProcessingSeconds }),
+      ...(active ? pickOverrideValues(active) : {}),
     };
     validateAccountPolicyValues(values);
     return {
@@ -223,27 +246,11 @@ export class AccountPolicyService implements OnModuleInit {
   }
 
   async publicPolicy(schemaVersion = '2') {
-    if (!['1', '2'].includes(schemaVersion))
-      throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
+    if (schemaVersion !== '2') throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
     const policy = await this.global();
     const acceptNewJobs =
       this.config.get<boolean>('AUDIO_PROCESSING_ENABLED') === true &&
       policy.acceptNewJobs;
-    if (schemaVersion === '1') {
-      return {
-        schemaVersion: 1 as const,
-        revision: policy.revision,
-        acceptNewJobs,
-        messageEn: policy.maintenanceMessageEn,
-        messageAr: policy.maintenanceMessageAr,
-        limits: {
-          maxInputBytesExclusive: policy.maxPreparedAudioBytes + 1,
-          maxDurationSecondsExclusive: policy.maxDurationSeconds + 1,
-          maxActiveJobsPerUser: policy.maxProcessingJobs,
-        },
-        checkedAt: new Date().toISOString(),
-      };
-    }
     return {
       schemaVersion: 2 as const,
       revision: policy.revision,
@@ -256,11 +263,11 @@ export class AccountPolicyService implements OnModuleInit {
         maxDurationSeconds: policy.maxDurationSeconds,
         maxPreparedAudioBytes: policy.maxPreparedAudioBytes,
         maxProcessingJobs: policy.maxProcessingJobs,
-        maxLocalSourceBytes: null,
+        maxLocalSourceBytes: 200_000_000,
         longJobThresholdSeconds: Math.min(600, policy.maxDurationSeconds),
-        maxSourceDownloadBytes: null,
-        maxPreparationSeconds: null,
-        maxSourceDownloadSeconds: null,
+        maxSourceDownloadBytes: policy.maxPreparedAudioBytes,
+        maxPreparationSeconds: 120,
+        maxSourceDownloadSeconds: 120,
       },
       preparationProfile: {
         id: PREPARATION_PROFILE_ID,
@@ -359,12 +366,10 @@ export class AccountPolicyService implements OnModuleInit {
     accountId: Types.ObjectId,
     dto: PutAccountPolicyOverrideDto,
   ) {
-    const monthlyProcessingSeconds = dto.values.monthlyProcessingSeconds;
-    if (
-      !Number.isSafeInteger(monthlyProcessingSeconds) ||
-      monthlyProcessingSeconds! < 1
-    )
+    const overrideValues = pickOverrideValues(dto.values);
+    if (Object.keys(overrideValues).length === 0)
       throw adminError('INVALID_REQUEST');
+    const storedValues = storedOverrideValues(overrideValues);
     const expiresAt = dto.expiresAt === null ? null : new Date(dto.expiresAt);
     if (
       expiresAt &&
@@ -379,7 +384,7 @@ export class AccountPolicyService implements OnModuleInit {
         route: 'PUT /admin/users/:id/account-policy-override',
         request: {
           id,
-          values: { monthlyProcessingSeconds },
+          values: overrideValues,
           expiresAt: dto.expiresAt,
           expectedRevision: dto.expectedRevision,
         },
@@ -390,6 +395,11 @@ export class AccountPolicyService implements OnModuleInit {
       async (session) => {
         if (!(await this.users.exists({ _id: accountId }).session(session)))
           throw adminError('RESOURCE_NOT_FOUND');
+        const global = await this.global(session);
+        validateAccountPolicyValues({
+          ...pickValues(global),
+          ...overrideValues,
+        });
         await this.touchAccountFence(accountId, session);
         const current = await this.overrides
           .findOne({ accountId })
@@ -406,7 +416,7 @@ export class AccountPolicyService implements OnModuleInit {
                 {
                   _id: new Types.ObjectId(),
                   accountId,
-                  monthlyProcessingSeconds,
+                  ...storedValues,
                   expiresAt,
                   reason: dto.reason,
                   createdBy: actor.uid,
@@ -426,7 +436,7 @@ export class AccountPolicyService implements OnModuleInit {
         } else {
           const update: UpdateQuery<AccountPolicyOverride> = {
             $set: {
-              monthlyProcessingSeconds,
+              ...storedValues,
               expiresAt,
               reason: dto.reason,
               updatedBy: actor.uid,
@@ -446,11 +456,11 @@ export class AccountPolicyService implements OnModuleInit {
         }
         return {
           processingChanges: [
-            {
-              field: 'monthlyProcessingSeconds',
-              before: current?.monthlyProcessingSeconds ?? null,
-              after: monthlyProcessingSeconds!,
-            },
+            ...ACCOUNT_POLICY_OVERRIDE_VALUE_KEYS.map((field) => ({
+              field,
+              before: current?.[field] ?? null,
+              after: storedValues[field],
+            })),
             {
               field: 'overrideExpiresAt',
               before: current?.expiresAt?.toISOString() ?? null,
@@ -498,11 +508,11 @@ export class AccountPolicyService implements OnModuleInit {
         }
         return {
           processingChanges: [
-            {
-              field: 'monthlyProcessingSeconds',
-              before: current.monthlyProcessingSeconds,
-              after: null,
-            },
+            ...ACCOUNT_POLICY_OVERRIDE_VALUE_KEYS.flatMap((field) =>
+              current[field] == null
+                ? []
+                : [{ field, before: current[field], after: null }],
+            ),
             {
               field: 'overrideExpiresAt',
               before: current.expiresAt?.toISOString() ?? null,

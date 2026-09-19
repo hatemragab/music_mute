@@ -1,14 +1,27 @@
+import type { AccountPolicyOverride } from "@/api/contracts";
+
 export function validateAccountPolicyOverride(
-  minutes: number,
+  values: AccountPolicyOverride["values"],
+  effective: AccountPolicyOverride["values"],
   expiresAt: string,
   now = new Date(),
 ) {
   const errors: string[] = [];
-  const seconds = minutes * 60;
-  if (!Number.isSafeInteger(seconds) || seconds < 1)
-    errors.push(
-      "Monthly processing must be a positive whole number of seconds.",
-    );
+  const entries = Object.entries(values);
+  if (!entries.length) errors.push("Choose at least one replacement value.");
+  for (const [key, amount] of entries) {
+    if (!Number.isSafeInteger(amount) || amount < 1)
+      errors.push(`${key} must be a positive whole number.`);
+  }
+  if ((values.signedUrlTtlSeconds ?? 1) > 600)
+    errors.push("Signed URL validity cannot exceed 600 seconds.");
+  const merged = { ...effective, ...values };
+  if (
+    merged.dailyUploadGrants !== undefined &&
+    merged.monthlyUploadGrants !== undefined &&
+    merged.monthlyUploadGrants < merged.dailyUploadGrants
+  )
+    errors.push("Monthly upload grants cannot be lower than daily grants.");
   if (expiresAt) {
     const expires = Date.parse(expiresAt);
     if (!Number.isFinite(expires) || expires <= now.getTime())

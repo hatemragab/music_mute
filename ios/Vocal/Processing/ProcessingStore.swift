@@ -86,6 +86,7 @@ struct UploadOperation: Codable, Equatable, Identifiable, Sendable {
   var transferId: UUID?
   var transferTaskId: Int?
   var uploadAttempts: Int
+  var uploadGrantRequestId: UUID? = nil
   var lastFailureCode: String?
   var cancellationRequested: Bool = false
   var sourceTitle: String?
@@ -100,7 +101,8 @@ struct UploadOperation: Codable, Equatable, Identifiable, Sendable {
 
   enum CodingKeys: String, CodingKey {
     case operationId, ownerUid, requestId, input, stagedRelativePath, createdAt, updatedAt
-    case jobId, jobStatus, phase, transferId, transferTaskId, uploadAttempts, lastFailureCode
+    case jobId, jobStatus, phase, transferId, transferTaskId, uploadAttempts,
+      uploadGrantRequestId, lastFailureCode
     case cancellationRequested, sourceTitle, sourceKind, sourceURL, clientStartedAt, displayName,
       activeRunToken, policyVersion, preparationProfileId, mediaSource
   }
@@ -123,6 +125,7 @@ extension UploadOperation {
       transferId: try values.decodeIfPresent(UUID.self, forKey: .transferId),
       transferTaskId: try values.decodeIfPresent(Int.self, forKey: .transferTaskId),
       uploadAttempts: try values.decode(Int.self, forKey: .uploadAttempts),
+      uploadGrantRequestId: try values.decodeIfPresent(UUID.self, forKey: .uploadGrantRequestId),
       lastFailureCode: try values.decodeIfPresent(String.self, forKey: .lastFailureCode),
       cancellationRequested: try values.decodeIfPresent(Bool.self, forKey: .cancellationRequested)
         ?? false,

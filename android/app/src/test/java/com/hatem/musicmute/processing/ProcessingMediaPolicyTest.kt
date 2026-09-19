@@ -5,57 +5,69 @@ import org.junit.Test
 
 class ProcessingMediaPolicyTest {
     private val fixture = """{
-      "schemaVersion":2,"revision":1,"acceptNewJobs":false,
-      "limits":{"maxDurationSeconds":1800,"maxPreparedAudioBytes":100000000,"maxLocalSourceBytes":null,
-      "maxPreparationSeconds":null,"maxSourceDownloadBytes":null,"maxSourceDownloadSeconds":null},
+      "schemaVersion":2,"revision":1,"acceptNewJobs":true,"acceptLongJobs":true,
+      "limits":{"maxDurationSeconds":1200,"maxPreparedAudioBytes":50000000,"maxLocalSourceBytes":200000000,
+      "maxPreparationSeconds":120,"maxSourceDownloadBytes":50000000,"maxSourceDownloadSeconds":120,
+      "longJobThresholdSeconds":600},
       "preparationProfile":{"id":"preserve-or-aac-lc-256-v1","preserveCompatibleAudio":true,
       "compatibilityRevision":"unavailable","fallbackConversion":{"codec":"aac-lc","outputContentType":"audio/mp4","targetBitrate":256000}}
     }"""
-    @Test fun serverReadinessFixtureParsesWithoutEnablingExpansion() {
+
+    @Test fun serverPolicyParsesAsTheOnlyStandardPolicy() {
         val policy = ProcessingMediaPolicy.parse(fixture)
         assertEquals(2, policy.version)
-        assertTrue(policy.acceptsPrepared(100000000, 1800.0))
-        assertFalse(policy.localExpansionReady)
-        assertFalse(policy.acceptNewJobs)
+        assertTrue(policy.acceptsPrepared(50_000_000, 1_200.0))
+        assertTrue(policy.localPreparationReady)
+        assertTrue(policy.youtubePreparationReady)
+        assertTrue(policy.acceptNewJobs)
     }
-    @Test(expected = JobsFailure::class) fun unknownProfileRejected() { ProcessingMediaPolicy.parse(fixture.replace("preserve-or-aac-lc-256-v1", "future-profile")) }
-    @Test(expected = JobsFailure::class) fun unknownVersionRejected() { ProcessingMediaPolicy.parse(fixture.replace("\"schemaVersion\":2", "\"schemaVersion\":3")) }
-    @Test(expected = JobsFailure::class) fun pausedLongAdmissionRejectsBeforeExpensiveWork() {
-        expandedMediaPolicy().copy(acceptLongJobs = false, longJobThresholdSeconds = 600.0).requireLongJobAvailable(601.0)
+
+    @Test(expected = JobsFailure::class)
+    fun unknownProfileRejected() {
+        ProcessingMediaPolicy.parse(fixture.replace("preserve-or-aac-lc-256-v1", "future-profile"))
     }
+
+    @Test(expected = JobsFailure::class)
+    fun unknownVersionRejected() {
+        ProcessingMediaPolicy.parse(fixture.replace("\"schemaVersion\":2", "\"schemaVersion\":1"))
+    }
+
+    @Test(expected = JobsFailure::class)
+    fun responseCannotExpandSafeOfflineCeilings() {
+        ProcessingMediaPolicy.parse(fixture.replace("50000000", "50000001"))
+    }
+
+    @Test(expected = JobsFailure::class)
+    fun pausedLongAdmissionRejectsBeforeExpensiveWork() {
+        standardMediaPolicy().copy(acceptLongJobs = false, longJobThresholdSeconds = 600.0)
+            .requireLongJobAvailable(600.001)
+    }
+
     @Test fun inclusivePreparedBoundaries() {
-        val policy = expandedMediaPolicy()
-        assertTrue(policy.acceptsPrepared(100_000_000, 1800.0))
-        assertFalse(policy.acceptsPrepared(100_000_001, 1800.0))
-        assertFalse(policy.acceptsPrepared(10, 1800.001))
+        val policy = ProcessingMediaPolicy.STANDARD
+        assertTrue(policy.acceptsPrepared(49_999_999, 1_199.999))
+        assertTrue(policy.acceptsPrepared(50_000_000, 1_200.0))
+        assertFalse(policy.acceptsPrepared(50_000_001, 1_200.0))
+        assertFalse(policy.acceptsPrepared(10, 1_200.001))
         assertFalse(policy.acceptsPrepared(10, Double.NaN))
         assertFalse(policy.acceptsPrepared(0, 1.0))
     }
-    @Test fun legacyRemainsExclusive() {
-        assertFalse(ProcessingMediaPolicy.LEGACY.acceptsPrepared(10, 600.0))
-        assertFalse(ProcessingMediaPolicy.LEGACY.acceptsPrepared(30_000_000, 1.0))
-    }
-    @Test fun standardLocalPreparationHasBoundsWithoutExpandedAdmission() {
-        val policy = ProcessingMediaPolicy.LEGACY
+
+    @Test fun standardOfflinePolicyHasBoundedLocalAndRemotePreparation() {
+        val policy = ProcessingMediaPolicy.STANDARD
         assertEquals(200_000_000L, policy.maxLocalSourceBytes)
         assertEquals(120L, policy.maxPreparationSeconds)
-        assertEquals(1, policy.version)
-        assertNull(policy.profileId)
+        assertEquals(50_000_000L, policy.maxSourceDownloadBytes)
+        assertEquals(120L, policy.maxSourceDownloadSeconds)
         assertTrue(policy.localPreparationReady)
-        assertFalse(policy.localExpansionReady)
-        assertFalse(policy.youtubeExpansionReady)
-        assertTrue(policy.acceptsPrepared(29_999_999, 599.0))
-        assertFalse(policy.acceptsPrepared(30_000_000, 599.0))
-        assertFalse(policy.acceptsPrepared(1, 600.0))
+        assertTrue(policy.youtubePreparationReady)
     }
-    @Test fun readinessIsNotAnUnlimitedBound() {
-        assertFalse(expandedMediaPolicy().copy(maxLocalSourceBytes = null).localExpansionReady)
-        assertFalse(ProcessingMediaPolicy.LEGACY.copy(maxLocalSourceBytes = null).localPreparationReady)
-        assertFalse(ProcessingMediaPolicy.LEGACY.copy(maxPreparationSeconds = 0).localPreparationReady)
+
+    @Test fun readinessRequiresEveryBound() {
+        assertFalse(standardMediaPolicy().copy(maxLocalSourceBytes = null).localPreparationReady)
+        assertFalse(standardMediaPolicy().copy(maxPreparationSeconds = 0).localPreparationReady)
+        assertFalse(standardMediaPolicy().copy(maxSourceDownloadBytes = null).youtubePreparationReady)
     }
 }
-internal fun expandedMediaPolicy() = ProcessingMediaPolicy(
-    version = 2, revision = 1, maxDurationSeconds = 1800.0, maxPreparedAudioBytes = 100_000_000,
-    profileId = "preserve-or-aac-lc-256-v1", maxLocalSourceBytes = 200_000_000,
-    maxPreparationSeconds = 120, maxSourceDownloadBytes = 100_000_000, maxSourceDownloadSeconds = 120,
-)
+
+internal fun standardMediaPolicy() = ProcessingMediaPolicy.STANDARD.copy(revision = 1)
