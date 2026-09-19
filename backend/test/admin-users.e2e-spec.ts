@@ -26,6 +26,20 @@ describe('admin users HTTP boundary', () => {
         id: '64b000000000000000000001',
         processingSuspended: false,
       }),
+      accountUsage: vi.fn().mockResolvedValue({
+        schemaVersion: 2,
+        plan: 'standard',
+      }),
+      putPolicyOverride: vi.fn().mockResolvedValue({
+        schemaVersion: 2,
+        plan: 'standard',
+        effectivePolicySource: 'account_override',
+      }),
+      deletePolicyOverride: vi.fn().mockResolvedValue({
+        schemaVersion: 2,
+        plan: 'standard',
+        effectivePolicySource: 'global',
+      }),
     };
     harness = await createAdminHarness({
       controllers: [AdminUsersController],
@@ -103,5 +117,71 @@ describe('admin users HTTP boundary', () => {
       )
       .expect(400);
     expect(users.resume).not.toHaveBeenCalled();
+  });
+
+  it('protects account override writes with permission, fresh auth, and strict DTOs', async () => {
+    const { harness, users } = await setup();
+    const path =
+      '/admin/users/64b000000000000000000001/account-policy-override';
+    const body = {
+      values: { monthlyProcessingSeconds: 14_400 },
+      expiresAt: null,
+      expectedRevision: 0,
+      operationId: '7f107510-108d-4c25-a091-ecf28e43bd7b',
+      reason: 'Reviewed customer exception',
+    };
+    await harness
+      .request('put', path, body, harness.signInAs('viewer'))
+      .expect(403);
+    const staleToken = harness.signInAs('support');
+    harness.identities.get(staleToken)!.authTimeSec =
+      Math.floor(Date.now() / 1000) - 301;
+    await harness.request('put', path, body, staleToken).expect(403);
+    harness.identities.get(staleToken)!.authTimeSec = Math.floor(
+      Date.now() / 1000,
+    );
+    await harness
+      .request(
+        'put',
+        path,
+        { ...body, values: {} },
+        harness.signInAs('support'),
+      )
+      .expect(400);
+    await harness
+      .request('put', path, body, harness.signInAs('support'))
+      .expect(200);
+    expect(users.putPolicyOverride).toHaveBeenCalledOnce();
+  });
+
+  it('protects override clearing and requires an existing revision', async () => {
+    const { harness, users } = await setup();
+    const path =
+      '/admin/users/64b000000000000000000001/account-policy-override';
+    await harness
+      .request(
+        'delete',
+        path,
+        {
+          expectedRevision: 0,
+          operationId: 'b93d8904-dd3a-4fe8-a59b-5d9e079d358b',
+          reason: 'Invalid absent revision',
+        },
+        harness.signInAs('support'),
+      )
+      .expect(400);
+    await harness
+      .request(
+        'delete',
+        path,
+        {
+          expectedRevision: 2,
+          operationId: 'b93d8904-dd3a-4fe8-a59b-5d9e079d358b',
+          reason: 'Return to standard policy',
+        },
+        harness.signInAs('support'),
+      )
+      .expect(200);
+    expect(users.deletePolicyOverride).toHaveBeenCalledOnce();
   });
 });

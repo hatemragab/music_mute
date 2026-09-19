@@ -1,69 +1,59 @@
-export interface UsageEntry {
-  state: string;
-  audioSeconds: number;
-  expiresAt: Date | null;
+export interface UtcMonthPeriod {
+  key: string;
+  start: Date;
+  end: Date;
+  purgeAt: Date;
 }
-export function summarizeUsage(
-  entries: UsageEntry[],
-  allowance: number,
-  now: Date,
-) {
-  let reservedAudioSeconds = 0;
-  let usedAudioSeconds = 0;
-  const replenishments = new Map<string, number>();
-  for (const entry of entries) {
-    if (!Number.isSafeInteger(entry.audioSeconds) || entry.audioSeconds < 0)
-      throw new Error('Invalid accounting entry');
-    if (
-      entry.state === 'reserved' ||
-      (entry.state === 'pending' && (!entry.expiresAt || entry.expiresAt > now))
-    )
-      reservedAudioSeconds += entry.audioSeconds;
-    if (
-      ['used', 'pending'].includes(entry.state) &&
-      entry.expiresAt &&
-      entry.expiresAt > now
-    ) {
-      if (entry.state === 'used') usedAudioSeconds += entry.audioSeconds;
-      const at = entry.expiresAt.toISOString();
-      replenishments.set(
-        at,
-        (replenishments.get(at) ?? 0) + entry.audioSeconds,
-      );
-    }
-  }
+
+export function utcMonthPeriod(now: Date): UtcMonthPeriod {
+  if (!Number.isFinite(now.getTime())) throw new Error('Invalid usage date');
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const start = new Date(Date.UTC(year, month, 1));
+  const end = new Date(Date.UTC(year, month + 1, 1));
+  const purgeAt = new Date(Date.UTC(year, month + 13, 1));
   return {
-    reservedAudioSeconds,
-    usedAudioSeconds,
-    remainingAudioSeconds: Math.max(
-      0,
-      allowance - reservedAudioSeconds - usedAudioSeconds,
-    ),
-    replenishments: [...replenishments]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .slice(0, 100)
-      .map(([at, audioSeconds]) => ({ at, audioSeconds })),
+    key: `${year}-${String(month + 1).padStart(2, '0')}`,
+    start,
+    end,
+    purgeAt,
   };
 }
 
-export function cancellationDebit(
-  duration: number,
-  execution: number | null,
-  ratio: number | null,
-): number | null {
-  if (
-    execution === null ||
-    ratio === null ||
-    !Number.isFinite(execution) ||
-    execution < 0 ||
-    !Number.isFinite(ratio) ||
-    ratio <= 0
-  )
-    return null;
-  if (!Number.isFinite(duration) || duration <= 0)
-    throw new Error('Invalid measured duration');
-  return Math.min(
-    Math.ceil(duration),
-    Math.max(1, Math.ceil(execution / ratio)),
-  );
+export function usagePeriodId(
+  accountId: { toHexString(): string },
+  key: string,
+) {
+  return `${accountId.toHexString()}:${key}`;
+}
+
+export interface ProcessingUsageCounters {
+  processingUsedSeconds: number;
+  processingReservedSeconds: number;
+  processingReleasedSeconds: number;
+}
+
+export function summarizeMonthlyProcessing(
+  counters: ProcessingUsageCounters,
+  limit: number,
+) {
+  for (const value of [
+    counters.processingUsedSeconds,
+    counters.processingReservedSeconds,
+    counters.processingReleasedSeconds,
+    limit,
+  ])
+    if (!Number.isSafeInteger(value) || value < 0)
+      throw new Error('Invalid monthly processing counters');
+  return {
+    usedSeconds: counters.processingUsedSeconds,
+    reservedSeconds: counters.processingReservedSeconds,
+    releasedSeconds: counters.processingReleasedSeconds,
+    remainingSeconds: Math.max(
+      0,
+      limit -
+        counters.processingUsedSeconds -
+        counters.processingReservedSeconds,
+    ),
+  };
 }

@@ -56,7 +56,7 @@ export function UserDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ["user", id] });
       await queryClient.invalidateQueries({ queryKey: ["users"] });
       await queryClient.invalidateQueries({
-        queryKey: ["processing-usage", id],
+        queryKey: ["account-usage", id],
       });
       await queryClient.invalidateQueries({ queryKey: ["audit"] });
     },

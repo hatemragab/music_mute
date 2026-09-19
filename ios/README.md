@@ -315,8 +315,8 @@ of transcoding. A completed consent-review input survives relaunch. Uncertain up
 retains its immutable input until an authenticated receipt/reconciliation marks it submitted;
 only then is temporary prepared input removed. Force-quit cannot guarantee continued preparation.
 
-`ProcessingUsageRepository` fetches owner-only rolling used/reserved/remaining audio allowance,
-active jobs, availability, and server replenishment timestamps. Reads are advisory; create-job
+`ProcessingUsageRepository` fetches owner-only UTC-month used/reserved/refunded/remaining
+processing allowance, active jobs, availability, and the next reset. Reads are advisory; create-job
 admission is authoritative. Account changes clear the snapshot, and known allowance/capacity
 rejections never become automatic rate-limit retries. English and Arabic messages accompany
 media, quota, capacity, and provider failures. Waiting and separator timers remain separate,

@@ -4,12 +4,26 @@ export interface ProcessingChangeMetadata {
   after: string | number | boolean | null;
 }
 const processingAuditFields = new Set([
-  'allowanceAudioSeconds',
-  'allowanceExpiresAt',
+  'monthlyProcessingSeconds',
+  'overrideExpiresAt',
   'processingSuspended',
   'suspensionExpiresAt',
   'acceptNewJobs',
-  'maxActiveJobsPerUser',
+  'maxDurationSeconds',
+  'maxPreparedAudioBytes',
+  'dailyUploadGrants',
+  'monthlyUploadGrants',
+  'monthlyConfirmedUploadBytes',
+  'maxWaitingJobs',
+  'maxProcessingJobs',
+  'maxInfrastructureAttempts',
+  'maxClientInputAttempts',
+  'monthlyDownloadGrants',
+  'monthlyEstimatedDownloadBytes',
+  'maxRetainedOutputBytes',
+  'signedUrlTtlSeconds',
+  'monthlyServiceOutboundBytes',
+  'deletionGraceHours',
 ]);
 import { createHash } from 'node:crypto';
 import { Types } from 'mongoose';
@@ -256,7 +270,9 @@ export function validateAuditEvent(
     if (
       !Array.isArray(value.processingChanges) ||
       value.processingChanges.length > 20 ||
-      !['user', 'processing_settings'].includes(String(value.resourceType))
+      !['user', 'account_policy', 'account_policy_override'].includes(
+        String(value.resourceType),
+      )
     )
       throw adminError('INVALID_REQUEST');
     for (const change of value.processingChanges as ProcessingChangeMetadata[]) {

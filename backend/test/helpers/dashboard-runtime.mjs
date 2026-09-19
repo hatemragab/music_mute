@@ -415,7 +415,7 @@ try {
     '/admin/jobs',
     '/admin/users',
     '/admin/releases',
-    '/admin/settings/processing',
+    '/admin/settings/account-policy',
     '/admin/health',
     '/admin/alerts',
   ])

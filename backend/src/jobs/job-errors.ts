@@ -7,7 +7,7 @@ const errors = {
   MEDIA_DURATION_UNKNOWN: [400, 'Audio duration could not be verified'],
   PROCESSING_ALLOWANCE_EXHAUSTED: [
     409,
-    'The rolling processing allowance is exhausted',
+    'The monthly processing allowance is exhausted',
   ],
   PROCESSING_POLICY_INCOMPATIBLE: [
     409,
@@ -29,7 +29,7 @@ const errors = {
 export type JobHttpErrorCode = keyof typeof errors;
 export function jobError(
   code: JobHttpErrorCode,
-  details: { nextReplenishmentAt?: string | null } = {},
+  details: { nextResetAt?: string | null } = {},
 ): HttpException {
   const [statusCode, message] = errors[code];
   return new HttpException(

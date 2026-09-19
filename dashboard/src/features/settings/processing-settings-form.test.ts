@@ -1,37 +1,54 @@
 import { describe, expect, it } from "vitest";
+import type { AccountPolicyDraft } from "./processing-settings-form";
+import { validateAccountPolicy } from "./processing-settings-form";
 
-import {
-  type ProcessingSettingsDraft,
-  validateProcessingSettings,
-} from "./processing-settings-form";
-
-const valid: ProcessingSettingsDraft = {
+const valid: AccountPolicyDraft = {
   acceptNewJobs: true,
   maintenanceMessageEn: "",
   maintenanceMessageAr: null,
-  maxInputBytesExclusive: 30_000_000,
-  maxDurationSecondsExclusive: 600,
-  maxActiveJobsPerUser: null,
+  values: {
+    monthlyProcessingSeconds: 7_200,
+    maxDurationSeconds: 1_200,
+    maxPreparedAudioBytes: 50_000_000,
+    dailyUploadGrants: 30,
+    monthlyUploadGrants: 200,
+    monthlyConfirmedUploadBytes: 1_000_000_000,
+    maxWaitingJobs: 3,
+    maxProcessingJobs: 1,
+    maxInfrastructureAttempts: 3,
+    maxClientInputAttempts: 5,
+    monthlyDownloadGrants: 150,
+    monthlyEstimatedDownloadBytes: 10_000_000_000,
+    maxRetainedOutputBytes: 1_000_000_000,
+    signedUrlTtlSeconds: 600,
+    monthlyServiceOutboundBytes: 80_000_000_000,
+    deletionGraceHours: 360,
+  },
 };
 
-describe("validateProcessingSettings", () => {
-  it("accepts the documented exclusive ceilings and null as unlimited", () => {
-    expect(validateProcessingSettings(valid)).toEqual([]);
+describe("validateAccountPolicy", () => {
+  it("accepts the documented standard launch policy", () => {
+    expect(validateAccountPolicy(valid)).toEqual([]);
   });
 
-  it("rejects out-of-range numbers and requires English maintenance text when paused", () => {
+  it("rejects unsafe numeric relationships and requires pause copy", () => {
     expect(
-      validateProcessingSettings({
+      validateAccountPolicy({
         ...valid,
         acceptNewJobs: false,
-        maxInputBytesExclusive: 30_000_001,
-        maxDurationSecondsExclusive: 0,
-        maxActiveJobsPerUser: 0,
+        values: {
+          ...valid.values,
+          monthlyProcessingSeconds: 0,
+          signedUrlTtlSeconds: 601,
+          dailyUploadGrants: 201,
+          monthlyServiceOutboundBytes: 1,
+        },
       }),
     ).toEqual([
-      "Input bytes must be an integer from 2 through 30,000,000.",
-      "Duration must be greater than 0 and at most 600 seconds.",
-      "Active jobs must be Unlimited or an integer from 1 through 100.",
+      "Successful processing seconds / UTC month has an invalid value.",
+      "Signed URL validity seconds has an invalid value.",
+      "Monthly upload grants cannot be lower than daily grants.",
+      "The service outbound ceiling cannot be below the account download estimate.",
       "An English maintenance message is required while admissions are paused.",
     ]);
   });

@@ -136,6 +136,10 @@ function fixture() {
     cancelScheduled: vi.fn().mockResolvedValue(undefined),
   };
   const accountAccess = { assertActive: vi.fn().mockResolvedValue(undefined) };
+  const usage = {
+    reconcileMeasured: vi.fn().mockResolvedValue(undefined),
+    settleJob: vi.fn().mockResolvedValue(undefined),
+  };
   const service = new WorkerAttemptService(
     { startSession: vi.fn().mockResolvedValue(transaction) } as never,
     attempts as never,
@@ -145,6 +149,7 @@ function fixture() {
     storage as never,
     cleanup as never,
     accountAccess as never,
+    usage as never,
   );
   return {
     service,

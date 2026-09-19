@@ -1,19 +1,19 @@
-export function validateAllowance(
+export function validateAccountPolicyOverride(
   minutes: number,
   expiresAt: string,
   now = new Date(),
 ) {
   const errors: string[] = [];
   const seconds = minutes * 60;
-  if (!Number.isSafeInteger(seconds) || seconds < 3600 || seconds > 86400)
-    errors.push("Allowance must be from 60 to 1,440 audio minutes.");
-  const expires = Date.parse(expiresAt);
-  if (
-    !Number.isFinite(expires) ||
-    expires <= now.getTime() ||
-    expires - now.getTime() > 30 * 86400_000
-  )
-    errors.push("Choose a future expiry within 30 days.");
+  if (!Number.isSafeInteger(seconds) || seconds < 1)
+    errors.push(
+      "Monthly processing must be a positive whole number of seconds.",
+    );
+  if (expiresAt) {
+    const expires = Date.parse(expiresAt);
+    if (!Number.isFinite(expires) || expires <= now.getTime())
+      errors.push("Choose a future expiry, or leave it empty for no expiry.");
+  }
   return errors;
 }
 

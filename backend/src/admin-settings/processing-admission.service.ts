@@ -8,10 +8,9 @@ import { jobError } from '../jobs/job-errors.js';
 import type { AdmissionSnapshot, InputDeclaration } from '../jobs/job.types.js';
 import type { JobMetadata } from '../jobs/job-metadata.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
-import { ProcessingUsageLedger } from '../processing-usage/processing-usage.schema.js';
 import { User } from '../users/user.schema.js';
 import { ProcessingAdmissionFence } from './processing-settings.schema.js';
-import { ProcessingSettingsService } from './processing-settings.service.js';
+import { AccountPolicyService } from './account-policy.service.js';
 
 @Injectable()
 export class ProcessingAdmissionService {
@@ -20,7 +19,8 @@ export class ProcessingAdmissionService {
     private readonly fences: Model<ProcessingAdmissionFence>,
     @InjectModel(User.name) private readonly users: Model<User>,
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
-    private readonly settings: ProcessingSettingsService,
+    private readonly policies: AccountPolicyService,
+    private readonly usage: ProcessingUsageService,
     private readonly config: ConfigService,
   ) {}
 
@@ -34,7 +34,7 @@ export class ProcessingAdmissionService {
     if (!session.inTransaction())
       throw new Error('Processing admission requires a transaction');
 
-    await this.settings.touchGlobalFence(session);
+    await this.policies.touchGlobalFence(session);
     const userFence = await this.fences.updateOne(
       { _id: `user:${userId.toString()}` },
       { $inc: { revision: 1 } },
@@ -61,10 +61,18 @@ export class ProcessingAdmissionService {
     );
     if (user.modifiedCount !== 1) throw jobError('PROCESSING_UNAVAILABLE');
 
-    const settings = await this.settings.effective(session);
+    const accountId =
+      typeof userId === 'string'
+        ? new this.jobs.base.Types.ObjectId(userId)
+        : userId;
+    const policy = await this.policies.effective(
+      accountId,
+      new Date(),
+      session,
+    );
     if (
       this.config.get<boolean>('AUDIO_PROCESSING_ENABLED') !== true ||
-      !settings.acceptNewJobs
+      !policy.acceptNewJobs
     )
       throw jobError('PROCESSING_UNAVAILABLE');
 
@@ -73,17 +81,17 @@ export class ProcessingAdmissionService {
       !Number.isSafeInteger(input.bytes) ||
       input.bytes < 1 ||
       (v2
-        ? input.bytes > settings.maxInputBytesExclusive
-        : input.bytes >= settings.maxInputBytesExclusive) ||
+        ? input.bytes > policy.values.maxPreparedAudioBytes
+        : input.bytes > policy.values.maxPreparedAudioBytes) ||
       !Number.isFinite(input.durationSeconds) ||
       input.durationSeconds <= 0 ||
       (v2
-        ? input.durationSeconds > settings.maxDurationSecondsExclusive
-        : input.durationSeconds >= settings.maxDurationSecondsExclusive)
+        ? input.durationSeconds > policy.values.maxDurationSeconds
+        : input.durationSeconds > policy.values.maxDurationSeconds)
     )
       throw jobError('PROCESSING_UNAVAILABLE');
 
-    const maximumActive = settings.maxActiveJobsPerUser ?? 1;
+    const maximumActive = policy.values.maxProcessingJobs;
     const active = await this.jobs
       .countDocuments({
         userId,
@@ -95,9 +103,7 @@ export class ProcessingAdmissionService {
 
     await this.usage.reserveForJob(
       newJobId,
-      typeof userId === 'string'
-        ? new this.jobs.base.Types.ObjectId(userId)
-        : userId,
+      accountId,
       input.durationSeconds,
       session,
     );
@@ -106,15 +112,15 @@ export class ProcessingAdmissionService {
       ...(v2
         ? {
             policyVersion: 2 as const,
-            maxDurationSeconds: settings.maxDurationSecondsExclusive,
-            maxInputBytes: settings.maxInputBytesExclusive,
+            maxDurationSeconds: policy.values.maxDurationSeconds,
+            maxInputBytes: policy.values.maxPreparedAudioBytes,
             preparationProfileId: metadata.preparationProfileId,
             source: metadata.source,
           }
         : { policyVersion: 1 as const }),
-      settingsRevision: settings.revision,
-      maxInputBytesExclusive: settings.maxInputBytesExclusive,
-      maxDurationSecondsExclusive: settings.maxDurationSecondsExclusive,
+      settingsRevision: policy.globalRevision,
+      maxInputBytesExclusive: policy.values.maxPreparedAudioBytes + 1,
+      maxDurationSecondsExclusive: policy.values.maxDurationSeconds + 1,
       maxActiveJobsPerUser: maximumActive,
       reservationExpiresAt: new Date(
         Date.now() +
@@ -142,12 +148,5 @@ export class ProcessingAdmissionService {
     )
       throw jobError('PROCESSING_UNAVAILABLE');
     return snapshot;
-  }
-
-  private get usage() {
-    return new ProcessingUsageService(
-      this.jobs.db.model<ProcessingUsageLedger>(ProcessingUsageLedger.name),
-      this.jobs,
-    );
   }
 }

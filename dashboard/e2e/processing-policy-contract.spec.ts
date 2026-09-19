@@ -1,11 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { setDashboardRole } from "./helpers/session";
+import { E2E_API_ORIGIN } from "./helpers/urls";
 
-test("compiled backend accepts basic processing settings", async ({ page }) => {
+test("compiled backend accepts the standard account policy", async ({
+  page,
+}) => {
   await setDashboardRole(page, "owner");
   await page.goto("/overview");
-  const result = await page.evaluate(async () => {
-    const root = "http://127.0.0.1:3100/api/v1";
+  const result = await page.evaluate(async (root) => {
     const request = async (method: string, path: string, body?: unknown) => {
       const response = await fetch(root + path, {
         method,
@@ -20,32 +22,34 @@ test("compiled backend accepts basic processing settings", async ({ page }) => {
         value: await response.json().catch(() => null),
       };
     };
-    const before = await request("GET", "/admin/settings/processing");
+    const before = await request("GET", "/admin/settings/account-policy");
     const command = {
       acceptNewJobs: false,
       maintenanceMessageEn: "Processing redesign in progress",
       maintenanceMessageAr: null,
-      maxInputBytesExclusive: before.value.maxInputBytesExclusive,
-      maxDurationSecondsExclusive: before.value.maxDurationSecondsExclusive,
-      maxActiveJobsPerUser: before.value.maxActiveJobsPerUser,
+      ...before.value.values,
       expectedRevision: before.value.revision,
       operationId: crypto.randomUUID(),
-      reason: "Validate the basic settings contract",
+      reason: "Validate the standard account policy contract",
     };
-    const save = await request("PUT", "/admin/settings/processing", command);
-    const after = await request("GET", "/admin/settings/processing");
-    const conflict = await request("PUT", "/admin/settings/processing", {
+    const save = await request(
+      "PUT",
+      "/admin/settings/account-policy",
+      command,
+    );
+    const after = await request("GET", "/admin/settings/account-policy");
+    const conflict = await request("PUT", "/admin/settings/account-policy", {
       ...command,
       operationId: crypto.randomUUID(),
     });
-    const allowance = await request(
+    const override = await request(
       "PUT",
-      "/admin/users/missing-user/processing-allowance",
+      "/admin/users/68c000000000000000000099/account-policy-override",
       {
         expectedRevision: 0,
         operationId: crypto.randomUUID(),
-        reason: "Check valid allowance DTO for absent fixture user",
-        allowanceAudioSeconds: 7200,
+        reason: "Check a valid override DTO for an absent fixture user",
+        values: { monthlyProcessingSeconds: 7200 },
         expiresAt: new Date(Date.now() + 86400000).toISOString(),
       },
     );
@@ -54,13 +58,13 @@ test("compiled backend accepts basic processing settings", async ({ page }) => {
       save,
       after,
       conflict,
-      allowance,
+      override,
     };
-  });
+  }, E2E_API_ORIGIN);
   expect(result.before.status).toBe(200);
   expect(result.save.status).toBe(200);
   expect(result.after.value.revision).toBe(result.before.value.revision + 1);
   expect(result.after.value.acceptNewJobs).toBe(false);
   expect(result.conflict.status).toBe(409);
-  expect(result.allowance.status).toBe(404);
+  expect(result.override.status).toBe(404);
 });

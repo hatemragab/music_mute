@@ -349,14 +349,14 @@
     <string name="media_error_duration">تعذر التحقق من مدة التسجيل. اختر ملفًا آخر.</string>
     <string name="media_error_playlist">الصق رابط فيديو منفرد دون معلومات قائمة تشغيل.</string>
     <string name="media_error_live">البث المباشر والفيديوهات القادمة غير مدعومة. اختر تسجيلًا مكتملًا.</string>
-    <string name="processing_error_allowance">رصيد معالجة الصوت مستخدم أو محجوز. تحقق من موعد تجدد الرصيد القادم.</string>
+    <string name="processing_error_allowance">رصيد معالجة الصوت الشهري مستخدم أو محجوز. تحقق من موعد إعادة الضبط التالي.</string>
     <string name="processing_error_queue_full">قائمة انتظار المعالجة ممتلئة. حاول لاحقًا.</string>
     <string name="processing_error_capacity">المعالجة غير متاحة مؤقتًا. حاول لاحقًا.</string>
     <string name="processing_error_compatibility">تتطلب سياسة المعالجة هذه تحديثًا متوافقًا للتطبيق.</string>
     <string name="processing_error_active">أكمل مهمتك الحالية أو ألغها قبل بدء مهمة أخرى.</string>
     <string name="processing_usage_remaining">متبقٍ %1$d دقيقة صوتية</string>
     <string name="processing_usage_details">%1$d دقيقة مستخدمة · %2$d دقيقة محجوزة</string>
-    <string name="processing_usage_replenishment">موعد تجدد الرصيد القادم: %1$s</string>
+    <string name="processing_usage_replenishment">موعد إعادة ضبط الرصيد الشهري التالي: %1$s</string>
     <string name="processing_usage_admission">قد تتغير الإتاحة أثناء التجهيز. يتم تأكيد القبول بعد التجهيز.</string>
     <string name="media_inspecting">فحص الوسائط</string>
     <string name="media_error_reselect">فُقد الوصول إلى الملف المحدد. اختر الملف مرة أخرى.</string>

@@ -10,17 +10,6 @@ import type { NameSource } from './display-name.js';
   versionKey: false,
 })
 export class User {
-  @Prop({
-    type: Number,
-    default: null,
-    min: 3600,
-    max: 86400,
-    validate: (value: number | null) =>
-      value === null || Number.isSafeInteger(value),
-  })
-  processingAllowanceAudioSeconds!: number | null;
-  @Prop({ type: Date, default: null })
-  processingAllowanceExpiresAt!: Date | null;
   @Prop({ type: Date, default: null })
   processingSuspensionExpiresAt!: Date | null;
   _id!: Types.ObjectId;

@@ -349,14 +349,14 @@
     <string name="media_error_duration">The recording duration could not be verified. Choose another file.</string>
     <string name="media_error_playlist">Paste an individual video link without playlist information.</string>
     <string name="media_error_live">Live and upcoming videos are not supported. Choose a finished recording.</string>
-    <string name="processing_error_allowance">Your audio allowance is used or reserved. Check the next replenishment time.</string>
+    <string name="processing_error_allowance">Your monthly audio allowance is used or reserved. Check the next reset time.</string>
     <string name="processing_error_queue_full">The processing queue is full. Try again later.</string>
     <string name="processing_error_capacity">Processing is temporarily unavailable. Try again later.</string>
     <string name="processing_error_compatibility">This processing policy requires a compatible app update.</string>
     <string name="processing_error_active">Finish or cancel your existing task before starting another.</string>
     <string name="processing_usage_remaining">%1$d audio minutes remaining</string>
     <string name="processing_usage_details">%1$d minutes used · %2$d minutes reserved</string>
-    <string name="processing_usage_replenishment">Next allowance replenishment: %1$s</string>
+    <string name="processing_usage_replenishment">Next monthly allowance reset: %1$s</string>
     <string name="processing_usage_admission">Availability can change during preparation. Admission is confirmed after preparation.</string>
     <string name="media_inspecting">Inspecting media</string>
     <string name="media_error_reselect">Access to the selected file was lost. Choose the file again.</string>

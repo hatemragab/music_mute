@@ -1,10 +1,5 @@
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
-import { ProcessingUsageLedger } from '../processing-usage/processing-usage.schema.js';
-import { assertAllowanceExpiry } from '../processing-usage/processing-allowance.js';
-import type {
-  AdminAllowanceDto,
-  AdminSuspensionDto,
-} from './dto/admin-user.dto.js';
+import type { AdminSuspensionDto } from './dto/admin-user.dto.js';
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { trusted, Types, type ClientSession, type Model } from 'mongoose';
@@ -13,10 +8,15 @@ import { adminError } from '../admin/admin-errors.js';
 import { AdminOperationsService } from '../admin/admin-operations.service.js';
 import type { AdminActor } from '../admin/admin.types.js';
 import { ProcessingAdmissionFence } from '../admin-settings/processing-settings.schema.js';
+import { AccountPolicyService } from '../admin-settings/account-policy.service.js';
 import { Job } from '../jobs/job.schema.js';
 import { UserIdentityFenceService } from '../users/user-identity-fence.service.js';
 import { User } from '../users/user.schema.js';
 import type { AdminUserProcessingDto } from './dto/admin-user.dto.js';
+import type {
+  DeleteAccountPolicyOverrideDto,
+  PutAccountPolicyOverrideDto,
+} from '../admin-settings/dto/account-policy.dto.js';
 import {
   presentAdminUser,
   presentAdminUserDetail,
@@ -25,6 +25,16 @@ import {
 
 const USER_STATUSES = ['active', 'disabled', 'deleting', 'purging'] as const;
 const esc = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const suspensionExpiry = (value: string, now: Date) => {
+  const expiry = new Date(value);
+  if (
+    !Number.isFinite(expiry.getTime()) ||
+    expiry <= now ||
+    expiry.getTime() > now.getTime() + 30 * 86400_000
+  )
+    throw adminError('INVALID_REQUEST');
+  return expiry;
+};
 
 @Injectable()
 export class AdminUsersService implements OnModuleInit {
@@ -35,6 +45,8 @@ export class AdminUsersService implements OnModuleInit {
     private readonly admissionFences: Model<ProcessingAdmissionFence>,
     private readonly identityFences: UserIdentityFenceService,
     private readonly operations: AdminOperationsService,
+    private readonly usage: ProcessingUsageService,
+    private readonly policies: AccountPolicyService,
   ) {}
 
   async onModuleInit() {
@@ -149,123 +161,32 @@ export class AdminUsersService implements OnModuleInit {
     );
   }
 
-  async processingUsage(id: string) {
+  async accountUsage(id: string) {
     const owner = this.objectId(id);
-    const user = await this.users.findById(owner).lean();
-    if (!user) throw adminError('RESOURCE_NOT_FOUND');
+    if (!(await this.users.exists({ _id: owner })))
+      throw adminError('RESOURCE_NOT_FOUND');
     return {
-      ...(await new ProcessingUsageService(
-        this.jobs.db.model<ProcessingUsageLedger>(ProcessingUsageLedger.name),
-        this.jobs,
-      ).readUsage(owner)),
-      revision: user.adminRevision ?? 0,
-      allowanceOverride:
-        user.processingAllowanceAudioSeconds &&
-        user.processingAllowanceExpiresAt
-          ? {
-              allowanceAudioSeconds: user.processingAllowanceAudioSeconds,
-              expiresAt: user.processingAllowanceExpiresAt.toISOString(),
-            }
-          : null,
+      ...(await this.usage.readUsage(owner)),
+      policyOverride: await this.policies.currentOverride(owner),
     };
   }
 
-  async changeAllowance(
+  async putPolicyOverride(
     actor: AdminActor,
     id: string,
-    dto: AdminAllowanceDto | AdminUserProcessingDto,
-    clear = false,
+    dto: PutAccountPolicyOverrideDto,
   ) {
-    const owner = this.objectId(id);
-    const amount = clear
-      ? null
-      : (dto as AdminAllowanceDto).allowanceAudioSeconds;
-    const expiresAt = clear ? null : (dto as AdminAllowanceDto).expiresAt;
-    if (
-      !clear &&
-      (!Number.isSafeInteger(amount) || amount! < 3600 || amount! > 86400)
-    )
-      throw adminError('INVALID_REQUEST');
-    const result = await this.operations.run(
-      actor,
-      {
-        operationId: dto.operationId,
-        route: clear
-          ? 'POST /admin/users/:id/clear-processing-allowance'
-          : 'PUT /admin/users/:id/processing-allowance',
-        request: {
-          id,
-          expectedRevision: dto.expectedRevision,
-          allowanceAudioSeconds: amount,
-          expiresAt,
-        },
-        action: clear
-          ? 'users.processing.allowance.clear'
-          : 'users.processing.allowance.update',
-        resourceType: 'user',
-        reason: dto.reason,
-      },
-      async (session) => {
-        if (expiresAt) assertAllowanceExpiry(expiresAt, new Date());
-        await this.admissionFences.updateOne(
-          { _id: `user:${id}` },
-          { $inc: { revision: 1 } },
-          { upsert: true, session, setDefaultsOnInsert: true },
-        );
-        const user = await this.users.findById(owner).session(session).lean();
-        if (!user) throw adminError('RESOURCE_NOT_FOUND');
-        if ((user.adminRevision ?? 0) !== dto.expectedRevision)
-          throw adminError('REVISION_CONFLICT');
-        const updated = await this.users
-          .findOneAndUpdate(
-            {
-              _id: owner,
-              adminRevision:
-                dto.expectedRevision === 0
-                  ? trusted({ $in: [0, null] })
-                  : dto.expectedRevision,
-            },
-            {
-              $set: {
-                processingAllowanceAudioSeconds: amount,
-                processingAllowanceExpiresAt: expiresAt,
-              },
-              $inc: { adminRevision: 1 },
-            },
-            { session, returnDocument: 'after', runValidators: true },
-          )
-          .lean();
-        if (!updated) throw adminError('REVISION_CONFLICT');
-        return {
-          processingChanges: [
-            {
-              field: 'allowanceAudioSeconds',
-              before: user.processingAllowanceAudioSeconds ?? null,
-              after: amount,
-            },
-            {
-              field: 'allowanceExpiresAt',
-              before: user.processingAllowanceExpiresAt?.toISOString() ?? null,
-              after: expiresAt,
-            },
-          ],
-          resourceId: id,
-          previousRevision: dto.expectedRevision,
-          revision: updated.adminRevision,
-          value: {
-            revision: updated.adminRevision,
-            allowanceOverride:
-              amount === null
-                ? null
-                : {
-                    allowanceAudioSeconds: amount,
-                    expiresAt: expiresAt!,
-                  },
-          },
-        };
-      },
-    );
-    return result.value ?? this.processingUsage(id);
+    await this.policies.putOverride(actor, this.objectId(id), dto);
+    return this.accountUsage(id);
+  }
+
+  async deletePolicyOverride(
+    actor: AdminActor,
+    id: string,
+    dto: DeleteAccountPolicyOverrideDto,
+  ) {
+    await this.policies.deleteOverride(actor, this.objectId(id), dto);
+    return this.accountUsage(id);
   }
 
   suspend(actor: AdminActor, id: string, dto: AdminSuspensionDto) {
@@ -346,7 +267,7 @@ export class AdminUsersService implements OnModuleInit {
             processingSuspended: suspended,
             processingSuspensionExpiresAt:
               suspended && dto.expiresAt
-                ? assertAllowanceExpiry(dto.expiresAt, new Date())
+                ? suspensionExpiry(dto.expiresAt, new Date())
                 : null,
             processingSuspensionReason: suspended ? dto.reason : null,
             processingSuspendedBy: suspended ? actor.uid : null,

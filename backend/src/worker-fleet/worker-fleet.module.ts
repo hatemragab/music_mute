@@ -24,10 +24,12 @@ import { WorkerRecoveryService } from './leases/worker-recovery.service.js';
 import { WorkerRecoveryMaintenanceService } from './leases/worker-recovery-maintenance.service.js';
 import { WorkerFleetStartupService } from './worker-fleet-startup.service.js';
 import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
+import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js';
 
 @Module({
   imports: [
     AdminModule,
+    AdminSettingsModule,
     ProcessingPersistenceModule,
     StorageTransfersModule,
     UsersModule,

@@ -2,7 +2,7 @@
 
 **Collection:** `codex/backend-security-cost-hardening`
 **Implementation checkpoints:** 32
-**Current implementation status:** not started
+**Current implementation status:** Branch 1 ready for review; Branch 2 not authorized
 
 ## 1. Sequential branch contract
 
@@ -21,12 +21,12 @@ collection tip, never independently from `main` or the old parent commit.
 
 ### A. Account quotas and administrator controls
 
-- [ ] **A1:** Inventory and remove/replace the conflicting allowance and settings paths.
-- [ ] **A2:** Add one revisioned standard-plan policy and effective-policy resolver.
-- [ ] **A3:** Add atomic UTC-month processing usage, reservations, settlement, and summaries.
-- [ ] **A4:** Add one audited per-account replacement override with optional expiry.
-- [ ] **A5:** Replace backend/dashboard quota contracts and show effective usage clearly.
-- [ ] **A6:** Remove legacy quota controls and pass unit, integration, dashboard, and build gates.
+- [x] **A1:** Inventory and remove/replace the conflicting allowance and settings paths.
+- [x] **A2:** Add one revisioned standard-plan policy and effective-policy resolver.
+- [x] **A3:** Add atomic UTC-month processing usage, reservations, settlement, and summaries.
+- [x] **A4:** Add one audited per-account replacement override with optional expiry.
+- [x] **A5:** Replace backend/dashboard quota contracts and show effective usage clearly.
+- [x] **A6:** Remove legacy quota controls and pass unit, integration, dashboard, and build gates.
 
 ### B. Media and S3 cost protection
 

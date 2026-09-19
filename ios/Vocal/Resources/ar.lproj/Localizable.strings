@@ -294,7 +294,7 @@
 "account_recovery_rejected" = "لم تتم الموافقة على طلب الاسترداد. يبقى الحذف المجدول قائمًا.";
 "account_recovery_refresh" = "التحقق من حالة الطلب";
 
-// Media preparation and rolling processing allowance
+// Media preparation and UTC-month processing allowance
 "media_import_photos" = "اختيار فيديو من الصور";
 "media_media_too_long" = "يجب ألا يتجاوز الصوت ٣٠ دقيقة. قد يطبق الخادم الحالي حدًا أقل.";
 "media_media_too_large" = "يتجاوز الملف حد الحجم الحالي. اختر ملفًا أصغر.";
@@ -305,7 +305,7 @@
 "media_youtube_playlist_unsupported" = "الصق رابط فيديو واحد دون معاملات قائمة التشغيل.";
 "media_youtube_live_unsupported" = "لا يمكن معالجة البث المباشر أو الفيديوهات القادمة.";
 "media_youtube_metadata_unavailable" = "تعذر التحقق من فيديو يوتيوب بأمان. استورد ملفًا صوتيًا مسموحًا لك باستخدامه.";
-"media_processing_allowance_exhausted" = "تم استخدام رصيد المعالجة أو حجزه. تحقق من وقت تجدد الرصيد التالي.";
+"media_processing_allowance_exhausted" = "تم استخدام رصيد المعالجة الشهري أو حجزه. تحقق من موعد إعادة الضبط التالي.";
 "media_processing_limit_reached" = "توجد مهمة غير مكتملة لهذا الحساب.";
 "media_processing_queue_full" = "قائمة انتظار المعالجة ممتلئة. حاول لاحقًا.";
 "media_processing_policy_incompatible" = "تجهيز الوسائط الموسّع غير متاح بعد. استورد صوتًا ضمن الحدود الحالية.";
@@ -313,7 +313,7 @@
 "media_interrupted" = "أوقف iOS التجهيز مؤقتًا. افتح التطبيق وحدد المصدر مجددًا. لا يستمر التجهيز بعد الإغلاق القسري.";
 "media_allowance_remaining" = "رصيد الصوت المتبقي:";
 "media_allowance_reserved" = "المحجوز للمهام غير المكتملة:";
-"media_replenishes" = "التجدد التالي:";
+"media_allowance_resets" = "إعادة الضبط الشهرية التالية:";
 "media_minutes" = "دقيقة";
 "media_inspecting" = "فحص الوسائط…";
 "device_history_title" = "سجل الأجهزة";

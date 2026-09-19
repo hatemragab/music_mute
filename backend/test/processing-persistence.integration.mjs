@@ -79,7 +79,8 @@ test('processing documents commit together and abort without partial job or erro
   assert.equal(await jobs.countDocuments({ _id: jobId }), 1);
   assert.equal(await errors.countDocuments({ jobId }), 1);
   for (const entry of PROCESSING_MODELS) {
-    if (entry.name === 'ProcessingUsageLedger') continue; // Minimal accounting has explicitly bounded retention; job history does not.
+    if (['AccountUsagePeriod', 'ProcessingReservation'].includes(entry.name))
+      continue; // Compact closed usage and settled reservations have explicit bounded retention.
     const indexes = await connection.model(entry.name).listIndexes();
     assert.ok(
       indexes.every((index) => index.expireAfterSeconds === undefined),

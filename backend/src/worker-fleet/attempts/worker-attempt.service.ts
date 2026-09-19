@@ -10,7 +10,6 @@ import {
 import { Job } from '../../jobs/job.schema.js';
 import type { JobFailureCode, ObjectIdentity } from '../../jobs/job.types.js';
 import { NotificationOutbox } from '../../notifications/notification-outbox.schema.js';
-import { ProcessingUsageLedger } from '../../processing-usage/processing-usage.schema.js';
 import { ProcessingUsageService } from '../../processing-usage/processing-usage.service.js';
 import { StorageCleanupService } from '../../storage/storage-cleanup.service.js';
 import { StorageTransfersService } from '../../storage/storage-transfers.service.js';
@@ -63,14 +62,8 @@ export class WorkerAttemptService {
     private readonly storage: StorageTransfersService,
     private readonly cleanup: StorageCleanupService,
     private readonly accountAccess: AccountAccessService,
+    private readonly usage: ProcessingUsageService,
   ) {}
-
-  private get usage() {
-    return new ProcessingUsageService(
-      this.jobs.db.model<ProcessingUsageLedger>(ProcessingUsageLedger.name),
-      this.jobs,
-    );
-  }
 
   private get outbox() {
     return this.jobs.db.model<NotificationOutbox>(NotificationOutbox.name);

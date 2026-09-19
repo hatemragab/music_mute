@@ -305,7 +305,7 @@
     {
       "controller": "AdminSettingsController",
       "method": "GET",
-      "path": "/admin/settings/processing",
+      "path": "/admin/settings/account-policy",
       "permissions": ["settings.read"],
       "roles": ["owner", "support", "viewer"],
       "freshAuth": false,
@@ -318,7 +318,7 @@
     {
       "controller": "AdminSettingsController",
       "method": "PUT",
-      "path": "/admin/settings/processing",
+      "path": "/admin/settings/account-policy",
       "permissions": ["settings.manage"],
       "roles": ["owner"],
       "freshAuth": true,
@@ -330,9 +330,22 @@
         "acceptNewJobs": true,
         "maintenanceMessageEn": "",
         "maintenanceMessageAr": null,
-        "maxInputBytesExclusive": 30000000,
-        "maxDurationSecondsExclusive": 600,
-        "maxActiveJobsPerUser": null
+        "monthlyProcessingSeconds": 7200,
+        "maxDurationSeconds": 1200,
+        "maxPreparedAudioBytes": 50000000,
+        "dailyUploadGrants": 30,
+        "monthlyUploadGrants": 200,
+        "monthlyConfirmedUploadBytes": 1000000000,
+        "maxWaitingJobs": 3,
+        "maxProcessingJobs": 1,
+        "maxInfrastructureAttempts": 3,
+        "maxClientInputAttempts": 5,
+        "monthlyDownloadGrants": 150,
+        "monthlyEstimatedDownloadBytes": 10000000000,
+        "maxRetainedOutputBytes": 1000000000,
+        "signedUrlTtlSeconds": 600,
+        "monthlyServiceOutboundBytes": 80000000000,
+        "deletionGraceHours": 360
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -646,7 +659,7 @@
     {
       "controller": "AdminUsersController",
       "method": "GET",
-      "path": "/admin/users/:id/processing-usage",
+      "path": "/admin/users/:id/account-usage",
       "permissions": ["users.read"],
       "roles": ["owner", "support"],
       "freshAuth": false,
@@ -658,8 +671,8 @@
     },
     {
       "controller": "AdminUsersController",
-      "method": "POST",
-      "path": "/admin/users/:id/clear-processing-allowance",
+      "method": "DELETE",
+      "path": "/admin/users/:id/account-policy-override",
       "permissions": ["users.processing.manage"],
       "roles": ["owner", "support"],
       "freshAuth": true,
@@ -667,16 +680,16 @@
       "requestBody": {
         "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expectedRevision": 0
+        "expectedRevision": 1
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
-      "successStatus": 201
+      "successStatus": 200
     },
     {
       "controller": "AdminUsersController",
       "method": "PUT",
-      "path": "/admin/users/:id/processing-allowance",
+      "path": "/admin/users/:id/account-policy-override",
       "permissions": ["users.processing.manage"],
       "roles": ["owner", "support"],
       "freshAuth": true,
@@ -685,8 +698,8 @@
         "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
         "expectedRevision": 0,
-        "allowanceAudioSeconds": 7200,
-        "expiresAt": "2026-09-14T12:00:00.000Z"
+        "values": { "monthlyProcessingSeconds": 14400 },
+        "expiresAt": null
       },
       "responseCategory": "resource",
       "validationOwner": "dto",

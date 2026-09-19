@@ -6,8 +6,8 @@ import type {
   AuditEvent,
   JobDetail,
   Permission,
-  ProcessingSettings,
-  ProcessingUsage,
+  AccountPolicy,
+  AccountUsage,
   RevisionCommand,
   ReleaseDetail,
   UpdatePolicy,
@@ -121,29 +121,59 @@ export const sessionForRole = (role: AdminRole): AdminSession => ({
 
 export class DashboardFixture {
   readonly requests: FixtureRequest[] = [];
-  processingUsage: ProcessingUsage = {
-    revision: 1,
+  accountUsage: AccountUsage = {
+    schemaVersion: 2,
+    plan: "standard",
     policyRevision: 1,
-    allowanceAudioSeconds: 3600,
-    usedAudioSeconds: 900,
-    reservedAudioSeconds: 600,
-    remainingAudioSeconds: 2100,
+    overrideRevision: null,
+    effectivePolicySource: "global",
+    overrideExpiresAt: null,
+    period: {
+      key: "2026-09",
+      start: "2026-09-01T00:00:00.000Z",
+      end: "2026-10-01T00:00:00.000Z",
+      nextResetAt: "2026-10-01T00:00:00.000Z",
+    },
+    processing: {
+      limitSeconds: 7_200,
+      usedSeconds: 900,
+      reservedSeconds: 600,
+      releasedSeconds: 0,
+      remainingSeconds: 5_700,
+    },
+    usageRevision: 1,
     activeJobs: 1,
-    maxActiveJobs: 1,
-    nextReplenishmentAt: null,
-    replenishments: [],
-    availability: "available",
+    maxProcessingJobs: 1,
+    availability: { status: "blocked", reason: "active_job_limit" },
     checkedAt: NOW,
-    allowanceOverride: null,
+    policyOverride: null,
   };
-  settings: ProcessingSettings = {
+  settings: AccountPolicy = {
+    plan: "standard",
     revision: 1,
     acceptNewJobs: true,
     maintenanceMessageEn: "",
     maintenanceMessageAr: null,
-    maxInputBytesExclusive: 30_000_000,
-    maxDurationSecondsExclusive: 600,
-    maxActiveJobsPerUser: null,
+    values: {
+      monthlyProcessingSeconds: 7_200,
+      maxDurationSeconds: 1_200,
+      maxPreparedAudioBytes: 50_000_000,
+      dailyUploadGrants: 30,
+      monthlyUploadGrants: 200,
+      monthlyConfirmedUploadBytes: 1_000_000_000,
+      maxWaitingJobs: 3,
+      maxProcessingJobs: 1,
+      maxInfrastructureAttempts: 3,
+      maxClientInputAttempts: 5,
+      monthlyDownloadGrants: 150,
+      monthlyEstimatedDownloadBytes: 10_000_000_000,
+      maxRetainedOutputBytes: 1_000_000_000,
+      signedUrlTtlSeconds: 600,
+      monthlyServiceOutboundBytes: 80_000_000_000,
+      deletionGraceHours: 360,
+    },
+    enforcedFeatures: ["processing_minutes"],
+    updatedBy: "owner-fixture",
     updatedAt: NOW,
   };
   policy: UpdatePolicy = {
@@ -288,29 +318,27 @@ export class DashboardFixture {
     if (method === "GET" && path === "/admin/session")
       return { status: 200, body: sessionForRole(role) };
     if (
-      path === `/admin/users/${FIXTURE_IDS.user}/processing-usage` &&
+      path === `/admin/users/${FIXTURE_IDS.user}/account-usage` &&
       method === "GET"
     ) {
-      return {
-        status: 200,
-        body: { ...this.processingUsage, revision: this.user.revision },
-      };
+      return { status: 200, body: this.accountUsage };
     }
     if (
-      (path === `/admin/users/${FIXTURE_IDS.user}/processing-allowance` &&
-        method === "PUT") ||
-      (path === `/admin/users/${FIXTURE_IDS.user}/clear-processing-allowance` &&
-        method === "POST")
+      path === `/admin/users/${FIXTURE_IDS.user}/account-policy-override` &&
+      ["PUT", "DELETE"].includes(method)
     ) {
       const body = input.body as RevisionCommand & {
-        allowanceAudioSeconds?: number;
-        expiresAt?: string;
+        values?: { monthlyProcessingSeconds?: number };
+        expiresAt?: string | null;
       };
-      if (body.expectedRevision !== this.user.revision)
+      if (
+        body.expectedRevision !==
+        (this.accountUsage.policyOverride?.revision ?? 0)
+      )
         return error(
           409,
           "REVISION_CONFLICT",
-          "Account revision changed; refresh usage and review again.",
+          "Override revision changed; refresh usage and review again.",
         );
       if (!body.reason || !body.operationId)
         return error(
@@ -318,43 +346,53 @@ export class DashboardFixture {
           "INVALID_REQUEST",
           "Reason and operation ID are required.",
         );
-      const clear = path.endsWith("clear-processing-allowance");
+      const clear = method === "DELETE";
       if (
         !clear &&
-        (!body.allowanceAudioSeconds ||
-          !body.expiresAt ||
-          body.allowanceAudioSeconds < 3600 ||
-          body.allowanceAudioSeconds > 86400 ||
-          Date.parse(body.expiresAt) <= Date.now())
+        (!body.values?.monthlyProcessingSeconds ||
+          body.values.monthlyProcessingSeconds < 1 ||
+          (body.expiresAt !== null &&
+            (!body.expiresAt || Date.parse(body.expiresAt) <= Date.now())))
       )
         return error(
           400,
           "INVALID_REQUEST",
-          "Bounded allowance and future expiry are required.",
+          "A positive replacement and optional future expiry are required.",
         );
-      this.user = { ...this.user, revision: this.user.revision + 1 };
-      this.processingUsage = {
-        ...this.processingUsage,
-        revision: this.user.revision,
-        allowanceAudioSeconds: clear ? 3600 : body.allowanceAudioSeconds!,
-        remainingAudioSeconds:
-          (clear ? 3600 : body.allowanceAudioSeconds!) -
-          this.processingUsage.usedAudioSeconds -
-          this.processingUsage.reservedAudioSeconds,
-        allowanceOverride: clear
+      const limit = clear
+        ? this.settings.values.monthlyProcessingSeconds
+        : body.values!.monthlyProcessingSeconds!;
+      const nextRevision =
+        (this.accountUsage.policyOverride?.revision ?? 0) + 1;
+      this.accountUsage = {
+        ...this.accountUsage,
+        overrideRevision: clear ? null : nextRevision,
+        effectivePolicySource: clear ? "global" : "account_override",
+        overrideExpiresAt: clear ? null : (body.expiresAt ?? null),
+        processing: {
+          ...this.accountUsage.processing,
+          limitSeconds: limit,
+          remainingSeconds: Math.max(
+            0,
+            limit -
+              this.accountUsage.processing.usedSeconds -
+              this.accountUsage.processing.reservedSeconds,
+          ),
+        },
+        policyOverride: clear
           ? null
           : {
-              allowanceAudioSeconds: body.allowanceAudioSeconds!,
-              expiresAt: body.expiresAt!,
+              revision: nextRevision,
+              values: { monthlyProcessingSeconds: limit },
+              expiresAt: body.expiresAt ?? null,
+              reason: body.reason,
+              createdBy: "owner-fixture",
+              updatedBy: "owner-fixture",
+              createdAt: NOW,
+              updatedAt: NOW,
             },
       };
-      return {
-        status: 200,
-        body: {
-          revision: this.user.revision,
-          allowanceOverride: this.processingUsage.allowanceOverride,
-        },
-      };
+      return { status: 200, body: this.accountUsage };
     }
     if (method === "GET" && path === "/admin/overview")
       return {
@@ -726,11 +764,25 @@ export class DashboardFixture {
       };
     }
 
-    if (path === "/admin/settings/processing") {
+    if (path === "/admin/settings/account-policy") {
       if (method === "GET") return { status: 200, body: this.settings };
+      const body = input.body as Record<string, unknown>;
+      const values = Object.fromEntries(
+        Object.keys(this.settings.values).map((key) => [
+          key,
+          body[key] ??
+            this.settings.values[key as keyof typeof this.settings.values],
+        ]),
+      ) as unknown as AccountPolicy["values"];
       this.settings = {
         ...this.settings,
-        ...(input.body as Partial<ProcessingSettings>),
+        acceptNewJobs: Boolean(body.acceptNewJobs),
+        maintenanceMessageEn: String(body.maintenanceMessageEn ?? ""),
+        maintenanceMessageAr:
+          typeof body.maintenanceMessageAr === "string"
+            ? body.maintenanceMessageAr
+            : null,
+        values,
         revision: this.settings.revision + 1,
         updatedAt: NOW,
       };

@@ -77,7 +77,7 @@ export interface AdminHarness {
   seedAdmin(role?: AdminRole): void;
   signInAs(role: AdminRole): string;
   request(
-    method: 'get' | 'post' | 'put' | 'patch',
+    method: 'get' | 'post' | 'put' | 'patch' | 'delete',
     path: string,
     body?: unknown,
     token?: string,

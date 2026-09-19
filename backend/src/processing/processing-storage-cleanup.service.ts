@@ -1,5 +1,4 @@
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
-import { ProcessingUsageLedger } from '../processing-usage/processing-usage.schema.js';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { trusted, type Model } from 'mongoose';
@@ -17,6 +16,7 @@ export class ProcessingStorageCleanupService {
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
     private readonly transactions: ProcessingTransactions,
     private readonly cleanup: StorageCleanupService,
+    private readonly usage: ProcessingUsageService,
   ) {}
 
   /** Schedules one expired reservation of each kind in bounded transactions. */
@@ -76,10 +76,7 @@ export class ProcessingStorageCleanupService {
       );
       if (changed.modifiedCount !== 1)
         throw new Error('Expired upload changed while scheduling cleanup');
-      await new ProcessingUsageService(
-        this.jobs.db.model<ProcessingUsageLedger>(ProcessingUsageLedger.name),
-        this.jobs,
-      ).settleJob({ ...candidate, status: 'failed' }, session);
+      await this.usage.settleJob({ ...candidate, status: 'failed' }, session);
       return true;
     });
   }

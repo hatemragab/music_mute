@@ -94,8 +94,8 @@ See the [approved scope](../docs/tasks/full-dashboard/scope.md), [API contracts]
 
 ## Processing administration
 
-User detail includes rolling usage, reservation holds, individual replenishments,
-and temporary allowance increases/revocation. Expiry, reason, operation ID,
-expected revision and fresh authentication are required for allowance changes.
-Suspensions can have an optional expiry; effective access comes from the server,
-not a client timer. Allowance writes perform authoritative read-back.
+User detail includes the current UTC-month account usage, reservation holds,
+released/refunded seconds, the next reset, and an optional account policy override.
+Reason, operation ID, expected revision and fresh authentication are required for
+override changes. Suspensions can have an optional expiry; effective access comes
+from the server, not a client timer. Override writes perform authoritative read-back.

@@ -10,11 +10,16 @@ import {
 import {
   ProcessingAdmissionFence,
   ProcessingAdmissionFenceSchema,
-  ProcessingSettings,
-  ProcessingSettingsSchema,
 } from './processing-settings.schema.js';
-import { ProcessingSettingsService } from './processing-settings.service.js';
 import { ProcessingAdmissionService } from './processing-admission.service.js';
+import {
+  AccountPolicy,
+  AccountPolicyOverride,
+  AccountPolicyOverrideSchema,
+  AccountPolicySchema,
+} from './account-policy.schema.js';
+import { AccountPolicyService } from './account-policy.service.js';
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 
 @Module({
   imports: [
@@ -22,7 +27,11 @@ import { ProcessingAdmissionService } from './processing-admission.service.js';
     UsersModule,
     ProcessingPersistenceModule,
     MongooseModule.forFeature([
-      { name: ProcessingSettings.name, schema: ProcessingSettingsSchema },
+      { name: AccountPolicy.name, schema: AccountPolicySchema },
+      {
+        name: AccountPolicyOverride.name,
+        schema: AccountPolicyOverrideSchema,
+      },
       {
         name: ProcessingAdmissionFence.name,
         schema: ProcessingAdmissionFenceSchema,
@@ -30,10 +39,15 @@ import { ProcessingAdmissionService } from './processing-admission.service.js';
     ]),
   ],
   controllers: [AdminSettingsController, ProcessingPolicyController],
-  providers: [ProcessingSettingsService, ProcessingAdmissionService],
+  providers: [
+    AccountPolicyService,
+    ProcessingUsageService,
+    ProcessingAdmissionService,
+  ],
   exports: [
     MongooseModule,
-    ProcessingSettingsService,
+    AccountPolicyService,
+    ProcessingUsageService,
     ProcessingAdmissionService,
   ],
 })

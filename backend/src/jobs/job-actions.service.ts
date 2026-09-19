@@ -1,5 +1,4 @@
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
-import { ProcessingUsageLedger } from '../processing-usage/processing-usage.schema.js';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isUUID } from 'class-validator';
@@ -42,14 +41,8 @@ export class JobActionsService {
     private readonly transactions: ProcessingTransactions,
     private readonly accountAccess: AccountAccessService,
     private readonly admission: ProcessingAdmissionService,
+    private readonly usage: ProcessingUsageService,
   ) {}
-
-  private get usage() {
-    return new ProcessingUsageService(
-      this.jobs.db.model<ProcessingUsageLedger>(ProcessingUsageLedger.name),
-      this.jobs,
-    );
-  }
 
   async cancel(userId: string, jobId: string) {
     const principal: JobActionPrincipal = {

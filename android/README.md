@@ -389,8 +389,8 @@ removed. Automatic in-operation extractor updates were removed so an update cann
 escape the source-operation deadline. Live YouTube availability was not tested.
 
 Owner-only usage is refreshed before intake and periodically on the home screen.
-It separates spent, reserved, remaining audio minutes and the server UTC rolling
-replenishment time, shown in local time. Busy/allowance errors are localized in
+It separates used, reserved, refunded, and remaining audio minutes for the current
+UTC calendar month and shows the next reset in local time. Capacity/allowance errors are localized in
 English and Arabic without raw diagnostics or automatic queue-full retries. No
 queue-position or completion-time promise is shown when estimates are unavailable.
 See `../docs/tasks/media-input-and-queue/evidence/android.md` for current validation.

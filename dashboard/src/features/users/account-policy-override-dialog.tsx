@@ -2,64 +2,70 @@ import { useState } from "react";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { validateAccountPolicyOverride } from "./processing-access-validation";
 
-import { validateAllowance } from "./processing-access-validation";
-export function ProcessingAllowanceDialog({
+export function AccountPolicyOverrideDialog({
   open,
   onOpenChange,
   currentSeconds,
+  currentExpiry,
   reauthenticate,
   onSave,
 }: {
   open: boolean;
   onOpenChange(open: boolean): void;
   currentSeconds: number;
+  currentExpiry: string | null;
   reauthenticate(): Promise<void>;
   onSave(input: {
-    allowanceAudioSeconds: number;
-    expiresAt: string;
+    monthlyProcessingSeconds: number;
+    expiresAt: string | null;
     reason: string;
   }): Promise<void>;
 }) {
   return open ? (
-    <AllowanceForm
+    <OverrideForm
       onOpenChange={onOpenChange}
       currentSeconds={currentSeconds}
+      currentExpiry={currentExpiry}
       reauthenticate={reauthenticate}
       onSave={onSave}
     />
   ) : null;
 }
-function AllowanceForm({
+
+function OverrideForm({
   onOpenChange,
   currentSeconds,
+  currentExpiry,
   reauthenticate,
   onSave,
-}: Omit<Parameters<typeof ProcessingAllowanceDialog>[0], "open">) {
+}: Omit<Parameters<typeof AccountPolicyOverrideDialog>[0], "open">) {
   const [minutes, setMinutes] = useState(currentSeconds / 60);
-  const [expiry, setExpiry] = useState("");
-  const errors = validateAllowance(minutes, expiry);
+  const [expiry, setExpiry] = useState(
+    currentExpiry ? currentExpiry.slice(0, 16) : "",
+  );
+  const errors = validateAccountPolicyOverride(minutes, expiry);
   return (
     <ReasonDialog
       open
       onOpenChange={onOpenChange}
-      title="Temporary processing allowance"
-      description="This exception cannot bypass media duration, byte, global capacity or one-active-job limits. Revocation preserves accepted reservations."
-      confirmLabel="Save allowance"
+      title="Account processing override"
+      description="Replace this account's monthly processing limit. The value is not added to the global limit and never changes raw usage counters."
+      confirmLabel="Save override"
       freshAuth
       onReauthenticate={reauthenticate}
       summary={
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="allowance-minutes">
-              Total allowance (audio minutes)
+            <Label htmlFor="override-minutes">
+              Monthly successful processing minutes
             </Label>
             <Input
-              id="allowance-minutes"
+              id="override-minutes"
               type="number"
-              min={60}
-              max={1440}
-              step="any"
+              min={1 / 60}
+              step={1 / 60}
               value={Number.isFinite(minutes) ? minutes : ""}
               onChange={(event) =>
                 setMinutes(
@@ -69,16 +75,18 @@ function AllowanceForm({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="allowance-expiry">Expires at (local time)</Label>
+            <Label htmlFor="override-expiry">
+              Expires at (optional local time)
+            </Label>
             <Input
-              id="allowance-expiry"
+              id="override-expiry"
               type="datetime-local"
               value={expiry}
               onChange={(event) => setExpiry(event.target.value)}
             />
           </div>
           <p>
-            Current total: {currentSeconds / 60} min →{" "}
+            Effective total: {currentSeconds / 60} min →{" "}
             {Number.isFinite(minutes) ? minutes : "—"} min
           </p>
           {errors.length ? (
@@ -91,15 +99,11 @@ function AllowanceForm({
         </div>
       }
       onConfirm={async (reason) => {
-        const currentErrors = validateAllowance(minutes, expiry);
+        const currentErrors = validateAccountPolicyOverride(minutes, expiry);
         if (currentErrors.length) throw new Error(currentErrors.join(" "));
-        if (minutes * 60 < currentSeconds)
-          throw new Error(
-            "Use explicit revocation to remove an existing increase.",
-          );
         await onSave({
-          allowanceAudioSeconds: minutes * 60,
-          expiresAt: new Date(expiry).toISOString(),
+          monthlyProcessingSeconds: minutes * 60,
+          expiresAt: expiry ? new Date(expiry).toISOString() : null,
           reason,
         });
       }}

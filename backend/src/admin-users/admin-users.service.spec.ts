@@ -63,6 +63,8 @@ function setup(records = [user()]) {
       fences as never,
       identity as never,
       operations as never,
+      {} as never,
+      {} as never,
     ),
     users,
     jobs,
