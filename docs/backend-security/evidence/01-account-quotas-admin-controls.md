@@ -7,7 +7,8 @@
 - Accepted predecessor commit: `0f8fb0572a309029dc6ada24d9da1c0fbfb8e0eb`
 - Starting collection commit: `0f8fb0572a309029dc6ada24d9da1c0fbfb8e0eb`
 - Actual tested source commit: `e04905ecd40b10aab3d554dc3038f659ece84c21`
-- Pull request URL/base: not opened / `codex/backend-security-cost-hardening`
+- Pull request URL/base: <https://github.com/hatemragab/music_mute/pull/10> /
+  `codex/backend-security-cost-hardening`
 - Date/time with timezone: 2026-09-19 22:31:49 EEST
 - Agent/operator: Codex / Hatem Ragap
 - Environment class: local macOS worktree; no live provider or real-data access
