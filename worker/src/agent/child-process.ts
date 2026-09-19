@@ -5,6 +5,7 @@ import {
 } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { delimiter, isAbsolute } from "node:path";
 import {
   ChildFrameDecoder,
   ChildProtocolError,
@@ -24,6 +25,7 @@ export interface ChildProcessOptions {
   args: string[];
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  trustedExecutableDirectory?: string;
   startTimeoutMs?: number;
   requestTimeoutMs?: number;
   stopTimeoutMs?: number;
@@ -72,7 +74,10 @@ export class WorkerChildProcess {
     this.currentIncarnation = randomUUID();
     this.decoder = new ChildFrameDecoder();
     this.stderr = "";
-    const env = childEnvironment(this.options.env);
+    const env = childEnvironment(
+      this.options.env,
+      this.options.trustedExecutableDirectory,
+    );
     this.ready = new Promise<ChildResponse>((resolve, reject) => {
       this.resolveReady = resolve;
       this.rejectReady = reject;
@@ -294,7 +299,10 @@ function boundedTimeout(value: number | undefined, fallback: number): number {
   return value;
 }
 
-function childEnvironment(extra: NodeJS.ProcessEnv | undefined) {
+function childEnvironment(
+  extra: NodeJS.ProcessEnv | undefined,
+  trustedExecutableDirectory: string | undefined,
+) {
   const names = [
     "HOME",
     "PATH",
@@ -317,6 +325,16 @@ function childEnvironment(extra: NodeJS.ProcessEnv | undefined) {
   for (const name of names) {
     const value = process.env[name];
     if (value !== undefined) env[name] = value;
+  }
+  if (trustedExecutableDirectory !== undefined) {
+    if (
+      !isAbsolute(trustedExecutableDirectory) ||
+      trustedExecutableDirectory.includes(delimiter)
+    )
+      throw new TypeError("Worker child executable directory is invalid");
+    env.PATH = env.PATH
+      ? `${trustedExecutableDirectory}${delimiter}${env.PATH}`
+      : trustedExecutableDirectory;
   }
   const allowed = new Set(["MUSICMUTE_LOG_LEVEL", "MUSICMUTE_PROVIDER"]);
   for (const [name, value] of Object.entries(extra ?? {})) {

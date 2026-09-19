@@ -224,9 +224,13 @@ and CoreML job was claimed at D3.
   restart and a doctor path. The LaunchDaemon receives only minimal system
   environment keys and stable private paths; no backend infrastructure or S3
   credential is placed in the plist.
+- The supervisor prepends only the immutable release media directory to the
+  child `PATH`, so `audio-separator` finds the same qualified FFmpeg binary that
+  the request names explicitly. Relative tool directories are rejected and no
+  logged-in shell or global Homebrew installation is required.
 - Python bytecode, Numba and plotting caches are redirected to protected state
-  paths. A real packaged doctor and CoreML processing run left all 33,798
-  release-manifest entries unchanged.
+  paths. A fresh final-D6 packaged doctor and CoreML processing run left all
+  33,828 release-manifest entries unchanged.
 - Model provisioning accepts only the exact qualified source file, installs it
   into the service account's content-addressed cache and checks the sanitized
   result. Default uninstall removes only the service plist/current pointer and
@@ -260,15 +264,25 @@ the packaged runtime doctor. Using only the packaged Python and media binaries,
 44.1 kHz sample rate and 192 kb/s bitrate. A second manifest verification after
 processing passed, proving runtime caches did not mutate the release.
 
+The package was rebuilt again from the final D6 runtime. Its first service-like
+run correctly exposed that `audio-separator` performed its own FFmpeg discovery
+through `PATH`; a LaunchDaemon does not inherit the interactive Homebrew path.
+The supervisor now prepends only the configured immutable media directory to
+the child environment. The resulting 33,828-entry package passed the runtime
+doctor with CoreML, Python 3.13.7, ONNX Runtime 1.30.0 and the exact Kim model.
+`kim-vocals-trim-v1` then produced a valid 193,767-byte stereo 44.1 kHz MP3 at
+192 kb/s, and every manifest entry verified unchanged after processing.
+
 ### D4 verification and current blocker
 
 - macOS release/manifest/Mach-O/LaunchDaemon/installation tests: PASS;
 - full worker protocol drift, formatting, lint, typecheck and build: PASS;
-- complete TypeScript worker suite: PASS, 20 files and 49 tests;
-- complete Python engine suite: PASS, 21 tests;
+- complete TypeScript worker suite: PASS, 23 files and 62 tests;
+- complete Python engine suite: PASS, 28 tests;
 - real private Python CoreML provider profile and Kim pipeline: PASS;
 - reproducible offline FFmpeg/LAME build and complete private release: PASS;
-- packaged runtime doctor, real CoreML job and post-run immutability: PASS;
+- fresh final-D6 package, runtime doctor, real CoreML job, qualified child PATH
+  and post-run immutability: PASS;
 - enrolled config/credential, system LaunchDaemon install/restart, dedicated
   logged-out operation, live backend/S3 job and reboot: NOT_RUN.
 

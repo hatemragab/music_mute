@@ -82,6 +82,11 @@ subprocess outputs have their own hard caps. FFmpeg accepts only the fixed MVP
 container allowlist through its local `file` protocol; playlist demuxers and
 network inputs are not enabled.
 
+The supervisor prepends only the configured FFmpeg directory to the processing
+child's `PATH`. This lets `audio-separator` discover the same qualified,
+immutable FFmpeg binary that the request names explicitly, without depending
+on Homebrew, a logged-in shell or another global installation.
+
 Only two runtime adapters are enabled: native macOS ARM64/CoreML with launchd
 and owner-only POSIX credentials, and Windows x64/DirectML adapter 0 with a
 Windows Service and LocalService NTFS ACLs. Linux, CUDA, MIGraphX, Intel Mac and

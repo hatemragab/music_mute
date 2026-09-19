@@ -9,7 +9,7 @@ const body = Buffer.from(
     requestId: randomUUID(),
     incarnation,
     sentAt: new Date().toISOString(),
-    payload: { processCapacity: 1 },
+    payload: { processCapacity: 1, path: process.env.PATH },
   }),
 );
 const frame = Buffer.alloc(4 + body.length);

@@ -1,5 +1,17 @@
 # Package changes
 
+## Revision 4.6
+
+- Rebuilt the complete Mac package from the final D6 runtime and found that
+  `audio-separator` could not discover FFmpeg under the service-minimal `PATH`.
+- Fixed the supervisor to prepend only the qualified packaged FFmpeg directory
+  to each processing child and added regression coverage for the exact child
+  environment and invalid relative directories.
+- The fresh 33,828-entry ARM64 package passed its runtime doctor, a real
+  CoreML/Kim-to-MP3 job and post-run manifest verification. D4 remains blocked
+  on the actual LaunchDaemon, enrolled machine, logged-out, live S3 and reboot
+  acceptance gates.
+
 ## Revision 4.5
 
 - Completed the local D6 safety boundary with attempt-only trusted paths,

@@ -52,7 +52,9 @@ The package build contains no environment files, credentials, models, audio fixt
   state/model provisioning, repair/rollback and safe uninstall boundaries. Its
   reproducible network-disabled FFmpeg 8.0.3/LAME 3.100 build, complete private
   package, local tests, packaged runtime doctor, post-run immutability check and
-  real CoreML pipeline pass. The checkpoint remains BLOCKED only on the enrolled
+  real CoreML pipeline pass. A fresh package from the final D6 runtime also
+  proved the qualified child `PATH` fix, runtime doctor, real CoreML job and all
+  33,828 immutable entries. The checkpoint remains BLOCKED only on the enrolled
   system-service acceptance flow. See [D evidence](../evidence/D-runtime.md).
 - D5 implementation now covers x86_64 PE and immutable release validation,
   pinned WinSW acquisition, password-free LocalService configuration,

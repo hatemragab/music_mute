@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WorkerChildProcess } from "../agent/child-process.js";
 import { MachineSupervisor } from "../agent/machine-supervisor.js";
@@ -79,6 +79,7 @@ if (command === "protocol-doctor") {
             args: ["-m", "musicmute_engine.child"],
             cwd: config.engineRoot,
             env: { MUSICMUTE_PROVIDER: slot.provider },
+            trustedExecutableDirectory: dirname(config.ffmpegPath),
             requestTimeoutMs: 7_200_000,
           },
         })),

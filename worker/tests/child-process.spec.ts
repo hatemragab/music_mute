@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { delimiter, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -87,18 +87,35 @@ describe("worker child lifecycle", () => {
     await expect(child.start()).rejects.toThrow(
       "environment key is not allowlisted",
     );
+
+    child = new WorkerChildProcess({
+      command: "unused",
+      args: [],
+      cwd: engineRoot,
+      trustedExecutableDirectory: "relative-tools",
+    });
+    await expect(child.start()).rejects.toThrow(
+      "executable directory is invalid",
+    );
   });
 
   it("kills a child that exceeds its bounded request timeout", async () => {
+    const trustedTools = resolve(workerRoot, "qualified-tools");
     child = new WorkerChildProcess({
       command: process.execPath,
       args: [hangingFixture],
       cwd: workerRoot,
+      trustedExecutableDirectory: trustedTools,
       startTimeoutMs: 2_000,
       requestTimeoutMs: 100,
       stopTimeoutMs: 100,
     });
-    await child.start();
+    const ready = await child.start();
+    expect(ready.payload.path).toBe(
+      process.env.PATH
+        ? `${trustedTools}${delimiter}${process.env.PATH}`
+        : trustedTools,
+    );
     await expect(child.request("ping", {})).rejects.toThrow(
       "Worker child ping timed out",
     );
