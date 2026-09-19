@@ -37,7 +37,7 @@
       "checkpoints": ["A1", "A2", "A3", "A4", "A5", "A6"],
       "status": "ready_for_review",
       "currentCheckpoint": null,
-      "lastVerifiedCommit": null,
+      "lastVerifiedCommit": "e04905ecd40b10aab3d554dc3038f659ece84c21",
       "purpose": "Monthly account quota, policy settings, overrides, admin controls, and usage explanation"
     },
     {
