@@ -43,13 +43,13 @@ const inputReservation = new MongoSchema<InputReservation>(
       type: Number,
       required: true,
       min: 1,
-      max: 100_000_000,
+      max: 50_000_000,
       validate: Number.isInteger,
     },
     durationSeconds: {
       type: Number,
       required: true,
-      validate: (v: number) => Number.isFinite(v) && v > 0 && v <= 1800,
+      validate: (v: number) => Number.isFinite(v) && v > 0 && v <= 1_200,
     },
     sha256: { type: String, required: true, validate: isSha256 },
   },
@@ -58,34 +58,31 @@ const inputReservation = new MongoSchema<InputReservation>(
 
 const admissionSnapshot = new MongoSchema<AdmissionSnapshot>(
   {
-    policyVersion: { type: Number, enum: [1, 2] },
-    maxDurationSeconds: { type: Number, min: Number.MIN_VALUE, max: 1800 },
+    policyVersion: { type: Number, required: true, enum: [2] },
+    maxDurationSeconds: {
+      type: Number,
+      required: true,
+      min: Number.MIN_VALUE,
+      max: 1_200,
+    },
     maxInputBytes: {
       type: Number,
+      required: true,
       min: 1,
-      max: 100_000_000,
+      max: 50_000_000,
       validate: Number.isSafeInteger,
     },
-    preparationProfileId: { type: String, maxlength: 100 },
-    source: { type: String, enum: ['audio_file', 'video_file', 'youtube'] },
+    preparationProfileId: { type: String, required: true, maxlength: 100 },
+    source: {
+      type: String,
+      required: true,
+      enum: ['audio_file', 'video_file', 'youtube'],
+    },
     settingsRevision: {
       type: Number,
       required: true,
       min: 0,
       validate: Number.isSafeInteger,
-    },
-    maxInputBytesExclusive: {
-      type: Number,
-      required: true,
-      min: 2,
-      max: 30_000_000,
-      validate: Number.isSafeInteger,
-    },
-    maxDurationSecondsExclusive: {
-      type: Number,
-      required: true,
-      min: Number.MIN_VALUE,
-      max: 600,
     },
     maxActiveJobsPerUser: {
       type: Number,
@@ -203,6 +200,17 @@ export class Job {
   @Prop({ type: MongoSchema.Types.ObjectId, default: null, immutable: true })
   retryOfJobId!: Types.ObjectId | null;
   @Prop({
+    type: MongoSchema.Types.ObjectId,
+    required: true,
+    immutable: true,
+    default: function (this: { _id: Types.ObjectId }) {
+      return this._id;
+    },
+  })
+  logicalAudioId!: Types.ObjectId;
+  @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
+  uploadAttemptCount!: number;
+  @Prop({
     type: String,
     default: null,
     validate: (v: string | null) => v === null || isAudioName(v),
@@ -247,8 +255,24 @@ export class Job {
   admissionSnapshot!: AdmissionSnapshot | null;
   @Prop({ type: objectIdentity, default: null })
   inputObject!: ObjectIdentity | null;
+  @Prop({ type: Date, default: null })
+  confirmedUploadAccountedAt!: Date | null;
+  @Prop({ type: String, default: null, match: /^\d{4}-\d{2}$/ })
+  confirmedUploadPeriodKey!: string | null;
+  @Prop({
+    type: Number,
+    default: null,
+    min: 1,
+    validate: (value: number | null) =>
+      value === null || Number.isSafeInteger(value),
+  })
+  confirmedUploadBytes!: number | null;
   @Prop({ type: objectIdentity, default: null })
   outputObject!: ObjectIdentity | null;
+  @Prop({ type: Date, default: null })
+  retainedOutputAccountedAt!: Date | null;
+  @Prop({ type: Date, default: null })
+  retainedOutputReleasedAt!: Date | null;
   @Prop({ type: workerRecipeSnapshot, default: null, immutable: true })
   recipeSnapshot!: WorkerRecipeSnapshot | null;
   @Prop({ type: workerRetryEligibility, default: null })
@@ -267,7 +291,7 @@ export class Job {
     type: Number,
     default: null,
     validate: (value: number | null) =>
-      value === null || (Number.isFinite(value) && value > 0 && value <= 1800),
+      value === null || (Number.isFinite(value) && value > 0 && value <= 1_200),
   })
   measuredDurationSeconds!: number | null;
   @Prop({ type: Date, default: null }) uploadingResultAt!: Date | null;
@@ -364,6 +388,10 @@ JobSchema.index(
     'admissionSnapshot.reservationExpiresAt': 1,
   },
   { name: 'jobs_expired_upload_cleanup' },
+);
+JobSchema.index(
+  { status: 1, reservationCleanupScheduledAt: 1, finishedAt: 1, _id: 1 },
+  { name: 'jobs_terminal_input_cleanup' },
 );
 JobSchema.index(
   { cleanupNextAt: 1, cleanupLeaseUntil: 1 },

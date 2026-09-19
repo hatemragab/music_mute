@@ -77,7 +77,45 @@ export class WorkerAttemptService {
     const first = await this.loadCurrent(principal, attemptId, dto);
     if (!first.job.inputObject)
       throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-    const grant = await this.storage.createDownloadGrant(first.job.inputObject);
+    if (!(await this.storage.isPinnedObjectAvailable(first.job.inputObject)))
+      throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+    const session = await this.connection.startSession();
+    let entitlement: { expiresAt: Date };
+    try {
+      const reserved = await session.withTransaction(async () => {
+        const current = await this.loadCurrent(
+          principal,
+          attemptId,
+          dto,
+          session,
+        );
+        if (
+          !current.job.inputObject ||
+          !sameObject(first.job.inputObject!, current.job.inputObject)
+        )
+          throw workerError('WORKER_CONFLICT');
+        await this.accountAccess.assertActive(current.job.userId, session);
+        return this.usage.reserveDownloadGrant(
+          {
+            accountId: current.job.userId,
+            jobId: current.job._id,
+            scope: 'worker_input',
+            requestId: dto.requestId,
+            attemptId,
+            object: current.job.inputObject,
+          },
+          session,
+        );
+      });
+      if (!reserved) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+      entitlement = reserved;
+    } finally {
+      await session.endSession();
+    }
+    const grant = await this.storage.createDownloadGrant(
+      first.job.inputObject,
+      entitlement.expiresAt,
+    );
     const current = await this.loadCurrent(principal, attemptId, dto);
     if (
       !current.job.inputObject ||
@@ -235,6 +273,11 @@ export class WorkerAttemptService {
         );
         if (attemptFence.modifiedCount !== 1)
           throw workerError('WORKER_CONFLICT');
+        await this.usage.recordRetainedOutput(
+          current.job,
+          object.bytes,
+          session,
+        );
         const job = await this.jobs
           .findOneAndUpdate(
             this.jobOwnershipFilter(current.job, current.attempt, now),
@@ -242,6 +285,8 @@ export class WorkerAttemptService {
               $set: {
                 status: 'ready',
                 outputObject: object,
+                retainedOutputAccountedAt: now,
+                retainedOutputReleasedAt: null,
                 currentExecution: null,
                 finishedAt: now,
                 retryEligibility: {

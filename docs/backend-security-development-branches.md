@@ -1,6 +1,6 @@
 # MusicMute backend security development branches
 
-**Status:** Branch 1 ready for review; Branch 2 not authorized
+**Status:** Branch 1 merged; Branch 2 ready for review; Branch 3 not started
 **Collection branch:** `codex/backend-security-cost-hardening`
 **Direct parent:** `codex/worker-rebuild`
 
@@ -55,6 +55,6 @@ Neither `main` nor `codex/worker-rebuild` is the implementation target.
 
 ## Review boundary
 
-The documentation is ready for maintainer review. All 32 implementation checkpoints
-remain unchecked. No implementation branch, commit, push, PR, provider change, or
-deployment is authorized by this document alone.
+Branch 2 is ready for maintainer review with A1–A6 and B1–B7 complete. Branch 3
+remains unauthorized until Branch 2 is reviewed and merged. No push, PR, provider
+change, deployment, or later branch is authorized by this document alone.

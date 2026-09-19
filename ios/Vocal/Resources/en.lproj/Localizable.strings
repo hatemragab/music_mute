@@ -181,7 +181,7 @@
 "processing_description" = "Import permitted audio, review it, then explicitly upload for vocals-only cloud processing.";
 "processing_import" = "Choose audio or video";
 "processing_remove" = "Remove music";
-"processing_limits" = "Prepared audio: up to 30 minutes and 100 MB when available. Current service limits may be lower.";
+"processing_limits" = "Prepared audio: up to 20 minutes and 50 MB.";
 "processing_empty" = "Your processing jobs will appear here.";
 "processing_refresh" = "Refresh";
 "processing_more" = "Load more";
@@ -209,7 +209,7 @@
 "processing_error_service" = "Processing is currently unavailable. Try again later.";
 "processing_error_auth" = "Sign in again to continue.";
 "processing_error_policy" = "Your account or app version cannot submit processing right now. Check Account settings.";
-"processing_error_input" = "Choose a supported, readable audio-only file under 10 minutes and 30 MB.";
+"processing_error_input" = "Choose a supported, readable audio-only file up to 20 minutes and 50 MB.";
 "processing_error_storage" = "Audio could not be saved. Check available storage and file access.";
 "processing_error_state" = "This job changed. Refresh to see the available actions.";
 "processing_error_retry_input" = "This file cannot be retried. Import a different audio file.";
@@ -222,7 +222,7 @@
 "processing_cancel" = "Cancel";
 "processing_storage_error" = "Audio could not be saved. Check storage and file access.";
 "processing_offline" = "No connection. Your job is retained.";
-"processing_invalid_input" = "Choose a supported audio file under 10 minutes and 30 MB.";
+"processing_invalid_input" = "Choose a supported audio file up to 20 minutes and 50 MB.";
 "processing_upload_retry_limit" = "Upload attempts paused. Tap Resume upload to try again.";
 "processing_upload_error" = "Audio could not be uploaded. Try again.";
 "processing_service_unavailable" = "Processing is unavailable. Try again later.";
@@ -266,7 +266,7 @@
 
 "import_review_title" = "Review audio";
 
-"import_cloud_disclosure" = "Remove music uploads this audio to private cloud storage for remote processing and creates vocals-only MP3 audio. Under 30 MB and under 10 minutes.";
+"import_cloud_disclosure" = "Remove music uploads this audio to private cloud storage for remote processing and creates vocals-only MP3 audio. Up to 50 MB and 20 minutes.";
 
 "import_rights_confirmation" = "I own this audio or have permission to process it.";
 
@@ -296,7 +296,7 @@
 
 // Media preparation and UTC-month processing allowance
 "media_import_photos" = "Choose a video from Photos";
-"media_media_too_long" = "Audio must be 30 minutes or less. The current server may apply a smaller limit.";
+"media_media_too_long" = "Audio must be 20 minutes or less.";
 "media_media_too_large" = "The media exceeds the current size limit. Choose a smaller file.";
 "media_media_no_audio" = "This file has no audio soundtrack.";
 "media_media_default_track_unavailable" = "A default soundtrack could not be identified. Export one audio track and try again.";
@@ -306,6 +306,14 @@
 "media_youtube_live_unsupported" = "Live and upcoming videos cannot be processed.";
 "media_youtube_metadata_unavailable" = "This YouTube video cannot be checked safely. Import a permitted audio file instead.";
 "media_processing_allowance_exhausted" = "Your monthly processing allowance is used or reserved. Check the next reset time.";
+"media_upload_grant_limit_reached" = "Your upload limit is reached. Check the next reset time.";
+"media_upload_byte_limit_reached" = "Your upload data limit is reached. Check the next reset time.";
+"media_upload_attempt_limit_reached" = "This audio has used all upload attempts. Choose it again to start a new request.";
+"media_retained_storage_limit_reached" = "Delete a saved result before processing another audio file.";
+"media_download_reservation_expired" = "The result link expired. Try the download again.";
+"media_download_grant_limit_reached" = "Your result access limit is reached. Check the next reset time.";
+"media_download_byte_limit_reached" = "Your estimated result data limit is reached. Check the next reset time.";
+"media_service_bandwidth_limit_reached" = "New transfers are temporarily paused. Try again later.";
 "media_processing_limit_reached" = "An unfinished job already exists for this account.";
 "media_processing_queue_full" = "The processing queue is full. Try again later.";
 "media_processing_policy_incompatible" = "Expanded media preparation is not available yet. Import audio under the current limits.";

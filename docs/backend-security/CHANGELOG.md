@@ -1,5 +1,107 @@
 # Backend security planning changelog
 
+## 2026-09-20 — Branch 2 checkpoint B7 complete
+
+- Passed backend format, lint, typecheck, secret, unit, HTTP E2E, build, processing,
+  and dashboard integration gates.
+- Passed the dashboard format, lint, typecheck, unit, and production-build gate and
+  both Android Direct/Play unit, lint, and debug-build variants.
+- Passed iOS format lint and generic compile-for-testing without launching a device
+  or simulator, as requested; runtime simulator execution remains deferred.
+- Removed the last obsolete media-limit copy and worker output-duration boundary,
+  then documented the remaining non-policy numeric matches.
+- Validated JSON, relative links, and whitespace; left all 52 provider actions and
+  real S3 checks unexecuted for the operator handoff.
+- Marked Branch 2 ready for maintainer review and left Branch 3 unauthorized.
+
+## 2026-09-20 — Branch 2 checkpoint B6 complete
+
+- Expanded global and per-account policy controls to cover the selected media,
+  upload, download, retained-storage, and signed-URL limits.
+- Exposed processing, upload, download, retained-storage, effective-limit, period,
+  and reset information in the dashboard from the backend-owned contract.
+- Updated Android and iOS parsing, localized errors, boundary behavior, cached
+  playback, and stable result-grant request identity for uncertain retries.
+- Removed active legacy client decision paths for the former 30 MB/10-minute and
+  100 MB/30-minute policies and documented the unified 50 MB/20-minute contract.
+- Verified focused backend, dashboard, Android, and compile-only iOS checks without
+  launching a device or simulator; advanced Branch 2 to checkpoint B7.
+
+## 2026-09-20 — Branch 2 checkpoint B5 complete
+
+- Added atomic monthly result-grant and estimated-byte accounting against immutable
+  object versions, with concurrent and sequential request replay charged once.
+- Added one UTC-month service outbound estimate for user result/input and worker
+  input grants, with an atomic safety ceiling before new signed URLs are issued.
+- Preserved Android and iOS private-cache playback paths so valid local results do
+  not request or consume another backend grant.
+- Covered byte and grant boundaries, concurrent races, expiry, object changes,
+  missing objects, wrong ownership, restricted/deleting accounts, and service scope.
+- Verified TypeScript, focused unit tests, the full backend unit suite, and the
+  replica-set processing-usage integration; advanced Branch 2 to checkpoint B6.
+
+## 2026-09-20 — Branch 2 checkpoint B4 complete
+
+- Counted each verified published result in one lifetime retained-byte counter and
+  blocked only later admission at the account ceiling, preserving in-flight success.
+- Released retained bytes transactionally only after exact cleanup completed or the
+  object was safely reconciled as missing.
+- Scheduled terminal input cleanup while leaving retry-eligible failed inputs intact.
+- Signed worker result uploads with required `INTELLIGENT_TIERING` storage-class
+  headers while successful outputs remain until job/account deletion.
+- Verified focused admission/deletion/cleanup/worker tests and replica-set retained
+  accounting, bounded overshoot, and release behavior.
+- Advanced Branch 2 to checkpoint B5.
+
+## 2026-09-19 — Branch 2 checkpoint B3 complete
+
+- Hard-capped processing and release upload/download grants at 600 seconds while
+  keeping required size, checksum, content-type, and immutability headers signed.
+- Added leased exact-version cleanup with confirmed-missing reconciliation; unknown
+  abandoned versions still use bounded exact-key discovery without prefix deletion.
+- Scheduled invalid confirmation objects and cancelled uploads for durable cleanup,
+  while cancelling a pending invalid-object task after a valid confirmation wins.
+- Added cancelled-unconfirmed and cancelled-pinned regression coverage plus transient
+  and bounded permanent provider-failure tests.
+- Verified TypeScript and 12 focused backend files / 73 tests.
+- Advanced Branch 2 to checkpoint B4.
+
+## 2026-09-19 — Branch 2 checkpoint B2 complete
+
+- Added atomic per-account upload-grant ceilings for UTC day/month periods and
+  idempotent receipt replay without storing presigned URLs.
+- Added monthly confirmed-upload byte accounting after exact storage verification,
+  with duplicate confirmation charged only once.
+- Added a server-owned logical-audio family and shared five-attempt ceiling that a
+  changed request UUID or sibling retry job cannot reset.
+- Persisted renewal request identity on Android and iOS and rotated it only when a
+  genuinely new upload attempt is required.
+- Verified backend race/rollover integration, focused backend and Android suites,
+  and an iOS generic simulator test build without launching device/UI E2E.
+- Advanced Branch 2 to checkpoint B3.
+
+## 2026-09-19 — Branch 2 checkpoint B1 complete
+
+- Removed live legacy 30 MB/10-minute and expanded 100 MB/30-minute admission
+  paths in favor of one inclusive 50,000,000-byte/1,200-second policy.
+- Made schema version 2 and the preparation profile mandatory for new jobs.
+- Added the same bounded offline policy and boundary coverage to Android and iOS.
+- Verified backend tests/typecheck, Android JVM tests, and an iOS generic
+  simulator test build without launching device/UI E2E.
+- Advanced Branch 2 to checkpoint B2.
+
+## 2026-09-19 — Branch 2 started
+
+- Confirmed PR #10 merged into the collection branch at
+  `e9691b2a80f7faed64b66f0800827ea545cfe728`.
+- Created `hatem/media-s3-cost-protection` from that exact merged collection tip in
+  an isolated worktree.
+- Marked checkpoint B1 in progress before changing application behavior.
+- Limited this branch to unified media limits, transfer accounting, exact-object
+  cleanup, retained output, download grants, and S3 cost protection.
+- Kept AWS, Atlas, Redis/VPS, Firebase, deployment, and real data changes outside
+  this branch; the provider runbook remains a human checklist.
+
 ## 2026-09-19 — Branch 1 ready for review
 
 - Replaced the 3,600-second rolling/temporary allowance paths with one account-only

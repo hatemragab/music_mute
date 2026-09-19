@@ -217,7 +217,7 @@
     <string name="cloud_processing_description">Remove music from a downloaded or imported audio file.</string>
     <string name="processing_import">Choose audio or video file</string>
     <string name="processing_remove">Remove music</string>
-    <string name="processing_limits">Audio only · under 10 minutes · under 30 MB</string>
+    <string name="processing_limits">Audio only · up to 20 minutes · up to 50 MB</string>
     <string name="processing_empty">Your processing jobs will appear here.</string>
     <string name="processing_refresh">Refresh</string>
     <string name="processing_more">Load more</string>
@@ -245,7 +245,7 @@
     <string name="processing_error_service">Processing is currently unavailable. Try again later.</string>
     <string name="processing_error_auth">Sign in again to continue.</string>
     <string name="processing_error_policy">Your account or app version cannot submit processing right now. Check Account settings.</string>
-    <string name="processing_error_input">Choose a supported, readable audio-only file under 10 minutes and 30 MB.</string>
+    <string name="processing_error_input">Choose a supported, readable audio-only file up to 20 minutes and 50 MB.</string>
     <string name="processing_error_storage">Audio could not be saved. Check available storage and file access.</string>
     <string name="processing_error_state">This job changed. Refresh to see the available actions.</string>
     <string name="processing_error_retry_input">This file cannot be retried. Import a different audio file.</string>
@@ -282,7 +282,7 @@
     <string name="audio_task_duration">Audio duration: %1$s</string>
     <string name="processing_reason_invalid">The media is invalid, unsupported, or unreadable. Choose another audio file.</string>
     <string name="processing_reason_upload_expired">The upload expired before it finished. Import the audio again.</string>
-    <string name="processing_reason_too_long">The audio exceeds the 10-minute limit. Choose a shorter file.</string>
+    <string name="processing_reason_too_long">The audio exceeds the 20-minute limit. Choose a shorter file.</string>
     <string name="processing_reason_checksum">The uploaded audio does not match the original file. Import it again.</string>
     <string name="processing_reason_download">The source audio could not be downloaded. Check that it is available and try again.</string>
     <string name="processing_reason_upload">The processed audio could not be uploaded. Try again later.</string>
@@ -350,6 +350,10 @@
     <string name="media_error_playlist">Paste an individual video link without playlist information.</string>
     <string name="media_error_live">Live and upcoming videos are not supported. Choose a finished recording.</string>
     <string name="processing_error_allowance">Your monthly audio allowance is used or reserved. Check the next reset time.</string>
+    <string name="processing_error_upload_limit">Your upload limit is reached. Check the next reset time.</string>
+    <string name="processing_error_download_limit">Your result access limit is reached. Check the next reset time.</string>
+    <string name="processing_error_storage_limit">Delete a saved result before processing another audio file.</string>
+    <string name="processing_error_bandwidth_limit">New transfers are temporarily paused. Try again later.</string>
     <string name="processing_error_queue_full">The processing queue is full. Try again later.</string>
     <string name="processing_error_capacity">Processing is temporarily unavailable. Try again later.</string>
     <string name="processing_error_compatibility">This processing policy requires a compatible app update.</string>

@@ -43,6 +43,25 @@ export const DEFAULT_ACCOUNT_POLICY_VALUES: Readonly<AccountPolicyValues> =
   });
 export type AccountPolicyValueKey = keyof AccountPolicyValues;
 
+export const ACCOUNT_POLICY_OVERRIDE_VALUE_KEYS = [
+  'monthlyProcessingSeconds',
+  'maxDurationSeconds',
+  'maxPreparedAudioBytes',
+  'dailyUploadGrants',
+  'monthlyUploadGrants',
+  'monthlyConfirmedUploadBytes',
+  'maxClientInputAttempts',
+  'monthlyDownloadGrants',
+  'monthlyEstimatedDownloadBytes',
+  'maxRetainedOutputBytes',
+  'signedUrlTtlSeconds',
+] as const satisfies readonly AccountPolicyValueKey[];
+export type AccountPolicyOverrideValueKey =
+  (typeof ACCOUNT_POLICY_OVERRIDE_VALUE_KEYS)[number];
+export type AccountPolicyOverrideValues = Partial<
+  Pick<AccountPolicyValues, AccountPolicyOverrideValueKey>
+>;
+
 @Schema({
   collection: 'account_policies',
   strict: 'throw',
@@ -146,6 +165,42 @@ export class AccountPolicyOverride {
   })
   monthlyProcessingSeconds!: number | null;
 
+  @Prop({ type: Number, default: null, min: 1, validate: nullableSafeInteger })
+  maxDurationSeconds!: number | null;
+
+  @Prop({ type: Number, default: null, min: 1, validate: nullableSafeInteger })
+  maxPreparedAudioBytes!: number | null;
+
+  @Prop({ type: Number, default: null, min: 1, validate: nullableSafeInteger })
+  dailyUploadGrants!: number | null;
+
+  @Prop({ type: Number, default: null, min: 1, validate: nullableSafeInteger })
+  monthlyUploadGrants!: number | null;
+
+  @Prop({ type: Number, default: null, min: 1, validate: nullableSafeInteger })
+  monthlyConfirmedUploadBytes!: number | null;
+
+  @Prop({ type: Number, default: null, min: 1, validate: nullableSafeInteger })
+  maxClientInputAttempts!: number | null;
+
+  @Prop({ type: Number, default: null, min: 1, validate: nullableSafeInteger })
+  monthlyDownloadGrants!: number | null;
+
+  @Prop({ type: Number, default: null, min: 1, validate: nullableSafeInteger })
+  monthlyEstimatedDownloadBytes!: number | null;
+
+  @Prop({ type: Number, default: null, min: 1, validate: nullableSafeInteger })
+  maxRetainedOutputBytes!: number | null;
+
+  @Prop({
+    type: Number,
+    default: null,
+    min: 1,
+    max: 600,
+    validate: nullableSafeInteger,
+  })
+  signedUrlTtlSeconds!: number | null;
+
   @Prop({ type: Date, default: null })
   expiresAt!: Date | null;
 
@@ -175,3 +230,7 @@ AccountPolicyOverrideSchema.index(
   { accountId: 1 },
   { unique: true, name: 'account_policy_override_unique_account' },
 );
+
+function nullableSafeInteger(value: number | null): boolean {
+  return value === null || Number.isSafeInteger(value);
+}

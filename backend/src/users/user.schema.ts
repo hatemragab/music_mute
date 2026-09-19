@@ -96,6 +96,15 @@ export class User {
     min: 0,
     validate: Number.isSafeInteger,
   })
+  retainedOutputBytes!: number;
+
+  @Prop({
+    type: Number,
+    required: true,
+    default: 0,
+    min: 0,
+    validate: Number.isSafeInteger,
+  })
   sessionsRevokedAfterSec!: number;
 
   @Prop({ required: true, type: Date })

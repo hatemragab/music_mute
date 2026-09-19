@@ -5,6 +5,28 @@ export interface UtcMonthPeriod {
   purgeAt: Date;
 }
 
+export interface UtcDayPeriod {
+  key: string;
+  start: Date;
+  end: Date;
+  purgeAt: Date;
+}
+
+export function utcDayPeriod(now: Date): UtcDayPeriod {
+  if (!Number.isFinite(now.getTime())) throw new Error('Invalid usage date');
+  const start = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  const purgeAt = new Date(end.getTime() + 35 * 24 * 60 * 60 * 1000);
+  return {
+    key: start.toISOString().slice(0, 10),
+    start,
+    end,
+    purgeAt,
+  };
+}
+
 export function utcMonthPeriod(now: Date): UtcMonthPeriod {
   if (!Number.isFinite(now.getTime())) throw new Error('Invalid usage date');
   const year = now.getUTCFullYear();
@@ -25,6 +47,17 @@ export function usagePeriodId(
   key: string,
 ) {
   return `${accountId.toHexString()}:${key}`;
+}
+
+export function usageDayId(accountId: { toHexString(): string }, key: string) {
+  return `${accountId.toHexString()}:${key}`;
+}
+
+export function uploadGrantReceiptId(
+  accountId: { toHexString(): string },
+  requestId: string,
+) {
+  return `${accountId.toHexString()}:upload:${requestId}`;
 }
 
 export interface ProcessingUsageCounters {

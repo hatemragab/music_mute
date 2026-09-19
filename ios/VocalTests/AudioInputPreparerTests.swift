@@ -14,11 +14,11 @@ final class AudioInputPreparerTests: XCTestCase {
 
   func testStrictDeclarationBoundaries() {
     XCTAssertTrue(validProcessingInput(bytes: 1, duration: 0.001))
-    XCTAssertTrue(validProcessingInput(bytes: 29_999_999, duration: 599.999))
-    for bytes: Int64 in [0, -1, 30_000_000] {
+    XCTAssertTrue(validProcessingInput(bytes: 50_000_000, duration: 1_200))
+    for bytes: Int64 in [0, -1, 50_000_001] {
       XCTAssertFalse(validProcessingInput(bytes: bytes, duration: 1))
     }
-    for duration in [0, -1, 600, Double.infinity, Double.nan] {
+    for duration in [0, -1, 1_200.001, Double.infinity, Double.nan] {
       XCTAssertFalse(validProcessingInput(bytes: 1, duration: duration))
     }
   }
@@ -76,7 +76,7 @@ final class AudioInputPreparerTests: XCTestCase {
       try await low.prepare(sourceURL: source, ownerUid: "owner", securityScoped: false)
     }
     let handle = try FileHandle(forWritingTo: source)
-    try handle.truncate(atOffset: 30_000_000)
+    try handle.truncate(atOffset: 50_000_001)
     try handle.close()
     await expect(.invalidSize) {
       try await self.preparer().prepare(sourceURL: source, ownerUid: "owner", securityScoped: false)
@@ -93,7 +93,7 @@ final class AudioInputPreparerTests: XCTestCase {
       AudioInputInspection(
         duration: .nan, hasAudio: true, hasVideo: false, isPlayable: true, container: .mp4),
       AudioInputInspection(
-        duration: 600, hasAudio: true, hasVideo: false, isPlayable: true, container: .mp4),
+        duration: 1_200.001, hasAudio: true, hasVideo: false, isPlayable: true, container: .mp4),
       AudioInputInspection(
         duration: 1, hasAudio: true, hasVideo: false, isPlayable: false, container: .mp4),
       AudioInputInspection(

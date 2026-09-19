@@ -24,6 +24,7 @@ class TasksFixture {
   async updateOne(
     filter: {
       key?: string;
+      versionId?: string | null;
       _id?: Types.ObjectId;
       leaseToken?: string;
       settleUntil?: Date;
@@ -34,6 +35,8 @@ class TasksFixture {
     let item = this.records.find(
       (entry) =>
         (filter.key === undefined || entry.key === filter.key) &&
+        (filter.versionId === undefined ||
+          (entry.versionId ?? null) === filter.versionId) &&
         (filter._id === undefined || entry._id.equals(filter._id)) &&
         (filter.leaseToken === undefined ||
           entry.leaseToken === filter.leaseToken) &&
@@ -104,6 +107,7 @@ class TasksFixture {
 
 function setup(
   results: Array<{ complete: boolean; deleted: number } | Error> = [],
+  exactResults: Array<undefined | Error> = [],
 ) {
   const tasks = new TasksFixture();
   const sweepVersionsForKey = vi.fn(async () => {
@@ -111,11 +115,18 @@ function setup(
     if (result instanceof Error) throw result;
     return result;
   });
+  const deleteExactVersion = vi.fn(async () => {
+    const result = exactResults.shift();
+    if (result instanceof Error) throw result;
+  });
   const service = new StorageCleanupService(
     tasks as unknown as Model<StorageCleanupTask>,
-    { sweepVersionsForKey } as unknown as StorageTransfersService,
+    {
+      sweepVersionsForKey,
+      deleteExactVersion,
+    } as unknown as StorageTransfersService,
   );
-  return { service, tasks, sweepVersionsForKey };
+  return { service, tasks, sweepVersionsForKey, deleteExactVersion };
 }
 
 describe('StorageCleanupService', () => {
@@ -175,9 +186,32 @@ describe('StorageCleanupService', () => {
     expect(tasks.records).toHaveLength(1);
     expect(tasks.records[0]).toMatchObject({
       key,
+      versionId: null,
       attempts: 0,
       nextAt: due,
       settleUntil: new Date(due.getTime() + 40_000),
+    });
+  });
+
+  it('leases and completes one exact immutable version without a key sweep', async () => {
+    const { service, tasks, sweepVersionsForKey, deleteExactVersion } = setup();
+    await service.schedule({
+      key,
+      versionId: 'version-1',
+      ownerUserId: owner,
+      reason: 'AUDIO_INPUT_EXPIRED',
+      nextAt: due,
+      settleUntil: due,
+    });
+
+    await expect(service.cleanupDue(due)).resolves.toBe(true);
+
+    expect(deleteExactVersion).toHaveBeenCalledWith(key, 'version-1');
+    expect(sweepVersionsForKey).not.toHaveBeenCalled();
+    expect(tasks.records[0]).toMatchObject({
+      completedAt: due,
+      nextAt: null,
+      leaseToken: null,
     });
   });
 
@@ -273,5 +307,28 @@ describe('StorageCleanupService', () => {
       nextAt: new Date(due.getTime() + 30_000),
     });
     await expect(service.hasPendingForOwner(owner)).resolves.toBe(true);
+  });
+
+  it('keeps a permanent provider failure safely pending at bounded hourly retry', async () => {
+    const { service, tasks } = setup([], [new Error('access denied')]);
+    await service.schedule({
+      key,
+      versionId: 'version-1',
+      ownerUserId: owner,
+      reason: 'AUDIO_INPUT_EXPIRED',
+      nextAt: due,
+      settleUntil: due,
+    });
+    tasks.records[0].attempts = 19;
+
+    await expect(service.cleanupDue(due)).resolves.toBe(true);
+
+    expect(tasks.records[0]).toMatchObject({
+      attempts: 20,
+      completedAt: null,
+      leaseToken: null,
+      leaseUntil: null,
+      nextAt: new Date(due.getTime() + 3_600_000),
+    });
   });
 });

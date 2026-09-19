@@ -191,6 +191,9 @@ export class JobActionsService {
           .session(session)
           .lean();
         this.assertRetryable(original);
+        const originalAdmission = original.admissionSnapshot;
+        if (!originalAdmission)
+          throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
 
         const newJobId = new Types.ObjectId();
         const admissionSnapshot = await this.admission.assertNewWork(
@@ -198,14 +201,11 @@ export class JobActionsService {
           original.inputReservation,
           session,
           newJobId,
-          original.admissionSnapshot?.policyVersion === 2
-            ? {
-                policyVersion: 2,
-                preparationProfileId:
-                  original.admissionSnapshot.preparationProfileId,
-                source: original.admissionSnapshot.source,
-              }
-            : {},
+          {
+            policyVersion: 2,
+            preparationProfileId: originalAdmission.preparationProfileId,
+            source: originalAdmission.source,
+          },
         );
         const touched = await this.jobs.updateOne(
           {
@@ -225,6 +225,7 @@ export class JobActionsService {
             {
               _id: newJobId,
               userId: owner,
+              logicalAudioId: original.logicalAudioId,
               requestId,
               requestHash: hash,
               retryOfJobId: original._id,

@@ -95,6 +95,26 @@ Native apps -> TLS reverse proxy -> API (main.ts)
 - `deploy/` and Compose files: API-only VPS deployment preparation.
 - `AGENTS.md`: commands, conventions and boundaries for AI-assisted development.
 
+## Media usage and transfer contract
+
+Authenticated clients read `GET /api/v1/processing-usage`. Schema version 2 reports
+the UTC period, processing use/reservations/refunds, upload grant and confirmed-byte
+counters, result-grant and estimated-byte counters, retained-result bytes, effective
+media/transfer limits, reset times, and the safe admission reason. These counters
+belong to the account, not an installation.
+
+`POST /api/v1/jobs/:id/download-url` requires `artifact` plus a UUID-v4 `requestId`.
+Replaying the same still-valid request for the same immutable object does not charge
+again. A known-expired entitlement requires a new request ID. User result grants are
+charged to the account and service estimate; worker input grants affect only the
+service estimate. Presigned URLs are never persisted or logged.
+
+The global standard policy and selected per-account replacement values are managed
+through the existing audited admin settings and account-override routes. Overrides
+may replace processing, media, upload, download, retention, and signed-URL fields;
+omitted fields continue using the global value. Administrators change policy values,
+not raw usage counters or object metadata.
+
 Set the required `REDIS_URL`, just as you set `MONGODB_URI`:
 
 ```dotenv

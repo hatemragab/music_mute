@@ -62,7 +62,7 @@ struct YouTubeAudioService: AudioDownloading {
   /// resolves a supported direct audio URL. A persisted receipt is claimed first on relaunch.
   @MainActor func downloadForProcessing(
     videoID: String, id: UUID, ownerUid: String,
-    policy: ProcessingMediaPolicy = .legacy,
+    policy: ProcessingMediaPolicy = .standard,
     stage: @escaping @Sendable (DownloadStatus) -> Void,
     progress: @escaping @Sendable (DownloadProgress) -> Void
   ) async throws -> SavedAudio {
@@ -77,9 +77,7 @@ struct YouTubeAudioService: AudioDownloading {
     }
 
     stage(.resolving)
-    if policy.version == 2
-      && (policy.maxSourceDownloadBytes == nil || policy.maxSourceDownloadSeconds == nil)
-    {
+    if policy.maxSourceDownloadBytes == nil || policy.maxSourceDownloadSeconds == nil {
       throw AudioInputPreparationError.policyUnavailable
     }
     let resolved = try await resolve(videoID, policy: policy)

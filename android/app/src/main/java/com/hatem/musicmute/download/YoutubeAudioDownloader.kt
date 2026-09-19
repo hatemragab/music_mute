@@ -34,7 +34,7 @@ interface AudioDownloader {
     fun cancel(id: String)
 }
 
-class YoutubeAudioDownloader(private val context: Context, private val mediaPolicy: suspend () -> ProcessingMediaPolicy = { ProcessingMediaPolicy.LEGACY }) : AudioDownloader {
+class YoutubeAudioDownloader(private val context: Context, private val mediaPolicy: suspend () -> ProcessingMediaPolicy = { ProcessingMediaPolicy.STANDARD }) : AudioDownloader {
     private val engineLock = Mutex()
     private var extractorVersion = "unknown"
     private var lastDownloadFinishedNanos = 0L
@@ -52,9 +52,10 @@ class YoutubeAudioDownloader(private val context: Context, private val mediaPoli
                 maintainExtractor(id)
                 val waitMillis = 5_000 - (System.nanoTime() - lastDownloadFinishedNanos) / 1_000_000
                 if (lastDownloadFinishedNanos != 0L && waitMillis > 0) delay(waitMillis)
-                val fetched = mediaPolicy()
-                val policy = if (fetched.youtubeExpansionReady && fetched.acceptNewJobs) fetched else ProcessingMediaPolicy.LEGACY
-                val maxBytes = policy.maxSourceDownloadBytes ?: 29_999_999L
+                val policy = mediaPolicy()
+                if (!policy.acceptNewJobs || !policy.youtubePreparationReady)
+                    throw JobsFailure(JobsProblem.PROCESSING_CAPACITY_UNAVAILABLE)
+                val maxBytes = policy.maxSourceDownloadBytes ?: throw JobsFailure(JobsProblem.PROCESSING_POLICY_INCOMPATIBLE)
                 val deadlineSeconds = (policy.maxSourceDownloadSeconds ?: 120L).coerceAtMost(3600)
                 val startedAt = System.nanoTime()
                 val bounds = SourceDownloadBounds(maxBytes, deadlineSeconds)
@@ -102,7 +103,7 @@ class YoutubeAudioDownloader(private val context: Context, private val mediaPoli
                         if (bounds.failure != null) throw boundsFailure()
                         val projected = response.out.lineSequence().firstOrNull { it.startsWith("{\"duration\"") }
                             ?: throw JobsFailure(JobsProblem.MEDIA_DURATION_UNKNOWN)
-                        policy.requireLongJobAvailable(YouTubePreflight.validateMetadata(projected, policy.maxDurationSeconds, policy.version == 2))
+                        policy.requireLongJobAvailable(YouTubePreflight.validateMetadata(projected, policy.maxDurationSeconds))
                         val request = createAudioRequest(url, directory).apply { addOption("--max-filesize", maxBytes.toString()) }
                         job.ensureActive()
                         if (bounds.failure != null) throw boundsFailure()

@@ -4,6 +4,7 @@ import {
   IsInt,
   IsISO8601,
   IsObject,
+  IsOptional,
   IsString,
   IsUUID,
   Length,
@@ -65,9 +66,24 @@ export class UpdateAccountPolicyDto extends AccountPolicyValuesDto {
 }
 
 export class AccountPolicyOverrideValuesDto {
+  @ValidateIf(
+    (object: AccountPolicyOverrideValuesDto, value: unknown) =>
+      value !== undefined ||
+      Object.values(object).every((candidate) => candidate === undefined),
+  )
   @IsInt()
   @Min(1)
-  monthlyProcessingSeconds!: number;
+  monthlyProcessingSeconds?: number;
+  @IsOptional() @IsInt() @Min(1) maxDurationSeconds?: number;
+  @IsOptional() @IsInt() @Min(1) maxPreparedAudioBytes?: number;
+  @IsOptional() @IsInt() @Min(1) dailyUploadGrants?: number;
+  @IsOptional() @IsInt() @Min(1) monthlyUploadGrants?: number;
+  @IsOptional() @IsInt() @Min(1) monthlyConfirmedUploadBytes?: number;
+  @IsOptional() @IsInt() @Min(1) maxClientInputAttempts?: number;
+  @IsOptional() @IsInt() @Min(1) monthlyDownloadGrants?: number;
+  @IsOptional() @IsInt() @Min(1) monthlyEstimatedDownloadBytes?: number;
+  @IsOptional() @IsInt() @Min(1) maxRetainedOutputBytes?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(600) signedUrlTtlSeconds?: number;
 }
 
 export class PutAccountPolicyOverrideDto {

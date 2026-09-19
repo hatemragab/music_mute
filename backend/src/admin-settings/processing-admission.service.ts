@@ -5,7 +5,11 @@ import { trusted, type ClientSession, type Model, type Types } from 'mongoose';
 import { Job } from '../jobs/job.schema.js';
 import { ACTIVE_ADMISSION_STATUSES } from '../jobs/job-state.js';
 import { jobError } from '../jobs/job-errors.js';
-import type { AdmissionSnapshot, InputDeclaration } from '../jobs/job.types.js';
+import {
+  PREPARATION_PROFILE_ID,
+  type AdmissionSnapshot,
+  type InputDeclaration,
+} from '../jobs/job.types.js';
 import type { JobMetadata } from '../jobs/job-metadata.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { User } from '../users/user.schema.js';
@@ -76,20 +80,27 @@ export class ProcessingAdmissionService {
     )
       throw jobError('PROCESSING_UNAVAILABLE');
 
-    const v2 = metadata.policyVersion === 2;
+    if (
+      metadata.policyVersion !== 2 ||
+      metadata.preparationProfileId !== PREPARATION_PROFILE_ID ||
+      !['audio_file', 'video_file', 'youtube'].includes(metadata.source ?? '')
+    )
+      throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
     if (
       !Number.isSafeInteger(input.bytes) ||
       input.bytes < 1 ||
-      (v2
-        ? input.bytes > policy.values.maxPreparedAudioBytes
-        : input.bytes > policy.values.maxPreparedAudioBytes) ||
+      input.bytes > policy.values.maxPreparedAudioBytes ||
       !Number.isFinite(input.durationSeconds) ||
       input.durationSeconds <= 0 ||
-      (v2
-        ? input.durationSeconds > policy.values.maxDurationSeconds
-        : input.durationSeconds > policy.values.maxDurationSeconds)
+      input.durationSeconds > policy.values.maxDurationSeconds
     )
       throw jobError('PROCESSING_UNAVAILABLE');
+
+    await this.usage.assertRetainedCapacity(
+      accountId,
+      policy.values.maxRetainedOutputBytes,
+      session,
+    );
 
     const maximumActive = policy.values.maxProcessingJobs;
     const active = await this.jobs
@@ -109,18 +120,12 @@ export class ProcessingAdmissionService {
     );
 
     return {
-      ...(v2
-        ? {
-            policyVersion: 2 as const,
-            maxDurationSeconds: policy.values.maxDurationSeconds,
-            maxInputBytes: policy.values.maxPreparedAudioBytes,
-            preparationProfileId: metadata.preparationProfileId,
-            source: metadata.source,
-          }
-        : { policyVersion: 1 as const }),
+      policyVersion: 2 as const,
+      maxDurationSeconds: policy.values.maxDurationSeconds,
+      maxInputBytes: policy.values.maxPreparedAudioBytes,
+      preparationProfileId: metadata.preparationProfileId,
+      source: metadata.source!,
       settingsRevision: policy.globalRevision,
-      maxInputBytesExclusive: policy.values.maxPreparedAudioBytes + 1,
-      maxDurationSecondsExclusive: policy.values.maxDurationSeconds + 1,
       maxActiveJobsPerUser: maximumActive,
       reservationExpiresAt: new Date(
         Date.now() +
@@ -138,13 +143,9 @@ export class ProcessingAdmissionService {
     if (snapshot.reservationExpiresAt.getTime() <= Date.now())
       throw jobError('UPLOAD_RESERVATION_EXPIRED');
     if (
-      snapshot.policyVersion === 2
-        ? actualBytes > (snapshot.maxInputBytes ?? 0) ||
-          job.inputReservation.durationSeconds >
-            (snapshot.maxDurationSeconds ?? 0)
-        : actualBytes >= snapshot.maxInputBytesExclusive ||
-          job.inputReservation.durationSeconds >=
-            snapshot.maxDurationSecondsExclusive
+      snapshot.policyVersion !== 2 ||
+      actualBytes > snapshot.maxInputBytes ||
+      job.inputReservation.durationSeconds > snapshot.maxDurationSeconds
     )
       throw jobError('PROCESSING_UNAVAILABLE');
     return snapshot;

@@ -21,15 +21,18 @@ interface JobsApi {
         input: InputDeclaration,
         metadata: CreateJobMetadata,
     ): CreateReservation = create(requestId, input)
-    suspend fun mediaPolicy(): ProcessingMediaPolicy = ProcessingMediaPolicy.LEGACY
+    suspend fun mediaPolicy(): ProcessingMediaPolicy = ProcessingMediaPolicy.STANDARD
     suspend fun processingUsage(): ProcessingUsage? = null
-    suspend fun renewUpload(id: String): UploadGrant
+    suspend fun renewUpload(id: String): UploadGrant = renewUpload(id, java.util.UUID.randomUUID().toString())
+    suspend fun renewUpload(id: String, requestId: String): UploadGrant = renewUpload(id)
     suspend fun confirmUpload(id: String): JobMutation
     suspend fun list(cursor: String? = null, status: String? = null): JobPage
     suspend fun detail(id: String): Job
     suspend fun cancel(id: String): JobMutation
     suspend fun retry(id: String, requestId: String): JobMutation
     suspend fun download(id: String, artifact: String): DownloadGrant
+    suspend fun download(id: String, artifact: String, requestId: String): DownloadGrant =
+        download(id, artifact)
     suspend fun rename(id: String, displayName: String): Job = throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE)
     suspend fun delete(id: String) { throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE) }
     suspend fun reportClientError(report: ClientErrorReport): ClientErrorAccepted =
@@ -79,14 +82,17 @@ class JobsApiClient(
     override suspend fun mediaPolicy(): ProcessingMediaPolicy = try {
         ProcessingMediaPolicy.parse(request("GET", "/processing-policy?schemaVersion=2"))
     } catch (error: JobsFailure) {
-        if (error.problem in setOf(JobsProblem.JOB_NOT_FOUND, JobsProblem.OFFLINE)) ProcessingMediaPolicy.LEGACY else throw error
+        if (error.problem in setOf(JobsProblem.JOB_NOT_FOUND, JobsProblem.OFFLINE)) ProcessingMediaPolicy.STANDARD else throw error
     }
 
     override suspend fun processingUsage(): ProcessingUsage? =
         decode<ProcessingUsage>(request("GET", "/processing-usage")).also { it.validate() }
 
-    override suspend fun renewUpload(id: String): UploadGrant =
-        decode<UploadGrant>(request("POST", "${path(id)}/upload-url", "{}", true)).also(::validateUpload)
+    override suspend fun renewUpload(id: String, requestId: String): UploadGrant {
+        uuid(requestId)
+        return decode<UploadGrant>(request("POST", "${path(id)}/upload-url",
+            buildJsonObject { put("requestId", requestId) }.toString(), true)).also(::validateUpload)
+    }
 
     override suspend fun confirmUpload(id: String): JobMutation =
         decode(request("POST", "${path(id)}/upload-complete", "{}", true))
@@ -112,8 +118,16 @@ class JobsApiClient(
     }
 
     override suspend fun download(id: String, artifact: String): DownloadGrant {
+        return download(id, artifact, java.util.UUID.randomUUID().toString())
+    }
+
+    override suspend fun download(id: String, artifact: String, requestId: String): DownloadGrant {
         if (artifact !in setOf("input", "output")) invalidInput()
-        return decode<DownloadGrant>(request("POST", "${path(id)}/download-url", buildJsonObject { put("artifact", artifact) }.toString())).also { validateUrl(it.url) }
+        uuid(requestId)
+        return decode<DownloadGrant>(request("POST", "${path(id)}/download-url", buildJsonObject {
+            put("artifact", artifact)
+            put("requestId", requestId)
+        }.toString())).also { validateUrl(it.url) }
     }
 
     override suspend fun rename(id: String, displayName: String): Job =
@@ -185,8 +199,11 @@ class JobsApiClient(
 
     private fun failure(response: AuthHttpResponse): JobsFailure {
         val code = runCatching { json.parseToJsonElement(response.body).jsonObject["code"]?.jsonPrimitive?.content }.getOrNull()
-        val safeMediaProblem = JobsProblem.entries.find { it.name == code && (it.name.startsWith("MEDIA_") || it.name.startsWith("YOUTUBE_") || it.name.startsWith("PROCESSING_")) }
-        val problem = safeMediaProblem ?: when (response.status) {
+        val safeProblem = JobsProblem.entries.find {
+            it.name == code && (it.name.startsWith("MEDIA_") || it.name.startsWith("YOUTUBE_") ||
+                it.name.startsWith("PROCESSING_") || it in accountLimitProblems)
+        }
+        val problem = safeProblem ?: when (response.status) {
             400 -> JobsProblem.INVALID_INPUT
             401 -> JobsProblem.UNAUTHENTICATED
             403 -> JobsProblem.entries.find { it.name == code && it in policyProblems } ?: JobsProblem.POLICY_DENIED
@@ -226,6 +243,16 @@ class JobsApiClient(
 
     companion object {
         private val policyProblems = setOf(JobsProblem.ACCOUNT_DISABLED, JobsProblem.EMAIL_VERIFICATION_REQUIRED, JobsProblem.APP_UPDATE_REQUIRED, JobsProblem.PROFILE_SYNC_REQUIRED)
-        private val conflictProblems = setOf(JobsProblem.JOB_STATE_CONFLICT, JobsProblem.JOB_ACTIVE, JobsProblem.IDEMPOTENCY_CONFLICT, JobsProblem.UPLOAD_NOT_READY, JobsProblem.NEW_INPUT_REQUIRED, JobsProblem.PROFILE_SYNC_REQUIRED, JobsProblem.DEVICE_SYNC_REQUIRED, JobsProblem.DEVICE_REPORT_CONFLICT)
+        private val conflictProblems = setOf(JobsProblem.JOB_STATE_CONFLICT, JobsProblem.JOB_ACTIVE, JobsProblem.IDEMPOTENCY_CONFLICT, JobsProblem.UPLOAD_NOT_READY, JobsProblem.UPLOAD_RESERVATION_EXPIRED, JobsProblem.UPLOAD_BYTE_LIMIT_REACHED, JobsProblem.UPLOAD_ATTEMPT_LIMIT_REACHED, JobsProblem.NEW_INPUT_REQUIRED, JobsProblem.PROFILE_SYNC_REQUIRED, JobsProblem.DEVICE_SYNC_REQUIRED, JobsProblem.DEVICE_REPORT_CONFLICT)
+        private val accountLimitProblems = setOf(
+            JobsProblem.UPLOAD_GRANT_LIMIT_REACHED,
+            JobsProblem.UPLOAD_BYTE_LIMIT_REACHED,
+            JobsProblem.UPLOAD_ATTEMPT_LIMIT_REACHED,
+            JobsProblem.RETAINED_STORAGE_LIMIT_REACHED,
+            JobsProblem.DOWNLOAD_RESERVATION_EXPIRED,
+            JobsProblem.DOWNLOAD_GRANT_LIMIT_REACHED,
+            JobsProblem.DOWNLOAD_BYTE_LIMIT_REACHED,
+            JobsProblem.SERVICE_BANDWIDTH_LIMIT_REACHED,
+        )
     }
 }

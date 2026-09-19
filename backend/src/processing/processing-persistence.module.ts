@@ -5,8 +5,16 @@ import {
 import {
   AccountUsagePeriod,
   AccountUsagePeriodSchema,
+  AccountDailyUsagePeriod,
+  AccountDailyUsagePeriodSchema,
   ProcessingReservation,
   ProcessingReservationSchema,
+  UploadGrantReceipt,
+  UploadGrantReceiptSchema,
+  DownloadGrantReceipt,
+  DownloadGrantReceiptSchema,
+  ServiceUsagePeriod,
+  ServiceUsagePeriodSchema,
 } from '../processing-usage/processing-usage.schema.js';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -35,7 +43,14 @@ export const PROCESSING_MODELS = [
     schema: ProcessingAdmissionFenceSchema,
   },
   { name: AccountUsagePeriod.name, schema: AccountUsagePeriodSchema },
+  {
+    name: AccountDailyUsagePeriod.name,
+    schema: AccountDailyUsagePeriodSchema,
+  },
   { name: ProcessingReservation.name, schema: ProcessingReservationSchema },
+  { name: UploadGrantReceipt.name, schema: UploadGrantReceiptSchema },
+  { name: DownloadGrantReceipt.name, schema: DownloadGrantReceiptSchema },
+  { name: ServiceUsagePeriod.name, schema: ServiceUsagePeriodSchema },
   { name: ClientError.name, schema: ClientErrorSchema },
   { name: Job.name, schema: JobSchema },
   { name: JobError.name, schema: JobErrorSchema },

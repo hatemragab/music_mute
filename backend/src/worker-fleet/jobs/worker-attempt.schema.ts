@@ -74,7 +74,7 @@ const outputReservation = new MongoSchema<WorkerOutputReservation>(
       type: Number,
       required: true,
       min: 0.001,
-      max: 1800,
+      max: 1200,
     },
     grantExpiresAt: { type: Date, required: true },
   },

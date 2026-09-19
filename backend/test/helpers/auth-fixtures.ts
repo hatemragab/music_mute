@@ -273,7 +273,7 @@ export async function authFixture() {
             AWS_REGION: 'us-east-1',
             S3_BUCKET: 'fixture-bucket',
             AUDIO_PROCESSING_ENABLED: false,
-            PROCESSING_URL_SECONDS: 900,
+            PROCESSING_URL_SECONDS: 600,
             PROCESSING_OUTPUT_MAX_BYTES: 30_000_000,
           }),
         ],

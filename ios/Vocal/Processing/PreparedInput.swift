@@ -42,5 +42,5 @@ enum AudioInputPreparationError: Error, Equatable {
 }
 
 func validProcessingInput(bytes: Int64, duration: Double) -> Bool {
-  (1...29_999_999).contains(bytes) && duration.isFinite && duration > 0 && duration < 600
+  ProcessingMediaPolicy.standard.accepts(bytes: bytes, duration: duration)
 }

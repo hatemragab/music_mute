@@ -133,6 +133,9 @@ import XCTest
     try await restarted.resume(operationId: input.operationId)
     XCTAssertEqual(api.confirmCount, 1)
     XCTAssertEqual(api.renewCount, 2)
+    XCTAssertEqual(Set(api.renewRequestIds).count, 2)
+    let recovered = try await requiredOperation(input)
+    XCTAssertEqual(api.renewRequestIds.last, recovered.uploadGrantRequestId)
     XCTAssertEqual(transfers.started.count, 2)
   }
   func testFirstAuthenticatedBindingAdoptsExistingOwnerUploadAfterRestart() async throws {
@@ -315,6 +318,7 @@ import XCTest
   var expiredCreateGrant = false
   var confirmCount = 0
   var renewCount = 0
+  var renewRequestIds: [UUID] = []
   let id = "68c000000000000000000001"
   func grant(expired: Bool = false) -> UploadGrant {
     UploadGrant(
@@ -336,6 +340,10 @@ import XCTest
   func renewUpload(id: String) async throws -> UploadGrant {
     renewCount += 1
     return grant()
+  }
+  func renewUpload(id: String, requestId: UUID) async throws -> UploadGrant {
+    renewRequestIds.append(requestId)
+    return try await renewUpload(id: id)
   }
   func confirmUpload(id: String) async throws -> JobMutation {
     confirmCount += 1

@@ -78,9 +78,16 @@ test('processing documents commit together and abort without partial job or erro
   });
   assert.equal(await jobs.countDocuments({ _id: jobId }), 1);
   assert.equal(await errors.countDocuments({ jobId }), 1);
+  const boundedUsageModels = new Set([
+    'AccountUsagePeriod',
+    'AccountDailyUsagePeriod',
+    'ProcessingReservation',
+    'UploadGrantReceipt',
+    'DownloadGrantReceipt',
+    'ServiceUsagePeriod',
+  ]);
   for (const entry of PROCESSING_MODELS) {
-    if (['AccountUsagePeriod', 'ProcessingReservation'].includes(entry.name))
-      continue; // Compact closed usage and settled reservations have explicit bounded retention.
+    if (boundedUsageModels.has(entry.name)) continue; // Closed usage, settled reservations and idempotency receipts have bounded retention.
     const indexes = await connection.model(entry.name).listIndexes();
     assert.ok(
       indexes.every((index) => index.expireAfterSeconds === undefined),

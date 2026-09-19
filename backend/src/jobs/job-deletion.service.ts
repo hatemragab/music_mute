@@ -4,6 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
 import { trusted, type ClientSession, type Model } from 'mongoose';
 import { ProcessingTransactions } from '../processing/processing-transactions.js';
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { StorageTransfersService } from '../storage/storage-transfers.service.js';
 import { NotificationOutbox } from '../notifications/notification-outbox.schema.js';
 import { Job } from './job.schema.js';
@@ -23,6 +24,7 @@ export class JobDeletionService {
     private readonly outbox: Model<NotificationOutbox>,
     private readonly transactions: ProcessingTransactions,
     private readonly storage: StorageTransfersService,
+    private readonly usage: ProcessingUsageService,
     private readonly config: ConfigService,
   ) {}
 
@@ -41,7 +43,11 @@ export class JobDeletionService {
       const execution = job.currentExecution;
       // Allow existing upload grants to expire before sweeping unconfirmed versions.
       const graceMs =
-        (this.config.getOrThrow<number>('PROCESSING_URL_SECONDS') + 300) *
+        (Math.min(
+          600,
+          this.config.getOrThrow<number>('PROCESSING_URL_SECONDS'),
+        ) +
+          300) *
         1_000;
       const changed = await this.jobs.updateOne(
         { _id: id, userId: owner, revision: job.revision, deletedAt: null },
@@ -189,19 +195,22 @@ export class JobDeletionService {
           break;
         }
       }
-      const finished = complete;
-      await this.jobs.updateOne(
-        { _id: job._id, cleanupToken: token },
-        {
-          $set: {
-            cleanupToken: null,
-            cleanupLeaseUntil: null,
-            cleanupAttempts: 0,
-            cleanupNextAt: finished ? null : new Date(now.getTime() + 1_000),
-            cleanupCompletedAt: finished ? new Date() : null,
+      if (complete) {
+        await this.completeCleanup(job._id, token, now);
+      } else {
+        await this.jobs.updateOne(
+          { _id: job._id, cleanupToken: token },
+          {
+            $set: {
+              cleanupToken: null,
+              cleanupLeaseUntil: null,
+              cleanupAttempts: 0,
+              cleanupNextAt: new Date(now.getTime() + 1_000),
+              cleanupCompletedAt: null,
+            },
           },
-        },
-      );
+        );
+      }
     } catch {
       const failures = Math.min((job.cleanupAttempts ?? 0) + 1, 20);
       await this.jobs.updateOne(
@@ -219,5 +228,42 @@ export class JobDeletionService {
       );
     }
     return true;
+  }
+
+  private async completeCleanup(
+    jobId: Job['_id'],
+    token: string,
+    now: Date,
+  ): Promise<void> {
+    await this.transactions.run(async (session) => {
+      const current = await this.jobs
+        .findOne({ _id: jobId, cleanupToken: token })
+        .session(session)
+        .lean();
+      if (!current) throw new Error('Cleanup lease lost');
+      await this.usage.releaseRetainedOutput(current, session);
+      const releasesRetainedOutput = Boolean(
+        current.outputObject &&
+        current.retainedOutputAccountedAt &&
+        !current.retainedOutputReleasedAt,
+      );
+      const updated = await this.jobs.updateOne(
+        { _id: jobId, cleanupToken: token },
+        {
+          $set: {
+            cleanupToken: null,
+            cleanupLeaseUntil: null,
+            cleanupAttempts: 0,
+            cleanupNextAt: null,
+            cleanupCompletedAt: now,
+            ...(releasesRetainedOutput
+              ? { retainedOutputReleasedAt: now }
+              : {}),
+          },
+        },
+        { session, runValidators: true },
+      );
+      if (updated.modifiedCount !== 1) throw new Error('Cleanup lease lost');
+    });
   }
 }

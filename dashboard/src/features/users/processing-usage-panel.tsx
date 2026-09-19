@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AccountUsage } from "@/api/contracts";
+import type { AccountPolicyOverride, AccountUsage } from "@/api/contracts";
 import { createOperationId } from "@/api/api-client";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { ErrorState, LoadingState, PageSection } from "@/components/page";
@@ -17,6 +17,12 @@ import { AccountPolicyOverrideDialog } from "./account-policy-override-dialog";
 
 const minutes = (value: number) =>
   `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value / 60)} min`;
+const bytes = (value: number) =>
+  new Intl.NumberFormat(undefined, {
+    style: "unit",
+    unit: "megabyte",
+    maximumFractionDigits: 2,
+  }).format(value / 1_000_000);
 
 export function ProcessingUsagePanel({ usage }: { usage: AccountUsage }) {
   const processing = usage.processing;
@@ -36,6 +42,39 @@ export function ProcessingUsagePanel({ usage }: { usage: AccountUsage }) {
           </div>
         ))}
       </dl>
+      <dl className="grid gap-4 border-t pt-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[
+          [
+            "Upload grants today",
+            `${usage.uploads.dailyGrants} / ${usage.uploads.dailyGrantLimit}`,
+          ],
+          [
+            "Upload grants this month",
+            `${usage.uploads.monthlyGrants} / ${usage.uploads.monthlyGrantLimit}`,
+          ],
+          [
+            "Confirmed uploads",
+            `${bytes(usage.uploads.confirmedBytes)} / ${bytes(usage.uploads.monthlyByteLimit)}`,
+          ],
+          [
+            "Result grants this month",
+            `${usage.downloads.monthlyGrants} / ${usage.downloads.monthlyGrantLimit}`,
+          ],
+          [
+            "Estimated result transfer",
+            `${bytes(usage.downloads.estimatedBytes)} / ${bytes(usage.downloads.monthlyByteLimit)}`,
+          ],
+          [
+            "Retained successful results",
+            `${bytes(usage.storage.retainedBytes)} / ${bytes(usage.storage.limitBytes)}`,
+          ],
+        ].map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-xs text-muted-foreground">{label}</dt>
+            <dd className="mt-1 font-mono">{value}</dd>
+          </div>
+        ))}
+      </dl>
       <p className="text-sm">
         UTC period {usage.period.key}: {formatDateTime(usage.period.start)} →{" "}
         {formatDateTime(usage.period.end)}. Next reset{" "}
@@ -52,10 +91,7 @@ export function ProcessingUsagePanel({ usage }: { usage: AccountUsage }) {
       {usage.policyOverride ? (
         <p className="rounded-lg border p-3 text-sm">
           Account override revision {usage.policyOverride.revision}:{" "}
-          {minutes(
-            usage.policyOverride.values.monthlyProcessingSeconds ??
-              processing.limitSeconds,
-          )}
+          {Object.keys(usage.policyOverride.values).length} replacement value(s)
           {usage.policyOverride.expiresAt
             ? ` · Expires ${formatDateTime(usage.policyOverride.expiresAt)}`
             : " · No expiry"}
@@ -92,7 +128,7 @@ export function ProcessingUsageSection({ userId }: { userId: string }) {
   const [clearingRevision, setClearingRevision] = useState<number | null>(null);
   const update = useMutation({
     mutationFn: (input: {
-      monthlyProcessingSeconds: number;
+      values: AccountPolicyOverride["values"];
       expiresAt: string | null;
       reason: string;
     }) => {
@@ -101,9 +137,7 @@ export function ProcessingUsageSection({ userId }: { userId: string }) {
           "Permission and a current override revision are required.",
         );
       return setAccountPolicyOverride(client, userId, {
-        values: {
-          monthlyProcessingSeconds: input.monthlyProcessingSeconds,
-        },
+        values: input.values,
         expiresAt: input.expiresAt,
         reason: input.reason,
         operationId: createOperationId(),
@@ -183,7 +217,26 @@ export function ProcessingUsageSection({ userId }: { userId: string }) {
                 onOpenChange={(open) => {
                   if (!open) setEditingRevision(null);
                 }}
-                currentSeconds={usage.data.processing.limitSeconds}
+                currentValues={{
+                  monthlyProcessingSeconds: usage.data.processing.limitSeconds,
+                  maxDurationSeconds:
+                    usage.data.effectiveLimits.maxDurationSeconds,
+                  maxPreparedAudioBytes:
+                    usage.data.effectiveLimits.maxPreparedAudioBytes,
+                  dailyUploadGrants: usage.data.uploads.dailyGrantLimit,
+                  monthlyUploadGrants: usage.data.uploads.monthlyGrantLimit,
+                  monthlyConfirmedUploadBytes:
+                    usage.data.uploads.monthlyByteLimit,
+                  maxClientInputAttempts:
+                    usage.data.effectiveLimits.maxClientInputAttempts,
+                  monthlyDownloadGrants: usage.data.downloads.monthlyGrantLimit,
+                  monthlyEstimatedDownloadBytes:
+                    usage.data.downloads.monthlyByteLimit,
+                  maxRetainedOutputBytes: usage.data.storage.limitBytes,
+                  signedUrlTtlSeconds:
+                    usage.data.effectiveLimits.signedUrlTtlSeconds,
+                }}
+                currentOverride={usage.data.policyOverride?.values ?? {}}
                 currentExpiry={usage.data.policyOverride?.expiresAt ?? null}
                 reauthenticate={reauthenticate}
                 onSave={(input) =>

@@ -38,7 +38,14 @@ describe('account policy', () => {
       plan: 'standard',
       revision: 0,
       values: DEFAULT_ACCOUNT_POLICY_VALUES,
-      enforcedFeatures: ['processing_minutes'],
+      enforcedFeatures: [
+        'processing_minutes',
+        'media_limits',
+        'upload_limits',
+        'download_limits',
+        'retained_storage',
+        'service_outbound',
+      ],
       updatedBy: 'system',
     });
   });
@@ -90,6 +97,9 @@ describe('account policy', () => {
       override: {
         revision: 2,
         monthlyProcessingSeconds: 14_400,
+        monthlyUploadGrants: 300,
+        monthlyEstimatedDownloadBytes: 12_000_000_000,
+        maxRetainedOutputBytes: 2_000_000_000,
         expiresAt: new Date(now.getTime() + 1),
       },
     });
@@ -98,7 +108,13 @@ describe('account policy', () => {
     ).resolves.toMatchObject({
       source: 'account_override',
       overrideRevision: 2,
-      values: { monthlyProcessingSeconds: 14_400 },
+      values: {
+        monthlyProcessingSeconds: 14_400,
+        monthlyUploadGrants: 300,
+        monthlyEstimatedDownloadBytes: 12_000_000_000,
+        maxRetainedOutputBytes: 2_000_000_000,
+        signedUrlTtlSeconds: 600,
+      },
     });
     const expired = fixture({
       global,
