@@ -147,3 +147,52 @@ sudo node dist/src/cli/main.js macos doctor \
 pointer. Versioned releases, the credential, model cache and job-state root are
 preserved for explicit recovery or separately authorized deletion. Automated
 fleet updates and destructive state removal are not part of this command.
+
+## Windows private release and service
+
+Build Windows packages only on native x86_64 Windows from already-qualified
+private Node, Python 3.12/DirectML and offline FFmpeg roots. The packager audits
+every executable as PE32+ x86_64, rejects links, and records every release file
+by byte count and SHA-256. WinSW 2.12.0 is the stable pinned service wrapper;
+the helper downloads only its official x64 asset and license and verifies their
+fixed hashes.
+
+```powershell
+powershell.exe -NoProfile -File .\scripts\build-windows-service-runtime.ps1 `
+  -OutputPath C:\MusicMuteBuild\winsw-runtime
+pnpm run build
+node .\dist\src\cli\main.js windows package `
+  --worker-root C:\src\music_remover\worker `
+  --output C:\MusicMuteBuild\musicmute-worker-0.1.0-win `
+  --version 0.1.0-win `
+  --node-root C:\MusicMuteBuild\node `
+  --python-root C:\MusicMuteBuild\python `
+  --media-root C:\MusicMuteBuild\media-runtime `
+  --service-root C:\MusicMuteBuild\winsw-runtime
+```
+
+From an elevated PowerShell prompt, the packaged manager installs or repairs
+the versioned release under `%ProgramData%\MusicMuteWorker`, applies restrictive
+ACLs, verifies the exact Kim model, writes a password-free LocalService WinSW
+definition, and rolls back the definition if its local doctor fails. The
+runtime config must select exactly one DirectML slot on adapter `0` and use the
+matching versioned runtime paths plus the stable state paths.
+
+```powershell
+powershell.exe -NoProfile -File C:\MusicMuteBuild\musicmute-worker-0.1.0-win\installer\manage-windows-service.ps1 `
+  -Action Install `
+  -Release C:\MusicMuteBuild\musicmute-worker-0.1.0-win `
+  -Config C:\MusicMutePrivate\runtime.json `
+  -Credential C:\MusicMutePrivate\machine.credential `
+  -ModelSource C:\MusicMutePrivate\Kim_Vocal_2.onnx
+
+powershell.exe -NoProfile -File C:\MusicMuteBuild\musicmute-worker-0.1.0-win\installer\manage-windows-service.ps1 -Action Doctor
+```
+
+`Repair` accepts the same four private inputs. `Uninstall` removes only the
+Windows Service definition, stable wrapper and active-release marker; releases,
+credentials, models and job state remain preserved. The scripts never bypass
+PowerShell policy, alter global Node/Python, or install/replace a GPU driver.
+Local package tests do not prove LocalService GPU access, logged-out operation,
+restart/reboot recovery, live S3, or actual Z440 execution; those stay `NOT_RUN`
+until the owner-authorized Windows host run.

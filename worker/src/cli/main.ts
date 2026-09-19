@@ -13,6 +13,11 @@ import {
   macosCommandErrorSummary,
   runMacosCommand,
 } from "../platform/macos/cli.js";
+import {
+  WINDOWS_USAGE,
+  runWindowsCommand,
+  windowsCommandErrorSummary,
+} from "../platform/windows/cli.js";
 
 const command = process.argv[2];
 
@@ -43,6 +48,15 @@ if (command === "protocol-doctor") {
   } catch (error) {
     console.error(
       `MusicMute macOS service command: FAILED (${macosCommandErrorSummary(error)})\n${MACOS_USAGE}`,
+    );
+    process.exitCode = 1;
+  }
+} else if (command === "windows") {
+  try {
+    await runWindowsCommand(process.argv.slice(3));
+  } catch (error) {
+    console.error(
+      `MusicMute Windows service command: FAILED (${windowsCommandErrorSummary(error)})\n${WINDOWS_USAGE}`,
     );
     process.exitCode = 1;
   }
@@ -103,7 +117,7 @@ if (command === "protocol-doctor") {
   }
 } else {
   console.error(
-    "Usage: musicmute-worker <protocol-doctor | run --config <absolute-path> | macos ...>",
+    "Usage: musicmute-worker <protocol-doctor | run --config <absolute-path> | macos ... | windows ...>",
   );
   process.exitCode = 2;
 }

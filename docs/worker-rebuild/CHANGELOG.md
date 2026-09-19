@@ -1,5 +1,19 @@
 # Package changes
 
+## Revision 4.4
+
+- Started D5 with a native x86_64 PE audit, immutable Windows release format
+  and private package builder for Node, Python/DirectML, media and service
+  wrapper roots.
+- Pinned and digest-verified WinSW 2.12.0, added a password-free LocalService
+  definition and an elevated PowerShell install/repair/doctor/uninstall flow
+  with restrictive ACLs and local rollback.
+- Extended the runtime doctor to enforce the accepted Windows x86_64, Python
+  3.12, DirectML 1.24.4 and adapter-provider boundary while retaining exact
+  macOS checks.
+- Passed 49 TypeScript and 21 Python tests, but kept D5 unchecked because no
+  Windows package, PowerShell execution or real Z440 service run occurred.
+
 ## Revision 4.3
 
 - Added a reproducible native ARM64 media-runtime build pinned to FFmpeg 8.0.3

@@ -264,8 +264,8 @@ processing passed, proving runtime caches did not mutate the release.
 
 - macOS release/manifest/Mach-O/LaunchDaemon/installation tests: PASS;
 - full worker protocol drift, formatting, lint, typecheck and build: PASS;
-- complete TypeScript worker suite: PASS, 15 files and 39 tests;
-- complete Python engine suite: PASS, 19 tests;
+- complete TypeScript worker suite: PASS, 20 files and 49 tests;
+- complete Python engine suite: PASS, 21 tests;
 - real private Python CoreML provider profile and Kim pipeline: PASS;
 - reproducible offline FFmpeg/LAME build and complete private release: PASS;
 - packaged runtime doctor, real CoreML job and post-run immutability: PASS;
@@ -278,12 +278,57 @@ password was collected or embedded, and no logout/reboot was attempted. D4
 remains unchecked until the real LaunchDaemon flow passes; portable package and
 local execution evidence alone are not a completed service checkpoint.
 
+## D5 Windows runtime and service installation (in progress)
+
+- Added a native Windows x86_64 release builder and immutable manifest. It
+  accepts only prepared private Node, Python 3.12/DirectML, offline media and
+  service-wrapper roots; rejects links; verifies every file by byte count and
+  SHA-256; and PE-audits Node, Python, FFmpeg, FFprobe and the service wrapper as
+  x86_64 PE32+ executables.
+- Pinned the stable WinSW 2.12.0 x64 wrapper. Its official 18,243,033-byte
+  release asset matched SHA-256
+  `05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da`,
+  and its official license matched its independently pinned digest. The
+  PowerShell source builder fails closed on either mismatch.
+- Added a password-free WinSW definition using `LocalService`, absolute private
+  runtime paths, minimal environment, protected cache/temp roots, automatic
+  delayed start, bounded rolling logs and bounded restart policy.
+- Added one elevated PowerShell install/repair/doctor/uninstall entry point. It
+  serializes installers, validates the immutable release and exact one-slot
+  DirectML adapter-0 config, applies SID-based ACLs, installs the exact Kim
+  artifact, keeps releases versioned, and restores the prior service definition
+  when candidate diagnostics fail. Uninstall preserves releases, credentials,
+  models and job state.
+- Generalized the private runtime doctor without weakening macOS checks. The
+  Windows path accepts only Windows x86_64, Python 3.12,
+  `onnxruntime-directml==1.24.4`, `audio-separator==0.47.0`,
+  `DmlExecutionProvider`, the exact model and the offline FFmpeg capability set;
+  conflicting ONNX Runtime distributions fail closed.
+
+### D5 verification and current blocker
+
+- Windows PE/manifest/builder/service-definition/PowerShell fixture tests:
+  PASS, 5 files and 10 tests;
+- full worker protocol drift, formatting, lint, typecheck and build: PASS;
+- complete TypeScript worker suite: PASS, 20 files and 49 tests;
+- complete Python engine suite, including accepted DirectML host selection:
+  PASS, 21 tests;
+- WinSW official asset/license download and pinned digest comparison: PASS;
+- native PowerShell parsing and execution: NOT_RUN on this macOS host;
+- complete private Windows package, restrictive ACL inspection, LocalService
+  DirectML access, exact RX 580 selection, real inference, restart/logged-out
+  behavior, live backend/S3 job, rollback and reboot: NOT_RUN.
+
+D5 remains unchecked. The code and cross-platform fixtures are implementation
+evidence only; owner-authorized access to the accepted Windows host and a fully
+prepared private Windows runtime are still required for service acceptance.
+
 ## Limits
 
 This is local protocol/pipeline/runtime evidence. It does not prove live S3 or
-deployed-backend integration, WebSocket hints, service-account operation,
-installation, logged-out behavior, reboot survival, DirectML service
-execution, denoise listening quality or release readiness. D4 must package the
-accepted native ARM64 Python
-3.13/CoreML environment; the system Python 3.14 used for D1 protocol tests is
-not a runtime qualification.
+deployed-backend integration, WebSocket hints, accepted-platform service
+accounts, installation, logged-out behavior, reboot survival, DirectML service
+execution, denoise listening quality or release readiness. The D4 portable Mac
+runtime is qualified locally, but its LaunchDaemon acceptance is not. D5 tooling
+has only fixture/static evidence; no Windows package or service result is
+claimed.

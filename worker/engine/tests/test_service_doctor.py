@@ -7,12 +7,31 @@ from unittest import mock
 
 from musicmute_engine.service_doctor import (
     ServiceDoctorError,
+    accepted_runtime,
     executable_version,
     validate_media_runtime,
 )
 
 
 class ServiceDoctorTests(unittest.TestCase):
+    def test_accepts_only_the_declared_directml_host(self) -> None:
+        with (
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch("platform.machine", return_value="AMD64"),
+        ):
+            self.assertEqual(
+                accepted_runtime("directml"),
+                ("win32", "x64", "onnxruntime-directml", "DmlExecutionProvider"),
+            )
+
+    def test_rejects_directml_on_the_wrong_host(self) -> None:
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("platform.machine", return_value="arm64"),
+        ):
+            with self.assertRaisesRegex(ServiceDoctorError, "Windows x86_64"):
+                accepted_runtime("directml")
+
     def test_executable_version_is_bounded_and_sanitized(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             executable = Path(directory) / "ffmpeg"

@@ -5,7 +5,7 @@
   "checkpoint_count": 36,
   "package_file_count_including_sha256sums": 41,
   "sha256_covered_file_count": 40,
-  "relative_markdown_links_checked": 50,
+  "relative_markdown_links_checked": 51,
   "reference_sha256": "b376a185d24811560fbc6cc681542517e61130a6d737077360ace5f502a32f1d",
   "reference_line_ranges_verified": {
     "trim_vocal_gaps": [
@@ -61,9 +61,10 @@
     "d2_recipe_pipeline": "PASS",
     "d3_backend_execution": "PASS",
     "d4_macos_service": "BLOCKED",
+    "d5_windows_tooling": "PASS_LOCAL_ONLY",
     "d5_windows_service": "NOT_RUN",
     "d6_safety_and_adapter_boundaries": "NOT_RUN",
     "evidence": "../evidence/D-runtime.md"
   },
-  "scope": "Documentation/source-reference checks, sanitized real M4 Pro/CoreML and Z440 RX 580/DirectML feasibility runs, local C1-C6 backend verification, local D1-D3 runtime verification, reproducible offline FFmpeg/LAME and complete D4 macOS private-package verification, local D4 service-tool and post-run immutability verification, local HTTP ownership/transfer integration, and real private-Python M4/CoreML pipeline/provider verification; no production infrastructure, live S3, WebSocket hints or accepted-platform system-service tests."
+  "scope": "Documentation/source-reference checks, sanitized real M4 Pro/CoreML and Z440 RX 580/DirectML feasibility runs, local C1-C6 backend verification, local D1-D3 runtime verification, reproducible offline FFmpeg/LAME and complete D4 macOS private-package verification, local D4 service-tool and post-run immutability verification, local D5 Windows package/service-tool fixtures and exact provider-lock validation, local HTTP ownership/transfer integration, and real private-Python M4/CoreML pipeline/provider verification; no production infrastructure, live S3, WebSocket hints, native PowerShell execution, Windows service package, or accepted-platform system-service tests."
 }
