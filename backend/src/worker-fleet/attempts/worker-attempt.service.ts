@@ -496,6 +496,7 @@ export class WorkerAttemptService {
       !recipe ||
       recipe.recipeId !== dto.recipeId ||
       recipe.recipeRevision !== dto.recipeRevision ||
+      recipe.recipeDigest !== dto.recipeDigest ||
       recipe.modelDigest !== dto.modelDigest ||
       recipe.trimEnabled !== dto.trimEnabled ||
       recipe.denoiseEnabled !== dto.denoiseEnabled ||

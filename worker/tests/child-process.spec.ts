@@ -30,7 +30,15 @@ describe("worker child lifecycle", () => {
     const ready = await child.start();
     expect(ready.type).toBe("ready");
     expect(ready.incarnation).toBe(child.incarnation);
-    expect(ready.payload).toEqual({ processCapacity: 1 });
+    expect(ready.payload).toEqual({
+      processCapacity: 1,
+      recipeIds: [
+        "kim-vocals-denoise-trim-v1",
+        "kim-vocals-denoise-v1",
+        "kim-vocals-trim-v1",
+        "kim-vocals-v1",
+      ],
+    });
 
     const pong = await child.request("ping", {});
     expect(pong.type).toBe("result");
@@ -42,7 +50,7 @@ describe("worker child lifecycle", () => {
     expect(cancellation.payload.cancelled).toBe(false);
   });
 
-  it("reports D2 processing as explicitly unavailable instead of faking it", async () => {
+  it("rejects a process request that does not match the D2 contract", async () => {
     child = new WorkerChildProcess({
       command: process.platform === "win32" ? "python" : "python3",
       args: ["-m", "musicmute_engine.child"],
@@ -54,7 +62,7 @@ describe("worker child lifecycle", () => {
     await child.start();
     await expect(child.request("process", {})).rejects.toEqual(
       expect.objectContaining<Partial<ChildCommandError>>({
-        code: "PROCESSING_NOT_IMPLEMENTED",
+        code: "INVALID_REQUEST",
       }),
     );
   });

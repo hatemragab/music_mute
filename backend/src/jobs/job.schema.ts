@@ -13,6 +13,10 @@ import type {
 } from './job.types.js';
 import { isSha256 } from './job-state.js';
 import { isAudioName, YOUTUBE_SOURCE_URL_PATTERN } from './job-metadata.js';
+import {
+  WORKER_RECIPE_IDS,
+  WORKER_RECIPE_STEP_IDS,
+} from '../worker-fleet/protocol/v1/protocol.js';
 
 const objectIdentity = new MongoSchema<ObjectIdentity>(
   {
@@ -111,7 +115,7 @@ const safeError = new MongoSchema<SafeJobError>(
 
 const workerRecipeSnapshot = new MongoSchema<WorkerRecipeSnapshot>(
   {
-    recipeId: { type: String, required: true, enum: ['kim-vocal-2-v1'] },
+    recipeId: { type: String, required: true, enum: WORKER_RECIPE_IDS },
     recipeRevision: {
       type: Number,
       required: true,
@@ -119,6 +123,12 @@ const workerRecipeSnapshot = new MongoSchema<WorkerRecipeSnapshot>(
       validate: Number.isSafeInteger,
     },
     protocolVersion: { type: Number, required: true, enum: [1] },
+    recipeDigest: { type: String, required: true, match: /^[a-f0-9]{64}$/ },
+    modelFilename: {
+      type: String,
+      required: true,
+      enum: ['Kim_Vocal_2.onnx'],
+    },
     modelDigest: { type: String, required: true, match: /^[a-f0-9]{64}$/ },
     modelBytes: {
       type: Number,
@@ -126,8 +136,32 @@ const workerRecipeSnapshot = new MongoSchema<WorkerRecipeSnapshot>(
       min: 1,
       validate: Number.isSafeInteger,
     },
+    preparationProfileId: {
+      type: String,
+      required: true,
+      enum: ['pcm16-stereo-44100-v1'],
+    },
+    stepIds: {
+      type: [{ type: String, enum: WORKER_RECIPE_STEP_IDS }],
+      required: true,
+      validate: (value: string[]) =>
+        Array.isArray(value) &&
+        value.length >= 4 &&
+        value.length <= 6 &&
+        new Set(value).size === value.length,
+    },
     trimEnabled: { type: Boolean, required: true },
     denoiseEnabled: { type: Boolean, required: true },
+    denoisePresetId: {
+      type: String,
+      enum: ['afftdn-conservative-v1', null],
+      default: null,
+    },
+    trimProfileId: {
+      type: String,
+      enum: ['trim-vocal-gaps-v1', null],
+      default: null,
+    },
     outputFormat: { type: String, required: true, enum: ['mp3'] },
     outputBitrateKbps: { type: Number, required: true, enum: [192] },
   },

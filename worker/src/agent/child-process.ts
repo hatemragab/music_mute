@@ -36,8 +36,15 @@ interface PendingRequest {
 }
 
 export class ChildCommandError extends Error {
-  constructor(readonly code: string) {
-    super(`Worker child command failed: ${code}`);
+  constructor(
+    readonly code: string,
+    readonly summary?: string,
+  ) {
+    super(
+      summary
+        ? `Worker child command failed: ${code} (${summary})`
+        : `Worker child command failed: ${code}`,
+    );
     this.name = "ChildCommandError";
   }
 }
@@ -220,7 +227,11 @@ export class WorkerChildProcess {
             typeof message.payload.code === "string"
               ? message.payload.code.slice(0, 100)
               : "CHILD_ERROR";
-          pending.reject(new ChildCommandError(code));
+          const summary =
+            typeof message.payload.summary === "string"
+              ? message.payload.summary.slice(0, 200)
+              : undefined;
+          pending.reject(new ChildCommandError(code, summary));
         } else {
           pending.resolve(message);
         }

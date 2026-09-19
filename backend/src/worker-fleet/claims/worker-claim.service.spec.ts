@@ -50,7 +50,7 @@ function fixture() {
         acceptClaims: true,
         recipes: [
           {
-            recipeId: 'kim-vocal-2-v1',
+            recipeId: 'kim-vocals-trim-v1',
             enabled: true,
             maxSlotsPerMachine: 1,
           },
@@ -112,7 +112,7 @@ const activeMachine = {
       platform: 'darwin-arm64',
       provider: 'coreml',
       gpuId: 'gpu0',
-      recipeIds: ['kim-vocal-2-v1'],
+      recipeIds: ['kim-vocals-trim-v1'],
       maxSlots: 1,
     },
   ],
@@ -154,7 +154,7 @@ describe('worker atomic claims', () => {
         _id: jobId,
         currentExecution: { attemptId },
         inputObject: { key: 'input', versionId: 'v1' },
-        recipeSnapshot: { recipeId: 'kim-vocal-2-v1' },
+        recipeSnapshot: { recipeId: 'kim-vocals-trim-v1' },
       }),
     );
     const result = await f.service.claim(principal, claimDto);
@@ -178,7 +178,7 @@ describe('worker atomic claims', () => {
         incarnation,
         state: 'idle',
         currentAttemptId: null,
-        allowedRecipeIds: ['kim-vocal-2-v1'],
+        allowedRecipeIds: ['kim-vocals-trim-v1'],
         revision: 2,
       }),
     );
@@ -207,7 +207,7 @@ describe('worker atomic claims', () => {
         sha256: 'sha',
         contentType: 'audio/wav',
       },
-      recipeSnapshot: { recipeId: 'kim-vocal-2-v1' },
+      recipeSnapshot: { recipeId: 'kim-vocals-trim-v1' },
     };
     const slot = {
       _id: workerId,
@@ -218,7 +218,7 @@ describe('worker atomic claims', () => {
       incarnation,
       state: 'idle',
       currentAttemptId: null,
-      allowedRecipeIds: ['kim-vocal-2-v1'],
+      allowedRecipeIds: ['kim-vocals-trim-v1'],
       revision: 2,
     };
     f.machines.findById.mockReturnValue(sessionLean(activeMachine));
@@ -301,7 +301,7 @@ describe('worker atomic claims', () => {
         _id: jobId,
         currentExecution: { attemptId },
         inputObject: { key: 'input', versionId: 'v1' },
-        recipeSnapshot: { recipeId: 'kim-vocal-2-v1' },
+        recipeSnapshot: { recipeId: 'kim-vocals-trim-v1' },
       }),
     );
     await expect(f.service.claim(principal, claimDto)).resolves.toMatchObject({

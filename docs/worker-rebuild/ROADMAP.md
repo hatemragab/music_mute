@@ -84,7 +84,7 @@ All PRs use `codex/worker-rebuild` as their base. A feature branch begins from t
 ### D. Runtime and installation
 
 - [x] **D1:** Implement the Node supervisor and bounded Python child protocol.
-- [ ] **D2:** Implement and verify the versioned Kim recipe family and processing order.
+- [x] **D2:** Implement and verify the versioned Kim recipe family and processing order.
 - [ ] **D3:** Implement polling, ownership, renewal, recovery and S3 execution.
 - [ ] **D4:** Package and prove the accepted Mac runtime as a system service.
 - [ ] **D5:** Package and prove the accepted Windows runtime as a system service.

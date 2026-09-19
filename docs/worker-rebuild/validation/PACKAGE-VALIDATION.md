@@ -36,13 +36,18 @@ The package build contains no environment files, credentials, models, audio fixt
 - D1 added the standalone worker package and passed protocol drift, formatting,
   lint, typecheck, 10 TypeScript tests, 4 Python IPC tests, production build and
   built-CLI/Python-child handshake checks. See [D evidence](../evidence/D-runtime.md).
+- D2 added the four immutable recipe snapshots and safe ordered pipeline. It
+  passed 13 Python engine tests, 10 TypeScript tests, 42 focused backend tests,
+  the full 729 backend unit and 135 E2E tests under the env-isolated procedure
+  recorded in the evidence, reference PCM parity and a real framed M4/CoreML
+  Kim-to-MP3 child run. See [D evidence](../evidence/D-runtime.md).
 
 ## Not executed or claimed
 
 No worker service installation, live S3 integration, listening-quality review,
 npm publication, signing with production keys or deployment has occurred. The
-C1-C6 backend and D1 protocol work are locally verified only; dashboard,
-Android and iOS were not changed. D2-D6, Linux/NVIDIA and all other hardware
+C1-C6 backend and D1-D2 runtime work are locally verified only; dashboard,
+Android and iOS were not changed. D3-D6, Linux/NVIDIA and all other hardware
 remain unverified until later actual hardware evidence.
 
 ## Source/consistency caveats

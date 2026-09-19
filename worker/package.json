@@ -22,7 +22,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
-    "test:engine": "cd engine && python3 -m unittest discover -s tests -p 'test_*.py'",
+    "test:engine": "node scripts/run-engine-tests.mjs",
     "verify": "pnpm run protocol:check && pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm test && pnpm run test:engine && pnpm run build"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source: backend/src/worker-fleet/protocol/v1/protocol.ts
-// Source SHA-256: f29a92c3cf51a04758270b931547fe22de32ca29d7cd5e065416ac0942d99b6d
+// Source SHA-256: dbcf976ab2623c2b0177ca25deffd61742f845432963b9fc7d2d745811663fd6
 
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 export const WORKER_PROTOCOL_MAX_BYTES = 64 * 1024;
@@ -14,8 +14,23 @@ export type WorkerPlatform = (typeof WORKER_PLATFORMS)[number];
 export const WORKER_PROVIDERS = ['coreml', 'directml'] as const;
 export type WorkerProvider = (typeof WORKER_PROVIDERS)[number];
 
-export const WORKER_RECIPE_IDS = ['kim-vocal-2-v1'] as const;
+export const WORKER_RECIPE_IDS = [
+  'kim-vocals-v1',
+  'kim-vocals-trim-v1',
+  'kim-vocals-denoise-v1',
+  'kim-vocals-denoise-trim-v1',
+] as const;
 export type WorkerRecipeId = (typeof WORKER_RECIPE_IDS)[number];
+
+export const WORKER_RECIPE_STEP_IDS = [
+  'prepare-pcm16-stereo-44100-v1',
+  'separate-kim-vocal-2-v1',
+  'denoise-afftdn-conservative-v1',
+  'trim-vocal-gaps-v1',
+  'encode-mp3-192k-v1',
+  'validate-audio-v1',
+] as const;
+export type WorkerRecipeStepId = (typeof WORKER_RECIPE_STEP_IDS)[number];
 
 export const WORKER_PROTOCOL_OPERATIONS = [
   'installation.exchange',

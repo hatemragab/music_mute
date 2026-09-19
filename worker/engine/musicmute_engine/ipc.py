@@ -51,7 +51,9 @@ def _bounded(value: Any, depth: int = 0) -> None:
     if value is None or isinstance(value, bool):
         return
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if isinstance(value, float) and (value != value or value in (float("inf"), -float("inf"))):
+        if isinstance(value, float) and (
+            value != value or value in (float("inf"), -float("inf"))
+        ):
             raise ProtocolFailure("MESSAGE_INVALID", "Child payload number is invalid")
         return
     if isinstance(value, str):
@@ -66,7 +68,9 @@ def _bounded(value: Any, depth: int = 0) -> None:
         return
     if _record(value):
         if len(value) > MAX_ITEMS:
-            raise ProtocolFailure("MESSAGE_INVALID", "Child payload object is too large")
+            raise ProtocolFailure(
+                "MESSAGE_INVALID", "Child payload object is too large"
+            )
         for item in value.values():
             _bounded(item, depth + 1)
         return
@@ -83,7 +87,9 @@ def _timestamp(value: Any) -> bool:
     return True
 
 
-def validate_message(value: Any, *, expected_incarnation: str | None = None) -> dict[str, Any]:
+def validate_message(
+    value: Any, *, expected_incarnation: str | None = None
+) -> dict[str, Any]:
     if not _record(value):
         raise ProtocolFailure("MESSAGE_INVALID", "Child message must be an object")
     request = value.get("type") == "request"
@@ -91,7 +97,9 @@ def validate_message(value: Any, *, expected_incarnation: str | None = None) -> 
     if set(value) - allowed:
         raise ProtocolFailure("MESSAGE_INVALID", "Child message has unknown fields")
     if value.get("protocolVersion") != PROTOCOL_VERSION:
-        raise ProtocolFailure("VERSION_UNSUPPORTED", "Unsupported child protocol version")
+        raise ProtocolFailure(
+            "VERSION_UNSUPPORTED", "Unsupported child protocol version"
+        )
     request_id = value.get("requestId")
     incarnation = value.get("incarnation")
     if not isinstance(request_id, str) or not UUID_V4.fullmatch(request_id):
@@ -113,7 +121,9 @@ def validate_message(value: Any, *, expected_incarnation: str | None = None) -> 
         if command == "cancel":
             target = payload.get("targetRequestId")
             if not isinstance(target, str) or not UUID_V4.fullmatch(target):
-                raise ProtocolFailure("MESSAGE_INVALID", "Cancellation target is invalid")
+                raise ProtocolFailure(
+                    "MESSAGE_INVALID", "Cancellation target is invalid"
+                )
     elif value.get("type") not in RESPONSE_TYPES:
         raise ProtocolFailure("MESSAGE_INVALID", "Child response type is invalid")
     return value
@@ -121,7 +131,9 @@ def validate_message(value: Any, *, expected_incarnation: str | None = None) -> 
 
 def encode_frame(message: dict[str, Any]) -> bytes:
     validated = validate_message(message)
-    body = json.dumps(validated, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body = json.dumps(validated, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     if not body or len(body) > MAX_FRAME_BYTES:
         raise ProtocolFailure("FRAME_TOO_LARGE", "Child frame exceeds byte limit")
     return struct.pack(">I", len(body)) + body
@@ -141,7 +153,9 @@ def _read_exact(stream: BinaryIO, size: int) -> bytes | None:
     return b"".join(chunks)
 
 
-def read_frame(stream: BinaryIO, *, expected_incarnation: str | None = None) -> dict[str, Any] | None:
+def read_frame(
+    stream: BinaryIO, *, expected_incarnation: str | None = None
+) -> dict[str, Any] | None:
     header = _read_exact(stream, 4)
     if header is None:
         return None

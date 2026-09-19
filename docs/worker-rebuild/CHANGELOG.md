@@ -1,5 +1,25 @@
 # Package changes
 
+## Revision 4.0
+
+- Completed checkpoint D2 with the four frozen Kim recipe combinations, a
+  deterministic cross-language recipe digest and `kim-vocals-trim-v1` as the
+  initial default.
+- Added exact content-addressed model verification/installation, bounded local
+  media probing, PCM16 stereo 44.1 kHz preparation, the qualified CoreML/
+  DirectML adapter, optional allowlisted FFmpeg denoise, the reference-compatible
+  gap trimmer, MP3 encoding, final validation/hash, stage timing and a bounded
+  edit map.
+- Expanded the backend recipe snapshot and policy contract to use the same four
+  recipe identities and immutable step configuration.
+- Proved the default recipe through the real framed Node-to-Python child on the
+  M4/CoreML host with the qualified Kim artifact and owned fixture. The run also
+  exposed and fixed third-party stdout corrupting the binary child protocol.
+
+This checkpoint does not claim backend polling/S3 execution, service
+installation, reboot recovery, denoise listening quality, Windows service
+execution or production readiness. Those remain D3-D6.
+
 ## Revision 3.9
 
 - Started the accepted runtime branch from merged control-plane commit

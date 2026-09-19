@@ -15,13 +15,24 @@ backend or S3 credentials.
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
+uv venv .venv --python 3.13
+uv pip sync --python .venv/bin/python ../tools/worker-gpu-feasibility/requirements-coreml.lock.txt
 pnpm run verify
 ```
+
+On Windows, create the venv with the accepted Python 3.12 runtime and sync
+`requirements-directml.lock.txt` instead. `MUSICMUTE_PYTHON` may point the test
+runner at an already-qualified interpreter. Do not mix ONNX Runtime
+distributions or install these locks globally.
 
 The generated TypeScript protocol under `protocol/v1/` is copied from the
 backend's canonical pure-data protocol. Run `pnpm protocol:sync` after an
 intentional backend protocol change. `pnpm protocol:check` fails on drift.
 
-Runtime packaging, platform service installation and real GPU evidence are
-tracked separately by checkpoints D2-D6. Passing the D1 tests does not certify
-CoreML, DirectML, service startup or production readiness.
+Checkpoint D2 implements the four immutable Kim recipes, verified model cache,
+safe local-media pipeline and exact reference trimmer. The model is not
+redistributed by this repository; it must be installed into the
+content-addressed cache and pass the frozen size and SHA-256 checks. Backend
+polling/S3 ownership, platform service installation and full safety acceptance
+remain checkpoints D3-D6. Passing local tests does not certify service startup
+or production readiness.

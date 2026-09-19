@@ -22,9 +22,9 @@ def request(**overrides):
         "command": "ping",
         "requestId": str(uuid.uuid4()),
         "incarnation": str(uuid.uuid4()),
-        "sentAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
-            "+00:00", "Z"
-        ),
+        "sentAt": datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z"),
         "payload": {},
     }
     value.update(overrides)
