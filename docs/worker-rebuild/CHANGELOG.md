@@ -1,5 +1,27 @@
 # Package changes
 
+## Revision 4.16
+
+- Added the protected worker fleet dashboard: stable server-filtered machine
+  pagination, contact and work summaries, one-use enrollment and installation
+  history, machine detail, bounded diagnostics, safe controls and a
+  revision-fenced pipeline policy editor.
+- Kept enrollment credentials out of query caches and history. The one browser
+  copy is dialog-local, disappears on close, and cannot be recovered from an
+  idempotent replay. Diagnostic display applies strict entry/line/character
+  bounds and redacts signed URLs, bearer headers, credentials, tokens and
+  secrets.
+- Extended the backend's administrative list projection and indexes for
+  platform/release filtering, canonical opaque cursors, current attempts,
+  recent errors and installation status without exposing private worker fields.
+- Complete backend verification passes formatting, lint, typecheck, tracked
+  secret checks, 110 unit files/753 tests, 22 E2E files/135 tests and build.
+  Complete dashboard verification passes formatting, lint, typecheck, 18 unit
+  files/56 tests, production build and 32 Chrome browser tests.
+- Dashboard acceptance is local and simulated. Live fleet enrollment and the
+  remaining native runtime/S3, logged-out, reboot and interrupted-upgrade gates
+  remain for integration and release readiness.
+
 ## Revision 4.15
 
 - Added one-command platform bootstrap orchestration. Both native CLIs now
