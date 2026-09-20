@@ -149,7 +149,7 @@ the purge and recovery tests.
 - `backend/README.md` for configuration or verification changes;
 - `backend/docs/api/audio-processing.md` for mobile contracts;
 - `backend/docs/operations/audio-processing.md` for cleanup/operations;
-- `backend/docs/account-deletion.md` for the fifteen-day lifecycle;
+- `docs/account-deletion.md` for the fifteen-day lifecycle;
 - backend dashboard API/permission documentation;
 - `dashboard/README.md` for new administrator controls;
 - Android/iOS guides when client-visible limits or account behavior change;

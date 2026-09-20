@@ -187,7 +187,7 @@ integration tests also require local MongoDB, Redis, and Google Chrome.
 | [Audio API](backend/docs/api/audio-processing.md)                  | Mobile history and unavailable-boundary contracts         |
 | [Audio operations](backend/docs/operations/audio-processing.md)    | Storage and retained-job operations                       |
 | [Dashboard](dashboard/README.md)                                   | Administrator setup, checks, and packaging                |
-| [Account deletion](backend/docs/account-deletion.md)               | Identity and storage cleanup operations                   |
+| [Account deletion](docs/account-deletion.md)                       | Identity and storage cleanup operations                   |
 | [Mobile processing tracker](docs/tasks/mobile-audio-processing.md) | Implementation status and validation boundaries           |
 | [Contributing](CONTRIBUTING.md)                                    | Change scope, local checks, and pull requests             |
 
