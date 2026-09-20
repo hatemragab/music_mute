@@ -138,7 +138,8 @@ bootstrap online. Account deletion is available in Account, including when proce
 reauthenticates the current identity; Apple accounts obtain a fresh authorization code and revoke
 the Apple token using Firebase before requesting backend deletion. `DELETE /api/v1/users/me`
 uses a fresh bearer token and an empty body. Only a validated HTTP 202 acceptance receipt is
-shown as accepted; it does not claim cloud cleanup has completed.
+shown as accepted. The receipt and backup-excluded journal preserve the exact backend-provided
+15-day recovery deadline; acceptance does not claim cloud cleanup has completed.
 
 A private, backup-excluded journal preserves ambiguous requests and interrupted local cleanup.
 Accepted cleanup fences session callbacks, stops private transfers/playback, removes account-owned

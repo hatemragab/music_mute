@@ -42,7 +42,7 @@ test(
       status: 'deleting',
       deletionRequestId: '00000000-0000-4000-8000-000000000001',
       deletionRequestedAt: new Date('2025-01-01T00:00:00.000Z'),
-      deletionRecoverUntil: new Date('2025-04-01T00:00:00.000Z'),
+      deletionRecoverUntil: new Date('2025-01-16T00:00:00.000Z'),
       deletionNextAt: new Date(0),
     });
     await identities.withDeletion(user.firebaseUid, async () => undefined);
@@ -69,7 +69,7 @@ test(
         connection,
         {},
         {},
-        { hasPendingForOwner: async () => false },
+        { hasPendingForOwner: async () => false, schedule: async () => {} },
         firebase,
         identities,
       );
@@ -128,6 +128,16 @@ test(
     }
     assert.equal(deleted, true);
     assert.equal(await users.exists({ _id: user._id }), null);
+    const tombstone = await connection
+      .collection('account_deletion_tombstones')
+      .findOne({ _id: '00000000-0000-4000-8000-000000000001' });
+    assert.deepEqual(Object.keys(tombstone).sort(), [
+      '_id',
+      'acceptedAt',
+      'completedAt',
+      'schemaVersion',
+      'status',
+    ]);
     assert.equal(
       await connection
         .collection('device_installation_owners')

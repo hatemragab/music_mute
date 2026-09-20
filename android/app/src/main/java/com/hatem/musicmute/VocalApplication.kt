@@ -122,8 +122,8 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
             },
             deletionRejected = { uid -> deletionJournal.rejected(uid) },
             deletionRequested = { uid -> deletionJournal.requested(uid) },
-            deletionAccepted = { uid ->
-                try { deletionJournal.accepted(uid) } finally { scheduleOwnerPurge(uid) }
+            deletionAccepted = { uid, receipt ->
+                try { deletionJournal.accepted(uid, receipt) } finally { scheduleOwnerPurge(uid) }
             },
             hasUnconfirmedDeletion = { deletionJournal.all().any { !it.requiresPurge } },
             afterSignOut = { deletionJournal.all().filter { it.requiresPurge }.forEach { purgeDeletedAccount(it.uid) } },

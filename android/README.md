@@ -38,7 +38,7 @@ Google through Firebase Authentication and Credential Manager. Account settings
 support optional email verification, password reset, linked sign-in methods,
 registered installations, local sign-out, and sign-out everywhere. Linking keeps
 the same Firebase UID; unlinking requires fresh authentication with a retained
-method usable on Android. Account deletion requires provider reauthentication and a final destructive confirmation. The backend accepts deletion durably before local sign-out and UID-scoped private cleanup. Acceptance is not a claim that cloud cleanup or backup expiry has finished.
+method usable on Android. Account deletion requires provider reauthentication and a final destructive confirmation. The backend returns and the no-backup journal preserves the exact 15-day recovery deadline before local sign-out and UID-scoped private cleanup. Acceptance is not a claim that cloud cleanup or backup expiry has finished.
 
 `auth/` owns the Firebase gateway, bounded HTTP client, session coordinator, and
 installation metadata. `ui/auth/` owns the sign-in gate and account screens.

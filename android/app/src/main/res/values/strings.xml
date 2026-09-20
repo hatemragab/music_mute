@@ -290,9 +290,9 @@
     <string name="processing_reason_separator">The audio separation failed. Try again later or choose another file.</string>
     <string name="processing_reason_retries">The transfer failed after repeated attempts. Check your connection and try again.</string>
     <string name="account_delete">Delete account</string>
-    <string name="account_delete_explanation">Schedule deletion of your account, cloud inputs, vocal results, history and device registrations. Account access ends immediately. You have three months to request recovery; after that, permanent cleanup starts and your media can no longer be recovered. Private account copies on this installation are removed. Original selected files and exported copies stay under your control. Authenticate again to continue.</string>
-    <string name="account_delete_final">Schedule account deletion? You will be signed out immediately and have three months to request recovery by signing in again. Permanent cloud cleanup starts after that deadline.</string>
-    <string name="account_deletion_accepted">Deletion scheduled. You are signed out. Sign in again within three months if you want to request account recovery.</string>
+    <string name="account_delete_explanation">Schedule deletion of your account, cloud inputs, vocal results, history and device registrations. Account access ends immediately. You have exactly 15 days to request recovery; after that, permanent cleanup starts and your media can no longer be recovered. Private account copies on this installation are removed. Original selected files and exported copies stay under your control. Authenticate again to continue.</string>
+    <string name="account_delete_final">Schedule account deletion? You will be signed out immediately and have exactly 15 days to request recovery by signing in again. Permanent cloud cleanup starts after that deadline.</string>
+    <string name="account_deletion_accepted">Deletion scheduled. You are signed out. Sign in again before the exact deadline shown if you want to request account recovery.</string>
     <string name="account_privacy">Privacy policy</string>
     <string name="account_deletion_help">Account deletion help</string>
     <string name="audio_review_title">Review audio</string>
@@ -305,7 +305,7 @@
     <string name="youtube_rights_disclosure">Download audio from YouTube only when you have permission and the service permits downloading. After download, the audio is prepared and uploaded automatically for processing.</string>
     <string name="account_deletion_unconfirmed">A deletion request could not be confirmed. Sign in again to retry deletion, or use account deletion help. Your data is not reported as deleted.</string>
     <string name="auth_error_deletion_pending">Account deletion is scheduled. You can request recovery from this page.</string>
-    <string name="auth_error_recovery_expired">The three-month recovery period has ended and permanent deletion has started.</string>
+    <string name="auth_error_recovery_expired">The 15-day recovery period has ended and permanent deletion has started.</string>
     <string name="account_recovery_title">Recover your account</string>
     <string name="account_recovery_description">This account is scheduled for deletion. Send a recovery request to the MusicMute team before the deadline. Your account stays inaccessible until an administrator approves it.</string>
     <string name="account_recovery_deadline">Recovery deadline: %1$s</string>

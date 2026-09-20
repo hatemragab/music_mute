@@ -207,7 +207,7 @@ describe('Firebase account API composition', () => {
     owner.status = 'deleting';
     owner.deletionRequestId = 'fixture-deletion-request';
     owner.deletionRequestedAt = new Date('2026-09-11T00:00:00.000Z');
-    owner.deletionRecoverUntil = new Date('2026-12-11T00:00:00.000Z');
+    owner.deletionRecoverUntil = new Date('2026-09-26T00:00:00.000Z');
 
     const blocked = await request(f.app.getHttpServer())
       .post('/api/v1/auth/session')

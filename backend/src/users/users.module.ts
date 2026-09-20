@@ -14,6 +14,10 @@ import {
   AccountRecoveryRequestSchema,
 } from './account-recovery-request.schema.js';
 import { AccountRecoveryService } from './account-recovery.service.js';
+import {
+  AccountDeletionTombstone,
+  AccountDeletionTombstoneSchema,
+} from './account-deletion-tombstone.schema.js';
 
 @Module({
   imports: [
@@ -23,6 +27,10 @@ import { AccountRecoveryService } from './account-recovery.service.js';
       {
         name: AccountRecoveryRequest.name,
         schema: AccountRecoveryRequestSchema,
+      },
+      {
+        name: AccountDeletionTombstone.name,
+        schema: AccountDeletionTombstoneSchema,
       },
     ]),
   ],

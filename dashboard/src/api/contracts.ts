@@ -124,6 +124,8 @@ export interface UserDetail extends UserSummary {
     requestedAt: string | null;
     recoverUntil: string | null;
     purgeStartedAt: string | null;
+    phase: string | null;
+    failureCode: "DEPENDENCY_RETRY" | null;
     recoveryAvailable: boolean;
   } | null;
 }
@@ -193,6 +195,8 @@ export interface AccountRecoveryRequest {
     email: string | null;
     displayName: string | null;
     status: string | null;
+    deletionPhase: string | null;
+    deletionFailureCode: "DEPENDENCY_RETRY" | null;
   };
 }
 

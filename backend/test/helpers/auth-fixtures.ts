@@ -237,7 +237,7 @@ export async function authFixture() {
       deletion: {
         requestId: 'fixture-deletion-request',
         requestedAt: '2026-09-11T00:00:00.000Z',
-        recoverUntil: '2026-12-11T00:00:00.000Z',
+        recoverUntil: '2026-09-26T00:00:00.000Z',
         recoveryAvailable: true,
       },
       request: null,

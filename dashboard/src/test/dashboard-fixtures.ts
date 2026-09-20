@@ -286,12 +286,14 @@ export class DashboardFixture {
     revision: 0,
     deletionRequestId: "fixture-deletion-request",
     deletionRequestedAt: NOW,
-    recoverUntil: "2026-12-11T00:00:00.000Z",
+    recoverUntil: "2026-09-26T00:00:00.000Z",
     user: {
       id: FIXTURE_IDS.user,
       email: this.user.email,
       displayName: this.user.displayName,
       status: "deleting",
+      deletionPhase: "grace_fence",
+      deletionFailureCode: null,
     },
   };
   releases: ReleaseDetail[] = [

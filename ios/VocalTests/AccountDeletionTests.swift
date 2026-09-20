@@ -12,10 +12,13 @@ final class AccountDeletionTests: XCTestCase {
     let restored = try await AccountDeletionStore(root: root).pending("owner-a")
     XCTAssertEqual(restored?.uid, "owner-a")
     XCTAssertNil(restored?.receipt)
-    let receipt = AccountDeletionReceipt(requestId: "request-one", status: "accepted")
+    let deadline = Date(timeIntervalSince1970: 1_790_380_800)
+    let receipt = AccountDeletionReceipt(
+      requestId: "request-one", status: "accepted", recoverUntil: deadline)
     try await first.save(.init(uid: "owner-a", receipt: receipt))
     let accepted = try await AccountDeletionStore(root: root).pending("owner-a")
     XCTAssertEqual(accepted?.receipt, receipt)
+    XCTAssertEqual(accepted?.receipt?.recoverUntil, deadline)
     try await first.save(.init(uid: "owner-a", needsReauthentication: true))
     let notDowngraded = try await first.pending("owner-a")
     XCTAssertEqual(notDowngraded?.receipt, receipt)
@@ -180,6 +183,7 @@ final class AccountDeletionTests: XCTestCase {
     XCTAssertEqual(fixture.firebase.reauthenticated, 1)
     XCTAssertEqual(fixture.purged, ["owner-a"])
     XCTAssertEqual(fixture.model.deletionReceipt?.status, "accepted")
+    XCTAssertNotNil(fixture.model.deletionReceipt?.recoverUntil)
     XCTAssertEqual(fixture.model.phase, .signedOut)
   }
 
@@ -304,7 +308,9 @@ final class AccountDeletionTests: XCTestCase {
         requests += 1
         if pauseRequest { await withCheckedContinuation { continuation = $0 } }
         if let failure { throw failure }
-        return AccountDeletionReceipt(requestId: "accepted-request", status: "accepted")
+        return AccountDeletionReceipt(
+          requestId: "accepted-request", status: "accepted",
+          recoverUntil: Date(timeIntervalSince1970: 1_790_380_800))
       })
     model.purgeAccountData = { [unowned self] in purged.append($0) }
     return model
