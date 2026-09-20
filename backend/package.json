@@ -35,7 +35,7 @@
     "test:dashboard:curl": "pnpm run build && node --test test/dashboard-curl.integration.mjs",
     "test:deletion:integration": "pnpm run build && node --test test/account-deletion-request.integration.mjs test/account-deletion.integration.mjs test/account-recovery.integration.mjs",
     "test:auth:integration": "pnpm run build && node --test test/auth.integration.mjs test/users.integration.mjs test/devices.integration.mjs test/app-policy.integration.mjs test/rate-limits.integration.mjs test/operations.integration.mjs test/firebase-tokens.integration.mjs test/helpers/isolated-services.test.mjs",
-    "test:processing:integration": "pnpm run build && node --test test/processing-persistence.integration.mjs test/processing-usage.integration.mjs test/job-actions.integration.mjs test/push-registrations.integration.mjs test/notifications.integration.mjs",
+    "test:processing:integration": "pnpm run build && node --test test/processing-persistence.integration.mjs test/processing-usage.integration.mjs test/job-actions.integration.mjs test/push-registrations.integration.mjs test/notifications.integration.mjs test/abuse-protection.integration.mjs",
     "ops:auth": "node dist/operations/cli.js",
     "lint": "oxlint --deny-warnings src/ test/",
     "test": "vitest run",

@@ -107,7 +107,7 @@ export function AccountRecoveryPage() {
             </p>
             <p className="mt-1 text-muted-foreground">
               Approving restores account access and keeps any independent
-              processing suspension unchanged.
+              account restriction unchanged.
             </p>
           </div>
         </div>

@@ -13,7 +13,9 @@ export const PERMISSIONS = [
   "jobs.manage",
   "users.read",
   "users.processing.manage",
+  "users.restrictions.manage",
   "users.account-recovery.manage",
+  "abuse.read",
   "media.read",
   "releases.read",
   "releases.manage",
@@ -109,7 +111,6 @@ export interface UserSummary {
   email: string | null;
   displayName: string | null;
   status: "active" | "disabled" | "deleting" | string;
-  processingSuspended: boolean;
   createdAt: string;
   updatedAt: string;
   revision: number;
@@ -118,12 +119,6 @@ export interface UserSummary {
 export interface UserDetail extends UserSummary {
   processingCounts: Record<string, number>;
   recentJobIds: string[];
-  suspension: {
-    expiresAt?: string | null;
-    reason: string;
-    actorUid: string;
-    at: string;
-  } | null;
   deletion: {
     requestId: string;
     requestedAt: string | null;
@@ -131,6 +126,55 @@ export interface UserDetail extends UserSummary {
     purgeStartedAt: string | null;
     recoveryAvailable: boolean;
   } | null;
+}
+
+export type RestrictionReasonCode =
+  | "manual_review"
+  | "repeated_limit_bypass"
+  | "provider_cost_risk"
+  | "terms_violation";
+
+export interface AccountRestriction {
+  id: string;
+  accountId: string;
+  status: "active" | "expired" | "removed";
+  reasonCode: RestrictionReasonCode;
+  note: string;
+  startsAt: string;
+  expiresAt: string | null;
+  createdBy: string;
+  updatedBy: string;
+  updatedAt: string;
+  revision: number;
+  cancelledJobs?: number;
+}
+
+export type AbuseEventType =
+  | "upload_grant_limit"
+  | "upload_attempt_limit"
+  | "invalid_upload_repeat"
+  | "cancel_after_upload_repeat"
+  | "client_retry_limit"
+  | "download_grant_limit"
+  | "download_bytes_limit"
+  | "processing_quota_limit"
+  | "queue_limit"
+  | "endpoint_rate_limit"
+  | "restriction_bypass_attempt"
+  | "service_safety_ceiling";
+
+export interface AbuseEvent {
+  id: string;
+  accountId: string;
+  type: AbuseEventType;
+  severity: "low" | "medium" | "high";
+  operationClass: string;
+  count: number;
+  firstOccurredAt: string;
+  lastOccurredAt: string;
+  policyRevision: number | null;
+  restrictionId: string | null;
+  restrictionStatus: "active" | "expired" | "removed" | "none";
 }
 
 export interface AccountRecoveryRequest {

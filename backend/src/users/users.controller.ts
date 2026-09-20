@@ -30,7 +30,7 @@ export class UsersController {
   @Delete()
   @HttpCode(202)
   @AllowDeletionRetry()
-  @LimitOperation('profile')
+  @LimitOperation('account-deletion')
   deleteAccount(@Req() req: AuthRequest, @Body(EmptyBodyPipe) _body: void) {
     return this.deletion.requestDeletion(
       req.user!._id.toHexString(),
@@ -39,6 +39,7 @@ export class UsersController {
   }
   @Get('account-recovery')
   @AllowAccountRecovery()
+  @LimitOperation('account-recovery')
   recoveryStatus(@Req() req: AuthRequest) {
     return this.recovery.status(req.user!._id.toHexString());
   }
@@ -46,6 +47,7 @@ export class UsersController {
   @Post('account-recovery')
   @HttpCode(202)
   @AllowAccountRecovery()
+  @LimitOperation('account-recovery')
   requestRecovery(
     @Req() req: AuthRequest,
     @Body() body: AccountRecoveryRequestDto,

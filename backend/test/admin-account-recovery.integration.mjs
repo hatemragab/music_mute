@@ -85,7 +85,6 @@ test(
         deletionRequestedAt: requestedAt,
         deletionRecoverUntil: recoverUntil,
         deletionNextAt: recoverUntil,
-        processingSuspended: true,
         sessionsRevokedAfterSec: 0,
         profileSyncedAt: requestedAt,
         lastSeenAt: requestedAt,
@@ -127,7 +126,6 @@ test(
     assert.equal(restored.deletionRequestId, null);
     assert.equal(restored.deletionRecoverUntil, null);
     assert.equal(restored.deletionNextAt, null);
-    assert.equal(restored.processingSuspended, true);
     assert.equal(restored.adminRevision, 1);
     assert.equal(
       (

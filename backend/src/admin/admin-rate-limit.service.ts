@@ -35,6 +35,8 @@ export class AdminRateLimitService {
 
   async assertAllowed(
     uid: string,
+    ip: string,
+    endpoint: string,
     rateClass: AdminRateClass,
     response: Pick<Response, 'setHeader'>,
     requestId: string,
@@ -45,6 +47,21 @@ export class AdminRateLimitService {
         key: this.keys.bucket(`admin-${rateClass}-uid`, uid),
         limit: this.config.get<number>(definition.key, definition.fallback),
         windowMs: definition.windowMs,
+      },
+      {
+        key: this.keys.bucket(`admin-${rateClass}-ip`, ip),
+        limit: this.config.get<number>('ADMIN_OPERATION_IP_PER_MINUTE', 60),
+        windowMs: 60_000,
+      },
+      {
+        key: this.keys.bucket('admin-endpoint', endpoint),
+        limit: this.config.get<number>('ADMIN_ENDPOINT_PER_MINUTE', 300),
+        windowMs: 60_000,
+      },
+      {
+        key: this.keys.bucket('admin-service', 'global'),
+        limit: this.config.get<number>('ADMIN_SERVICE_PER_MINUTE', 1_000),
+        windowMs: 60_000,
       },
     ]);
     if (!decision.allowed) {

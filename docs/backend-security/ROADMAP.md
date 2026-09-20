@@ -2,7 +2,7 @@
 
 **Collection:** `codex/backend-security-cost-hardening`
 **Implementation checkpoints:** 32
-**Current implementation status:** Branches 1–2 merged; Branch 3 C1–C7 ready for review
+**Current implementation status:** Branches 1–3 merged; Branch 4 D1–D6 ready for review
 
 ## 1. Sequential branch contract
 
@@ -50,12 +50,12 @@ collection tip, never independently from `main` or the old parent commit.
 
 ### D. Account abuse and API limits
 
-- [ ] **D1:** Add compact typed abuse events with aggregation and bounded retention.
-- [ ] **D2:** Apply account, IP, endpoint, and service budgets to cost-creating operations.
-- [ ] **D3:** Add audited manual account restrictions and safe backend enforcement.
-- [ ] **D4:** Add dashboard event filters and manual restrict/restore controls.
-- [ ] **D5:** Bound Redis/MongoDB growth and define fail-closed expensive-operation behavior.
-- [ ] **D6:** Pass authorization, rate, outage, privacy, dashboard, and capacity gates.
+- [x] **D1:** Add compact typed abuse events with aggregation and bounded retention.
+- [x] **D2:** Apply account, IP, endpoint, and service budgets to cost-creating operations.
+- [x] **D3:** Add audited manual account restrictions and safe backend enforcement.
+- [x] **D4:** Add dashboard event filters and manual restrict/restore controls.
+- [x] **D5:** Bound Redis/MongoDB growth and define fail-closed expensive-operation behavior.
+- [x] **D6:** Pass authorization, rate, outage, privacy, dashboard, and capacity gates.
 
 ### E. Account deletion and cleanup
 

@@ -50,6 +50,8 @@ import type {
   VerifiedIdentity,
 } from '../../src/auth/auth.types.js';
 import { StorageCleanupTask } from '../../src/storage/storage-cleanup-task.schema.js';
+import { AbuseEventsService } from '../../src/abuse-protection/abuse-events.service.js';
+import { AccountRestrictionsService } from '../../src/abuse-protection/account-restrictions.service.js';
 
 // AppModule's infrastructure is replaced below. Prevent its eager configuration
 // import from consulting any developer dotenv file before that override applies.
@@ -318,6 +320,10 @@ export async function authFixture() {
     })
     .overrideProvider(RateBudgetService)
     .useValue(budgets)
+    .overrideProvider(AbuseEventsService)
+    .useValue({ record: vi.fn().mockResolvedValue(undefined) })
+    .overrideProvider(AccountRestrictionsService)
+    .useValue({ assertAllowed: vi.fn().mockResolvedValue(undefined) })
     .overrideProvider(RedisThrottlerStorage)
     .useValue(storage)
     .overrideProvider(SECURITY_REDIS)

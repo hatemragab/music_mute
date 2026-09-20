@@ -34,6 +34,7 @@ import { AdminRateLimitService } from '../../src/admin/admin-rate-limit.service.
 import { AdminSessionController } from '../../src/admin/admin-session.controller.js';
 import type { AdminRole } from '../../src/admin/admin.types.js';
 import { PublicExceptionFilter } from '../../src/http/public-exception.filter.js';
+import { AccountRestrictionsService } from '../../src/abuse-protection/account-restrictions.service.js';
 
 interface IdentityState {
   uid: string;
@@ -200,6 +201,10 @@ export async function createAdminHarness(
       { provide: UsersService, useValue: users },
       { provide: RateBudgetService, useValue: budgets },
       { provide: RateLimitKeys, useValue: keys },
+      {
+        provide: AccountRestrictionsService,
+        useValue: { assertAllowed: vi.fn().mockResolvedValue(undefined) },
+      },
       { provide: getModelToken(AdminAccess.name), useValue: model },
       AdminRateLimitService,
       { provide: APP_GUARD, useClass: AuthGuard },

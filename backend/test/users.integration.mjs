@@ -119,12 +119,16 @@ test(
         email: 'hidden@privaterelay.appleid.com',
         providerData: [{ providerId: 'apple.com' }],
       });
-      const renamed = await users.syncProfile(apple._id.toString(), {
-        ...profile,
-        uid: appleIdentity.uid,
-        email: 'new-email@fixture.invalid',
-        providerData: [{ providerId: 'apple.com' }],
-      });
+      const renamed = await users.syncProfile(
+        apple._id.toString(),
+        {
+          ...profile,
+          uid: appleIdentity.uid,
+          email: 'new-email@fixture.invalid',
+          providerData: [{ providerId: 'apple.com' }],
+        },
+        appleIdentity,
+      );
       assert.match(apple.displayName, /^\d{12}$/);
       assert.equal(renamed.displayName, apple.displayName);
     } finally {

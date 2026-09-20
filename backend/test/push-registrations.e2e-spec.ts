@@ -14,6 +14,7 @@ import { PushRegistrationsService } from '../src/notifications/push-registration
 import { RateBudgetService } from '../src/rate-limits/rate-budget.service.js';
 import { RateLimitKeys } from '../src/rate-limits/rate-limit-keys.js';
 import { UsersService } from '../src/users/users.service.js';
+import { AccountRestrictionsService } from '../src/abuse-protection/account-restrictions.service.js';
 
 const installationId = 'd7ea7de6-52e9-4b96-8834-3b517941bdb0';
 const token = 'fixture-token:abc_123-XYZ';
@@ -86,6 +87,10 @@ describe('push registration HTTP boundary', () => {
           useValue: {
             bucket: (scope: string, id: string) => `${scope}:${id}`,
           },
+        },
+        {
+          provide: AccountRestrictionsService,
+          useValue: { assertAllowed: vi.fn().mockResolvedValue(undefined) },
         },
         { provide: PushRegistrationsService, useValue: registrations },
         { provide: APP_GUARD, useClass: AuthGuard },

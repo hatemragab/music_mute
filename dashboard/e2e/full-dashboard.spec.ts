@@ -275,22 +275,26 @@ test("owner withdraws a release with a replacement policy", async ({
   expect(fixture.policy.android.directReleaseId).toBe(FIXTURE_IDS.release);
 });
 
-test("support suspends processing, requests media deliberately, and cancels a job", async ({
+test("support restricts an account, requests media deliberately, and cancels a job", async ({
   page,
 }) => {
   await setDashboardRole(page, "support");
   const fixture = await installDashboardFixture(page);
 
   await page.goto(`/users/${FIXTURE_IDS.user}`);
-  await page.getByRole("button", { name: "Suspend processing" }).click();
+  await page.getByRole("button", { name: "Restrict account" }).click();
   let dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason").fill("Investigate an abuse report");
   await dialog
     .getByRole("button", { name: "Reauthenticate with Google" })
     .click();
-  await dialog.getByRole("button", { name: "Suspend processing" }).click();
+  await dialog.getByRole("button", { name: "Restrict account" }).click();
   await expect(dialog).toHaveCount(0);
-  expect(fixture.user.processingSuspended).toBe(true);
+  expect(fixture.restriction).toMatchObject({
+    accountId: FIXTURE_IDS.user,
+    status: "active",
+    reasonCode: "manual_review",
+  });
 
   await page.goto(`/jobs/${FIXTURE_IDS.job}`);
   expect(

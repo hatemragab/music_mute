@@ -6,7 +6,7 @@
   "collectionParent": "codex/worker-rebuild",
   "baselineCommit": "947d0544a6c93aff63243770d0aba05d7e67c89d",
   "documentationStatus": "approved",
-  "implementationStatus": "branch_3_in_progress",
+  "implementationStatus": "branch_4_ready_for_review",
   "totalCheckpoints": 32,
   "protectedBranches": ["main", "codex/worker-rebuild"],
   "agentMayNotWithoutExplicitInstruction": [
@@ -65,7 +65,7 @@
       "architectureFile": "architecture/03-job-lifecycle.md",
       "evidenceFile": "evidence/03-job-queue-retries-refunds.md",
       "checkpoints": ["C1", "C2", "C3", "C4", "C5", "C6", "C7"],
-      "status": "ready_for_review",
+      "status": "merged",
       "currentCheckpoint": null,
       "lastVerifiedCommit": "ffdadf8f3950d2afc8d0a52ac98499c5c86e0599",
       "purpose": "Bounded account queue, oldest-eligible picking, retry classification, usage settlement, and refunds"
@@ -80,9 +80,9 @@
       "architectureFile": "architecture/04-abuse-and-data-protection.md",
       "evidenceFile": "evidence/04-account-abuse-api-limits.md",
       "checkpoints": ["D1", "D2", "D3", "D4", "D5", "D6"],
-      "status": "not_started",
-      "currentCheckpoint": "D1",
-      "lastVerifiedCommit": null,
+      "status": "ready_for_review",
+      "currentCheckpoint": null,
+      "lastVerifiedCommit": "33f5a640ba126b3e4f863e1a0aa946995c9dde99",
       "purpose": "Typed bounded abuse records, API budgets, manual account restrictions, dashboard review, and datastore protection"
     },
     {
