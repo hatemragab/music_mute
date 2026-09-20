@@ -18,6 +18,38 @@ afterEach(async () => {
 });
 
 describe("worker transfers", () => {
+  it("allows a bounded timeout override for focused failure handling", async () => {
+    const client = new WorkerTransferClient({
+      fetch: vi.fn(
+        async (_input: unknown, init?: RequestInit) =>
+          await new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(init.signal?.reason),
+            );
+          }),
+      ) as unknown as typeof fetch,
+      allowInsecureLoopback: true,
+      timeoutMs: 100,
+    });
+    const root = await mkdtemp(join(tmpdir(), "musicmute-transfer-"));
+    roots.push(root);
+    const destination = join(root, "input.mp3");
+
+    await expect(
+      client.download(
+        { url: "http://127.0.0.1/input", expiresAt: future() },
+        {
+          key: "input/source.mp3",
+          versionId: "v1",
+          bytes: 1,
+          sha256: createHash("sha256").update("x").digest("base64"),
+          contentType: "audio/mpeg",
+        },
+        destination,
+      ),
+    ).rejects.toMatchObject({ code: "DOWNLOAD_FAILED", retryable: true });
+  });
+
   it("streams an exact input to a new file and verifies its identity", async () => {
     const body = Buffer.from("bounded-input");
     const fetchMock = vi.fn(

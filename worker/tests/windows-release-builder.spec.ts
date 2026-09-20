@@ -27,6 +27,16 @@ describe("Windows release builder", () => {
     });
     expect(audited).toHaveLength(5);
     expect(await verifyWindowsRelease(fixture.outputRoot)).toEqual(manifest);
+    const paths = manifest.entries.map((entry) => entry.path);
+    expect(paths).toContain("runtime/node/LICENSE");
+    expect(paths).toContain("runtime/python/Lib/site-packages/runtime.dll");
+    expect(paths).not.toContain("runtime/node/npm/ignored.js");
+    expect(paths).not.toContain(
+      "runtime/python/Lib/site-packages/torch/lib/development.lib",
+    );
+    expect(paths).not.toContain(
+      "runtime/python/Lib/site-packages/pkg/tests/fixture.py",
+    );
     await expect(
       readFile(
         join(
@@ -70,7 +80,25 @@ async function inputs() {
       "Write-Output 'installer'\n",
     ],
     [join(nodeRoot, "node.exe"), "node\n"],
+    [join(nodeRoot, "LICENSE"), "Node license\n"],
+    [join(nodeRoot, "npm", "ignored.js"), "ignored\n"],
     [join(pythonRoot, "python.exe"), "python\n"],
+    [join(pythonRoot, "Lib", "site-packages", "runtime.dll"), "runtime\n"],
+    [
+      join(
+        pythonRoot,
+        "Lib",
+        "site-packages",
+        "torch",
+        "lib",
+        "development.lib",
+      ),
+      "ignored\n",
+    ],
+    [
+      join(pythonRoot, "Lib", "site-packages", "pkg", "tests", "fixture.py"),
+      "ignored\n",
+    ],
     [join(mediaRoot, "bin", "ffmpeg.exe"), "ffmpeg\n"],
     [join(mediaRoot, "bin", "ffprobe.exe"), "ffprobe\n"],
     [join(mediaRoot, "SOURCE-MANIFEST.json"), "{}\n"],

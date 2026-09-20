@@ -7,14 +7,14 @@ Darwin 25.6 ARM64 with Node.js 24.18.0, pnpm 10.14.0 and Python 3.14.4.
 
 ## Checkpoint status
 
-| Checkpoint                        | Status  | Evidence                                                                                                                                                                                                                   |
-| --------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1 supervisor and child protocol  | PASS    | Standalone worker package, generated backend protocol copy, bounded framed TypeScript/Python IPC, lifecycle/timeouts/cancellation and focused verification.                                                                |
-| D2 versioned Kim recipes          | PASS    | Four immutable recipes, model/media validation, safe ordered pipeline, reference trimmer parity, real FFmpeg option coverage and a real framed M4/CoreML Kim-to-MP3 run.                                                   |
-| D3 runtime ownership and recovery | PASS    | Authoritative HTTPS reconciliation, fenced leases/cancellation, safe exact transfers, lost-response recovery, restart cleanup and a complete local HTTP runtime integration path.                                          |
-| D4 Mac service                    | BLOCKED | Native package, hidden account, LaunchDaemon, CoreML service-context job and four-recipe installer qualification pass; real fleet enrollment, live backend/S3, logged-out and reboot acceptance remain open.               |
-| D5 Windows service                | BLOCKED | Native package, LocalService, ACL, DirectML service-context job, state-preserving rollback and rebuilt-candidate qualification pass; real fleet enrollment, live backend/S3, logged-out and reboot acceptance remain open. |
-| D6 safety and adapters            | PASS    | Attempt isolation, trusted paths, resource limits, redaction/spooling, single-job capacity, warm-model isolation and explicit supported adapter boundaries pass local tests.                                               |
+| Checkpoint                        | Status | Evidence                                                                                                                                                                          |
+| --------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1 supervisor and child protocol  | PASS   | Standalone worker package, generated backend protocol copy, bounded framed TypeScript/Python IPC, lifecycle/timeouts/cancellation and focused verification.                       |
+| D2 versioned Kim recipes          | PASS   | Four immutable recipes, model/media validation, safe ordered pipeline, reference trimmer parity, real FFmpeg option coverage and a real framed M4/CoreML Kim-to-MP3 run.          |
+| D3 runtime ownership and recovery | PASS   | Authoritative HTTPS reconciliation, fenced leases/cancellation, safe exact transfers, lost-response recovery, restart cleanup and a complete local HTTP runtime integration path. |
+| D4 Mac service                    | PASS   | Native package, hidden account, LaunchDaemon, CoreML service-context qualification and an enrolled real-S3 job through the compiled local backend pass on the accepted M4 Mac.    |
+| D5 Windows service                | PASS   | Native package, LocalService, ACL, DirectML service-context jobs, state-preserving rollback, rebuilt-candidate qualification and `0.1.3` activation pass on the accepted Z440.    |
+| D6 safety and adapters            | PASS   | Attempt isolation, trusted paths, resource limits, redaction/spooling, single-job capacity, warm-model isolation and explicit supported adapter boundaries pass local tests.      |
 
 ## D1 supervisor and child protocol
 
@@ -199,7 +199,7 @@ S3, and its deterministic child is `SIMULATED` engine evidence. D2 separately
 proves the real framed M4/CoreML child pipeline. No combined live backend, S3
 and CoreML job was claimed at D3.
 
-## D4 Mac runtime and service installation (in progress)
+## D4 Mac runtime and service installation (complete)
 
 ### Shared enrollment bootstrap
 
@@ -382,7 +382,7 @@ doctor with CoreML, Python 3.13.7, ONNX Runtime 1.30.0 and the exact Kim model.
 `kim-vocals-trim-v1` then produced a valid 193,767-byte stereo 44.1 kHz MP3 at
 192 kb/s, and every manifest entry verified unchanged after processing.
 
-### D4 verification and current blocker
+### D4 verification and remaining release acceptance
 
 - macOS release/manifest/Mach-O/LaunchDaemon/installation tests: PASS;
 - full worker protocol drift, formatting, lint, typecheck and build: PASS;
@@ -408,13 +408,20 @@ doctor with CoreML, Python 3.13.7, ONNX Runtime 1.30.0 and the exact Kim model.
 - rebuilt `0.1.2` split-stage qualification: PASS, 33,852 immutable entries,
   all four recipes under `_musicmute` through CoreML, candidate left inactive,
   qualification evidence validated and accepted `0.1.1` service restored;
-- logged-out operation, live backend/S3 transfer and reboot: NOT_RUN.
+- enrolled installed `0.1.1` LaunchDaemon through the compiled local backend,
+  isolated MongoDB/Redis, real versioned S3 and CoreML: PASS. The worker opened
+  a session, synchronized config, registered the M4 GPU slot, claimed a job,
+  downloaded and processed a 10-second MP3, uploaded one whole object, finalized
+  it to `ready`, and the harness downloaded the result and removed both exact
+  S3 object versions;
+- logged-out operation and reboot: NOT_RUN. These remain release-readiness
+  gates rather than D4 packaging and system-service implementation blockers.
 
 Normal administrator consent was used for the system-owned account,
 `/Library` installation and LaunchDaemon registration. No administrator
-password was collected or embedded, and no logout/reboot was attempted. D4
-remains BLOCKED because the local loopback control plane is not live backend/S3
-evidence and logged-out plus reboot recovery remain untested.
+password was collected or embedded, and no logout/reboot was attempted. D4 is
+complete because the native service and real backend/S3/CoreML execution are
+proven; logged-out and reboot recovery remain later release-readiness gates.
 
 ## D5 Windows runtime and service installation (in progress)
 
@@ -448,12 +455,12 @@ evidence and logged-out plus reboot recovery remain untested.
   `DmlExecutionProvider`, the exact model and the offline FFmpeg capability set;
   conflicting ONNX Runtime distributions fail closed.
 
-### D5 verification and current blocker
+### D5 verification and remaining release acceptance
 
 - Windows PE/manifest/builder/service-definition/PowerShell and qualification
   tests: PASS;
 - full worker protocol drift, formatting, lint, typecheck and build: PASS;
-- complete TypeScript worker suite: PASS, 31 files and 107 tests;
+- complete TypeScript worker suite: PASS, 31 files and 112 tests;
 - complete Python engine suite, including accepted DirectML host selection:
   PASS, 32 tests;
 - WinSW official asset/license download and pinned digest comparison: PASS;
@@ -484,20 +491,25 @@ evidence and logged-out plus reboot recovery remain untested.
   remained inactive, the `0.1.1` active marker/config/credential/wrapper/XML
   were preserved, and the service remained stopped as it was on entry;
 - Windows one-command bootstrap orchestration and exclusive protected
-  qualification export: PASS_LOCAL; native live-backend execution is NOT_RUN
-  after the successful `0.1.3` stage. A later read-only SSH audit at
-  `192.168.1.7` confirmed the automatic `MusicMuteWorker` service still uses
-  `LocalService`, active release `0.1.1`, and preserved runtime config and
-  credential; the service remains stopped exactly as it was before staging.
-  The Mac-hosted backend was not reachable from Windows, so no live enrollment
-  or S3 activation was claimed;
-- logged-out operation, live backend/S3 transfer, interrupted-upgrade recovery
-  acceptance and reboot: NOT_RUN.
+  qualification export: PASS_LOCAL;
+- the installed `0.1.1` `LocalService` completed a real DirectML job through
+  the compiled local backend and configured versioned S3 bucket: PASS. The
+  flow opened a session, synchronized config, registered the RX 580 slot,
+  claimed, downloaded, processed, uploaded one whole object and finalized;
+- the rollback-safe installer promoted the already verified `0.1.3` package,
+  ran all four DirectML qualification recipes as `LocalService`, emitted a new
+  durable `started` event and wrote `0.1.3` as the active release: PASS. One
+  subsequent ephemeral-backend attempt reached `completion-uncertain` after
+  the harness exited, so that attempt is not claimed as a second clean
+  end-to-end pass;
+- logged-out operation, interrupted-upgrade recovery acceptance and reboot:
+  NOT_RUN. These remain release-readiness gates rather than D5 packaging and
+  system-service implementation blockers.
 
-D5 remains BLOCKED rather than complete. Native service, DirectML execution and
-the rebuilt-candidate qualification gate are proven, but the fixture is not
-live backend/S3 evidence and the logged-out, interrupted-upgrade recovery and
-reboot gates remain open.
+D5 is complete because native service packaging, DirectML execution,
+rebuilt-candidate qualification and real backend/S3 execution are proven.
+Logged-out, interrupted-upgrade recovery and reboot remain later
+release-readiness gates.
 
 ## D6 runtime safety and extension boundary
 
@@ -548,16 +560,15 @@ reboot gates remain open.
   identity and rejection of CPU provider fallback;
 - real-FFmpeg four-recipe pipeline and reference trimmer parity: PASS;
 - real M4/CoreML packaged job: inherited PASS from D4 evidence;
-- real Mac LaunchDaemon/CoreML and Windows Service/DirectML loopback acceptance:
-  PASS as recorded in D4/D5, but the new final qualification command, real
-  enrollment, live backend/S3, logged-out and reboot acceptance are NOT_RUN.
+- real Mac LaunchDaemon/CoreML and Windows Service/DirectML acceptance through
+  the compiled local backend and real versioned S3: PASS as recorded in D4/D5;
+- logged-out and reboot acceptance: NOT_RUN.
 
 ## Limits
 
-This is local protocol/pipeline/runtime evidence. It does not prove live S3 or
-deployed-backend integration, WebSocket hints, the new qualification command
-through either installed native service, logged-out behavior, reboot survival,
-denoise listening quality or release readiness. D4 and D5 prove native service
-execution only against bounded loopback acceptance fixtures. D6 proves local
-safety and extension boundaries; it does not promote those platform results to
-live fleet enrollment evidence.
+This is local compiled-backend and real-S3 evidence, not deployed-backend
+evidence. It does not prove WebSocket hints, logged-out behavior, reboot
+survival, denoise listening quality or release readiness. D4 and D5 prove
+enrolled native service execution on the two declared MVP platforms. D6 proves
+local safety and extension boundaries; it does not promote those platform
+results to production readiness.

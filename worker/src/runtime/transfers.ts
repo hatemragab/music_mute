@@ -12,6 +12,7 @@ const UPLOAD_HEADER_NAMES = new Set([
   "if-none-match",
   "x-amz-checksum-sha256",
 ]);
+const DEFAULT_TRANSFER_TIMEOUT_MS = 2 * 60 * 60_000;
 
 export class TransferError extends Error {
   constructor(
@@ -41,7 +42,9 @@ export class WorkerTransferClient {
   constructor(options: TransferClientOptions = {}) {
     this.fetchImplementation = options.fetch ?? fetch;
     this.allowInsecureLoopback = options.allowInsecureLoopback === true;
-    this.timeoutMs = boundedTimeout(options.timeoutMs ?? 60_000);
+    this.timeoutMs = boundedTimeout(
+      options.timeoutMs ?? DEFAULT_TRANSFER_TIMEOUT_MS,
+    );
   }
 
   async download(
