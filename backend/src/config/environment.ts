@@ -56,6 +56,10 @@ const schema = Joi.object({
   S3_BUCKET: Joi.string()
     .pattern(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/)
     .required(),
+  WORKER_INSTALLATION_CATALOG_PATH: Joi.string()
+    .pattern(/^\//)
+    .max(4096)
+    .optional(),
   FIREBASE_PROJECT_ID: Joi.string().trim().min(1).required(),
   FIREBASE_WEB_API_KEY: Joi.string().trim().min(1).required(),
   FIREBASE_SERVICE_ACCOUNT_BASE64: Joi.string().trim().base64().optional(),

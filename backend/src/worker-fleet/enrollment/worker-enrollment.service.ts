@@ -27,10 +27,12 @@ import type {
   WorkerLifecycleDto,
 } from './worker-enrollment.dto.js';
 import { sanitizeWorkerDiagnosticLine } from '../telemetry/worker-diagnostic-sanitizer.js';
+import {
+  DEFAULT_WORKER_RECIPE_ID,
+  QUALIFIED_MODEL_DIGEST,
+} from '../../jobs/worker-recipes.js';
 
 const INSTALLATION_TTL_MS = 60 * 60 * 1000;
-const QUALIFIED_MODEL_DIGEST =
-  'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b';
 
 function digest(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -85,7 +87,7 @@ function isQualified(dto: {
   const os = dto.hardware.os.toLowerCase();
   return dto.capabilities.every((capability) => {
     if (!gpuIds.has(capability.gpuId)) return false;
-    if (!capability.recipeIds.includes('kim-vocal-2-v1')) return false;
+    if (!capability.recipeIds.includes(DEFAULT_WORKER_RECIPE_ID)) return false;
     if (
       capability.platform === 'darwin-arm64' &&
       capability.provider === 'coreml'
@@ -372,6 +374,8 @@ export class WorkerEnrollmentService {
             .session(session)
             .lean();
           if (!machine) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+          if (machine.credentialDigest !== dto.credentialDigest)
+            throw workerError('WORKER_CONFLICT');
           return { machine, replayed: true, failed: false };
         }
         if (
@@ -379,6 +383,7 @@ export class WorkerEnrollmentService {
           installation.revision !== dto.expectedRevision ||
           !installation.hardwareReport ||
           !installation.runtimeIdentity ||
+          !installation.qualificationObject ||
           installation.capabilities.length === 0
         )
           throw workerError('WORKER_CONFLICT');
@@ -399,14 +404,9 @@ export class WorkerEnrollmentService {
           return { machine: null, replayed: false, failed: true };
         }
         const machineId = randomUUID();
-        const credential = deriveCredential(
-          principal.credential,
-          'machine',
-          machineId,
-        );
         const machine = await new this.machines({
           _id: machineId,
-          credentialDigest: digest(credential),
+          credentialDigest: dto.credentialDigest,
           status: 'active',
           label: installation.label,
           groupId: installation.groupId,
@@ -438,11 +438,6 @@ export class WorkerEnrollmentService {
       return {
         machineId: machine._id,
         status: machine.status,
-        credential: deriveCredential(
-          principal.credential,
-          'machine',
-          machine._id,
-        ),
         credentialRevision: machine.credentialRevision,
         replayed: result.replayed,
       };

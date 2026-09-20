@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
+import { ADMIN_RATE_LIMIT_DEFAULTS } from '../config/environment.js';
 import { AdminRateLimitService } from './admin-rate-limit.service.js';
 
 describe('AdminRateLimitService', () => {
@@ -18,7 +19,7 @@ describe('AdminRateLimitService', () => {
       const service = new AdminRateLimitService(
         budgets as never,
         { bucket: (scope: string, id: string) => `${scope}:${id}` } as never,
-        new ConfigService(),
+        new ConfigService(ADMIN_RATE_LIMIT_DEFAULTS),
       );
       await service.assertAllowed(
         'fixture-uid',
@@ -39,7 +40,7 @@ describe('AdminRateLimitService', () => {
         reserve: async () => ({ allowed: false, retryAfterSeconds: 17 }),
       } as never,
       { bucket: () => 'fixture-key' } as never,
-      new ConfigService(),
+      new ConfigService(ADMIN_RATE_LIMIT_DEFAULTS),
     );
     await expect(
       service.assertAllowed(

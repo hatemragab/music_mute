@@ -110,7 +110,6 @@ describe('CSV export HTTP boundary', () => {
         );
       },
     );
-    await harness.app.listen(0, '127.0.0.1');
     const port = (harness.app.getHttpServer().address() as AddressInfo).port;
     const request = get({
       host: '127.0.0.1',

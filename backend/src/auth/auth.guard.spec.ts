@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it, vi } from 'vitest';
+import { AUTH_RATE_LIMIT_DEFAULTS } from '../config/environment.js';
 import { AuthGuard } from './auth.guard.js';
 import type { FirebaseIdentityService } from './firebase-identity.service.js';
 import type { UsersService } from '../users/users.service.js';
@@ -80,7 +81,7 @@ describe('private request trust order', () => {
       users as unknown as UsersService,
       budgets as unknown as RateBudgetService,
       keys as unknown as RateLimitKeys,
-      new ConfigService(),
+      new ConfigService(AUTH_RATE_LIMIT_DEFAULTS),
     );
     return {
       events,

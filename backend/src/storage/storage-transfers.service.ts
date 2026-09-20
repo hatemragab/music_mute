@@ -129,6 +129,13 @@ export class StorageTransfersService {
     return this.createUploadGrant(reservation, deadlineAt);
   }
 
+  async createWorkerInstallationUploadGrant(
+    reservation: ObjectReservation,
+    deadlineAt: Date,
+  ): Promise<UploadGrant> {
+    return this.createUploadGrant(reservation, deadlineAt);
+  }
+
   async verifyUploadedVersion(
     reservation: ObjectReservation,
     versionId: string,
@@ -149,6 +156,13 @@ export class StorageTransfersService {
     )
       throw jobError('UPLOAD_NOT_READY');
     return { ...reservation, versionId };
+  }
+
+  /** Recovers the immutable version after a successful PUT response was lost. */
+  async findUploadedVersion(
+    reservation: ObjectReservation,
+  ): Promise<ObjectIdentity | null> {
+    return this.inspect(reservation);
   }
 
   async isPinnedObjectAvailable(object: ObjectIdentity): Promise<boolean> {

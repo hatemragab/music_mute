@@ -1,3 +1,8 @@
+import type {
+  WorkerRecipeId,
+  WorkerRecipeStepId,
+} from '../worker-fleet/protocol/v1/protocol.js';
+
 export type InputSource = 'audio_file' | 'video_file' | 'youtube';
 export const PREPARATION_PROFILE_ID = 'preserve-or-aac-lc-256-v1';
 export const JOB_STATUSES = [
@@ -82,13 +87,19 @@ export interface SafeJobError {
 }
 
 export interface WorkerRecipeSnapshot {
-  recipeId: 'kim-vocal-2-v1';
+  recipeId: WorkerRecipeId;
   recipeRevision: number;
   protocolVersion: 1;
+  recipeDigest: string;
+  modelFilename: 'Kim_Vocal_2.onnx';
   modelDigest: string;
   modelBytes: number;
+  preparationProfileId: 'pcm16-stereo-44100-v1';
+  stepIds: WorkerRecipeStepId[];
   trimEnabled: boolean;
   denoiseEnabled: boolean;
+  denoisePresetId: 'afftdn-conservative-v1' | null;
+  trimProfileId: 'trim-vocal-gaps-v1' | null;
   outputFormat: 'mp3';
   outputBitrateKbps: 192;
 }
