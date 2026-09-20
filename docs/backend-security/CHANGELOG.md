@@ -1,5 +1,13 @@
 # Backend security planning changelog
 
+## 2026-09-20 — Branch 5 merged and roadmap complete
+
+- Merged Branch 5 PR #14 into `codex/backend-security-cost-hardening` at
+  `b0b69a6d57021a86327bf438acab360ad2098633`.
+- Marked all five implementation branches and checkpoints A1–E6 complete.
+- Kept provider-console changes, deployment, real account deletion, and any merge
+  to `main` outside the completed local roadmap.
+
 ## 2026-09-20 — Branch 5 checkpoints E1–E6 complete
 
 - Replaced the calendar-month recovery rule with one exact fifteen-day elapsed-time

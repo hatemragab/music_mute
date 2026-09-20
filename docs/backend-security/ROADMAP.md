@@ -2,7 +2,7 @@
 
 **Collection:** `codex/backend-security-cost-hardening`
 **Implementation checkpoints:** 32
-**Current implementation status:** Branches 1–4 merged; Branch 5 E1–E6 ready for review
+**Current implementation status:** All five branches merged; A1–E6 complete
 
 ## 1. Sequential branch contract
 

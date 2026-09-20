@@ -1,7 +1,6 @@
 # Branch evidence reports
 
-Branches 1–4 are merged. Branch 5 has completed E1–E6 and its evidence report is
-ready for collection-branch review.
+All five branches are merged into the collection branch with A1–E6 complete.
 
 When a branch starts, copy `../templates/CHECKPOINT-REPORT.md` to the evidence file
 named in `../branch-manifest.json`. Update it after every checkpoint. Do not create

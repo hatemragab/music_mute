@@ -2,7 +2,7 @@
 
 **Collection branch:** `codex/backend-security-cost-hardening`
 **Direct parent:** `codex/worker-rebuild`
-**Package status:** Branches 1–4 merged; Branch 5 E1–E6 are ready for review
+**Package status:** All five implementation branches merged; A1–E6 complete
 **Implementation authority:** the maintainer authorized execution on 2026-09-19
 
 ## Purpose
@@ -123,8 +123,7 @@ latest instruction and this accepted contract cannot both be satisfied.
 - Branch 2 checkpoints B1–B7 are merged into the collection branch.
 - Branch 3 completed C1–C7 and merged into the collection branch.
 - Branch 4 completed D1–D6 and merged into the collection branch as PR #13.
-- Branch 5 completed E1–E6 in `hatem/account-deletion-cleanup` and is ready for
-  collection-branch review.
+- Branch 5 completed E1–E6 and merged into the collection branch as PR #14.
 - No provider console, live database, Redis, S3, Firebase, deployment, or user data
   was changed.
 - Device-based quota enforcement and automatic bans remain deferred.
