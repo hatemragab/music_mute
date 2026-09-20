@@ -138,7 +138,9 @@ export class DiagnosticSpool implements RuntimeDiagnostics {
     if (information)
       assertSafePrivateFile(information, "Diagnostic spool event file");
     await appendFile(this.eventsPath, encoded, { mode: 0o600 });
-    const handle = await open(this.eventsPath, "r");
+    // Windows requires a writable file handle for FlushFileBuffers/fsync even
+    // when the record was appended through a separate handle.
+    const handle = await open(this.eventsPath, "r+");
     try {
       await handle.sync();
     } finally {

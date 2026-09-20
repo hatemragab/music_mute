@@ -7,14 +7,14 @@ Darwin 25.6 ARM64 with Node.js 24.18.0, pnpm 10.14.0 and Python 3.14.4.
 
 ## Checkpoint status
 
-| Checkpoint                        | Status  | Evidence                                                                                                                                                                                                   |
-| --------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1 supervisor and child protocol  | PASS    | Standalone worker package, generated backend protocol copy, bounded framed TypeScript/Python IPC, lifecycle/timeouts/cancellation and focused verification.                                                |
-| D2 versioned Kim recipes          | PASS    | Four immutable recipes, model/media validation, safe ordered pipeline, reference trimmer parity, real FFmpeg option coverage and a real framed M4/CoreML Kim-to-MP3 run.                                   |
-| D3 runtime ownership and recovery | PASS    | Authoritative HTTPS reconciliation, fenced leases/cancellation, safe exact transfers, lost-response recovery, restart cleanup and a complete local HTTP runtime integration path.                          |
-| D4 Mac service                    | BLOCKED | Complete portable release/service tooling and a packaged CoreML job pass, but enrolled config/credential and authorized system LaunchDaemon, logged-out, live S3 and reboot acceptance remain unavailable. |
-| D5 Windows service                | NOT_RUN | No Windows service was installed or tested.                                                                                                                                                                |
-| D6 safety and adapters            | PASS    | Attempt isolation, trusted paths, resource limits, redaction/spooling, single-job capacity, warm-model isolation and explicit supported adapter boundaries pass local tests.                               |
+| Checkpoint                        | Status  | Evidence                                                                                                                                                                                                                   |
+| --------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1 supervisor and child protocol  | PASS    | Standalone worker package, generated backend protocol copy, bounded framed TypeScript/Python IPC, lifecycle/timeouts/cancellation and focused verification.                                                                |
+| D2 versioned Kim recipes          | PASS    | Four immutable recipes, model/media validation, safe ordered pipeline, reference trimmer parity, real FFmpeg option coverage and a real framed M4/CoreML Kim-to-MP3 run.                                                   |
+| D3 runtime ownership and recovery | PASS    | Authoritative HTTPS reconciliation, fenced leases/cancellation, safe exact transfers, lost-response recovery, restart cleanup and a complete local HTTP runtime integration path.                                          |
+| D4 Mac service                    | BLOCKED | Native package, hidden account, LaunchDaemon, CoreML service-context job and four-recipe installer qualification pass; real fleet enrollment, live backend/S3, logged-out and reboot acceptance remain open.               |
+| D5 Windows service                | BLOCKED | Native package, LocalService, ACL, DirectML service-context job, state-preserving rollback and rebuilt-candidate qualification pass; real fleet enrollment, live backend/S3, logged-out and reboot acceptance remain open. |
+| D6 safety and adapters            | PASS    | Attempt isolation, trusted paths, resource limits, redaction/spooling, single-job capacity, warm-model isolation and explicit supported adapter boundaries pass local tests.                                               |
 
 ## D1 supervisor and child protocol
 
@@ -201,6 +201,113 @@ and CoreML job was claimed at D3.
 
 ## D4 Mac runtime and service installation (in progress)
 
+### Shared enrollment bootstrap
+
+- Added a bounded HTTPS enrollment client and `musicmute-worker enroll`
+  command for the accepted C2 exchange/report/activate contract. It reads the
+  one-use invitation only from an owner-protected file, rejects non-HTTPS
+  endpoints except an explicit loopback-only development mode, and never
+  prints installation or machine credentials.
+- Request UUIDs and restricted installation state are durably written before
+  advancing. Re-running the command reuses the same exchange, report and
+  activation identities, validates that returned identities and credentials
+  remain stable, and writes `machine.credential` plus non-secret
+  `machine.json` into an existing protected directory.
+- A real loopback HTTP contract test proves the complete three-request flow,
+  protected file modes, secret-free output and a second invocation that
+  recovers through backend replay without issuing a second report.
+- Runtime-derived enrollment now verifies the immutable release, strictly
+  parses the packaged runtime doctor and collects only bounded host/GPU fields
+  for the accepted M4/CoreML or RX 580/DirectML pair. It cannot advertise a
+  capability from doctor output alone.
+- Added a packaged service-identity qualification command. It verifies the
+  backend-provided fixture digest, runs all four immutable Kim recipes through
+  one warm runtime, profiles ONNX Runtime and emits bounded evidence only when
+  the accelerated provider has model-node events and the CPU provider has
+  none. Runtime-derived enrollment requires and cross-checks that evidence
+  against the host, provider, immutable release-manifest digest and qualified
+  model before report/activation.
+- Enrollment now exchanges the one-use invitation before expensive local
+  report construction, generates and protects the 32-byte machine credential
+  locally, and submits only its SHA-256 digest during activation. The backend
+  stores that digest, returns no plaintext machine secret and accepts an
+  activation replay only when both the request ID and credential digest match.
+  This removes the credential-ordering mismatch between restricted
+  installation and final native service activation.
+- Added a bounded streaming artifact downloader for installation grants.
+  It requires HTTPS except for explicit loopback tests, rejects redirects and
+  URL credentials, enforces declared size and content type, verifies SHA-256
+  while streaming, publishes atomically into an existing protected directory,
+  safely reuses an identical file and rejects conflicting local state.
+- Added an operator-configured backend catalog and restricted artifact-grant
+  route for the platform release, qualified Kim model and rights-cleared
+  fixture. The backend validates each pinned S3 object before signing it and
+  omits internal storage keys/version IDs from the response. The new
+  `prepare-installation` CLI action establishes/replays the installation
+  session, downloads that exact set and writes only verified local metadata;
+  signed URLs and credentials are not persisted in its artifact receipt. The
+  preparation step now also validates every archive path, extracts into a
+  protected temporary directory, verifies the immutable platform manifest and
+  catalog version, then atomically publishes or safely reuses the versioned
+  release root.
+- Platform package commands can emit the matching `.tar.gz` or `.zip`
+  directly after release verification. Archive publication is exclusive, its
+  entry listing is checked with the same path policy, and the command reports
+  exact bytes, SHA-256 and content type for catalog registration.
+- Closed the fixture-result smoke-test gap. Qualification evidence now binds a
+  private service-context Kim output path, byte count and digest to the base
+  recipe. Enrollment refuses a changed file, requests one installation-scoped
+  immutable PUT, sends only the backend-signed headers and confirms the exact
+  S3 version. Activation now requires that durable confirmation. Identical
+  retries recover an already uploaded version without a second object, while
+  changed reservations or versions fail closed.
+- The native installers now provision a digest-named private WAV fixture and
+  run that command through a temporary one-shot service definition. macOS uses
+  `_musicmute` and CoreML, validates the owner-only report, deactivates the
+  qualification LaunchDaemon and atomically restores the normal plist. Windows
+  uses `LocalService` and DirectML adapter 0, validates the same strict evidence
+  through the packaged CLI, then restores the automatic WinSW definition;
+  first installation explicitly reinstalls the service so its SCM start mode
+  cannot remain manual. Both paths retain their existing transactional rollback.
+- Native installation is now split into qualification and activation. macOS
+  `stage` and Windows `Stage` run qualification without fake config or machine
+  credentials, never activate the candidate, and restore an accepted prior
+  service. Enrollment generates the final one-slot runtime config only after
+  activation supplies the real machine ID; a separate native `activate` step
+  installs that config and credential before starting the normal service.
+- A rebuilt 33,852-entry macOS `0.1.2` candidate passed this stage as
+  `_musicmute` across all four CoreML recipes, remained inactive and restored
+  the accepted `0.1.1` LaunchDaemon. The first attempt found that the protected
+  downloaded model was unreadable to `_musicmute`; staging now makes a private
+  service-owned temporary copy for model validation and always removes it.
+- The complete worker verification after the latest local installation wiring
+  passes protocol drift, formatting, lint, typecheck, 31 TypeScript files/111
+  tests, 32 Python tests and the production build. The backend contract change
+  passes formatting, lint, typecheck, secret scanning, 110 unit files/749
+  tests, 22 E2E files/135 tests and its production build. The shared E2E
+  harness also passed five consecutive complete runs after replacing implicit
+  test-server lifecycles with an explicit loopback listener. The candidate
+  PowerShell script previously parsed with Windows PowerShell on the authorized
+  Z440 host; no new native package was built in this revision.
+- The complete one-shot installer qualification passed through both native
+  service managers with rebuilt `0.1.1` releases. The 33,843-entry macOS
+  package ran all four recipes as `_musicmute` through CoreML and restored the
+  normal active LaunchDaemon plist. The 31,476-entry Windows package ran all
+  four recipes as `LocalService` through DirectML adapter 0, reported 896
+  accelerated model-node events with zero CPU model-node events, restored the
+  normal WinSW XML and returned the automatic service to `Running`. This is
+  native qualification evidence for the two MVP hosts; no real backend
+  activation is claimed.
+- One-command macOS and Windows bootstrap orchestration now performs artifact
+  preparation, native service-context staging, enrollment and activation. The
+  Windows path delegates every privileged mutation to the packaged PowerShell
+  manager and safely reuses a completed qualification on retry; its final
+  install reruns the gate before activation. The orchestration passes local
+  contract tests, while a live backend/S3 bootstrap still requires native
+  acceptance. Manual prebuilt-report mode remains restricted to explicit
+  loopback replay/transport contract testing and is not native qualification
+  evidence.
+
 - Added a deterministic native ARM64 release builder. It packages only the
   compiled worker, engine and supplied private Node/Python/FFmpeg/FFprobe
   roots; credentials, configuration, model weights, job data and logs remain
@@ -218,12 +325,14 @@ and CoreML job was claimed at D3.
   libraries are accepted; Homebrew and other mutable absolute prefixes are
   rejected. The installed Homebrew Node and FFmpeg on this host therefore
   cannot be misrepresented as private package inputs.
-- Added idempotent install/repair commands, a dedicated-account system
-  LaunchDaemon definition, `0700` state/log roots, `0600` config/credential
-  files, atomic `current` activation, previous-release rollback, service
-  restart and a doctor path. The LaunchDaemon receives only minimal system
-  environment keys and stable private paths; no backend infrastructure or S3
-  credential is placed in the plist.
+- Added idempotent install/repair commands, automatic creation and strict
+  validation of the hidden `_musicmute` service account, a dedicated-account
+  system LaunchDaemon definition, `0700` state/log roots, `0600`
+  config/credential files, atomic `current` activation, previous-release
+  rollback, service restart and a doctor path. Activation waits for launchd's
+  asynchronous `bootout` completion before bootstrapping the replacement. The
+  LaunchDaemon receives only minimal system environment keys and stable private
+  paths; no backend infrastructure or S3 credential is placed in the plist.
 - The supervisor prepends only the immutable release media directory to the
   child `PATH`, so `audio-separator` finds the same qualified FFmpeg binary that
   the request names explicitly. Relative tool directories are rejected and no
@@ -277,20 +386,35 @@ doctor with CoreML, Python 3.13.7, ONNX Runtime 1.30.0 and the exact Kim model.
 
 - macOS release/manifest/Mach-O/LaunchDaemon/installation tests: PASS;
 - full worker protocol drift, formatting, lint, typecheck and build: PASS;
-- complete TypeScript worker suite: PASS, 23 files and 62 tests;
-- complete Python engine suite: PASS, 28 tests;
+- complete TypeScript worker suite: PASS, 31 files and 111 tests;
+- complete Python engine suite: PASS, 32 tests;
 - real private Python CoreML provider profile and Kim pipeline: PASS;
 - reproducible offline FFmpeg/LAME build and complete private release: PASS;
 - fresh final-D6 package, runtime doctor, real CoreML job, qualified child PATH
   and post-run immutability: PASS;
-- enrolled config/credential, system LaunchDaemon install/restart, dedicated
-  logged-out operation, live backend/S3 job and reboot: NOT_RUN.
+- dedicated service-account creation, protected config/credential installation,
+  restrictive ownership/modes, system LaunchDaemon install/doctor/restart and
+  a real CoreML job under `_musicmute` against a loopback acceptance fixture:
+  PASS;
+- final stable `0.1.0` package build, install, Doctor and activation: PASS,
+  33,831 immutable entries and active `current -> releases/0.1.0`;
+- stable-release service-context output: PASS, 97,845-byte 4.0-second stereo
+  44.1 kHz MP3 with SHA-256
+  `fe7a34782b01d2ca19ae28d0a227a767b7206aa41f96cb56f03d0e8ccde6f717`;
+- rebuilt `0.1.1` installer qualification: PASS, 33,843 immutable entries,
+  all four recipes under `_musicmute` through CoreML, strict protected-report
+  validation, normal LaunchDaemon restoration and active
+  `current -> releases/0.1.1`;
+- rebuilt `0.1.2` split-stage qualification: PASS, 33,852 immutable entries,
+  all four recipes under `_musicmute` through CoreML, candidate left inactive,
+  qualification evidence validated and accepted `0.1.1` service restored;
+- logged-out operation, live backend/S3 transfer and reboot: NOT_RUN.
 
-Normal administrator consent, a pre-existing dedicated account and an enrolled
-machine config/credential are required for system acceptance. No administrator
+Normal administrator consent was used for the system-owned account,
+`/Library` installation and LaunchDaemon registration. No administrator
 password was collected or embedded, and no logout/reboot was attempted. D4
-remains unchecked until the real LaunchDaemon flow passes; portable package and
-local execution evidence alone are not a completed service checkpoint.
+remains BLOCKED because the local loopback control plane is not live backend/S3
+evidence and logged-out plus reboot recovery remain untested.
 
 ## D5 Windows runtime and service installation (in progress)
 
@@ -314,8 +438,10 @@ local execution evidence alone are not a completed service checkpoint.
   prior config, credential, wrapper and service definition; a failed update
   restores all four, restarts the prior version and verifies its runtime instead
   of combining an old service definition with candidate state. Incomplete
-  existing installations fail before activation. Uninstall preserves releases,
-  credentials, models and job state.
+  existing installations fail before activation. Candidate and rollback starts
+  now require a new durable `started` diagnostic after the start timestamp;
+  WinSW wrapper status alone is not accepted as worker health. Uninstall
+  preserves releases, credentials, models and job state.
 - Generalized the private runtime doctor without weakening macOS checks. The
   Windows path accepts only Windows x86_64, Python 3.12,
   `onnxruntime-directml==1.24.4`, `audio-separator==0.47.0`,
@@ -324,23 +450,49 @@ local execution evidence alone are not a completed service checkpoint.
 
 ### D5 verification and current blocker
 
-- Windows PE/manifest/builder/service-definition/PowerShell fixture tests:
-  PASS, 5 files and 10 tests;
+- Windows PE/manifest/builder/service-definition/PowerShell and qualification
+  tests: PASS;
 - full worker protocol drift, formatting, lint, typecheck and build: PASS;
-- complete TypeScript worker suite: PASS, 20 files and 49 tests;
+- complete TypeScript worker suite: PASS, 31 files and 107 tests;
 - complete Python engine suite, including accepted DirectML host selection:
-  PASS, 21 tests;
+  PASS, 32 tests;
 - WinSW official asset/license download and pinned digest comparison: PASS;
 - portable PowerShell 7.6.6 parsing, non-Windows fail-closed behavior and
   rollback-helper restore/remove execution: PASS on this macOS host;
-- native Windows PowerShell and service execution: NOT_RUN;
-- complete private Windows package, restrictive ACL inspection, LocalService
-  DirectML access, exact RX 580 selection, real inference, restart/logged-out
-  behavior, live backend/S3 job, rollback and reboot: NOT_RUN.
+- native Windows PowerShell, 31,331-entry private package, elevated
+  install/doctor, restrictive SID ACL inspection and stable `0.1.0` activation:
+  PASS on the accepted Z440 host;
+- `LocalService` DirectML access, exact RX 580 adapter-0 selection, a real
+  service-context Kim job, checked MP3 upload/complete flow against a loopback
+  acceptance fixture, diagnostic-spool persistence and service restart: PASS;
+- same-version repair preserving the credential, model, active marker and
+  `LocalService` state: PASS;
+- controlled invalid-credential repair: PASS for rejection and automatic
+  restoration of config, credential, wrapper and XML; the restored service
+  emitted a new durable `started` event and returned to `Running` on `0.1.0`;
+- rebuilt `0.1.1` repair and installer qualification: PASS with 31,476
+  immutable entries, all four recipes as `LocalService` through DirectML
+  adapter 0, 896 accelerated model-node events, zero CPU model-node events,
+  strict protected-report validation, normal WinSW XML restoration and the
+  automatic service `Running` on `0.1.1`;
+- rebuilt `0.1.3` split `Stage` transaction: PASS on the accepted Z440 with
+  31,506 immutable entries and all four recipes under `LocalService`/DirectML.
+  The first `0.1.2` attempt exposed that restoration incorrectly restarted a
+  service which was stopped before staging. The transaction now records and
+  restores the prior running/stopped state; native PowerShell parsing, local
+  regression tests and the corrected native stage all pass. The candidate
+  remained inactive, the `0.1.1` active marker/config/credential/wrapper/XML
+  were preserved, and the service remained stopped as it was on entry;
+- Windows one-command bootstrap orchestration and exclusive protected
+  qualification export: PASS_LOCAL; native live-backend execution is NOT_RUN
+  because the host became unreachable after the successful `0.1.3` stage;
+- logged-out operation, live backend/S3 transfer, interrupted-upgrade recovery
+  acceptance and reboot: NOT_RUN.
 
-D5 remains unchecked. The code and cross-platform fixtures are implementation
-evidence only; owner-authorized access to the accepted Windows host and a fully
-prepared private Windows runtime are still required for service acceptance.
+D5 remains BLOCKED rather than complete. Native service, DirectML execution and
+the rebuilt-candidate qualification gate are proven, but the fixture is not
+live backend/S3 evidence and the logged-out, interrupted-upgrade recovery and
+reboot gates remain open.
 
 ## D6 runtime safety and extension boundary
 
@@ -384,20 +536,23 @@ prepared private Windows runtime are still required for service acceptance.
 - complete backend verification after the final runtime-contract changes:
   PASS, 108 Vitest files/731 tests, 22 E2E files/135 tests and production build;
 - full protocol drift, formatting, lint, typecheck and production build: PASS;
-- complete TypeScript worker suite: PASS, 23 files and 62 tests;
-- complete Python engine suite: PASS, 28 tests;
+- complete TypeScript worker suite: PASS, 26 files and 73 tests;
+- complete Python engine suite: PASS, 32 tests;
+- runtime-derived enrollment qualification gate: PASS in focused tests for
+  verified release/doctor/hardware composition, all-recipe evidence, service
+  identity and rejection of CPU provider fallback;
 - real-FFmpeg four-recipe pipeline and reference trimmer parity: PASS;
 - real M4/CoreML packaged job: inherited PASS from D4 evidence;
-- real Windows Service/DirectML and logged-out service acceptance: NOT_RUN and
-  remains a D5 gate, not inferred from adapter tests.
+- real Mac LaunchDaemon/CoreML and Windows Service/DirectML loopback acceptance:
+  PASS as recorded in D4/D5, but the new final qualification command, real
+  enrollment, live backend/S3, logged-out and reboot acceptance are NOT_RUN.
 
 ## Limits
 
 This is local protocol/pipeline/runtime evidence. It does not prove live S3 or
-deployed-backend integration, WebSocket hints, accepted-platform service
-accounts, installation, logged-out behavior, reboot survival, DirectML service
-execution, denoise listening quality or release readiness. D6 proves local
-safety and extension boundaries, not those platform-service outcomes. The D4
-portable Mac runtime is qualified locally, but its LaunchDaemon acceptance is
-not. D5 tooling has only fixture/static evidence; no Windows package or service
-result is claimed.
+deployed-backend integration, WebSocket hints, the new qualification command
+through either installed native service, logged-out behavior, reboot survival,
+denoise listening quality or release readiness. D4 and D5 prove native service
+execution only against bounded loopback acceptance fixtures. D6 proves local
+safety and extension boundaries; it does not promote those platform results to
+live fleet enrollment evidence.

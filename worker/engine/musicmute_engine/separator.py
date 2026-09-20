@@ -27,17 +27,25 @@ class KimSeparator:
         model_path: Path,
         *,
         directml_device_id: int = 0,
+        profile_directory: Path | None = None,
     ) -> None:
         self.provider = provider
         self.model_path = verify_model(model_path)
         self.directml_device_id = directml_device_id
+        self.profile_directory = profile_directory
+        self._profile_sessions: list[Any] = []
+        self._profiles_finished = False
         self._separator = self._load()
 
     def _load(self) -> Any:
         try:
             from audio_separator.separator import Separator
 
-            with provider_session(self.provider, self.directml_device_id):
+            with provider_session(
+                self.provider,
+                self.directml_device_id,
+                profile_directory=self.profile_directory,
+            ) as sessions:
                 separator = Separator(
                     log_level=logging.WARNING,
                     model_file_dir=str(self.model_path.parent),
@@ -48,6 +56,7 @@ class KimSeparator:
                     use_directml=self.provider == "directml",
                 )
                 separator.load_model(model_filename=MODEL_FILENAME)
+                self._profile_sessions.extend(sessions)
             return separator
         except Exception as error:  # third-party errors are sanitized at this boundary
             raise SeparatorError("Kim model could not be loaded") from error
@@ -83,3 +92,19 @@ class KimSeparator:
             if isinstance(error, SeparatorError):
                 raise
             raise SeparatorError("Kim separation failed") from error
+
+    def finish_profiles(self) -> tuple[Path, ...]:
+        if self.profile_directory is None or not self._profile_sessions:
+            raise SeparatorError("Kim provider profiling is unavailable")
+        if self._profiles_finished:
+            raise SeparatorError("Kim provider profiling already finished")
+        self._profiles_finished = True
+        try:
+            return tuple(
+                Path(session.end_profiling()).resolve(strict=True)
+                for session in self._profile_sessions
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            raise SeparatorError(
+                "Kim provider profile could not be finalized"
+            ) from error

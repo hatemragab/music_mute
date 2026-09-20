@@ -18,6 +18,12 @@ import {
   runWindowsCommand,
   windowsCommandErrorSummary,
 } from "../platform/windows/cli.js";
+import {
+  ENROLLMENT_USAGE,
+  enrollmentCommandErrorSummary,
+  runEnrollmentCommand,
+  runInstallationPreparationCommand,
+} from "../enrollment/cli.js";
 
 const command = process.argv[2];
 
@@ -57,6 +63,24 @@ if (command === "protocol-doctor") {
   } catch (error) {
     console.error(
       `MusicMute Windows service command: FAILED (${windowsCommandErrorSummary(error)})\n${WINDOWS_USAGE}`,
+    );
+    process.exitCode = 1;
+  }
+} else if (command === "enroll") {
+  try {
+    await runEnrollmentCommand(process.argv.slice(3));
+  } catch (error) {
+    console.error(
+      `MusicMute worker enrollment: FAILED (${enrollmentCommandErrorSummary(error)})\n${ENROLLMENT_USAGE}`,
+    );
+    process.exitCode = 1;
+  }
+} else if (command === "prepare-installation") {
+  try {
+    await runInstallationPreparationCommand(process.argv.slice(3));
+  } catch (error) {
+    console.error(
+      `MusicMute worker installation preparation: FAILED (${enrollmentCommandErrorSummary(error)})\n${ENROLLMENT_USAGE}`,
     );
     process.exitCode = 1;
   }
@@ -118,7 +142,7 @@ if (command === "protocol-doctor") {
   }
 } else {
   console.error(
-    "Usage: musicmute-worker <protocol-doctor | run --config <absolute-path> | macos ... | windows ...>",
+    "Usage: musicmute-worker <protocol-doctor | prepare-installation ... | enroll ... | run --config <absolute-path> | macos ... | windows ...>",
   );
   process.exitCode = 2;
 }

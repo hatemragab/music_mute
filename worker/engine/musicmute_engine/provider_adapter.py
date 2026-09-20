@@ -6,6 +6,7 @@ import importlib.metadata
 import platform
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterator, Literal
 
 Provider = Literal["coreml", "directml"]
@@ -129,11 +130,23 @@ def discover_provider(provider: Provider, device_id: int) -> ProviderDiscovery:
 
 
 @contextmanager
-def provider_session(provider: Provider, device_id: int) -> Iterator[None]:
+def provider_session(
+    provider: Provider,
+    device_id: int,
+    *,
+    profile_directory: Path | None = None,
+) -> Iterator[list[Any]]:
     adapter = provider_adapter(provider)
     adapter.discover(device_id)
     ort = _onnxruntime()
     original = ort.InferenceSession
+    sessions: list[Any] = []
+
+    if profile_directory is not None:
+        if not profile_directory.is_absolute() or not profile_directory.is_dir():
+            raise ProviderAdapterError(
+                "Profile directory must be an existing absolute directory"
+            )
 
     def configured_session(
         path_or_bytes: object,
@@ -145,16 +158,24 @@ def provider_session(provider: Provider, device_id: int) -> Iterator[None]:
         del providers, provider_options
         default_options, selected = adapter.session_arguments(ort, device_id)
         options = sess_options or default_options
+        if profile_directory is not None:
+            options.enable_profiling = True
+            options.profile_file_prefix = str(
+                profile_directory / f"onnx-{provider}"
+            )
         if provider == "directml":
             options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
             options.enable_mem_pattern = False
-        return original(
+        session = original(
             path_or_bytes, sess_options=options, providers=selected, **kwargs
         )
+        if profile_directory is not None:
+            sessions.append(session)
+        return session
 
     ort.InferenceSession = configured_session
     try:
-        yield
+        yield sessions
     finally:
         ort.InferenceSession = original
 

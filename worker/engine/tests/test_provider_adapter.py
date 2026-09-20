@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from musicmute_engine.provider_adapter import (
@@ -83,6 +85,31 @@ class ProviderAdapterTests(unittest.TestCase):
         options = call["sess_options"]
         self.assertEqual(options.execution_mode, "sequential")
         self.assertFalse(options.enable_mem_pattern)
+
+    def test_qualification_profiling_collects_only_created_sessions(self) -> None:
+        runtime = FakeOnnxRuntime([COREML_PROVIDER, "CPUExecutionProvider"])
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("musicmute_engine.provider_adapter.platform.system", return_value="Darwin"),
+            patch("musicmute_engine.provider_adapter.platform.machine", return_value="arm64"),
+            patch(
+                "musicmute_engine.provider_adapter._package_version",
+                side_effect=lambda name: "1.30.0" if name == "onnxruntime" else None,
+            ),
+            patch("musicmute_engine.provider_adapter._onnxruntime", return_value=runtime),
+        ):
+            profile_directory = Path(directory).resolve()
+            with provider_session(
+                "coreml", 0, profile_directory=profile_directory
+            ) as sessions:
+                created = runtime.InferenceSession("model.onnx")
+
+        self.assertEqual(sessions, [created])
+        options = runtime.calls[0]["sess_options"]
+        self.assertTrue(options.enable_profiling)
+        self.assertTrue(
+            options.profile_file_prefix.startswith(str(profile_directory))
+        )
 
     def test_unqualified_hosts_distributions_and_devices_fail_closed(self) -> None:
         runtime = FakeOnnxRuntime([COREML_PROVIDER])

@@ -14,6 +14,8 @@ import { WorkerAuthGuard } from './auth/worker-auth.guard.js';
 import { AdminWorkerEnrollmentController } from './enrollment/admin-worker-enrollment.controller.js';
 import { WorkerEnrollmentController } from './enrollment/worker-enrollment.controller.js';
 import { WorkerEnrollmentService } from './enrollment/worker-enrollment.service.js';
+import { WorkerInstallationArtifactsService } from './enrollment/worker-installation-artifacts.service.js';
+import { WorkerInstallationQualificationService } from './enrollment/worker-installation-qualification.service.js';
 import { WorkerDiagnosticsService } from './telemetry/worker-diagnostics.service.js';
 import { WorkerRuntimeDiagnosticsController } from './telemetry/worker-runtime-diagnostics.controller.js';
 import { WorkerClaimController } from './claims/worker-claim.controller.js';
@@ -54,6 +56,8 @@ import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
     WorkerRecoveryService,
     WorkerRecoveryMaintenanceService,
     WorkerEnrollmentService,
+    WorkerInstallationArtifactsService,
+    WorkerInstallationQualificationService,
     WorkerFleetStartupService,
   ],
   exports: [MongooseModule, WorkerAuthGuard, WorkerEnrollmentService],

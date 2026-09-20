@@ -1,10 +1,12 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
+import type { Stats } from "node:fs";
 import {
   chmod,
   chown,
   cp,
   lstat,
+  lchown,
   mkdir,
   open,
   readFile,
@@ -14,7 +16,18 @@ import {
   rm,
   symlink,
 } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { parseQualificationEvidence } from "../../enrollment/report-builder.js";
 import { loadRuntimeConfig } from "../../runtime/runtime-config.js";
 import {
   MAC_SERVICE_LABEL,
@@ -31,14 +44,17 @@ export interface MacServiceOwner {
   gid: number;
 }
 
-export interface InstallMacServiceOptions {
+export interface StageMacServiceOptions {
   releaseRoot: string;
-  configSource: string;
-  credentialSource: string;
   layout: MacServiceLayout;
   serviceUser: string;
   serviceGroup: string;
   owner?: MacServiceOwner;
+}
+
+export interface InstallMacServiceOptions extends StageMacServiceOptions {
+  configSource: string;
+  credentialSource: string;
 }
 
 export interface MacServiceInstallation {
@@ -46,6 +62,30 @@ export interface MacServiceInstallation {
   releaseRoot: string;
   previousRelease: string | null;
   plistPath: string;
+}
+
+export interface MacServiceQualificationOptions {
+  layout: MacServiceLayout;
+  releaseRoot: string;
+  fixtureSource: string;
+  fixtureSha256: string;
+  serviceUser: string;
+  serviceGroup: string;
+  owner?: MacServiceOwner;
+  lifecycle?: {
+    activate: () => Promise<void>;
+    deactivate: () => Promise<void>;
+  };
+  waitForReport?: (
+    reportPath: string,
+    fixtureSha256: string,
+    owner?: MacServiceOwner,
+  ) => Promise<void>;
+}
+
+export interface MacServiceQualification {
+  fixturePath: string;
+  reportPath: string;
 }
 
 export interface MacServiceInspection {
@@ -73,19 +113,46 @@ export interface MacRuntimeDiagnostics {
 export async function installMacServiceFiles(
   options: InstallMacServiceOptions,
 ): Promise<MacServiceInstallation> {
-  const manifest = await verifyMacRelease(options.releaseRoot);
-  await assertSecureSource(
+  const installation = await stageMacServiceFiles(options);
+  await installMacServiceIdentity(
+    options.layout,
     options.configSource,
-    "runtime config",
-    64 * 1024,
-    false,
-  );
-  await assertSecureSource(
     options.credentialSource,
-    "machine credential",
-    128,
-    true,
+    options.owner,
   );
+  return installation;
+}
+
+export async function installMacServiceIdentity(
+  layout: MacServiceLayout,
+  configSource: string,
+  credentialSource: string,
+  owner?: MacServiceOwner,
+): Promise<void> {
+  await assertSecureSource(configSource, "runtime config", 64 * 1024, false);
+  await assertSecureSource(credentialSource, "machine credential", 128, true);
+  await atomicCopy(
+    credentialSource,
+    layout.credentialPath,
+    0o600,
+    owner,
+    "machine credential",
+  );
+  await atomicCopy(
+    configSource,
+    layout.configPath,
+    0o600,
+    owner,
+    "runtime config",
+  );
+  const config = await loadRuntimeConfig(layout.configPath);
+  assertServiceConfig(config, layout);
+}
+
+export async function stageMacServiceFiles(
+  options: StageMacServiceOptions,
+): Promise<MacServiceInstallation> {
+  const manifest = await verifyMacRelease(options.releaseRoot);
   await ensureDirectory(options.layout.installRoot, 0o755);
   await ensureDirectory(options.layout.releasesRoot, 0o755);
   await ensureDirectory(options.layout.stateRoot, 0o700, options.owner);
@@ -106,22 +173,6 @@ export async function installMacServiceFiles(
     manifest,
   );
   await assertReleaseOwnership(installedRelease, options.owner);
-  await atomicCopy(
-    options.credentialSource,
-    options.layout.credentialPath,
-    0o600,
-    options.owner,
-    "machine credential",
-  );
-  await atomicCopy(
-    options.configSource,
-    options.layout.configPath,
-    0o600,
-    options.owner,
-    "runtime config",
-  );
-  const config = await loadRuntimeConfig(options.layout.configPath);
-  assertServiceConfig(config, options.layout);
   const plist = renderLaunchDaemonPlist(options);
   const previousRelease = await currentRelease(options.layout);
   const temporaryLink = join(
@@ -239,18 +290,28 @@ export async function installMacModelArtifact(
     sourceInfo.size !== 66_759_214
   )
     throw new TypeError("Mac model source is unsafe");
-  const output = await runPrivatePython(
-    layout,
-    [
-      "-m",
-      "musicmute_engine.model_tool",
-      "--source",
-      source,
-      "--model-cache",
-      layout.modelCacheRoot,
-    ],
-    owner,
+  const stagedSource = join(
+    layout.stateRoot,
+    `.model-source-${randomUUID()}.onnx`,
   );
+  await atomicCopy(source, stagedSource, 0o600, owner, "staged model source");
+  let output: string;
+  try {
+    output = await runPrivatePython(
+      layout,
+      [
+        "-m",
+        "musicmute_engine.model_tool",
+        "--source",
+        stagedSource,
+        "--model-cache",
+        layout.modelCacheRoot,
+      ],
+      owner,
+    );
+  } finally {
+    await rm(stagedSource, { force: true });
+  }
   let decoded: unknown;
   try {
     decoded = JSON.parse(output) as unknown;
@@ -274,6 +335,155 @@ export async function installMacModelArtifact(
     result.modelPath !== expectedPath
   )
     throw new TypeError("Mac model installer returned invalid output");
+}
+
+export async function runMacServiceQualification(
+  options: MacServiceQualificationOptions,
+): Promise<MacServiceQualification> {
+  if (!/^[a-f0-9]{64}$/u.test(options.fixtureSha256))
+    throw new TypeError("Mac qualification fixture digest is invalid");
+  if (extname(options.fixtureSource).toLowerCase() !== ".wav")
+    throw new TypeError("Mac qualification fixture must be WAV");
+  await assertSecureSource(
+    options.fixtureSource,
+    "qualification fixture",
+    64 * 1024 * 1024,
+    false,
+  );
+
+  const releaseRoot = resolve(options.releaseRoot);
+  if (!releaseRoot.startsWith(`${resolve(options.layout.releasesRoot)}${sep}`))
+    throw new TypeError("Mac qualification release is unsafe");
+  await verifyMacRelease(releaseRoot);
+
+  const fixturePath = join(
+    options.layout.stateRoot,
+    `qualification-fixture-${options.fixtureSha256}.wav`,
+  );
+  await atomicCopy(
+    options.fixtureSource,
+    fixturePath,
+    0o600,
+    options.owner,
+    "qualification fixture",
+  );
+  const installedDigest = createHash("sha256")
+    .update(await readFile(fixturePath))
+    .digest("hex");
+  if (installedDigest !== options.fixtureSha256) {
+    await rm(fixturePath, { force: true });
+    throw new TypeError("Mac qualification fixture digest does not match");
+  }
+
+  const reportPath = join(
+    options.layout.stateRoot,
+    `qualification-${randomUUID()}.json`,
+  );
+  const qualificationPlist = renderLaunchDaemonPlist({
+    layout: options.layout,
+    serviceUser: options.serviceUser,
+    serviceGroup: options.serviceGroup,
+    qualification: {
+      releaseRoot,
+      fixturePath,
+      fixtureSha256: options.fixtureSha256,
+      reportPath,
+    },
+  });
+  const activePlist = renderLaunchDaemonPlist({
+    layout: options.layout,
+    serviceUser: options.serviceUser,
+    serviceGroup: options.serviceGroup,
+  });
+  const lifecycle = options.lifecycle ?? {
+    activate: () => activateMacService(options.layout),
+    deactivate: () => deactivateMacService(),
+  };
+  const waitForReport = options.waitForReport ?? waitForMacQualificationReport;
+
+  let qualificationError: unknown;
+  try {
+    await replaceManagedPlist(options.layout.plistPath, qualificationPlist);
+    await lifecycle.activate();
+    await waitForReport(reportPath, options.fixtureSha256, options.owner);
+  } catch (error) {
+    qualificationError = error;
+  }
+
+  let cleanupError: unknown;
+  try {
+    await lifecycle.deactivate();
+  } catch (error) {
+    cleanupError = error;
+  }
+  try {
+    await replaceManagedPlist(options.layout.plistPath, activePlist);
+  } catch (error) {
+    cleanupError ??= error;
+  }
+
+  if (qualificationError !== undefined || cleanupError !== undefined) {
+    await rm(reportPath, { force: true });
+    throw qualificationError ?? cleanupError;
+  }
+  return { fixturePath, reportPath };
+}
+
+export async function waitForMacQualificationReport(
+  reportPath: string,
+  fixtureSha256: string,
+  owner?: MacServiceOwner,
+  wait: (milliseconds: number) => Promise<unknown> = delay,
+  attempts = 9_600,
+): Promise<void> {
+  if (
+    !isAbsolute(reportPath) ||
+    !/^[a-f0-9]{64}$/u.test(fixtureSha256) ||
+    !Number.isSafeInteger(attempts) ||
+    attempts < 1
+  )
+    throw new TypeError("Mac qualification report wait is invalid");
+
+  let invalidJsonAttempts = 0;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const info = await optionalLstat(reportPath);
+    if (info === null || info.size < 2) {
+      if (attempt + 1 < attempts) await wait(250);
+      continue;
+    }
+    if (
+      !info.isFile() ||
+      info.isSymbolicLink() ||
+      info.size > 64 * 1024 ||
+      (info.mode & 0o777) !== 0o600 ||
+      (owner !== undefined &&
+        (info.uid !== owner.uid || info.gid !== owner.gid))
+    )
+      throw new TypeError("Mac qualification report is unsafe");
+
+    let value: unknown;
+    try {
+      value = JSON.parse(await readFile(reportPath, "utf8")) as unknown;
+    } catch {
+      invalidJsonAttempts += 1;
+      if (invalidJsonAttempts >= 10)
+        throw new TypeError("Mac qualification report is invalid JSON");
+      if (attempt + 1 < attempts) await wait(250);
+      continue;
+    }
+    const evidence = parseQualificationEvidence(value);
+    if (
+      evidence.platform !== "darwin-arm64" ||
+      evidence.provider !== "coreml" ||
+      evidence.gpuId !== "gpu0" ||
+      evidence.fixtureDigest !== fixtureSha256
+    )
+      throw new TypeError(
+        "Mac qualification report does not match installation",
+      );
+    return;
+  }
+  throw new Error("Mac qualification service timed out");
 }
 
 async function runPrivatePython(
@@ -363,6 +573,7 @@ export async function activateMacService(
 ): Promise<void> {
   assertDarwinAdministrator();
   await launchctl(["bootout", `system/${MAC_SERVICE_LABEL}`], true);
+  await waitForMacServiceDeactivation();
   const bootstrap = await launchctl(
     ["bootstrap", "system", layout.plistPath],
     false,
@@ -378,11 +589,22 @@ export async function activateMacService(
 export async function deactivateMacService(): Promise<void> {
   assertDarwinAdministrator();
   await launchctl(["bootout", `system/${MAC_SERVICE_LABEL}`], true);
-  const remaining = await launchctl(
-    ["print", `system/${MAC_SERVICE_LABEL}`],
-    true,
-  );
-  if (remaining.code === 0) throw new Error("LaunchDaemon deactivation failed");
+  await waitForMacServiceDeactivation();
+}
+
+export async function waitForMacServiceDeactivation(
+  check: () => Promise<{ code: number }> = () =>
+    launchctl(["print", `system/${MAC_SERVICE_LABEL}`], true),
+  wait: (milliseconds: number) => Promise<unknown> = delay,
+  attempts = 50,
+): Promise<void> {
+  if (!Number.isSafeInteger(attempts) || attempts < 1)
+    throw new TypeError("Mac service deactivation attempts are invalid");
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if ((await check()).code !== 0) return;
+    if (attempt + 1 < attempts) await wait(100);
+  }
+  throw new Error("LaunchDaemon deactivation failed");
 }
 
 export async function uninstallMacServiceFiles(
@@ -428,6 +650,7 @@ async function installImmutableRelease(
     const installed = await verifyMacRelease(destination);
     if (JSON.stringify(installed) !== JSON.stringify(expected))
       throw new TypeError("Installed Mac release version is immutable");
+    await normalizeReleaseOwnership(destination);
     return;
   }
   const temporary = `${destination}.${randomUUID()}.installing`;
@@ -443,10 +666,28 @@ async function installImmutableRelease(
     const copied = await verifyMacRelease(temporary);
     if (JSON.stringify(copied) !== JSON.stringify(expected))
       throw new TypeError("Copied Mac release failed verification");
+    await normalizeReleaseOwnership(temporary);
     await rename(temporary, destination);
   } catch (error) {
     await rm(temporary, { recursive: true, force: true });
     throw error;
+  }
+}
+
+async function normalizeReleaseOwnership(releaseRoot: string): Promise<void> {
+  if (process.geteuid?.() !== 0) return;
+  const entries = [releaseRoot];
+  for (let index = 0; index < entries.length; index += 1) {
+    const path = entries[index];
+    if (path === undefined) continue;
+    const info = await lstat(path);
+    if (info.isSymbolicLink()) {
+      await lchown(path, 0, 0);
+      continue;
+    }
+    await chown(path, 0, 0);
+    if (info.isDirectory())
+      for (const child of await readdir(path)) entries.push(join(path, child));
   }
 }
 
@@ -540,6 +781,22 @@ async function atomicWrite(
     await handle.close();
   }
   await chmod(path, mode);
+}
+
+async function replaceManagedPlist(
+  path: string,
+  contents: string,
+): Promise<void> {
+  const info = await optionalLstat(path);
+  if (info === null || !info.isFile() || info.isSymbolicLink())
+    throw new TypeError("LaunchDaemon definition is unsafe");
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    await atomicWrite(temporary, contents, 0o644);
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 async function assertSecureSource(
@@ -644,9 +901,7 @@ async function launchctl(
   });
 }
 
-async function optionalLstat(
-  path: string,
-): Promise<Awaited<ReturnType<typeof lstat>> | null> {
+async function optionalLstat(path: string): Promise<Stats | null> {
   try {
     return await lstat(path);
   } catch (error) {

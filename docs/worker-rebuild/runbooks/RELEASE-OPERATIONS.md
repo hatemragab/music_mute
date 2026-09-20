@@ -32,6 +32,29 @@ Owner-approved packaging uses explicit tested versions, scoped registry/storage 
 
 Register the candidate without assigning it remotely to machines. The dashboard uses worker-specific release records, not mobile app releases. Keep the previously working binaries, environments and model digests available for rollback.
 
+The current runtime branch can emit the catalog artifact directly while it
+builds the verified release directory:
+
+```text
+musicmute-worker macos package ... --output <release-directory> --archive <protected-output.tar.gz>
+musicmute-worker windows package ... --output <release-directory> --archive <protected-output.zip>
+```
+
+The package command refuses to replace an existing archive. Its JSON result
+contains the release version, byte count, SHA-256 and content type needed by
+the operator-owned backend catalog. Keep the archive parent owner-protected;
+upload and catalog registration remain explicit release-operator actions.
+
+On the target host, `prepare-installation` exchanges the invitation and
+downloads the exact release/model/fixture set. It now materializes the release
+through a protected temporary directory, checks archive paths and the full
+platform manifest, then reports a versioned `releaseRoot`. Native `stage` runs
+service-identity qualification without a fake machine credential. Enrollment
+uploads the selected result and creates the real runtime config only after
+backend activation; native `activate` then installs that config/credential and
+starts the normal service. These are currently explicit recovery-safe phases;
+the final single bootstrap command still must orchestrate them.
+
 ## Manual per-machine activation
 
 An operator selects one test machine for each supported OS/backend path and runs the verified update locally. The local command downloads or accepts the pinned package, verifies it, drains the machine, switches, self-tests and reports health. Keep sufficient compatible capacity available; for a one-machine fleet, plan the expected interruption explicitly.

@@ -42,6 +42,7 @@ import {
 } from '../src/admin/admin.decorators.js';
 import type { AdminRole } from '../src/admin/admin.types.js';
 import { RateBudgetService } from '../src/rate-limits/rate-budget.service.js';
+import { ADMIN_RATE_LIMIT_DEFAULTS } from '../src/config/environment.js';
 import {
   createAdminHarness,
   type AdminHarness,
@@ -146,13 +147,13 @@ describe('complete administration route authorization contract', () => {
         {
           provide: ConfigService,
           useValue: new ConfigService({
+            ...ADMIN_RATE_LIMIT_DEFAULTS,
             ADMIN_REAUTH_MAX_AGE_SECONDS: 300,
             AUDIO_PROCESSING_ENABLED: true,
           }),
         },
       ],
     });
-    await harness.app.listen(0, '127.0.0.1');
   });
   afterAll(async () => {
     await harness?.close();
@@ -334,7 +335,6 @@ describe('complete administration route authorization contract', () => {
       ],
     });
     try {
-      await queryHarness.app.listen(0, '127.0.0.1');
       const owner = queryHarness.signInAs('owner');
       for (const path of ['/admin/jobs']) {
         for (const query of [

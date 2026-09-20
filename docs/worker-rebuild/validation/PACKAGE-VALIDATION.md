@@ -44,9 +44,33 @@ The package build contains no environment files, credentials, models, audio fixt
 - D3 added authoritative HTTPS reconciliation, ownership safety, exact transfer
   execution and lost-response recovery. It passed 25 TypeScript worker tests,
   13 Python engine tests, a local real-HTTP full runtime sequence, 13 focused
-  backend tests, the complete 731 backend unit/package tests and 135 backend
+  backend tests, the complete 732 backend unit/package tests and 135 backend
   E2E tests under the recorded env-isolated procedure. See
   [D evidence](../evidence/D-runtime.md).
+- The service-context enrollment gate is now part of both native installer
+  transactions: a one-shot `_musicmute`/CoreML LaunchDaemon on macOS and a
+  one-shot `LocalService`/DirectML WinSW service on Windows. Strict evidence
+  parsing, atomic report publication, active-service restoration and rollback
+  paths pass the full worker verification (31 TypeScript files/111 tests and 32
+  Python tests). The candidate script also passes native Windows PowerShell
+  parsing on the authorized Z440 host, and rebuilt `0.1.1` candidate
+  installation/qualification passes on both MVP hosts.
+- The local installation transport now includes a strict backend catalog and
+  installation-authenticated download grants for the platform release, model
+  and fixture; a resumable `prepare-installation` CLI downloads and verifies
+  the set without persisting signed URLs. Preparation also rejects unsafe
+  archive paths, extracts through a protected temporary root, verifies the
+  immutable platform manifest/catalog version and atomically publishes the
+  versioned release directory. Platform package commands emit the matching
+  exclusive archive and report its exact catalog metadata. Qualification now
+  selects one exact
+  service-context output for an immutable S3 PUT, confirms its version and
+  blocks activation until confirmation. Changed local bytes, reservations,
+  versions and response metadata fail closed. This passes the complete worker
+  verification (31 TypeScript files/111 tests, 32 Python tests and build) and
+  complete backend verification (110 unit files/749 tests, 22 E2E files/135
+  tests and build). The backend E2E suite also passed five consecutive runs
+  after the shared harness switched to an explicit loopback listener.
 - D4 implementation now covers deterministic native ARM64 release manifests,
   private dependency auditing, dedicated-account LaunchDaemon files, secure
   state/model provisioning, repair/rollback and safe uninstall boundaries. Its
@@ -54,8 +78,19 @@ The package build contains no environment files, credentials, models, audio fixt
   package, local tests, packaged runtime doctor, post-run immutability check and
   real CoreML pipeline pass. A fresh package from the final D6 runtime also
   proved the qualified child `PATH` fix, runtime doctor, real CoreML job and all
-  33,828 immutable entries. The checkpoint remains BLOCKED only on the enrolled
-  system-service acceptance flow. See [D evidence](../evidence/D-runtime.md).
+  33,828 immutable entries. The system LaunchDaemon was then installed with an
+  automatically provisioned hidden `_musicmute` account, passed doctor,
+  restrictive ownership/mode checks, restart and a real service-context CoreML
+  job against the loopback acceptance fixture. The final stable `0.1.0`
+  package with 33,831 entries was installed and activated, then completed a
+  checked 97,845-byte service-context output. Logged-out, live backend/S3 and
+  reboot gates keep the checkpoint BLOCKED. See
+  [D evidence](../evidence/D-runtime.md).
+- The split macOS stage/activate transaction was then exercised with a fresh
+  33,852-entry `0.1.2` candidate. The stage used no placeholder machine
+  identity, ran all four recipes as `_musicmute` through CoreML, left the
+  candidate inactive and restored the accepted `0.1.1` service. Runtime
+  enrollment now writes the final service config only after backend activation.
 - D5 implementation now covers x86_64 PE and immutable release validation,
   pinned WinSW acquisition, password-free LocalService configuration,
   SID-scoped ACL/install/repair/rollback/uninstall tooling and an exact
@@ -63,30 +98,50 @@ The package build contains no environment files, credentials, models, audio fixt
   credential, wrapper and XML state before restarting and verifying the prior
   release. Five focused TypeScript files with ten tests, portable PowerShell
   7.6.6 parsing and rollback-helper execution, the complete 49-test worker
-  suite and the 21-test engine suite pass locally. No native Windows
-  PowerShell execution, Windows package, service-context DirectML job or Z440
-  acceptance is claimed. See [D evidence](../evidence/D-runtime.md).
+  suite and the 21-test engine suite pass locally. On the accepted Z440, the
+  31,331-entry package, native elevated installer, `LocalService`, restrictive
+  ACLs, DirectML adapter 0, runtime doctor, service restart and a real
+  service-context Kim job all passed. The stable `0.1.0` release is active.
+  Same-version repair and a controlled invalid-credential rollback also passed,
+  including restored credential/service files and a new durable `started`
+  event. The active immutable package predates that readiness fix, so a new
+  package version plus logged-out, live backend/S3, interrupted-upgrade and
+  reboot gates remain open. See [D evidence](../evidence/D-runtime.md).
 - D6 locally verifies attempt isolation, trusted filenames, bounded
   media/subprocess/resource behavior, signed-URL and secret redaction, an
   admission-blocking 8 MiB diagnostic spool, one-job capacity, warm-model
   cross-job cleanup, explicit CoreML/DirectML session adapters and explicit
-  macOS/Windows service/credential policies. The complete 62-test TypeScript
-  suite and 28-test Python engine suite pass. The backend also passes its full
-  verification after the final runtime-contract changes: 108 Vitest files/731
-  tests, 22 E2E files/135 tests and production build. See
+  macOS/Windows service/credential policies. Runtime-derived enrollment now
+  verifies the immutable release and runtime doctor, collects only accepted
+  host/GPU fields, and requires four-recipe service-identity qualification
+  evidence with accelerated ONNX node dispatch and zero CPU model-node
+  fallback. The current complete worker suite passes 31 TypeScript files/111
+  tests and 32 Python engine tests, including bounded enrollment exchange/
+  report/activation, replay recovery, protected credential files, secret-free
+  CLI output and fail-closed qualification parsing. Native installer
+  qualification also passed on rebuilt `0.1.1` releases: all four recipes as
+  `_musicmute` through CoreML on the Mac M4, and as `LocalService` through
+  DirectML adapter 0 on the Z440/RX 580 with 896 accelerated model-node events
+  and zero CPU model-node events. Both native installers restored the normal
+  active service definition after the one-shot gate. The backend also passes
+  its full verification after the final runtime-contract changes: 110 Vitest
+  files/749 tests, 22 E2E files/135 tests and production build. See
   [D evidence](../evidence/D-runtime.md).
 
 ## Not executed or claimed
 
-No worker system-service installation, live S3 integration, WebSocket hint transport,
-listening-quality review,
+No live S3 integration, WebSocket hint transport, listening-quality review,
 npm publication, signing with production keys or deployment has occurred. The
-C1-C6 backend and D1-D3 runtime work are locally verified only; D4 tooling,
-private package and CoreML execution are locally verified but the D4 system
-service checkpoint is not complete; D5 tooling has local fixture evidence only;
-D6 has local safety/adapter evidence only; dashboard, Android and iOS were not
-changed. D4 system-service acceptance, the D5 Windows service, Linux/NVIDIA and
-all other hardware remain unverified until later actual hardware evidence.
+C1-C6 backend and D1-D3 runtime work are locally verified only. D4 and D5 now
+have native package, installed-service, accelerated processing and final
+four-recipe qualification evidence on the two MVP hosts, but neither checkpoint
+is complete. D6 has local automated evidence. Dashboard, Android and iOS were
+not changed. Real fleet enrollment, live backend/S3, logged-out and reboot
+acceptance remain unverified. The upload-candidate report and artifact
+preparation contracts have now passed rebuilt native macOS and Windows stages,
+but not a live backend/S3 enrollment. Windows
+interrupted-upgrade recovery and all Linux/NVIDIA or other hardware also remain
+unverified.
 
 ## Source/consistency caveats
 

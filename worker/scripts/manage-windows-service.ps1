@@ -1,13 +1,16 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("Install", "Repair", "Doctor", "Uninstall")]
+  [ValidateSet("Stage", "Install", "Repair", "Doctor", "Uninstall")]
   [string]$Action,
 
   [string]$Release = "",
   [string]$Config = "",
   [string]$Credential = "",
   [string]$ModelSource = "",
+  [string]$FixtureSource = "",
+  [string]$FixtureSha256 = "",
+  [string]$QualificationOutput = "",
   [string]$InstallRoot = "$env:ProgramData\MusicMuteWorker"
 )
 
@@ -133,6 +136,27 @@ function Copy-PrivateFile([string]$Source, [string]$Destination) {
   }
 }
 
+function Export-PrivateFileExclusive([string]$Source, [string]$Destination) {
+  if (Test-Path -LiteralPath $Destination) {
+    throw "The qualification output already exists."
+  }
+  $Parent = Split-Path -Parent $Destination
+  $ParentItem = Get-Item -LiteralPath $Parent -Force -ErrorAction Stop
+  if (-not $ParentItem.PSIsContainer -or ($ParentItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw "The qualification output directory is unsafe."
+  }
+  $Temporary = Join-Path $Parent ".$([IO.Path]::GetFileName($Destination)).$([guid]::NewGuid()).tmp"
+  try {
+    Copy-Item -LiteralPath $Source -Destination $Temporary -ErrorAction Stop
+    Set-PrivateFileAcl $Temporary
+    [IO.File]::Move($Temporary, $Destination)
+  } finally {
+    if (Test-Path -LiteralPath $Temporary -PathType Leaf) {
+      Remove-Item -LiteralPath $Temporary -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
 function Restore-ManagedFile(
   [string]$Path,
   [bool]$Existed,
@@ -234,7 +258,85 @@ function Install-Model(
   }
 }
 
-function Test-InstalledRuntime([string]$Root, [string]$Version) {
+function Wait-WorkerQualification(
+  [string]$InstalledRelease,
+  [string]$ReportPath,
+  [string]$ExpectedFixtureSha256,
+  [int]$TimeoutSeconds = 2400
+) {
+  $Deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+  while ([DateTimeOffset]::UtcNow -lt $Deadline) {
+    if (Test-Path -LiteralPath $ReportPath -PathType Leaf) {
+      Assert-RegularFile $ReportPath "qualification report" 65536 | Out-Null
+      Set-PrivateFileAcl $ReportPath
+      $Lines = @(Invoke-WorkerCli $InstalledRelease @(
+        "windows", "qualification-check",
+        "--report", $ReportPath,
+        "--fixture-sha256", $ExpectedFixtureSha256
+      ))
+      if ($Lines.Count -ne 1) {
+        throw "The qualification verifier returned invalid output."
+      }
+      $Result = $Lines[0] | ConvertFrom-Json
+      if (
+        $Result.status -ne "ok" -or
+        $Result.action -ne "qualification-check" -or
+        [int]$Result.recipeCount -ne 4
+      ) {
+        throw "The qualification verifier returned invalid output."
+      }
+      return
+    }
+    $Service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    if (
+      $null -eq $Service -or
+      $Service.Status -eq [ServiceProcess.ServiceControllerStatus]::Stopped
+    ) {
+      throw "The MusicMute DirectML qualification service failed."
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  throw "The MusicMute DirectML qualification service timed out."
+}
+
+function Wait-WorkerRuntimeStarted(
+  [string]$StateRoot,
+  [DateTimeOffset]$NotBefore,
+  [int]$TimeoutSeconds = 60
+) {
+  $EventsPath = Join-Path $StateRoot "logs\events.jsonl"
+  $Deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+  while ([DateTimeOffset]::UtcNow -lt $Deadline) {
+    if (Test-Path -LiteralPath $EventsPath -PathType Leaf) {
+      foreach ($Line in @(Get-Content -LiteralPath $EventsPath -Tail 100 -ErrorAction SilentlyContinue)) {
+        try {
+          $Record = $Line | ConvertFrom-Json
+          if ($Record.event.kind -ne "started") {
+            continue
+          }
+          $RecordedAt = [DateTimeOffset]::Parse(
+            [string]$Record.recordedAt,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind
+          )
+          if ($RecordedAt -ge $NotBefore) {
+            return
+          }
+        } catch {
+          # Ignore an incomplete tail read; the bounded spool is validated by the runtime.
+        }
+      }
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  throw "The MusicMute worker did not complete runtime startup."
+}
+
+function Test-InstalledRuntime(
+  [string]$Root,
+  [string]$Version,
+  [DateTimeOffset]$StartedAfter = [DateTimeOffset]::MinValue
+) {
   $ReleaseRoot = Join-Path $Root "releases\$Version"
   Read-ReleaseManifest $ReleaseRoot | Out-Null
   $StateRoot = Join-Path $Root "state"
@@ -264,6 +366,9 @@ function Test-InstalledRuntime([string]$Root, [string]$Version) {
   $Service = Get-Service -Name $ServiceName -ErrorAction Stop
   if ($Service.Status -ne [ServiceProcess.ServiceControllerStatus]::Running) {
     throw "The MusicMute Windows service is not running."
+  }
+  if ($StartedAfter -ne [DateTimeOffset]::MinValue) {
+    Wait-WorkerRuntimeStarted $StateRoot $StartedAfter
   }
 }
 
@@ -344,8 +449,28 @@ try {
     return
   }
 
-  if ($Release -eq "" -or $Config -eq "" -or $Credential -eq "" -or $ModelSource -eq "") {
-    throw "Install and Repair require Release, Config, Credential and ModelSource."
+  $StagingOnly = $Action -eq "Stage"
+  if ($QualificationOutput -ne "" -and -not $StagingOnly) {
+    throw "QualificationOutput is valid only for Stage."
+  }
+  $QualificationOutputPath = ""
+  if ($QualificationOutput -ne "") {
+    if (-not [IO.Path]::IsPathRooted($QualificationOutput)) {
+      throw "The qualification output must be an absolute path."
+    }
+    $QualificationOutputPath = [IO.Path]::GetFullPath($QualificationOutput)
+    if (Test-Path -LiteralPath $QualificationOutputPath) {
+      throw "The qualification output already exists."
+    }
+  }
+  if (
+    $Release -eq "" -or
+    $ModelSource -eq "" -or
+    $FixtureSource -eq "" -or
+    $FixtureSha256 -eq "" -or
+    (-not $StagingOnly -and ($Config -eq "" -or $Credential -eq ""))
+  ) {
+    throw "Stage requires Release, ModelSource, FixtureSource and FixtureSha256; Install and Repair also require Config and Credential."
   }
   $ReleaseRoot = [IO.Path]::GetFullPath($Release)
   if (
@@ -354,17 +479,35 @@ try {
   ) {
     throw "The release source must be outside the installation root."
   }
-  $ConfigItem = Assert-RegularFile $Config "runtime config" 65536
-  $CredentialItem = Assert-RegularFile $Credential "machine credential" 128
+  $ConfigItem = $null
+  $CredentialItem = $null
+  if (-not $StagingOnly) {
+    $ConfigItem = Assert-RegularFile $Config "runtime config" 65536
+    $CredentialItem = Assert-RegularFile $Credential "machine credential" 128
+  }
   $ModelItem = Assert-RegularFile $ModelSource "model source" $ModelBytes
   if ($ModelItem.Length -ne $ModelBytes) {
     throw "The model source size is invalid."
+  }
+  $FixtureItem = Assert-RegularFile $FixtureSource "qualification fixture" (64MB)
+  if (
+    -not [string]::Equals(
+      [IO.Path]::GetExtension($FixtureItem.FullName),
+      ".wav",
+      [StringComparison]::OrdinalIgnoreCase
+    ) -or
+    $FixtureSha256 -cnotmatch "^[a-f0-9]{64}$" -or
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $FixtureItem.FullName).Hash.ToLowerInvariant() -cne $FixtureSha256
+  ) {
+    throw "The qualification fixture is invalid."
   }
   $Manifest = Read-ReleaseManifest $ReleaseRoot
   $Version = [string]$Manifest.releaseVersion
   $ReleasesRoot = Join-Path $Root "releases"
   $InstalledRelease = Join-Path $ReleasesRoot $Version
-  Assert-RuntimeConfig $ConfigItem.FullName $InstalledRelease $StateRoot
+  if (-not $StagingOnly) {
+    Assert-RuntimeConfig $ConfigItem.FullName $InstalledRelease $StateRoot
+  }
 
   foreach ($Path in @(
     $Root,
@@ -414,6 +557,8 @@ try {
   $ServiceXml = Join-Path $ServiceRoot "MusicMuteWorkerService.xml"
   $RuntimeConfigPath = Join-Path $StateRoot "runtime.json"
   $CredentialPath = Join-Path $StateRoot "machine.credential"
+  $QualificationFixture = Join-Path $StateRoot "qualification-fixture-$FixtureSha256.wav"
+  $QualificationReport = Join-Path $StateRoot "qualification-$([guid]::NewGuid()).json"
   $PreviousVersion = Read-ActiveVersion $StateRoot
   $RuntimeConfigExisted = Test-Path -LiteralPath $RuntimeConfigPath -PathType Leaf
   $CredentialExisted = Test-Path -LiteralPath $CredentialPath -PathType Leaf
@@ -437,6 +582,9 @@ try {
   }
   $InstalledService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
   $ServiceExists = $null -ne $InstalledService
+  $ServiceWasRunning =
+    $ServiceExists -and
+    $InstalledService.Status -ne [ServiceProcess.ServiceControllerStatus]::Stopped
   if (
     $ServiceExists -and (
       $PreviousVersion -eq "" -or
@@ -449,6 +597,9 @@ try {
     throw "The installed service state is incomplete."
   }
   Install-Model $InstalledRelease $StateRoot $ModelItem.FullName
+  $ActiveXml = ""
+  $QualificationExported = $false
+  $QualificationXml = "$ServiceXml.$([guid]::NewGuid()).qualification.tmp"
   try {
     if (
       $ServiceExists -and
@@ -456,28 +607,70 @@ try {
     ) {
       Invoke-Checked $Wrapper @("stopwait")
     }
-    Copy-PrivateFile $ConfigItem.FullName $RuntimeConfigPath
-    Copy-PrivateFile $CredentialItem.FullName $CredentialPath
+    if (-not $StagingOnly) {
+      Copy-PrivateFile $ConfigItem.FullName $RuntimeConfigPath
+      Copy-PrivateFile $CredentialItem.FullName $CredentialPath
+    }
+    Copy-PrivateFile $FixtureItem.FullName $QualificationFixture
     Copy-PrivateFile (Join-Path $InstalledRelease "runtime\service\MusicMuteWorkerService.exe") $Wrapper
     Set-ExecutableFileAcl $Wrapper
-    $NewXml = "$ServiceXml.$([guid]::NewGuid()).tmp"
+    if (-not $StagingOnly) {
+      $ActiveXml = "$ServiceXml.$([guid]::NewGuid()).active.tmp"
+      Invoke-WorkerCli $InstalledRelease @(
+        "windows", "service-config",
+        "--root", $Root,
+        "--version", $Version,
+        "--output", $ActiveXml
+      ) | Out-Null
+      Set-PrivateFileAcl $ActiveXml
+    }
     Invoke-WorkerCli $InstalledRelease @(
       "windows", "service-config",
       "--root", $Root,
       "--version", $Version,
-      "--output", $NewXml
+      "--output", $QualificationXml,
+      "--qualification-fixture", $QualificationFixture,
+      "--qualification-fixture-sha256", $FixtureSha256,
+      "--qualification-report", $QualificationReport
     ) | Out-Null
-    Set-PrivateFileAcl $NewXml
-    Move-Item -LiteralPath $NewXml -Destination $ServiceXml -Force
-    if ($ServiceExists) {
-      # WinSW 2.x reloads its side-by-side XML when the service starts.
-    } else {
+    Set-PrivateFileAcl $QualificationXml
+    Move-Item -LiteralPath $QualificationXml -Destination $ServiceXml -Force
+    if (-not $ServiceExists) {
       Invoke-Checked $Wrapper @("install")
     }
     Invoke-Checked $Wrapper @("start")
-    Start-Sleep -Seconds 2
-    Test-InstalledRuntime $Root $Version
-    Write-ActiveVersion $StateRoot $Version
+    Wait-WorkerQualification $InstalledRelease $QualificationReport $FixtureSha256
+    $QualificationService = Get-Service -Name $ServiceName -ErrorAction Stop
+    if ($QualificationService.Status -ne [ServiceProcess.ServiceControllerStatus]::Stopped) {
+      Invoke-Checked $Wrapper @("stopwait")
+    }
+    if (-not $ServiceExists) {
+      Invoke-Checked $Wrapper @("uninstall")
+    }
+    if ($StagingOnly) {
+      if ($ServiceExists) {
+        Restore-ManagedFile $Wrapper $WrapperExisted $PreviousWrapper $true
+        Restore-ManagedFile $ServiceXml $ServiceXmlExisted $PreviousXml $false
+        if ($ServiceWasRunning) {
+          $RestoredAfter = [DateTimeOffset]::UtcNow
+          Invoke-Checked $Wrapper @("start")
+          Test-InstalledRuntime $Root $PreviousVersion $RestoredAfter
+        }
+      }
+      if ($QualificationOutputPath -ne "") {
+        Export-PrivateFileExclusive $QualificationReport $QualificationOutputPath
+        $QualificationExported = $true
+      }
+    } else {
+      Move-Item -LiteralPath $ActiveXml -Destination $ServiceXml -Force
+      if (-not $ServiceExists) {
+        Invoke-Checked $Wrapper @("install")
+      }
+      $StartedAfter = [DateTimeOffset]::UtcNow
+      Invoke-Checked $Wrapper @("start")
+      Test-InstalledRuntime $Root $Version $StartedAfter
+      Write-ActiveVersion $StateRoot $Version
+    }
   } catch {
     try {
       $RollbackService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
@@ -495,16 +688,32 @@ try {
       Restore-ManagedFile $Wrapper $WrapperExisted $PreviousWrapper $true
       Restore-ManagedFile $ServiceXml $ServiceXmlExisted $PreviousXml $false
       if ($ServiceExists) {
-        Invoke-Checked $Wrapper @("start")
         Write-ActiveVersion $StateRoot $PreviousVersion
-        Test-InstalledRuntime $Root $PreviousVersion
+        if ($ServiceWasRunning) {
+          $RollbackStartedAfter = [DateTimeOffset]::UtcNow
+          Invoke-Checked $Wrapper @("start")
+          Test-InstalledRuntime $Root $PreviousVersion $RollbackStartedAfter
+        }
       }
     } catch {
       Write-Warning "Automatic rollback also failed; inspect the preserved installation."
     }
+    if (Test-Path -LiteralPath $QualificationReport -PathType Leaf) {
+      Remove-Item -LiteralPath $QualificationReport -Force -ErrorAction SilentlyContinue
+    }
+    if ($QualificationExported -and (Test-Path -LiteralPath $QualificationOutputPath -PathType Leaf)) {
+      Remove-Item -LiteralPath $QualificationOutputPath -Force -ErrorAction SilentlyContinue
+    }
     throw
+  } finally {
+    foreach ($Temporary in @($ActiveXml, $QualificationXml)) {
+      if ($Temporary -ne "" -and (Test-Path -LiteralPath $Temporary -PathType Leaf)) {
+        Remove-Item -LiteralPath $Temporary -Force -ErrorAction SilentlyContinue
+      }
+    }
   }
-  Write-Output "MusicMute Windows service: $($Action.ToLowerInvariant()) complete ($Version)"
+  $ReportedQualification = if ($QualificationOutputPath -ne "") { $QualificationOutputPath } else { $QualificationReport }
+  Write-Output "MusicMute Windows service: $($Action.ToLowerInvariant()) complete ($Version); qualification report: $ReportedQualification"
 } finally {
   if ($HasMutex) {
     $Mutex.ReleaseMutex()

@@ -101,6 +101,9 @@ Routes below are relative to the configured application API prefix. One fleet mo
 | Route | Credential | Purpose |
 | --- | --- | --- |
 | `POST /worker/v1/installations` | Single-use enrollment code | Exchange invitation for installation session; request replay handled safely |
+| `POST /worker/v1/installations/:id/artifacts` | Scoped installation credential | Obtain verified release/model/fixture download grants for the declared platform |
+| `POST /worker/v1/installations/:id/qualification-output/grant` | Scoped installation credential | Reserve one immutable fixture-result object and obtain/refresh its exact PUT grant |
+| `POST /worker/v1/installations/:id/qualification-output/confirm` | Scoped installation credential | Verify and pin the uploaded fixture-result S3 version before activation |
 | `POST /worker/v1/installations/:id/logs` | Scoped installation credential | Pre-activation diagnostics, sequence ack |
 | `POST /worker/v1/installations/:id/report` | Installation credential | Preflight, service and benchmark report |
 | `POST /worker/v1/installations/:id/activate` | Installation credential | Idempotent activation with locally generated machine credential digest |

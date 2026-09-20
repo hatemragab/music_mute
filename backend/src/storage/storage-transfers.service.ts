@@ -129,6 +129,13 @@ export class StorageTransfersService {
     return this.createUploadGrant(reservation, deadlineAt);
   }
 
+  async createWorkerInstallationUploadGrant(
+    reservation: ObjectReservation,
+    deadlineAt: Date,
+  ): Promise<UploadGrant> {
+    return this.createUploadGrant(reservation, deadlineAt);
+  }
+
   async verifyUploadedVersion(
     reservation: ObjectReservation,
     versionId: string,

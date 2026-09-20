@@ -374,6 +374,8 @@ export class WorkerEnrollmentService {
             .session(session)
             .lean();
           if (!machine) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+          if (machine.credentialDigest !== dto.credentialDigest)
+            throw workerError('WORKER_CONFLICT');
           return { machine, replayed: true, failed: false };
         }
         if (
@@ -381,6 +383,7 @@ export class WorkerEnrollmentService {
           installation.revision !== dto.expectedRevision ||
           !installation.hardwareReport ||
           !installation.runtimeIdentity ||
+          !installation.qualificationObject ||
           installation.capabilities.length === 0
         )
           throw workerError('WORKER_CONFLICT');
@@ -401,14 +404,9 @@ export class WorkerEnrollmentService {
           return { machine: null, replayed: false, failed: true };
         }
         const machineId = randomUUID();
-        const credential = deriveCredential(
-          principal.credential,
-          'machine',
-          machineId,
-        );
         const machine = await new this.machines({
           _id: machineId,
-          credentialDigest: digest(credential),
+          credentialDigest: dto.credentialDigest,
           status: 'active',
           label: installation.label,
           groupId: installation.groupId,
@@ -440,11 +438,6 @@ export class WorkerEnrollmentService {
       return {
         machineId: machine._id,
         status: machine.status,
-        credential: deriveCredential(
-          principal.credential,
-          'machine',
-          machine._id,
-        ),
         credentialRevision: machine.credentialRevision,
         replayed: result.replayed,
       };

@@ -44,6 +44,25 @@ export class ExchangeWorkerInvitationDto {
   @IsUUID('4') requestId!: string;
 }
 
+export class GetWorkerInstallationArtifactsDto {
+  @IsIn(WORKER_PLATFORMS) platform!: WorkerPlatform;
+}
+
+export class CreateWorkerQualificationUploadDto {
+  @IsUUID('4') requestId!: string;
+  @IsInt() @Min(1) @Max(30_000_000) bytes!: number;
+  @Matches(/^[a-f0-9]{64}$/) sha256!: string;
+}
+
+export class ConfirmWorkerQualificationUploadDto {
+  @IsUUID('4') requestId!: string;
+  @Transform(trim)
+  @IsString()
+  @Length(1, 1024)
+  @Matches(/^[A-Za-z0-9+/=_.,:-]+$/)
+  versionId!: string;
+}
+
 export class WorkerGpuReportDto {
   @Transform(trim) @IsString() @Length(1, 128) id!: string;
   @Transform(trim) @IsString() @Length(1, 200) name!: string;
@@ -129,6 +148,7 @@ export class ActivateWorkerInstallationDto {
   @Min(0)
   @Max(Number.MAX_SAFE_INTEGER - 1)
   expectedRevision!: number;
+  @Matches(/^[a-f0-9]{64}$/) credentialDigest!: string;
 }
 
 export class WorkerLifecycleDto {

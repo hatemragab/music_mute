@@ -30,6 +30,9 @@ export type WorkerRecipeStepId = (typeof WORKER_RECIPE_STEP_IDS)[number];
 
 export const WORKER_PROTOCOL_OPERATIONS = [
   'installation.exchange',
+  'installation.artifacts',
+  'installation.qualification-output-grant',
+  'installation.qualification-output-confirm',
   'installation.logs',
   'installation.report',
   'installation.activate',

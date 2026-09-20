@@ -28,11 +28,41 @@ describe("Windows service definition", () => {
     expect(xml).not.toContain("AWS_");
   });
 
+  it("renders a one-shot DirectML qualification as LocalService", () => {
+    const layout = createWindowsServiceLayout(
+      "C:\\ProgramData\\MusicMute Test",
+    );
+    const release = createWindowsReleaseLayout(layout, "0.1.0-win.1");
+    const xml = renderWinSWConfig(layout, release, {
+      fixturePath: `${layout.stateRoot}\\qualification-fixture.wav`,
+      fixtureSha256: "b".repeat(64),
+      reportPath: `${layout.stateRoot}\\qualification.json`,
+    });
+
+    expect(xml).toContain("runtime\\python\\python.exe");
+    expect(xml).toContain("musicmute_engine.qualification");
+    expect(xml).toContain("--directml-device-id 0");
+    expect(xml).toContain("<startmode>Manual</startmode>");
+    expect(xml).toContain("<domain>NT AUTHORITY</domain>");
+    expect(xml).toContain("<user>LocalService</user>");
+    expect(xml).not.toContain("<delayedAutoStart/>");
+    expect(xml).not.toContain('action="restart"');
+    expect(xml).not.toContain("state\\runtime.json");
+  });
+
   it("rejects roots and versions that can escape the installation", () => {
     expect(() => createWindowsServiceLayout("C:\\")).toThrow("unsafe");
     const layout = createWindowsServiceLayout();
     expect(() => createWindowsReleaseLayout(layout, "..\\outside")).toThrow(
       "version is invalid",
     );
+    const release = createWindowsReleaseLayout(layout, "0.1.0");
+    expect(() =>
+      renderWinSWConfig(layout, release, {
+        fixturePath: `${layout.stateRoot}\\fixture.wav`,
+        fixtureSha256: "invalid",
+        reportPath: `${layout.stateRoot}\\report.json`,
+      }),
+    ).toThrow("fixture digest is invalid");
   });
 });

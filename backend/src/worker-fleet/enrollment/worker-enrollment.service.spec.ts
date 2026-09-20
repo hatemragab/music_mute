@@ -319,6 +319,73 @@ describe('worker enrollment lifecycle', () => {
     );
   });
 
+  it('rejects activation when the qualification object was not recorded', async () => {
+    const f = fixture();
+    const id = 'e3f4f07b-cdf0-42ef-a9aa-7bf8e5532604';
+    f.installations.findById.mockReturnValue(
+      chain({
+        _id: id,
+        phase: 'reported',
+        revision: 1,
+        reportRequestId: '3f15b013-74a3-41f0-8f8b-4f4e92b47644',
+        reportSummary: 'qualified',
+        label: 'M4 worker',
+        groupId: null,
+        hardwareReport: {
+          os: 'Darwin',
+          osBuild: '25.6',
+          architecture: 'arm64',
+          cpu: 'Apple M4 Pro',
+          memoryBytes: 24_000_000_000,
+          gpus: [
+            {
+              id: 'gpu0',
+              name: 'Apple M4 Pro',
+              driverVersion: 'system',
+              memoryBytes: null,
+            },
+          ],
+        },
+        runtimeIdentity: {
+          workerVersion: '0.1.0',
+          protocolVersion: 1,
+          manifestDigest: 'a'.repeat(64),
+          modelDigest:
+            'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b',
+          providerRuntimeVersion: 'onnxruntime 1.30.0',
+        },
+        qualificationObject: null,
+        capabilities: [
+          {
+            platform: 'darwin-arm64',
+            provider: 'coreml',
+            gpuId: 'gpu0',
+            recipeIds: ['kim-vocals-trim-v1'],
+            maxSlots: 1,
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      f.service.activate(
+        {
+          kind: 'installation',
+          subjectId: id,
+          credential: Buffer.alloc(32, 11).toString('base64url'),
+        },
+        id,
+        {
+          requestId: '91e36646-b142-498e-821f-b2fbc07432ad',
+          expectedRevision: 1,
+          credentialDigest: 'b'.repeat(64),
+        },
+      ),
+    ).rejects.toThrow('Worker resource changed');
+    expect(f.MachineModel).not.toHaveBeenCalled();
+    expect(f.installations.updateOne).not.toHaveBeenCalled();
+  });
+
   it('activates only a recorded qualified MVP runtime and stores a credential digest', async () => {
     const f = fixture();
     const id = 'e3f4f07b-cdf0-42ef-a9aa-7bf8e5532604';
@@ -355,6 +422,13 @@ describe('worker enrollment lifecycle', () => {
             'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b',
           providerRuntimeVersion: 'onnxruntime 1.30.0',
         },
+        qualificationObject: {
+          key: `worker-installation-results/${id}/qualification.mp3`,
+          versionId: 'qualification-version',
+          bytes: 1234,
+          sha256: Buffer.alloc(32, 1).toString('base64'),
+          contentType: 'audio/mpeg',
+        },
         capabilities: [
           {
             platform: 'darwin-arm64',
@@ -382,19 +456,19 @@ describe('worker enrollment lifecycle', () => {
       subjectId: id,
       credential: Buffer.alloc(32, 11).toString('base64url'),
     };
+    const machineCredentialDigest = 'b'.repeat(64);
     const result = await f.service.activate(principal, id, {
       requestId,
       expectedRevision: 1,
+      credentialDigest: machineCredentialDigest,
     });
     expect(result).toMatchObject({
       status: 'active',
       credentialRevision: 1,
       replayed: false,
     });
-    expect(result.credential).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const stored = f.MachineModel.mock.calls[0][0] as Record<string, unknown>;
-    expect(stored.credentialDigest).toMatch(/^[a-f0-9]{64}$/);
-    expect(stored.credentialDigest).not.toBe(result.credential);
+    expect(stored.credentialDigest).toBe(machineCredentialDigest);
     expect(f.installations.updateOne).toHaveBeenCalledWith(
       expect.objectContaining({ _id: id, revision: 1, phase: 'reported' }),
       expect.objectContaining({
@@ -405,5 +479,49 @@ describe('worker enrollment lifecycle', () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it('replays activation only for the original local credential digest', async () => {
+    const f = fixture();
+    const id = 'e3f4f07b-cdf0-42ef-a9aa-7bf8e5532604';
+    const machineId = 'ab264295-d2ad-4b91-9361-73cff5bd6eb2';
+    const requestId = '91e36646-b142-498e-821f-b2fbc07432ad';
+    const credentialDigest = 'b'.repeat(64);
+    f.installations.findById.mockReturnValue(
+      chain({
+        _id: id,
+        phase: 'activated',
+        machineId,
+        activationRequestId: requestId,
+      }),
+    );
+    f.MachineModel.findById.mockReturnValue(
+      chain({
+        _id: machineId,
+        status: 'active',
+        credentialDigest,
+        credentialRevision: 1,
+      }),
+    );
+    const principal = {
+      kind: 'installation' as const,
+      subjectId: id,
+      credential: Buffer.alloc(32, 11).toString('base64url'),
+    };
+
+    await expect(
+      f.service.activate(principal, id, {
+        requestId,
+        expectedRevision: 1,
+        credentialDigest,
+      }),
+    ).resolves.toMatchObject({ machineId, replayed: true });
+    await expect(
+      f.service.activate(principal, id, {
+        requestId,
+        expectedRevision: 1,
+        credentialDigest: 'c'.repeat(64),
+      }),
+    ).rejects.toThrow('Worker resource changed');
   });
 });

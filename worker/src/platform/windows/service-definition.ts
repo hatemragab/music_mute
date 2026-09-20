@@ -32,6 +32,12 @@ export interface WindowsReleaseLayout {
   serviceExecutableSource: string;
 }
 
+export interface WindowsServiceQualification {
+  fixturePath: string;
+  fixtureSha256: string;
+  reportPath: string;
+}
+
 export function createWindowsServiceLayout(
   installRoot = DEFAULT_WINDOWS_INSTALL_ROOT,
 ): WindowsServiceLayout {
@@ -87,26 +93,92 @@ export function createWindowsReleaseLayout(
 export function renderWinSWConfig(
   layout: WindowsServiceLayout,
   release: WindowsReleaseLayout,
+  qualification?: WindowsServiceQualification,
 ): string {
   assertReleaseInsideLayout(layout, release);
-  const arguments_ = [
-    quoteWindowsArgument(release.cliPath),
-    "run",
-    "--config",
-    quoteWindowsArgument(layout.configPath),
-  ].join(" ");
+  if (
+    qualification !== undefined &&
+    !/^[a-f0-9]{64}$/u.test(qualification.fixtureSha256)
+  )
+    throw new TypeError("Qualification fixture digest is invalid");
+  if (qualification !== undefined) {
+    assertWindowsPathInside(
+      layout.stateRoot,
+      qualification.fixturePath,
+      "Qualification fixture path",
+    );
+    assertWindowsPathInside(
+      layout.stateRoot,
+      qualification.reportPath,
+      "Qualification report path",
+    );
+  }
+  const executable =
+    qualification === undefined ? release.nodePath : release.pythonPath;
+  const arguments_ =
+    qualification === undefined
+      ? [
+          quoteWindowsArgument(release.cliPath),
+          "run",
+          "--config",
+          quoteWindowsArgument(layout.configPath),
+        ].join(" ")
+      : [
+          "-m",
+          "musicmute_engine.qualification",
+          "--provider",
+          "directml",
+          "--fixture",
+          quoteWindowsArgument(qualification.fixturePath),
+          "--fixture-sha256",
+          qualification.fixtureSha256,
+          "--work-root",
+          quoteWindowsArgument(layout.workRoot),
+          "--release-root",
+          quoteWindowsArgument(release.releaseRoot),
+          "--model-cache",
+          quoteWindowsArgument(layout.modelCacheRoot),
+          "--ffmpeg",
+          quoteWindowsArgument(release.ffmpegPath),
+          "--ffprobe",
+          quoteWindowsArgument(release.ffprobePath),
+          "--directml-device-id",
+          "0",
+          "--report",
+          quoteWindowsArgument(qualification.reportPath),
+        ].join(" ");
+  const workingDirectory =
+    qualification === undefined ? release.appRoot : release.engineRoot;
+  const path =
+    qualification === undefined
+      ? "%SystemRoot%\\System32;%SystemRoot%"
+      : `${win32.dirname(release.ffmpegPath)};%SystemRoot%\\System32;%SystemRoot%`;
+  const lifecycle =
+    qualification === undefined
+      ? `<startmode>Automatic</startmode>
+  <delayedAutoStart/>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="none"/>
+  <resetfailure>1 hour</resetfailure>`
+      : `<startmode>Manual</startmode>
+  <onfailure action="none"/>`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <service>
   <id>${WINDOWS_SERVICE_ID}</id>
   <name>MusicMute Worker</name>
-  <description>MusicMute private DirectML processing worker</description>
-  <executable>${xml(release.nodePath)}</executable>
+  <description>${
+    qualification === undefined
+      ? "MusicMute private DirectML processing worker"
+      : "MusicMute DirectML installation qualification"
+  }</description>
+  <executable>${xml(executable)}</executable>
   <arguments>${xml(arguments_)}</arguments>
-  <workingdirectory>${xml(release.appRoot)}</workingdirectory>
+  <workingdirectory>${xml(workingDirectory)}</workingdirectory>
   <env name="HOME" value="${xml(layout.stateRoot)}"/>
   <env name="MPLCONFIGDIR" value="${xml(win32.join(layout.runtimeCacheRoot, "matplotlib"))}"/>
   <env name="NUMBA_CACHE_DIR" value="${xml(win32.join(layout.runtimeCacheRoot, "numba"))}"/>
-  <env name="PATH" value="%SystemRoot%\\System32;%SystemRoot%"/>
+  <env name="PATH" value="${xml(path)}"/>
   <env name="TEMP" value="${xml(layout.temporaryRoot)}"/>
   <env name="TMP" value="${xml(layout.temporaryRoot)}"/>
   <env name="XDG_CACHE_HOME" value="${xml(layout.runtimeCacheRoot)}"/>
@@ -114,12 +186,7 @@ export function renderWinSWConfig(
     <domain>NT AUTHORITY</domain>
     <user>LocalService</user>
   </serviceaccount>
-  <startmode>Automatic</startmode>
-  <delayedAutoStart/>
-  <onfailure action="restart" delay="10 sec"/>
-  <onfailure action="restart" delay="30 sec"/>
-  <onfailure action="none"/>
-  <resetfailure>1 hour</resetfailure>
+  ${lifecycle}
   <stoptimeout>30 sec</stoptimeout>
   <logpath>${xml(layout.logRoot)}</logpath>
   <log mode="roll-by-size">
@@ -163,6 +230,23 @@ function assertSafeWindowsValue(value: string): void {
     )
   )
     throw new TypeError("Windows service path is unsafe");
+}
+
+function assertWindowsPathInside(
+  root: string,
+  value: string,
+  label: string,
+): void {
+  assertSafeWindowsValue(value);
+  if (!win32.isAbsolute(value))
+    throw new TypeError(`${label} must be absolute`);
+  const relative = win32.relative(root, value);
+  if (
+    relative.length < 1 ||
+    relative.startsWith("..") ||
+    win32.isAbsolute(relative)
+  )
+    throw new TypeError(`${label} is unsafe`);
 }
 
 function quoteWindowsArgument(value: string): string {

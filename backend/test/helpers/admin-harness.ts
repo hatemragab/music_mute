@@ -223,7 +223,7 @@ export async function createAdminHarness(
       exceptionFactory: () => authError('INVALID_INPUT'),
     }),
   );
-  await app.init();
+  await app.listen(0, '127.0.0.1');
 
   const seedAdmin = (role: AdminRole = 'owner') => {
     access.set('owner-uid', {

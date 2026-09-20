@@ -53,6 +53,20 @@ describe('environment boundary', () => {
       ...ADMIN_RATE_LIMIT_DEFAULTS,
     });
   });
+  it('accepts only an absolute optional worker installation catalog path', () => {
+    expect(
+      validateEnvironment({
+        ...local,
+        WORKER_INSTALLATION_CATALOG_PATH: '/run/musicmute/worker-catalog.json',
+      }).WORKER_INSTALLATION_CATALOG_PATH,
+    ).toBe('/run/musicmute/worker-catalog.json');
+    expect(() =>
+      validateEnvironment({
+        ...local,
+        WORKER_INSTALLATION_CATALOG_PATH: 'worker-catalog.json',
+      }),
+    ).toThrow('Invalid environment: WORKER_INSTALLATION_CATALOG_PATH');
+  });
   it.each([
     ['APP_ANDROID_CURRENT_VERSION_NAME', '1.0.0-beta'],
     ['APP_IOS_CURRENT_VERSION_NAME', '01.0.0'],

@@ -40,6 +40,36 @@ describe("macOS LaunchDaemon definition", () => {
     expect(plist).not.toContain("MONGODB");
   });
 
+  it("renders a one-shot CoreML qualification under the service identity", () => {
+    const layout = createMacServiceLayout(
+      "/private/var/db/MusicMute Test",
+      "/private/var/db/LaunchDaemons",
+    );
+    const plist = renderLaunchDaemonPlist({
+      layout,
+      serviceUser: "_musicmute",
+      serviceGroup: "_musicmute",
+      qualification: {
+        releaseRoot:
+          "/private/var/db/MusicMute Test/releases/0.1.0-macos-arm64",
+        fixturePath:
+          "/private/var/db/MusicMute Test/state/qualification-fixture.wav",
+        fixtureSha256: "a".repeat(64),
+        reportPath: "/private/var/db/MusicMute Test/state/qualification.json",
+      },
+    });
+
+    expect(plist).toContain("musicmute_engine.qualification");
+    expect(plist).toContain("<string>coreml</string>");
+    expect(plist).toContain("<string>--release-root</string>");
+    expect(plist).toContain("<key>KeepAlive</key>\n  <false/>");
+    expect(plist).toContain(
+      "/current/runtime/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    );
+    expect(plist).not.toContain("<string>run</string>");
+    expect(plist).not.toContain("state/runtime.json");
+  });
+
   it("escapes XML values and rejects unsafe account or root values", () => {
     const layout = createMacServiceLayout(
       "/private/var/db/MusicMute & Test",
@@ -62,5 +92,18 @@ describe("macOS LaunchDaemon definition", () => {
     expect(() => createMacServiceLayout("/", "/Library/LaunchDaemons")).toThrow(
       "Mac install root is unsafe",
     );
+    expect(() =>
+      renderLaunchDaemonPlist({
+        layout,
+        serviceUser: "_musicmute",
+        serviceGroup: "staff",
+        qualification: {
+          releaseRoot: "/private/var/db/MusicMute & Test/releases/0.1.0",
+          fixturePath: "/private/var/db/MusicMute & Test/state/fixture.wav",
+          fixtureSha256: "not-a-digest",
+          reportPath: "/private/var/db/MusicMute & Test/state/report.json",
+        },
+      }),
+    ).toThrow("fixture digest is invalid");
   });
 });

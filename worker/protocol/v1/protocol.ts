@@ -1,6 +1,6 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source: backend/src/worker-fleet/protocol/v1/protocol.ts
-// Source SHA-256: dbcf976ab2623c2b0177ca25deffd61742f845432963b9fc7d2d745811663fd6
+// Source SHA-256: 4939fb52282b9615481abe20ca9e290ecdbee906aa7a9a57edda494a0d6f6dcb
 
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 export const WORKER_PROTOCOL_MAX_BYTES = 64 * 1024;
@@ -34,6 +34,9 @@ export type WorkerRecipeStepId = (typeof WORKER_RECIPE_STEP_IDS)[number];
 
 export const WORKER_PROTOCOL_OPERATIONS = [
   'installation.exchange',
+  'installation.artifacts',
+  'installation.qualification-output-grant',
+  'installation.qualification-output-confirm',
   'installation.logs',
   'installation.report',
   'installation.activate',

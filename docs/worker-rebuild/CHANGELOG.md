@@ -1,5 +1,192 @@
 # Package changes
 
+## Revision 4.15
+
+- Added one-command platform bootstrap orchestration. Both native CLIs now
+  prepare and materialize the backend-granted release/model/fixture set, run
+  service-context qualification, enroll with the verified report, install the
+  generated runtime config and credential, and activate through the existing
+  native service boundary. Windows mutations remain inside the packaged
+  elevated PowerShell manager and retries safely reuse a completed report.
+- Added exclusive protected Windows qualification export so the enrollment
+  client can consume the `LocalService` report without weakening the private
+  installation-state ACLs or replacing an existing output.
+- Fixed Windows stage/rollback state preservation. A service which was stopped
+  before staging is now restored as stopped; a previously running service is
+  restarted and must emit a fresh durable `started` event. The same rule
+  applies to failed install/repair rollback.
+- Native Windows `0.1.3` package and split-stage acceptance passed on the
+  Z440/RX 580: 31,506 immutable entries, 31,508 safe ZIP entries, four recipes
+  as `LocalService` through DirectML, candidate inactive, prior `0.1.1`
+  state preserved. Live backend/S3 bootstrap, logged-out, reboot and
+  interrupted-upgrade gates remain open.
+- Complete local worker verification passes 31 TypeScript files/111 tests, 32
+  Python tests and the production build. The backend remains green at 110 unit
+  files/749 tests, 22 E2E files/135 tests and production build.
+
+## Revision 4.14
+
+- Split native installation into explicit qualification and activation phases.
+  macOS `stage` and Windows `Stage` install an immutable candidate, provision
+  the model/fixture and run all four recipes under the real service identity
+  without installing placeholder machine credentials. A successful stage does
+  not activate the candidate and restores an already accepted service.
+- Runtime enrollment now creates the final service configuration only after
+  backend activation, using the backend-issued machine ID, one stable local
+  worker ID and the fixed CoreML/DirectML one-slot layout. Separate native
+  activation installs that config and the locally generated credential before
+  starting and checking the normal service.
+- `prepare-installation` now completes the archive handoff: after streaming
+  release/model/fixture verification it validates archive paths, extracts the
+  release into a protected temporary directory, verifies the platform release
+  manifest and catalog version, and atomically publishes or safely reuses the
+  versioned release root.
+- The macOS and Windows package commands can now emit that catalog archive
+  directly. They verify the release first, refuse replacement, validate the
+  resulting archive listing and report exact bytes, SHA-256 and content type.
+- A rebuilt 33,852-entry macOS `0.1.2` candidate passed the four-recipe CoreML
+  stage as `_musicmute`, remained inactive, and restored the accepted `0.1.1`
+  LaunchDaemon. The stage also exposed and fixed a source-ownership bug by
+  copying the owner-only model download into a service-owned temporary file
+  before private-Python validation.
+- Complete worker verification passes 31 TypeScript files/107 tests, 32 Python
+  tests and build. Complete backend verification passes 110 unit files/749
+  tests, 22 E2E files/135 tests and build. The extra backend test proves that
+  activation performs no machine or installation write when the immutable
+  qualification object is absent.
+- The equivalent Windows stage transaction is implemented and locally tested,
+  but its rebuilt native PowerShell/DirectML acceptance is still pending while
+  the current Z440 SSH endpoint is unreachable. Live backend/S3, logged-out,
+  reboot and interrupted-Windows-upgrade gates also remain open.
+
+## Revision 4.13
+
+- Added an installation-authenticated backend catalog boundary for the exact
+  macOS/Windows release, Kim model and qualification fixture. The catalog must
+  be an operator-owned bounded regular JSON file; every object is checked by
+  key namespace, version ID, byte count, content type and SHA-256 before the
+  backend issues short-lived S3 download grants. Storage keys/version IDs are
+  not returned to the installer.
+- Added `musicmute-worker prepare-installation`, which consumes/replays the
+  invitation early, strictly validates the platform-specific grant response,
+  downloads all three artifacts into a protected directory and persists only
+  verified local metadata. Signed URLs and credentials are never written to
+  its local artifact manifest or output.
+- Added the missing qualification-result S3 smoke test. The service-context
+  qualification report selects one exact Kim output, and enrollment binds its
+  path, byte count and digest to an installation-scoped immutable PUT. The
+  backend verifies the returned S3 version and will not activate the machine
+  until that exact result is durably confirmed. Lost PUT responses and command
+  replay recover without changing the reserved object.
+- Replaced implicit Supertest server lifecycles in the shared admin E2E
+  harness with one explicit loopback listener. Five consecutive complete E2E
+  runs passed after the change. Complete backend verification passes 110 unit
+  files/748 tests, 22 E2E files/135 tests and the production build; complete
+  worker verification passes 29 TypeScript files/95 tests, 32 Python tests and
+  the production build.
+- These are local contract results only. The native packages must be rebuilt
+  because qualification evidence now includes the upload candidate, and the
+  approved artifact catalog plus real S3 upload/confirmation still require a
+  live backend run on both MVP hosts.
+
+## Revision 4.12
+
+- Moved invitation exchange ahead of expensive runtime report generation so a
+  restricted installation session is established early and safely replayed.
+- Changed activation to generate and protect the random machine credential on
+  the installer host and submit only its SHA-256 digest. The backend no longer
+  returns a plaintext machine credential and rejects activation replay when the
+  request ID matches but the locally held credential digest does not.
+- Added an atomic streaming enrollment-artifact downloader with strict URL,
+  response metadata, byte count, content digest, protected-directory and
+  idempotent local-file checks. This is the client-side boundary needed for
+  backend-issued release/model/fixture grants; the grant endpoint is still open.
+- Made backend verification independent of developer-local rate-limit values
+  and serialized Nest E2E files that share process/reflection state. Complete
+  verification passes 108 unit files/732 tests, 22 E2E files/135 tests and the
+  production build; the worker remains green at 28 TypeScript files/82 tests,
+  32 Python tests and production build.
+
+## Revision 4.11
+
+- Wired the packaged four-recipe qualification into the native installers.
+  macOS now swaps in a one-shot `_musicmute` LaunchDaemon, validates the
+  protected CoreML evidence and atomically restores the normal service plist.
+  Windows now performs the equivalent DirectML gate as `LocalService`, then
+  reinstalls the normal automatic service definition when needed.
+- Added immutable digest-named WAV fixture provisioning, bounded report waits,
+  strict reuse of the enrollment evidence validator, atomic report publication
+  and rollback cleanup. The normal worker service cannot start as an accepted
+  candidate until the service-context qualification report passes.
+- Added Windows CLI report verification and made the PowerShell transaction
+  preserve the prior service/config/credential/wrapper state across failures.
+  The candidate PowerShell script parses successfully with Windows PowerShell
+  on the authorized Z440 host.
+- The complete worker verification passes 27 TypeScript files/78 tests and 32
+  Python engine tests. The rebuilt `0.1.1` installer gate then passed natively
+  on both MVP hosts: all four recipes as `_musicmute` through CoreML on the Mac
+  M4, and as `LocalService` through DirectML adapter 0 on the Z440/RX 580 with
+  896 accelerated model-node events and zero CPU model-node events. Both
+  installers restored their normal service definitions and active service.
+  Real fleet enrollment, live backend/S3, logged-out and reboot acceptance
+  remain open.
+
+## Revision 4.10
+
+- Added verified-release hardware report generation for the accepted M4/CoreML
+  and Z440/RX 580/DirectML pairs, with strict service-doctor and host inventory
+  parsing and one-slot capability output.
+- Added a packaged Kim qualification command that runs all four frozen recipes,
+  profiles ONNX Runtime, rejects CPU model-node fallback, verifies the fixture
+  digest, binds evidence to the immutable release manifest and records bounded
+  benchmark/result evidence under the dedicated macOS or Windows service
+  identity.
+- Changed runtime-derived enrollment to require this qualification artifact;
+  a runtime doctor alone can no longer produce an activatable capability
+  report. Replay-safe manual report mode is restricted to explicit loopback
+  contract testing.
+- The complete worker verification passes 26 TypeScript files/73 tests and 32
+  Python engine tests. Real fleet enrollment, fixture-result S3 upload, native
+  execution of this new final gate on both installed services, logged-out and
+  reboot acceptance remain open.
+
+## Revision 4.9
+
+- Added a bounded worker enrollment client and CLI covering the accepted C2
+  invitation exchange, installation report and machine activation contract.
+- Persisted request identities and restricted credentials in an owner-protected
+  recovery state so a lost response or interrupted invocation replays the same
+  installation instead of consuming a second invitation.
+- Wrote final machine identity and credential files without logging secrets,
+  with strict HTTPS/loopback, response-size, response-shape and stable-identity
+  validation.
+- Added a real loopback HTTP test for the full sequence and its second-run
+  replay. Platform hardware/runtime report generation, runtime-config creation
+  and direct native-installer handoff remain the next D4/D5 work; this revision
+  does not claim real backend enrollment.
+
+## Revision 4.8
+
+- Added automatic, fail-closed provisioning of the hidden `_musicmute` macOS
+  service identity and normalized immutable release ownership to `root:wheel`.
+- Fixed a real launchd race by waiting for asynchronous `bootout` completion
+  before replacement bootstrap, with bounded success and fail-closed tests.
+- Installed and verified the real LaunchDaemon, dedicated-account CoreML job,
+  restrictive state/config ownership and restart behavior against the bounded
+  loopback acceptance fixture; installed and activated the final 33,831-entry
+  `0.1.0` package and completed a checked stable-release service job.
+- Fixed Windows diagnostic-spool flushes to use a writable file handle, then
+  built and installed the 31,331-entry stable `0.1.0` release on the accepted
+  Z440. Native Doctor, `LocalService`, SID ACLs, DirectML processing, checked
+  output completion and service restart passed.
+- A native invalid-credential repair exposed a WinSW recovery timing race. The
+  installer now requires a new durable runtime `started` event for candidate
+  and rollback health. The repeated negative repair rejected the candidate,
+  restored all managed files and proved the recovered `0.1.0` service started.
+- Kept D4 and D5 BLOCKED because loopback fixtures do not prove live backend/S3,
+  and logged-out, interrupted-upgrade recovery and reboot acceptance are not
+  yet run.
+
 ## Revision 4.7
 
 - Audited the D5 installer transaction and fixed rollback so a failed candidate

@@ -1,6 +1,6 @@
 {
   "all_passed": true,
-  "validated_on": "2026-09-19",
+  "validated_on": "2026-09-20",
   "branch_count": 7,
   "checkpoint_count": 36,
   "package_file_count_including_sha256sums": 41,
@@ -8,38 +8,14 @@
   "relative_markdown_links_checked": 52,
   "reference_sha256": "b376a185d24811560fbc6cc681542517e61130a6d737077360ace5f502a32f1d",
   "reference_line_ranges_verified": {
-    "trim_vocal_gaps": [
-      19,
-      114
-    ],
-    "prepare_audio": [
-      117,
-      164
-    ],
-    "load_separator": [
-      167,
-      183
-    ],
-    "process_audio": [
-      186,
-      279
-    ],
-    "_write_message": [
-      282,
-      288
-    ],
-    "_read_request": [
-      291,
-      302
-    ],
-    "serve": [
-      305,
-      391
-    ],
-    "main": [
-      394,
-      483
-    ]
+    "trim_vocal_gaps": [19, 114],
+    "prepare_audio": [117, 164],
+    "load_separator": [167, 183],
+    "process_audio": [186, 279],
+    "_write_message": [282, 288],
+    "_read_request": [291, 302],
+    "serve": [305, 391],
+    "main": [394, 483]
   },
   "feasibility": {
     "b1_probe_harness": "PASS",
@@ -61,10 +37,20 @@
     "d2_recipe_pipeline": "PASS",
     "d3_backend_execution": "PASS",
     "d4_macos_service": "BLOCKED",
-    "d5_windows_tooling": "PASS_LOCAL_ONLY",
-    "d5_windows_service": "NOT_RUN",
+    "d5_windows_tooling": "PASS",
+    "d5_windows_service": "BLOCKED",
     "d6_safety_and_adapter_boundaries": "PASS",
+    "enrollment_qualification_gate": "PASS_NATIVE_MVP_HOSTS",
+    "native_installer_qualification_wiring": "PASS_NATIVE_MVP_HOSTS",
+    "installation_artifact_grants_and_preparation": "PASS_LOCAL",
+    "release_archive_creation": "PASS_LOCAL",
+    "installation_archive_materialization": "PASS_LOCAL",
+    "qualification_result_upload_and_activation_gate": "PASS_LOCAL",
+    "runtime_config_generation": "PASS_LOCAL",
+    "macos_split_stage_activation": "PASS_NATIVE_MACOS",
+    "windows_split_stage_activation": "PASS_NATIVE_WINDOWS",
+    "platform_bootstrap_orchestration": "PASS_LOCAL",
     "evidence": "../evidence/D-runtime.md"
   },
-  "scope": "Documentation/source-reference checks, sanitized real M4 Pro/CoreML and Z440 RX 580/DirectML feasibility runs, local C1-C6 backend verification, local D1-D3 runtime verification, reproducible offline FFmpeg/LAME and complete D4 macOS private-package verification, local D4 service-tool and post-run immutability verification, local D5 Windows package/service-tool fixtures and exact provider-lock validation, local D6 safety/adapter verification, local HTTP ownership/transfer integration, and real private-Python M4/CoreML pipeline/provider verification; no production infrastructure, live S3, WebSocket hints, native PowerShell execution, Windows service package, or accepted-platform system-service tests."
+  "scope": "Documentation/source-reference checks, sanitized real M4 Pro/CoreML and Z440 RX 580/DirectML feasibility runs, local C1-C6 backend verification, local D1-D3 runtime verification, replay-safe local enrollment CLI HTTP contract verification with a locally generated machine credential digest, strict local release/model/fixture catalog-grant/download/archive-materialization verification, immutable qualification-result upload/version-confirmation and activation-gate verification, native four-recipe qualification through the installed _musicmute/CoreML and LocalService/DirectML services on rebuilt 0.1.1 MVP-host packages, split-stage native macOS qualification on rebuilt 0.1.2 with accepted-service restoration, split-stage native Windows qualification on rebuilt 0.1.3 with prior stopped-state restoration, locally verified one-command platform bootstrap orchestration, reproducible offline FFmpeg/LAME and complete D4 macOS private-package verification, native D4 LaunchDaemon and service-context CoreML loopback-fixture acceptance, native D5 Windows package/PowerShell/LocalService/ACL/DirectML loopback-fixture acceptance, local D6 safety/adapter verification, local HTTP ownership/transfer integration, and real private-Python provider verification; the current artifact/result-upload contracts and one-command bootstrap have not yet run through live S3 on both native hosts, and there is no production infrastructure, real fleet enrollment, WebSocket hints, logged-out acceptance, reboot acceptance, or Windows interrupted-upgrade recovery acceptance."
 }
