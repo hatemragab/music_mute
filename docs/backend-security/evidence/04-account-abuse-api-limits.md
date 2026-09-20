@@ -7,7 +7,8 @@
 - Merged predecessor PR: <https://github.com/hatemragab/music_mute/pull/12>
 - Starting collection commit: `5151426a87d2712e9064bd222de498cf6b054f5f`
 - Tested implementation commit: `33f5a640ba126b3e4f863e1a0aa946995c9dde99`
-- Pull request URL/base: not opened / `codex/backend-security-cost-hardening`
+- Pull request URL/base: <https://github.com/hatemragab/music_mute/pull/13> /
+  `codex/backend-security-cost-hardening`
 - Date/time with timezone: 2026-09-20 EEST
 - Environment: local macOS isolated worktree with synthetic isolated MongoDB and
   Redis; Firebase, S3, APK verification, and provider configuration used test
@@ -17,7 +18,7 @@
 
 - Branch status: `READY_FOR_REVIEW`
 - Completed checkpoints: D1, D2, D3, D4, D5, D6
-- Next item: open the Branch 4 PR against the collection branch
+- Next item: review and merge PR #13 into the collection branch
 - Blocking input: none
 
 ## Delivered behavior

@@ -19,6 +19,7 @@
   gate. One pre-existing APK installer timeout passed alone and on full rerun.
 - Recorded implementation commit `33f5a640ba126b3e4f863e1a0aa946995c9dde99`;
   no provider, deployment, live data, device, or browser UI E2E action was run.
+- Opened Branch 4 PR #13 against `codex/backend-security-cost-hardening`.
 
 ## 2026-09-20 — Branch 4 started at checkpoint D1
 
