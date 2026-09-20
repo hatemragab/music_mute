@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ProcessingUsagePanel } from "./processing-usage-panel";
 import {
-  suspensionExpiry,
+  restrictionExpiry,
   validateAccountPolicyOverride,
 } from "./processing-access-validation";
 
@@ -81,13 +81,13 @@ describe("UTC monthly account processing usage", () => {
     expect(screen.getByText(/shared by all installations/)).toBeInTheDocument();
   });
 
-  it("validates optional authoritative suspension expiry", () => {
+  it("validates optional authoritative restriction expiry", () => {
     const now = new Date("2026-09-13T12:00:00Z");
-    expect(suspensionExpiry("", now)).toBeUndefined();
-    expect(suspensionExpiry("2026-09-14T12:00:00Z", now)).toBe(
+    expect(restrictionExpiry("", now)).toBeUndefined();
+    expect(restrictionExpiry("2026-09-14T12:00:00Z", now)).toBe(
       "2026-09-14T12:00:00.000Z",
     );
-    expect(() => suspensionExpiry("2026-09-12T12:00:00Z", now)).toThrow();
+    expect(() => restrictionExpiry("2026-09-12T12:00:00Z", now)).toThrow();
   });
 
   it("allows a positive replacement with optional future expiry", () => {

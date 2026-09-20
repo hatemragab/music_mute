@@ -118,38 +118,65 @@
       "successStatus": 200
     },
     {
-      "controller": "AdminUsersController",
-      "method": "POST",
-      "path": "/admin/users/:id/suspend-processing",
-      "permissions": ["users.processing.manage"],
+      "controller": "AdminAbuseProtectionController",
+      "method": "GET",
+      "path": "/admin/abuse-events",
+      "permissions": ["abuse.read"],
       "roles": ["owner", "support"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "reason": "Synthetic contract fixture",
-        "expectedRevision": 0
-      },
-      "responseCategory": "resource",
-      "validationOwner": "dto",
-      "successStatus": 201
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "page",
+      "validationOwner": "service",
+      "successStatus": 200
     },
     {
-      "controller": "AdminUsersController",
-      "method": "POST",
-      "path": "/admin/users/:id/resume-processing",
-      "permissions": ["users.processing.manage"],
+      "controller": "AdminAbuseProtectionController",
+      "method": "GET",
+      "path": "/admin/users/:id/restriction",
+      "permissions": ["abuse.read"],
+      "roles": ["owner", "support"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminAbuseProtectionController",
+      "method": "PUT",
+      "path": "/admin/users/:id/restriction",
+      "permissions": ["users.restrictions.manage"],
+      "roles": ["owner", "support"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "reasonCode": "manual_review",
+        "note": "Synthetic contract fixture",
+        "expectedRevision": 0
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminAbuseProtectionController",
+      "method": "DELETE",
+      "path": "/admin/users/:id/restriction",
+      "permissions": ["users.restrictions.manage"],
       "roles": ["owner", "support"],
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
         "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expectedRevision": 0
+        "expectedRevision": 1
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
-      "successStatus": 201
+      "successStatus": 200
     },
     {
       "controller": "AdminAccountRecoveryController",

@@ -24,6 +24,11 @@ const AccountRecoveryPage = lazy(() =>
     }),
   ),
 );
+const AbuseEventsPage = lazy(() =>
+  import("@/features/abuse/abuse-events-page").then((module) => ({
+    default: module.AbuseEventsPage,
+  })),
+);
 const SystemHealthPage = lazy(() =>
   import("@/features/health/system-health-page").then((module) => ({
     default: module.SystemHealthPage,
@@ -154,6 +159,14 @@ export function AppRouter() {
           element={
             <Guard permission="users.account-recovery.manage">
               <AccountRecoveryPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="abuse-events"
+          element={
+            <Guard permission="abuse.read">
+              <AbuseEventsPage />
             </Guard>
           }
         />

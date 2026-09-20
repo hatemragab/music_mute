@@ -1,18 +1,13 @@
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
-import type { AdminSuspensionDto } from './dto/admin-user.dto.js';
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { trusted, Types, type ClientSession, type Model } from 'mongoose';
+import { trusted, Types, type Model } from 'mongoose';
 import { operationFingerprint } from '../admin/admin-audit-query.js';
 import { adminError } from '../admin/admin-errors.js';
-import { AdminOperationsService } from '../admin/admin-operations.service.js';
 import type { AdminActor } from '../admin/admin.types.js';
-import { ProcessingAdmissionFence } from '../admin-settings/processing-settings.schema.js';
 import { AccountPolicyService } from '../admin-settings/account-policy.service.js';
 import { Job } from '../jobs/job.schema.js';
-import { UserIdentityFenceService } from '../users/user-identity-fence.service.js';
 import { User } from '../users/user.schema.js';
-import type { AdminUserProcessingDto } from './dto/admin-user.dto.js';
 import type {
   DeleteAccountPolicyOverrideDto,
   PutAccountPolicyOverrideDto,
@@ -25,26 +20,11 @@ import {
 
 const USER_STATUSES = ['active', 'disabled', 'deleting', 'purging'] as const;
 const esc = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const suspensionExpiry = (value: string, now: Date) => {
-  const expiry = new Date(value);
-  if (
-    !Number.isFinite(expiry.getTime()) ||
-    expiry <= now ||
-    expiry.getTime() > now.getTime() + 30 * 86400_000
-  )
-    throw adminError('INVALID_REQUEST');
-  return expiry;
-};
-
 @Injectable()
 export class AdminUsersService implements OnModuleInit {
   constructor(
     @InjectModel(User.name) private readonly users: Model<User>,
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
-    @InjectModel(ProcessingAdmissionFence.name)
-    private readonly admissionFences: Model<ProcessingAdmissionFence>,
-    private readonly identityFences: UserIdentityFenceService,
-    private readonly operations: AdminOperationsService,
     private readonly usage: ProcessingUsageService,
     private readonly policies: AccountPolicyService,
   ) {}
@@ -54,13 +34,7 @@ export class AdminUsersService implements OnModuleInit {
   }
 
   async list(raw: Record<string, unknown>) {
-    const allowed = [
-      'query',
-      'status',
-      'processingSuspended',
-      'limit',
-      'cursor',
-    ];
+    const allowed = ['query', 'status', 'limit', 'cursor'];
     if (Object.keys(raw).some((key) => !allowed.includes(key)))
       throw adminError('INVALID_REQUEST');
     const limit = raw.limit === undefined ? 25 : Number(raw.limit);
@@ -82,28 +56,13 @@ export class AdminUsersService implements OnModuleInit {
     const status = raw.status === undefined ? null : String(raw.status);
     if (status !== null && !USER_STATUSES.includes(status as never))
       throw adminError('INVALID_REQUEST');
-    let suspended: boolean | null = null;
-    if (raw.processingSuspended !== undefined) {
-      if (
-        raw.processingSuspended !== 'true' &&
-        raw.processingSuspended !== 'false'
-      )
-        throw adminError('INVALID_REQUEST');
-      suspended = raw.processingSuspended === 'true';
-    }
     const scope = operationFingerprint({
       query: search,
       status,
-      processingSuspended: suspended,
     });
     const after = this.decodeCursor(raw.cursor, scope);
     const filter: Record<string, unknown> = {
       ...(status ? { status } : {}),
-      ...(suspended === null
-        ? {}
-        : {
-            processingSuspended: suspended ? true : trusted({ $ne: true }),
-          }),
       ...(after ? { _id: trusted({ $gt: after }) } : {}),
       ...(search
         ? {
@@ -187,125 +146,6 @@ export class AdminUsersService implements OnModuleInit {
   ) {
     await this.policies.deleteOverride(actor, this.objectId(id), dto);
     return this.accountUsage(id);
-  }
-
-  suspend(actor: AdminActor, id: string, dto: AdminSuspensionDto) {
-    return this.change(actor, id, dto, true);
-  }
-  resume(actor: AdminActor, id: string, dto: AdminUserProcessingDto) {
-    return this.change(actor, id, dto, false);
-  }
-
-  private async change(
-    actor: AdminActor,
-    id: string,
-    dto: AdminSuspensionDto,
-    suspended: boolean,
-  ) {
-    const objectId = this.objectId(id);
-    const route = suspended
-      ? 'POST /admin/users/:id/suspend-processing'
-      : 'POST /admin/users/:id/resume-processing';
-    const result = await this.operations.run(
-      actor,
-      {
-        operationId: dto.operationId,
-        route,
-        request: {
-          id,
-          expectedRevision: dto.expectedRevision,
-          ...(dto.expiresAt ? { expiresAt: dto.expiresAt } : {}),
-        },
-        action: suspended
-          ? 'users.processing.suspend'
-          : 'users.processing.resume',
-        resourceType: 'user',
-        reason: dto.reason,
-      },
-      (session) =>
-        this.changeInTransaction(actor, objectId, dto, suspended, session),
-    );
-    return result.value ?? this.summary(id);
-  }
-
-  private async changeInTransaction(
-    actor: AdminActor,
-    id: Types.ObjectId,
-    dto: AdminSuspensionDto,
-    suspended: boolean,
-    session: ClientSession,
-  ) {
-    const current = await this.users
-      .findOne({ _id: id })
-      .session(session)
-      .lean();
-    if (!current) throw adminError('RESOURCE_NOT_FOUND');
-    if ((current.adminRevision ?? 0) !== dto.expectedRevision)
-      throw adminError('REVISION_CONFLICT');
-    if ((current.processingSuspended === true) === suspended)
-      throw adminError('INVALID_REQUEST');
-    await this.identityFences.touch(current.firebaseUid, session);
-    const fence = await this.admissionFences.updateOne(
-      { _id: `user:${id.toHexString()}` },
-      { $inc: { revision: 1 } },
-      { upsert: true, session, setDefaultsOnInsert: true },
-    );
-    if (!fence.acknowledged) throw adminError('DEPENDENCY_UNAVAILABLE');
-    const updated = await this.users
-      .findOneAndUpdate(
-        {
-          _id: id,
-          adminRevision:
-            dto.expectedRevision === 0
-              ? trusted({ $in: [0, null] })
-              : dto.expectedRevision,
-          firebaseUid: current.firebaseUid,
-          status: current.status,
-        },
-        {
-          $set: {
-            processingSuspended: suspended,
-            processingSuspensionExpiresAt:
-              suspended && dto.expiresAt
-                ? suspensionExpiry(dto.expiresAt, new Date())
-                : null,
-            processingSuspensionReason: suspended ? dto.reason : null,
-            processingSuspendedBy: suspended ? actor.uid : null,
-            processingSuspendedAt: suspended ? new Date() : null,
-          },
-          $inc: { adminRevision: 1 },
-        },
-        { returnDocument: 'after', runValidators: true, session },
-      )
-      .lean();
-    if (!updated) throw adminError('REVISION_CONFLICT');
-    return {
-      processingChanges: [
-        {
-          field: 'processingSuspended',
-          before: current.processingSuspended ?? false,
-          after: suspended,
-        },
-        {
-          field: 'suspensionExpiresAt',
-          before: current.processingSuspensionExpiresAt?.toISOString() ?? null,
-          after: updated.processingSuspensionExpiresAt?.toISOString() ?? null,
-        },
-      ],
-      resourceId: id.toHexString(),
-      revision: dto.expectedRevision + 1,
-      previousRevision: dto.expectedRevision,
-      value: presentAdminUser(updated as unknown as AdminUserView),
-    };
-  }
-
-  private async summary(id: string) {
-    const user = await this.users
-      .findOne({ _id: this.objectId(id) })
-      .maxTimeMS(5000)
-      .lean();
-    if (!user) throw adminError('RESOURCE_NOT_FOUND');
-    return presentAdminUser(user as unknown as AdminUserView);
   }
 
   private objectId(value: string) {

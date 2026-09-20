@@ -37,7 +37,6 @@ export function UsersPage() {
   const [draft, setDraft] = useState(params.get("query") ?? "");
   const query = params.get("query") ?? "";
   const status = params.get("status") ?? "all";
-  const suspended = params.get("processingSuspended") ?? "all";
   const cursor = params.get("cursor");
   useEffect(() => {
     if (draft.trim() === query) return;
@@ -58,7 +57,6 @@ export function UsersPage() {
   const filters = {
     query: query || undefined,
     status: status === "all" ? undefined : status,
-    processingSuspended: suspended === "all" ? undefined : suspended === "true",
     cursor,
   };
   const users = useQuery({
@@ -77,9 +75,9 @@ export function UsersPage() {
     <div className="space-y-6">
       <PageHeader
         title="Users"
-        description="Support directory for account state and processing restrictions. Login access and account deletion are outside this dashboard."
+        description="Support directory for account state. Open an account to review quotas and manual abuse restrictions."
       />
-      <div className="grid gap-2 rounded-xl border bg-card p-3 md:grid-cols-3">
+      <div className="grid gap-2 rounded-xl border bg-card p-3 md:grid-cols-2">
         <div>
           <Input
             aria-label="Search users"
@@ -107,19 +105,6 @@ export function UsersPage() {
             <SelectItem value="deleting">Deleting</SelectItem>
           </SelectContent>
         </Select>
-        <Select
-          value={suspended}
-          onValueChange={(value) => change("processingSuspended", value)}
-        >
-          <SelectTrigger aria-label="Filter processing access">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All processing states</SelectItem>
-            <SelectItem value="true">Processing suspended</SelectItem>
-            <SelectItem value="false">Processing allowed</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
       {!validQuery ? null : users.isLoading ? (
         <LoadingState />
@@ -133,7 +118,6 @@ export function UsersPage() {
                 <TableRow>
                   <TableHead>User</TableHead>
                   <TableHead>Account</TableHead>
-                  <TableHead>Processing</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Revision</TableHead>
                 </TableRow>
@@ -154,14 +138,6 @@ export function UsersPage() {
                     </TableCell>
                     <TableCell>
                       <StatusBadge value={user.status} />
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge
-                        value={user.processingSuspended ? "warning" : "active"}
-                        label={
-                          user.processingSuspended ? "Suspended" : "Allowed"
-                        }
-                      />
                     </TableCell>
                     <TableCell>{formatDateTime(user.createdAt)}</TableCell>
                     <TableCell className="font-mono">{user.revision}</TableCell>

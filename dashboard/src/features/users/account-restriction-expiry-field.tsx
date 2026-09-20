@@ -1,8 +1,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-export { ReasonDialog as ProcessingSuspensionDialog } from "@/components/reason-dialog";
 
-export function SuspensionExpiryField({
+export function AccountRestrictionExpiryField({
   value,
   onChange,
 }: {
@@ -11,18 +10,18 @@ export function SuspensionExpiryField({
 }) {
   return (
     <div className="mt-3 space-y-2">
-      <Label htmlFor="suspension-expiry">
-        Optional suspension expiry (local time)
+      <Label htmlFor="restriction-expiry">
+        Optional restriction expiry (local time)
       </Label>
       <Input
-        id="suspension-expiry"
+        id="restriction-expiry"
         type="datetime-local"
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
       <p className="text-xs text-muted-foreground">
-        Empty means no automatic expiry. The server decides effective access;
-        the dashboard never resumes processing from a local timer.
+        Empty means no automatic expiry. The server is authoritative; the
+        dashboard does not remove restrictions from a local timer.
       </p>
     </div>
   );

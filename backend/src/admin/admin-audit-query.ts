@@ -6,8 +6,6 @@ export interface ProcessingChangeMetadata {
 const processingAuditFields = new Set([
   'monthlyProcessingSeconds',
   'overrideExpiresAt',
-  'processingSuspended',
-  'suspensionExpiresAt',
   'acceptNewJobs',
   'maxDurationSeconds',
   'maxPreparedAudioBytes',

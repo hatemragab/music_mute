@@ -2,6 +2,8 @@ import type {
   AdminRole,
   AdminSession,
   AccountRecoveryRequest,
+  AccountRestriction,
+  AbuseEvent,
   AlertRecord,
   AuditEvent,
   JobDetail,
@@ -105,6 +107,9 @@ const permissionFor = (method: string, path: string): Permission | null => {
   }
   if (path.startsWith("/admin/account-recovery-requests"))
     return "users.account-recovery.manage";
+  if (path.startsWith("/admin/abuse-events")) return "abuse.read";
+  if (path.endsWith("/restriction"))
+    return method === "GET" ? "abuse.read" : "users.restrictions.manage";
   if (path.startsWith("/admin/users"))
     return method === "GET" ? "users.read" : "users.processing.manage";
   return null;
@@ -262,15 +267,15 @@ export class DashboardFixture {
     email: "listener@example.invalid",
     displayName: "Fixture Listener",
     status: "active",
-    processingSuspended: false,
     createdAt: NOW,
     updatedAt: NOW,
     revision: 1,
     processingCounts: { processing: 1, completed: 2 },
     recentJobIds: [FIXTURE_IDS.job],
-    suspension: null,
     deletion: null,
   };
+  restriction: AccountRestriction | null = null;
+  abuseEvents: AbuseEvent[] = [];
   recovery: AccountRecoveryRequest = {
     id: FIXTURE_IDS.recovery,
     status: "pending",
@@ -634,22 +639,46 @@ export class DashboardFixture {
       return { status: 200, body: page([this.user]) };
     if (path === `/admin/users/${this.user.id}` && method === "GET")
       return { status: 200, body: this.user };
-    if (path.startsWith(`/admin/users/${this.user.id}/`) && method === "POST") {
-      const suspended = path.endsWith("suspend-processing");
-      this.user = {
-        ...this.user,
-        processingSuspended: suspended,
-        revision: this.user.revision + 1,
-        suspension: suspended
-          ? {
-              reason: "Fixture support action",
-              actorUid: `${role}-fixture`,
-              at: NOW,
-            }
-          : null,
+    if (path === `/admin/users/${this.user.id}/restriction` && method === "GET")
+      return { status: 200, body: this.restriction };
+    if (
+      path === `/admin/users/${this.user.id}/restriction` &&
+      method === "PUT"
+    ) {
+      const body = input.body as {
+        reasonCode: AccountRestriction["reasonCode"];
+        note: string;
+        expiresAt?: string;
       };
-      return { status: 201, body: this.user };
+      this.restriction = {
+        id: "000000000000000000000060",
+        accountId: this.user.id,
+        status: "active",
+        reasonCode: body.reasonCode,
+        note: body.note,
+        startsAt: NOW,
+        expiresAt: body.expiresAt ?? null,
+        createdBy: `${role}-fixture`,
+        updatedBy: `${role}-fixture`,
+        updatedAt: NOW,
+        revision: (this.restriction?.revision ?? 0) + 1,
+      };
+      return { status: 200, body: this.restriction };
     }
+    if (
+      path === `/admin/users/${this.user.id}/restriction` &&
+      method === "DELETE"
+    ) {
+      if (this.restriction)
+        this.restriction = {
+          ...this.restriction,
+          status: "removed",
+          revision: this.restriction.revision + 1,
+        };
+      return { status: 200, body: this.restriction };
+    }
+    if (path === "/admin/abuse-events" && method === "GET")
+      return { status: 200, body: page(this.abuseEvents) };
 
     if (path === "/admin/releases/proposal" && method === "GET") {
       const platform = url.searchParams.get("platform");

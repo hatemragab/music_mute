@@ -15,12 +15,14 @@ import { AdminObservabilityModule } from './admin-observability/admin-observabil
 import { AdminExportsModule } from './admin-exports/admin-exports.module.js';
 import { AdminHealthModule } from './admin-observability/admin-health.module.js';
 import { WorkerFleetModule } from './worker-fleet/worker-fleet.module.js';
+import { AbuseProtectionModule } from './abuse-protection/abuse-protection.module.js';
 
 @Module({
   imports: [
     InfrastructureModule,
     SecurityModule,
     AuthModule,
+    AbuseProtectionModule,
     OperationsModule,
     AudioProcessingModule,
     PublicPagesModule,

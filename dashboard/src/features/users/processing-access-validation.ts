@@ -30,7 +30,7 @@ export function validateAccountPolicyOverride(
   return errors;
 }
 
-export function suspensionExpiry(
+export function restrictionExpiry(
   value: string,
   now = new Date(),
 ): string | undefined {
@@ -42,7 +42,7 @@ export function suspensionExpiry(
     date.getTime() - now.getTime() > 30 * 86400_000
   )
     throw new Error(
-      "Choose a future suspension expiry within 30 days, or leave it empty.",
+      "Choose a future restriction expiry within 30 days, or leave it empty.",
     );
   return date.toISOString();
 }

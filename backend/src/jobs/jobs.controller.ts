@@ -66,7 +66,7 @@ export class JobsController {
   }
 
   @Post(':id/cancel')
-  @LimitOperation('processing-mutation')
+  @LimitOperation('processing-cancel')
   @HttpCode(200)
   cancel(
     @Req() req: AuthRequest,
@@ -77,7 +77,7 @@ export class JobsController {
   }
 
   @Post(':id/retry')
-  @LimitOperation('processing-create')
+  @LimitOperation('processing-retry')
   @RequireProcessingAccess()
   retry(
     @Req() req: AuthRequest,
@@ -107,7 +107,7 @@ export class JobsController {
   }
 
   @Post(':id/download-url')
-  @LimitOperation('processing-grant')
+  @LimitOperation('processing-download')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   download(
@@ -138,7 +138,7 @@ export class JobsController {
   }
 
   @Post(':id/upload-url')
-  @LimitOperation('processing-grant')
+  @LimitOperation('processing-upload-grant')
   @RequireProcessingAccess()
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
@@ -155,7 +155,7 @@ export class JobsController {
   }
 
   @Post(':id/upload-complete')
-  @LimitOperation('processing-grant')
+  @LimitOperation('processing-upload-confirm')
   @RequireProcessingAccess()
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')

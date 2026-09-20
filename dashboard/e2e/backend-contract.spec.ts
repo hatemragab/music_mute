@@ -256,13 +256,25 @@ test("every dashboard mutation payload passes compiled backend strict validation
     });
     const results: Record<string, { status: number; code: string | null }> = {};
 
-    for (const action of ["suspend-processing", "resume-processing"] as const) {
-      results[`user-${action}`] = await request(
-        "POST",
-        `/admin/users/missing-user/${action}`,
-        revision(),
-      );
-    }
+    results.accountRestrictionPut = await request(
+      "PUT",
+      "/admin/users/missing-user/restriction",
+      {
+        expectedRevision: 0,
+        operationId: crypto.randomUUID(),
+        reasonCode: "manual_review",
+        note: "Validate the account restriction contract",
+      },
+    );
+    results.accountRestrictionDelete = await request(
+      "DELETE",
+      "/admin/users/missing-user/restriction",
+      {
+        expectedRevision: 1,
+        operationId: crypto.randomUUID(),
+        reason: "Validate the account restriction removal contract",
+      },
+    );
     results.jobCancel = await request(
       "POST",
       `/admin/jobs/${missingId}/cancel`,

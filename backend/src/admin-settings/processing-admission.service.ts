@@ -49,15 +49,6 @@ export class ProcessingAdmissionService {
       {
         _id: userId,
         status: 'active',
-        $or: [
-          { processingSuspended: trusted({ $ne: true }) },
-          {
-            processingSuspensionExpiresAt: trusted({
-              $lte: new Date(),
-              $ne: null,
-            }),
-          },
-        ],
       },
       { $inc: { accessRevision: 1 } },
       { session },
@@ -163,15 +154,6 @@ export class ProcessingAdmissionService {
       {
         _id: userId,
         status: 'active',
-        $or: [
-          { processingSuspended: trusted({ $ne: true }) },
-          {
-            processingSuspensionExpiresAt: trusted({
-              $lte: new Date(),
-              $ne: null,
-            }),
-          },
-        ],
       },
       { $inc: { accessRevision: 1 } },
       { session },

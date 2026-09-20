@@ -5,7 +5,6 @@ import {
   Get,
   Header,
   Param,
-  Post,
   Put,
   Query,
   Req,
@@ -17,10 +16,6 @@ import {
   RequireFreshAdminAuth,
 } from '../admin/admin.decorators.js';
 import { AdminUsersService } from './admin-users.service.js';
-import {
-  AdminUserProcessingDto,
-  AdminSuspensionDto,
-} from './dto/admin-user.dto.js';
 import {
   DeleteAccountPolicyOverrideDto,
   PutAccountPolicyOverrideDto,
@@ -69,29 +64,5 @@ export class AdminUsersController {
     @Body() body: DeleteAccountPolicyOverrideDto,
   ) {
     return this.users.deletePolicyOverride(request.adminActor!, id, body);
-  }
-
-  @Post(':id/suspend-processing')
-  @RequireAdminPermission('users.processing.manage')
-  @RequireFreshAdminAuth()
-  @LimitAdmin('sensitive')
-  suspend(
-    @Req() request: AuthRequest,
-    @Param('id') id: string,
-    @Body() body: AdminSuspensionDto,
-  ) {
-    return this.users.suspend(request.adminActor!, id, body);
-  }
-
-  @Post(':id/resume-processing')
-  @RequireAdminPermission('users.processing.manage')
-  @RequireFreshAdminAuth()
-  @LimitAdmin('sensitive')
-  resume(
-    @Req() request: AuthRequest,
-    @Param('id') id: string,
-    @Body() body: AdminUserProcessingDto,
-  ) {
-    return this.users.resume(request.adminActor!, id, body);
   }
 }

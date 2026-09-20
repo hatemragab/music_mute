@@ -1,7 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import type { Types } from 'mongoose';
 
-export const ALERT_TYPES = ['apk_rejected', 'dependency_probe_failed'] as const;
+export const ALERT_TYPES = [
+  'apk_rejected',
+  'dependency_probe_failed',
+  'datastore_capacity_warning',
+] as const;
 export type AlertType = (typeof ALERT_TYPES)[number];
 export type AlertSeverity = 'warning' | 'critical';
 

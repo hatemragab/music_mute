@@ -35,6 +35,8 @@ const COMPONENTS: HealthComponent['name'][] = [
 ];
 const CACHE_MS = 30_000;
 const PROBE_MS = 2_000;
+const ATLAS_FREE_WARNING_BYTES = 350_000_000;
+const REDIS_MEMORY_WARNING_RATIO = 0.8;
 
 @Injectable()
 export class HealthSamplerService {
@@ -83,12 +85,8 @@ export class HealthSamplerService {
     components.set('api', this.component('api', 'healthy', checkedAt));
 
     const [mongodb, redis, storage, releases] = await Promise.all([
-      this.probe('mongodb', async () => {
-        if (this.database.readyState !== 1 || !this.database.db)
-          throw new Error('not connected');
-        await this.database.db.command({ ping: 1 }, { timeoutMS: PROBE_MS });
-      }),
-      this.probe('redis', () => this.redis.ping()),
+      this.probeMongo(),
+      this.probeRedis(),
       this.probe('storage', () => this.storage.assertReady()),
       this.readRejectedReleases(),
     ]);
@@ -103,7 +101,18 @@ export class HealthSamplerService {
           message: `${result.component.name} dependency probe failed`,
         });
       observedTypes.add('dependency_probe_failed');
+      if (
+        result.component.status === 'degraded' &&
+        ['mongodb', 'redis'].includes(result.component.name)
+      )
+        conditions.push({
+          type: 'datastore_capacity_warning',
+          severity: 'warning',
+          resourceId: result.component.name,
+          message: `${result.component.name} datastore capacity needs review`,
+        });
     }
+    observedTypes.add('datastore_capacity_warning');
 
     if (releases.ok) {
       observedTypes.add('apk_rejected');
@@ -168,6 +177,90 @@ export class HealthSamplerService {
       return {
         component: this.component(
           name,
+          'unavailable',
+          checkedAt,
+          'DEPENDENCY_UNAVAILABLE',
+        ),
+      };
+    }
+  }
+
+  private async probeMongo() {
+    const checkedAt = new Date().toISOString();
+    try {
+      if (this.database.readyState !== 1 || !this.database.db)
+        throw new Error('not connected');
+      await this.bounded(() =>
+        this.database.db!.command({ ping: 1 }, { timeoutMS: PROBE_MS }),
+      );
+      const stats = await this.bounded(() =>
+        this.database.db!.command(
+          { dbStats: 1, scale: 1 },
+          { timeoutMS: PROBE_MS },
+        ),
+      );
+      const dataSize = Number(stats.dataSize);
+      const indexSize = Number(stats.indexSize);
+      if (
+        Number.isFinite(dataSize) &&
+        Number.isFinite(indexSize) &&
+        dataSize + indexSize >= ATLAS_FREE_WARNING_BYTES
+      )
+        return {
+          component: this.component(
+            'mongodb',
+            'degraded',
+            checkedAt,
+            'MONGODB_STORAGE_PRESSURE',
+          ),
+        };
+      return { component: this.component('mongodb', 'healthy', checkedAt) };
+    } catch {
+      return {
+        component: this.component(
+          'mongodb',
+          'unavailable',
+          checkedAt,
+          'DEPENDENCY_UNAVAILABLE',
+        ),
+      };
+    }
+  }
+
+  private async probeRedis() {
+    const checkedAt = new Date().toISOString();
+    try {
+      await this.bounded(() => this.redis.ping());
+      const info = await this.bounded(() => this.redis.info('memory'));
+      const values = new Map(
+        info
+          .split(/\r?\n/)
+          .map((line) => line.split(':', 2))
+          .filter((entry): entry is [string, string] => entry.length === 2),
+      );
+      const used = Number(values.get('used_memory'));
+      const max = Number(values.get('maxmemory'));
+      const policy = values.get('maxmemory_policy');
+      const code =
+        max === 0
+          ? 'REDIS_MEMORY_UNBOUNDED'
+          : policy !== 'noeviction'
+            ? 'REDIS_EVICTION_POLICY_UNSAFE'
+            : Number.isFinite(used) && used / max >= REDIS_MEMORY_WARNING_RATIO
+              ? 'REDIS_MEMORY_PRESSURE'
+              : null;
+      return {
+        component: this.component(
+          'redis',
+          code ? 'degraded' : 'healthy',
+          checkedAt,
+          code,
+        ),
+      };
+    } catch {
+      return {
+        component: this.component(
+          'redis',
           'unavailable',
           checkedAt,
           'DEPENDENCY_UNAVAILABLE',
