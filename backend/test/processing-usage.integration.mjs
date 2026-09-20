@@ -8,6 +8,7 @@ import { accountFixture } from './helpers/account-fixture.mjs';
 import { PROCESSING_MODELS } from '../dist/processing/processing-persistence.module.js';
 import { ProcessingTransactions } from '../dist/processing/processing-transactions.js';
 import { ProcessingUsageService } from '../dist/processing-usage/processing-usage.service.js';
+import { ProcessingAdmissionService } from '../dist/admin-settings/processing-admission.service.js';
 import {
   AccountPolicy,
   AccountPolicyOverride,
@@ -16,7 +17,13 @@ import {
   DEFAULT_ACCOUNT_POLICY_VALUES,
 } from '../dist/admin-settings/account-policy.schema.js';
 
-const createJob = (jobs, owner, durationSeconds, logicalAudioId = null) => {
+const createJob = (
+  jobs,
+  owner,
+  durationSeconds,
+  logicalAudioId = null,
+  maxClientInputAttempts = 5,
+) => {
   const id = new Types.ObjectId();
   return jobs.create({
     _id: id,
@@ -40,7 +47,10 @@ const createJob = (jobs, owner, durationSeconds, logicalAudioId = null) => {
       preparationProfileId: 'preserve-or-aac-lc-256-v1',
       source: 'audio_file',
       settingsRevision: 0,
-      maxActiveJobsPerUser: 1,
+      maxWaitingJobs: 3,
+      maxProcessingJobs: 1,
+      maxInfrastructureAttempts: 3,
+      maxClientInputAttempts,
       reservationExpiresAt: new Date('2026-12-01T00:00:00.000Z'),
     },
   });
@@ -114,7 +124,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
   );
   const transactions = new ProcessingTransactions(connection);
-  const job = await createJob(jobs, owner, 30);
+  const job = await createJob(jobs, owner, 30, null, 3);
 
   const firstGrantId = randomUUID();
   const septemberDayOne = new Date('2026-09-10T12:00:00.000Z');
@@ -157,7 +167,13 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   assert.equal(octoberUsage.uploads.dailyGrants, 1);
   assert.equal(octoberUsage.uploads.monthlyGrants, 1);
 
-  const sameLogicalAudio = await createJob(jobs, owner, 30, job.logicalAudioId);
+  const sameLogicalAudio = await createJob(
+    jobs,
+    owner,
+    30,
+    job.logicalAudioId,
+    3,
+  );
   await assert.rejects(
     transactions.run((session) =>
       usage.reserveUploadGrant(
@@ -619,6 +635,57 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     3,
   );
 
+  const raceAccount = new Types.ObjectId();
+  await users.create({
+    _id: raceAccount,
+    firebaseUid: `fixture-${raceAccount}`,
+    displayName: 'Settlement Race Account',
+    nameSource: 'numeric_alias',
+    profileSyncedAt: new Date(),
+    lastSeenAt: new Date(),
+  });
+  const raceJob = await createJob(jobs, raceAccount, 30);
+  await transactions.run((session) =>
+    usage.reserveForJob(raceJob._id, raceAccount, 30, session),
+  );
+  await jobs.updateOne(
+    { _id: raceJob._id },
+    { $set: { status: 'processing' }, $inc: { revision: 1 } },
+  );
+  const settleRace = (status) =>
+    transactions.run(async (session) => {
+      const current = await jobs.findById(raceJob._id).session(session);
+      if (current.status !== 'processing') return false;
+      const changed = await jobs.updateOne(
+        {
+          _id: current._id,
+          status: 'processing',
+          revision: current.revision,
+        },
+        {
+          $set: { status, finishedAt: new Date() },
+          $inc: { revision: 1 },
+        },
+        { session, runValidators: true },
+      );
+      if (changed.modifiedCount !== 1) return false;
+      await usage.settleJob({ ...current.toObject(), status }, session);
+      return true;
+    });
+  const settlementOutcomes = await Promise.all([
+    settleRace('ready'),
+    settleRace('cancelled'),
+  ]);
+  assert.equal(settlementOutcomes.filter(Boolean).length, 1);
+  const settledReservation = await reservations.findById(raceJob._id).lean();
+  assert.ok(['used', 'released'].includes(settledReservation.state));
+  const raceUsage = await usage.readUsage(raceAccount);
+  assert.equal(raceUsage.processing.reservedSeconds, 0);
+  assert.equal(
+    raceUsage.processing.usedSeconds + raceUsage.processing.releasedSeconds,
+    30,
+  );
+
   await overrides.create({
     _id: new Types.ObjectId(),
     accountId: owner,
@@ -640,4 +707,179 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     status: 'blocked',
     reason: 'monthly_limit_reached',
   });
+});
+
+test('account admission atomically accepts only three waiting jobs', async (t) => {
+  const native = await IsolatedServices.create();
+  t.after(() => native.stop());
+  const { mongoUri } = await native.startDatabases({ replicaSet: true });
+  const connection = await createConnection(mongoUri).asPromise();
+  t.after(() => connection.close());
+  for (const { name, schema } of [
+    ...PROCESSING_MODELS,
+    { name: AccountPolicy.name, schema: AccountPolicySchema },
+    { name: AccountPolicyOverride.name, schema: AccountPolicyOverrideSchema },
+  ])
+    connection.model(name, schema);
+
+  const owner = new Types.ObjectId();
+  const { users } = await accountFixture(connection, [owner.toString()]);
+  await Promise.all(
+    Object.values(connection.models).map((model) => model.init()),
+  );
+
+  const jobs = connection.model('Job');
+  const fences = connection.model('ProcessingAdmissionFence');
+  const policies = connection.model(AccountPolicy.name);
+  const overrides = connection.model(AccountPolicyOverride.name);
+  const policy = new (
+    await import('../dist/admin-settings/account-policy.service.js')
+  ).AccountPolicyService(
+    policies,
+    overrides,
+    fences,
+    users,
+    {},
+    new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
+  );
+  await policies.create({
+    _id: 'standard',
+    revision: 1,
+    acceptNewJobs: true,
+    maintenanceMessageEn: '',
+    maintenanceMessageAr: null,
+    ...DEFAULT_ACCOUNT_POLICY_VALUES,
+    updatedBy: 'fixture-admin',
+    updatedAt: new Date(),
+  });
+  const usage = new ProcessingUsageService(
+    connection.model('AccountUsagePeriod'),
+    connection.model('AccountDailyUsagePeriod'),
+    connection.model('ProcessingReservation'),
+    connection.model('UploadGrantReceipt'),
+    connection.model('DownloadGrantReceipt'),
+    connection.model('ServiceUsagePeriod'),
+    jobs,
+    users,
+    policy,
+    new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
+  );
+  const admission = new ProcessingAdmissionService(
+    fences,
+    users,
+    jobs,
+    policy,
+    usage,
+    new ConfigService({
+      AUDIO_PROCESSING_ENABLED: true,
+      PROCESSING_URL_SECONDS: 600,
+    }),
+  );
+  const transactions = new ProcessingTransactions(connection);
+  const metadata = {
+    policyVersion: 2,
+    preparationProfileId: 'preserve-or-aac-lc-256-v1',
+    source: 'audio_file',
+  };
+
+  const createWaitingJob = () => {
+    const jobId = new Types.ObjectId();
+    return transactions.run(async (session) => {
+      const snapshot = await admission.assertNewWork(
+        owner,
+        { bytes: 1_024, durationSeconds: 30 },
+        session,
+        jobId,
+        metadata,
+      );
+      await jobs.create(
+        [
+          {
+            _id: jobId,
+            userId: owner,
+            logicalAudioId: jobId,
+            requestId: randomUUID(),
+            requestHash: randomUUID().replaceAll('-', '').padEnd(64, 'a'),
+            status: 'awaiting_upload',
+            inputReservation: {
+              key: `users/${owner}/jobs/${jobId}/input.mp3`,
+              extension: 'mp3',
+              contentType: 'audio/mpeg',
+              bytes: 1_024,
+              durationSeconds: 30,
+              sha256: Buffer.alloc(32).toString('base64'),
+            },
+            admissionSnapshot: snapshot,
+          },
+        ],
+        { session },
+      );
+      return jobId;
+    });
+  };
+
+  const outcomes = await Promise.allSettled(
+    Array.from({ length: 4 }, () => createWaitingJob()),
+  );
+  assert.equal(
+    outcomes.filter((outcome) => outcome.status === 'fulfilled').length,
+    3,
+  );
+  const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
+  assert.equal(rejected.reason.getResponse().code, 'PROCESSING_LIMIT_REACHED');
+  assert.deepEqual(rejected.reason.getResponse().capacity, {
+    waitingJobs: 3,
+    maxWaitingJobs: 3,
+    processingJobs: 0,
+    maxProcessingJobs: 1,
+  });
+  assert.equal(
+    await jobs.countDocuments({ userId: owner, status: 'awaiting_upload' }),
+    3,
+  );
+  assert.equal(
+    await connection.model('ProcessingReservation').countDocuments({
+      accountId: owner,
+      state: 'reserved',
+    }),
+    3,
+  );
+
+  const claimable = await jobs
+    .find({ userId: owner, status: 'awaiting_upload' })
+    .sort({ _id: 1 })
+    .limit(2)
+    .lean();
+  await Promise.all(
+    claimable.map((job, index) =>
+      jobs.updateOne(
+        { _id: job._id },
+        {
+          $set: {
+            status: 'queued',
+            queuedAt: new Date(`2026-09-20T00:0${index}:00.000Z`),
+          },
+        },
+      ),
+    ),
+  );
+  const claim = (jobId) =>
+    transactions.run(async (session) => {
+      const job = await jobs.findById(jobId).session(session);
+      if (!(await admission.claimProcessingSlot(job, session))) return null;
+      const updated = await jobs.findOneAndUpdate(
+        { _id: jobId, status: 'queued', revision: job.revision },
+        { $set: { status: 'processing' }, $inc: { revision: 1 } },
+        { session, returnDocument: 'after', runValidators: true },
+      );
+      return updated?._id ?? null;
+    });
+  const claimResults = await Promise.all(
+    claimable.map((job) => claim(job._id)),
+  );
+  assert.equal(claimResults.filter(Boolean).length, 1);
+  assert.equal(
+    await jobs.countDocuments({ userId: owner, status: 'processing' }),
+    1,
+  );
 });

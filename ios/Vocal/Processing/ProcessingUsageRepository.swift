@@ -64,7 +64,9 @@ struct ProcessingUsage: Decodable, Equatable, Sendable {
   let effectiveLimits: EffectiveLimits
   let downloads: Downloads
   let usageRevision: Int
-  let activeJobs: Int
+  let waitingJobs: Int
+  let maxWaitingJobs: Int
+  let processingJobs: Int
   let maxProcessingJobs: Int
   let availability: Availability
   let checkedAt: Date
@@ -99,11 +101,12 @@ struct ProcessingUsage: Decodable, Equatable, Sendable {
       effectiveLimits.maxDurationSeconds > 0, effectiveLimits.maxPreparedAudioBytes > 0,
       effectiveLimits.maxClientInputAttempts > 0,
       (1...600).contains(effectiveLimits.signedUrlTtlSeconds),
-      activeJobs >= 0, maxProcessingJobs > 0, period.start < period.end,
+      waitingJobs >= 0, maxWaitingJobs > 0,
+      processingJobs >= 0, maxProcessingJobs > 0, period.start < period.end,
       period.nextResetAt == period.end,
       uploads.monthlyResetAt == period.end, downloads.monthlyResetAt == period.end,
       ["available", "blocked"].contains(availability.status),
-      [nil, "paused", "monthly_limit_reached", "active_job_limit", "storage_limit_reached"]
+      [nil, "paused", "monthly_limit_reached", "waiting_job_limit", "storage_limit_reached"]
         .contains(availability.reason),
       (availability.status == "available") == (availability.reason == nil)
     else { throw JobsFailure.malformedResponse }
@@ -133,7 +136,7 @@ struct ProcessingUsage: Decodable, Equatable, Sendable {
   }
   func checkAvailability() throws {
     guard let usage, let receivedAt, abs(receivedAt.timeIntervalSinceNow) < 120 else { return }
-    if usage.activeJobs >= usage.maxProcessingJobs {
+    if usage.waitingJobs >= usage.maxWaitingJobs {
       throw JobsFailure.conflict(code: "PROCESSING_LIMIT_REACHED")
     }
     if usage.processing.remainingSeconds <= 0 {
@@ -142,7 +145,7 @@ struct ProcessingUsage: Decodable, Equatable, Sendable {
     switch usage.availability.reason {
     case "monthly_limit_reached":
       throw JobsFailure.conflict(code: "PROCESSING_ALLOWANCE_EXHAUSTED")
-    case "active_job_limit":
+    case "waiting_job_limit":
       throw JobsFailure.conflict(code: "PROCESSING_LIMIT_REACHED")
     case "paused":
       throw JobsFailure.conflict(code: "PROCESSING_CAPACITY_UNAVAILABLE")

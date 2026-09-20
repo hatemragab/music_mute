@@ -8,7 +8,8 @@ import {
   type Model,
 } from 'mongoose';
 import { Job } from '../../jobs/job.schema.js';
-import type { JobFailureCode, ObjectIdentity } from '../../jobs/job.types.js';
+import { resolveJobFailure } from '../../jobs/job-lifecycle-policy.js';
+import type { ObjectIdentity } from '../../jobs/job.types.js';
 import { NotificationOutbox } from '../../notifications/notification-outbox.schema.js';
 import { ProcessingUsageService } from '../../processing-usage/processing-usage.service.js';
 import { StorageCleanupService } from '../../storage/storage-cleanup.service.js';
@@ -20,7 +21,6 @@ import {
   type WorkerOutputReservation,
 } from '../jobs/worker-attempt.schema.js';
 import { WorkerSlot } from '../machines/worker-slot.schema.js';
-import { WorkerFleetPolicy } from '../policy/worker-fleet-policy.schema.js';
 import { sanitizeWorkerDiagnosticLine } from '../telemetry/worker-diagnostic-sanitizer.js';
 import { workerError } from '../worker-errors.js';
 import type {
@@ -32,22 +32,6 @@ import type {
 
 const ACTIVE_ATTEMPTS = ['claimed', 'running', 'uploading'] as const;
 const ACTIVE_JOB_STATUSES = ['processing', 'uploading_result'] as const;
-const RETRYABLE_FAILURES = new Set<JobFailureCode>([
-  'SEPARATOR_FAILED',
-  'DOWNLOAD_FAILED',
-  'OUTPUT_UPLOAD_FAILED',
-]);
-const SAFE_FAILURE_MESSAGES: Record<JobFailureCode, string> = {
-  UPLOAD_EXPIRED: 'The upload expired',
-  INVALID_AUDIO: 'The uploaded audio is invalid',
-  INPUT_TOO_LONG: 'The audio exceeds processing limits',
-  INPUT_CHECKSUM_MISMATCH: 'The uploaded audio could not be verified',
-  SEPARATOR_FAILED: 'Audio separation failed',
-  OUTPUT_INVALID: 'The processed audio is invalid',
-  DOWNLOAD_FAILED: 'The processing input could not be downloaded',
-  OUTPUT_UPLOAD_FAILED: 'The processed audio could not be uploaded',
-};
-
 @Injectable()
 export class WorkerAttemptService {
   constructor(
@@ -56,8 +40,6 @@ export class WorkerAttemptService {
     private readonly attempts: Model<WorkerAttempt>,
     @InjectModel(WorkerSlot.name)
     private readonly slots: Model<WorkerSlot>,
-    @InjectModel(WorkerFleetPolicy.name)
-    private readonly policies: Model<WorkerFleetPolicy>,
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
     private readonly storage: StorageTransfersService,
     private readonly cleanup: StorageCleanupService,
@@ -263,6 +245,7 @@ export class WorkerAttemptService {
               stage: 'finalizing',
               outputObject: object,
               terminalCode: null,
+              failureClass: null,
               terminalSummary: null,
               finishedAt: now,
               leaseExpiresAt: now,
@@ -350,16 +333,17 @@ export class WorkerAttemptService {
         const now = new Date();
         this.assertCurrent(current.attempt, current.job, now);
         await this.accountAccess.assertActive(current.job.userId, session);
-        const policy = await this.policies
-          .findById('worker-fleet')
-          .session(session)
-          .lean();
-        if (!policy) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-        const retry =
-          RETRYABLE_FAILURES.has(dto.code) &&
-          current.job.retryEligibility?.eligible === true &&
-          current.job.retryEligibility.attemptsRemaining > 1 &&
-          current.attempt.attemptNumber < policy.maxAttempts;
+        const maxAttempts =
+          current.job.admissionSnapshot?.maxInfrastructureAttempts;
+        if (!maxAttempts) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+        const failure = resolveJobFailure(dto.code, {
+          retryEligible: current.job.retryEligibility?.eligible === true,
+          attemptsRemaining:
+            current.job.retryEligibility?.attemptsRemaining ?? 0,
+          attemptNumber: current.attempt.attemptNumber,
+          maxAttempts,
+        });
+        const retry = failure.automaticRetry;
         const attemptFence = await this.attempts.updateOne(
           {
             _id: current.attempt._id,
@@ -370,6 +354,7 @@ export class WorkerAttemptService {
             $set: {
               state: 'failed',
               terminalCode: dto.code,
+              failureClass: failure.classification,
               terminalSummary,
               finishedAt: now,
               leaseExpiresAt: now,
@@ -406,7 +391,7 @@ export class WorkerAttemptService {
                 },
                 lastError: {
                   code: dto.code,
-                  message: SAFE_FAILURE_MESSAGES[dto.code],
+                  message: failure.publicMessage!,
                   at: now,
                 },
                 ...(retry

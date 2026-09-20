@@ -2,7 +2,7 @@
 
 **Collection:** `codex/backend-security-cost-hardening`
 **Implementation checkpoints:** 32
-**Current implementation status:** Branch 1 merged; Branch 2 ready for review; Branch 3 not started
+**Current implementation status:** Branches 1–2 merged; Branch 3 C1–C7 ready for review
 
 ## 1. Sequential branch contract
 
@@ -40,13 +40,13 @@ collection tip, never independently from `main` or the old parent commit.
 
 ### C. Job queue, retries, and refunds
 
-- [ ] **C1:** Replace old admission/retry assumptions with one documented failure taxonomy.
-- [ ] **C2:** Enforce one processing plus three waiting jobs atomically per account.
-- [ ] **C3:** Implement oldest-eligible backend selection without a new queue authority.
-- [ ] **C4:** Make reservation, success consumption, cancellation, and full refunds idempotent.
-- [ ] **C5:** Enforce three total infrastructure attempts and five client/input attempts.
-- [ ] **C6:** Preserve claim/lease fencing while handling duplicate, late, and stale operations.
-- [ ] **C7:** Pass concurrency, recovery, compatibility, client-state, and end-to-end gates.
+- [x] **C1:** Replace old admission/retry assumptions with one documented failure taxonomy.
+- [x] **C2:** Enforce one processing plus three waiting jobs atomically per account.
+- [x] **C3:** Implement oldest-eligible backend selection without a new queue authority.
+- [x] **C4:** Make reservation, success consumption, cancellation, and full refunds idempotent.
+- [x] **C5:** Enforce three total infrastructure attempts and five client/input attempts.
+- [x] **C6:** Preserve claim/lease fencing while handling duplicate, late, and stale operations.
+- [x] **C7:** Pass concurrency, recovery, compatibility, client-state, and end-to-end gates.
 
 ### D. Account abuse and API limits
 

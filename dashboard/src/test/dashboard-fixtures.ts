@@ -176,9 +176,11 @@ export class DashboardFixture {
       monthlyResetAt: "2026-10-01T00:00:00.000Z",
     },
     usageRevision: 1,
-    activeJobs: 1,
+    waitingJobs: 3,
+    maxWaitingJobs: 3,
+    processingJobs: 1,
     maxProcessingJobs: 1,
-    availability: { status: "blocked", reason: "active_job_limit" },
+    availability: { status: "blocked", reason: "waiting_job_limit" },
     checkedAt: NOW,
     policyOverride: null,
   };

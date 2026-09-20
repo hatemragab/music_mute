@@ -5,16 +5,7 @@ import {
   type InputDeclaration,
   type JobStatus,
 } from './job.types.js';
-
-export const ACTIVE_ADMISSION_STATUSES: readonly JobStatus[] = [
-  'awaiting_upload',
-  'queued',
-  'validating',
-  'processing',
-  'uploading_result',
-  'interrupted',
-  'cancel_requested',
-];
+export { ACTIVE_ADMISSION_STATUSES } from './job-lifecycle-policy.js';
 
 export function isSha256(value: unknown): value is string {
   return (

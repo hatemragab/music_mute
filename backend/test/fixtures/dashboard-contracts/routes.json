@@ -936,7 +936,6 @@
         ],
         "leaseSeconds": 60,
         "processingDeadlineSeconds": 900,
-        "maxAttempts": 3,
         "reason": "Synthetic contract fixture"
       },
       "responseCategory": "resource",

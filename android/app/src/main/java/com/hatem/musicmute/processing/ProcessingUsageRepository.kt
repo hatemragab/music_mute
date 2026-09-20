@@ -82,7 +82,9 @@ data class ProcessingUsage(
     val effectiveLimits: ProcessingEffectiveLimits,
     val downloads: ProcessingDownloadUsage,
     val usageRevision: Int,
-    val activeJobs: Int,
+    val waitingJobs: Int,
+    val maxWaitingJobs: Int,
+    val processingJobs: Int,
     val maxProcessingJobs: Int,
     val availability: ProcessingAvailability,
     val checkedAt: String,
@@ -123,9 +125,10 @@ data class ProcessingUsage(
             downloads.monthlyRemainingGrants > downloads.monthlyGrantLimit ||
             downloads.monthlyRemainingBytes > downloads.monthlyByteLimit ||
             effectiveLimits.signedUrlTtlSeconds > 600 ||
-            activeJobs < 0 || maxProcessingJobs < 1 ||
+            waitingJobs < 0 || maxWaitingJobs < 1 ||
+            processingJobs < 0 || maxProcessingJobs < 1 ||
             availability.status !in setOf("available", "blocked") ||
-            availability.reason !in setOf(null, "paused", "monthly_limit_reached", "active_job_limit", "storage_limit_reached") ||
+            availability.reason !in setOf(null, "paused", "monthly_limit_reached", "waiting_job_limit", "storage_limit_reached") ||
             (availability.status == "available") != (availability.reason == null)) {
             throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE)
         }
@@ -141,12 +144,12 @@ data class ProcessingUsage(
         } catch (_: Exception) { throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE) }
     }
     fun requireAvailable(checkAvailability: Boolean = true) {
-        if (activeJobs >= maxProcessingJobs) throw JobsFailure(JobsProblem.PROCESSING_LIMIT_REACHED)
+        if (waitingJobs >= maxWaitingJobs) throw JobsFailure(JobsProblem.PROCESSING_LIMIT_REACHED)
         if (processing.remainingSeconds <= 0) throw JobsFailure(JobsProblem.PROCESSING_ALLOWANCE_EXHAUSTED)
         if (!checkAvailability) return
         when (availability.reason) {
             "monthly_limit_reached" -> throw JobsFailure(JobsProblem.PROCESSING_ALLOWANCE_EXHAUSTED)
-            "active_job_limit" -> throw JobsFailure(JobsProblem.PROCESSING_LIMIT_REACHED)
+            "waiting_job_limit" -> throw JobsFailure(JobsProblem.PROCESSING_LIMIT_REACHED)
             "paused" -> throw JobsFailure(JobsProblem.PROCESSING_CAPACITY_UNAVAILABLE)
         }
     }

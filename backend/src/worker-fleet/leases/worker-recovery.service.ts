@@ -2,9 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { trusted, type Connection, type Model } from 'mongoose';
 import { Job } from '../../jobs/job.schema.js';
+import { resolveJobFailure } from '../../jobs/job-lifecycle-policy.js';
+import { ProcessingUsageService } from '../../processing-usage/processing-usage.service.js';
 import { WorkerAttempt } from '../jobs/worker-attempt.schema.js';
 import { WorkerSlot } from '../machines/worker-slot.schema.js';
-import { WorkerFleetPolicy } from '../policy/worker-fleet-policy.schema.js';
 import { workerError } from '../worker-errors.js';
 
 const ACTIVE_ATTEMPTS = ['claimed', 'running', 'uploading'] as const;
@@ -17,9 +18,8 @@ export class WorkerRecoveryService {
     private readonly attempts: Model<WorkerAttempt>,
     @InjectModel(WorkerSlot.name)
     private readonly slots: Model<WorkerSlot>,
-    @InjectModel(WorkerFleetPolicy.name)
-    private readonly policies: Model<WorkerFleetPolicy>,
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
+    private readonly usage: ProcessingUsageService,
   ) {}
 
   async recoverOne(now = new Date()): Promise<boolean> {
@@ -36,11 +36,6 @@ export class WorkerRecoveryService {
     const session = await this.connection.startSession();
     try {
       const recovered = await session.withTransaction(async () => {
-        const policy = await this.policies
-          .findById('worker-fleet')
-          .session(session)
-          .lean();
-        if (!policy) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
         const job = await this.jobs
           .findById(observed.jobId)
           .session(session)
@@ -57,12 +52,19 @@ export class WorkerRecoveryService {
           !job ||
           Boolean(job.deletedAt) ||
           ['cancel_requested', 'cancelled'].includes(job.status);
-        const retry =
-          Boolean(ownsJob) &&
-          !cancelled &&
-          job!.retryEligibility?.eligible === true &&
-          job!.retryEligibility.attemptsRemaining > 1 &&
-          observed.attemptNumber < policy.maxAttempts;
+        const failure = job
+          ? resolveJobFailure('LEASE_EXPIRED', {
+              retryEligible:
+                Boolean(ownsJob) &&
+                !cancelled &&
+                job.retryEligibility?.eligible === true,
+              attemptsRemaining: job.retryEligibility?.attemptsRemaining ?? 0,
+              attemptNumber: observed.attemptNumber,
+              maxAttempts:
+                job.admissionSnapshot?.maxInfrastructureAttempts ?? 0,
+            })
+          : null;
+        const retry = failure?.automaticRetry === true;
 
         const attemptFence = await this.attempts.updateOne(
           {
@@ -75,6 +77,7 @@ export class WorkerRecoveryService {
             $set: {
               state: cancelled ? 'cancelled' : 'lost',
               terminalCode: cancelled ? 'CANCELLED' : 'LEASE_EXPIRED',
+              failureClass: cancelled ? 'user_action' : failure!.classification,
               terminalSummary: cancelled
                 ? 'Job ownership was cancelled'
                 : 'Worker lease expired',
@@ -93,6 +96,7 @@ export class WorkerRecoveryService {
                   Math.min(60_000, 5_000 * 2 ** (observed.attemptNumber - 1)),
               )
             : null;
+          const status = cancelled ? 'cancelled' : retry ? 'queued' : 'failed';
           const jobFence = await this.jobs.updateOne(
             {
               _id: job._id,
@@ -102,7 +106,7 @@ export class WorkerRecoveryService {
             },
             {
               $set: {
-                status: cancelled ? 'cancelled' : retry ? 'queued' : 'failed',
+                status,
                 currentExecution: null,
                 retryEligibility: {
                   eligible: retry,
@@ -119,8 +123,8 @@ export class WorkerRecoveryService {
                     : {
                         finishedAt: now,
                         lastError: {
-                          code: 'SEPARATOR_FAILED',
-                          message: 'Processing worker became unavailable',
+                          code: failure!.publicFailureCode!,
+                          message: failure!.publicMessage!,
                           at: now,
                         },
                       }),
@@ -131,6 +135,8 @@ export class WorkerRecoveryService {
           );
           if (jobFence.modifiedCount !== 1)
             throw workerError('WORKER_CONFLICT');
+          if (!retry)
+            await this.usage.settleJob({ ...job, status }, session, now);
         }
         await this.slots.updateOne(
           {

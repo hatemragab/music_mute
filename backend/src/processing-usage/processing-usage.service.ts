@@ -7,7 +7,11 @@ import { AccountPolicyService } from '../admin-settings/account-policy.service.j
 import { Job } from '../jobs/job.schema.js';
 import type { ObjectIdentity } from '../jobs/job.types.js';
 import { jobError } from '../jobs/job-errors.js';
-import { ACTIVE_ADMISSION_STATUSES } from '../jobs/job-state.js';
+import {
+  PROCESSING_CAPACITY_STATUSES,
+  WAITING_CAPACITY_STATUSES,
+  settlementForStatus,
+} from '../jobs/job-lifecycle-policy.js';
 import { User } from '../users/user.schema.js';
 import {
   AccountUsagePeriod,
@@ -88,13 +92,22 @@ export class ProcessingUsageService {
       counters,
       effective.values.monthlyProcessingSeconds,
     );
-    const activeJobs = await this.jobs
-      .countDocuments({
-        userId: accountId,
-        deletedAt: null,
-        status: trusted({ $in: ACTIVE_ADMISSION_STATUSES }),
-      })
-      .session(session ?? null);
+    const [waitingJobs, processingJobs] = await Promise.all([
+      this.jobs
+        .countDocuments({
+          userId: accountId,
+          deletedAt: null,
+          status: trusted({ $in: WAITING_CAPACITY_STATUSES }),
+        })
+        .session(session ?? null),
+      this.jobs
+        .countDocuments({
+          userId: accountId,
+          deletedAt: null,
+          status: trusted({ $in: PROCESSING_CAPACITY_STATUSES }),
+        })
+        .session(session ?? null),
+    ]);
     const processingEnabled =
       this.config?.get<boolean>('AUDIO_PROCESSING_ENABLED') ?? true;
     const retainedOutputBytes = user.retainedOutputBytes ?? 0;
@@ -111,10 +124,10 @@ export class ProcessingUsageService {
                 status: 'blocked' as const,
                 reason: 'monthly_limit_reached' as const,
               }
-            : activeJobs >= effective.values.maxProcessingJobs
+            : waitingJobs >= effective.values.maxWaitingJobs
               ? {
                   status: 'blocked' as const,
-                  reason: 'active_job_limit' as const,
+                  reason: 'waiting_job_limit' as const,
                 }
               : { status: 'available' as const, reason: null };
 
@@ -189,7 +202,9 @@ export class ProcessingUsageService {
         monthlyResetAt: period.end.toISOString(),
       },
       usageRevision: counters.revision,
-      activeJobs,
+      waitingJobs,
+      maxWaitingJobs: effective.values.maxWaitingJobs,
+      processingJobs,
       maxProcessingJobs: effective.values.maxProcessingJobs,
       availability,
       checkedAt: now.toISOString(),
@@ -280,6 +295,20 @@ export class ProcessingUsageService {
     return reservation;
   }
 
+  async hasReservedProcessing(
+    jobId: Types.ObjectId,
+    accountId: Types.ObjectId,
+    session: ClientSession,
+  ): Promise<boolean> {
+    this.assertTransaction(session);
+    const reservation = await this.reservations
+      .findOne({ _id: jobId, accountId, state: 'reserved' })
+      .session(session)
+      .select({ _id: 1 })
+      .lean();
+    return reservation !== null;
+  }
+
   async reserveUploadGrant(
     job: Pick<Job, '_id' | 'userId' | 'logicalAudioId' | 'admissionSnapshot'>,
     requestId: string,
@@ -326,7 +355,7 @@ export class ProcessingUsageService {
           userId: job.userId,
           logicalAudioId: job.logicalAudioId,
           uploadAttemptCount: {
-            $lt: effective.values.maxClientInputAttempts,
+            $lt: snapshot.maxClientInputAttempts,
           },
         },
         { $inc: { uploadAttemptCount: 1 } },
@@ -717,8 +746,9 @@ export class ProcessingUsageService {
       .findById(job._id)
       .session(session);
     if (!reservation || reservation.state !== 'reserved') return;
-    if (!['ready', 'failed', 'cancelled'].includes(job.status)) return;
-    const nextState = job.status === 'ready' ? 'used' : 'released';
+    const settlement = settlementForStatus(job.status);
+    if (settlement !== 'consume' && settlement !== 'release') return;
+    const nextState = settlement === 'consume' ? 'used' : 'released';
     const period = this.periodForKey(reservation.periodKey);
     const changed = await this.reservations.updateOne(
       { _id: job._id, state: 'reserved' },
