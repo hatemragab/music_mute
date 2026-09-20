@@ -1,5 +1,92 @@
 # Backend security planning changelog
 
+## 2026-09-20 — Branch 3 checkpoint C6 complete
+
+- Added direct race coverage for cancellation winning claim, account restriction or
+  deletion blocking claim, lease renewal winning recovery, cancel/finalize single
+  settlement, and a stale attempt losing to a newer owner.
+- Preserved exact machine, worker, session, slot, incarnation, revision, and attempt
+  ownership filters and kept internal admission/worker fields out of public jobs.
+- Proved stale attempt output keeps its exact orphan-cleanup task and cannot publish.
+- Confirmed MongoDB jobs remain the only queue authority with no BullMQ, Redis queue,
+  duplicate queue collection, or additional eligibility index; advanced to C7.
+
+## 2026-09-20 — Branch 3 checkpoint C5 complete
+
+- Moved retry authority from mutable fleet settings into each immutable admission
+  snapshot: three total infrastructure attempts and five client/input attempts.
+- Persisted worker attempt failure class and bounded `nextAttemptAt` together with
+  attempt number, and retained attempt-scoped output keys and stale-result fences.
+- Made attempt three terminal with one full usage release, while retryable attempts
+  preserve the same job and processing reservation.
+- Counted only newly issued logical-audio upload grants; identical request replay
+  returns the existing receipt without consuming another attempt.
+- Verified existing Android/iOS durable retry identities stop on new-input-required
+  and do not create hidden retry loops; advanced to C6.
+
+## 2026-09-20 — Branch 3 checkpoint C4 complete
+
+- Audited every terminal job write and confirmed success, failure, upload expiry,
+  owner/admin/deletion cancellation, and worker failure share one idempotent usage
+  settlement path.
+- Fixed lease-exhaustion recovery so terminal infrastructure failure or cancellation
+  releases the reservation in the same MongoDB transaction; retryable lease loss
+  preserves it without an extra charge.
+- Added a concurrent cancel-versus-finalize integration race proving one job winner
+  and exactly one reservation/counter settlement.
+- Passed typecheck, recovery unit tests, build, and all 13 processing integrations;
+  advanced Branch 3 to C5.
+
+## 2026-09-20 — Branch 3 checkpoint C3 complete
+
+- Extended FIFO worker selection to keep scanning `(queuedAt, _id)` when an older
+  account is ineligible, preventing queue head-of-line blocking.
+- Rechecked account state/suspension, effective policy, reserved usage, retry time,
+  recipe support, processing capacity, machine, session, and slot fences inside the
+  claim transaction.
+- Reused the existing account fence and worker-claim index; no queue collection or
+  MongoDB index was added.
+- Passed typecheck, four focused files / 26 tests, and all 13 processing
+  integrations including concurrent same-account claim protection; advanced C4.
+
+## 2026-09-20 — Branch 3 checkpoint C2 complete
+
+- Replaced the legacy combined active-job limit with separate immutable waiting
+  and processing limits: three `awaiting_upload`/`queued` jobs and one processing
+  job per account.
+- Reused the account transaction fence for create and worker-claim admission,
+  added safe full-capacity guidance, and preserved create/confirm idempotency.
+- Updated backend, dashboard, Android, and iOS usage contracts so one processing
+  job still permits preparation until the three waiting slots are full.
+- Passed backend typecheck, five focused files / 36 tests, all 13 processing
+  integrations, dashboard typecheck/tests, and focused Android unit tests without
+  launching a device; advanced Branch 3 to C3.
+
+## 2026-09-20 — Branch 3 checkpoint C1 complete
+
+- Added one exhaustive status-to-capacity contract for preparing, queued,
+  processing, and terminal jobs.
+- Added one failure resolver covering every safe job code plus lease expiry, user
+  action, account deletion, quota/restriction/deletion state, and queue capacity.
+- Centralized safe public messages, infrastructure retry exhaustion, temporary
+  object action, and reservation settlement decisions.
+- Replaced worker-attempt and lease-recovery local retry logic with the shared
+  resolver and made processing usage use the shared status settlement contract.
+- Passed format, lint, typecheck, 8 focused files / 63 tests, build, and two isolated
+  processing integrations; advanced Branch 3 to C2.
+
+## 2026-09-20 — Branch 3 started at checkpoint C1
+
+- Confirmed Branch 2 PR #11 is merged and fast-forwarded the collection branch to
+  merge commit `b774ad18c79866170ea3141320a31f0d4a50de20`.
+- Created the isolated `hatem/job-queue-retries-refunds` worktree from that exact
+  collection commit and left the unrelated worker-runtime checkout untouched.
+- Read the job lifecycle/test contracts and inventoried admission, create/confirm,
+  retry/cancel, claim, recovery, attempt finalization, client, and usage paths.
+- Passed the six-file/25-test focused unit baseline and the two processing
+  usage/job-action integration baselines.
+- Marked C1 in progress; no device, provider, deployment, or real-data action ran.
+
 ## 2026-09-20 — Branch 2 checkpoint B7 complete
 
 - Passed backend format, lint, typecheck, secret, unit, HTTP E2E, build, processing,

@@ -56,9 +56,23 @@ const errors = {
   PROCESSING_UNAVAILABLE: [503, 'New audio processing work is unavailable'],
 } as const;
 export type JobHttpErrorCode = keyof typeof errors;
+
+export interface JobCapacityDetails {
+  waitingJobs: number;
+  maxWaitingJobs: number;
+  processingJobs: number;
+  maxProcessingJobs: number;
+}
+
+export interface JobErrorDetails {
+  nextResetAt?: string | null;
+  capacity?: JobCapacityDetails;
+  action?: 'wait_for_job_to_finish';
+}
+
 export function jobError(
   code: JobHttpErrorCode,
-  details: { nextResetAt?: string | null } = {},
+  details: JobErrorDetails = {},
 ): HttpException {
   const [statusCode, message] = errors[code];
   return new HttpException(

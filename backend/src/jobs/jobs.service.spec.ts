@@ -19,7 +19,10 @@ const admissionSnapshot = {
   preparationProfileId: 'preserve-or-aac-lc-256-v1',
   source: 'audio_file' as const,
   settingsRevision: 1,
-  maxActiveJobsPerUser: 1,
+  maxWaitingJobs: 3,
+  maxProcessingJobs: 1,
+  maxInfrastructureAttempts: 3,
+  maxClientInputAttempts: 5,
   reservationExpiresAt: new Date(Date.now() + 60_000),
 };
 

@@ -64,6 +64,9 @@ function fixture() {
       attemptsRemaining: 3,
       nextAttemptAt: null,
     },
+    admissionSnapshot: {
+      maxInfrastructureAttempts: 3,
+    },
     processingStartedAt: new Date(),
     processingFinishedAt: null,
     uploadingResultAt: null,
@@ -91,9 +94,6 @@ function fixture() {
     }),
   };
   const slots = { updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }) };
-  const policies = {
-    findById: vi.fn(() => query(() => ({ maxAttempts: 3 }))),
-  };
   const ledger = {
     findById: vi.fn(() => ({ session: vi.fn().mockResolvedValue(null) })),
   };
@@ -149,7 +149,6 @@ function fixture() {
     { startSession: vi.fn().mockResolvedValue(transaction) } as never,
     attempts as never,
     slots as never,
-    policies as never,
     jobs as never,
     storage as never,
     cleanup as never,
@@ -323,6 +322,29 @@ describe('worker attempt transfers and finalization', () => {
     expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
+  it('keeps exact cleanup scheduled when a newer attempt fences a stale result', async () => {
+    const f = fixture();
+    await f.service.outputGrant(principal, attemptId, output);
+    const staleKey = f.attempt.outputReservation.key;
+    f.job.currentExecution = {
+      ...f.job.currentExecution,
+      attemptId: 'a719bfce-c6f5-44e9-8902-51b0cfab3a02',
+    };
+
+    await expect(
+      f.service.complete(principal, attemptId, completion),
+    ).rejects.toThrow('Worker resource changed');
+    expect(f.storage.verifyUploadedVersion).not.toHaveBeenCalled();
+    expect(f.cleanup.schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: staleKey,
+        reason: 'AUDIO_OUTPUT_ORPHANED',
+      }),
+      expect.any(Object),
+    );
+    expect(f.cleanup.cancelScheduled).not.toHaveBeenCalled();
+  });
+
   it('finalizes a non-retryable worker failure once', async () => {
     const f = fixture();
     const failure = {
@@ -343,8 +365,9 @@ describe('worker attempt transfers and finalization', () => {
     });
     expect(f.job.lastError).toMatchObject({
       code: 'INVALID_AUDIO',
-      message: 'The uploaded audio is invalid',
+      message: 'The file does not contain supported playable audio.',
     });
+    expect(f.attempt.failureClass).toBe('client_input');
     expect(f.outbox.updateOne).toHaveBeenCalledOnce();
     expect(f.slots.updateOne).toHaveBeenCalledOnce();
   });

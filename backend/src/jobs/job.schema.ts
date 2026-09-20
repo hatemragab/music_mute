@@ -84,13 +84,33 @@ const admissionSnapshot = new MongoSchema<AdmissionSnapshot>(
       min: 0,
       validate: Number.isSafeInteger,
     },
-    maxActiveJobsPerUser: {
+    maxWaitingJobs: {
       type: Number,
-      default: null,
+      required: true,
       min: 1,
       max: 100,
-      validate: (value: number | null) =>
-        value === null || Number.isSafeInteger(value),
+      validate: Number.isSafeInteger,
+    },
+    maxProcessingJobs: {
+      type: Number,
+      required: true,
+      min: 1,
+      max: 100,
+      validate: Number.isSafeInteger,
+    },
+    maxInfrastructureAttempts: {
+      type: Number,
+      required: true,
+      min: 1,
+      max: 10,
+      validate: Number.isSafeInteger,
+    },
+    maxClientInputAttempts: {
+      type: Number,
+      required: true,
+      min: 1,
+      max: 20,
+      validate: Number.isSafeInteger,
     },
     reservationExpiresAt: { type: Date, required: true },
   },

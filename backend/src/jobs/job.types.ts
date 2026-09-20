@@ -41,7 +41,10 @@ export interface AdmissionSnapshot {
   source: InputSource;
 
   settingsRevision: number;
-  maxActiveJobsPerUser: number | null;
+  maxWaitingJobs: number;
+  maxProcessingJobs: number;
+  maxInfrastructureAttempts: number;
+  maxClientInputAttempts: number;
   reservationExpiresAt: Date;
 }
 export interface ObjectIdentity {

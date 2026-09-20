@@ -20,7 +20,6 @@ import type {
   InputDeclaration,
   ObjectIdentity,
   WorkerRecipeSnapshot,
-  WorkerRetryEligibility,
 } from './job.types.js';
 
 const MVP_RECIPE: Readonly<WorkerRecipeSnapshot> = Object.freeze({
@@ -36,12 +35,6 @@ const MVP_RECIPE: Readonly<WorkerRecipeSnapshot> = Object.freeze({
   outputBitrateKbps: 192,
 });
 
-const INITIAL_RETRY_ELIGIBILITY: Readonly<WorkerRetryEligibility> =
-  Object.freeze({
-    eligible: true,
-    attemptsRemaining: 3,
-    nextAttemptAt: null,
-  });
 const UPLOAD_EXPIRY_GRACE_MS = 300_000;
 const VERSION_SETTLEMENT_MS = 3_600_000;
 
@@ -112,7 +105,12 @@ export class JobsService {
                 },
                 admissionSnapshot,
                 recipeSnapshot: { ...MVP_RECIPE },
-                retryEligibility: { ...INITIAL_RETRY_ELIGIBILITY },
+                retryEligibility: {
+                  eligible: true,
+                  attemptsRemaining:
+                    admissionSnapshot.maxInfrastructureAttempts,
+                  nextAttemptAt: null,
+                },
               },
             ],
             { session },

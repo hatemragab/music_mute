@@ -104,8 +104,9 @@ export function ProcessingUsagePanel({ usage }: { usage: AccountUsage }) {
       )}
       <p className="text-xs text-muted-foreground">
         Checked {formatDateTime(usage.checkedAt)} · policy revision{" "}
-        {usage.policyRevision} · usage revision {usage.usageRevision}. Active
-        jobs {usage.activeJobs} / {usage.maxProcessingJobs}.
+        {usage.policyRevision} · usage revision {usage.usageRevision}. Waiting
+        jobs {usage.waitingJobs} / {usage.maxWaitingJobs} · processing jobs{" "}
+        {usage.processingJobs} / {usage.maxProcessingJobs}.
       </p>
       <p className="text-sm text-muted-foreground">
         Usage belongs to the account and is shared by all installations. Devices

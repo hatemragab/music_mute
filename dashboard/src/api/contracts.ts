@@ -425,14 +425,16 @@ export interface AccountUsage {
     monthlyResetAt: string;
   };
   usageRevision: number;
-  activeJobs: number;
+  waitingJobs: number;
+  maxWaitingJobs: number;
+  processingJobs: number;
   maxProcessingJobs: number;
   availability: {
     status: "available" | "blocked";
     reason:
       | "paused"
       | "monthly_limit_reached"
-      | "active_job_limit"
+      | "waiting_job_limit"
       | "storage_limit_reached"
       | null;
   };

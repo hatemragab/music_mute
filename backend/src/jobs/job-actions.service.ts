@@ -242,7 +242,7 @@ export class JobActionsService {
               recipeSnapshot: { ...original.recipeSnapshot },
               retryEligibility: {
                 eligible: true,
-                attemptsRemaining: 3,
+                attemptsRemaining: admissionSnapshot.maxInfrastructureAttempts,
                 nextAttemptAt: null,
               },
               queuedAt,

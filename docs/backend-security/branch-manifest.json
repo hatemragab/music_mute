@@ -6,7 +6,7 @@
   "collectionParent": "codex/worker-rebuild",
   "baselineCommit": "947d0544a6c93aff63243770d0aba05d7e67c89d",
   "documentationStatus": "approved",
-  "implementationStatus": "branch_2_ready_for_review",
+  "implementationStatus": "branch_3_in_progress",
   "totalCheckpoints": 32,
   "protectedBranches": ["main", "codex/worker-rebuild"],
   "agentMayNotWithoutExplicitInstruction": [
@@ -50,7 +50,7 @@
       "architectureFile": "architecture/02-media-and-s3.md",
       "evidenceFile": "evidence/02-media-s3-cost-protection.md",
       "checkpoints": ["B1", "B2", "B3", "B4", "B5", "B6", "B7"],
-      "status": "ready_for_review",
+      "status": "merged",
       "currentCheckpoint": null,
       "lastVerifiedCommit": "9b5118aa0a5b21ce459541d83480a78fe032cf07",
       "purpose": "Unified media limits, upload/download accounting, storage retention, cleanup, and S3 cost protection"
@@ -65,8 +65,8 @@
       "architectureFile": "architecture/03-job-lifecycle.md",
       "evidenceFile": "evidence/03-job-queue-retries-refunds.md",
       "checkpoints": ["C1", "C2", "C3", "C4", "C5", "C6", "C7"],
-      "status": "not_started",
-      "currentCheckpoint": "C1",
+      "status": "in_progress",
+      "currentCheckpoint": "C7",
       "lastVerifiedCommit": null,
       "purpose": "Bounded account queue, oldest-eligible picking, retry classification, usage settlement, and refunds"
     },

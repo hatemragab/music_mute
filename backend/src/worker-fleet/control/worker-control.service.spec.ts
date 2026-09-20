@@ -120,7 +120,6 @@ function policy(revision = 3) {
     ],
     leaseSeconds: 60,
     processingDeadlineSeconds: 900,
-    maxAttempts: 3,
     updatedAt: new Date(),
   };
 }
@@ -209,7 +208,6 @@ describe('worker control plane', () => {
       ],
       leaseSeconds: 60,
       processingDeadlineSeconds: 900,
-      maxAttempts: 3,
       reason: 'Raise qualified capacity',
     });
     expect(result).toEqual({ revision: 4, replayed: false });

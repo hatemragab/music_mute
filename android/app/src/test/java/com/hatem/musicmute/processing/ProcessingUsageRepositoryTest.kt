@@ -21,7 +21,9 @@ class ProcessingUsageRepositoryTest {
         effectiveLimits = ProcessingEffectiveLimits(1_200, 50_000_000, 5, 600),
         downloads = ProcessingDownloadUsage(150, 5, 145, 10_000_000_000, 250_000_000, 9_750_000_000, "2026-10-01T00:00:00Z"),
         usageRevision = 3,
-        activeJobs = 0,
+        waitingJobs = 0,
+        maxWaitingJobs = 3,
+        processingJobs = 0,
         maxProcessingJobs = 1,
         availability = ProcessingAvailability("available"),
         checkedAt = "2026-09-13T12:00:00Z",
@@ -35,7 +37,11 @@ class ProcessingUsageRepositoryTest {
     @Test(expected = JobsFailure::class) fun pausedUsageIsNotFreeCapacity() {
         usage().copy(availability = ProcessingAvailability("blocked", "paused")).requireAvailable()
     }
-    @Test(expected = JobsFailure::class) fun activeJobBlocksNewPreparation() { usage().copy(activeJobs = 1).requireAvailable() }
+    @Test(expected = JobsFailure::class) fun fullWaitingQueueBlocksNewPreparation() { usage().copy(waitingJobs = 3).requireAvailable() }
+
+    @Test fun processingJobStillAllowsPreparation() {
+        usage().copy(processingJobs = 1).requireAvailable()
+    }
     @Test(expected = JobsFailure::class) fun nonfiniteUsageIsRejected() {
         usage().copy(processing = usage().processing.copy(remainingSeconds = Double.NaN)).validate()
     }

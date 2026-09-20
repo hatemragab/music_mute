@@ -56,8 +56,6 @@ export class WorkerFleetPolicy {
   leaseSeconds!: number;
   @Prop({ type: Number, required: true, min: 60, max: 7200 })
   processingDeadlineSeconds!: number;
-  @Prop({ type: Number, required: true, min: 1, max: 10 })
-  maxAttempts!: number;
   @Prop({ required: true }) updatedAt!: Date;
   @Prop({ required: true, maxlength: 128 }) updatedByUid!: string;
 }

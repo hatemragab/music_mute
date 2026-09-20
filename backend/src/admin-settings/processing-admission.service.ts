@@ -3,12 +3,16 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { trusted, type ClientSession, type Model, type Types } from 'mongoose';
 import { Job } from '../jobs/job.schema.js';
-import { ACTIVE_ADMISSION_STATUSES } from '../jobs/job-state.js';
+import {
+  PROCESSING_CAPACITY_STATUSES,
+  WAITING_CAPACITY_STATUSES,
+} from '../jobs/job-lifecycle-policy.js';
 import { jobError } from '../jobs/job-errors.js';
 import {
   PREPARATION_PROFILE_ID,
   type AdmissionSnapshot,
   type InputDeclaration,
+  type JobStatus,
 } from '../jobs/job.types.js';
 import type { JobMetadata } from '../jobs/job-metadata.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
@@ -39,12 +43,7 @@ export class ProcessingAdmissionService {
       throw new Error('Processing admission requires a transaction');
 
     await this.policies.touchGlobalFence(session);
-    const userFence = await this.fences.updateOne(
-      { _id: `user:${userId.toString()}` },
-      { $inc: { revision: 1 } },
-      { upsert: true, session, setDefaultsOnInsert: true },
-    );
-    if (!userFence.acknowledged) throw jobError('PROCESSING_UNAVAILABLE');
+    await this.touchAccountFence(userId, session);
 
     const user = await this.users.updateOne(
       {
@@ -102,15 +101,23 @@ export class ProcessingAdmissionService {
       session,
     );
 
-    const maximumActive = policy.values.maxProcessingJobs;
-    const active = await this.jobs
-      .countDocuments({
-        userId,
-        deletedAt: null,
-        status: trusted({ $in: ACTIVE_ADMISSION_STATUSES }),
-      })
-      .session(session);
-    if (active >= maximumActive) throw jobError('PROCESSING_LIMIT_REACHED');
+    const [waitingJobs, processingJobs] = await Promise.all([
+      this.countCapacity(userId, WAITING_CAPACITY_STATUSES, session),
+      this.countCapacity(userId, PROCESSING_CAPACITY_STATUSES, session),
+    ]);
+    const maxWaitingJobs = policy.values.maxWaitingJobs;
+    const maxProcessingJobs = policy.values.maxProcessingJobs;
+    if (waitingJobs >= maxWaitingJobs)
+      throw jobError('PROCESSING_LIMIT_REACHED', {
+        nextResetAt: null,
+        capacity: {
+          waitingJobs,
+          maxWaitingJobs,
+          processingJobs,
+          maxProcessingJobs,
+        },
+        action: 'wait_for_job_to_finish',
+      });
 
     await this.usage.reserveForJob(
       newJobId,
@@ -126,12 +133,89 @@ export class ProcessingAdmissionService {
       preparationProfileId: metadata.preparationProfileId,
       source: metadata.source!,
       settingsRevision: policy.globalRevision,
-      maxActiveJobsPerUser: maximumActive,
+      maxWaitingJobs,
+      maxProcessingJobs,
+      maxInfrastructureAttempts: policy.values.maxInfrastructureAttempts,
+      maxClientInputAttempts: policy.values.maxClientInputAttempts,
       reservationExpiresAt: new Date(
         Date.now() +
           this.config.getOrThrow<number>('PROCESSING_URL_SECONDS') * 1000,
       ),
     };
+  }
+
+  async claimProcessingSlot(
+    job: Pick<Job, '_id' | 'userId' | 'admissionSnapshot'>,
+    session: ClientSession,
+  ): Promise<boolean> {
+    if (!session.inTransaction())
+      throw new Error('Processing claim admission requires a transaction');
+    const userId = job.userId;
+    const maxProcessingJobs = job.admissionSnapshot?.maxProcessingJobs;
+    if (
+      typeof maxProcessingJobs !== 'number' ||
+      !Number.isSafeInteger(maxProcessingJobs) ||
+      maxProcessingJobs < 1
+    )
+      return false;
+    await this.touchAccountFence(userId, session);
+    const user = await this.users.updateOne(
+      {
+        _id: userId,
+        status: 'active',
+        $or: [
+          { processingSuspended: trusted({ $ne: true }) },
+          {
+            processingSuspensionExpiresAt: trusted({
+              $lte: new Date(),
+              $ne: null,
+            }),
+          },
+        ],
+      },
+      { $inc: { accessRevision: 1 } },
+      { session },
+    );
+    if (user.modifiedCount !== 1) return false;
+    const policy = await this.policies.effective(userId, new Date(), session);
+    if (
+      this.config.get<boolean>('AUDIO_PROCESSING_ENABLED') !== true ||
+      !policy.acceptNewJobs ||
+      !(await this.usage.hasReservedProcessing(job._id, userId, session))
+    )
+      return false;
+    const processingJobs = await this.countCapacity(
+      userId,
+      PROCESSING_CAPACITY_STATUSES,
+      session,
+    );
+    return processingJobs < maxProcessingJobs;
+  }
+
+  private async touchAccountFence(
+    userId: string | Types.ObjectId,
+    session: ClientSession,
+  ): Promise<void> {
+    const userFence = await this.fences.updateOne(
+      { _id: `user:${userId.toString()}` },
+      { $inc: { revision: 1 } },
+      { upsert: true, session, setDefaultsOnInsert: true },
+    );
+    if (!userFence.acknowledged) throw jobError('PROCESSING_UNAVAILABLE');
+  }
+
+  private countCapacity(
+    userId: string | Types.ObjectId,
+    statuses: readonly JobStatus[],
+    session: ClientSession,
+  ): Promise<number> {
+    return this.jobs
+      .countDocuments({
+        userId,
+        deletedAt: null,
+        status: trusted({ $in: statuses }),
+      })
+      .session(session);
   }
 
   assertAcceptedReservation(

@@ -22,12 +22,12 @@ fence/transaction pattern so simultaneous requests cannot exceed the limits.
 
 ## State groups
 
-| Group        | Typical states                                           | Capacity                   |
-| ------------ | -------------------------------------------------------- | -------------------------- |
-| Preparing    | `awaiting_upload`                                        | One of three waiting slots |
-| Ready to run | `queued`                                                 | One of three waiting slots |
-| Processing   | claimed/validating/processing/uploading-result ownership | Single processing slot     |
-| Terminal     | `ready`, `failed`, `cancelled`, deleted                  | No queue slot              |
+| Group        | Public states                                                                     | Capacity                   |
+| ------------ | --------------------------------------------------------------------------------- | -------------------------- |
+| Preparing    | `awaiting_upload`                                                                 | One of three waiting slots |
+| Ready to run | `queued`                                                                          | One of three waiting slots |
+| Processing   | `validating`, `processing`, `uploading_result`, `interrupted`, `cancel_requested` | Single processing slot     |
+| Terminal     | `ready`, `failed`, `cancelled`, deleted                                           | No queue slot              |
 
 The exact public status names remain compatible where possible. Internal attempt
 state does not leak through public serializers.
@@ -49,6 +49,18 @@ The claim transaction atomically rechecks account activity, account processing
 ownership, candidate state, worker slot, and attempt ownership. A losing contender
 retries selection rather than claiming a second job for the account.
 
+The picker advances through the durable queue cursor in `(queuedAt, _id)` order.
+If an older candidate's account, policy, reservation, retry time, recipe, or
+processing slot is ineligible, selection continues to the next job instead of
+returning an empty claim. The account fence is written before the account checks,
+so concurrent worker transactions cannot both observe an empty processing slot.
+
+No new MongoDB index or collection is added. The picker reuses
+`jobs_worker_claim_eligibility`, the existing compound index beginning with status
+and queue time. This keeps Atlas storage unchanged; the tradeoff is a bounded index
+walk across temporarily ineligible jobs, which is acceptable for launch and avoids
+the larger storage/write cost of a duplicate eligibility index.
+
 Do not introduce BullMQ, a second queue collection, weighted plans, queue priority,
 or per-account round-robin for launch.
 
@@ -66,6 +78,20 @@ Every failure maps to one stable class before retry/accounting decisions:
 
 Safe public errors expose the category and next action without internal worker,
 provider, or abuse-rule details.
+
+The launch mapping is explicit and exhaustive:
+
+| Source                                                                         | Class before attempt exhaustion | Retry                             | Terminal settlement             | Temporary object                             |
+| ------------------------------------------------------------------------------ | ------------------------------- | --------------------------------- | ------------------------------- | -------------------------------------------- |
+| `SEPARATOR_FAILED`, `DOWNLOAD_FAILED`, `OUTPUT_UPLOAD_FAILED`, lease expiry    | Infrastructure transient        | Same job while an attempt remains | Release after attempt three     | Preserve for retry, then clean               |
+| `OUTPUT_INVALID`                                                               | Infrastructure terminal         | Never automatic                   | Release                         | Clean                                        |
+| `UPLOAD_EXPIRED`, `INVALID_AUDIO`, `INPUT_TOO_LONG`, `INPUT_CHECKSUM_MISMATCH` | Client/input                    | Never a worker retry              | Release if reserved             | Clean                                        |
+| Owner cancellation or account deletion                                         | User action                     | Never                             | Release unless already consumed | Clean                                        |
+| Quota denial, restriction, deleting state, or queue full                       | Policy                          | Never                             | No new reservation              | None unless an earlier object already exists |
+
+`backend/src/jobs/job-lifecycle-policy.ts` is the code authority for this mapping,
+including the safe public message/action. Worker failure and lease recovery paths
+must call it rather than maintaining independent retryable-code lists.
 
 ## Infrastructure attempts
 
@@ -92,9 +118,14 @@ not create hidden retry loops or manufacture a fresh identity to bypass the limi
 ## Settlement invariants
 
 - A job has one processing reservation.
+- Creation reserves the confirmed duration before a job can become queue eligible.
+- Preparing, queued, processing, and infrastructure-retry transitions preserve the
+  same reservation without another charge.
 - Successful exact result finalization consumes that reservation once.
 - Infrastructure retry does not create another reservation or usage charge.
 - Terminal failure/cancellation releases the reservation once.
+- Policy rejection before admission creates no reservation; idempotent settlement
+  is still safe when a prior transition already reserved usage.
 - A result cannot be published after cancellation, account deletion, restriction,
   lease loss, attempt replacement, or ownership change.
 - Duplicate create, confirm, claim, renew, cancel, retry, and finalize requests are

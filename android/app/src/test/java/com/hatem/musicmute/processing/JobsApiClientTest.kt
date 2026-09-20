@@ -70,7 +70,7 @@ class JobsApiClientTest {
               "storage":{"limitBytes":1000000000,"retainedBytes":100000000,"remainingBytes":900000000},
               "effectiveLimits":{"maxDurationSeconds":1200,"maxPreparedAudioBytes":50000000,"maxClientInputAttempts":5,"signedUrlTtlSeconds":600},
               "downloads":{"monthlyGrantLimit":150,"monthlyGrants":5,"monthlyRemainingGrants":145,"monthlyByteLimit":10000000000,"estimatedBytes":250000000,"monthlyRemainingBytes":9750000000,"monthlyResetAt":"2026-10-01T00:00:00Z"},"usageRevision":3,
-              "activeJobs":0,"maxProcessingJobs":1,"availability":{"status":"available","reason":null},"checkedAt":"2026-09-13T12:00:00Z"}""")
+              "waitingJobs":0,"maxWaitingJobs":3,"processingJobs":1,"maxProcessingJobs":1,"availability":{"status":"available","reason":null},"checkedAt":"2026-09-13T12:00:00Z"}""")
         })
         val usage = api.processingUsage()!!
         assertEquals(600.0, usage.processing.usedSeconds, 0.0)
