@@ -4,8 +4,8 @@
 **Create from:** updated collection after branch 3 merge
 **PR base:** `codex/backend-security-cost-hardening`
 **Checkpoints:** D1–D6
-**Status:** `READY_FOR_REVIEW`
-**Current checkpoint:** D6 complete
+**Status:** `MERGED`
+**Current checkpoint:** none
 **Evidence:** `../evidence/04-account-abuse-api-limits.md`
 
 ## Assignment

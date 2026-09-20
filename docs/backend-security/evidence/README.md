@@ -1,6 +1,7 @@
 # Branch evidence reports
 
-All implementation branches are currently `NOT_STARTED`; no success report exists.
+Branches 1–4 are merged. Branch 5 has completed E1–E6 and its evidence report is
+ready for collection-branch review.
 
 When a branch starts, copy `../templates/CHECKPOINT-REPORT.md` to the evidence file
 named in `../branch-manifest.json`. Update it after every checkpoint. Do not create

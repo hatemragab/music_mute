@@ -107,7 +107,7 @@
 "auth_weak_password" = "Choose a stronger password that meets the Firebase password policy.";
 "auth_account_disabled" = "This account is disabled.";
 "auth_account_deletion_pending" = "Account deletion is scheduled. You can request recovery from this page.";
-"auth_account_recovery_expired" = "The three-month recovery period has ended and permanent deletion has started.";
+"auth_account_recovery_expired" = "The 15-day recovery period has ended and permanent deletion has started.";
 "auth_collision" = "That sign-in method belongs to another account. Sign in to that account instead.";
 "auth_provider_linked" = "That sign-in method is already linked.";
 "auth_provider_missing" = "Keep at least one sign-in method that works on this device.";
@@ -274,9 +274,9 @@
 
 "auth_delete_confirm" = "Schedule account deletion?";
 
-"auth_delete_scope" = "Account access ends immediately. You have three months to request recovery by signing in again. After the deadline, permanent deletion starts and your cloud media can no longer be recovered. Private copies on this device are removed. Files you imported and exported copies remain yours. Sign in again to confirm.";
+"auth_delete_scope" = "Account access ends immediately. You have exactly 15 days to request recovery by signing in again. After the deadline, permanent deletion starts and your cloud media can no longer be recovered. Private copies on this device are removed. Files you imported and exported copies remain yours. Sign in again to confirm.";
 
-"auth_delete_accepted" = "Deletion scheduled. You are signed out. Sign in again within three months if you want to request account recovery.";
+"auth_delete_accepted" = "Deletion scheduled. You are signed out. Sign in again before the exact deadline shown if you want to request account recovery.";
 
 "auth_delete_uncertain" = "The deletion response was not confirmed. Your account may already be pending deletion. Use deletion help to check your request.";
 

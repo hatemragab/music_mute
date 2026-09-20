@@ -14,7 +14,7 @@
     <string name="creative_account_recovery">الاستعادة</string>
     <string name="creative_account_files">ملفاتك</string>
     <string name="creative_account_delete_access">ينتهي الوصول فورًا. تتم جدولة حذف حسابك والمدخلات السحابية ونتائج الصوت والسجل وتسجيلات الأجهزة.</string>
-    <string name="creative_account_delete_recovery">لديك ثلاثة أشهر لطلب الاستعادة. يبدأ الحذف السحابي النهائي بعد انتهاء هذه المهلة.</string>
+    <string name="creative_account_delete_recovery">لديك 15 يومًا بالضبط لطلب الاستعادة. يبدأ الحذف السحابي النهائي بعد انتهاء هذه المهلة.</string>
     <string name="creative_account_delete_files">تُحذف النسخ الخاصة بالحساب على هذا التثبيت. تبقى الملفات الأصلية والنسخ المصدّرة أو المشتركة معك.</string>
     <string name="creative_account_delete_step">الخطوة ١ من ٢ · يليها تأكيد نهائي.</string>
     <string name="creative_account_submitted">تم إرسال الطلب</string>

@@ -34,7 +34,7 @@ contains exact object identity and accounting metadata.
 | Admission            | `backend/src/admin-settings/processing-admission.service.ts`                           | All active admission states count against a default maximum of one | Replace with one processing plus three waiting                            |
 | Picker               | `backend/src/worker-fleet/claims/worker-claim.service.ts`                              | Global FIFO does not enforce per-account active ownership          | Extend eligibility while preserving atomic claim fences                   |
 | Retry policy         | job retry fields, worker recovery, client transfer retry stores                        | Multiple retry meanings and limits                                 | Replace with explicit infrastructure/client taxonomy                      |
-| Deletion delay       | `backend/src/users/account-recovery-policy.ts`                                         | Three calendar months                                              | Replace with exact fifteen-day deadline                                   |
+| Deletion delay       | `backend/src/users/account-recovery-policy.ts`                                         | Exact fifteen elapsed days                                         | Keep clients and public copy aligned to the backend deadline              |
 
 Before removing any item, find every backend, dashboard, Android, iOS, test, and
 documentation caller. Removal is complete only when no runtime path or stale UI
@@ -149,7 +149,7 @@ the purge and recovery tests.
 - `backend/README.md` for configuration or verification changes;
 - `backend/docs/api/audio-processing.md` for mobile contracts;
 - `backend/docs/operations/audio-processing.md` for cleanup/operations;
-- `backend/docs/account-deletion.md` for the fifteen-day lifecycle;
+- `docs/account-deletion.md` for the fifteen-day lifecycle;
 - backend dashboard API/permission documentation;
 - `dashboard/README.md` for new administrator controls;
 - Android/iOS guides when client-visible limits or account behavior change;

@@ -14,7 +14,7 @@
     <string name="creative_account_recovery">Recovery</string>
     <string name="creative_account_files">Your files</string>
     <string name="creative_account_delete_access">Access ends immediately. Your account, cloud inputs, voice results, history and device registrations are scheduled for deletion.</string>
-    <string name="creative_account_delete_recovery">You have three months to request recovery. Permanent cloud cleanup starts after that deadline.</string>
+    <string name="creative_account_delete_recovery">You have exactly 15 days to request recovery. Permanent cloud cleanup starts after that deadline.</string>
     <string name="creative_account_delete_files">Private account copies on this installation are removed. Original files and exported or shared copies stay with you.</string>
     <string name="creative_account_delete_step">Step 1 of 2 · A final confirmation follows.</string>
     <string name="creative_account_submitted">Request submitted</string>

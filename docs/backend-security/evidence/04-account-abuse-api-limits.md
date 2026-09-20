@@ -16,9 +16,9 @@
 
 ## Progress
 
-- Branch status: `READY_FOR_REVIEW`
+- Branch status: `MERGED` in PR #13
 - Completed checkpoints: D1, D2, D3, D4, D5, D6
-- Next item: review and merge PR #13 into the collection branch
+- Next item: Branch 5 account deletion and cleanup
 - Blocking input: none
 
 ## Delivered behavior
@@ -92,7 +92,7 @@ timing-only failure.
 
 ## Handoff
 
-- Ready for review: yes
+- Ready for review: merged
 - PR base: `codex/backend-security-cost-hardening`
-- Next branch: `hatem/account-deletion-cleanup`, only after Branch 4 is merged and
-  the collection branch is fetched to its exact merge commit
+- Next branch: `hatem/account-deletion-cleanup`, created from merge commit
+  `daad109f646400440714c12c175e3e12ac3442de`

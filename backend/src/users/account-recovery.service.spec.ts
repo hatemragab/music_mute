@@ -14,7 +14,7 @@ function query<T>(value: T) {
 }
 
 function fixture(
-  recoverUntil: Date | null = new Date('2026-12-11T00:00:00.000Z'),
+  recoverUntil: Date | null = new Date('2026-09-26T00:00:00.000Z'),
 ) {
   const user = {
     _id: new Types.ObjectId(),
@@ -104,17 +104,18 @@ describe('account recovery requests', () => {
     expect(f.requests.create).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects a request after the recovery deadline', async () => {
-    const f = fixture(new Date('2026-09-11T00:00:00.000Z'));
-    await expect(
-      f.service.request(
-        new Types.ObjectId().toHexString(),
-        {},
-        new Date('2026-09-12T00:00:00.000Z'),
-      ),
-    ).rejects.toMatchObject({ response: { code: 'ACCOUNT_RECOVERY_EXPIRED' } });
-    expect(f.requests.create).not.toHaveBeenCalled();
-  });
+  it.each(['2026-09-11T00:00:00.000Z', '2026-09-11T00:00:00.001Z'])(
+    'rejects a request at or after the recovery deadline %s',
+    async (at) => {
+      const f = fixture(new Date('2026-09-11T00:00:00.000Z'));
+      await expect(
+        f.service.request(new Types.ObjectId().toHexString(), {}, new Date(at)),
+      ).rejects.toMatchObject({
+        response: { code: 'ACCOUNT_RECOVERY_EXPIRED' },
+      });
+      expect(f.requests.create).not.toHaveBeenCalled();
+    },
+  );
 
   it('serializes creation with deletion cleanup ownership', async () => {
     const f = fixture();
@@ -140,7 +141,7 @@ describe('account recovery requests', () => {
       new Date('2026-09-12T00:00:00.000Z'),
     );
     expect(beforeRequest.deletion).toMatchObject({
-      recoverUntil: '2026-12-11T00:00:00.000Z',
+      recoverUntil: '2026-09-26T00:00:00.000Z',
       recoveryAvailable: true,
     });
 
@@ -156,8 +157,8 @@ describe('account recovery requests', () => {
       }),
       expect.objectContaining({
         $set: {
-          deletionRecoverUntil: new Date('2026-12-11T00:00:00.000Z'),
-          deletionNextAt: new Date('2026-12-11T00:00:00.000Z'),
+          deletionRecoverUntil: new Date('2026-09-26T00:00:00.000Z'),
+          deletionNextAt: new Date('2026-09-26T00:00:00.000Z'),
         },
       }),
       { session: f.session },

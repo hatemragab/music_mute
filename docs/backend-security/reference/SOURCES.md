@@ -60,6 +60,6 @@ before production rollout because provider pricing and limits can change.
 - `backend/src/worker-fleet/` already supplies claim, attempt, lease, and stale-owner
   fences.
 - `backend/src/users/account-deletion-*` already supplies retryable cleanup and
-  identity fences but currently uses a three-month policy.
+  identity fences and an exact fifteen-day recovery policy.
 
 Local source evidence establishes implemented code, not live provider configuration.

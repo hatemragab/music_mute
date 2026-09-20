@@ -3,6 +3,13 @@ import Foundation
 struct AccountDeletionReceipt: Codable, Equatable, Sendable {
   let requestId: String
   let status: String
+  let recoverUntil: Date?
+
+  init(requestId: String, status: String, recoverUntil: Date? = nil) {
+    self.requestId = requestId
+    self.status = status
+    self.recoverUntil = recoverUntil
+  }
 }
 
 /// No credentials or source media: this journal survives an interrupted acceptance or local purge.

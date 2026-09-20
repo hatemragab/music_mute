@@ -69,6 +69,26 @@ export class User {
   @Prop({ type: String, default: null })
   deletionLeaseToken!: string | null;
 
+  @Prop({
+    type: String,
+    default: null,
+    enum: ['grace_fence', 'identity', 'jobs', 'records', 'provider', 'profile'],
+  })
+  deletionPhase!:
+    | 'grace_fence'
+    | 'identity'
+    | 'jobs'
+    | 'records'
+    | 'provider'
+    | 'profile'
+    | null;
+
+  @Prop({ type: String, default: null, maxlength: 100 })
+  deletionCursor!: string | null;
+
+  @Prop({ type: String, default: null, enum: ['DEPENDENCY_RETRY'] })
+  deletionFailureCode!: 'DEPENDENCY_RETRY' | null;
+
   @Prop({ type: Number, default: 0 })
   accessRevision!: number;
 

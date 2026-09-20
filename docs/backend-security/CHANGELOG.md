@@ -1,5 +1,41 @@
 # Backend security planning changelog
 
+## 2026-09-20 — Branch 5 checkpoints E1–E6 complete
+
+- Replaced the calendar-month recovery rule with one exact fifteen-day elapsed-time
+  deadline and preserved duplicate-request identity, recent authentication, and
+  recovery-before-purge fences.
+- Added immediate grace-period cancellation/fencing, durable purge phases/cursors,
+  bounded collection pages, stale worker-attempt object reconciliation, and a
+  sanitized retry state.
+- Expanded permanent cleanup across jobs/errors, notifications, devices,
+  installations, usage/grants/reservations, policy overrides, abuse events and
+  summaries, restrictions, recovery records, storage tasks, Firebase identity,
+  and the personal profile.
+- Added a minimal non-personal completion tombstone and tests prohibiting identity,
+  device, media, object-key, quota, abuse, and free-text fields.
+- Updated Android and iOS durable receipts to preserve the exact backend deadline,
+  updated localized copy/public pages/dashboard phase presentation, and added the
+  deletion operations guide.
+- Passed backend verify (772 unit and 140 HTTP E2E tests), all 60 isolated
+  integrations, dashboard 51-test/build gate, and Android Direct/Play unit/lint/
+  debug builds. Fifteen focused iOS deletion/recovery tests passed on the authorized
+  simulator; the broader iOS suite retained 40 unrelated media/upload failures.
+- Recorded implementation commit `7b35761a26f8d2482f1a96b39075a2c7b4afaed7`;
+  no provider, deployment, live data, browser UI E2E, or mobile UI E2E action ran.
+
+## 2026-09-20 — Branch 5 started at checkpoint E1
+
+- Confirmed Branch 4 PR #13 merged into the collection branch at
+  `daad109f646400440714c12c175e3e12ac3442de` and created the isolated
+  `hatem/account-deletion-cleanup` worktree from that exact commit.
+- Inventoried account-owned schemas, Redis key families, exact S3 identities,
+  notifications, installations, Firebase actions, clients, and public/dashboard
+  surfaces.
+- Passed the five-file/27-test deletion/recovery unit baseline before changes.
+- Kept provider consoles, deployments, live accounts/data, and device/UI E2E
+  outside the branch.
+
 ## 2026-09-20 — Branch 4 checkpoints D1–D6 complete
 
 - Added atomic hourly abuse buckets with 90-day TTL, compact monthly summaries,

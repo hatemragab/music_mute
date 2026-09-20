@@ -6,7 +6,7 @@
   "collectionParent": "codex/worker-rebuild",
   "baselineCommit": "947d0544a6c93aff63243770d0aba05d7e67c89d",
   "documentationStatus": "approved",
-  "implementationStatus": "branch_4_ready_for_review",
+  "implementationStatus": "branch_5_ready_for_review",
   "totalCheckpoints": 32,
   "protectedBranches": ["main", "codex/worker-rebuild"],
   "agentMayNotWithoutExplicitInstruction": [
@@ -80,7 +80,7 @@
       "architectureFile": "architecture/04-abuse-and-data-protection.md",
       "evidenceFile": "evidence/04-account-abuse-api-limits.md",
       "checkpoints": ["D1", "D2", "D3", "D4", "D5", "D6"],
-      "status": "ready_for_review",
+      "status": "merged",
       "currentCheckpoint": null,
       "lastVerifiedCommit": "33f5a640ba126b3e4f863e1a0aa946995c9dde99",
       "purpose": "Typed bounded abuse records, API budgets, manual account restrictions, dashboard review, and datastore protection"
@@ -95,9 +95,9 @@
       "architectureFile": "architecture/05-account-deletion.md",
       "evidenceFile": "evidence/05-account-deletion-cleanup.md",
       "checkpoints": ["E1", "E2", "E3", "E4", "E5", "E6"],
-      "status": "not_started",
-      "currentCheckpoint": "E1",
-      "lastVerifiedCommit": null,
+      "status": "ready_for_review",
+      "currentCheckpoint": null,
+      "lastVerifiedCommit": "7b35761a26f8d2482f1a96b39075a2c7b4afaed7",
       "purpose": "Fifteen-day recovery state and permanent, resumable account and media cleanup"
     }
   ]

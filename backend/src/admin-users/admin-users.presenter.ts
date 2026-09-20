@@ -11,6 +11,8 @@ export type AdminUserView = Pick<
   | 'deletionRequestedAt'
   | 'deletionRecoverUntil'
   | 'deletionPurgeStartedAt'
+  | 'deletionPhase'
+  | 'deletionFailureCode'
   | 'createdAt'
   | 'updatedAt'
 > & {
@@ -44,6 +46,8 @@ export function presentAdminUserDetail(
           requestedAt: user.deletionRequestedAt?.toISOString() ?? null,
           recoverUntil: user.deletionRecoverUntil?.toISOString() ?? null,
           purgeStartedAt: user.deletionPurgeStartedAt?.toISOString() ?? null,
+          phase: user.deletionPhase ?? null,
+          failureCode: user.deletionFailureCode ?? null,
           recoveryAvailable:
             user.status === 'deleting' &&
             Boolean(

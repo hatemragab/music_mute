@@ -46,7 +46,7 @@ class AuthContractTest {
             assertEquals("DELETE", method)
             assertNull(body)
             assertEquals("Bearer token", headers["Authorization"])
-            AuthHttpResponse(202, """{"requestId":"receipt","status":"accepted"}""")
+            AuthHttpResponse(202, """{"requestId":"receipt","status":"accepted","recoverUntil":"2026-09-26T00:00:00.000Z"}""")
         })
         assertEquals("receipt", api.deleteAccount().requestId)
     }
@@ -72,7 +72,7 @@ class AuthContractTest {
         var uid = "first"
         val api = client(AuthHttpTransport { _, _, _, _ ->
             uid = "second"
-            AuthHttpResponse(202, """{"requestId":"receipt","status":"accepted"}""")
+            AuthHttpResponse(202, """{"requestId":"receipt","status":"accepted","recoverUntil":"2026-09-26T00:00:00.000Z"}""")
         }, uid = { uid })
         assertEquals("receipt", api.deleteAccount("first").requestId)
     }

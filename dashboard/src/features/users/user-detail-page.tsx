@@ -157,6 +157,15 @@ export function UserDetailPage() {
                         ? formatDateTime(data.deletion.recoverUntil)
                         : "Unavailable"}
                     </dd>
+                    <dd className="mt-1 text-muted-foreground">
+                      Phase: {data.deletion.phase || "pending"}
+                    </dd>
+                    {data.deletion.failureCode ? (
+                      <dd className="mt-1 text-amber-700 dark:text-amber-300">
+                        Cleanup is waiting for a dependency and will retry
+                        automatically.
+                      </dd>
+                    ) : null}
                   </div>
                 ) : null}
               </dl>

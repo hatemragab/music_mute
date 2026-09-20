@@ -2,7 +2,7 @@
 
 **Collection:** `codex/backend-security-cost-hardening`
 **Implementation checkpoints:** 32
-**Current implementation status:** Branches 1–3 merged; Branch 4 D1–D6 ready for review
+**Current implementation status:** Branches 1–4 merged; Branch 5 E1–E6 ready for review
 
 ## 1. Sequential branch contract
 
@@ -59,12 +59,12 @@ collection tip, never independently from `main` or the old parent commit.
 
 ### E. Account deletion and cleanup
 
-- [ ] **E1:** Replace the three-month policy with one exact fifteen-day recovery contract.
-- [ ] **E2:** Enforce read-only recovery state without resetting quota or duplicating work.
-- [ ] **E3:** Permanently purge owned S3, jobs, policy, usage, restriction, device, and identity data.
-- [ ] **E4:** Make multi-provider cleanup leased, resumable, idempotent, and privacy-safe.
-- [ ] **E5:** Update Android, iOS, dashboard, public copy, and operations documentation.
-- [ ] **E6:** Pass recovery/deletion integration, interruption, privacy, client, and build gates.
+- [x] **E1:** Use one exact fifteen-day recovery contract.
+- [x] **E2:** Enforce read-only recovery state without resetting quota or duplicating work.
+- [x] **E3:** Permanently purge owned S3, jobs, policy, usage, restriction, device, and identity data.
+- [x] **E4:** Make multi-provider cleanup leased, resumable, idempotent, and privacy-safe.
+- [x] **E5:** Update Android, iOS, dashboard, public copy, and operations documentation.
+- [x] **E6:** Pass relevant recovery/deletion, interruption, privacy, client, and build gates.
 
 ## 3. Per-checkpoint completion rule
 

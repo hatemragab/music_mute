@@ -72,7 +72,7 @@ class AuthSessionCoordinator(
     private val deletionRequested: suspend (String) -> Boolean = { false },
     private val afterSignOut: suspend () -> Unit = {},
     private val hasUnconfirmedDeletion: () -> Boolean = { false },
-    private val deletionAccepted: suspend (String) -> Unit = {},
+    private val deletionAccepted: suspend (String, AccountDeletionReceipt) -> Unit = { _, _ -> },
     private val beforeSignOut: suspend (uid: String, installationId: String?) -> Unit = { _, _ -> },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

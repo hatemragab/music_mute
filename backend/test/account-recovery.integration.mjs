@@ -111,7 +111,11 @@ test(
     });
     const cleanup = new AccountDeletionCleanupService(
       users,
-      {},
+      {
+        find: () => ({
+          sort: () => ({ limit: () => ({ lean: async () => [] }) }),
+        }),
+      },
       connection,
       {},
       {},
@@ -123,11 +127,11 @@ test(
     assert.equal(normalized.status, 'deleting');
     assert.equal(
       normalized.deletionRecoverUntil.toISOString(),
-      '2026-04-30T12:00:00.000Z',
+      '2026-02-15T12:00:00.000Z',
     );
     assert.equal(
       normalized.deletionNextAt.toISOString(),
-      '2026-04-30T12:00:00.000Z',
+      '2026-02-15T12:00:00.000Z',
     );
     assert.equal(normalized.deletionLeaseToken, null);
   },

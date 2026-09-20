@@ -43,7 +43,7 @@ describe('Public account deletion and privacy pages', () => {
     expect(response.text).toContain('Example Developer');
     expect(response.text).toContain('mailto:support@example.test?subject=');
     expect(response.text).toContain('ownership');
-    expect(response.text).toContain('three calendar months');
+    expect(response.text).toContain('exactly 15 days');
     expect(response.text).toContain('without reinstalling');
     expect(response.text).toContain(configured.PUBLIC_DELETION_TIMEFRAME);
     expect(response.text).toContain(configured.PUBLIC_RETENTION_NOTICE);
