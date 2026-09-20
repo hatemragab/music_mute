@@ -1,8 +1,8 @@
 import Foundation
 
 enum YouTubePreflight {
-  static let maximumDownloadBytes: Int64 = 100_000_000
-  static let maximumDownloadSeconds: TimeInterval = 600
+  static let maximumDownloadBytes = ProcessingMediaPolicy.standard.maxSourceDownloadBytes!
+  static let maximumDownloadSeconds = ProcessingMediaPolicy.standard.maxSourceDownloadSeconds!
 
   static func isIndividualURL(_ value: String) -> Bool {
     guard YouTubeURL.videoID(from: value) != nil,
@@ -16,7 +16,9 @@ enum YouTubePreflight {
     guard isLive == false, isUpcoming == false, let duration, duration.isFinite, duration > 0 else {
       throw AudioInputPreparationError.youtubeMetadataUnavailable
     }
-    guard duration <= 1800 else { throw AudioInputPreparationError.tooLong }
+    guard duration <= ProcessingMediaPolicy.standard.maxDuration else {
+      throw AudioInputPreparationError.tooLong
+    }
   }
 }
 

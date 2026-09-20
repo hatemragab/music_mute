@@ -62,9 +62,11 @@ class MediaPreparationWorker(context: Context, parameters: WorkerParameters) : C
                 val target = AudioTaskNotificationTarget(owner, operationId, epoch, workRequestId = id.toString())
                 setForeground(AudioTaskNotifications(applicationContext).foreground(target, audioTaskNotificationProjection(operation, target)))
                 val fetched = try { app.jobsApi.mediaPolicy() } catch (error: JobsFailure) {
-                    if (error.problem in setOf(JobsProblem.JOB_NOT_FOUND, JobsProblem.OFFLINE)) ProcessingMediaPolicy.LEGACY else throw error
+                    if (error.problem in setOf(JobsProblem.JOB_NOT_FOUND, JobsProblem.OFFLINE)) ProcessingMediaPolicy.STANDARD else throw error
                 }
-                val policy = if (fetched.localExpansionReady && fetched.acceptNewJobs) fetched else ProcessingMediaPolicy.LEGACY
+                if (!fetched.acceptNewJobs || !fetched.localPreparationReady)
+                    throw JobsFailure(JobsProblem.PROCESSING_CAPACITY_UNAVAILABLE)
+                val policy = fetched
                 checkOwner()
                 repository.store.update(owner, operationId) { it.copy(mediaPolicy = policy, phase = ProcessingPhase.INSPECTING) }
                 val engine = AudioPreparationEngine(applicationContext)

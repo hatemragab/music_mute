@@ -28,18 +28,16 @@ function fixture() {
   };
   const attempts = { findOne: vi.fn(), updateOne: vi.fn() };
   const slots = { updateOne: vi.fn() };
-  const policies = {
-    findById: vi.fn(() => sessionLean({ maxAttempts: 3 })),
-  };
   const jobs = { findById: vi.fn(), updateOne: vi.fn() };
+  const usage = { settleJob: vi.fn().mockResolvedValue(undefined) };
   const service = new WorkerRecoveryService(
     { startSession: vi.fn().mockResolvedValue(transaction) } as never,
     attempts as never,
     slots as never,
-    policies as never,
     jobs as never,
+    usage as never,
   );
-  return { service, transaction, attempts, slots, policies, jobs };
+  return { service, transaction, attempts, slots, jobs, usage };
 }
 
 function ownership(attemptNumber: number, leaseExpiresAt: Date) {
@@ -81,6 +79,7 @@ describe('worker lease recovery', () => {
         revision: 7,
         currentExecution: value.currentExecution,
         retryEligibility: { eligible: true, attemptsRemaining: 3 },
+        admissionSnapshot: { maxInfrastructureAttempts: 3 },
       }),
     );
     f.attempts.updateOne.mockResolvedValue({ modifiedCount: 0 });
@@ -103,6 +102,7 @@ describe('worker lease recovery', () => {
         revision: 7,
         currentExecution: value.currentExecution,
         retryEligibility: { eligible: true, attemptsRemaining: 3 },
+        admissionSnapshot: { maxInfrastructureAttempts: 3 },
       }),
     );
     f.attempts.updateOne.mockResolvedValue({ modifiedCount: 1 });
@@ -119,6 +119,16 @@ describe('worker lease recovery', () => {
     expect(update.retryEligibility.nextAttemptAt.getTime()).toBe(
       now.getTime() + 5_000,
     );
+    expect(f.attempts.updateOne).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          terminalCode: 'LEASE_EXPIRED',
+          failureClass: 'infrastructure_transient',
+        }),
+      }),
+      expect.any(Object),
+    );
     expect(f.slots.updateOne).toHaveBeenCalledWith(
       expect.objectContaining({ currentAttemptId: attemptId }),
       expect.objectContaining({
@@ -129,6 +139,7 @@ describe('worker lease recovery', () => {
       }),
       expect.any(Object),
     );
+    expect(f.usage.settleJob).not.toHaveBeenCalled();
   });
 
   it('fails finally when the policy attempt limit is exhausted', async () => {
@@ -144,6 +155,7 @@ describe('worker lease recovery', () => {
         revision: 7,
         currentExecution: value.currentExecution,
         retryEligibility: { eligible: true, attemptsRemaining: 1 },
+        admissionSnapshot: { maxInfrastructureAttempts: 3 },
       }),
     );
     f.attempts.updateOne.mockResolvedValue({ modifiedCount: 1 });
@@ -161,6 +173,21 @@ describe('worker lease recovery', () => {
             attemptsRemaining: 0,
             nextAttemptAt: null,
           },
+        }),
+      }),
+      expect.any(Object),
+    );
+    expect(f.usage.settleJob).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: value.jobId, status: 'failed' }),
+      f.transaction,
+      now,
+    );
+    expect(f.attempts.updateOne).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          terminalCode: 'LEASE_EXPIRED',
+          failureClass: 'infrastructure_terminal',
         }),
       }),
       expect.any(Object),

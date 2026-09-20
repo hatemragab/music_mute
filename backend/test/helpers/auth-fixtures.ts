@@ -40,15 +40,18 @@ import { Release } from '../../src/releases/release.schema.js';
 import { ReleaseUpload } from '../../src/releases/release-upload.schema.js';
 import { AdminAlert } from '../../src/admin-observability/admin-alert.schema.js';
 import { AdminAlertObservation } from '../../src/admin-observability/admin-alert-observation.schema.js';
+import { ProcessingAdmissionFence } from '../../src/admin-settings/processing-settings.schema.js';
 import {
-  ProcessingAdmissionFence,
-  ProcessingSettings,
-} from '../../src/admin-settings/processing-settings.schema.js';
+  AccountPolicy,
+  AccountPolicyOverride,
+} from '../../src/admin-settings/account-policy.schema.js';
 import type {
   DeviceReport,
   VerifiedIdentity,
 } from '../../src/auth/auth.types.js';
 import { StorageCleanupTask } from '../../src/storage/storage-cleanup-task.schema.js';
+import { AbuseEventsService } from '../../src/abuse-protection/abuse-events.service.js';
+import { AccountRestrictionsService } from '../../src/abuse-protection/account-restrictions.service.js';
 
 // AppModule's infrastructure is replaced below. Prevent its eager configuration
 // import from consulting any developer dotenv file before that override applies.
@@ -234,7 +237,7 @@ export async function authFixture() {
       deletion: {
         requestId: 'fixture-deletion-request',
         requestedAt: '2026-09-11T00:00:00.000Z',
-        recoverUntil: '2026-12-11T00:00:00.000Z',
+        recoverUntil: '2026-09-26T00:00:00.000Z',
         recoveryAvailable: true,
       },
       request: null,
@@ -272,7 +275,7 @@ export async function authFixture() {
             AWS_REGION: 'us-east-1',
             S3_BUCKET: 'fixture-bucket',
             AUDIO_PROCESSING_ENABLED: false,
-            PROCESSING_URL_SECONDS: 900,
+            PROCESSING_URL_SECONDS: 600,
             PROCESSING_OUTPUT_MAX_BYTES: 30_000_000,
           }),
         ],
@@ -317,6 +320,10 @@ export async function authFixture() {
     })
     .overrideProvider(RateBudgetService)
     .useValue(budgets)
+    .overrideProvider(AbuseEventsService)
+    .useValue({ record: vi.fn().mockResolvedValue(undefined) })
+    .overrideProvider(AccountRestrictionsService)
+    .useValue({ assertAllowed: vi.fn().mockResolvedValue(undefined) })
     .overrideProvider(RedisThrottlerStorage)
     .useValue(storage)
     .overrideProvider(SECURITY_REDIS)
@@ -340,7 +347,8 @@ export async function authFixture() {
     ReleaseUpload.name,
     AdminAlert.name,
     AdminAlertObservation.name,
-    ProcessingSettings.name,
+    AccountPolicy.name,
+    AccountPolicyOverride.name,
     ProcessingAdmissionFence.name,
     StorageCleanupTask.name,
     ...PROCESSING_MODELS.map(({ name }) => name),

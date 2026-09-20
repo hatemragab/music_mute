@@ -53,7 +53,7 @@ enum MediaSourceInspector {
       duration = range.duration.seconds
     }
     guard duration.isFinite, duration > 0 else { throw AudioInputPreparationError.durationUnknown }
-    guard policy.inclusive ? duration <= policy.maxDuration : duration < policy.maxDuration else {
+    guard duration <= policy.maxDuration else {
       throw AudioInputPreparationError.tooLong
     }
     return MediaSourceInspection(

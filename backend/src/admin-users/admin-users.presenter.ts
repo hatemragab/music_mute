@@ -6,21 +6,18 @@ export type AdminUserView = Pick<
   | 'email'
   | 'displayName'
   | 'status'
-  | 'processingSuspended'
-  | 'processingSuspensionReason'
-  | 'processingSuspendedBy'
-  | 'processingSuspendedAt'
   | 'adminRevision'
   | 'deletionRequestId'
   | 'deletionRequestedAt'
   | 'deletionRecoverUntil'
   | 'deletionPurgeStartedAt'
+  | 'deletionPhase'
+  | 'deletionFailureCode'
   | 'createdAt'
   | 'updatedAt'
-> &
-  Partial<Pick<User, 'processingSuspensionExpiresAt'>> & {
-    _id: Types.ObjectId;
-  };
+> & {
+  _id: Types.ObjectId;
+};
 
 export function presentAdminUser(user: AdminUserView) {
   return {
@@ -28,10 +25,6 @@ export function presentAdminUser(user: AdminUserView) {
     email: user.email ?? null,
     displayName: user.displayName,
     status: user.status,
-    processingSuspended:
-      user.processingSuspended === true &&
-      (!user.processingSuspensionExpiresAt ||
-        user.processingSuspensionExpiresAt.getTime() > Date.now()),
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
     revision: user.adminRevision ?? 0,
@@ -47,18 +40,14 @@ export function presentAdminUserDetail(
     ...presentAdminUser(user),
     processingCounts,
     recentJobIds,
-    suspension: {
-      expiresAt: user.processingSuspensionExpiresAt?.toISOString() ?? null,
-      reason: user.processingSuspensionReason ?? null,
-      actorUid: user.processingSuspendedBy ?? null,
-      at: user.processingSuspendedAt?.toISOString() ?? null,
-    },
     deletion: user.deletionRequestId
       ? {
           requestId: user.deletionRequestId,
           requestedAt: user.deletionRequestedAt?.toISOString() ?? null,
           recoverUntil: user.deletionRecoverUntil?.toISOString() ?? null,
           purgeStartedAt: user.deletionPurgeStartedAt?.toISOString() ?? null,
+          phase: user.deletionPhase ?? null,
+          failureCode: user.deletionFailureCode ?? null,
           recoveryAvailable:
             user.status === 'deleting' &&
             Boolean(

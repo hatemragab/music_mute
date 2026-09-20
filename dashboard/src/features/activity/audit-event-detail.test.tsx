@@ -9,19 +9,19 @@ it("shows only server-provided processing changes with actor and reason", () => 
       event={{
         id: "audit",
         actorUid: "owner-fixture",
-        action: "processing_allowance_updated",
-        resourceType: "user",
+        action: "account_policy_override.updated",
+        resourceType: "account_policy_override",
         resourceId: "user-fixture",
         operationId: "operation-fixture",
-        reason: "Temporary reviewed increase",
+        reason: "Reviewed account exception",
         at: "2026-09-13T12:00:00Z",
         previousRevision: 1,
         nextRevision: 2,
         outcome: "succeeded",
         processingChanges: [
-          { field: "allowanceAudioSeconds", before: 3600, after: 7200 },
+          { field: "monthlyProcessingSeconds", before: 3600, after: 7200 },
           {
-            field: "allowanceExpiresAt",
+            field: "overrideExpiresAt",
             before: null,
             after: "2026-09-14T12:00:00Z",
           },
@@ -30,7 +30,7 @@ it("shows only server-provided processing changes with actor and reason", () => 
     />,
   );
   expect(screen.getByText("owner-fixture")).toBeInTheDocument();
-  expect(screen.getByText("Temporary reviewed increase")).toBeInTheDocument();
+  expect(screen.getByText("Reviewed account exception")).toBeInTheDocument();
   expect(screen.getByText(/3600 → 7200/)).toBeInTheDocument();
   expect(screen.getByText(/None → 2026-09-14/)).toBeInTheDocument();
 });

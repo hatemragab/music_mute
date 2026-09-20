@@ -1,14 +1,7 @@
-export const ACCOUNT_RECOVERY_MONTHS = 3;
+export const ACCOUNT_RECOVERY_DAYS = 15;
+export const ACCOUNT_RECOVERY_MS = ACCOUNT_RECOVERY_DAYS * 24 * 60 * 60 * 1_000;
 
-/** Adds calendar months in UTC and clamps month-end dates (for example, Jan 31 -> Apr 30). */
+/** Returns the exact recovery deadline: fifteen elapsed 24-hour periods. */
 export function accountRecoveryDeadline(requestedAt: Date): Date {
-  const deadline = new Date(requestedAt);
-  const day = deadline.getUTCDate();
-  deadline.setUTCDate(1);
-  deadline.setUTCMonth(deadline.getUTCMonth() + ACCOUNT_RECOVERY_MONTHS);
-  const lastDay = new Date(
-    Date.UTC(deadline.getUTCFullYear(), deadline.getUTCMonth() + 1, 0),
-  ).getUTCDate();
-  deadline.setUTCDate(Math.min(day, lastDay));
-  return deadline;
+  return new Date(requestedAt.getTime() + ACCOUNT_RECOVERY_MS);
 }

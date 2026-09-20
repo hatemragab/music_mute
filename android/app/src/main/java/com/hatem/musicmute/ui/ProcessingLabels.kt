@@ -67,6 +67,12 @@ internal fun processingFailureLabel(problem: JobsProblem): Int = when (problem) 
     JobsProblem.INVALID_INPUT -> R.string.processing_error_input
     JobsProblem.JOB_NOT_FOUND -> R.string.processing_error_missing
     JobsProblem.NEW_INPUT_REQUIRED -> R.string.processing_error_retry_input
+    JobsProblem.UPLOAD_GRANT_LIMIT_REACHED, JobsProblem.UPLOAD_BYTE_LIMIT_REACHED,
+    JobsProblem.UPLOAD_ATTEMPT_LIMIT_REACHED -> R.string.processing_error_upload_limit
+    JobsProblem.DOWNLOAD_GRANT_LIMIT_REACHED, JobsProblem.DOWNLOAD_BYTE_LIMIT_REACHED,
+    JobsProblem.DOWNLOAD_RESERVATION_EXPIRED -> R.string.processing_error_download_limit
+    JobsProblem.RETAINED_STORAGE_LIMIT_REACHED -> R.string.processing_error_storage_limit
+    JobsProblem.SERVICE_BANDWIDTH_LIMIT_REACHED -> R.string.processing_error_bandwidth_limit
     JobsProblem.RATE_LIMITED -> R.string.processing_error_rate
     JobsProblem.IDEMPOTENCY_CONFLICT, JobsProblem.JOB_STATE_CONFLICT, JobsProblem.JOB_ACTIVE,
     JobsProblem.UPLOAD_NOT_READY -> R.string.processing_error_state

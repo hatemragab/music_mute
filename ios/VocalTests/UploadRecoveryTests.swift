@@ -133,6 +133,9 @@ import XCTest
     try await restarted.resume(operationId: input.operationId)
     XCTAssertEqual(api.confirmCount, 1)
     XCTAssertEqual(api.renewCount, 2)
+    XCTAssertEqual(Set(api.renewRequestIds).count, 2)
+    let recovered = try await requiredOperation(input)
+    XCTAssertEqual(api.renewRequestIds.last, recovered.uploadGrantRequestId)
     XCTAssertEqual(transfers.started.count, 2)
   }
   func testFirstAuthenticatedBindingAdoptsExistingOwnerUploadAfterRestart() async throws {
@@ -176,7 +179,7 @@ import XCTest
     try await store.update(id: input.operationId, ownerUid: input.ownerUid) {
       $0.jobId = jobId
       $0.phase = .uploadPending
-      $0.uploadAttempts = 3
+      $0.uploadAttempts = 5
     }
     for _ in 0..<2 {
       let restarted = ProcessingRepository(api: api, store: store, transfers: transfers)
@@ -197,7 +200,8 @@ import XCTest
     XCTAssertThrowsError(
       try S3MultipartFile.build(
         inputURL: input.fileURL, declaration: input.declaration,
-        destination: destination, availableCapacity: { _ in 0 })
+        destination: destination, policyVersion: input.policyVersion,
+        availableCapacity: { _ in 0 })
     ) { error in
       XCTAssertEqual(error as? ProcessingTransferFailure, .storage)
     }
@@ -259,6 +263,7 @@ import XCTest
     let body = try S3MultipartFile.build(
       inputURL: prepared.fileURL, declaration: prepared.declaration,
       destination: root.appendingPathComponent("upload"),
+      policyVersion: prepared.policyVersion,
       availableCapacity: { _ in 1_000_000 })
     let bytes = try Data(contentsOf: body.fileURL)
     XCTAssertEqual(bytes, try Data(contentsOf: prepared.fileURL))
@@ -280,7 +285,8 @@ import XCTest
     XCTAssertThrowsError(
       try S3MultipartFile.build(
         inputURL: prepared.fileURL, declaration: prepared.declaration,
-        destination: root.appendingPathComponent("changed")))
+        destination: root.appendingPathComponent("changed"),
+        policyVersion: prepared.policyVersion))
   }
 
   func testWholeObjectUploadRejectsCaseInsensitiveDuplicateHeaders() throws {
@@ -288,6 +294,7 @@ import XCTest
     let body = try S3MultipartFile.build(
       inputURL: prepared.fileURL, declaration: prepared.declaration,
       destination: root.appendingPathComponent("duplicate-header-upload"),
+      policyVersion: prepared.policyVersion,
       availableCapacity: { _ in 1_000_000 })
     let grant = UploadGrant(
       method: .put,
@@ -315,6 +322,7 @@ import XCTest
   var expiredCreateGrant = false
   var confirmCount = 0
   var renewCount = 0
+  var renewRequestIds: [UUID] = []
   let id = "68c000000000000000000001"
   func grant(expired: Bool = false) -> UploadGrant {
     UploadGrant(
@@ -336,6 +344,10 @@ import XCTest
   func renewUpload(id: String) async throws -> UploadGrant {
     renewCount += 1
     return grant()
+  }
+  func renewUpload(id: String, requestId: UUID) async throws -> UploadGrant {
+    renewRequestIds.append(requestId)
+    return try await renewUpload(id: id)
   }
   func confirmUpload(id: String) async throws -> JobMutation {
     confirmCount += 1

@@ -107,7 +107,7 @@ export function AccountRecoveryPage() {
             </p>
             <p className="mt-1 text-muted-foreground">
               Approving restores account access and keeps any independent
-              processing suspension unchanged.
+              account restriction unchanged.
             </p>
           </div>
         </div>
@@ -165,6 +165,20 @@ export function AccountRecoveryPage() {
                     </dd>
                   </div>
                 </dl>
+                {request.user.deletionPhase ||
+                request.user.deletionFailureCode ? (
+                  <div className="rounded-lg border bg-muted/20 p-3 text-sm">
+                    <p>
+                      Deletion phase: {request.user.deletionPhase || "pending"}
+                    </p>
+                    {request.user.deletionFailureCode ? (
+                      <p className="mt-1 text-amber-700 dark:text-amber-300">
+                        Cleanup is waiting for a dependency and will retry
+                        automatically.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="rounded-lg border bg-muted/20 p-3 text-sm">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     User reason

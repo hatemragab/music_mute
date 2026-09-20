@@ -77,11 +77,13 @@ library retains job history and retrieves completed voice-only MP3 output on dem
 [mobile processing tracker](docs/tasks/mobile-audio-processing.md) for implementation
 status, local test results and separate live-service validation requirements.
 
-Account deletion is available in both apps with recent authentication, durable
-request recovery and account-scoped local cleanup. The backend coordinates storage
-and identity deletion. Public `/delete-account` and `/privacy` pages require
+Account deletion is available in both apps with recent authentication, an exact
+15-day recovery deadline, durable request recovery, and account-scoped local
+cleanup. The backend immediately blocks new costly work, fences active work, and
+coordinates storage and identity deletion after the deadline. Public
+`/delete-account` and `/privacy` pages require
 operator-supplied publication settings. See the [implementation and validation record](docs/validation/2026-09-10-store-readiness.md)
-and [deletion operations guide](backend/docs/account-deletion.md).
+and [deletion operations guide](docs/account-deletion.md).
 
 Both apps use `com.hatem.musicmute`. This replaces the earlier development ID
 `com.hatem.vocal`; the operating systems treat them as separate apps, so old
@@ -150,7 +152,9 @@ With JDK 17 and Android SDK 36 configured:
 
 ```sh
 cd android
-./gradlew :app:assembleDebug :app:lintDebug :app:testDebugUnitTest
+./gradlew :app:assembleDirectDebug :app:assemblePlayDebug \
+  :app:lintDirectDebug :app:lintPlayDebug \
+  :app:testDirectDebugUnitTest :app:testPlayDebugUnitTest
 ```
 
 ## Validate iOS
@@ -185,7 +189,7 @@ integration tests also require local MongoDB, Redis, and Google Chrome.
 | [Audio API](backend/docs/api/audio-processing.md)                  | Mobile history and unavailable-boundary contracts         |
 | [Audio operations](backend/docs/operations/audio-processing.md)    | Storage and retained-job operations                       |
 | [Dashboard](dashboard/README.md)                                   | Administrator setup, checks, and packaging                |
-| [Account deletion](backend/docs/account-deletion.md)               | Identity and storage cleanup operations                   |
+| [Account deletion](docs/account-deletion.md)                       | Identity and storage cleanup operations                   |
 | [Mobile processing tracker](docs/tasks/mobile-audio-processing.md) | Implementation status and validation boundaries           |
 | [Contributing](CONTRIBUTING.md)                                    | Change scope, local checks, and pull requests             |
 

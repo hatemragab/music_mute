@@ -180,7 +180,7 @@ class AuthApiClient(
 
     suspend fun deleteAccount(ownerUid: String = currentUid() ?: throw AuthFailure(AuthProblem.UNAUTHENTICATED)): AccountDeletionReceipt {
         val receipt: AccountDeletionReceipt = decode(request("DELETE", "/users/me", replaySafe = false, expectedStatus = 202, expectedOwnerUid = ownerUid, retainResponseForOwner = true))
-        if (receipt.status != "accepted" || receipt.requestId.isBlank())
+        if (receipt.status != "accepted" || receipt.requestId.isBlank() || receipt.recoverUntil.isNullOrBlank())
             throw AuthFailure(AuthProblem.SERVICE_UNAVAILABLE)
         return receipt
     }

@@ -13,6 +13,7 @@ import {
   ServerCog,
   ShieldCheck,
   ShieldAlert,
+  ShieldBan,
   Sun,
   Users,
   type LucideIcon,
@@ -59,6 +60,12 @@ export const NAV_ITEMS: NavItem[] = [
     icon: BriefcaseBusiness,
   },
   { label: "Users", to: "/users", permission: "users.read", icon: Users },
+  {
+    label: "Abuse events",
+    to: "/abuse-events",
+    permission: "abuse.read",
+    icon: ShieldBan,
+  },
   {
     label: "Account recovery",
     to: "/account-recovery",

@@ -5,10 +5,9 @@ import {
   createDashboardFixture,
   type DashboardFixture,
 } from "../../src/test/dashboard-fixtures";
+import { E2E_API_ORIGIN, E2E_APP_ORIGIN } from "./urls";
 
 const ROLE_KEY = "musicmute:e2e-role";
-const APP_ORIGIN = "http://127.0.0.1:4173";
-export const E2E_API_ROOT = `http://127.0.0.1:${process.env.DASHBOARD_E2E_API_PORT ?? "3100"}/api/v1`;
 
 export async function setDashboardRole(page: Page, role: AdminRole | null) {
   await page.addInitScript(
@@ -24,13 +23,13 @@ export async function installDashboardFixture(
   page: Page,
   fixture: DashboardFixture = createDashboardFixture(),
 ) {
-  await page.route(`${E2E_API_ROOT}/**`, async (route) => {
+  await page.route(`${E2E_API_ORIGIN}/**`, async (route) => {
     const request = route.request();
     const corsHeaders = {
-      "access-control-allow-origin": APP_ORIGIN,
+      "access-control-allow-origin": E2E_APP_ORIGIN,
       "access-control-allow-headers":
         "Authorization, Content-Type, X-Request-Id, X-Installation-Id",
-      "access-control-allow-methods": "GET, POST, PUT, PATCH, OPTIONS",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     };
     if (request.method() === "OPTIONS") {
       await route.fulfill({ status: 204, headers: corsHeaders, body: "" });

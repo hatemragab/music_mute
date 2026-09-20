@@ -138,7 +138,9 @@ func processingPrepared(root: URL, owner: String = "owner-a") throws -> Prepared
     operationId: operation, ownerUid: owner, fileURL: file,
     declaration: InputDeclaration(
       extension: "mp3", contentType: "audio/mpeg", bytes: Int64(data.count),
-      durationSeconds: 1, sha256: Data(SHA256.hash(data: data)).base64EncodedString()))
+      durationSeconds: 1, sha256: Data(SHA256.hash(data: data)).base64EncodedString()),
+    policyVersion: 2, preparationProfileId: ProcessingMediaPolicy.standard.profileID,
+    mediaSource: "audio_file")
 }
 
 func processingJob(id: String, status: String = "awaiting_upload") -> Job {

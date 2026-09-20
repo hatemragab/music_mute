@@ -7,12 +7,14 @@ import Foundation
   func create(requestId: UUID, input: InputDeclaration, metadata: JobSourceMetadata) async throws
     -> CreateReservation
   func renewUpload(id: String) async throws -> UploadGrant
+  func renewUpload(id: String, requestId: UUID) async throws -> UploadGrant
   func confirmUpload(id: String) async throws -> JobMutation
   func list(cursor: String?, status: String?) async throws -> JobPage
   func detail(id: String) async throws -> Job
   func cancel(id: String) async throws -> JobMutation
   func retry(id: String, requestId: UUID) async throws -> JobMutation
   func download(id: String, artifact: String) async throws -> DownloadGrant
+  func download(id: String, artifact: String, requestId: UUID) async throws -> DownloadGrant
   func rename(id: String, displayName: String) async throws -> Job
   func delete(id: String) async throws
   func report(_ event: ClientErrorEvent) async throws -> ClientErrorReceipt
@@ -26,6 +28,12 @@ extension JobsAPI {
     -> CreateReservation
   {
     try await create(requestId: requestId, input: input)
+  }
+  func renewUpload(id: String, requestId: UUID) async throws -> UploadGrant {
+    try await renewUpload(id: id)
+  }
+  func download(id: String, artifact: String, requestId: UUID) async throws -> DownloadGrant {
+    try await download(id: id, artifact: artifact)
   }
   func rename(id: String, displayName: String) async throws -> Job {
     throw JobsFailure.serviceUnavailable
@@ -110,17 +118,24 @@ extension JobsAPI {
       "POST", "/jobs",
       body: encoder.encode(
         Body(
-          policyVersion: metadata.policyVersion,
-          preparationProfileId: metadata.preparationProfileId,
-          source: metadata.source, requestId: try requestUUID(requestId), input: input,
+          policyVersion: metadata.policyVersion ?? 2,
+          preparationProfileId: metadata.preparationProfileId
+            ?? ProcessingMediaPolicy.standard.profileID,
+          source: metadata.source ?? (metadata.sourceKind == .url ? "youtube" : "audio_file"),
+          requestId: try requestUUID(requestId), input: input,
           sourceTitle: title,
           sourceKind: metadata.sourceKind, sourceUrl: metadata.sourceURL,
           clientStartedAt: metadata.clientStartedAt.map(Self.iso8601))),
       installation: true)
   }
+  func renewUpload(id: String, requestId: UUID) async throws -> UploadGrant {
+    struct Body: Encodable { let requestId: String }
+    return try await send(
+      "POST", route(id, "upload-url"),
+      body: encoder.encode(Body(requestId: try requestUUID(requestId))), installation: true)
+  }
   func renewUpload(id: String) async throws -> UploadGrant {
-    try await send(
-      "POST", route(id, "upload-url"), body: encoder.encode(Empty()), installation: true)
+    try await renewUpload(id: id, requestId: UUID())
   }
   func confirmUpload(id: String) async throws -> JobMutation {
     try await send(
@@ -147,10 +162,17 @@ extension JobsAPI {
       installation: true)
   }
   func download(id: String, artifact: String) async throws -> DownloadGrant {
+    try await download(id: id, artifact: artifact, requestId: UUID())
+  }
+  func download(id: String, artifact: String, requestId: UUID) async throws -> DownloadGrant {
     guard artifact == "input" || artifact == "output" else { throw JobsFailure.invalidInput }
-    struct Body: Encodable { let artifact: String }
+    struct Body: Encodable {
+      let artifact: String
+      let requestId: String
+    }
     return try await send(
-      "POST", route(id, "download-url"), body: encoder.encode(Body(artifact: artifact)))
+      "POST", route(id, "download-url"),
+      body: encoder.encode(Body(artifact: artifact, requestId: try requestUUID(requestId))))
   }
   func rename(id: String, displayName: String) async throws -> Job {
     struct Body: Encodable { let displayName: String }
@@ -235,7 +257,8 @@ extension JobsAPI {
         "PROCESSING_NOT_ALLOWED", "INSTALLATION_REQUIRED", "DEVICE_NOT_FOUND",
         "PROFILE_SYNC_REQUIRED", "DEVICE_SYNC_REQUIRED", "DEVICE_REPORT_CONFLICT",
         "JOB_STATE_CONFLICT", "IDEMPOTENCY_CONFLICT", "UPLOAD_NOT_READY",
-        "NEW_INPUT_REQUIRED", "JOB_ACTIVE", "JOB_NOT_FOUND",
+        "UPLOAD_RESERVATION_EXPIRED", "UPLOAD_BYTE_LIMIT_REACHED",
+        "UPLOAD_ATTEMPT_LIMIT_REACHED", "NEW_INPUT_REQUIRED", "JOB_ACTIVE", "JOB_NOT_FOUND",
       ]
       if let rawCode, ProcessingMediaMessage.serverCodes.contains(rawCode) {
         throw JobsFailure.conflict(code: rawCode)

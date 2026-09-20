@@ -1,6 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Schema as MongoSchema, type Types } from 'mongoose';
 import type { ObjectIdentity } from '../../jobs/job.types.js';
+import {
+  JOB_FAILURE_CLASSES,
+  type JobFailureClass,
+} from '../../jobs/job-lifecycle-policy.js';
 import { isSha256 } from '../../jobs/job-state.js';
 import {
   UUID_V4_PATTERN,
@@ -74,7 +78,7 @@ const outputReservation = new MongoSchema<WorkerOutputReservation>(
       type: Number,
       required: true,
       min: 0.001,
-      max: 1800,
+      max: 1200,
     },
     grantExpiresAt: { type: Date, required: true },
   },
@@ -134,6 +138,8 @@ export class WorkerAttempt {
   outputReservation!: WorkerOutputReservation | null;
   @Prop({ type: String, default: null, maxlength: 100 })
   terminalCode!: string | null;
+  @Prop({ type: String, default: null, enum: JOB_FAILURE_CLASSES })
+  failureClass!: JobFailureClass | null;
   @Prop({ type: String, default: null, maxlength: 500 })
   terminalSummary!: string | null;
   @Prop({ type: Date, default: null }) finishedAt!: Date | null;

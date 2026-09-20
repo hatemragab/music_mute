@@ -1,17 +1,15 @@
 import { expect, test } from "@playwright/test";
 
 import type { AdminRole } from "../src/api/contracts";
-import {
-  E2E_API_ROOT,
-  installDashboardFixture,
-  setDashboardRole,
-} from "./helpers/session";
+import { installDashboardFixture, setDashboardRole } from "./helpers/session";
+import { E2E_API_ORIGIN } from "./helpers/urls";
 
 const expectedNavigation: Record<AdminRole, string[]> = {
   owner: [
     "Overview",
     "Jobs",
     "Users",
+    "Abuse events",
     "Account recovery",
     "Releases",
     "Update policy",
@@ -26,6 +24,7 @@ const expectedNavigation: Record<AdminRole, string[]> = {
     "Overview",
     "Jobs",
     "Users",
+    "Abuse events",
     "Account recovery",
     "Settings",
     "Worker fleet",
@@ -70,8 +69,8 @@ test("direct route and forged API request remain forbidden to support", async ({
   await page.goto("/administrators");
   await expect(page.getByRole("alert")).toContainText("Not authorized");
 
-  const status = await page.evaluate(async (apiRoot) => {
-    const response = await fetch(`${apiRoot}/admin/access`, {
+  const status = await page.evaluate(async (url) => {
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         authorization: "Bearer support-fixture",
@@ -85,6 +84,6 @@ test("direct route and forged API request remain forbidden to support", async ({
       }),
     });
     return response.status;
-  }, E2E_API_ROOT);
+  }, `${E2E_API_ORIGIN}/admin/access`);
   expect(status).toBe(403);
 });

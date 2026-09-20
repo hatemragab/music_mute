@@ -465,6 +465,9 @@ try {
     'POST',
     '/jobs',
     {
+      policyVersion: 2,
+      preparationProfileId: 'preserve-or-aac-lc-256-v1',
+      source: 'audio_file',
       requestId: randomUUID(),
       input: {
         extension: inputExtension,
@@ -609,6 +612,7 @@ try {
   assert.equal(completed.status, 'ready');
   const download = await api('POST', `/jobs/${created.id}/download-url`, {
     artifact: 'output',
+    requestId: randomUUID(),
   });
   const downloaded = await fetch(download.url, {
     signal: AbortSignal.timeout(transferTimeoutMs),
@@ -625,7 +629,7 @@ try {
   const attempts = app.get(getModelToken('WorkerAttempt'));
   const slots = app.get(getModelToken('WorkerSlot'));
   const jobs = app.get(getModelToken('Job'));
-  const usage = app.get(getModelToken('ProcessingUsageLedger'));
+  const usage = app.get(getModelToken('ProcessingReservation'));
   const notifications = app.get(getModelToken('NotificationOutbox'));
   assert.equal(await attempts.countDocuments({ jobId: created.id }), 1);
   assert.equal(
@@ -646,6 +650,9 @@ try {
         'POST',
         '/jobs',
         {
+          policyVersion: 2,
+          preparationProfileId: 'preserve-or-aac-lc-256-v1',
+          source: 'audio_file',
           requestId: randomUUID(),
           input: {
             extension: 'mp3',

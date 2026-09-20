@@ -6,7 +6,7 @@ struct HomeView: View {
   var acceptURL: (String) async -> Bool = { _ in false }
   var beginImport: () -> Void = {}
   var importAudio: (URL) -> Void = { _ in }
-  var photoSourceLimit: Int64 = 29_999_999
+  var photoSourceLimit = ProcessingMediaPolicy.standard.maxSourceBytes!
   var importPhoto: (URL) -> Void = { _ in }
   var reportImportFailure: (Error) -> Void = { _ in }
   var showProcessing: () -> Void = {}

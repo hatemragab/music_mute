@@ -27,6 +27,7 @@ import { RetryJobDto } from './dto/retry-job.dto.js';
 import { RenameJobDto } from './dto/rename-job.dto.js';
 import { JobMetadataService } from './job-metadata.service.js';
 import { JobDeletionService } from './job-deletion.service.js';
+import { UploadGrantDto } from './dto/upload-grant.dto.js';
 
 @Controller('jobs')
 export class JobsController {
@@ -65,7 +66,7 @@ export class JobsController {
   }
 
   @Post(':id/cancel')
-  @LimitOperation('processing-mutation')
+  @LimitOperation('processing-cancel')
   @HttpCode(200)
   cancel(
     @Req() req: AuthRequest,
@@ -76,7 +77,7 @@ export class JobsController {
   }
 
   @Post(':id/retry')
-  @LimitOperation('processing-create')
+  @LimitOperation('processing-retry')
   @RequireProcessingAccess()
   retry(
     @Req() req: AuthRequest,
@@ -106,7 +107,7 @@ export class JobsController {
   }
 
   @Post(':id/download-url')
-  @LimitOperation('processing-grant')
+  @LimitOperation('processing-download')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   download(
@@ -114,7 +115,12 @@ export class JobsController {
     @Param('id') id: string,
     @Body() dto: DownloadJobDto,
   ) {
-    return this.query.download(req.user!._id.toHexString(), id, dto.artifact);
+    return this.query.download(
+      req.user!._id.toHexString(),
+      id,
+      dto.artifact,
+      dto.requestId,
+    );
   }
 
   @Post()
@@ -132,20 +138,24 @@ export class JobsController {
   }
 
   @Post(':id/upload-url')
-  @LimitOperation('processing-grant')
+  @LimitOperation('processing-upload-grant')
   @RequireProcessingAccess()
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   renew(
     @Req() req: AuthRequest,
     @Param('id') id: string,
-    @Body(EmptyBodyPipe) _body: unknown,
+    @Body() dto: UploadGrantDto,
   ) {
-    return this.jobs.renewUpload(req.user!._id.toHexString(), id);
+    return this.jobs.renewUpload(
+      req.user!._id.toHexString(),
+      id,
+      dto.requestId,
+    );
   }
 
   @Post(':id/upload-complete')
-  @LimitOperation('processing-grant')
+  @LimitOperation('processing-upload-confirm')
   @RequireProcessingAccess()
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')

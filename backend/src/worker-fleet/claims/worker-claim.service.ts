@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
-import { trusted, type Connection, type Model } from 'mongoose';
+import {
+  trusted,
+  type ClientSession,
+  type Connection,
+  type Model,
+} from 'mongoose';
+import type mongoose from 'mongoose';
+import { ProcessingAdmissionService } from '../../admin-settings/processing-admission.service.js';
 import { Job } from '../../jobs/job.schema.js';
 import type { WorkerPrincipal } from '../auth/worker-auth.types.js';
 import { WorkerAttempt } from '../jobs/worker-attempt.schema.js';
@@ -30,6 +37,7 @@ export class WorkerClaimService {
     @InjectModel(WorkerFleetPolicy.name)
     private readonly policies: Model<WorkerFleetPolicy>,
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
+    private readonly admission: ProcessingAdmissionService,
   ) {}
 
   async openSession(principal: WorkerPrincipal, dto: OpenWorkerSessionDto) {
@@ -276,10 +284,11 @@ export class WorkerClaimService {
           .map((recipe) => recipe.recipeId)
           .filter((recipe) => slot.allowedRecipeIds.includes(recipe));
         if (eligibleRecipes.length === 0) throw workerError('WORKER_FORBIDDEN');
-        const candidate = await this.jobs
-          .findOne({
+        const candidate = await this.oldestEligibleCandidate(
+          {
             status: 'queued',
             deletedAt: null,
+            queuedAt: trusted({ $ne: null }),
             currentExecution: null,
             inputObject: trusted({ $ne: null }),
             recipeSnapshot: trusted({ $ne: null }),
@@ -288,17 +297,21 @@ export class WorkerClaimService {
             }),
             'retryEligibility.eligible': true,
             'retryEligibility.attemptsRemaining': trusted({ $gt: 0 }),
-            attemptNumber: trusted({ $lt: policy.maxAttempts }),
+            $expr: trusted({
+              $lt: [
+                '$attemptNumber',
+                '$admissionSnapshot.maxInfrastructureAttempts',
+              ],
+            }),
             $or: [
               { 'retryEligibility.nextAttemptAt': null },
               {
                 'retryEligibility.nextAttemptAt': trusted({ $lte: new Date() }),
               },
             ],
-          })
-          .sort({ queuedAt: 1, _id: 1 })
-          .session(session)
-          .lean();
+          },
+          session,
+        );
         if (!candidate) return null;
         const now = new Date();
         const attemptId = randomUUID();
@@ -403,6 +416,42 @@ export class WorkerClaimService {
       };
     } finally {
       await session.endSession();
+    }
+  }
+
+  private async oldestEligibleCandidate(
+    eligibility: mongoose.QueryFilter<Job>,
+    session: ClientSession,
+  ): Promise<Job | null> {
+    let cursor: { _id: Job['_id']; queuedAt: Date } | null = null;
+    while (true) {
+      const candidate: Job | null = await this.jobs
+        .findOne({
+          $and: [
+            eligibility,
+            ...(cursor
+              ? [
+                  {
+                    $or: [
+                      { queuedAt: { $gt: cursor.queuedAt } },
+                      {
+                        queuedAt: cursor.queuedAt,
+                        _id: { $gt: cursor._id },
+                      },
+                    ],
+                  },
+                ]
+              : []),
+          ],
+        })
+        .sort({ queuedAt: 1, _id: 1 })
+        .session(session)
+        .lean();
+      if (!candidate) return null;
+      if (await this.admission.claimProcessingSlot(candidate, session))
+        return candidate;
+      if (!candidate.queuedAt) return null;
+      cursor = { _id: candidate._id, queuedAt: candidate.queuedAt };
     }
   }
 

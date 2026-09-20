@@ -2,12 +2,15 @@ import type {
   AdminRole,
   AdminSession,
   AccountRecoveryRequest,
+  AccountRestriction,
+  AbuseEvent,
   AlertRecord,
   AuditEvent,
   JobDetail,
   Permission,
-  ProcessingSettings,
-  ProcessingUsage,
+  AccountPolicy,
+  AccountPolicyOverride,
+  AccountUsage,
   RevisionCommand,
   ReleaseDetail,
   UpdatePolicy,
@@ -117,6 +120,9 @@ const permissionFor = (method: string, path: string): Permission | null => {
   }
   if (path.startsWith("/admin/account-recovery-requests"))
     return "users.account-recovery.manage";
+  if (path.startsWith("/admin/abuse-events")) return "abuse.read";
+  if (path.endsWith("/restriction"))
+    return method === "GET" ? "abuse.read" : "users.restrictions.manage";
   if (path.startsWith("/admin/users"))
     return method === "GET" ? "users.read" : "users.processing.manage";
   if (path.startsWith("/admin/worker-fleet/machines")) {
@@ -143,29 +149,101 @@ export const sessionForRole = (role: AdminRole): AdminSession => ({
 
 export class DashboardFixture {
   readonly requests: FixtureRequest[] = [];
-  processingUsage: ProcessingUsage = {
-    revision: 1,
+  accountUsage: AccountUsage = {
+    schemaVersion: 2,
+    plan: "standard",
     policyRevision: 1,
-    allowanceAudioSeconds: 3600,
-    usedAudioSeconds: 900,
-    reservedAudioSeconds: 600,
-    remainingAudioSeconds: 2100,
-    activeJobs: 1,
-    maxActiveJobs: 1,
-    nextReplenishmentAt: null,
-    replenishments: [],
-    availability: "available",
+    overrideRevision: null,
+    effectivePolicySource: "global",
+    overrideExpiresAt: null,
+    period: {
+      key: "2026-09",
+      start: "2026-09-01T00:00:00.000Z",
+      end: "2026-10-01T00:00:00.000Z",
+      nextResetAt: "2026-10-01T00:00:00.000Z",
+    },
+    processing: {
+      limitSeconds: 7_200,
+      usedSeconds: 900,
+      reservedSeconds: 600,
+      releasedSeconds: 0,
+      remainingSeconds: 5_700,
+    },
+    uploads: {
+      dailyGrantLimit: 30,
+      dailyGrants: 2,
+      dailyRemainingGrants: 28,
+      dailyResetAt: "2026-09-12T00:00:00.000Z",
+      monthlyGrantLimit: 200,
+      monthlyGrants: 12,
+      monthlyRemainingGrants: 188,
+      monthlyByteLimit: 1_000_000_000,
+      confirmedBytes: 50_000_000,
+      monthlyRemainingBytes: 950_000_000,
+      monthlyResetAt: "2026-10-01T00:00:00.000Z",
+    },
+    storage: {
+      limitBytes: 1_000_000_000,
+      retainedBytes: 100_000_000,
+      remainingBytes: 900_000_000,
+    },
+    effectiveLimits: {
+      maxDurationSeconds: 1_200,
+      maxPreparedAudioBytes: 50_000_000,
+      maxClientInputAttempts: 5,
+      signedUrlTtlSeconds: 600,
+    },
+    downloads: {
+      monthlyGrantLimit: 150,
+      monthlyGrants: 10,
+      monthlyRemainingGrants: 140,
+      monthlyByteLimit: 10_000_000_000,
+      estimatedBytes: 500_000_000,
+      monthlyRemainingBytes: 9_500_000_000,
+      monthlyResetAt: "2026-10-01T00:00:00.000Z",
+    },
+    usageRevision: 1,
+    waitingJobs: 3,
+    maxWaitingJobs: 3,
+    processingJobs: 1,
+    maxProcessingJobs: 1,
+    availability: { status: "blocked", reason: "waiting_job_limit" },
     checkedAt: NOW,
-    allowanceOverride: null,
+    policyOverride: null,
   };
-  settings: ProcessingSettings = {
+  settings: AccountPolicy = {
+    plan: "standard",
     revision: 1,
     acceptNewJobs: true,
     maintenanceMessageEn: "",
     maintenanceMessageAr: null,
-    maxInputBytesExclusive: 30_000_000,
-    maxDurationSecondsExclusive: 600,
-    maxActiveJobsPerUser: null,
+    values: {
+      monthlyProcessingSeconds: 7_200,
+      maxDurationSeconds: 1_200,
+      maxPreparedAudioBytes: 50_000_000,
+      dailyUploadGrants: 30,
+      monthlyUploadGrants: 200,
+      monthlyConfirmedUploadBytes: 1_000_000_000,
+      maxWaitingJobs: 3,
+      maxProcessingJobs: 1,
+      maxInfrastructureAttempts: 3,
+      maxClientInputAttempts: 5,
+      monthlyDownloadGrants: 150,
+      monthlyEstimatedDownloadBytes: 10_000_000_000,
+      maxRetainedOutputBytes: 1_000_000_000,
+      signedUrlTtlSeconds: 600,
+      monthlyServiceOutboundBytes: 80_000_000_000,
+      deletionGraceHours: 360,
+    },
+    enforcedFeatures: [
+      "processing_minutes",
+      "media_limits",
+      "upload_limits",
+      "download_limits",
+      "retained_storage",
+      "service_outbound",
+    ],
+    updatedBy: "owner-fixture",
     updatedAt: NOW,
   };
   policy: UpdatePolicy = {
@@ -211,15 +289,15 @@ export class DashboardFixture {
     email: "listener@example.invalid",
     displayName: "Fixture Listener",
     status: "active",
-    processingSuspended: false,
     createdAt: NOW,
     updatedAt: NOW,
     revision: 1,
     processingCounts: { processing: 1, completed: 2 },
     recentJobIds: [FIXTURE_IDS.job],
-    suspension: null,
     deletion: null,
   };
+  restriction: AccountRestriction | null = null;
+  abuseEvents: AbuseEvent[] = [];
   recovery: AccountRecoveryRequest = {
     id: FIXTURE_IDS.recovery,
     status: "pending",
@@ -230,12 +308,14 @@ export class DashboardFixture {
     revision: 0,
     deletionRequestId: "fixture-deletion-request",
     deletionRequestedAt: NOW,
-    recoverUntil: "2026-12-11T00:00:00.000Z",
+    recoverUntil: "2026-09-26T00:00:00.000Z",
     user: {
       id: FIXTURE_IDS.user,
       email: this.user.email,
       displayName: this.user.displayName,
       status: "deleting",
+      deletionPhase: "grace_fence",
+      deletionFailureCode: null,
     },
   };
   releases: ReleaseDetail[] = [
@@ -492,29 +572,27 @@ export class DashboardFixture {
     if (method === "GET" && path === "/admin/session")
       return { status: 200, body: sessionForRole(role) };
     if (
-      path === `/admin/users/${FIXTURE_IDS.user}/processing-usage` &&
+      path === `/admin/users/${FIXTURE_IDS.user}/account-usage` &&
       method === "GET"
     ) {
-      return {
-        status: 200,
-        body: { ...this.processingUsage, revision: this.user.revision },
-      };
+      return { status: 200, body: this.accountUsage };
     }
     if (
-      (path === `/admin/users/${FIXTURE_IDS.user}/processing-allowance` &&
-        method === "PUT") ||
-      (path === `/admin/users/${FIXTURE_IDS.user}/clear-processing-allowance` &&
-        method === "POST")
+      path === `/admin/users/${FIXTURE_IDS.user}/account-policy-override` &&
+      ["PUT", "DELETE"].includes(method)
     ) {
       const body = input.body as RevisionCommand & {
-        allowanceAudioSeconds?: number;
-        expiresAt?: string;
+        values?: AccountPolicyOverride["values"];
+        expiresAt?: string | null;
       };
-      if (body.expectedRevision !== this.user.revision)
+      if (
+        body.expectedRevision !==
+        (this.accountUsage.policyOverride?.revision ?? 0)
+      )
         return error(
           409,
           "REVISION_CONFLICT",
-          "Account revision changed; refresh usage and review again.",
+          "Override revision changed; refresh usage and review again.",
         );
       if (!body.reason || !body.operationId)
         return error(
@@ -522,43 +600,57 @@ export class DashboardFixture {
           "INVALID_REQUEST",
           "Reason and operation ID are required.",
         );
-      const clear = path.endsWith("clear-processing-allowance");
+      const clear = method === "DELETE";
       if (
         !clear &&
-        (!body.allowanceAudioSeconds ||
-          !body.expiresAt ||
-          body.allowanceAudioSeconds < 3600 ||
-          body.allowanceAudioSeconds > 86400 ||
-          Date.parse(body.expiresAt) <= Date.now())
+        (!body.values ||
+          Object.keys(body.values).length === 0 ||
+          Object.values(body.values).some(
+            (value) => !Number.isSafeInteger(value) || value! < 1,
+          ) ||
+          (body.expiresAt !== null &&
+            (!body.expiresAt || Date.parse(body.expiresAt) <= Date.now())))
       )
         return error(
           400,
           "INVALID_REQUEST",
-          "Bounded allowance and future expiry are required.",
+          "A positive replacement and optional future expiry are required.",
         );
-      this.user = { ...this.user, revision: this.user.revision + 1 };
-      this.processingUsage = {
-        ...this.processingUsage,
-        revision: this.user.revision,
-        allowanceAudioSeconds: clear ? 3600 : body.allowanceAudioSeconds!,
-        remainingAudioSeconds:
-          (clear ? 3600 : body.allowanceAudioSeconds!) -
-          this.processingUsage.usedAudioSeconds -
-          this.processingUsage.reservedAudioSeconds,
-        allowanceOverride: clear
+      const limit = clear
+        ? this.settings.values.monthlyProcessingSeconds
+        : (body.values!.monthlyProcessingSeconds ??
+          this.settings.values.monthlyProcessingSeconds);
+      const nextRevision =
+        (this.accountUsage.policyOverride?.revision ?? 0) + 1;
+      this.accountUsage = {
+        ...this.accountUsage,
+        overrideRevision: clear ? null : nextRevision,
+        effectivePolicySource: clear ? "global" : "account_override",
+        overrideExpiresAt: clear ? null : (body.expiresAt ?? null),
+        processing: {
+          ...this.accountUsage.processing,
+          limitSeconds: limit,
+          remainingSeconds: Math.max(
+            0,
+            limit -
+              this.accountUsage.processing.usedSeconds -
+              this.accountUsage.processing.reservedSeconds,
+          ),
+        },
+        policyOverride: clear
           ? null
           : {
-              allowanceAudioSeconds: body.allowanceAudioSeconds!,
-              expiresAt: body.expiresAt!,
+              revision: nextRevision,
+              values: body.values!,
+              expiresAt: body.expiresAt ?? null,
+              reason: body.reason,
+              createdBy: "owner-fixture",
+              updatedBy: "owner-fixture",
+              createdAt: NOW,
+              updatedAt: NOW,
             },
       };
-      return {
-        status: 200,
-        body: {
-          revision: this.user.revision,
-          allowanceOverride: this.processingUsage.allowanceOverride,
-        },
-      };
+      return { status: 200, body: this.accountUsage };
     }
     if (method === "GET" && path === "/admin/overview")
       return {
@@ -753,22 +845,46 @@ export class DashboardFixture {
       return { status: 200, body: page([this.user]) };
     if (path === `/admin/users/${this.user.id}` && method === "GET")
       return { status: 200, body: this.user };
-    if (path.startsWith(`/admin/users/${this.user.id}/`) && method === "POST") {
-      const suspended = path.endsWith("suspend-processing");
-      this.user = {
-        ...this.user,
-        processingSuspended: suspended,
-        revision: this.user.revision + 1,
-        suspension: suspended
-          ? {
-              reason: "Fixture support action",
-              actorUid: `${role}-fixture`,
-              at: NOW,
-            }
-          : null,
+    if (path === `/admin/users/${this.user.id}/restriction` && method === "GET")
+      return { status: 200, body: this.restriction };
+    if (
+      path === `/admin/users/${this.user.id}/restriction` &&
+      method === "PUT"
+    ) {
+      const body = input.body as {
+        reasonCode: AccountRestriction["reasonCode"];
+        note: string;
+        expiresAt?: string;
       };
-      return { status: 201, body: this.user };
+      this.restriction = {
+        id: "000000000000000000000060",
+        accountId: this.user.id,
+        status: "active",
+        reasonCode: body.reasonCode,
+        note: body.note,
+        startsAt: NOW,
+        expiresAt: body.expiresAt ?? null,
+        createdBy: `${role}-fixture`,
+        updatedBy: `${role}-fixture`,
+        updatedAt: NOW,
+        revision: (this.restriction?.revision ?? 0) + 1,
+      };
+      return { status: 200, body: this.restriction };
     }
+    if (
+      path === `/admin/users/${this.user.id}/restriction` &&
+      method === "DELETE"
+    ) {
+      if (this.restriction)
+        this.restriction = {
+          ...this.restriction,
+          status: "removed",
+          revision: this.restriction.revision + 1,
+        };
+      return { status: 200, body: this.restriction };
+    }
+    if (path === "/admin/abuse-events" && method === "GET")
+      return { status: 200, body: page(this.abuseEvents) };
 
     if (path === "/admin/worker-fleet/machines" && method === "GET") {
       const status = url.searchParams.get("status");
@@ -1101,11 +1217,25 @@ export class DashboardFixture {
       };
     }
 
-    if (path === "/admin/settings/processing") {
+    if (path === "/admin/settings/account-policy") {
       if (method === "GET") return { status: 200, body: this.settings };
+      const body = input.body as Record<string, unknown>;
+      const values = Object.fromEntries(
+        Object.keys(this.settings.values).map((key) => [
+          key,
+          body[key] ??
+            this.settings.values[key as keyof typeof this.settings.values],
+        ]),
+      ) as unknown as AccountPolicy["values"];
       this.settings = {
         ...this.settings,
-        ...(input.body as Partial<ProcessingSettings>),
+        acceptNewJobs: Boolean(body.acceptNewJobs),
+        maintenanceMessageEn: String(body.maintenanceMessageEn ?? ""),
+        maintenanceMessageAr:
+          typeof body.maintenanceMessageAr === "string"
+            ? body.maintenanceMessageAr
+            : null,
+        values,
         revision: this.settings.revision + 1,
         updatedAt: NOW,
       };

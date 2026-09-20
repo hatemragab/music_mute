@@ -1,5 +1,4 @@
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
-import { ProcessingUsageLedger } from '../processing-usage/processing-usage.schema.js';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isUUID } from 'class-validator';
@@ -42,14 +41,8 @@ export class JobActionsService {
     private readonly transactions: ProcessingTransactions,
     private readonly accountAccess: AccountAccessService,
     private readonly admission: ProcessingAdmissionService,
+    private readonly usage: ProcessingUsageService,
   ) {}
-
-  private get usage() {
-    return new ProcessingUsageService(
-      this.jobs.db.model<ProcessingUsageLedger>(ProcessingUsageLedger.name),
-      this.jobs,
-    );
-  }
 
   async cancel(userId: string, jobId: string) {
     const principal: JobActionPrincipal = {
@@ -198,6 +191,9 @@ export class JobActionsService {
           .session(session)
           .lean();
         this.assertRetryable(original);
+        const originalAdmission = original.admissionSnapshot;
+        if (!originalAdmission)
+          throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
 
         const newJobId = new Types.ObjectId();
         const admissionSnapshot = await this.admission.assertNewWork(
@@ -205,14 +201,11 @@ export class JobActionsService {
           original.inputReservation,
           session,
           newJobId,
-          original.admissionSnapshot?.policyVersion === 2
-            ? {
-                policyVersion: 2,
-                preparationProfileId:
-                  original.admissionSnapshot.preparationProfileId,
-                source: original.admissionSnapshot.source,
-              }
-            : {},
+          {
+            policyVersion: 2,
+            preparationProfileId: originalAdmission.preparationProfileId,
+            source: originalAdmission.source,
+          },
         );
         const touched = await this.jobs.updateOne(
           {
@@ -232,6 +225,7 @@ export class JobActionsService {
             {
               _id: newJobId,
               userId: owner,
+              logicalAudioId: original.logicalAudioId,
               requestId,
               requestHash: hash,
               retryOfJobId: original._id,
@@ -248,7 +242,7 @@ export class JobActionsService {
               recipeSnapshot: { ...original.recipeSnapshot },
               retryEligibility: {
                 eligible: true,
-                attemptsRemaining: 3,
+                attemptsRemaining: admissionSnapshot.maxInfrastructureAttempts,
                 nextAttemptAt: null,
               },
               queuedAt,

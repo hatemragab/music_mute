@@ -60,7 +60,7 @@ actor AudioFiles {
       let duration = Double(audioFile.length) / audioFile.fileFormat.sampleRate
       let playable = try await asset.load(.isPlayable)
       guard !audio.isEmpty, video.isEmpty, playable, duration.isFinite, duration > 0,
-        duration <= 1800
+        duration <= ProcessingMediaPolicy.standard.maxDuration
       else {
         throw AudioFailure.invalidAudio
       }

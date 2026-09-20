@@ -58,6 +58,8 @@ export class AccountRecoveryService implements OnModuleInit {
             requestId: user.deletionRequestId,
             requestedAt: user.deletionRequestedAt?.toISOString() ?? null,
             recoverUntil: recoverUntil?.toISOString() ?? null,
+            phase: user.deletionPhase ?? 'grace_fence',
+            failureCode: user.deletionFailureCode ?? null,
             recoveryAvailable:
               user.status === 'deleting' &&
               Boolean(recoverUntil && recoverUntil.getTime() > now.getTime()),

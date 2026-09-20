@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   DeleteObjectsCommand,
   HeadObjectCommand,
   S3Client,
@@ -53,11 +54,16 @@ describe('StorageTransfersService', () => {
       inputReservation: reservation,
       inputObject: null,
       admissionSnapshot: {
-        policyVersion: 1,
+        policyVersion: 2,
+        maxDurationSeconds: 1_200,
+        maxInputBytes: 50_000_000,
+        preparationProfileId: 'preserve-or-aac-lc-256-v1',
+        source: 'audio_file',
         settingsRevision: 1,
-        maxInputBytesExclusive: 30_000_000,
-        maxDurationSecondsExclusive: 600,
-        maxActiveJobsPerUser: 1,
+        maxWaitingJobs: 3,
+        maxProcessingJobs: 1,
+        maxInfrastructureAttempts: 3,
+        maxClientInputAttempts: 5,
         reservationExpiresAt: new Date(Date.now() + 60_000),
       },
     });
@@ -126,6 +132,22 @@ describe('StorageTransfersService', () => {
     expect(decodeURIComponent(url.pathname)).toBe(`/${object.key}`);
     expect(url.searchParams.get('versionId')).toBe(object.versionId);
     expect(url.searchParams.get('response-cache-control')).toBe('no-store');
+    expect(url.searchParams.get('X-Amz-Expires')).toBe('600');
+    client.destroy();
+  });
+
+  it('caps worker upload grants at ten minutes even with a larger legacy setting', async () => {
+    const { service, client } = fixture();
+    const grant = await service.createWorkerOutputGrant(
+      object,
+      new Date(Date.now() + 3_600_000),
+    );
+    const url = new URL(grant.url);
+    expect(url.searchParams.get('X-Amz-Expires')).toBe('600');
+    expect(grant.headers['x-amz-storage-class']).toBe('INTELLIGENT_TIERING');
+    expect(url.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toContain(
+      'x-amz-storage-class',
+    );
     client.destroy();
   });
 
@@ -263,6 +285,29 @@ describe('StorageTransfersService', () => {
       { Key: object.key, VersionId: 'v1' },
       { Key: object.key, VersionId: 'marker' },
     ]);
+    client.destroy();
+  });
+
+  it('deletes one exact version and reconciles a confirmed missing version', async () => {
+    const { service, client, send } = fixture();
+    send.mockResolvedValueOnce({} as never);
+    await expect(
+      service.deleteExactVersion(object.key, object.versionId),
+    ).resolves.toBeUndefined();
+    expect((send.mock.calls[0][0] as DeleteObjectCommand).input).toMatchObject({
+      Key: object.key,
+      VersionId: object.versionId,
+    });
+
+    send.mockRejectedValueOnce(
+      Object.assign(new Error('missing'), {
+        name: 'NoSuchVersion',
+        $metadata: { httpStatusCode: 404 },
+      }) as never,
+    );
+    await expect(
+      service.deleteExactVersion(object.key, object.versionId),
+    ).resolves.toBeUndefined();
     client.destroy();
   });
 });

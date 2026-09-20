@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { jobError } from './job-errors.js';
 import { JobsService } from './jobs.service.js';
 import { workerRecipeSnapshot } from './worker-recipes.js';
 
@@ -13,11 +14,16 @@ const input = {
   sha256: Buffer.alloc(32, 2).toString('base64'),
 };
 const admissionSnapshot = {
-  policyVersion: 1 as const,
+  policyVersion: 2 as const,
+  maxDurationSeconds: 1_200,
+  maxInputBytes: 50_000_000,
+  preparationProfileId: 'preserve-or-aac-lc-256-v1',
+  source: 'audio_file' as const,
   settingsRevision: 1,
-  maxInputBytesExclusive: 30_000_000,
-  maxDurationSecondsExclusive: 600,
-  maxActiveJobsPerUser: 1,
+  maxWaitingJobs: 3,
+  maxProcessingJobs: 1,
+  maxInfrastructureAttempts: 3,
+  maxClientInputAttempts: 5,
   reservationExpiresAt: new Date(Date.now() + 60_000),
 };
 
@@ -53,6 +59,16 @@ function fixture() {
     assertNewWork: vi.fn().mockResolvedValue(admissionSnapshot),
     assertAcceptedReservation: vi.fn(() => admissionSnapshot),
   };
+  const usage = {
+    reserveUploadGrant: vi.fn().mockResolvedValue({
+      expiresAt: new Date(Date.now() + 60_000),
+    }),
+    confirmUploadBytes: vi.fn().mockResolvedValue(undefined),
+  };
+  const cleanup = {
+    schedule: vi.fn().mockResolvedValue(undefined),
+    cancelScheduled: vi.fn().mockResolvedValue(undefined),
+  };
   return {
     service: new JobsService(
       jobs as never,
@@ -60,11 +76,15 @@ function fixture() {
       transactions as never,
       access as never,
       admission as never,
+      usage as never,
+      cleanup as never,
     ),
     jobs,
     storage,
     access,
     admission,
+    usage,
+    cleanup,
   };
 }
 
@@ -87,7 +107,9 @@ describe('public job admission', () => {
           deletedAt: null,
         }),
       };
-      f.jobs.findOne.mockReturnValueOnce(directLean(created.toObject()));
+      f.jobs.findOne
+        .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(created) })
+        .mockReturnValueOnce(directLean(created.toObject()));
       return [created];
     });
 
@@ -157,5 +179,41 @@ describe('public job admission', () => {
       }),
       expect.objectContaining({ runValidators: true }),
     );
+    expect(f.cleanup.cancelScheduled).toHaveBeenCalledWith(
+      job.inputReservation.key,
+      expect.anything(),
+    );
+  });
+
+  it('durably schedules an invalid unconfirmed object without storing its grant URL', async () => {
+    const f = fixture();
+    const job = {
+      _id: jobId,
+      userId: ownerId,
+      status: 'awaiting_upload',
+      revision: 2,
+      deletedAt: null,
+      inputObject: null,
+      inputReservation: { ...input, key: 'users/u/jobs/j/input/source.mp3' },
+      admissionSnapshot,
+      recipeSnapshot: { recipeId: 'kim-vocal-2-v1' },
+    };
+    f.jobs.findOne.mockReturnValueOnce(directLean(job));
+    f.storage.verifyInput.mockRejectedValue(jobError('UPLOAD_NOT_READY'));
+
+    await expect(
+      f.service.confirmUpload(ownerId.toHexString(), jobId.toHexString()),
+    ).rejects.toMatchObject({ response: { code: 'UPLOAD_NOT_READY' } });
+
+    expect(f.cleanup.schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: job.inputReservation.key,
+        versionId: null,
+        ownerUserId: ownerId,
+        reason: 'AUDIO_INPUT_INVALID',
+      }),
+    );
+    const scheduled = f.cleanup.schedule.mock.calls[0]?.[0];
+    expect(scheduled).not.toHaveProperty('url');
   });
 });

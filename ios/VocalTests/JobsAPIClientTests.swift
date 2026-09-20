@@ -91,13 +91,13 @@ import XCTest
     }
     let reservation = try await api.create(requestId: requestId, input: input)
     XCTAssertEqual(reservation.upload?.headers["If-None-Match"], "*")
-    _ = try await api.renewUpload(id: id)
+    _ = try await api.renewUpload(id: id, requestId: requestId)
     _ = try await api.confirmUpload(id: id)
     _ = try await api.list(cursor: "a+/=&?", status: "ready")
     _ = try await api.detail(id: id)
     _ = try await api.cancel(id: id)
     _ = try await api.retry(id: id, requestId: requestId)
-    _ = try await api.download(id: id, artifact: "output")
+    _ = try await api.download(id: id, artifact: "output", requestId: requestId)
     XCTAssertEqual(
       received.map { $0.httpMethod! },
       ["POST", "POST", "POST", "GET", "GET", "POST", "POST", "POST"])
@@ -113,15 +113,20 @@ import XCTest
       XCTAssertEqual(
         request.value(forHTTPHeaderField: "X-Installation-Id"),
         [0, 1, 2, 6].contains(index) ? installation.lowercased() : nil)
-      if [1, 2, 5].contains(index) { XCTAssertEqual(try body(request).count, 0) }
+      if [2, 5].contains(index) { XCTAssertEqual(try body(request).count, 0) }
     }
     XCTAssertEqual(try body(received[0])["requestId"] as? String, requestId.uuidString.lowercased())
-    XCTAssertEqual(Set(try body(received[0]).keys), ["requestId", "input"])
+    XCTAssertEqual(try body(received[1])["requestId"] as? String, requestId.uuidString.lowercased())
+    XCTAssertEqual(
+      Set(try body(received[0]).keys),
+      ["policyVersion", "preparationProfileId", "source", "requestId", "input"])
     let declaration = try XCTUnwrap(try body(received[0])["input"] as? [String: Any])
     XCTAssertEqual(
       Set(declaration.keys), ["extension", "contentType", "bytes", "durationSeconds", "sha256"])
     XCTAssertEqual(declaration["bytes"] as? Int, 123)
     XCTAssertEqual(try body(received[6])["requestId"] as? String, requestId.uuidString.lowercased())
+    XCTAssertEqual(try body(received[7])["requestId"] as? String, requestId.uuidString.lowercased())
+    XCTAssertEqual(try body(received[7])["artifact"] as? String, "output")
     XCTAssertEqual(try body(received[7])["artifact"] as? String, "output")
     XCTAssertEqual(
       URLComponents(url: received[3].url!, resolvingAgainstBaseURL: false)?.queryItems?.first(
@@ -309,6 +314,26 @@ import XCTest
       } catch {
         XCTAssertEqual(
           error as? JobsFailure, .conflict(code: code == "DEVICE_SYNC_REQUIRED" ? code : nil))
+      }
+    }
+  }
+
+  func testTransferLimitCodesRemainTypedWithoutRateCooldown() async throws {
+    let token = JobsTokenFixture()
+    for (status, code) in [
+      (429, "UPLOAD_GRANT_LIMIT_REACHED"),
+      (429, "DOWNLOAD_GRANT_LIMIT_REACHED"),
+      (409, "DOWNLOAD_BYTE_LIMIT_REACHED"),
+      (409, "RETAINED_STORAGE_LIMIT_REACHED"),
+      (503, "SERVICE_BANDWIDTH_LIMIT_REACHED"),
+    ] {
+      let api = client(token)
+      JobsURLProtocol.handler = { _ in (status, [:], Data("{\"code\":\"\(code)\"}".utf8)) }
+      do {
+        _ = try await api.detail(id: id)
+        XCTFail("Expected typed transfer limit")
+      } catch {
+        XCTAssertEqual(error as? JobsFailure, .conflict(code: code))
       }
     }
   }

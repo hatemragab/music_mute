@@ -156,7 +156,6 @@ describe("worker runtime HTTP integration", () => {
                 ],
                 leaseSeconds: 90,
                 processingDeadlineSeconds: 300,
-                maxAttempts: 3,
               },
               compatibleRelease: null,
               commands: [],

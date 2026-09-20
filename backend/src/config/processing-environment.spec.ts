@@ -24,11 +24,12 @@ describe('processing configuration', () => {
       }),
     ).toMatchObject({
       AUDIO_PROCESSING_ENABLED: true,
-      PROCESSING_URL_SECONDS: 900,
+      PROCESSING_URL_SECONDS: 600,
     });
   });
   it('rejects an invalid transfer lifetime', () => {
     const key = 'PROCESSING_URL_SECONDS';
     expect(() => validateEnvironment({ ...base, [key]: -1 })).toThrow(key);
+    expect(() => validateEnvironment({ ...base, [key]: 601 })).toThrow(key);
   });
 });

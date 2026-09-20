@@ -12,6 +12,7 @@ import { JobMetadataService } from '../src/jobs/job-metadata.service.js';
 import { JobsQueryService } from '../src/jobs/jobs-query.service.js';
 import { JobsController } from '../src/jobs/jobs.controller.js';
 import { JobsService } from '../src/jobs/jobs.service.js';
+import { PREPARATION_PROFILE_ID } from '../src/jobs/job.types.js';
 
 describe('processing admission HTTP boundary', () => {
   let app: INestApplication;
@@ -67,13 +68,18 @@ describe('processing admission HTTP boundary', () => {
     };
     const responses = [
       await request(server).post('/api/v1/jobs').send({
+        policyVersion: 2,
+        preparationProfileId: PREPARATION_PROFILE_ID,
+        source: 'audio_file',
         requestId: '14b2d476-e40e-4aeb-a8dd-24db12337695',
         input,
       }),
       await request(server)
         .post(`/api/v1/jobs/${id}/retry`)
         .send({ requestId: '24b2d476-e40e-4aeb-a8dd-24db12337695' }),
-      await request(server).post(`/api/v1/jobs/${id}/upload-url`).send({}),
+      await request(server).post(`/api/v1/jobs/${id}/upload-url`).send({
+        requestId: '34b2d476-e40e-4aeb-a8dd-24db12337695',
+      }),
       await request(server).post(`/api/v1/jobs/${id}/upload-complete`).send({}),
     ];
     expect(responses.map((response) => response.status)).toEqual([

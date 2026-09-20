@@ -13,23 +13,23 @@ const input = {
 };
 
 describe('processing input boundaries', () => {
-  it('accepts a valid audio declaration and the last permitted byte', () => {
+  it('accepts a valid audio declaration and the inclusive standard boundary', () => {
     expect(() => assertInputDeclaration(input)).not.toThrow();
     expect(() =>
       assertInputDeclaration({
         ...input,
-        bytes: 29_999_999,
-        durationSeconds: 599.999,
+        bytes: 50_000_000,
+        durationSeconds: 1_200,
       }),
     ).not.toThrow();
   });
-  it.each([0, -1, 30_000_000, 30_000_001, 1.5, NaN, Infinity])(
+  it.each([0, -1, 50_000_001, 50_000_002, 1.5, NaN, Infinity])(
     'rejects invalid byte count %s',
     (bytes) => {
       expect(() => assertInputDeclaration({ ...input, bytes })).toThrow();
     },
   );
-  it.each([0, -1, 600, 601, NaN, Infinity])(
+  it.each([0, -1, 1_200.001, 1_201, NaN, Infinity])(
     'rejects invalid duration %s',
     (durationSeconds) => {
       expect(() =>
@@ -74,9 +74,10 @@ describe('cancellation state rules', () => {
 });
 
 describe('captured duration limits', () => {
-  it('uses the accepted exclusive ceiling for measured duration', () => {
+  it('uses the same inclusive ceiling for measured duration', () => {
     expect(() => assertMeasuredDuration(299.9, 300)).not.toThrow();
-    expect(() => assertMeasuredDuration(300, 300)).toThrow();
-    expect(() => assertMeasuredDuration(500, 600)).not.toThrow();
+    expect(() => assertMeasuredDuration(300, 300)).not.toThrow();
+    expect(() => assertMeasuredDuration(300.001, 300)).toThrow();
+    expect(() => assertMeasuredDuration(1_200)).not.toThrow();
   });
 });

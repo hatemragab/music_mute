@@ -32,7 +32,7 @@ export class WorkerOutputGrantDto extends WorkerAttemptOwnershipDto {
   @Equals('audio/mpeg') contentType!: 'audio/mpeg';
   @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0.001)
-  @Max(1800)
+  @Max(1200)
   measuredDurationSeconds!: number;
 }
 

@@ -126,6 +126,8 @@ struct AccountRecoveryDeletion: Codable, Equatable, Sendable {
   let requestId: String
   let requestedAt: Date?
   let recoverUntil: Date?
+  let phase: String?
+  let failureCode: String?
   let recoveryAvailable: Bool
 }
 

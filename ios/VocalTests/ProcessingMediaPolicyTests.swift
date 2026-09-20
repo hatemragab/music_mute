@@ -4,34 +4,55 @@ import XCTest
 @testable import Vocal
 
 final class ProcessingMediaPolicyTests: XCTestCase {
-  func testPolicyRejectsUnknownProfileAndAppliesLongJobPause() throws {
-    let json = """
-      {"schemaVersion":2,"acceptNewJobs":true,"acceptLongJobs":false,
-       "limits":{"maxDurationSeconds":1800,"maxPreparedAudioBytes":100000000,
-       "maxLocalSourceBytes":200000000,"maxPreparationSeconds":60,
-       "longJobThresholdSeconds":600,"maxSourceDownloadBytes":80000000,
-       "maxSourceDownloadSeconds":120},
-       "preparationProfile":{"id":"preserve-or-aac-lc-256-v1","preserveCompatibleAudio":true,
-       "fallbackConversion":{"codec":"aac-lc","outputContentType":"audio/mp4","targetBitrate":256000}}}
-      """
-    let response = try JSONDecoder().decode(ProcessingPolicyResponse.self, from: Data(json.utf8))
-    XCTAssertEqual(try response.validated().maxDuration, 600)
-    let unknown = json.replacingOccurrences(
+  private let responseJSON = """
+    {"schemaVersion":2,"acceptNewJobs":true,"acceptLongJobs":true,
+     "limits":{"maxDurationSeconds":1200,"maxPreparedAudioBytes":50000000,
+     "maxLocalSourceBytes":200000000,"maxPreparationSeconds":120,
+     "longJobThresholdSeconds":600,"maxSourceDownloadBytes":50000000,
+     "maxSourceDownloadSeconds":120},
+     "preparationProfile":{"id":"preserve-or-aac-lc-256-v1","preserveCompatibleAudio":true,
+     "fallbackConversion":{"codec":"aac-lc","outputContentType":"audio/mp4","targetBitrate":256000}}}
+    """
+
+  func testBackendPolicyValidatesWithoutExpandingOfflineCeilings() throws {
+    let response = try JSONDecoder().decode(
+      ProcessingPolicyResponse.self, from: Data(responseJSON.utf8))
+    let policy = try response.validated()
+    XCTAssertEqual(policy, .standard)
+
+    let expanded = responseJSON.replacingOccurrences(
+      of: "\"maxPreparedAudioBytes\":50000000",
+      with: "\"maxPreparedAudioBytes\":50000001")
+    XCTAssertThrowsError(
+      try JSONDecoder().decode(
+        ProcessingPolicyResponse.self, from: Data(expanded.utf8)
+      ).validated())
+  }
+
+  func testUnknownProfileAndVersionAreRejected() throws {
+    let unknownProfile = responseJSON.replacingOccurrences(
       of: "preserve-or-aac-lc-256-v1", with: "unknown-profile")
     XCTAssertThrowsError(
       try JSONDecoder().decode(
-        ProcessingPolicyResponse.self, from: Data(unknown.utf8)
+        ProcessingPolicyResponse.self, from: Data(unknownProfile.utf8)
+      ).validated())
+    let unknownVersion = responseJSON.replacingOccurrences(
+      of: "\"schemaVersion\":2", with: "\"schemaVersion\":1")
+    XCTAssertThrowsError(
+      try JSONDecoder().decode(
+        ProcessingPolicyResponse.self, from: Data(unknownVersion.utf8)
       ).validated())
   }
-  func testInclusivePreparedBoundaryAndLegacyExclusiveBoundary() {
-    XCTAssertTrue(ProcessingMediaPolicy.expanded.accepts(bytes: 100_000_000, duration: 1800))
-    XCTAssertFalse(ProcessingMediaPolicy.expanded.accepts(bytes: 100_000_001, duration: 1800))
-    XCTAssertFalse(ProcessingMediaPolicy.expanded.accepts(bytes: 1, duration: 1800.001))
-    XCTAssertFalse(ProcessingMediaPolicy.expanded.accepts(bytes: 1, duration: .nan))
-    XCTAssertFalse(ProcessingMediaPolicy.legacy.accepts(bytes: 30_000_000, duration: 1))
-    XCTAssertFalse(ProcessingMediaPolicy.legacy.accepts(bytes: 1, duration: 600))
+
+  func testInclusivePreparedBoundaries() {
+    XCTAssertTrue(ProcessingMediaPolicy.standard.accepts(bytes: 49_999_999, duration: 1_199.999))
+    XCTAssertTrue(ProcessingMediaPolicy.standard.accepts(bytes: 50_000_000, duration: 1_200))
+    XCTAssertFalse(ProcessingMediaPolicy.standard.accepts(bytes: 50_000_001, duration: 1_200))
+    XCTAssertFalse(ProcessingMediaPolicy.standard.accepts(bytes: 1, duration: 1_200.001))
+    XCTAssertFalse(ProcessingMediaPolicy.standard.accepts(bytes: 1, duration: .nan))
   }
-  func testPreparedUploadHonorsAcceptedVersionInsteadOfLegacyLimit() throws {
+
+  func testPreparedUploadRequiresTheStandardPolicyVersion() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -40,14 +61,14 @@ final class ProcessingMediaPolicyTests: XCTestCase {
     try data.write(to: source)
     let declaration = InputDeclaration(
       extension: "m4a", contentType: "audio/mp4", bytes: 3,
-      durationSeconds: 1800, sha256: Data(SHA256.hash(data: data)).base64EncodedString())
+      durationSeconds: 1_200, sha256: Data(SHA256.hash(data: data)).base64EncodedString())
     XCTAssertThrowsError(
       try S3MultipartFile.build(
         inputURL: source, declaration: declaration,
-        destination: root.appendingPathComponent("legacy")))
+        destination: root.appendingPathComponent("missing-version")))
     let result = try S3MultipartFile.build(
       inputURL: source, declaration: declaration,
-      destination: root.appendingPathComponent("expanded"), policyVersion: 2)
+      destination: root.appendingPathComponent("standard"), policyVersion: 2)
     XCTAssertEqual(result.bytes, 3)
   }
 
@@ -57,19 +78,17 @@ final class ProcessingMediaPolicyTests: XCTestCase {
     XCTAssertThrowsError(try MediaSourceInspector.selectTrack(ids: [7, 12], defaultID: nil))
     XCTAssertThrowsError(try MediaSourceInspector.selectTrack(ids: [], defaultID: nil))
   }
-  func testYouTubePreflightRejectsUnknownLiveAndOverLimit() throws {
+
+  func testYouTubePreflightUsesTheInclusiveStandardDuration() throws {
     XCTAssertNoThrow(
-      try YouTubePreflight.validate(duration: 1800, isLive: false, isUpcoming: false))
+      try YouTubePreflight.validate(duration: 1_200, isLive: false, isUpcoming: false))
     XCTAssertThrowsError(
       try YouTubePreflight.validate(duration: nil, isLive: false, isUpcoming: false))
     XCTAssertThrowsError(
-      try YouTubePreflight.validate(duration: 1800.001, isLive: false, isUpcoming: false))
+      try YouTubePreflight.validate(duration: 1_200.001, isLive: false, isUpcoming: false))
     XCTAssertThrowsError(
       try YouTubePreflight.validate(duration: 1, isLive: true, isUpcoming: false))
     XCTAssertThrowsError(
       try YouTubePreflight.validate(duration: 1, isLive: false, isUpcoming: true))
-    XCTAssertFalse(
-      YouTubePreflight.isIndividualURL("https://youtube.com/watch?v=jNQXAC9IVRw&list=PL123"))
-    XCTAssertTrue(YouTubePreflight.isIndividualURL("https://youtu.be/jNQXAC9IVRw"))
   }
 }

@@ -329,13 +329,18 @@ try {
     },
     inputObject: input,
   });
-  const suspended = await api(
-    'POST',
-    `/admin/users/${userId}/suspend-processing`,
-    command({ expectedRevision: 0 }),
+  const restriction = await api(
+    'PUT',
+    `/admin/users/${userId}/restriction`,
+    {
+      operationId: randomUUID(),
+      expectedRevision: 0,
+      reasonCode: 'manual_review',
+      note: 'Owned dashboard integration fixture',
+    },
     'support-fixture',
   );
-  assert.equal(suspended.processingSuspended, true);
+  assert.equal(restriction.status, 'active');
   const media = await api(
     'POST',
     `/admin/jobs/${jobId}/media-grants`,
@@ -415,7 +420,7 @@ try {
     '/admin/jobs',
     '/admin/users',
     '/admin/releases',
-    '/admin/settings/processing',
+    '/admin/settings/account-policy',
     '/admin/health',
     '/admin/alerts',
   ])

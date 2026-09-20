@@ -425,7 +425,6 @@ export class WorkerControlService {
           recipes: dto.recipes,
           leaseSeconds: dto.leaseSeconds,
           processingDeadlineSeconds: dto.processingDeadlineSeconds,
-          maxAttempts: dto.maxAttempts,
         },
         action: 'workers.policy.update',
         resourceType: 'worker_fleet_policy',
@@ -448,7 +447,6 @@ export class WorkerControlService {
               recipes: dto.recipes,
               leaseSeconds: dto.leaseSeconds,
               processingDeadlineSeconds: dto.processingDeadlineSeconds,
-              maxAttempts: dto.maxAttempts,
               updatedAt: new Date(),
               updatedByUid: actor.uid,
             },
@@ -570,7 +568,6 @@ function presentPolicy(policy: WorkerFleetPolicy) {
     recipes: policy.recipes,
     leaseSeconds: policy.leaseSeconds,
     processingDeadlineSeconds: policy.processingDeadlineSeconds,
-    maxAttempts: policy.maxAttempts,
     updatedAt: policy.updatedAt,
   };
 }

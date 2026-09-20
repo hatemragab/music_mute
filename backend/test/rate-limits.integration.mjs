@@ -63,6 +63,7 @@ test('shares rolling rate budgets atomically through Redis', async (t) => {
         },
         {
           findByFirebaseUid: async () => ({
+            _id: 'fixture-account-id',
             status: 'active',
             sessionsRevokedAfterSec: 0,
           }),
@@ -75,6 +76,7 @@ test('shares rolling rate budgets atomically through Redis', async (t) => {
           PROCESSING_READ_UID_PER_MINUTE: 2,
           PROCESSING_CREATE_UID_PER_MINUTE: 1,
         }),
+        { assertAllowed: async () => undefined },
       );
       const invoke = (uid, handler) => {
         const req = {

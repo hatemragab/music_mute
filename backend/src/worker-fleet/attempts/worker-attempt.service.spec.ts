@@ -64,6 +64,9 @@ function fixture() {
       attemptsRemaining: 3,
       nextAttemptAt: null,
     },
+    admissionSnapshot: {
+      maxInfrastructureAttempts: 3,
+    },
     processingStartedAt: new Date(),
     processingFinishedAt: null,
     uploadingResultAt: null,
@@ -92,9 +95,6 @@ function fixture() {
     }),
   };
   const slots = { updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }) };
-  const policies = {
-    findById: vi.fn(() => query(() => ({ maxAttempts: 3 }))),
-  };
   const ledger = {
     findById: vi.fn(() => ({ session: vi.fn().mockResolvedValue(null) })),
   };
@@ -116,6 +116,7 @@ function fixture() {
     },
   };
   const storage = {
+    isPinnedObjectAvailable: vi.fn().mockResolvedValue(true),
     createDownloadGrant: vi.fn().mockResolvedValue({
       url: 'https://storage.invalid/input',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -138,15 +139,23 @@ function fixture() {
     cancelScheduled: vi.fn().mockResolvedValue(undefined),
   };
   const accountAccess = { assertActive: vi.fn().mockResolvedValue(undefined) };
+  const usage = {
+    reserveDownloadGrant: vi.fn().mockResolvedValue({
+      expiresAt: new Date(Date.now() + 60_000),
+    }),
+    reconcileMeasured: vi.fn().mockResolvedValue(undefined),
+    recordRetainedOutput: vi.fn().mockResolvedValue(undefined),
+    settleJob: vi.fn().mockResolvedValue(undefined),
+  };
   const service = new WorkerAttemptService(
     { startSession: vi.fn().mockResolvedValue(transaction) } as never,
     attempts as never,
     slots as never,
-    policies as never,
     jobs as never,
     storage as never,
     cleanup as never,
     accountAccess as never,
+    usage as never,
   );
   return {
     service,
@@ -159,6 +168,7 @@ function fixture() {
     cleanup,
     accountAccess,
     outbox,
+    usage,
   };
 }
 
@@ -195,6 +205,50 @@ const completion = {
 };
 
 describe('worker attempt transfers and finalization', () => {
+  it('charges an idempotent worker input grant only to service outbound usage', async () => {
+    const f = fixture();
+
+    await expect(
+      f.service.inputGrant(principal, attemptId, ownership),
+    ).resolves.toMatchObject({
+      requestId: ownership.requestId,
+      attemptId,
+      object: f.job.inputObject,
+    });
+
+    expect(f.storage.isPinnedObjectAvailable).toHaveBeenCalledWith(
+      f.job.inputObject,
+    );
+    expect(f.usage.reserveDownloadGrant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: f.job.userId,
+        jobId: f.job._id,
+        scope: 'worker_input',
+        requestId: ownership.requestId,
+        attemptId,
+        object: f.job.inputObject,
+      }),
+      expect.any(Object),
+    );
+    expect(f.storage.createDownloadGrant).toHaveBeenCalledWith(
+      f.job.inputObject,
+      expect.any(Date),
+    );
+  });
+
+  it('does not charge or sign a missing pinned worker input', async () => {
+    const f = fixture();
+    f.storage.isPinnedObjectAvailable.mockResolvedValue(false);
+
+    await expect(
+      f.service.inputGrant(principal, attemptId, ownership),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+    });
+    expect(f.usage.reserveDownloadGrant).not.toHaveBeenCalled();
+    expect(f.storage.createDownloadGrant).not.toHaveBeenCalled();
+  });
+
   it('derives and stores one attempt-scoped output reservation', async () => {
     const f = fixture();
     const result = await f.service.outputGrant(principal, attemptId, output);
@@ -257,6 +311,13 @@ describe('worker attempt transfers and finalization', () => {
 
     expect(f.storage.verifyUploadedVersion).toHaveBeenCalledOnce();
     expect(f.job.outputObject).toEqual(object);
+    expect(f.job.retainedOutputAccountedAt).toEqual(expect.any(Date));
+    expect(f.usage.recordRetainedOutput).toHaveBeenCalledOnce();
+    expect(f.usage.recordRetainedOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: f.job._id }),
+      object.bytes,
+      expect.any(Object),
+    );
     expect(f.job.currentExecution).toBeNull();
     expect(f.outbox.updateOne).toHaveBeenCalledOnce();
     expect(f.cleanup.cancelScheduled).toHaveBeenCalledWith(
@@ -284,6 +345,29 @@ describe('worker attempt transfers and finalization', () => {
     expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
+  it('keeps exact cleanup scheduled when a newer attempt fences a stale result', async () => {
+    const f = fixture();
+    await f.service.outputGrant(principal, attemptId, output);
+    const staleKey = f.attempt.outputReservation.key;
+    f.job.currentExecution = {
+      ...f.job.currentExecution,
+      attemptId: 'a719bfce-c6f5-44e9-8902-51b0cfab3a02',
+    };
+
+    await expect(
+      f.service.complete(principal, attemptId, completion),
+    ).rejects.toThrow('Worker resource changed');
+    expect(f.storage.verifyUploadedVersion).not.toHaveBeenCalled();
+    expect(f.cleanup.schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: staleKey,
+        reason: 'AUDIO_OUTPUT_ORPHANED',
+      }),
+      expect.any(Object),
+    );
+    expect(f.cleanup.cancelScheduled).not.toHaveBeenCalled();
+  });
+
   it('finalizes a non-retryable worker failure once', async () => {
     const f = fixture();
     const failure = {
@@ -304,8 +388,9 @@ describe('worker attempt transfers and finalization', () => {
     });
     expect(f.job.lastError).toMatchObject({
       code: 'INVALID_AUDIO',
-      message: 'The uploaded audio is invalid',
+      message: 'The file does not contain supported playable audio.',
     });
+    expect(f.attempt.failureClass).toBe('client_input');
     expect(f.outbox.updateOne).toHaveBeenCalledOnce();
     expect(f.slots.updateOne).toHaveBeenCalledOnce();
   });

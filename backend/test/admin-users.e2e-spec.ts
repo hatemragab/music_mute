@@ -18,13 +18,19 @@ describe('admin users HTTP boundary', () => {
         asOf: new Date().toISOString(),
       }),
       detail: vi.fn().mockResolvedValue({ id: '64b000000000000000000001' }),
-      suspend: vi.fn().mockResolvedValue({
-        id: '64b000000000000000000001',
-        processingSuspended: true,
+      accountUsage: vi.fn().mockResolvedValue({
+        schemaVersion: 2,
+        plan: 'standard',
       }),
-      resume: vi.fn().mockResolvedValue({
-        id: '64b000000000000000000001',
-        processingSuspended: false,
+      putPolicyOverride: vi.fn().mockResolvedValue({
+        schemaVersion: 2,
+        plan: 'standard',
+        effectivePolicySource: 'account_override',
+      }),
+      deletePolicyOverride: vi.fn().mockResolvedValue({
+        schemaVersion: 2,
+        plan: 'standard',
+        effectivePolicySource: 'global',
       }),
     };
     harness = await createAdminHarness({
@@ -48,60 +54,69 @@ describe('admin users HTTP boundary', () => {
     expect(users.list).toHaveBeenCalledOnce();
   });
 
-  it('requires support permission and fresh auth for processing suspension', async () => {
+  it('protects account override writes with permission, fresh auth, and strict DTOs', async () => {
     const { harness, users } = await setup();
+    const path =
+      '/admin/users/64b000000000000000000001/account-policy-override';
+    const body = {
+      values: { monthlyProcessingSeconds: 14_400 },
+      expiresAt: null,
+      expectedRevision: 0,
+      operationId: '7f107510-108d-4c25-a091-ecf28e43bd7b',
+      reason: 'Reviewed customer exception',
+    };
+    await harness
+      .request('put', path, body, harness.signInAs('viewer'))
+      .expect(403);
     const staleToken = harness.signInAs('support');
     harness.identities.get(staleToken)!.authTimeSec =
       Math.floor(Date.now() / 1000) - 301;
-    const body = {
-      expectedRevision: 0,
-      operationId: 'e183f234-ac55-4d06-9d08-b92d5d829ed8',
-      reason: 'Abuse review',
-    };
-    await harness
-      .request(
-        'post',
-        '/admin/users/64b000000000000000000001/suspend-processing',
-        body,
-        harness.signInAs('viewer'),
-      )
-      .expect(403);
-    await harness
-      .request(
-        'post',
-        '/admin/users/64b000000000000000000001/suspend-processing',
-        body,
-        staleToken,
-      )
-      .expect(403);
+    await harness.request('put', path, body, staleToken).expect(403);
     harness.identities.get(staleToken)!.authTimeSec = Math.floor(
       Date.now() / 1000,
     );
     await harness
       .request(
-        'post',
-        '/admin/users/64b000000000000000000001/suspend-processing',
-        body,
+        'put',
+        path,
+        { ...body, values: {} },
         harness.signInAs('support'),
       )
-      .expect(201);
-    expect(users.suspend).toHaveBeenCalledOnce();
+      .expect(400);
+    await harness
+      .request('put', path, body, harness.signInAs('support'))
+      .expect(200);
+    expect(users.putPolicyOverride).toHaveBeenCalledOnce();
   });
 
-  it('rejects blank reasons before the service', async () => {
+  it('protects override clearing and requires an existing revision', async () => {
     const { harness, users } = await setup();
+    const path =
+      '/admin/users/64b000000000000000000001/account-policy-override';
     await harness
       .request(
-        'post',
-        '/admin/users/64b000000000000000000001/resume-processing',
+        'delete',
+        path,
         {
-          expectedRevision: 1,
-          operationId: '14b2d476-e40e-4aeb-a8dd-24db12337695',
-          reason: '   ',
+          expectedRevision: 0,
+          operationId: 'b93d8904-dd3a-4fe8-a59b-5d9e079d358b',
+          reason: 'Invalid absent revision',
         },
         harness.signInAs('support'),
       )
       .expect(400);
-    expect(users.resume).not.toHaveBeenCalled();
+    await harness
+      .request(
+        'delete',
+        path,
+        {
+          expectedRevision: 2,
+          operationId: 'b93d8904-dd3a-4fe8-a59b-5d9e079d358b',
+          reason: 'Return to standard policy',
+        },
+        harness.signInAs('support'),
+      )
+      .expect(200);
+    expect(users.deletePolicyOverride).toHaveBeenCalledOnce();
   });
 });

@@ -56,7 +56,6 @@ export class UpdateWorkerFleetPolicyDto {
   recipes!: WorkerRecipePolicyDto[];
   @IsInt() @Min(15) @Max(300) leaseSeconds!: number;
   @IsInt() @Min(60) @Max(7200) processingDeadlineSeconds!: number;
-  @IsInt() @Min(1) @Max(10) maxAttempts!: number;
   @Transform(trim) @IsString() @Length(1, 500) reason!: string;
 }
 

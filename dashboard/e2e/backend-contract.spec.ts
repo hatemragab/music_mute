@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-import { E2E_API_ROOT, setDashboardRole } from "./helpers/session";
+import { setDashboardRole } from "./helpers/session";
+import { E2E_API_ORIGIN } from "./helpers/urls";
 
 test("browser enforces session, permission, receipt, concurrency, and revision contracts through compiled Nest", async ({
   page,
@@ -118,7 +119,7 @@ test("browser enforces session, permission, receipt, concurrency, and revision c
       stale,
       supportSession,
     };
-  }, E2E_API_ROOT);
+  }, E2E_API_ORIGIN);
 
   expect(result.ownerSession.status).toBe(200);
   expect(result.ownerSession.cacheControl).toBe("no-store");
@@ -211,7 +212,7 @@ test("dashboard media and release payloads pass compiled backend validation", as
       },
     );
     return { media, edit, current, preview, publish, withdraw };
-  }, E2E_API_ROOT);
+  }, E2E_API_ORIGIN);
 
   expect(result.current.status).toBe(200);
   expect(result.preview.status).toBe(201);
@@ -255,13 +256,25 @@ test("every dashboard mutation payload passes compiled backend strict validation
     });
     const results: Record<string, { status: number; code: string | null }> = {};
 
-    for (const action of ["suspend-processing", "resume-processing"] as const) {
-      results[`user-${action}`] = await request(
-        "POST",
-        `/admin/users/missing-user/${action}`,
-        revision(),
-      );
-    }
+    results.accountRestrictionPut = await request(
+      "PUT",
+      "/admin/users/missing-user/restriction",
+      {
+        expectedRevision: 0,
+        operationId: crypto.randomUUID(),
+        reasonCode: "manual_review",
+        note: "Validate the account restriction contract",
+      },
+    );
+    results.accountRestrictionDelete = await request(
+      "DELETE",
+      "/admin/users/missing-user/restriction",
+      {
+        expectedRevision: 1,
+        operationId: crypto.randomUUID(),
+        reason: "Validate the account restriction removal contract",
+      },
+    );
     results.jobCancel = await request(
       "POST",
       `/admin/jobs/${missingId}/cancel`,
@@ -273,29 +286,29 @@ test("every dashboard mutation payload passes compiled backend strict validation
       revision(),
     );
 
-    const settings = await request("GET", "/admin/settings/processing");
-    const settingsResponse = await fetch(`${api}/admin/settings/processing`, {
-      headers: {
-        accept: "application/json",
-        authorization: "Bearer owner-fixture",
+    const settings = await request("GET", "/admin/settings/account-policy");
+    const settingsResponse = await fetch(
+      `${api}/admin/settings/account-policy`,
+      {
+        headers: {
+          accept: "application/json",
+          authorization: "Bearer owner-fixture",
+        },
       },
-    });
+    );
     const currentSettings = await settingsResponse.json();
     results.settingsRead = settings;
     results.settingsUpdate = await request(
       "PUT",
-      "/admin/settings/processing",
+      "/admin/settings/account-policy",
       {
         acceptNewJobs: currentSettings.acceptNewJobs,
         maintenanceMessageEn: currentSettings.maintenanceMessageEn,
         maintenanceMessageAr: currentSettings.maintenanceMessageAr,
-        maxInputBytesExclusive: currentSettings.maxInputBytesExclusive,
-        maxDurationSecondsExclusive:
-          currentSettings.maxDurationSecondsExclusive,
-        maxActiveJobsPerUser: currentSettings.maxActiveJobsPerUser,
+        ...currentSettings.values,
         expectedRevision: currentSettings.revision,
         operationId: crypto.randomUUID(),
-        reason: "Validate processing settings contract",
+        reason: "Validate the standard account policy contract",
       },
     );
 
@@ -336,7 +349,7 @@ test("every dashboard mutation payload passes compiled backend strict validation
     );
 
     return results;
-  }, E2E_API_ROOT);
+  }, E2E_API_ORIGIN);
 
   for (const [route, response] of Object.entries(responses)) {
     expect(response.status, `${route}: ${response.code}`).not.toBe(400);

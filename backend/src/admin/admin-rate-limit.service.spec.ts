@@ -23,12 +23,21 @@ describe('AdminRateLimitService', () => {
       );
       await service.assertAllowed(
         'fixture-uid',
+        '127.0.0.1',
+        'FixtureController.list',
         rateClass,
         { setHeader: vi.fn() } as never,
         'fixture-request',
       );
       expect(budgets.reserve).toHaveBeenCalledWith([
         { key: `admin-${rateClass}-uid:fixture-uid`, limit, windowMs },
+        { key: `admin-${rateClass}-ip:127.0.0.1`, limit: 60, windowMs: 60_000 },
+        {
+          key: 'admin-endpoint:FixtureController.list',
+          limit: 300,
+          windowMs: 60_000,
+        },
+        { key: 'admin-service:global', limit: 1_000, windowMs: 60_000 },
       ]);
     },
   );
@@ -45,6 +54,8 @@ describe('AdminRateLimitService', () => {
     await expect(
       service.assertAllowed(
         'fixture-uid',
+        '127.0.0.1',
+        'FixtureController.write',
         'write',
         response as never,
         'request-id',

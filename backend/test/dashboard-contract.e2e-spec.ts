@@ -34,6 +34,7 @@ import { AdminAlertsController } from '../src/admin-observability/admin-alerts.c
 import { AdminExportsController } from '../src/admin-exports/admin-exports.controller.js';
 import { AdminWorkerEnrollmentController } from '../src/worker-fleet/enrollment/admin-worker-enrollment.controller.js';
 import { AdminWorkerControlController } from '../src/worker-fleet/control/admin-worker-control.controller.js';
+import { AdminAbuseProtectionController } from '../src/abuse-protection/admin-abuse-protection.controller.js';
 import {
   ADMIN_FRESH_AUTH,
   ADMIN_PERMISSION,
@@ -50,7 +51,7 @@ import {
 
 interface RouteFixture {
   controller: string;
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   path: string;
   permissions: string[];
   roles: AdminRole[];
@@ -73,6 +74,7 @@ const controllers: Type[] = [
   AdminAuditController,
   AdminOperationsController,
   AdminUsersController,
+  AdminAbuseProtectionController,
   AdminAccountRecoveryController,
   AdminJobsController,
   AdminMediaController,
@@ -232,7 +234,7 @@ describe('complete administration route authorization contract', () => {
   for (const route of inventory.routes) {
     it(`${route.method} ${route.path}: credentials, roles, freshness, rate limit and validation`, async () => {
       const method = route.method.toLowerCase() as
-        'get' | 'post' | 'put' | 'patch';
+        'get' | 'post' | 'put' | 'patch' | 'delete';
       const send = (token?: string, body: unknown = route.requestBody) =>
         harness.request(method, endpoint(route), body, token);
       for (const token of [
@@ -307,6 +309,21 @@ describe('complete administration route authorization contract', () => {
         {
           key: `admin-${route.rateClass}-uid:owner-uid`,
           ...budgetsByClass[route.rateClass],
+        },
+        {
+          key: `admin-${route.rateClass}-ip:127.0.0.1`,
+          limit: 60,
+          windowMs: 60_000,
+        },
+        {
+          key: expect.stringMatching(/^admin-endpoint:[A-Za-z0-9_.]+$/u),
+          limit: 300,
+          windowMs: 60_000,
+        },
+        {
+          key: 'admin-service:global',
+          limit: 1_000,
+          windowMs: 60_000,
         },
       ]);
     });

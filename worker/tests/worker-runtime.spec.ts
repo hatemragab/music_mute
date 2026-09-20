@@ -151,7 +151,6 @@ function fixture(options: { hang?: boolean; cancelled?: boolean } = {}) {
         ],
         leaseSeconds: 90,
         processingDeadlineSeconds: 300,
-        maxAttempts: 3,
       },
       serverTime: new Date(now).toISOString(),
     })),

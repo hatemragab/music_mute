@@ -58,6 +58,7 @@ data class ProcessingOperation(
     val clientStartedAtMillis: Long = 0,
     val acceptedAtMillis: Long = 0,
     val transientRetryCount: Int = 0,
+    val uploadGrantRequestId: String? = null,
     val sourceDownloadedBytes: Long = 0,
     val sourceTotalBytes: Long? = null,
     val pendingDelete: Boolean = false,
@@ -66,7 +67,7 @@ data class ProcessingOperation(
     val awaitingCloudConsent: Boolean = false,
     val sourceUri: String? = null,
     val sourceName: String? = null,
-    val mediaPolicy: ProcessingMediaPolicy = ProcessingMediaPolicy.LEGACY,
+    val mediaPolicy: ProcessingMediaPolicy = ProcessingMediaPolicy.STANDARD,
     val mediaSource: String = "audio_file",
     val schemaVersion: Int = 2,
     // Display history only. Retry/cancellation still use phase, never this value.

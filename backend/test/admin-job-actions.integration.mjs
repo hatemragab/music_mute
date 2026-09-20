@@ -55,6 +55,8 @@ test('administrative cancellation is audited and retry is unavailable', async (t
     jobs,
     new ProcessingTransactions(connection),
     { assertActive: async () => undefined },
+    {},
+    { settleJob: async () => undefined },
   );
   const service = new AdminJobActionsService(
     actions,

@@ -1,4 +1,3 @@
-import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { ProcessingUsageController } from '../processing-usage/processing-usage.controller.js';
 import { Module } from '@nestjs/common';
 import { FirebaseModule } from '../auth/firebase.module.js';
@@ -42,7 +41,6 @@ import { AccountDeletionMaintenanceService } from '../users/account-deletion-mai
     ClientErrorsController,
   ],
   providers: [
-    ProcessingUsageService,
     AccountDeletionCleanupService,
     AccountDeletionMaintenanceService,
     ProcessingStartupService,

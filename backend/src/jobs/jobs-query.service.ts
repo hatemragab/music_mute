@@ -10,6 +10,9 @@ import { jobError } from './job-errors.js';
 import { JOB_STATUSES, type JobStatus } from './job.types.js';
 import { presentJob } from './jobs.presenter.js';
 import { AccountAccessService } from '../users/account-access.service.js';
+import { ProcessingTransactions } from '../processing/processing-transactions.js';
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
+import type { ObjectIdentity } from './job.types.js';
 
 interface HistoryPosition {
   createdAt: Date;
@@ -52,6 +55,8 @@ export class JobsQueryService {
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
     private readonly access: AccountAccessService,
     private readonly storage: StorageTransfersService,
+    private readonly transactions: ProcessingTransactions,
+    private readonly usage: ProcessingUsageService,
   ) {}
 
   async list(
@@ -114,20 +119,57 @@ export class JobsQueryService {
     return presentJob(await this.findOwned(userId, jobId));
   }
 
-  async download(userId: string, jobId: string, artifact: 'input' | 'output') {
+  async download(
+    userId: string,
+    jobId: string,
+    artifact: 'input' | 'output',
+    requestId: string,
+  ) {
     const job = await this.findOwned(userId, jobId);
-    const object =
-      artifact === 'input'
-        ? job.inputObject
-        : job.status === 'ready'
-          ? job.outputObject
-          : null;
+    const object = this.downloadObject(job, artifact);
     if (!object) throw jobError('JOB_STATE_CONFLICT');
+    if (
+      !(await processingIo(() => this.storage.isPinnedObjectAvailable(object)))
+    )
+      throw jobError('JOB_STATE_CONFLICT');
+    const entitlement = await this.transactions.run(async (session) => {
+      await this.access.assertActive(userId, session);
+      const current = await this.jobs
+        .findOne({ _id: job._id, userId: job.userId, deletedAt: null })
+        .session(session)
+        .lean();
+      const currentObject = current
+        ? this.downloadObject(current, artifact)
+        : null;
+      if (!current || !currentObject || !sameObject(currentObject, object))
+        throw jobError('JOB_STATE_CONFLICT');
+      return this.usage.reserveDownloadGrant(
+        {
+          accountId: current.userId,
+          jobId: current._id,
+          scope: artifact === 'output' ? 'user_result' : 'user_input',
+          requestId,
+          object: currentObject,
+        },
+        session,
+      );
+    });
     const grant = await processingIo(() =>
-      this.storage.createDownloadGrant(object),
+      this.storage.createDownloadGrant(object, entitlement.expiresAt),
     );
     await this.findOwned(userId, jobId);
     return grant;
+  }
+
+  private downloadObject(
+    job: Job,
+    artifact: 'input' | 'output',
+  ): ObjectIdentity | null {
+    return artifact === 'input'
+      ? job.inputObject
+      : job.status === 'ready'
+        ? job.outputObject
+        : null;
   }
 
   private async findOwned(userId: string, jobId: string) {
@@ -138,4 +180,14 @@ export class JobsQueryService {
     if (!job || job.deletedAt) throw jobError('JOB_NOT_FOUND');
     return job;
   }
+}
+
+function sameObject(left: ObjectIdentity, right: ObjectIdentity): boolean {
+  return (
+    left.key === right.key &&
+    left.versionId === right.versionId &&
+    left.bytes === right.bytes &&
+    left.sha256 === right.sha256 &&
+    left.contentType === right.contentType
+  );
 }

@@ -5,14 +5,14 @@ import XCTest
 final class YouTubePreflightTests: XCTestCase {
   func testRecordedVideoRequiresMatchingIdentityAndFiniteVerifiedDuration() throws {
     let html =
-      #"<script>var ytInitialPlayerResponse = {"playabilityStatus":{"status":"OK"},"videoDetails":{"videoId":"jNQXAC9IVRw","lengthSeconds":"1800","isLiveContent":false,"title":"A } in a title"}};</script>"#
+      #"<script>var ytInitialPlayerResponse = {"playabilityStatus":{"status":"OK"},"videoDetails":{"videoId":"jNQXAC9IVRw","lengthSeconds":"1200","isLiveContent":false,"title":"A } in a title"}};</script>"#
     XCTAssertEqual(
-      try YouTubePreflight.parseWatchPage(Data(html.utf8), videoID: "jNQXAC9IVRw"), 1800)
+      try YouTubePreflight.parseWatchPage(Data(html.utf8), videoID: "jNQXAC9IVRw"), 1200)
     XCTAssertThrowsError(
       try YouTubePreflight.parseWatchPage(Data(html.utf8), videoID: "abcdefghijk"))
     XCTAssertThrowsError(
       try YouTubePreflight.parseWatchPage(
-        Data(html.replacingOccurrences(of: "1800", with: "1801").utf8), videoID: "jNQXAC9IVRw"))
+        Data(html.replacingOccurrences(of: "1200", with: "1201").utf8), videoID: "jNQXAC9IVRw"))
   }
   func testLiveUpcomingUnknownDurationAndConsentPagesFailClosed() {
     let template =

@@ -1,23 +1,36 @@
-export function validateAllowance(
-  minutes: number,
+import type { AccountPolicyOverride } from "@/api/contracts";
+
+export function validateAccountPolicyOverride(
+  values: AccountPolicyOverride["values"],
+  effective: AccountPolicyOverride["values"],
   expiresAt: string,
   now = new Date(),
 ) {
   const errors: string[] = [];
-  const seconds = minutes * 60;
-  if (!Number.isSafeInteger(seconds) || seconds < 3600 || seconds > 86400)
-    errors.push("Allowance must be from 60 to 1,440 audio minutes.");
-  const expires = Date.parse(expiresAt);
+  const entries = Object.entries(values);
+  if (!entries.length) errors.push("Choose at least one replacement value.");
+  for (const [key, amount] of entries) {
+    if (!Number.isSafeInteger(amount) || amount < 1)
+      errors.push(`${key} must be a positive whole number.`);
+  }
+  if ((values.signedUrlTtlSeconds ?? 1) > 600)
+    errors.push("Signed URL validity cannot exceed 600 seconds.");
+  const merged = { ...effective, ...values };
   if (
-    !Number.isFinite(expires) ||
-    expires <= now.getTime() ||
-    expires - now.getTime() > 30 * 86400_000
+    merged.dailyUploadGrants !== undefined &&
+    merged.monthlyUploadGrants !== undefined &&
+    merged.monthlyUploadGrants < merged.dailyUploadGrants
   )
-    errors.push("Choose a future expiry within 30 days.");
+    errors.push("Monthly upload grants cannot be lower than daily grants.");
+  if (expiresAt) {
+    const expires = Date.parse(expiresAt);
+    if (!Number.isFinite(expires) || expires <= now.getTime())
+      errors.push("Choose a future expiry, or leave it empty for no expiry.");
+  }
   return errors;
 }
 
-export function suspensionExpiry(
+export function restrictionExpiry(
   value: string,
   now = new Date(),
 ): string | undefined {
@@ -29,7 +42,7 @@ export function suspensionExpiry(
     date.getTime() - now.getTime() > 30 * 86400_000
   )
     throw new Error(
-      "Choose a future suspension expiry within 30 days, or leave it empty.",
+      "Choose a future restriction expiry within 30 days, or leave it empty.",
     );
   return date.toISOString();
 }

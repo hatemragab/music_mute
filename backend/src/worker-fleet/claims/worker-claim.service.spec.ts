@@ -57,7 +57,6 @@ function fixture() {
         ],
         leaseSeconds: 60,
         processingDeadlineSeconds: 7200,
-        maxAttempts: 3,
       }),
     ),
   };
@@ -67,6 +66,9 @@ function fixture() {
     findOneAndUpdate: vi.fn(),
     updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }),
   };
+  const admission = {
+    claimProcessingSlot: vi.fn().mockResolvedValue(true),
+  };
   const service = new WorkerClaimService(
     { startSession: vi.fn().mockResolvedValue(transaction) } as never,
     machines as never,
@@ -74,6 +76,7 @@ function fixture() {
     attempts as never,
     policies as never,
     jobs as never,
+    admission as never,
   );
   return {
     service,
@@ -83,6 +86,7 @@ function fixture() {
     attempts,
     policies,
     jobs,
+    admission,
   };
 }
 
@@ -196,10 +200,12 @@ describe('worker atomic claims', () => {
     const jobId = new Types.ObjectId();
     const queued = {
       _id: jobId,
+      userId: new Types.ObjectId(),
       status: 'queued',
       revision: 7,
       attemptNumber: 0,
       processingStartedAt: null,
+      admissionSnapshot: { maxProcessingJobs: 1 },
       inputObject: {
         key: 'users/u/jobs/j/input.wav',
         versionId: 'v1',
@@ -255,6 +261,131 @@ describe('worker atomic claims', () => {
       expect.any(Object),
     );
     expect(f.attempts.create).toHaveBeenCalledOnce();
+    expect(f.admission.claimProcessingSlot).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: queued._id, userId: queued.userId }),
+      f.transaction,
+    );
+  });
+
+  it('aborts without an attempt when cancellation wins the job revision fence', async () => {
+    const f = fixture();
+    const queued = {
+      _id: new Types.ObjectId(),
+      userId: new Types.ObjectId(),
+      status: 'queued',
+      revision: 7,
+      attemptNumber: 0,
+      processingStartedAt: null,
+      admissionSnapshot: { maxProcessingJobs: 1 },
+      inputObject: { key: 'input', versionId: 'v1' },
+      recipeSnapshot: { recipeId: 'kim-vocals-trim-v1' },
+    };
+    const slot = {
+      _id: workerId,
+      machineId,
+      gpuId: 'gpu0',
+      slotIndex: 0,
+      sessionId,
+      incarnation,
+      state: 'idle',
+      currentAttemptId: null,
+      allowedRecipeIds: ['kim-vocals-trim-v1'],
+      revision: 2,
+    };
+    f.machines.findById.mockReturnValue(sessionLean(activeMachine));
+    f.attempts.findOne.mockReturnValue(sessionLean(null));
+    f.slots.findOne.mockReturnValue(sessionLean(slot));
+    f.jobs.findOne.mockReturnValue({
+      sort: vi.fn().mockReturnValue(sessionLean(queued)),
+    });
+    f.machines.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    f.slots.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    f.jobs.findOneAndUpdate.mockReturnValue(updateLean(null));
+
+    await expect(f.service.claim(principal, claimDto)).rejects.toThrow(
+      'Worker resource changed',
+    );
+    expect(f.attempts.create).not.toHaveBeenCalled();
+  });
+
+  it('skips an older account without processing capacity', async () => {
+    const f = fixture();
+    const older = {
+      _id: new Types.ObjectId(),
+      userId: new Types.ObjectId(),
+      queuedAt: new Date('2026-09-20T00:00:00.000Z'),
+      status: 'queued',
+      revision: 2,
+      attemptNumber: 0,
+      processingStartedAt: null,
+      admissionSnapshot: { maxProcessingJobs: 1 },
+      inputObject: {
+        key: 'users/older/jobs/job/input.wav',
+        versionId: 'older-v1',
+        bytes: 10,
+        sha256: 'older-sha',
+        contentType: 'audio/wav',
+      },
+      recipeSnapshot: { recipeId: 'kim-vocals-trim-v1' },
+    };
+    const eligible = {
+      ...older,
+      _id: new Types.ObjectId(),
+      userId: new Types.ObjectId(),
+      queuedAt: new Date('2026-09-20T00:01:00.000Z'),
+      revision: 3,
+      inputObject: {
+        ...older.inputObject,
+        key: 'users/eligible/jobs/job/input.wav',
+        versionId: 'eligible-v1',
+      },
+    };
+    const candidates = [older, eligible];
+    const slot = {
+      _id: workerId,
+      machineId,
+      gpuId: 'gpu0',
+      slotIndex: 0,
+      sessionId,
+      incarnation,
+      state: 'idle',
+      currentAttemptId: null,
+      allowedRecipeIds: ['kim-vocals-trim-v1'],
+      revision: 2,
+    };
+    f.machines.findById.mockReturnValue(sessionLean(activeMachine));
+    f.attempts.findOne.mockReturnValue(sessionLean(null));
+    f.slots.findOne.mockReturnValue(sessionLean(slot));
+    f.jobs.findOne.mockImplementation(() => ({
+      sort: vi.fn().mockReturnValue(sessionLean(candidates.shift() ?? null)),
+    }));
+    f.admission.claimProcessingSlot
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    f.machines.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    f.slots.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    f.jobs.findOneAndUpdate.mockImplementation(
+      (_filter: unknown, update: { $set: { currentExecution: object } }) =>
+        updateLean({ ...eligible, ...update.$set, attemptNumber: 1 }),
+    );
+    f.attempts.create.mockImplementation(async ([value]) => [
+      { ...value, toObject: () => value },
+    ]);
+
+    const result = await f.service.claim(principal, claimDto);
+
+    expect(result.claim?.jobId).toBe(eligible._id.toString());
+    expect(f.jobs.findOne).toHaveBeenCalledTimes(2);
+    expect(f.admission.claimProcessingSlot).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ _id: older._id }),
+      f.transaction,
+    );
+    expect(f.admission.claimProcessingSlot).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ _id: eligible._id }),
+      f.transaction,
+    );
   });
 
   it('rejects claim replay from a different supervisor session', async () => {
@@ -321,7 +452,6 @@ describe('worker atomic claims', () => {
         recipes: [],
         leaseSeconds: 60,
         processingDeadlineSeconds: 7200,
-        maxAttempts: 3,
       }),
     );
     await expect(f.service.claim(principal, claimDto)).rejects.toThrow(

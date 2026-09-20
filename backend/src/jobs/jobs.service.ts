@@ -8,24 +8,22 @@ import { authError } from '../auth/auth.errors.js';
 import { ProcessingTransactions } from '../processing/processing-transactions.js';
 import { processingIo } from '../processing/processing-io.js';
 import { StorageTransfersService } from '../storage/storage-transfers.service.js';
+import { StorageCleanupService } from '../storage/storage-cleanup.service.js';
 import { AccountAccessService } from '../users/account-access.service.js';
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { jobError } from './job-errors.js';
 import { normalizeJobMetadata, type JobMetadata } from './job-metadata.js';
 import { isDuplicateKey, objectId, requestHash } from './job-request.js';
 import { Job } from './job.schema.js';
 import { assertInputDeclaration } from './job-state.js';
-import type { InputDeclaration, WorkerRetryEligibility } from './job.types.js';
+import type { InputDeclaration, ObjectIdentity } from './job.types.js';
 import {
   DEFAULT_WORKER_RECIPE_ID,
   workerRecipeSnapshot,
 } from './worker-recipes.js';
 
-const INITIAL_RETRY_ELIGIBILITY: Readonly<WorkerRetryEligibility> =
-  Object.freeze({
-    eligible: true,
-    attemptsRemaining: 3,
-    nextAttemptAt: null,
-  });
+const UPLOAD_EXPIRY_GRACE_MS = 300_000;
+const VERSION_SETTLEMENT_MS = 3_600_000;
 
 @Injectable()
 export class JobsService {
@@ -35,6 +33,8 @@ export class JobsService {
     private readonly transactions: ProcessingTransactions,
     private readonly access: AccountAccessService,
     private readonly admission: ProcessingAdmissionService,
+    private readonly usage: ProcessingUsageService,
+    private readonly cleanup: StorageCleanupService,
   ) {}
 
   async create(
@@ -44,7 +44,7 @@ export class JobsService {
     metadata: JobMetadata = {},
   ) {
     const normalized = normalizeJobMetadata(metadata);
-    assertInputDeclaration(input, normalized.policyVersion ?? 1);
+    assertInputDeclaration(input);
     if (!isUUID(requestId, '4')) throw authError('INVALID_INPUT');
     requestId = requestId.toLowerCase();
     const owner = objectId(userId);
@@ -75,6 +75,7 @@ export class JobsService {
               {
                 _id: id,
                 userId: owner,
+                logicalAudioId: id,
                 requestId,
                 requestHash: hash,
                 sourceTitle: normalized.sourceTitle ?? null,
@@ -91,7 +92,12 @@ export class JobsService {
                 },
                 admissionSnapshot,
                 recipeSnapshot: workerRecipeSnapshot(DEFAULT_WORKER_RECIPE_ID),
-                retryEligibility: { ...INITIAL_RETRY_ELIGIBILITY },
+                retryEligibility: {
+                  eligible: true,
+                  attemptsRemaining:
+                    admissionSnapshot.maxInfrastructureAttempts,
+                  nextAttemptAt: null,
+                },
               },
             ],
             { session },
@@ -109,10 +115,7 @@ export class JobsService {
 
     const upload =
       job.status === 'awaiting_upload'
-        ? await processingIo(() => {
-            this.admission.assertAcceptedReservation(job!);
-            return this.storage.createInputGrant(job!);
-          })
+        ? await this.createAccountedInputGrant(owner, job._id, requestId)
         : undefined;
     const current = await this.findOwned(userId, job._id.toHexString());
     return {
@@ -123,21 +126,10 @@ export class JobsService {
     };
   }
 
-  async renewUpload(userId: string, jobId: string) {
+  async renewUpload(userId: string, jobId: string, requestId: string) {
     const owner = objectId(userId);
     const id = objectId(jobId);
-    const job = await this.transactions.run(async (session) => {
-      const current = await this.jobs
-        .findOne({ _id: id, userId: owner })
-        .session(session);
-      if (!current || current.deletedAt) throw jobError('JOB_NOT_FOUND');
-      if (current.status !== 'awaiting_upload')
-        throw jobError('JOB_STATE_CONFLICT');
-      await this.access.assertActive(owner, session);
-      this.admission.assertAcceptedReservation(current);
-      return current.toObject();
-    });
-    const grant = await processingIo(() => this.storage.createInputGrant(job));
+    const grant = await this.createAccountedInputGrant(owner, id, requestId);
     const current = await this.findOwned(userId, jobId);
     if (current.status !== 'awaiting_upload')
       throw jobError('JOB_STATE_CONFLICT');
@@ -149,7 +141,30 @@ export class JobsService {
     if (job.inputObject) return { id: jobId, status: job.status };
     if (job.status !== 'awaiting_upload') throw jobError('JOB_STATE_CONFLICT');
     this.admission.assertAcceptedReservation(job);
-    const identity = await processingIo(() => this.storage.verifyInput(job));
+    let identity: ObjectIdentity;
+    try {
+      identity = await processingIo(() => this.storage.verifyInput(job));
+    } catch (error) {
+      if (this.isUploadNotReady(error)) {
+        const now = new Date();
+        const due = new Date(
+          Math.max(
+            now.getTime(),
+            (job.admissionSnapshot?.reservationExpiresAt.getTime() ??
+              now.getTime()) + UPLOAD_EXPIRY_GRACE_MS,
+          ),
+        );
+        await this.cleanup.schedule({
+          key: job.inputReservation.key,
+          versionId: null,
+          ownerUserId: job.userId,
+          reason: 'AUDIO_INPUT_INVALID',
+          nextAt: due,
+          settleUntil: new Date(due.getTime() + VERSION_SETTLEMENT_MS),
+        });
+      }
+      throw error;
+    }
     return this.transactions.run(async (session) => {
       await this.access.assertActive(userId, session);
       const current = await this.jobs
@@ -160,6 +175,8 @@ export class JobsService {
       if (current.status !== 'awaiting_upload')
         throw jobError('JOB_STATE_CONFLICT');
       this.admission.assertAcceptedReservation(current, identity.bytes);
+      await this.usage.confirmUploadBytes(current, identity.bytes, session);
+      await this.cleanup.cancelScheduled(current.inputReservation.key, session);
       const queuedAt = new Date();
       const queued = await this.jobs.updateOne(
         {
@@ -187,5 +204,38 @@ export class JobsService {
       .lean();
     if (!job || job.deletedAt) throw jobError('JOB_NOT_FOUND');
     return job;
+  }
+
+  private async createAccountedInputGrant(
+    owner: Types.ObjectId,
+    jobId: Types.ObjectId,
+    requestId: string,
+  ) {
+    const entitlement = await this.transactions.run(async (session) => {
+      const current = await this.jobs
+        .findOne({ _id: jobId, userId: owner })
+        .session(session);
+      if (!current || current.deletedAt) throw jobError('JOB_NOT_FOUND');
+      if (current.status !== 'awaiting_upload')
+        throw jobError('JOB_STATE_CONFLICT');
+      await this.access.assertActive(owner, session);
+      this.admission.assertAcceptedReservation(current);
+      const receipt = await this.usage.reserveUploadGrant(
+        current,
+        requestId,
+        session,
+      );
+      return { job: current.toObject(), expiresAt: receipt.expiresAt };
+    });
+    return processingIo(() =>
+      this.storage.createInputGrant(entitlement.job, entitlement.expiresAt),
+    );
+  }
+
+  private isUploadNotReady(error: unknown): boolean {
+    const response = (
+      error as { getResponse?: () => unknown }
+    )?.getResponse?.() as { code?: unknown } | undefined;
+    return response?.code === 'UPLOAD_NOT_READY';
   }
 }

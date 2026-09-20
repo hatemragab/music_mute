@@ -84,7 +84,13 @@ export class AdminAccountRecoveryService implements OnModuleInit {
     const page = records.slice(0, limit);
     const users = await this.users
       .find({ _id: trusted({ $in: page.map((request) => request.userId) }) })
-      .select({ email: 1, displayName: 1, status: 1 })
+      .select({
+        email: 1,
+        displayName: 1,
+        status: 1,
+        deletionPhase: 1,
+        deletionFailureCode: 1,
+      })
       .maxTimeMS(5000)
       .lean();
     const byId = new Map(users.map((user) => [user._id.toString(), user]));
@@ -137,6 +143,7 @@ export class AdminAccountRecoveryService implements OnModuleInit {
     id: string,
     dto: AdminAccountRecoveryDecisionDto,
     approve: boolean,
+    now = new Date(),
   ) {
     const requestId = this.objectId(id);
     const action = approve ? 'approve' : 'reject';
@@ -151,9 +158,9 @@ export class AdminAccountRecoveryService implements OnModuleInit {
         reason: dto.reason,
       },
       (session) =>
-        this.decideInTransaction(actor, requestId, dto, approve, session),
+        this.decideInTransaction(actor, requestId, dto, approve, session, now),
     );
-    return result.value ?? this.detail(id);
+    return result.value ?? this.detail(id, now);
   }
 
   private async decideInTransaction(
@@ -162,6 +169,7 @@ export class AdminAccountRecoveryService implements OnModuleInit {
     dto: AdminAccountRecoveryDecisionDto,
     approve: boolean,
     session: ClientSession,
+    now: Date,
   ) {
     const request = await this.requests.findById(id).session(session).lean();
     if (!request) throw adminError('RESOURCE_NOT_FOUND');
@@ -180,7 +188,7 @@ export class AdminAccountRecoveryService implements OnModuleInit {
         user.status !== 'deleting' ||
         user.deletionRequestId !== request.deletionRequestId ||
         !user.deletionRecoverUntil ||
-        user.deletionRecoverUntil.getTime() <= Date.now() ||
+        user.deletionRecoverUntil.getTime() <= now.getTime() ||
         user.deletionLeaseToken
       )
         throw adminError('INVALID_REQUEST');
@@ -203,6 +211,9 @@ export class AdminAccountRecoveryService implements OnModuleInit {
               deletionNextAt: null,
               deletionLeaseUntil: null,
               deletionLeaseToken: null,
+              deletionPhase: null,
+              deletionCursor: null,
+              deletionFailureCode: null,
             },
             $inc: { adminRevision: 1 },
           },
@@ -220,7 +231,7 @@ export class AdminAccountRecoveryService implements OnModuleInit {
           $set: {
             status: approve ? 'approved' : 'rejected',
             reviewedBy: actor.uid,
-            reviewedAt: new Date(),
+            reviewedAt: now,
             reviewReason: dto.reason,
           },
           $inc: { revision: 1 },
@@ -233,7 +244,7 @@ export class AdminAccountRecoveryService implements OnModuleInit {
       resourceId: id.toHexString(),
       revision: dto.expectedRevision + 1,
       previousRevision: dto.expectedRevision,
-      value: this.present(updated, updatedUser),
+      value: this.present(updated, updatedUser, now),
     };
   }
 
@@ -252,6 +263,8 @@ export class AdminAccountRecoveryService implements OnModuleInit {
         email: user?.email ?? null,
         displayName: user?.displayName ?? null,
         status: user?.status ?? null,
+        deletionPhase: user?.deletionPhase ?? null,
+        deletionFailureCode: user?.deletionFailureCode ?? null,
       },
     };
   }

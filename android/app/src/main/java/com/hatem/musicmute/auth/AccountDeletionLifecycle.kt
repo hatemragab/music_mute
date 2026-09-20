@@ -10,7 +10,7 @@ import kotlinx.coroutines.withContext
 internal suspend fun requestAccountDeletionDurably(
     ownerUid: String,
     requested: suspend (String) -> Boolean,
-    accepted: suspend (String) -> Unit,
+    accepted: suspend (String, AccountDeletionReceipt) -> Unit,
     rejected: suspend (String) -> Unit,
     request: suspend (String) -> AccountDeletionReceipt,
 ): AccountDeletionReceipt = withContext(NonCancellable) {
@@ -22,7 +22,7 @@ internal suspend fun requestAccountDeletionDurably(
             throw AuthFailure(AuthProblem.OFFLINE)
         }
         // Once received, persist acceptance even if the caller left or the request deadline elapsed.
-        accepted(ownerUid)
+        accepted(ownerUid, receipt)
         receipt
     } catch (failure: AuthFailure) {
         // HTTP timeouts and server/network failures can hide a committed mutation.

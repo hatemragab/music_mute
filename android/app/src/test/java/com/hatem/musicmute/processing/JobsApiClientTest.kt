@@ -58,18 +58,24 @@ class JobsApiClientTest {
         assertFalse(error.message.orEmpty().contains("private"))
     }
 
-    @Test fun usageResponseIsPrivateTypedAndKeepsPartialReplenishments() = runTest {
+    @Test fun usageResponseIsPrivateTypedAndKeepsMonthlyCounters() = runTest {
         val api = client(AuthHttpTransport { url, _, headers, _ ->
             assertTrue(url.endsWith("/processing-usage"))
             assertEquals("Bearer token", headers["Authorization"])
-            AuthHttpResponse(200, """{"policyRevision":1,"allowanceAudioSeconds":3600,"usedAudioSeconds":600,"reservedAudioSeconds":300,
-              "remainingAudioSeconds":2700,"activeJobs":0,"maxActiveJobs":1,"nextReplenishmentAt":"2026-09-14T12:00:00Z",
-              "replenishments":[{"at":"2026-09-14T12:00:00Z","audioSeconds":600}],"availability":"available","checkedAt":"2026-09-13T12:00:00Z"}""")
+            AuthHttpResponse(200, """{"schemaVersion":2,"plan":"standard","policyRevision":1,"overrideRevision":null,
+              "effectivePolicySource":"global","overrideExpiresAt":null,"period":{"key":"2026-09","start":"2026-09-01T00:00:00Z",
+              "end":"2026-10-01T00:00:00Z","nextResetAt":"2026-10-01T00:00:00Z"},"processing":{"limitSeconds":7200,
+              "usedSeconds":600,"reservedSeconds":300,"releasedSeconds":100,"remainingSeconds":6300},
+              "uploads":{"dailyGrantLimit":30,"dailyGrants":1,"dailyRemainingGrants":29,"dailyResetAt":"2026-09-14T00:00:00Z","monthlyGrantLimit":200,"monthlyGrants":10,"monthlyRemainingGrants":190,"monthlyByteLimit":1000000000,"confirmedBytes":50000000,"monthlyRemainingBytes":950000000,"monthlyResetAt":"2026-10-01T00:00:00Z"},
+              "storage":{"limitBytes":1000000000,"retainedBytes":100000000,"remainingBytes":900000000},
+              "effectiveLimits":{"maxDurationSeconds":1200,"maxPreparedAudioBytes":50000000,"maxClientInputAttempts":5,"signedUrlTtlSeconds":600},
+              "downloads":{"monthlyGrantLimit":150,"monthlyGrants":5,"monthlyRemainingGrants":145,"monthlyByteLimit":10000000000,"estimatedBytes":250000000,"monthlyRemainingBytes":9750000000,"monthlyResetAt":"2026-10-01T00:00:00Z"},"usageRevision":3,
+              "waitingJobs":0,"maxWaitingJobs":3,"processingJobs":1,"maxProcessingJobs":1,"availability":{"status":"available","reason":null},"checkedAt":"2026-09-13T12:00:00Z"}""")
         })
         val usage = api.processingUsage()!!
-        assertEquals(600.0, usage.usedAudioSeconds, 0.0)
-        assertEquals(300.0, usage.reservedAudioSeconds, 0.0)
-        assertEquals(1, usage.replenishments.size)
+        assertEquals(600.0, usage.processing.usedSeconds, 0.0)
+        assertEquals(300.0, usage.processing.reservedSeconds, 0.0)
+        assertEquals("2026-10-01T00:00:00Z", usage.period.nextResetAt)
     }
 
     @Test fun allRoutesPreserveBodiesAndInstallationHeaders() = runTest {
@@ -80,9 +86,9 @@ class JobsApiClientTest {
             AuthHttpResponse(200, replies.removeFirst())
         })
         assertEquals("*", api.create(requestId, input).upload!!.headers["If-None-Match"])
-        api.renewUpload(id); api.confirmUpload(id); api.list("a+/=? &", "queued")
+        api.renewUpload(id, requestId); api.confirmUpload(id); api.list("a+/=? &", "queued")
         assertEquals(false, api.detail(id).workerAvailable)
-        api.cancel(id); api.retry(id, requestId); api.download(id, "output")
+        api.cancel(id); api.retry(id, requestId); api.download(id, "output", requestId)
         assertEquals(listOf("POST", "POST", "POST", "GET", "GET", "POST", "POST", "POST"), requests.map { it[1] })
         assertEquals(listOf("/jobs", "/jobs/$id/upload-url", "/jobs/$id/upload-complete", "/jobs?limit=20&cursor=a%2B%2F%3D%3F%20%26&status=queued", "/jobs/$id", "/jobs/$id/cancel", "/jobs/$id/retry", "/jobs/$id/download-url"), requests.map { (it[0] as String).removePrefix("https://api.example.test/api/v1") })
         requests.forEachIndexed { index, r ->
@@ -90,10 +96,11 @@ class JobsApiClientTest {
             assertEquals("Bearer token", headers["Authorization"])
             assertEquals(if (index in listOf(0, 1, 2, 6)) requestId else null, headers["X-Installation-Id"])
         }
-        listOf(1,2,5).forEach { assertEquals("{}", requests[it][3]) }
+        listOf(2,5).forEach { assertEquals("{}", requests[it][3]) }
         assertEquals(Json.parseToJsonElement("""{"requestId":"$requestId","input":{"extension":"mp3","contentType":"audio/mpeg","bytes":42,"durationSeconds":1.5,"sha256":"${input.sha256}"}}"""), Json.parseToJsonElement(requests[0][3] as String))
+        assertEquals("""{"requestId":"$requestId"}""", requests[1][3])
         assertEquals("""{"requestId":"$requestId"}""", requests[6][3])
-        assertEquals("""{"artifact":"output"}""", requests[7][3])
+        assertEquals("""{"artifact":"output","requestId":"$requestId"}""", requests[7][3])
     }
 
     @Test fun statusesAndAbsentDatesAreSafeAndMalformedDataFails() = runTest {
@@ -133,6 +140,17 @@ class JobsApiClientTest {
         for (code in listOf("NEW_INPUT_REQUIRED", "IDEMPOTENCY_CONFLICT", "UPLOAD_NOT_READY")) {
             val failure = runCatching { client(AuthHttpTransport { _,_,_,_ -> AuthHttpResponse(409, """{"code":"$code"}""") }).detail(id) }.exceptionOrNull() as JobsFailure
             assertEquals(code, failure.problem.name)
+        }
+        for ((status, code) in listOf(
+            429 to "UPLOAD_GRANT_LIMIT_REACHED",
+            429 to "DOWNLOAD_GRANT_LIMIT_REACHED",
+            409 to "DOWNLOAD_BYTE_LIMIT_REACHED",
+            409 to "RETAINED_STORAGE_LIMIT_REACHED",
+            503 to "SERVICE_BANDWIDTH_LIMIT_REACHED",
+        )) {
+            val failure = runCatching { client(AuthHttpTransport { _,_,_,_ -> AuthHttpResponse(status, """{"code":"$code"}""") }).detail(id) }.exceptionOrNull() as JobsFailure
+            assertEquals(code, failure.problem.name)
+            assertNull(failure.retryAfterSeconds)
         }
     }
     @Test fun rejectsWrongScalarTypesAndUnsafeGrants() = runTest {

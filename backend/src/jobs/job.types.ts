@@ -39,16 +39,17 @@ export interface InputReservation extends InputDeclaration {
   key: string;
 }
 export interface AdmissionSnapshot {
-  policyVersion?: 1 | 2;
-  maxDurationSeconds?: number;
-  maxInputBytes?: number;
-  preparationProfileId?: string;
-  source?: InputSource;
+  policyVersion: 2;
+  maxDurationSeconds: number;
+  maxInputBytes: number;
+  preparationProfileId: string;
+  source: InputSource;
 
   settingsRevision: number;
-  maxInputBytesExclusive: number;
-  maxDurationSecondsExclusive: number;
-  maxActiveJobsPerUser: number | null;
+  maxWaitingJobs: number;
+  maxProcessingJobs: number;
+  maxInfrastructureAttempts: number;
+  maxClientInputAttempts: number;
   reservationExpiresAt: Date;
 }
 export interface ObjectIdentity {

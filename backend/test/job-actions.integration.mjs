@@ -40,6 +40,8 @@ test('job cancellation preserves owner and state boundaries', async (t) => {
     jobs,
     new ProcessingTransactions(connection),
     { assertActive: async () => undefined },
+    {},
+    { settleJob: async () => undefined },
   );
   const ownerId = new Types.ObjectId();
   const otherId = new Types.ObjectId();

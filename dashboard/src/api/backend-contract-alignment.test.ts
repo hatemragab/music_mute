@@ -218,12 +218,14 @@ describe("dashboard/backend contract alignment", () => {
       revision: 2,
       deletionRequestId: "deletion-1",
       deletionRequestedAt: "2026-09-10T00:00:00.000Z",
-      recoverUntil: "2026-12-10T00:00:00.000Z",
+      recoverUntil: "2026-09-25T00:00:00.000Z",
       user: {
         id: "user-1",
         email: null,
         displayName: "Listener",
         status: "deleting",
+        deletionPhase: "grace_fence",
+        deletionFailureCode: null,
       },
     };
     const command = {

@@ -55,7 +55,6 @@ export interface FleetPolicy {
   }>;
   leaseSeconds: number;
   processingDeadlineSeconds: number;
-  maxAttempts: number;
 }
 
 export interface ConfigResponse {
@@ -390,7 +389,6 @@ export function parseConfigResponse(value: unknown): ConfigResponse {
         60,
         7200,
       ),
-      maxAttempts: integer(policy.maxAttempts, "policy.maxAttempts", 1, 10),
     },
     serverTime: isoTimestamp(item.serverTime, "serverTime"),
   };

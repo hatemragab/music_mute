@@ -17,6 +17,10 @@ const authErrors = {
     statusCode: HttpStatus.FORBIDDEN,
     message: 'Account disabled',
   },
+  ACCOUNT_RESTRICTED: {
+    statusCode: HttpStatus.FORBIDDEN,
+    message: 'Account processing is temporarily unavailable',
+  },
   ACCOUNT_DELETION_PENDING: {
     statusCode: HttpStatus.FORBIDDEN,
     message: 'Account deletion is pending',

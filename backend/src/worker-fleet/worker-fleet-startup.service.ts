@@ -37,7 +37,6 @@ export class WorkerFleetStartupService implements OnModuleInit {
               })),
               leaseSeconds: 60,
               processingDeadlineSeconds: 7200,
-              maxAttempts: 3,
               updatedAt: new Date(),
               updatedByUid: 'system-bootstrap',
             },

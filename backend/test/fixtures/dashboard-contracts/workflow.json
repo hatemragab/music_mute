@@ -14,6 +14,9 @@
           "jobs.manage",
           "users.read",
           "users.processing.manage",
+          "users.restrictions.manage",
+          "users.account-recovery.manage",
+          "abuse.read",
           "media.read",
           "releases.read",
           "releases.manage",
@@ -23,6 +26,10 @@
           "alerts.manage",
           "audit.read",
           "exports.read",
+          "workers.read",
+          "workers.manage",
+          "workers.enroll",
+          "workers.logs.read",
           "admin.access.manage"
         ],
         "accessRevision": 0,
@@ -56,9 +63,14 @@
           "jobs.manage",
           "users.read",
           "users.processing.manage",
+          "users.restrictions.manage",
+          "users.account-recovery.manage",
+          "abuse.read",
           "media.read",
           "settings.read",
-          "exports.read"
+          "exports.read",
+          "workers.read",
+          "workers.logs.read"
         ],
         "accessRevision": 0,
         "authTimeSec": 1789079284,
@@ -66,17 +78,46 @@
       }
     },
     {
-      "method": "POST",
-      "path": "/admin/users/000000000000000000000001/suspend-processing",
+      "method": "PUT",
+      "path": "/admin/users/000000000000000000000001/restriction",
       "response": {
-        "id": "000000000000000000000001",
-        "email": "user@example.invalid",
-        "displayName": "Fixture user",
+        "id": "000000000000000000000060",
+        "accountId": "000000000000000000000001",
         "status": "active",
-        "processingSuspended": true,
-        "createdAt": "2026-01-01T00:00:00.000Z",
+        "reasonCode": "manual_review",
+        "note": "Owned dashboard integration fixture",
+        "startsAt": "2026-01-01T00:00:00.000Z",
+        "expiresAt": null,
+        "createdBy": "support-fixture",
+        "updatedBy": "support-fixture",
         "updatedAt": "2026-01-01T00:00:00.000Z",
         "revision": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/admin/users/000000000000000000000001/restriction",
+      "response": {
+        "id": "000000000000000000000060",
+        "accountId": "000000000000000000000001",
+        "status": "active",
+        "reasonCode": "manual_review",
+        "note": "Owned dashboard integration fixture",
+        "startsAt": "2026-01-01T00:00:00.000Z",
+        "expiresAt": null,
+        "createdBy": "support-fixture",
+        "updatedBy": "support-fixture",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "revision": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/admin/abuse-events",
+      "response": {
+        "items": [],
+        "nextCursor": null,
+        "asOf": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -408,7 +449,6 @@
             "email": "user@example.invalid",
             "displayName": "Fixture user",
             "status": "active",
-            "processingSuspended": true,
             "createdAt": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
             "revision": 1
@@ -444,15 +484,40 @@
     },
     {
       "method": "GET",
-      "path": "/admin/settings/processing",
+      "path": "/admin/settings/account-policy",
       "response": {
+        "plan": "standard",
         "revision": 0,
         "acceptNewJobs": true,
         "maintenanceMessageEn": "",
         "maintenanceMessageAr": null,
-        "maxInputBytesExclusive": 30000000,
-        "maxDurationSecondsExclusive": 600,
-        "maxActiveJobsPerUser": null,
+        "values": {
+          "monthlyProcessingSeconds": 7200,
+          "maxDurationSeconds": 1200,
+          "maxPreparedAudioBytes": 50000000,
+          "dailyUploadGrants": 30,
+          "monthlyUploadGrants": 200,
+          "monthlyConfirmedUploadBytes": 1000000000,
+          "maxWaitingJobs": 3,
+          "maxProcessingJobs": 1,
+          "maxInfrastructureAttempts": 3,
+          "maxClientInputAttempts": 5,
+          "monthlyDownloadGrants": 150,
+          "monthlyEstimatedDownloadBytes": 10000000000,
+          "maxRetainedOutputBytes": 1000000000,
+          "signedUrlTtlSeconds": 600,
+          "monthlyServiceOutboundBytes": 80000000000,
+          "deletionGraceHours": 360
+        },
+        "enforcedFeatures": [
+          "processing_minutes",
+          "media_limits",
+          "upload_limits",
+          "download_limits",
+          "retained_storage",
+          "service_outbound"
+        ],
+        "updatedBy": "system",
         "updatedAt": "2026-01-01T00:00:00.000Z"
       }
     },
@@ -508,7 +573,6 @@
         "email": "user@example.invalid",
         "displayName": "Fixture user",
         "status": "active",
-        "processingSuspended": true,
         "createdAt": "2026-01-01T00:00:00.000Z",
         "updatedAt": "2026-01-01T00:00:00.000Z",
         "revision": 1,
@@ -516,11 +580,7 @@
           "queued": 1
         },
         "recentJobIds": ["000000000000000000000001"],
-        "suspension": {
-          "reason": "Owned dashboard integration fixture",
-          "actorUid": "support-fixture",
-          "at": "2026-01-01T00:00:00.000Z"
-        }
+        "deletion": null
       }
     },
     {

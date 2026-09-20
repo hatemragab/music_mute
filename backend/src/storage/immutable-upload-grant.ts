@@ -10,6 +10,7 @@ interface ImmutableUpload {
   bytes: number;
   contentType: string;
   checksumSha256: string;
+  storageClass?: 'INTELLIGENT_TIERING';
   expiresIn: number;
   expiresAt: Date;
 }
@@ -18,11 +19,12 @@ interface ImmutableUpload {
 export async function createImmutableUploadGrant(
   input: ImmutableUpload,
 ): Promise<UploadGrant> {
-  const headers = {
+  const headers: Record<string, string> = {
     'Content-Type': input.contentType,
     'x-amz-checksum-sha256': input.checksumSha256,
     'If-None-Match': '*',
-  } as const;
+  };
+  if (input.storageClass) headers['x-amz-storage-class'] = input.storageClass;
   const url = await getSignedUrl(
     input.storage,
     new PutObjectCommand({
@@ -32,6 +34,7 @@ export async function createImmutableUploadGrant(
       ContentType: input.contentType,
       ChecksumSHA256: input.checksumSha256,
       IfNoneMatch: '*',
+      StorageClass: input.storageClass,
     }),
     {
       expiresIn: input.expiresIn,
@@ -39,14 +42,18 @@ export async function createImmutableUploadGrant(
         'content-type',
         'if-none-match',
         'x-amz-checksum-sha256',
+        ...(input.storageClass ? ['x-amz-storage-class'] : []),
       ]),
-      unhoistableHeaders: new Set(['x-amz-checksum-sha256']),
+      unhoistableHeaders: new Set([
+        'x-amz-checksum-sha256',
+        ...(input.storageClass ? ['x-amz-storage-class'] : []),
+      ]),
     },
   );
   return {
     method: 'PUT',
     url,
-    headers: { ...headers },
+    headers,
     expiresAt: input.expiresAt.toISOString(),
   };
 }

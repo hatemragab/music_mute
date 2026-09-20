@@ -11,7 +11,7 @@ function query<T>(read: () => T) {
 }
 
 describe('administrative account recovery', () => {
-  it('atomically restores account access while preserving processing suspension', async () => {
+  it('atomically restores account access without mutating independent controls', async () => {
     const userId = new Types.ObjectId();
     const requestId = new Types.ObjectId();
     const user = {
@@ -27,7 +27,6 @@ describe('administrative account recovery', () => {
       deletionNextAt: new Date('2099-12-11T00:00:00.000Z'),
       deletionLeaseUntil: null,
       deletionLeaseToken: null,
-      processingSuspended: true,
       adminRevision: 4,
     };
     const recovery = {
@@ -98,7 +97,6 @@ describe('administrative account recovery', () => {
     expect(user).toMatchObject({
       status: 'active',
       deletionRequestId: null,
-      processingSuspended: true,
       adminRevision: 5,
     });
     expect(identities.unblock).toHaveBeenCalledWith(

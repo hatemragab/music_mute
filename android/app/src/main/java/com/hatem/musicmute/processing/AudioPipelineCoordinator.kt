@@ -27,7 +27,7 @@ class AudioPipelineCoordinator(
     private val sourceScheduler: PipelineSourceScheduler,
     private val usageRepository: ProcessingUsageRepository? = null,
     private val preparationScheduler: MediaPreparationScheduler? = null,
-    private val policyReader: suspend () -> ProcessingMediaPolicy = { ProcessingMediaPolicy.LEGACY },
+    private val policyReader: suspend () -> ProcessingMediaPolicy = { ProcessingMediaPolicy.STANDARD },
 ) {
     private val localSlots = Semaphore(1)
     private data class ActiveImport(val owner: ProcessingSession, val job: Job)
@@ -146,8 +146,9 @@ class AudioPipelineCoordinator(
         repository.updateSourceTitle(operationId, sourceTitle)
         checkSession(owner)
         val extension = downloadedFile.extension.lowercase().ifBlank { "mp3" }
-        val fetched = policyReader()
-        val policy = if (fetched.youtubeExpansionReady && fetched.acceptNewJobs) fetched else ProcessingMediaPolicy.LEGACY
+        val policy = policyReader()
+        if (!policy.acceptNewJobs || !policy.youtubePreparationReady)
+            throw JobsFailure(JobsProblem.PROCESSING_CAPACITY_UNAVAILABLE)
         val prepared = preparer.prepare(ownerUid, "$sourceTitle.$extension", operationId, policy, "youtube") {
             downloadedFile.inputStream()
         }
@@ -274,7 +275,7 @@ class AudioPipelineCoordinator(
 
     private suspend fun preflightAvailability() {
         val policy = policyReader()
-        usageRepository?.refresh()?.requireAvailable(policy.localExpansionReady && policy.acceptNewJobs)
+        usageRepository?.refresh()?.requireAvailable(policy.localPreparationReady && policy.acceptNewJobs)
     }
 
     private fun requireSession() = session() ?: throw JobsFailure(JobsProblem.UNAUTHENTICATED)
