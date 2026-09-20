@@ -228,3 +228,11 @@ WorkerMachineSchema.index(
   { groupId: 1, status: 1, _id: 1 },
   { name: 'worker_machine_group_status' },
 );
+WorkerMachineSchema.index(
+  { 'approvedCapabilities.platform': 1, lastSeenAt: -1, _id: 1 },
+  { name: 'worker_machine_platform_seen' },
+);
+WorkerMachineSchema.index(
+  { 'runtimeIdentity.workerVersion': 1, lastSeenAt: -1, _id: 1 },
+  { name: 'worker_machine_release_seen' },
+);

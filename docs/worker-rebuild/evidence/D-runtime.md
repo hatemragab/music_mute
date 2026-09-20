@@ -485,7 +485,12 @@ evidence and logged-out plus reboot recovery remain untested.
   were preserved, and the service remained stopped as it was on entry;
 - Windows one-command bootstrap orchestration and exclusive protected
   qualification export: PASS_LOCAL; native live-backend execution is NOT_RUN
-  because the host became unreachable after the successful `0.1.3` stage;
+  after the successful `0.1.3` stage. A later read-only SSH audit at
+  `192.168.1.7` confirmed the automatic `MusicMuteWorker` service still uses
+  `LocalService`, active release `0.1.1`, and preserved runtime config and
+  credential; the service remains stopped exactly as it was before staging.
+  The Mac-hosted backend was not reachable from Windows, so no live enrollment
+  or S3 activation was claimed;
 - logged-out operation, live backend/S3 transfer, interrupted-upgrade recovery
   acceptance and reboot: NOT_RUN.
 

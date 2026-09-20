@@ -127,17 +127,26 @@ The package build contains no environment files, credentials, models, audio fixt
   its full verification after the final runtime-contract changes: 110 Vitest
   files/749 tests, 22 E2E files/135 tests and production build. See
   [D evidence](../evidence/D-runtime.md).
+- E1-E5 add the protected worker administration surface and its bounded backend
+  projections. Complete backend verification passes formatting, lint,
+  typecheck, tracked-secret checks, 110 unit files/753 tests, 22 E2E files/135
+  tests and build. Complete dashboard verification passes formatting, lint,
+  typecheck, 18 unit files/56 tests, production build and 32 Chrome browser
+  tests covering permissions, compiled contracts, adverse states, responsive
+  widths and accessibility. See [E evidence](../evidence/E-dashboard.md).
 
 ## Not executed or claimed
 
 No live S3 integration, WebSocket hint transport, listening-quality review,
 npm publication, signing with production keys or deployment has occurred. The
-C1-C6 backend and D1-D3 runtime work are locally verified only. D4 and D5 now
+C1-C6 backend, D1-D3 runtime and E1-E5 dashboard work are locally verified
+only. D4 and D5 now
 have native package, installed-service, accelerated processing and final
 four-recipe qualification evidence on the two MVP hosts, but neither checkpoint
-is complete. D6 has local automated evidence. Dashboard, Android and iOS were
-not changed. Real fleet enrollment, live backend/S3, logged-out and reboot
-acceptance remain unverified. The upload-candidate report and artifact
+is complete. D6 has local automated evidence. Android and iOS were not changed.
+The dashboard has isolated-browser acceptance but no production deployment or
+live fleet acceptance. Real fleet enrollment, live backend/S3, logged-out and
+reboot acceptance remain unverified. The upload-candidate report and artifact
 preparation contracts have now passed rebuilt native macOS and Windows stages,
 but not a live backend/S3 enrollment. Windows
 interrupted-upgrade recovery and all Linux/NVIDIA or other hardware also remain

@@ -8,6 +8,7 @@ import {
   PERMISSIONS,
 } from "./contracts";
 import { NAV_ITEMS } from "@/app/app-shell";
+import { ROLE_DETAILS } from "@/features/administrators/role-permissions";
 import { requestMediaGrant } from "@/features/jobs/jobs-api";
 import {
   getReleaseProposal,
@@ -77,6 +78,29 @@ describe("dashboard/backend contract alignment", () => {
     ]);
     expect(PERMISSIONS).toContain("jobs.read");
     expect(NAV_ITEMS.map((item) => item.to)).toContain("/jobs");
+    expect(PERMISSIONS).toEqual(
+      expect.arrayContaining([
+        "workers.read",
+        "workers.manage",
+        "workers.enroll",
+        "workers.logs.read",
+      ]),
+    );
+    expect(NAV_ITEMS.map((item) => item.to)).toContain("/workers");
+    expect(ROLE_DETAILS.owner.permissions).toEqual(
+      expect.arrayContaining([
+        "workers.read",
+        "workers.manage",
+        "workers.enroll",
+        "workers.logs.read",
+      ]),
+    );
+    expect(ROLE_DETAILS.support.permissions).toEqual(
+      expect.arrayContaining(["workers.read", "workers.logs.read"]),
+    );
+    expect(ROLE_DETAILS.support.permissions).not.toContain("workers.manage");
+    expect(ROLE_DETAILS.viewer.permissions).toContain("workers.read");
+    expect(ROLE_DETAILS.viewer.permissions).not.toContain("workers.logs.read");
   });
 
   it("removes immutable fields from release edits", async () => {

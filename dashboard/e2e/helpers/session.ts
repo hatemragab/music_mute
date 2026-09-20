@@ -8,6 +8,7 @@ import {
 
 const ROLE_KEY = "musicmute:e2e-role";
 const APP_ORIGIN = "http://127.0.0.1:4173";
+export const E2E_API_ROOT = `http://127.0.0.1:${process.env.DASHBOARD_E2E_API_PORT ?? "3100"}/api/v1`;
 
 export async function setDashboardRole(page: Page, role: AdminRole | null) {
   await page.addInitScript(
@@ -23,7 +24,7 @@ export async function installDashboardFixture(
   page: Page,
   fixture: DashboardFixture = createDashboardFixture(),
 ) {
-  await page.route("http://127.0.0.1:3100/api/v1/**", async (route) => {
+  await page.route(`${E2E_API_ROOT}/**`, async (route) => {
     const request = route.request();
     const corsHeaders = {
       "access-control-allow-origin": APP_ORIGIN,

@@ -43,7 +43,7 @@ function fixture() {
   const attempts = { find: vi.fn() };
   const policies = { findById: vi.fn(), updateOne: vi.fn() };
   const invitations = { find: vi.fn() };
-  const installations = { findOne: vi.fn() };
+  const installations = { find: vi.fn(), findOne: vi.fn() };
   const diagnostics = { find: vi.fn() };
   const commands = {
     find: vi.fn(),
@@ -91,6 +91,9 @@ function fixture() {
     service,
     machines,
     slots,
+    attempts,
+    invitations,
+    installations,
     policies,
     commands,
     operations,
@@ -126,6 +129,191 @@ function policy(revision = 3) {
 }
 
 describe('worker control plane', () => {
+  it('pages the filtered fleet and includes bounded work and error summaries', async () => {
+    const f = fixture();
+    const secondMachineId = '136601c1-acb9-4768-91e5-059b1ec89a8e';
+    const seenAt = new Date('2026-09-20T01:00:00.000Z');
+    const machine = {
+      ...currentMachine({
+        approvedCapabilities: [
+          {
+            platform: 'windows-amd64',
+            provider: 'directml',
+            gpuId: '0',
+            recipeIds: ['kim-vocals-trim-v1'],
+            maxSlots: 1,
+          },
+        ],
+        runtimeIdentity: { workerVersion: '0.1.3' },
+        lastSeenAt: seenAt,
+      }),
+      label: 'Z440',
+      groupId: null,
+      hardwareReport: null,
+      revokedAt: null,
+      createdAt: seenAt,
+      updatedAt: seenAt,
+    };
+    f.machines.find
+      .mockReturnValueOnce(
+        query([
+          machine,
+          { ...machine, _id: secondMachineId, label: 'overflow' },
+        ]),
+      )
+      .mockReturnValueOnce(query([]));
+    const activeJob = { toHexString: () => '64f0c0000000000000000001' };
+    const failedJob = { toHexString: () => '64f0c0000000000000000002' };
+    f.attempts.find
+      .mockReturnValueOnce(
+        query([
+          {
+            _id: '10e021b3-799d-48cc-b763-524db4953c3c',
+            machineId,
+            jobId: activeJob,
+            state: 'running',
+            stage: 'separating',
+            terminalCode: null,
+            terminalSummary: null,
+            finishedAt: null,
+            createdAt: seenAt,
+            updatedAt: seenAt,
+          },
+          {
+            _id: '5016ff2e-9a78-48dd-8dbb-e806587b805f',
+            machineId,
+            jobId: failedJob,
+            state: 'failed',
+            stage: 'encoding',
+            terminalCode: 'WORKER_PROCESS_FAILED',
+            terminalSummary: 'Encoder exited safely',
+            finishedAt: seenAt,
+            createdAt: seenAt,
+            updatedAt: seenAt,
+          },
+        ]),
+      )
+      .mockReturnValueOnce(query([]));
+
+    const first = await f.service.listMachines(actor, {
+      platform: 'windows-amd64',
+      releaseVersion: '0.1.3',
+      limit: 1,
+    });
+
+    expect(first.items).toHaveLength(1);
+    expect(first.items[0]).toMatchObject({
+      machineId,
+      currentAttempt: {
+        jobId: '64f0c0000000000000000001',
+        state: 'running',
+        stage: 'separating',
+      },
+      recentError: {
+        code: 'WORKER_PROCESS_FAILED',
+        summary: 'Encoder exited safely',
+      },
+    });
+    expect(first.nextCursor).toEqual(expect.any(String));
+    expect(first.asOf).toBeInstanceOf(Date);
+
+    const second = await f.service.listMachines(actor, {
+      platform: 'windows-amd64',
+      releaseVersion: '0.1.3',
+      limit: 1,
+      cursor: first.nextCursor!,
+    });
+    expect(second).toMatchObject({ items: [], nextCursor: null });
+    expect(f.machines.find).toHaveBeenLastCalledWith(
+      expect.objectContaining({ $and: expect.any(Array) }),
+    );
+
+    await expect(
+      f.service.listMachines(actor, {
+        status: 'paused',
+        platform: 'windows-amd64',
+        releaseVersion: '0.1.3',
+        limit: 1,
+        cursor: first.nextCursor!,
+      }),
+    ).rejects.toThrow('Invalid cursor');
+  });
+
+  it('joins invitation history to bounded installation status without credentials', async () => {
+    const f = fixture();
+    const invitationId = '7a155328-7d4f-4102-a99f-63ea3025935f';
+    const installationId = 'd32f392a-88de-4ce3-b1a3-e79890be1547';
+    const expiredInvitationId = '950a1d87-5c24-41ba-a301-e8f60aa1217b';
+    const now = new Date();
+    f.invitations.find.mockReturnValue(
+      query([
+        {
+          _id: invitationId,
+          state: 'consumed',
+          createdByUid: actor.uid,
+          initialPolicyId: null,
+          expiresAt: new Date(now.getTime() + 60_000),
+          consumedAt: now,
+          revokedAt: null,
+          installationSessionId: installationId,
+          revision: 1,
+        },
+        {
+          _id: expiredInvitationId,
+          state: 'active',
+          createdByUid: actor.uid,
+          initialPolicyId: null,
+          expiresAt: new Date(now.getTime() - 60_000),
+          consumedAt: null,
+          revokedAt: null,
+          installationSessionId: null,
+          revision: 0,
+        },
+      ]),
+    );
+    f.installations.find.mockReturnValue(
+      query([
+        {
+          _id: installationId,
+          phase: 'failed',
+          outcomeCode: 'PROVIDER_UNAVAILABLE',
+          reportSummary: 'DirectML qualification failed',
+          lastSeenAt: now,
+          machineId: null,
+          activatedAt: null,
+          updatedAt: now,
+        },
+      ]),
+    );
+
+    const result = await f.service.listInvitations(actor);
+
+    expect(result.items[0]).toMatchObject({
+      invitationId,
+      installation: {
+        phase: 'failed',
+        outcomeCode: 'PROVIDER_UNAVAILABLE',
+        reportSummary: 'DirectML qualification failed',
+      },
+    });
+    expect(result.items[0]).not.toHaveProperty('credential');
+    expect(result.items[1]).toMatchObject({
+      invitationId: expiredInvitationId,
+      state: 'expired',
+      installation: null,
+    });
+    expect(result.asOf).toBeInstanceOf(Date);
+  });
+
+  it('returns a safe not-found error for an unknown machine', async () => {
+    const f = fixture();
+    f.machines.findById.mockReturnValue(query(null));
+
+    await expect(f.service.machineDetail(actor, machineId)).rejects.toThrow(
+      'Resource not found',
+    );
+  });
+
   it('returns only current-session configuration and pending commands', async () => {
     const f = fixture();
     f.machines.findById.mockReturnValue(query(currentMachine()));
@@ -221,6 +409,31 @@ describe('worker control plane', () => {
       },
       expect.any(Object),
     );
+  });
+
+  it('rejects a concurrent policy edit at the revision fence', async () => {
+    const f = fixture();
+    f.policies.findById.mockReturnValue(query(policy(4)));
+
+    await expect(
+      f.service.updatePolicy(actor, {
+        operationId: '1d1fe535-cd14-4687-be68-c4ab87f410fe',
+        expectedRevision: 3,
+        acceptClaims: true,
+        recipes: [
+          {
+            recipeId: 'kim-vocals-trim-v1',
+            enabled: true,
+            maxSlotsPerMachine: 1,
+          },
+        ],
+        leaseSeconds: 60,
+        processingDeadlineSeconds: 900,
+        maxAttempts: 3,
+        reason: 'Conflicting edit',
+      }),
+    ).rejects.toThrow('Revision conflict');
+    expect(f.policies.updateOne).not.toHaveBeenCalled();
   });
 
   it('creates a durable typed command and accepts one replay-safe result', async () => {

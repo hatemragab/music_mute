@@ -1,11 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { setDashboardRole } from "./helpers/session";
+import { E2E_API_ROOT, setDashboardRole } from "./helpers/session";
 
 test("compiled backend accepts basic processing settings", async ({ page }) => {
   await setDashboardRole(page, "owner");
   await page.goto("/overview");
-  const result = await page.evaluate(async () => {
-    const root = "http://127.0.0.1:3100/api/v1";
+  const result = await page.evaluate(async (root) => {
     const request = async (method: string, path: string, body?: unknown) => {
       const response = await fetch(root + path, {
         method,
@@ -56,7 +55,7 @@ test("compiled backend accepts basic processing settings", async ({ page }) => {
       conflict,
       allowance,
     };
-  });
+  }, E2E_API_ROOT);
   expect(result.before.status).toBe(200);
   expect(result.save.status).toBe(200);
   expect(result.after.value.revision).toBe(result.before.value.revision + 1);

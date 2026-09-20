@@ -15,6 +15,8 @@ const dashboardPages = [
   `/releases/${FIXTURE_IDS.release}`,
   "/update-policy",
   "/settings",
+  "/workers",
+  `/workers/${FIXTURE_IDS.workerMachine}`,
   "/health",
   "/activity",
   "/administrators",
@@ -113,4 +115,15 @@ test("overview is accessible in both themes with reduced motion", async ({
 
   const darkResults = await new AxeBuilder({ page }).analyze();
   expect(darkResults.violations).toEqual([]);
+});
+
+test("worker fleet list and detail have no detectable accessibility violations", async ({
+  page,
+}) => {
+  for (const path of ["/workers", `/workers/${FIXTURE_IDS.workerMachine}`]) {
+    await page.goto(path);
+    await expect(page.locator("main h1")).toBeVisible();
+    const results = await new AxeBuilder({ page }).analyze();
+    expect(results.violations).toEqual([]);
+  }
 });

@@ -74,6 +74,16 @@ const UsersPage = lazy(() =>
     default: module.UsersPage,
   })),
 );
+const WorkerFleetPage = lazy(() =>
+  import("@/features/workers/worker-fleet-page").then((module) => ({
+    default: module.WorkerFleetPage,
+  })),
+);
+const WorkerMachinePage = lazy(() =>
+  import("@/features/workers/worker-machine-page").then((module) => ({
+    default: module.WorkerMachinePage,
+  })),
+);
 
 const Guard = ({
   permission,
@@ -186,6 +196,22 @@ export function AppRouter() {
           element={
             <Guard permission="settings.read">
               <ProcessingSettingsPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="workers"
+          element={
+            <Guard permission="workers.read">
+              <WorkerFleetPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="workers/:id"
+          element={
+            <Guard permission="workers.read">
+              <WorkerMachinePage />
             </Guard>
           }
         />

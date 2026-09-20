@@ -44,15 +44,15 @@ No implementation branch pushes directly to `main` or the frozen clean-slate bra
 
 ## 2. Branch parents and outputs
 
-| Branch | Parent checkpoint | Main output | Task |
-| --- | --- | --- | --- |
-| `codex/worker-architecture` | Current accepted collection | Approved contracts and MVP boundaries | [01](tasks/01-worker-architecture.md) |
-| `codex/worker-gpu-feasibility` | Accepted architecture | Real CoreML/DirectML Kim evidence and pins | [02](tasks/02-worker-gpu-feasibility.md) |
-| `codex/worker-control-plane` | Accepted feasibility | Enrollment, claims, leases, S3 and minimal APIs | [03](tasks/03-worker-control-plane.md) |
-| `codex/worker-runtime` | Accepted control plane | Supervisor, Python pipeline and platform services | [04](tasks/04-worker-runtime.md) |
-| `codex/worker-dashboard` | Accepted runtime | Minimum enrollment/status/control UI | [05](tasks/05-worker-dashboard.md) |
-| `codex/worker-integration` | Accepted dashboard | End-to-end, failure and security evidence | [06](tasks/06-worker-integration.md) |
-| `codex/worker-release-readiness` | Accepted integration | Versioned candidate and final evidence | [07](tasks/07-worker-release-readiness.md) |
+| Branch                           | Parent checkpoint           | Main output                                       | Task                                       |
+| -------------------------------- | --------------------------- | ------------------------------------------------- | ------------------------------------------ |
+| `codex/worker-architecture`      | Current accepted collection | Approved contracts and MVP boundaries             | [01](tasks/01-worker-architecture.md)      |
+| `codex/worker-gpu-feasibility`   | Accepted architecture       | Real CoreML/DirectML Kim evidence and pins        | [02](tasks/02-worker-gpu-feasibility.md)   |
+| `codex/worker-control-plane`     | Accepted feasibility        | Enrollment, claims, leases, S3 and minimal APIs   | [03](tasks/03-worker-control-plane.md)     |
+| `codex/worker-runtime`           | Accepted control plane      | Supervisor, Python pipeline and platform services | [04](tasks/04-worker-runtime.md)           |
+| `codex/worker-dashboard`         | Accepted runtime            | Minimum enrollment/status/control UI              | [05](tasks/05-worker-dashboard.md)         |
+| `codex/worker-integration`       | Accepted dashboard          | End-to-end, failure and security evidence         | [06](tasks/06-worker-integration.md)       |
+| `codex/worker-release-readiness` | Accepted integration        | Versioned candidate and final evidence            | [07](tasks/07-worker-release-readiness.md) |
 
 All PRs use `codex/worker-rebuild` as their base. A feature branch begins from the exact accepted collection tip after the preceding merge, not independently from `main`.
 
@@ -92,11 +92,11 @@ All PRs use `codex/worker-rebuild` as their base. A feature branch begins from t
 
 ### E. Dashboard
 
-- [ ] **E1:** Add protected navigation and a minimal machine list.
-- [ ] **E2:** Add one-use enrollment and installation-status UX.
-- [ ] **E3:** Add machine detail, current work and recent bounded diagnostics.
-- [ ] **E4:** Add safe machine controls, typed operations, capacity, and pipeline policy.
-- [ ] **E5:** Complete permissions, contract, accessibility and adverse-state tests.
+- [x] **E1:** Add protected navigation and a minimal machine list.
+- [x] **E2:** Add one-use enrollment and installation-status UX.
+- [x] **E3:** Add machine detail, current work and recent bounded diagnostics.
+- [x] **E4:** Add safe machine controls, typed operations, capacity, and pipeline policy.
+- [x] **E5:** Complete permissions, contract, accessibility and adverse-state tests.
 
 ### F. Integration
 

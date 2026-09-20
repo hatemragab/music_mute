@@ -24,6 +24,10 @@ export const ROLE_DETAILS: Record<
       "alerts.manage",
       "audit.read",
       "exports.read",
+      "workers.read",
+      "workers.manage",
+      "workers.enroll",
+      "workers.logs.read",
       "admin.access.manage",
     ],
   },
@@ -47,6 +51,8 @@ export const ROLE_DETAILS: Record<
       "media.read",
       "settings.read",
       "exports.read",
+      "workers.read",
+      "workers.logs.read",
     ],
   },
   viewer: {
@@ -57,6 +63,7 @@ export const ROLE_DETAILS: Record<
       "jobs.read",
       "releases.read",
       "settings.read",
+      "workers.read",
     ],
   },
 };

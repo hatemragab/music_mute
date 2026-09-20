@@ -23,6 +23,10 @@ export const PERMISSIONS = [
   "alerts.manage",
   "audit.read",
   "exports.read",
+  "workers.read",
+  "workers.manage",
+  "workers.enroll",
+  "workers.logs.read",
   "admin.access.manage",
 ] as const;
 
