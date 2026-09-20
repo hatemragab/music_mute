@@ -4,7 +4,7 @@
 **Create from:** updated collection after branch 4 merge
 **PR base:** `codex/backend-security-cost-hardening`
 **Checkpoints:** E1–E6
-**Status:** `READY_FOR_REVIEW`
+**Status:** `MERGED`
 **Current checkpoint:** E6 complete
 **Evidence:** `../evidence/05-account-deletion-cleanup.md`
 
@@ -101,6 +101,6 @@ data remaining silently.
 - [x] Record real Firebase/S3/deployed deletion as `NOT_RUN` unless separately
       authorized and actually exercised with test-owned data.
 
-**Exit:** reviewed PR is ready against the collection branch. Stop. Do not merge
-the collection to `main`, deploy, or perform a real account deletion without a new
-explicit instruction.
+**Exit:** PR #14 is merged into the collection branch. Do not merge the collection
+to `main`, deploy, or perform a real account deletion without a new explicit
+instruction.

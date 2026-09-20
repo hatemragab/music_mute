@@ -15,9 +15,11 @@
 
 ## Progress
 
-- Branch status: `READY_FOR_REVIEW`
+- Branch status: `MERGED`
 - Completed checkpoints: E1, E2, E3, E4, E5, E6
-- Next item: review and merge the Branch 5 PR into the collection branch
+- Merge commit: `b0b69a6d57021a86327bf438acab360ad2098633`
+- Next item: maintainer review of the completed collection before any separately
+  authorized merge to `main` or deployment
 - Blocking input: none
 
 ## Delivered behavior

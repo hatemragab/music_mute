@@ -6,7 +6,7 @@
   "collectionParent": "codex/worker-rebuild",
   "baselineCommit": "947d0544a6c93aff63243770d0aba05d7e67c89d",
   "documentationStatus": "approved",
-  "implementationStatus": "branch_5_ready_for_review",
+  "implementationStatus": "complete_all_branches_merged",
   "totalCheckpoints": 32,
   "protectedBranches": ["main", "codex/worker-rebuild"],
   "agentMayNotWithoutExplicitInstruction": [
@@ -95,7 +95,7 @@
       "architectureFile": "architecture/05-account-deletion.md",
       "evidenceFile": "evidence/05-account-deletion-cleanup.md",
       "checkpoints": ["E1", "E2", "E3", "E4", "E5", "E6"],
-      "status": "ready_for_review",
+      "status": "merged",
       "currentCheckpoint": null,
       "lastVerifiedCommit": "7b35761a26f8d2482f1a96b39075a2c7b4afaed7",
       "purpose": "Fifteen-day recovery state and permanent, resumable account and media cleanup"
