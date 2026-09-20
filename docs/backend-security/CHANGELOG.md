@@ -1,5 +1,38 @@
 # Backend security planning changelog
 
+## 2026-09-20 — Branch 4 checkpoints D1–D6 complete
+
+- Added atomic hourly abuse buckets with 90-day TTL, compact monthly summaries,
+  bounded projections/pagination, true first/last times, and current restriction
+  state without raw identifiers, payloads, URLs, or stack traces.
+- Added layered account, IP, endpoint, and service Redis budgets for processing,
+  deletion/recovery, and administrator operations while preserving MongoDB as the
+  durable quota authority and fail-closed outage behavior.
+- Replaced the embedded processing-suspension fields/routes/UI with one revisioned,
+  audited account restriction record; applying a restriction cancels unfinished
+  work and fences worker ownership while authentication/deletion/recovery remain.
+- Added separate abuse-read and restriction-manage permissions, dashboard filters
+  and controls, sanitized Redis/Atlas capacity signals, and an unchanged external
+  provider checklist whose items remain unchecked.
+- Passed backend verify (769 unit and 140 HTTP E2E tests), 59 isolated integration
+  tests across auth/processing/dashboard/deletion, and the dashboard 51-test/build
+  gate. One pre-existing APK installer timeout passed alone and on full rerun.
+- Recorded implementation commit `33f5a640ba126b3e4f863e1a0aa946995c9dde99`;
+  no provider, deployment, live data, device, or browser UI E2E action was run.
+
+## 2026-09-20 — Branch 4 started at checkpoint D1
+
+- Confirmed Branch 3 PR #12 merged into the collection branch at
+  `5151426a87d2712e9064bd222de498cf6b054f5f`.
+- Created `hatem/account-abuse-api-limits` from that exact merged collection tip in
+  a separate managed worktree.
+- Inventoried typed-event, Redis budget, account-state, administrator audit,
+  dashboard, health, and provider-boundary requirements.
+- Passed 27 focused unit tests, 11 Redis/Mongo/admin integrations, and 18 HTTP
+  security/admin E2E tests as the pre-change baseline.
+- Kept automatic bans, device enforcement, VPS changes, deployments, and real data
+  outside this branch.
+
 ## 2026-09-20 — Branch 3 checkpoint C7 complete
 
 - Passed backend format, lint, typecheck, secret scan, 757 unit tests, 137 HTTP

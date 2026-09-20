@@ -72,6 +72,11 @@ not break AWS service access.
 
 ## 5. MongoDB Atlas Free
 
+The Branch 4 application health sampler now reports the sanitized
+`MONGODB_STORAGE_PRESSURE` code when data plus index size reaches its early local
+warning threshold. This is an application signal only; it does not configure an
+Atlas alert or prove current provider usage.
+
 - [ ] Confirm this environment is using the intended Free cluster and current
       provider limits.
 - [ ] Restrict network access to required application/operator sources; do not use
@@ -88,6 +93,11 @@ not break AWS service access.
 Backups/disaster recovery are intentionally outside this roadmap.
 
 ## 6. Redis on the shared 4 GB VPS
+
+The Branch 4 application health sampler now reports sanitized
+`REDIS_MEMORY_UNBOUNDED`, `REDIS_EVICTION_POLICY_UNSAFE`, or
+`REDIS_MEMORY_PRESSURE` codes. These are application signals only; they do not
+change `maxmemory`, eviction policy, authentication, firewall, or monitoring.
 
 - [ ] Confirm Redis is private or firewall-restricted and authenticated.
 - [ ] Confirm the application uses the intended Redis database/environment.
