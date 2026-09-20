@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 import type { AdminRole } from "../src/api/contracts";
-import { installDashboardFixture, setDashboardRole } from "./helpers/session";
+import {
+  E2E_API_ROOT,
+  installDashboardFixture,
+  setDashboardRole,
+} from "./helpers/session";
 
 const expectedNavigation: Record<AdminRole, string[]> = {
   owner: [
@@ -12,13 +16,28 @@ const expectedNavigation: Record<AdminRole, string[]> = {
     "Releases",
     "Update policy",
     "Settings",
+    "Worker fleet",
     "Health & alerts",
     "Activity",
     "Administrators",
   ],
   release_manager: ["Overview", "Releases", "Update policy"],
-  support: ["Overview", "Jobs", "Users", "Account recovery", "Settings"],
-  viewer: ["Overview", "Jobs", "Releases", "Update policy", "Settings"],
+  support: [
+    "Overview",
+    "Jobs",
+    "Users",
+    "Account recovery",
+    "Settings",
+    "Worker fleet",
+  ],
+  viewer: [
+    "Overview",
+    "Jobs",
+    "Releases",
+    "Update policy",
+    "Settings",
+    "Worker fleet",
+  ],
 };
 
 for (const [role, links] of Object.entries(expectedNavigation) as Array<
@@ -51,8 +70,8 @@ test("direct route and forged API request remain forbidden to support", async ({
   await page.goto("/administrators");
   await expect(page.getByRole("alert")).toContainText("Not authorized");
 
-  const status = await page.evaluate(async () => {
-    const response = await fetch("http://127.0.0.1:3100/api/v1/admin/access", {
+  const status = await page.evaluate(async (apiRoot) => {
+    const response = await fetch(`${apiRoot}/admin/access`, {
       method: "POST",
       headers: {
         authorization: "Bearer support-fixture",
@@ -66,6 +85,6 @@ test("direct route and forged API request remain forbidden to support", async ({
       }),
     });
     return response.status;
-  });
+  }, E2E_API_ROOT);
   expect(status).toBe(403);
 });

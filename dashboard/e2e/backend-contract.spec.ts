@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { setDashboardRole } from "./helpers/session";
+import { E2E_API_ROOT, setDashboardRole } from "./helpers/session";
 
 test("browser enforces session, permission, receipt, concurrency, and revision contracts through compiled Nest", async ({
   page,
@@ -11,8 +11,7 @@ test("browser enforces session, permission, receipt, concurrency, and revision c
     page.getByRole("heading", { name: "Operations overview" }),
   ).toBeVisible();
 
-  const result = await page.evaluate(async () => {
-    const api = "http://127.0.0.1:3100/api/v1";
+  const result = await page.evaluate(async (api) => {
     const request = async (
       method: string,
       path: string,
@@ -119,7 +118,7 @@ test("browser enforces session, permission, receipt, concurrency, and revision c
       stale,
       supportSession,
     };
-  });
+  }, E2E_API_ROOT);
 
   expect(result.ownerSession.status).toBe(200);
   expect(result.ownerSession.cacheControl).toBe("no-store");
@@ -142,8 +141,7 @@ test("dashboard media and release payloads pass compiled backend validation", as
   await setDashboardRole(page, "owner");
   await page.goto("/overview");
 
-  const result = await page.evaluate(async () => {
-    const api = "http://127.0.0.1:3100/api/v1";
+  const result = await page.evaluate(async (api) => {
     const request = async (method: string, path: string, body?: unknown) => {
       const response = await fetch(`${api}${path}`, {
         method,
@@ -213,7 +211,7 @@ test("dashboard media and release payloads pass compiled backend validation", as
       },
     );
     return { media, edit, current, preview, publish, withdraw };
-  });
+  }, E2E_API_ROOT);
 
   expect(result.current.status).toBe(200);
   expect(result.preview.status).toBe(201);
@@ -233,8 +231,7 @@ test("every dashboard mutation payload passes compiled backend strict validation
   await setDashboardRole(page, "owner");
   await page.goto("/overview");
 
-  const responses = await page.evaluate(async () => {
-    const api = "http://127.0.0.1:3100/api/v1";
+  const responses = await page.evaluate(async (api) => {
     const missingId = "000000000000000000000098";
     const request = async (method: string, path: string, body?: unknown) => {
       const response = await fetch(`${api}${path}`, {
@@ -339,7 +336,7 @@ test("every dashboard mutation payload passes compiled backend strict validation
     );
 
     return results;
-  });
+  }, E2E_API_ROOT);
 
   for (const [route, response] of Object.entries(responses)) {
     expect(response.status, `${route}: ${response.code}`).not.toBe(400);

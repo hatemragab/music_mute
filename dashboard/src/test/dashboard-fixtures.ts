@@ -14,6 +14,13 @@ import type {
   UserDetail,
 } from "../api/contracts";
 import { ROLE_DETAILS } from "../features/administrators/role-permissions";
+import type {
+  WorkerDiagnosticPage,
+  WorkerFleetPolicy,
+  WorkerInvitation,
+  WorkerMachine,
+  WorkerMachineDetail,
+} from "../features/workers/worker-types";
 
 const NOW = "2026-09-11T00:00:00.000Z";
 export const FIXTURE_IDS = {
@@ -24,6 +31,12 @@ export const FIXTURE_IDS = {
   upload: "000000000000000000000030",
   alert: "000000000000000000000040",
   recovery: "000000000000000000000050",
+  workerMachine: "5acc2df8-bf20-40ec-ab6f-b64a68cd4aec",
+  workerInvitation: "7a155328-7d4f-4102-a99f-63ea3025935f",
+  workerInstallation: "d32f392a-88de-4ce3-b1a3-e79890be1547",
+  workerAttempt: "10e021b3-799d-48cc-b763-524db4953c3c",
+  workerSlot: "4e8a5582-5e24-4fa5-8258-704f7cb2b6d5",
+  workerDiagnostic: "b05af08e-03e4-42eb-a694-ed94405130c4",
 } as const;
 
 export interface FixtureRequest {
@@ -106,6 +119,15 @@ const permissionFor = (method: string, path: string): Permission | null => {
     return "users.account-recovery.manage";
   if (path.startsWith("/admin/users"))
     return method === "GET" ? "users.read" : "users.processing.manage";
+  if (path.startsWith("/admin/worker-fleet/machines")) {
+    if (path.endsWith("/diagnostics")) return "workers.logs.read";
+    return method === "GET" ? "workers.read" : "workers.manage";
+  }
+  if (path === "/admin/worker-fleet/invitations") return "workers.enroll";
+  if (path === "/admin/worker-fleet/policy")
+    return method === "GET" ? "workers.read" : "workers.manage";
+  if (path.startsWith("/admin/workers/invitations")) return "workers.enroll";
+  if (path.startsWith("/admin/workers/machines")) return "workers.manage";
   return null;
 };
 
@@ -269,6 +291,188 @@ export class DashboardFixture {
     acknowledgedBy: null,
     revision: 1,
     message: "The storage dependency needs attention.",
+  };
+  workerMachine: WorkerMachine = {
+    machineId: FIXTURE_IDS.workerMachine,
+    status: "active",
+    label: "Windows Z440",
+    groupId: "mvp",
+    policyRevision: 3,
+    appliedRevision: 3,
+    desiredRevision: 3,
+    capabilities: [
+      {
+        platform: "windows-amd64",
+        provider: "directml",
+        gpuId: "0",
+        recipeIds: [
+          "kim-vocals-v1",
+          "kim-vocals-trim-v1",
+          "kim-vocals-denoise-v1",
+          "kim-vocals-denoise-trim-v1",
+        ],
+        maxSlots: 1,
+      },
+    ],
+    hardware: {
+      os: "Windows 11 Pro",
+      osBuild: "26200",
+      architecture: "x64",
+      cpu: "Intel Xeon fixture",
+      memoryBytes: 34_359_738_368,
+      gpus: [
+        {
+          id: "0",
+          name: "Radeon RX 580",
+          driverVersion: "fixture-driver",
+          memoryBytes: 8_589_934_592,
+        },
+      ],
+    },
+    runtime: {
+      workerVersion: "0.1.3",
+      protocolVersion: 1,
+      manifestDigest: "a".repeat(64),
+      modelDigest: "b".repeat(64),
+      providerRuntimeVersion: "onnxruntime-directml 1.24.4",
+    },
+    session: {
+      sessionId: "a7e20fda-7501-4942-ab8c-955621d13b85",
+      incarnation: "bb4e53ba-3c64-474e-9375-1ca345346e3b",
+      generation: 1,
+      startedAt: NOW,
+      lastSeenAt: NOW,
+    },
+    lastSeenAt: NOW,
+    revokedAt: null,
+    revision: 4,
+    createdAt: NOW,
+    updatedAt: NOW,
+    currentAttempt: {
+      attemptId: FIXTURE_IDS.workerAttempt,
+      jobId: FIXTURE_IDS.job,
+      state: "running",
+      stage: "separating",
+      startedAt: NOW,
+    },
+    recentError: null,
+  };
+  workerDetail: WorkerMachineDetail = {
+    machine: this.workerMachine,
+    slots: [
+      {
+        _id: FIXTURE_IDS.workerSlot,
+        gpuId: "0",
+        slotIndex: 0,
+        state: "busy",
+        allowedRecipeIds: this.workerMachine.capabilities[0]!.recipeIds,
+        currentAttemptId: FIXTURE_IDS.workerAttempt,
+        lastSeenAt: NOW,
+        revision: 2,
+      },
+    ],
+    attempts: [
+      {
+        attemptId: FIXTURE_IDS.workerAttempt,
+        jobId: FIXTURE_IDS.job,
+        workerId: FIXTURE_IDS.workerSlot,
+        state: "running",
+        stage: "separating",
+        attemptNumber: 1,
+        leaseExpiresAt: "2026-09-11T00:01:00.000Z",
+        deadlineAt: "2026-09-11T00:15:00.000Z",
+        terminalCode: null,
+        terminalSummary: null,
+        finishedAt: null,
+      },
+    ],
+    diagnostics: [
+      {
+        id: FIXTURE_IDS.workerDiagnostic,
+        kind: "runtime_log",
+        sequenceStart: 0,
+        sequenceEnd: 1,
+        lineCount: 2,
+        metricCount: 1,
+        createdAt: NOW,
+      },
+    ],
+    installation: {
+      id: FIXTURE_IDS.workerInstallation,
+      phase: "activated",
+      outcomeCode: null,
+      reportSummary: "DirectML qualification passed",
+      activatedAt: NOW,
+    },
+    commands: [],
+  };
+  workerDiagnostics: WorkerDiagnosticPage = {
+    items: [
+      {
+        id: FIXTURE_IDS.workerDiagnostic,
+        kind: "runtime_log",
+        sequenceStart: 0,
+        sequenceEnd: 1,
+        lines: [
+          "Service healthy",
+          "Private upload https://storage.invalid/signed-value credential=fixture-secret",
+        ],
+        metrics: [{ name: "provider_nodes", value: 896, unit: "nodes" }],
+        createdAt: NOW,
+      },
+    ],
+  };
+  workerInvitations: WorkerInvitation[] = [
+    {
+      invitationId: FIXTURE_IDS.workerInvitation,
+      state: "consumed",
+      createdByUid: "owner-fixture",
+      initialPolicyId: null,
+      expiresAt: "2026-09-11T00:15:00.000Z",
+      consumedAt: NOW,
+      revokedAt: null,
+      installationSessionId: FIXTURE_IDS.workerInstallation,
+      installation: {
+        phase: "activated",
+        outcomeCode: null,
+        reportSummary: "DirectML qualification passed",
+        lastSeenAt: NOW,
+        machineId: FIXTURE_IDS.workerMachine,
+        activatedAt: NOW,
+        updatedAt: NOW,
+      },
+      revision: 1,
+    },
+  ];
+  workerPolicy: WorkerFleetPolicy = {
+    revision: 3,
+    acceptClaims: true,
+    recipes: [
+      {
+        recipeId: "kim-vocals-v1",
+        enabled: true,
+        maxSlotsPerMachine: 1,
+      },
+      {
+        recipeId: "kim-vocals-trim-v1",
+        enabled: true,
+        maxSlotsPerMachine: 1,
+      },
+      {
+        recipeId: "kim-vocals-denoise-v1",
+        enabled: true,
+        maxSlotsPerMachine: 1,
+      },
+      {
+        recipeId: "kim-vocals-denoise-trim-v1",
+        enabled: true,
+        maxSlotsPerMachine: 1,
+      },
+    ],
+    leaseSeconds: 60,
+    processingDeadlineSeconds: 900,
+    maxAttempts: 3,
+    updatedAt: NOW,
   };
 
   async handle(input: FixtureRequest): Promise<FixtureResponse> {
@@ -564,6 +768,177 @@ export class DashboardFixture {
           : null,
       };
       return { status: 201, body: this.user };
+    }
+
+    if (path === "/admin/worker-fleet/machines" && method === "GET") {
+      const status = url.searchParams.get("status");
+      const platform = url.searchParams.get("platform");
+      const groupId = url.searchParams.get("groupId");
+      const releaseVersion = url.searchParams.get("releaseVersion");
+      const matches =
+        (!status || this.workerMachine.status === status) &&
+        (!platform ||
+          this.workerMachine.capabilities.some(
+            (capability) => capability.platform === platform,
+          )) &&
+        (!groupId || this.workerMachine.groupId === groupId) &&
+        (!releaseVersion ||
+          this.workerMachine.runtime?.workerVersion === releaseVersion);
+      return {
+        status: 200,
+        body: page(matches ? [this.workerMachine] : []),
+      };
+    }
+    if (
+      path ===
+        `/admin/worker-fleet/machines/${FIXTURE_IDS.workerMachine}/diagnostics` &&
+      method === "GET"
+    )
+      return { status: 200, body: this.workerDiagnostics };
+    if (
+      path === `/admin/worker-fleet/machines/${FIXTURE_IDS.workerMachine}` &&
+      method === "GET"
+    )
+      return { status: 200, body: this.workerDetail };
+    if (
+      path.match(
+        new RegExp(
+          `^/admin/worker-fleet/machines/${FIXTURE_IDS.workerMachine}/(doctor|benchmark)$`,
+        ),
+      ) &&
+      method === "POST"
+    )
+      return {
+        status: 201,
+        body: {
+          commandId: "c7ed43ba-4f5f-4531-8424-8f69fa87ddde",
+          deferred: false,
+          replayed: false,
+        },
+      };
+    if (path === "/admin/worker-fleet/invitations" && method === "GET")
+      return {
+        status: 200,
+        body: { items: this.workerInvitations, asOf: NOW },
+      };
+    if (path === "/admin/workers/invitations" && method === "POST") {
+      const body = input.body as {
+        expiresInSeconds?: number;
+        operationId?: string;
+        reason?: string;
+      };
+      if (
+        !body.reason ||
+        !body.operationId ||
+        !body.expiresInSeconds ||
+        body.expiresInSeconds < 300 ||
+        body.expiresInSeconds > 86400
+      )
+        return error(400, "INVALID_REQUEST", "Invalid worker invitation.");
+      const invitationId = "0a67996c-84d7-412e-9c0e-e8684519a793";
+      const expiresAt = new Date(
+        Date.parse(NOW) + body.expiresInSeconds * 1000,
+      ).toISOString();
+      this.workerInvitations.unshift({
+        invitationId,
+        state: "active",
+        createdByUid: `${role}-fixture`,
+        initialPolicyId: null,
+        expiresAt,
+        consumedAt: null,
+        revokedAt: null,
+        installationSessionId: null,
+        installation: null,
+        revision: 0,
+      });
+      return {
+        status: 201,
+        body: {
+          invitationId,
+          revision: 0,
+          credential: "fixture-one-use-enrollment-secret",
+          expiresAt,
+          replayed: false,
+        },
+      };
+    }
+    const invitationRevoke = path.match(
+      /^\/admin\/workers\/invitations\/([^/]+)\/revoke$/,
+    );
+    if (invitationRevoke && method === "POST") {
+      const invitation = this.workerInvitations.find(
+        (item) => item.invitationId === invitationRevoke[1],
+      );
+      if (!invitation)
+        return error(404, "RESOURCE_NOT_FOUND", "Invitation not found.");
+      invitation.state = "revoked";
+      invitation.revokedAt = NOW;
+      invitation.revision += 1;
+      return {
+        status: 201,
+        body: {
+          invitationId: invitation.invitationId,
+          revision: invitation.revision,
+          replayed: false,
+        },
+      };
+    }
+    const machineAction = path.match(
+      new RegExp(
+        `^/admin/workers/machines/${FIXTURE_IDS.workerMachine}/(pause|drain|resume|revoke)$`,
+      ),
+    );
+    if (machineAction && method === "POST") {
+      const body = input.body as RevisionCommand;
+      if (body.expectedRevision !== this.workerMachine.revision)
+        return error(409, "REVISION_CONFLICT", "Worker revision changed.");
+      const action = machineAction[1];
+      const status =
+        action === "pause"
+          ? "paused"
+          : action === "drain"
+            ? "draining"
+            : action === "resume"
+              ? "active"
+              : "revoked";
+      this.workerMachine = {
+        ...this.workerMachine,
+        status,
+        revision: this.workerMachine.revision + 1,
+        revokedAt: status === "revoked" ? NOW : null,
+      };
+      this.workerDetail.machine = this.workerMachine;
+      return {
+        status: 201,
+        body: {
+          machineId: this.workerMachine.machineId,
+          revision: this.workerMachine.revision,
+          status,
+          replayed: false,
+        },
+      };
+    }
+    if (path === "/admin/worker-fleet/policy") {
+      if (method === "GET") return { status: 200, body: this.workerPolicy };
+      const body = input.body as RevisionCommand & Partial<WorkerFleetPolicy>;
+      if (body.expectedRevision !== this.workerPolicy.revision)
+        return error(409, "REVISION_CONFLICT", "Policy revision changed.");
+      this.workerPolicy = {
+        ...this.workerPolicy,
+        acceptClaims: body.acceptClaims ?? this.workerPolicy.acceptClaims,
+        recipes: body.recipes ?? this.workerPolicy.recipes,
+        leaseSeconds: body.leaseSeconds ?? this.workerPolicy.leaseSeconds,
+        processingDeadlineSeconds:
+          body.processingDeadlineSeconds ??
+          this.workerPolicy.processingDeadlineSeconds,
+        maxAttempts: body.maxAttempts ?? this.workerPolicy.maxAttempts,
+        revision: this.workerPolicy.revision + 1,
+        updatedAt: NOW,
+      };
+      return {
+        status: 200,
+        body: { revision: this.workerPolicy.revision, replayed: false },
+      };
     }
 
     if (path === "/admin/releases/proposal" && method === "GET") {

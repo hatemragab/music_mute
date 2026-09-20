@@ -5,6 +5,17 @@ import {
   until,
 } from "../../../backend/test/helpers/isolated-services.mjs";
 
+const dashboardPort = Number.parseInt(
+  process.env.DASHBOARD_E2E_API_PORT ?? "3100",
+  10,
+);
+if (
+  !Number.isInteger(dashboardPort) ||
+  dashboardPort < 1024 ||
+  dashboardPort > 65535
+)
+  throw new Error("DASHBOARD_E2E_API_PORT must be a non-privileged TCP port.");
+
 const backendDirectory = fileURLToPath(
   new URL("../../../backend/", import.meta.url),
 );
@@ -45,7 +56,7 @@ try {
       RATE_LIMIT: "10000",
       ADMIN_SENSITIVE_OPERATIONS_PER_MINUTE: "100",
       DASHBOARD_SERVE_FOR_BROWSER: "1",
-      DASHBOARD_SERVE_PORT: "3100",
+      DASHBOARD_SERVE_PORT: String(dashboardPort),
     },
     services.directory,
   );

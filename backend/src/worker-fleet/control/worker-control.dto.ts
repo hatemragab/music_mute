@@ -11,13 +11,16 @@ import {
   IsString,
   IsUUID,
   Length,
+  Matches,
   Max,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
 import {
+  WORKER_PLATFORMS,
   WORKER_RECIPE_IDS,
+  type WorkerPlatform,
   type WorkerRecipeId,
 } from '../protocol/v1/protocol.js';
 import type { WorkerMachineStatus } from '../worker-fleet.types.js';
@@ -62,6 +65,17 @@ export class AdminWorkerListQueryDto {
   @IsIn(['pending', 'active', 'paused', 'draining', 'revoked'])
   status?: WorkerMachineStatus;
   @IsOptional() @Transform(trim) @IsString() @Length(1, 100) groupId?: string;
+  @IsOptional() @IsIn(WORKER_PLATFORMS) platform?: WorkerPlatform;
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @Length(1, 100)
+  releaseVersion?: string;
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  @Matches(/^[A-Za-z0-9_-]+$/)
+  cursor?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 50;
 }
 

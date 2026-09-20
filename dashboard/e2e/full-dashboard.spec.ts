@@ -28,6 +28,8 @@ test("owner can open every dashboard area without runtime errors", async ({
     [`/releases/${FIXTURE_IDS.release}`, "2.0.0 (20)"],
     ["/update-policy", "Update policy"],
     ["/settings", "Processing settings"],
+    ["/workers", "Worker fleet"],
+    [`/workers/${FIXTURE_IDS.workerMachine}`, "Windows Z440"],
     ["/health", "System health"],
     ["/activity", "Activity log"],
     ["/administrators", "Administrators"],
@@ -42,19 +44,49 @@ test("owner can open every dashboard area without runtime errors", async ({
   expect(runtimeErrors).toEqual([]);
 });
 
-test("removed worker routes render not found without worker API requests", async ({
+test("owner inspects worker detail and one-use enrollment is cleared", async ({
   page,
 }) => {
   await setDashboardRole(page, "owner");
   const fixture = await installDashboardFixture(page);
 
-  await page.goto("/" + "workers");
+  await page.goto("/workers");
+  await expect(page.getByRole("link", { name: /Windows Z440/ })).toBeVisible();
+  await page.getByRole("link", { name: /Windows Z440/ }).click();
   await expect(
-    page.getByRole("heading", { name: "Page not found", exact: true }),
+    page.getByRole("heading", { name: "Windows Z440", exact: true }),
   ).toBeVisible();
+  await page.getByText(/runtime log/).click();
+  await expect(page.getByText(/\[redacted-url\]/)).toBeVisible();
+  await expect(page.getByText(/fixture-secret/)).toHaveCount(0);
+
+  await page.goto("/workers");
+  const trigger = page.getByRole("button", { name: "Create invitation" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Enroll a worker machine" });
+  await dialog.getByLabel("Reason").fill("Enroll the Windows fixture");
+  await dialog.getByRole("button", { name: "Verify identity" }).click();
+  await dialog.getByRole("button", { name: "Create one-use code" }).click();
+  const credentialDialog = page.getByRole("dialog", {
+    name: "Save the one-use code",
+  });
+  await expect(
+    credentialDialog.getByText("fixture-one-use-enrollment-secret"),
+  ).toBeVisible();
+  await credentialDialog
+    .getByRole("button", { name: "I saved the code" })
+    .click();
+  await expect(credentialDialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await expect(
+    page.getByRole("dialog", { name: "Enroll a worker machine" }),
+  ).not.toContainText("fixture-one-use-enrollment-secret");
   expect(
-    fixture.requests.some(({ url }) => url.includes("/admin/" + "workers")),
-  ).toBe(false);
+    fixture.requests.some(({ url }) =>
+      url.includes("/admin/workers/invitations"),
+    ),
+  ).toBe(true);
 });
 
 test("support reviews a high-priority account recovery request", async ({

@@ -54,6 +54,8 @@ describe('worker fleet persistence contract', () => {
     expect(indexNames(WorkerMachineSchema)).toEqual([
       'worker_machine_credential_unique',
       'worker_machine_group_status',
+      'worker_machine_platform_seen',
+      'worker_machine_release_seen',
       'worker_machine_status_seen',
     ]);
     expect(indexNames(WorkerSlotSchema)).toEqual([

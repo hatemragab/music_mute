@@ -10,6 +10,7 @@ import {
   Moon,
   PackageOpen,
   Settings,
+  ServerCog,
   ShieldCheck,
   ShieldAlert,
   Sun,
@@ -82,6 +83,12 @@ export const NAV_ITEMS: NavItem[] = [
     to: "/settings",
     permission: "settings.read",
     icon: Settings,
+  },
+  {
+    label: "Worker fleet",
+    to: "/workers",
+    permission: "workers.read",
+    icon: ServerCog,
   },
   {
     label: "Health & alerts",

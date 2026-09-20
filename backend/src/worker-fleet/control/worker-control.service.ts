@@ -125,17 +125,73 @@ export class WorkerControlService {
   }
 
   async listMachines(_actor: AdminActor, query: AdminWorkerListQueryDto) {
-    const filter = {
+    const scope = workerListScope(query);
+    const filter: Record<string, unknown> = {
       ...(query.status ? { status: query.status } : {}),
       ...(query.groupId ? { groupId: query.groupId } : {}),
+      ...(query.platform
+        ? { 'approvedCapabilities.platform': query.platform }
+        : {}),
+      ...(query.releaseVersion
+        ? { 'runtimeIdentity.workerVersion': query.releaseVersion }
+        : {}),
     };
+    const after = query.cursor
+      ? decodeWorkerListCursor(query.cursor, scope)
+      : null;
     const machines = await this.machines
-      .find(filter)
+      .find(after ? { $and: [filter, workerListAfter(after)] } : filter)
       .sort({ lastSeenAt: -1, _id: 1 })
-      .limit(query.limit)
+      .limit(query.limit + 1)
       .maxTimeMS(3000)
       .lean();
-    return { items: machines.map(presentMachine), nextCursor: null };
+    const hasMore = machines.length > query.limit;
+    const page = machines.slice(0, query.limit);
+    const machineIds = page.map((machine) => machine._id);
+    const attempts = machineIds.length
+      ? await this.attempts
+          .find({
+            machineId: trusted({ $in: machineIds }),
+            state: trusted({
+              $in: ['claimed', 'running', 'uploading', 'failed', 'lost'],
+            }),
+          })
+          .sort({ createdAt: -1, _id: -1 })
+          .limit(machineIds.length * 20)
+          .maxTimeMS(3000)
+          .lean()
+      : [];
+    const currentByMachine = new Map<string, WorkerAttempt>();
+    const errorByMachine = new Map<string, WorkerAttempt>();
+    for (const attempt of attempts) {
+      if (
+        ['claimed', 'running', 'uploading'].includes(attempt.state) &&
+        !currentByMachine.has(attempt.machineId)
+      )
+        currentByMachine.set(attempt.machineId, attempt);
+      if (
+        ['failed', 'lost'].includes(attempt.state) &&
+        !errorByMachine.has(attempt.machineId)
+      )
+        errorByMachine.set(attempt.machineId, attempt);
+    }
+    const last = page.at(-1);
+    return {
+      items: page.map((machine) => ({
+        ...presentMachine(machine),
+        currentAttempt: presentAttemptSummary(
+          currentByMachine.get(machine._id) ?? null,
+        ),
+        recentError: presentAttemptError(
+          errorByMachine.get(machine._id) ?? null,
+        ),
+      })),
+      nextCursor:
+        hasMore && last
+          ? encodeWorkerListCursor(scope, last._id, last.lastSeenAt)
+          : null,
+      asOf: new Date(),
+    };
   }
 
   async machineDetail(_actor: AdminActor, id: string) {
@@ -231,21 +287,51 @@ export class WorkerControlService {
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();
+    const installationIds = items.flatMap((item) =>
+      item.installationSessionId ? [item.installationSessionId] : [],
+    );
+    const installations = installationIds.length
+      ? await this.installations
+          .find({ _id: trusted({ $in: installationIds }) })
+          .limit(100)
+          .maxTimeMS(3000)
+          .lean()
+      : [];
+    const installationById = new Map(
+      installations.map((installation) => [installation._id, installation]),
+    );
     return {
-      items: items.map((item) => ({
-        invitationId: item._id,
-        state:
-          item.state === 'active' && item.expiresAt <= now
-            ? 'expired'
-            : item.state,
-        createdByUid: item.createdByUid,
-        initialPolicyId: item.initialPolicyId,
-        expiresAt: item.expiresAt,
-        consumedAt: item.consumedAt,
-        revokedAt: item.revokedAt,
-        installationSessionId: item.installationSessionId,
-        revision: item.revision,
-      })),
+      items: items.map((item) => {
+        const installation = item.installationSessionId
+          ? installationById.get(item.installationSessionId)
+          : null;
+        return {
+          invitationId: item._id,
+          state:
+            item.state === 'active' && item.expiresAt <= now
+              ? 'expired'
+              : item.state,
+          createdByUid: item.createdByUid,
+          initialPolicyId: item.initialPolicyId,
+          expiresAt: item.expiresAt,
+          consumedAt: item.consumedAt,
+          revokedAt: item.revokedAt,
+          installationSessionId: item.installationSessionId,
+          installation: installation
+            ? {
+                phase: installation.phase,
+                outcomeCode: installation.outcomeCode,
+                reportSummary: installation.reportSummary,
+                lastSeenAt: installation.lastSeenAt,
+                machineId: installation.machineId,
+                activatedAt: installation.activatedAt,
+                updatedAt: installation.updatedAt,
+              }
+            : null,
+          revision: item.revision,
+        };
+      }),
+      asOf: now,
     };
   }
 
@@ -508,6 +594,96 @@ function presentMachine(machine: WorkerMachine) {
     createdAt: machine.createdAt,
     updatedAt: machine.updatedAt,
   };
+}
+
+interface WorkerListCursor {
+  scope: string;
+  at: string | null;
+  id: string;
+}
+
+function workerListScope(query: AdminWorkerListQueryDto) {
+  return JSON.stringify([
+    query.status ?? null,
+    query.groupId ?? null,
+    query.platform ?? null,
+    query.releaseVersion ?? null,
+    query.limit,
+  ]);
+}
+
+function encodeWorkerListCursor(
+  scope: string,
+  id: string,
+  lastSeenAt: Date | null,
+) {
+  return Buffer.from(
+    JSON.stringify({ scope, at: lastSeenAt?.toISOString() ?? null, id }),
+  ).toString('base64url');
+}
+
+function decodeWorkerListCursor(
+  cursor: string,
+  scope: string,
+): WorkerListCursor {
+  try {
+    if (cursor.length > 1024 || !/^[A-Za-z0-9_-]+$/.test(cursor)) throw 0;
+    const decodedText = Buffer.from(cursor, 'base64url').toString('utf8');
+    if (Buffer.from(decodedText).toString('base64url') !== cursor) throw 0;
+    const value = JSON.parse(decodedText) as Partial<WorkerListCursor>;
+    if (
+      value.scope !== scope ||
+      !isUUID(value.id, '4') ||
+      !(
+        value.at === null ||
+        (typeof value.at === 'string' &&
+          new Date(value.at).toISOString() === value.at)
+      )
+    )
+      throw 0;
+    return value as WorkerListCursor;
+  } catch {
+    throw adminError('INVALID_CURSOR');
+  }
+}
+
+function workerListAfter(cursor: WorkerListCursor) {
+  if (cursor.at === null)
+    return {
+      lastSeenAt: null,
+      _id: trusted({ $gt: cursor.id }),
+    };
+  const at = new Date(cursor.at);
+  return {
+    $or: [
+      { lastSeenAt: trusted({ $lt: at }) },
+      { lastSeenAt: at, _id: trusted({ $gt: cursor.id }) },
+      { lastSeenAt: null },
+    ],
+  };
+}
+
+function presentAttemptSummary(attempt: WorkerAttempt | null) {
+  return attempt
+    ? {
+        attemptId: attempt._id,
+        jobId: attempt.jobId.toHexString(),
+        state: attempt.state,
+        stage: attempt.stage,
+        startedAt: attempt.createdAt,
+      }
+    : null;
+}
+
+function presentAttemptError(attempt: WorkerAttempt | null) {
+  return attempt
+    ? {
+        attemptId: attempt._id,
+        code: attempt.terminalCode,
+        summary: attempt.terminalSummary,
+        at: attempt.finishedAt ?? attempt.updatedAt,
+      }
+    : null;
 }
 
 function presentCommand(command: WorkerCommand) {
