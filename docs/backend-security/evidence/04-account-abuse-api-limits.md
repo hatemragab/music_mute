@@ -18,7 +18,7 @@
 
 - Branch status: `MERGED` in PR #13
 - Completed checkpoints: D1, D2, D3, D4, D5, D6
-- Next item: Branch 5 account deletion and cleanup
+- Next item: none; Branch 5 later completed and merged as PR #14
 - Blocking input: none
 
 ## Delivered behavior
@@ -94,5 +94,5 @@ timing-only failure.
 
 - Ready for review: merged
 - PR base: `codex/backend-security-cost-hardening`
-- Next branch: `hatem/account-deletion-cleanup`, created from merge commit
-  `daad109f646400440714c12c175e3e12ac3442de`
+- Next branch: `hatem/account-deletion-cleanup`, later merged as PR #14 after
+  starting from merge commit `daad109f646400440714c12c175e3e12ac3442de`

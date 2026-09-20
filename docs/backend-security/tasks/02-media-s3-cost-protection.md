@@ -4,8 +4,8 @@
 **Create from:** updated collection after branch 1 merge
 **PR base:** `codex/backend-security-cost-hardening`
 **Checkpoints:** B1–B7
-**Status:** `READY_FOR_REVIEW`
-**Current checkpoint:** complete; waiting for maintainer review
+**Status:** `MERGED`
+**Current checkpoint:** none
 **Evidence:** `../evidence/02-media-s3-cost-protection.md`
 
 ## Assignment
@@ -122,4 +122,5 @@ actual presigned-download measurement.
 - [x] Remove all obsolete media-policy paths and explain remaining numeric matches.
 - [x] Update progress/evidence/changelog and prepare the PR.
 
-**Exit:** reviewed PR is ready against the collection branch. Stop before branch 3.
+**Exit:** PR #11 is merged into the collection branch. Branch 3 subsequently
+completed and merged as PR #12.

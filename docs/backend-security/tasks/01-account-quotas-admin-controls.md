@@ -4,8 +4,8 @@
 **Create from:** current accepted `origin/codex/backend-security-cost-hardening`
 **PR base:** `codex/backend-security-cost-hardening`
 **Checkpoints:** A1–A6
-**Status:** `READY_FOR_REVIEW`
-**Current checkpoint:** complete; waiting for maintainer review
+**Status:** `MERGED`
+**Current checkpoint:** none
 **Evidence:** `../evidence/01-account-quotas-admin-controls.md`
 
 ## Assignment
