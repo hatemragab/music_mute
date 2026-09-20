@@ -65,9 +65,9 @@
       "architectureFile": "architecture/03-job-lifecycle.md",
       "evidenceFile": "evidence/03-job-queue-retries-refunds.md",
       "checkpoints": ["C1", "C2", "C3", "C4", "C5", "C6", "C7"],
-      "status": "in_progress",
-      "currentCheckpoint": "C7",
-      "lastVerifiedCommit": null,
+      "status": "ready_for_review",
+      "currentCheckpoint": null,
+      "lastVerifiedCommit": "ffdadf8f3950d2afc8d0a52ac98499c5c86e0599",
       "purpose": "Bounded account queue, oldest-eligible picking, retry classification, usage settlement, and refunds"
     },
     {

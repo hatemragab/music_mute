@@ -1,5 +1,18 @@
 # Backend security planning changelog
 
+## 2026-09-20 — Branch 3 checkpoint C7 complete
+
+- Passed backend format, lint, typecheck, secret scan, 757 unit tests, 137 HTTP
+  E2E tests, build, all 13 processing integrations, and 23 dashboard integrations.
+- Passed the dashboard format/lint/typecheck/50-test/build gate and Android Direct/
+  Play debug assemble, lint, and JVM-test gate without launching a device.
+- Passed iOS Swift format and generic simulator compile-for-testing without starting
+  a simulator, as requested; runtime UI E2E remains deferred.
+- Audited obsolete retry/active-job symbols, JSON, relative Markdown links, and
+  whitespace; confirmed MongoDB jobs remain the sole queue authority.
+- Recorded implementation commit `ffdadf8f3950d2afc8d0a52ac98499c5c86e0599`
+  and marked Branch 3 ready for collection review.
+
 ## 2026-09-20 — Branch 3 checkpoint C6 complete
 
 - Added direct race coverage for cancellation winning claim, account restriction or

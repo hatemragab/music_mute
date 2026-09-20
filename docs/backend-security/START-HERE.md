@@ -2,7 +2,7 @@
 
 **Collection branch:** `codex/backend-security-cost-hardening`
 **Direct parent:** `codex/worker-rebuild`
-**Package status:** Branches 1–2 merged; Branch 3 C1–C6 are complete and C7 is in progress
+**Package status:** Branches 1–2 merged; Branch 3 C1–C7 are ready for review
 **Implementation authority:** the maintainer authorized execution on 2026-09-19
 
 ## Purpose
@@ -121,7 +121,7 @@ latest instruction and this accepted contract cannot both be satisfied.
 
 - Branch 1 checkpoints A1–A6 are merged into the collection branch.
 - Branch 2 checkpoints B1–B7 are merged into the collection branch.
-- Branch 3 is isolated in `hatem/job-queue-retries-refunds` at checkpoint C7.
+- Branch 3 completed C1–C7 and is ready for collection-branch review.
 - No provider console, live database, Redis, S3, Firebase, deployment, or user data
   was changed.
 - Device-based quota enforcement and automatic bans remain deferred.

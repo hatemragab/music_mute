@@ -4,8 +4,8 @@
 **Create from:** updated collection after branch 2 merge
 **PR base:** `codex/backend-security-cost-hardening`
 **Checkpoints:** C1–C7
-**Status:** `IN_PROGRESS`
-**Current checkpoint:** C7
+**Status:** `READY_FOR_REVIEW`
+**Current checkpoint:** complete
 **Evidence:** `../evidence/03-job-queue-retries-refunds.md`
 
 ## Assignment
@@ -103,14 +103,14 @@ stale result.
 
 ## C7. Verification and handoff
 
-- [ ] Run focused admission, job action, usage, claim, attempt, recovery, cleanup,
+- [x] Run focused admission, job action, usage, claim, attempt, recovery, cleanup,
       and presenter tests.
-- [ ] Run isolated processing persistence/usage/action integration tests.
-- [ ] Run backend format/verify and relevant dashboard integration tests.
-- [ ] Run dashboard gate if queue/admin UI changed.
-- [ ] Run Android/iOS client gates if job-state/retry contracts changed.
-- [ ] Run documentation/JSON/link/whitespace checks.
-- [ ] Search for obsolete active-job/retry constants and explain remaining matches.
-- [ ] Update task, roadmap, manifest, evidence, and changelog.
+- [x] Run isolated processing persistence/usage/action integration tests.
+- [x] Run backend format/verify and relevant dashboard integration tests.
+- [x] Run dashboard gate if queue/admin UI changed.
+- [x] Run Android/iOS client gates if job-state/retry contracts changed.
+- [x] Run documentation/JSON/link/whitespace checks.
+- [x] Search for obsolete active-job/retry constants and explain remaining matches.
+- [x] Update task, roadmap, manifest, evidence, and changelog.
 
 **Exit:** reviewed PR is ready against the collection branch. Stop before branch 4.

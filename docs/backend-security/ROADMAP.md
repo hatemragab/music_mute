@@ -2,7 +2,7 @@
 
 **Collection:** `codex/backend-security-cost-hardening`
 **Implementation checkpoints:** 32
-**Current implementation status:** Branches 1–2 merged; Branch 3 C1–C6 complete, C7 in progress
+**Current implementation status:** Branches 1–2 merged; Branch 3 C1–C7 ready for review
 
 ## 1. Sequential branch contract
 
@@ -46,7 +46,7 @@ collection tip, never independently from `main` or the old parent commit.
 - [x] **C4:** Make reservation, success consumption, cancellation, and full refunds idempotent.
 - [x] **C5:** Enforce three total infrastructure attempts and five client/input attempts.
 - [x] **C6:** Preserve claim/lease fencing while handling duplicate, late, and stale operations.
-- [ ] **C7:** Pass concurrency, recovery, compatibility, client-state, and end-to-end gates.
+- [x] **C7:** Pass concurrency, recovery, compatibility, client-state, and end-to-end gates.
 
 ### D. Account abuse and API limits
 
