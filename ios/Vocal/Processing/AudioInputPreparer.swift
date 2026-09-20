@@ -12,8 +12,15 @@ struct AudioInputInspection: Sendable {
   let container: Container
 }
 
+typealias AudioMediaPreparation =
+  @Sendable (
+    _ source: URL, _ directory: URL, _ policy: ProcessingMediaPolicy,
+    _ availableCapacity: @Sendable (URL) throws -> Int64?,
+    _ onPreparation: @escaping @Sendable () async throws -> Void
+  ) async throws -> URL
+
 actor AudioInputPreparer {
-  private var policy = ProcessingMediaPolicy.legacy
+  private var policy = ProcessingMediaPolicy.standard
   func configure(policy: ProcessingMediaPolicy) { self.policy = policy }
   func currentPolicy() -> ProcessingMediaPolicy { policy }
 
@@ -23,6 +30,7 @@ actor AudioInputPreparer {
   private let startAccess: @Sendable (URL) -> Bool
   private let stopAccess: @Sendable (URL) -> Void
   private let availableCapacity: @Sendable (URL) throws -> Int64?
+  private let prepareMedia: AudioMediaPreparation
 
   init(
     root: URL,
@@ -34,6 +42,12 @@ actor AudioInputPreparer {
     availableCapacity: @escaping @Sendable (URL) throws -> Int64? = {
       try $0.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         .volumeAvailableCapacityForImportantUsage
+    },
+    prepareMedia: @escaping AudioMediaPreparation = {
+      source, directory, policy, availableCapacity, onPreparation in
+      try await AudioPreparationEngine.prepare(
+        source: source, directory: directory, policy: policy,
+        availableCapacity: availableCapacity, onPreparation: onPreparation)
     }
   ) {
     self.root = root
@@ -41,6 +55,7 @@ actor AudioInputPreparer {
     self.startAccess = startAccess
     self.stopAccess = stopAccess
     self.availableCapacity = availableCapacity
+    self.prepareMedia = prepareMedia
   }
 
   /// Imported document URLs require security scope. Completed app-owned originals do not.
@@ -55,12 +70,22 @@ actor AudioInputPreparer {
     guard !purgedOwners.contains(ownerUid), source.isFileURL, !ownerUid.isEmpty else {
       throw AudioInputPreparationError.unreadable
     }
+    guard FileManager.default.isReadableFile(atPath: source.path) else {
+      throw AudioInputPreparationError.unreadable
+    }
     let policy = self.policy
     var ext = source.pathExtension.lowercased()
-    var pair =
-      policy.version == 1
-      ? try Self.declarationPair(ext)
-      : (contentType: "audio/mp4", container: AudioInputInspection.Container.mp4)
+    var pair = (contentType: "audio/mp4", container: AudioInputInspection.Container.mp4)
+    if let declared = try? Self.declarationPair(ext) {
+      if let sniffed = try Self.sniffContainer(source), sniffed != declared.container {
+        throw AudioInputPreparationError.invalidAudio
+      }
+      if let sourceInspection = try? await Self.inspectAudio(source),
+        sourceInspection.container != declared.container
+      {
+        throw AudioInputPreparationError.invalidAudio
+      }
+    }
     if securityScoped && !startAccess(source) { throw AudioInputPreparationError.accessDenied }
     defer { if securityScoped { stopAccess(source) } }
     let owner = SHA256.hash(data: Data(ownerUid.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -78,26 +103,23 @@ actor AudioInputPreparer {
         }
       } catch { throw AudioInputPreparationError.storage }
       let copied: (bytes: Int64, digest: String)
-      if policy.version == 2 {
-        destination = try await AudioPreparationEngine.prepare(
-          source: source, directory: directory,
-          policy: policy, availableCapacity: availableCapacity, onPreparation: onPreparation)
-        ext = destination.pathExtension.lowercased()
-        pair = try Self.declarationPair(ext)
-        let handle = try FileHandle(forReadingFrom: destination)
-        defer { try? handle.close() }
-        var hash = SHA256()
-        var count: Int64 = 0
-        while let chunk = try handle.read(upToCount: 65_536), !chunk.isEmpty {
-          try Task.checkCancellation()
-          count += Int64(chunk.count)
-          guard count <= policy.maxBytes else { throw AudioInputPreparationError.invalidSize }
-          hash.update(data: chunk)
-        }
-        copied = (count, Data(hash.finalize()).base64EncodedString())
-      } else {
-        try await onPreparation()
-        copied = try coordinatedCopy(source: source, destination: destination)
+      destination = try await prepareMedia(
+        source, directory, policy, availableCapacity, onPreparation)
+      ext = destination.pathExtension.lowercased()
+      pair = try Self.declarationPair(ext)
+      let handle = try FileHandle(forReadingFrom: destination)
+      defer { try? handle.close() }
+      var hash = SHA256()
+      var count: Int64 = 0
+      while let chunk = try handle.read(upToCount: 65_536), !chunk.isEmpty {
+        try Task.checkCancellation()
+        count += Int64(chunk.count)
+        guard count <= policy.maxBytes else { throw AudioInputPreparationError.invalidSize }
+        hash.update(data: chunk)
+      }
+      copied = (count, Data(hash.finalize()).base64EncodedString())
+      guard copied.bytes > 0, copied.bytes <= policy.maxBytes else {
+        throw AudioInputPreparationError.invalidSize
       }
       let media: AudioInputInspection
       do { media = try await inspect(destination) } catch is CancellationError {
@@ -119,12 +141,11 @@ actor AudioInputPreparer {
           bytes: copied.bytes, durationSeconds: media.duration, sha256: copied.digest),
         sourceTitle: sourceTitle, sourceKind: sourceKind, clientStartedAt: clientStartedAt,
         displayName: displayName, sourceURL: canonicalSourceURL,
-        policyVersion: policy.version == 2 ? 2 : nil, preparationProfileId: policy.profileID,
-        mediaSource: policy.version == 2
-          ? (sourceKind == .url
-            ? "youtube"
-            : ["mp4", "mov", "m4v"].contains(source.pathExtension.lowercased())
-              ? "video_file" : "audio_file") : nil)
+        policyVersion: 2, preparationProfileId: policy.profileID,
+        mediaSource: sourceKind == .url
+          ? "youtube"
+          : ["mp4", "mov", "m4v"].contains(source.pathExtension.lowercased())
+            ? "video_file" : "audio_file")
     } catch {
       // Remove only this new, unpublished attempt; retained inputs are never swept.
       try? FileManager.default.removeItem(at: directory)
@@ -155,67 +176,6 @@ actor AudioInputPreparer {
     }
   }
 
-  private func coordinatedCopy(source: URL, destination: URL) throws -> (
-    bytes: Int64, digest: String
-  ) {
-    var coordinationError: NSError?
-    var result: Result<(bytes: Int64, digest: String), Error>?
-    NSFileCoordinator().coordinate(
-      readingItemAt: source, options: .withoutChanges, error: &coordinationError
-    ) { url in
-      result = Result { try copyBytes(source: url, destination: destination) }
-    }
-    if let result { return try result.get() }
-    throw AudioInputPreparationError.unreadable
-  }
-
-  private func copyBytes(source: URL, destination: URL) throws -> (bytes: Int64, digest: String) {
-    let values: URLResourceValues
-    let input: FileHandle
-    do {
-      values = try source.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-      guard values.isRegularFile == true else { throw AudioInputPreparationError.unreadable }
-      input = try FileHandle(forReadingFrom: source)
-    } catch { throw AudioInputPreparationError.unreadable }
-    defer { try? input.close() }
-    let size = Int64(values.fileSize ?? 0)
-    guard (1...29_999_999).contains(size) else { throw AudioInputPreparationError.invalidSize }
-    do {
-      if let available = try availableCapacity(destination.deletingLastPathComponent()),
-        available < size
-      {
-        throw AudioInputPreparationError.storage
-      }
-    } catch { throw AudioInputPreparationError.storage }
-    guard
-      FileManager.default.createFile(
-        atPath: destination.path, contents: nil,
-        attributes: [.posixPermissions: 0o600])
-    else { throw AudioInputPreparationError.storage }
-    let output: FileHandle
-    do { output = try FileHandle(forWritingTo: destination) } catch {
-      throw AudioInputPreparationError.storage
-    }
-    defer { try? output.close() }
-    var count: Int64 = 0
-    var hash = SHA256()
-    while true {
-      try Task.checkCancellation()
-      let chunk: Data
-      do { chunk = try input.read(upToCount: 65_536) ?? Data() } catch {
-        throw AudioInputPreparationError.unreadable
-      }
-      if chunk.isEmpty { break }
-      count += Int64(chunk.count)
-      guard count < 30_000_000 else { throw AudioInputPreparationError.invalidSize }
-      do { try output.write(contentsOf: chunk) } catch { throw AudioInputPreparationError.storage }
-      hash.update(data: chunk)
-    }
-    guard count == size else { throw AudioInputPreparationError.unreadable }
-    do { try output.synchronize() } catch { throw AudioInputPreparationError.storage }
-    return (count, Data(hash.finalize()).base64EncodedString())
-  }
-
   private static func declarationPair(_ ext: String) throws -> (
     contentType: String, container: AudioInputInspection.Container
   ) {
@@ -229,15 +189,25 @@ actor AudioInputPreparer {
     }
   }
 
+  private static func sniffContainer(_ url: URL) throws -> AudioInputInspection.Container? {
+    let handle = try FileHandle(forReadingFrom: url)
+    defer { try? handle.close() }
+    let bytes = [UInt8](try handle.read(upToCount: 12) ?? Data())
+    if bytes.count >= 8, String(bytes: bytes[4..<8], encoding: .ascii) == "ftyp" { return .mp4 }
+    if bytes.count >= 4, String(bytes: bytes[0..<4], encoding: .ascii) == "OggS" { return .ogg }
+    if bytes.count >= 4, bytes[0..<4].elementsEqual([0x1A, 0x45, 0xDF, 0xA3]) { return .webm }
+    if bytes.count >= 3, String(bytes: bytes[0..<3], encoding: .ascii) == "ID3" { return .mp3 }
+    if bytes.count >= 2, bytes[0] == 0xFF, bytes[1] & 0xF0 == 0xF0 {
+      return bytes[1] & 0x06 == 0 ? .aac : .mp3
+    }
+    return nil
+  }
+
   static func inspectAudio(_ url: URL) async throws -> AudioInputInspection {
     let asset = AVURLAsset(url: url)
     let audio = try await asset.loadTracks(withMediaType: .audio)
     let video = try await asset.loadTracks(withMediaType: .video)
     let playable = try await asset.load(.isPlayable)
-    let file = try AVAudioFile(forReading: url)
-    // Match AudioFiles: fragmented M4A asset duration can be doubled; decoded
-    // audio frame count gives the playable duration without rewriting the bytes.
-    let duration = Double(file.length) / file.fileFormat.sampleRate
     var audioFile: AudioFileID?
     guard AudioFileOpenURL(url as CFURL, .readPermission, 0, &audioFile) == noErr,
       let audioFile
@@ -256,6 +226,10 @@ actor AudioInputPreparer {
     case kAudioFileAAC_ADTSType: container = .aac
     default: throw AudioInputPreparationError.unsupportedFormat
     }
+    let file = try AVAudioFile(forReading: url)
+    // Match AudioFiles: fragmented M4A asset duration can be doubled; decoded
+    // audio frame count gives the playable duration without rewriting the bytes.
+    let duration = Double(file.length) / file.fileFormat.sampleRate
     return AudioInputInspection(
       duration: duration, hasAudio: !audio.isEmpty,
       hasVideo: !video.isEmpty, isPlayable: playable, container: container)

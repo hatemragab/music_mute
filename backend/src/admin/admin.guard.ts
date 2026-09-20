@@ -54,8 +54,8 @@ export class AdminGuard implements CanActivate {
     const requestId = req.adminRequestId ?? adminRequestId(req);
     response.setHeader('X-Request-Id', requestId);
     const identity = req.identity;
+    if (!identity) throw adminError('UNAUTHENTICATED', requestId);
     if (
-      !identity ||
       identity.provider !== 'google.com' ||
       identity.tokenEmailVerified !== true
     )
@@ -67,7 +67,14 @@ export class AdminGuard implements CanActivate {
         targets,
       ) ?? (req.method === 'GET' ? 'read' : 'write');
     await this.rateLimits
-      .assertAllowed(identity.uid, rateClass, response, requestId)
+      .assertAllowed(
+        identity.uid,
+        req.ip ?? 'unknown',
+        `${context.getClass().name}.${context.getHandler().name}`,
+        rateClass,
+        response,
+        requestId,
+      )
       .catch((error: unknown) => {
         if (error instanceof HttpException && error.getStatus() === 429)
           throw error;

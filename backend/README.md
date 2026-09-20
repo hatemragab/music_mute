@@ -3,32 +3,30 @@
 NestJS backend for the MusicMute native apps. Includes Firebase authentication,
 profiles, installation/version tracking, voluntary verification, password recovery,
 shared Redis limits, processing-access policy and logout-all. MongoDB, external
-Redis and S3 provide the infrastructure foundation. Opt-in audio processing adds
-private direct uploads/downloads, durable FIFO jobs, one external Z440 assignment,
-shutdown recovery, cancellation, voice-only MP3 results, and an FCM outbox.
-The backend coordinates processing; separation runs on the external Windows PC.
+Redis and S3 provide the infrastructure foundation. Existing audio history,
+completed-result access, cancellation, deletion, and notifications remain supported.
+New audio processing is temporarily unavailable while the processing architecture
+is redesigned.
 
-- [Audio user/worker API](docs/api/audio-processing.md)
-- [Audio operations and Windows handoff](docs/operations/audio-processing.md)
-- [Worker fleet ownership, protocol and migration audit](docs/worker-fleet.md)
-- [Implementation and validation tracker](docs/tasks/audio-processing.md)
+- [Audio user API](docs/api/audio-processing.md)
+- [Audio operations](docs/operations/audio-processing.md)
 - [Dashboard API](docs/dashboard-api.md)
 - [Dashboard permission matrix](docs/dashboard-permissions.md)
 - [Dashboard local validation](docs/dashboard-local-validation.md)
 
 ## Requirements and local run
 
-- Node.js 24 LTS, npm 11. The lockfile defines reproducible dependency versions.
+- Node.js 24 LTS and pnpm 10. The lockfile defines reproducible dependency versions.
 - Independently running MongoDB 8 and Redis 7.4 or later.
 - Run all commands from this directory. Scripts target macOS/Linux and the VPS.
 
 ```sh
-npm ci
+pnpm install --frozen-lockfile
 cp -n .env.local.example .env.local
 cp -n .env.production.example .env.production
 chmod 600 .env.local .env.production
 # Configure MONGODB_URI and REDIS_URL in .env.local before starting.
-npm run start:dev
+pnpm run start:dev
 ```
 
 The API connects to existing MongoDB and Redis services; it does not start either
@@ -90,12 +88,32 @@ Native apps -> TLS reverse proxy -> API (main.ts)
 - `src/rate-limits/`: persistent counters and atomic mail reservations.
 - `src/app-policy/`: live verification and minimum-build policy.
 - `src/infrastructure/`: MongoDB and S3 Nest modules.
-- `src/jobs/`, `src/worker/`, `src/processing/`: durable audio lifecycle and Z440 protocol.
+- `src/jobs/`, `src/processing/`: durable audio history and temporary unavailable boundary.
 - `src/storage/`: restricted transfers and bucket preflight.
 - `src/notifications/`, `src/job-errors/`: durable push delivery and safe error records.
 - `src/app.module.ts`: HTTP composition.
 - `deploy/` and Compose files: API-only VPS deployment preparation.
 - `AGENTS.md`: commands, conventions and boundaries for AI-assisted development.
+
+## Media usage and transfer contract
+
+Authenticated clients read `GET /api/v1/processing-usage`. Schema version 2 reports
+the UTC period, processing use/reservations/refunds, upload grant and confirmed-byte
+counters, result-grant and estimated-byte counters, retained-result bytes, effective
+media/transfer limits, reset times, and the safe admission reason. These counters
+belong to the account, not an installation.
+
+`POST /api/v1/jobs/:id/download-url` requires `artifact` plus a UUID-v4 `requestId`.
+Replaying the same still-valid request for the same immutable object does not charge
+again. A known-expired entitlement requires a new request ID. User result grants are
+charged to the account and service estimate; worker input grants affect only the
+service estimate. Presigned URLs are never persisted or logged.
+
+The global standard policy and selected per-account replacement values are managed
+through the existing audited admin settings and account-override routes. Overrides
+may replace processing, media, upload, download, retention, and signed-URL fields;
+omitted fields continue using the global value. Administrators change policy values,
+not raw usage counters or object metadata.
 
 Set the required `REDIS_URL`, just as you set `MONGODB_URI`:
 
@@ -117,8 +135,8 @@ service to preserve security counters across API restarts. Use separate database
 or instances for environments, monitor capacity and test backups/restores.
 
 Migration: replace `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` and `REDIS_TLS`
-with `REDIS_URL` in your environment. `QUEUE_PREFIX`, BullMQ and the old in-process worker are
-removed. Existing dotenv files and deployed services are not changed by this
+with `REDIS_URL` in your environment. `QUEUE_PREFIX` and BullMQ are removed.
+Existing dotenv files and deployed services are not changed by this
 update. Keep any existing Redis data/volumes when switching deployment config.
 
 ## HTTP security
@@ -148,19 +166,12 @@ exceptions containing secrets.
 ## Verify
 
 ```sh
-npm run verify
-npm run test:integration
-npm run test:auth:integration
-npm run test:processing:integration
-npm audit --omit=dev
+pnpm run verify
+pnpm run test:integration
+pnpm run test:auth:integration
+pnpm run test:processing:integration
+pnpm audit --prod
 ```
-
-The worker fleet cutover is always explicit. With the production runtime
-environment and the legacy worker stopped at verified idle, use
-`npm run worker:fleet:migrate -- --dry-run`, then `--apply`, and finally
-`npm run worker:fleet:audit` before changing `PROCESSING_WORKER_AUTH_MODE` to
-`fleet`. See [worker fleet operations](docs/worker-fleet.md) for the guarded
-sequence and rollback boundary.
 
 `verify` runs formatting checks, lint, TypeScript checks, a tracked-file credential
 scan, unit and HTTP security tests, then compiles the API. The scan reports only
@@ -174,7 +185,7 @@ forces API and Redis restarts, and checks outage responses and reconnect. It nev
 to configured Atlas/S3 accounts or existing local databases. Temporary test data
 and owned child processes are cleaned up afterward.
 
-See [VPS operations](docs/vps.md) and [starter design/checklist](docs/starter-plan.md).
+See [VPS operations](docs/vps.md).
 
 The implemented feature follows the
 [auth/users/devices specification](docs/superpowers/specs/2026-09-08-auth-users-devices.md),
@@ -192,7 +203,7 @@ derived budget namespace and requires operational coordination. Auth emulator
 configuration is accepted only in test mode with a loopback host and a `demo-*`
 project.
 
-`npm run test:auth:integration` uses the pinned Firebase CLI, isolated MongoDB and
+`pnpm run test:auth:integration` uses the pinned Firebase CLI, isolated MongoDB and
 Redis, synthetic accounts and emulator-only email actions. It checks compiled API
 behavior without touching the real Firebase project, Atlas, S3 or a mailbox.
 
@@ -205,7 +216,7 @@ override has been applied. Recheck and address the audit before release.
 
 The official CLI scaffold was adapted to NestJS 11.2.3 because the current
 `@nestjs/throttler` 6.5.0 peer range does not support NestJS 12. Integration packages
-whose major is 12 explicitly support NestJS 11; npm resolves without peer bypasses.
+whose major is 12 explicitly support NestJS 11; pnpm resolves without peer bypasses.
 
 - [Nest configuration](https://docs.nestjs.com/techniques/configuration)
 - [Nest MongoDB](https://docs.nestjs.com/techniques/mongodb)

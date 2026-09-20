@@ -9,6 +9,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.runCurrent
 
 class AccountDeletionTest {
+    private fun receipt(id: String = "receipt") =
+        AccountDeletionReceipt(id, "accepted", "2026-09-26T00:00:00.000Z")
+
     @Test fun ambiguousRequestSurvivesRestartWithoutAuthorizingPurge() {
         val root = kotlin.io.path.createTempDirectory("deletion-").toFile()
         val journal = AccountDeletionJournal(File(root, "pending"))
@@ -16,7 +19,7 @@ class AccountDeletionTest {
         val reopened = AccountDeletionJournal(File(root, "pending"))
         assertEquals("owner", reopened.pending()?.uid)
         assertFalse(reopened.pending()!!.accepted)
-        reopened.accepted("owner")
+        reopened.accepted("owner", receipt())
         assertTrue(reopened.pending()!!.accepted)
         reopened.completed("foreign")
         assertNotNull(reopened.pending())
@@ -29,7 +32,7 @@ class AccountDeletionTest {
         val journal = AccountDeletionJournal(File(root, "pending"))
         journal.requested("first")
         journal.requested("second")
-        journal.accepted("second")
+        journal.accepted("second", receipt("second-request"))
         journal.completed("second")
         assertEquals(listOf(PendingAccountDeletion("first", false)), journal.all())
     }
@@ -71,7 +74,7 @@ class AccountDeletionTest {
                 assertEquals("Bearer token-A", headers["Authorization"])
                 assertNull(body)
                 response.await()
-                AuthHttpResponse(202, """{"requestId":"receipt-A","status":"accepted"}""")
+                AuthHttpResponse(202, """{"requestId":"receipt-A","status":"accepted","recoverUntil":"2026-09-26T00:00:00.000Z"}""")
             })
         val action = launch {
             requestAccountDeletionDurably("A", journal::requested, journal::accepted, journal::rejected, api::deleteAccount)
@@ -82,7 +85,15 @@ class AccountDeletionTest {
         response.complete(Unit)
         action.join()
         assertEquals("B", identity)
-        assertEquals(PendingAccountDeletion("A", true), journal.pending())
+        assertEquals(
+            PendingAccountDeletion(
+                "A",
+                true,
+                requestId = "receipt-A",
+                recoverUntil = "2026-09-26T00:00:00.000Z",
+            ),
+            journal.pending(),
+        )
     }
 
     @Test fun definitiveRejectionClearsOnlyThatRequestAndPermitsRetry() = runTest {
@@ -135,10 +146,12 @@ class AccountDeletionTest {
         assertEquals(AuthProblem.OFFLINE, failure.problem)
         assertEquals(20_000L, testScheduler.currentTime - started)
         assertEquals(PendingAccountDeletion("A", false), journal.pending())
-        requestAccountDeletionDurably("A", journal::requested, { uid ->
+        requestAccountDeletionDurably("A", journal::requested, { uid, accepted ->
             kotlinx.coroutines.delay(21_000)
-            journal.accepted(uid)
-        }, journal::rejected) { AccountDeletionReceipt("accepted", "accepted") }
+            journal.accepted(uid, accepted)
+        }, journal::rejected) {
+            AccountDeletionReceipt("accepted", "accepted", "2026-09-26T00:00:00.000Z")
+        }
         assertTrue(journal.pending()!!.accepted)
     }
 

@@ -3,21 +3,7 @@ import type { Types } from 'mongoose';
 import type {
   AuditExportMetadata,
   ProcessingChangeMetadata,
-  StopEvidenceMetadata,
 } from './admin-audit-query.js';
-
-@Schema({ _id: false, strict: 'throw' })
-class StopEvidence {
-  @Prop({ required: true, minlength: 20, maxlength: 1000 })
-  attestation!: string;
-  @Prop({ required: true }) stoppedAt!: string;
-  @Prop({ required: true, maxlength: 24 }) jobId!: string;
-  @Prop({ required: true, maxlength: 36 }) attemptId!: string;
-  @Prop({ required: true, maxlength: 36 }) sessionId!: string;
-  @Prop({ required: true, min: 1, validate: Number.isSafeInteger })
-  generation!: number;
-}
-const StopEvidenceSchema = SchemaFactory.createForClass(StopEvidence);
 
 @Schema({ _id: false, strict: 'throw' })
 class ExportMetadata {
@@ -40,8 +26,6 @@ export class AdminAuditEvent {
   processingChanges!: ProcessingChangeMetadata[] | null;
   @Prop({ type: ExportMetadataSchema, default: null })
   exportMetadata!: AuditExportMetadata | null;
-  @Prop({ type: StopEvidenceSchema, default: null })
-  stopEvidence!: StopEvidenceMetadata | null;
   @Prop({ required: true, maxlength: 128 }) actorUid!: string;
   @Prop({ required: true, maxlength: 80 }) action!: string;
   @Prop({ required: true, maxlength: 80 }) resourceType!: string;

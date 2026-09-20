@@ -10,7 +10,13 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 @Serializable
-data class PendingAccountDeletion(val uid: String, val accepted: Boolean, val invalidated: Boolean = false) {
+data class PendingAccountDeletion(
+    val uid: String,
+    val accepted: Boolean,
+    val invalidated: Boolean = false,
+    val requestId: String? = null,
+    val recoverUntil: String? = null,
+) {
     val requiresPurge: Boolean get() = accepted || invalidated
 }
 
@@ -29,8 +35,22 @@ class AccountDeletionJournal(private val file: File) {
         record(PendingAccountDeletion(uid, false))
         return true
     }
-    fun accepted(uid: String) = record(PendingAccountDeletion(uid, true))
-    fun invalidated(uid: String) = record(PendingAccountDeletion(uid, all().any { it.uid == uid && it.accepted }, true))
+    fun accepted(uid: String, receipt: AccountDeletionReceipt) {
+        require(receipt.requestId.isNotBlank() && !receipt.recoverUntil.isNullOrBlank())
+        record(PendingAccountDeletion(uid, true, requestId = receipt.requestId, recoverUntil = receipt.recoverUntil))
+    }
+    fun invalidated(uid: String) {
+        val existing = all().firstOrNull { it.uid == uid }
+        record(
+            PendingAccountDeletion(
+                uid,
+                existing?.accepted == true,
+                true,
+                existing?.requestId,
+                existing?.recoverUntil,
+            )
+        )
+    }
     fun rejected(uid: String) {
         if (all().any { it.uid == uid && !it.requiresPurge }) completed(uid)
     }

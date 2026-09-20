@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
+import { ADMIN_RATE_LIMIT_DEFAULTS } from '../config/environment.js';
 import { AdminRateLimitService } from './admin-rate-limit.service.js';
 
 describe('AdminRateLimitService', () => {
@@ -18,16 +19,25 @@ describe('AdminRateLimitService', () => {
       const service = new AdminRateLimitService(
         budgets as never,
         { bucket: (scope: string, id: string) => `${scope}:${id}` } as never,
-        new ConfigService(),
+        new ConfigService(ADMIN_RATE_LIMIT_DEFAULTS),
       );
       await service.assertAllowed(
         'fixture-uid',
+        '127.0.0.1',
+        'FixtureController.list',
         rateClass,
         { setHeader: vi.fn() } as never,
         'fixture-request',
       );
       expect(budgets.reserve).toHaveBeenCalledWith([
         { key: `admin-${rateClass}-uid:fixture-uid`, limit, windowMs },
+        { key: `admin-${rateClass}-ip:127.0.0.1`, limit: 60, windowMs: 60_000 },
+        {
+          key: 'admin-endpoint:FixtureController.list',
+          limit: 300,
+          windowMs: 60_000,
+        },
+        { key: 'admin-service:global', limit: 1_000, windowMs: 60_000 },
       ]);
     },
   );
@@ -39,11 +49,13 @@ describe('AdminRateLimitService', () => {
         reserve: async () => ({ allowed: false, retryAfterSeconds: 17 }),
       } as never,
       { bucket: () => 'fixture-key' } as never,
-      new ConfigService(),
+      new ConfigService(ADMIN_RATE_LIMIT_DEFAULTS),
     );
     await expect(
       service.assertAllowed(
         'fixture-uid',
+        '127.0.0.1',
+        'FixtureController.write',
         'write',
         response as never,
         'request-id',

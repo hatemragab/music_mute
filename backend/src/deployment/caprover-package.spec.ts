@@ -38,7 +38,7 @@ describe('CapRover dashboard package', () => {
         'captain-definition',
         'backend/Dockerfile',
         'backend/package.json',
-        'backend/package-lock.json',
+        'backend/pnpm-lock.yaml',
         'backend/scripts/install-apk-verifier.sh',
         'backend/src/main.ts',
       ]),

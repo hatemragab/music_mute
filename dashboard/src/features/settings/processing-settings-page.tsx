@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 
 import { createOperationId } from "@/api/api-client";
-import type { ProcessingSettings } from "@/api/contracts";
+import type { AccountPolicy } from "@/api/contracts";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { ErrorState, LoadingState, PageHeader } from "@/components/page";
 import { ReasonDialog } from "@/components/reason-dialog";
@@ -12,82 +12,73 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format";
 import {
-  ProcessingSettingsForm,
-  type ProcessingSettingsDraft,
-  validateProcessingSettings,
+  AccountPolicyForm,
+  type AccountPolicyDraft,
+  validateAccountPolicy,
 } from "./processing-settings-form";
-import {
-  getProcessingSettings,
-  updateProcessingSettings,
-} from "./settings-api";
+import { getAccountPolicy, updateAccountPolicy } from "./settings-api";
 
-import { ProcessingPolicyEditor } from "./processing-policy-editor";
-
-const toDraft = (value: ProcessingSettings): ProcessingSettingsDraft => ({
+const toDraft = (value: AccountPolicy): AccountPolicyDraft => ({
   acceptNewJobs: value.acceptNewJobs,
   maintenanceMessageEn: value.maintenanceMessageEn,
   maintenanceMessageAr: value.maintenanceMessageAr,
-  maxInputBytesExclusive: value.maxInputBytesExclusive,
-  maxDurationSecondsExclusive: value.maxDurationSecondsExclusive,
-  maxActiveJobsPerUser: value.maxActiveJobsPerUser,
+  values: value.values,
 });
 
 export function ProcessingSettingsPage() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const { can, reauthenticate } = useAdminSession();
-  const [editedDraft, setEditedDraft] =
-    useState<ProcessingSettingsDraft | null>(null);
-  const [policyDirty, setPolicyDirty] = useState(false);
+  const [editedDraft, setEditedDraft] = useState<AccountPolicyDraft | null>(
+    null,
+  );
   const [confirming, setConfirming] = useState(false);
-  const settings = useQuery({
-    queryKey: ["processing-settings"],
-    queryFn: () => getProcessingSettings(client),
+  const policy = useQuery({
+    queryKey: ["account-policy"],
+    queryFn: () => getAccountPolicy(client),
   });
-  const draft = editedDraft ?? (settings.data ? toDraft(settings.data) : null);
+  const draft = editedDraft ?? (policy.data ? toDraft(policy.data) : null);
   const dirty = useMemo(
     () =>
       Boolean(
-        settings.data &&
+        policy.data &&
         draft &&
-        JSON.stringify(toDraft(settings.data)) !== JSON.stringify(draft),
+        JSON.stringify(toDraft(policy.data)) !== JSON.stringify(draft),
       ),
-    [draft, settings.data],
+    [draft, policy.data],
   );
   const save = useMutation({
     mutationFn: (reason: string) => {
-      if (!settings.data || !draft)
-        throw new Error("Settings are unavailable.");
-      return updateProcessingSettings(client, {
-        ...draft,
-        expectedRevision: settings.data.revision,
+      if (!policy.data || !draft)
+        throw new Error("Account policy is unavailable.");
+      return updateAccountPolicy(client, {
+        acceptNewJobs: draft.acceptNewJobs,
+        maintenanceMessageEn: draft.maintenanceMessageEn,
+        maintenanceMessageAr: draft.maintenanceMessageAr,
+        ...draft.values,
+        expectedRevision: policy.data.revision,
         operationId: createOperationId(),
         reason,
       });
     },
     onSuccess: async (result) => {
       setEditedDraft(toDraft(result));
-      await queryClient.invalidateQueries({
-        queryKey: ["processing-settings"],
-      });
+      await queryClient.invalidateQueries({ queryKey: ["account-policy"] });
     },
   });
-  if (settings.isLoading || !draft) return <LoadingState />;
-  if (settings.isError || !settings.data)
+  if (policy.isLoading || !draft) return <LoadingState />;
+  if (policy.isError || !policy.data)
     return (
-      <ErrorState
-        error={settings.error}
-        retry={() => void settings.refetch()}
-      />
+      <ErrorState error={policy.error} retry={() => void policy.refetch()} />
     );
   const manage = can("settings.manage");
-  const errors = validateProcessingSettings(draft);
+  const errors = validateAccountPolicy(draft);
   return (
     <div className="space-y-6">
-      <UnsavedChangesGuard enabled={dirty || policyDirty} />
+      <UnsavedChangesGuard enabled={dirty} />
       <PageHeader
-        title="Processing settings"
-        description="Admission and workload ceilings. Model, output stem, retention, billing and host power are fixed outside this dashboard."
+        title="Standard account policy"
+        description="One revisioned policy for monthly account usage and the launch cost ceilings. Only listed enforced features are active."
         actions={
           manage ? (
             <Button
@@ -103,51 +94,49 @@ export function ProcessingSettingsPage() {
         <CardContent className="space-y-5 p-5">
           <div className="flex flex-wrap justify-between gap-3 border-b pb-4 text-sm">
             <span>
-              Revision{" "}
-              <strong className="font-mono">{settings.data.revision}</strong>
+              Plan <strong>{policy.data.plan}</strong> · revision{" "}
+              <strong className="font-mono">{policy.data.revision}</strong>
             </span>
             <span className="text-muted-foreground">
-              Updated {formatDateTime(settings.data.updatedAt)}
+              Enforced now: {policy.data.enforcedFeatures.join(", ") || "none"}
+              {" · "}Updated {formatDateTime(policy.data.updatedAt)}
             </span>
           </div>
-          <ProcessingSettingsForm
+          <AccountPolicyForm
             value={draft}
             onChange={setEditedDraft}
             disabled={!manage}
           />
           {!manage ? (
             <p className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
-              Your role can inspect these settings but cannot change them.
+              Your role can inspect this policy but cannot change it.
             </p>
           ) : null}
         </CardContent>
       </Card>
-      <ProcessingPolicyEditor onDirtyChange={setPolicyDirty} />
       <ReasonDialog
         open={confirming}
         onOpenChange={setConfirming}
-        title="Save processing settings"
-        description="Fresh authentication does not save automatically. Review the exact before and after values, then confirm with a reason."
-        confirmLabel="Save settings"
+        title="Save standard account policy"
+        description="The write uses the current revision and is audited. Lowering a limit does not rewrite consumed usage or cancel accepted work."
+        confirmLabel="Save policy"
         freshAuth
         onReauthenticate={reauthenticate}
         summary={
           <div className="grid gap-1 font-mono text-xs">
             <p>
-              Accept jobs: {String(settings.data.acceptNewJobs)} →{" "}
+              Accept jobs: {String(policy.data.acceptNewJobs)} →{" "}
               {String(draft.acceptNewJobs)}
             </p>
             <p>
-              Input bytes: {settings.data.maxInputBytesExclusive} →{" "}
-              {draft.maxInputBytesExclusive}
+              Monthly processing: {policy.data.values.monthlyProcessingSeconds}{" "}
+              → {draft.values.monthlyProcessingSeconds} seconds
             </p>
             <p>
-              Duration: {settings.data.maxDurationSecondsExclusive} →{" "}
-              {draft.maxDurationSecondsExclusive}
-            </p>
-            <p>
-              Active/user: {settings.data.maxActiveJobsPerUser ?? "Unlimited"} →{" "}
-              {draft.maxActiveJobsPerUser ?? "Unlimited"}
+              Media ceiling: {policy.data.values.maxDurationSeconds}s /{" "}
+              {policy.data.values.maxPreparedAudioBytes}B →{" "}
+              {draft.values.maxDurationSeconds}s /{" "}
+              {draft.values.maxPreparedAudioBytes}B
             </p>
           </div>
         }

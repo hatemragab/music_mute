@@ -14,7 +14,6 @@ import {
   operationFingerprint,
   validOperationId,
   validateAuditEvent,
-  type StopEvidenceMetadata,
   type ProcessingChangeMetadata,
   type AuditExportMetadata,
 } from './admin-audit-query.js';
@@ -33,7 +32,6 @@ export interface AdminCommand {
 export interface AdminMutationResult<T> {
   processingChanges?: ProcessingChangeMetadata[] | null;
   exportMetadata?: AuditExportMetadata | null;
-  stopEvidence?: StopEvidenceMetadata | null;
   resourceId: string;
   revision?: number | null;
   previousRevision?: number | null;
@@ -167,9 +165,6 @@ export class AdminOperationsService implements OnModuleInit {
               outcome: 'succeeded',
               ...(result.processingChanges
                 ? { processingChanges: result.processingChanges }
-                : {}),
-              ...(result.stopEvidence
-                ? { stopEvidence: result.stopEvidence }
                 : {}),
               ...(result.exportMetadata
                 ? { exportMetadata: result.exportMetadata }

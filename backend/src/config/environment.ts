@@ -10,6 +10,11 @@ export const AUTH_RATE_LIMIT_DEFAULTS = {
   PROCESSING_READ_UID_PER_MINUTE: 60,
   PROCESSING_GRANT_UID_PER_MINUTE: 60,
   PROCESSING_MUTATION_UID_PER_MINUTE: 60,
+  PROCESSING_OPERATION_IP_PER_MINUTE: 120,
+  PROCESSING_ENDPOINT_PER_MINUTE: 600,
+  PROCESSING_SERVICE_PER_MINUTE: 2_000,
+  ACCOUNT_DELETION_UID_PER_HOUR: 3,
+  ACCOUNT_RECOVERY_UID_PER_HOUR: 60,
   VERIFY_COOLDOWN_SECONDS: 60,
   VERIFY_UID_PER_DAY: 3,
   VERIFY_EMAIL_PER_DAY: 3,
@@ -28,6 +33,9 @@ export const ADMIN_RATE_LIMIT_DEFAULTS = {
   ADMIN_SENSITIVE_OPERATIONS_PER_MINUTE: 5,
   ADMIN_EXPORTS_PER_HOUR: 5,
   ADMIN_REAUTH_MAX_AGE_SECONDS: 300,
+  ADMIN_OPERATION_IP_PER_MINUTE: 60,
+  ADMIN_ENDPOINT_PER_MINUTE: 300,
+  ADMIN_SERVICE_PER_MINUTE: 1_000,
 } as const;
 
 const allowance = (defaultValue: number) =>
@@ -56,6 +64,10 @@ const schema = Joi.object({
   S3_BUCKET: Joi.string()
     .pattern(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/)
     .required(),
+  WORKER_INSTALLATION_CATALOG_PATH: Joi.string()
+    .pattern(/^\//)
+    .max(4096)
+    .optional(),
   FIREBASE_PROJECT_ID: Joi.string().trim().min(1).required(),
   FIREBASE_WEB_API_KEY: Joi.string().trim().min(1).required(),
   FIREBASE_SERVICE_ACCOUNT_BASE64: Joi.string().trim().base64().optional(),
@@ -77,7 +89,7 @@ const schema = Joi.object({
   APP_RELEASE_DOWNLOAD_SECONDS: Joi.number()
     .integer()
     .min(60)
-    .max(900)
+    .max(600)
     .default(300),
   APP_ANDROID_CURRENT_VERSION_NAME: Joi.string()
     .pattern(/^(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,2}$/)
@@ -103,24 +115,7 @@ const schema = Joi.object({
   RELEASE_LANDING_BASE_URL: Joi.string()
     .uri({ scheme: ['https'] })
     .optional(),
-  PROCESSING_WORKER_KEY_SHA256: Joi.string()
-    .pattern(/^[a-f0-9]{64}$/)
-    .optional(),
-  PROCESSING_WORKER_AUTH_MODE: Joi.string()
-    .valid('legacy', 'fleet')
-    .default('legacy'),
-  PROCESSING_WORKER_MAX_WAITERS: Joi.number()
-    .integer()
-    .min(1)
-    .max(1024)
-    .default(32),
-  PROCESSING_LEASE_SECONDS: Joi.number().integer().min(60).max(600).default(90),
-  PROCESSING_URL_SECONDS: Joi.number().integer().min(60).max(900).default(900),
-  PROCESSING_OUTPUT_MAX_BYTES: Joi.number()
-    .integer()
-    .min(1024)
-    .max(100_000_000)
-    .default(30_000_000),
+  PROCESSING_URL_SECONDS: Joi.number().integer().min(60).max(600).default(600),
   CORS_ORIGINS: Joi.string().allow('').default(''),
   PUBLIC_SUPPORT_EMAIL: Joi.string()
     .email({ tlds: { allow: false } })
@@ -156,6 +151,21 @@ const schema = Joi.object({
   PROCESSING_MUTATION_UID_PER_MINUTE: allowance(
     AUTH_RATE_LIMIT_DEFAULTS.PROCESSING_MUTATION_UID_PER_MINUTE,
   ),
+  PROCESSING_OPERATION_IP_PER_MINUTE: allowance(
+    AUTH_RATE_LIMIT_DEFAULTS.PROCESSING_OPERATION_IP_PER_MINUTE,
+  ),
+  PROCESSING_ENDPOINT_PER_MINUTE: allowance(
+    AUTH_RATE_LIMIT_DEFAULTS.PROCESSING_ENDPOINT_PER_MINUTE,
+  ),
+  PROCESSING_SERVICE_PER_MINUTE: allowance(
+    AUTH_RATE_LIMIT_DEFAULTS.PROCESSING_SERVICE_PER_MINUTE,
+  ),
+  ACCOUNT_DELETION_UID_PER_HOUR: allowance(
+    AUTH_RATE_LIMIT_DEFAULTS.ACCOUNT_DELETION_UID_PER_HOUR,
+  ),
+  ACCOUNT_RECOVERY_UID_PER_HOUR: allowance(
+    AUTH_RATE_LIMIT_DEFAULTS.ACCOUNT_RECOVERY_UID_PER_HOUR,
+  ),
   VERIFY_COOLDOWN_SECONDS: allowance(
     AUTH_RATE_LIMIT_DEFAULTS.VERIFY_COOLDOWN_SECONDS,
   ),
@@ -190,6 +200,15 @@ const schema = Joi.object({
   ADMIN_EXPORTS_PER_HOUR: allowance(
     ADMIN_RATE_LIMIT_DEFAULTS.ADMIN_EXPORTS_PER_HOUR,
   ),
+  ADMIN_OPERATION_IP_PER_MINUTE: allowance(
+    ADMIN_RATE_LIMIT_DEFAULTS.ADMIN_OPERATION_IP_PER_MINUTE,
+  ),
+  ADMIN_ENDPOINT_PER_MINUTE: allowance(
+    ADMIN_RATE_LIMIT_DEFAULTS.ADMIN_ENDPOINT_PER_MINUTE,
+  ),
+  ADMIN_SERVICE_PER_MINUTE: allowance(
+    ADMIN_RATE_LIMIT_DEFAULTS.ADMIN_SERVICE_PER_MINUTE,
+  ),
   ADMIN_REAUTH_MAX_AGE_SECONDS: Joi.number()
     .integer()
     .min(60)
@@ -213,12 +232,6 @@ export function validateEnvironment(
     );
   }
   const env = result.value as Record<string, unknown>;
-  if (
-    env.AUDIO_PROCESSING_ENABLED &&
-    env.PROCESSING_WORKER_AUTH_MODE === 'legacy' &&
-    !env.PROCESSING_WORKER_KEY_SHA256
-  )
-    throw new Error('Invalid environment: PROCESSING_WORKER_KEY_SHA256');
   const production = env.APP_ENV === 'production';
   if (production !== (env.NODE_ENV === 'production'))
     throw new Error('APP_ENV and NODE_ENV disagree');

@@ -10,19 +10,6 @@ import type { NameSource } from './display-name.js';
   versionKey: false,
 })
 export class User {
-  @Prop({
-    type: Number,
-    default: null,
-    min: 3600,
-    max: 86400,
-    validate: (value: number | null) =>
-      value === null || Number.isSafeInteger(value),
-  })
-  processingAllowanceAudioSeconds!: number | null;
-  @Prop({ type: Date, default: null })
-  processingAllowanceExpiresAt!: Date | null;
-  @Prop({ type: Date, default: null })
-  processingSuspensionExpiresAt!: Date | null;
   _id!: Types.ObjectId;
 
   @Prop({ required: true, immutable: true, maxlength: 128 })
@@ -82,23 +69,40 @@ export class User {
   @Prop({ type: String, default: null })
   deletionLeaseToken!: string | null;
 
+  @Prop({
+    type: String,
+    default: null,
+    enum: ['grace_fence', 'identity', 'jobs', 'records', 'provider', 'profile'],
+  })
+  deletionPhase!:
+    | 'grace_fence'
+    | 'identity'
+    | 'jobs'
+    | 'records'
+    | 'provider'
+    | 'profile'
+    | null;
+
+  @Prop({ type: String, default: null, maxlength: 100 })
+  deletionCursor!: string | null;
+
+  @Prop({ type: String, default: null, enum: ['DEPENDENCY_RETRY'] })
+  deletionFailureCode!: 'DEPENDENCY_RETRY' | null;
+
   @Prop({ type: Number, default: 0 })
   accessRevision!: number;
 
-  @Prop({ type: Boolean, default: false, required: true })
-  processingSuspended!: boolean;
-
-  @Prop({ type: String, default: null, maxlength: 500 })
-  processingSuspensionReason!: string | null;
-
-  @Prop({ type: String, default: null, maxlength: 128 })
-  processingSuspendedBy!: string | null;
-
-  @Prop({ type: Date, default: null })
-  processingSuspendedAt!: Date | null;
-
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
   adminRevision!: number;
+
+  @Prop({
+    type: Number,
+    required: true,
+    default: 0,
+    min: 0,
+    validate: Number.isSafeInteger,
+  })
+  retainedOutputBytes!: number;
 
   @Prop({
     type: Number,
@@ -131,7 +135,4 @@ UserSchema.index(
 );
 UserSchema.index({ email: 1 }, { name: 'admin_users_email' });
 UserSchema.index({ displayName: 1, _id: 1 }, { name: 'admin_users_name' });
-UserSchema.index(
-  { status: 1, processingSuspended: 1, _id: 1 },
-  { name: 'admin_users_filters' },
-);
+UserSchema.index({ status: 1, _id: 1 }, { name: 'admin_users_filters' });

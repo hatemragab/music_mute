@@ -1,16 +1,14 @@
-export type AdminRole =
-  'owner' | 'release_manager' | 'worker_manager' | 'support' | 'viewer';
+export type AdminRole = 'owner' | 'release_manager' | 'support' | 'viewer';
 
 export type AdminPermission =
   | 'overview.read'
-  | 'workers.read'
-  | 'workers.manage'
-  | 'workers.recover'
   | 'jobs.read'
   | 'jobs.manage'
   | 'users.read'
   | 'users.processing.manage'
+  | 'users.restrictions.manage'
   | 'users.account-recovery.manage'
+  | 'abuse.read'
   | 'media.read'
   | 'releases.read'
   | 'releases.manage'
@@ -20,6 +18,10 @@ export type AdminPermission =
   | 'alerts.manage'
   | 'audit.read'
   | 'exports.read'
+  | 'workers.read'
+  | 'workers.manage'
+  | 'workers.enroll'
+  | 'workers.logs.read'
   | 'admin.access.manage';
 
 export interface AdminActor {

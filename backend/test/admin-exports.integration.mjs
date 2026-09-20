@@ -2,11 +2,10 @@ import 'reflect-metadata';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { ConfigService } from '@nestjs/config';
 import { createConnection, Types } from 'mongoose';
 import { IsolatedServices } from './helpers/isolated-services.mjs';
 import { JobSchema } from '../dist/jobs/job.schema.js';
-import { JobAttemptSchema } from '../dist/jobs/job-attempt.schema.js';
+import { ReleaseSchema } from '../dist/releases/release.schema.js';
 import { AdminAccessSchema } from '../dist/admin/admin-access.schema.js';
 import { AdminAuditEventSchema } from '../dist/admin/admin-audit.schema.js';
 import { AdminOperationSchema } from '../dist/admin/admin-operation.schema.js';
@@ -38,7 +37,7 @@ test('bounded audited CSV snapshots', { timeout: 60000 }, async (t) => {
   for (const connection of connections) {
     connection.options = { ...connection.options, sanitizeFilter: true };
     connection.model('Job', JobSchema);
-    connection.model('JobAttempt', JobAttemptSchema);
+    connection.model('Release', ReleaseSchema);
     connection.model('AdminAccess', AdminAccessSchema);
     connection.model('AdminAuditEvent', AdminAuditEventSchema);
     connection.model('AdminOperation', AdminOperationSchema);
@@ -78,13 +77,7 @@ test('bounded audited CSV snapshots', { timeout: 60000 }, async (t) => {
     receipts,
     audit,
   );
-  const overview = new AdminOverviewService(
-    jobs,
-    {},
-    {},
-    {},
-    new ConfigService({}),
-  );
+  const overview = new AdminOverviewService(jobs, connection.model('Release'));
   const service = new AdminExportsService(jobs, overview, operations);
   const range = {
     from: '2026-09-01T00:00:00.000Z',
@@ -96,7 +89,6 @@ test('bounded audited CSV snapshots', { timeout: 60000 }, async (t) => {
     userId,
     requestId: randomUUID(),
     requestHash: 'a'.repeat(64),
-    workerId: 'node-a',
     status: 'ready',
     createdAt: new Date('2026-09-01T12:00:00.000Z'),
     queuedAt: null,
@@ -182,31 +174,6 @@ test('bounded audited CSV snapshots', { timeout: 60000 }, async (t) => {
         ...range,
         rowCount: 2,
       });
-    },
-  );
-
-  await t.test(
-    'recovered validation reports first attempt start in CSV',
-    async () => {
-      await reset();
-      const stored = row({
-        status: 'validating',
-        validatingAt: new Date('2026-09-01T18:00:00.000Z'),
-        finishedAt: null,
-      });
-      await jobs.collection.insertOne(stored);
-      await connection.model('JobAttempt').create({
-        jobId: stored._id,
-        workerId: 'node-a',
-        attemptId: randomUUID(),
-        sessionId: randomUUID(),
-        generation: 1,
-        startedAt: new Date('2026-09-01T12:05:00.000Z'),
-        processingStartedAt: null,
-      });
-      const report = await service.export(actor, 'jobs', range);
-      assert.equal(report.csv.includes('2026-09-01T12:05:00.000Z'), true);
-      assert.equal(report.csv.includes('2026-09-01T18:00:00.000Z'), false);
     },
   );
 

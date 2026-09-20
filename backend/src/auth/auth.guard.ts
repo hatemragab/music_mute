@@ -22,9 +22,11 @@ import {
 import type { AuthRequest } from './auth-request.js';
 import type { RateBucket } from './auth.types.js';
 import { authError } from './auth.errors.js';
-import { WORKER_ONLY_ROUTE } from '../worker/worker-routes.js';
 import { ADMIN_ROUTE } from '../admin/admin.decorators.js';
 import { adminError, adminRequestId } from '../admin/admin-errors.js';
+import { WORKER_ROUTE } from '../worker-fleet/auth/worker-auth.decorators.js';
+import { AccountRestrictionsService } from '../abuse-protection/account-restrictions.service.js';
+import type { RestrictedOperation } from '../abuse-protection/abuse-protection.types.js';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -35,24 +37,23 @@ export class AuthGuard implements CanActivate {
     private readonly budgets: RateBudgetService,
     private readonly keys: RateLimitKeys,
     private readonly config: ConfigService,
+    private readonly restrictions: AccountRestrictionsService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const targets = [context.getHandler(), context.getClass()];
     const publicRoute =
       this.reflector.getAllAndOverride<boolean>(PUBLIC_ROUTE, targets) === true;
-    const workerOnly =
-      this.reflector.getAllAndOverride<boolean>(WORKER_ONLY_ROUTE, targets) ===
-      true;
     const adminRoute =
       this.reflector.getAllAndOverride<boolean>(ADMIN_ROUTE, targets) === true;
-    if (
-      (publicRoute && workerOnly) ||
-      (publicRoute && adminRoute) ||
-      (workerOnly && adminRoute)
-    )
+    const workerRoute =
+      this.reflector.getAllAndOverride<boolean>(WORKER_ROUTE, targets) === true;
+    if ([publicRoute, adminRoute, workerRoute].filter(Boolean).length > 1)
       throw authError('UNAUTHENTICATED');
-    if (workerOnly || publicRoute) return true;
+    if (publicRoute) return true;
+    // WorkerRoute always installs the fail-closed WorkerAuthGuard. C2 replaces
+    // its rejection path with scoped enrollment/installation/machine auth.
+    if (workerRoute) return true;
     const req = context.switchToHttp().getRequest<AuthRequest>();
     const response = context.switchToHttp().getResponse<Response>();
     const requestId = adminRoute ? adminRequestId(req) : undefined;
@@ -125,37 +126,107 @@ export class AuthGuard implements CanActivate {
       });
     const processingBudget = {
       'processing-read': {
-        scope: 'processing-read-uid',
+        scope: 'read',
         config: 'PROCESSING_READ_UID_PER_MINUTE',
         defaultLimit: 60,
+        windowMs: 60_000,
       },
       'processing-create': {
-        scope: 'processing-create-uid',
+        scope: 'create',
         config: 'PROCESSING_CREATE_UID_PER_MINUTE',
         defaultLimit: 30,
+        windowMs: 60_000,
       },
-      'processing-grant': {
-        scope: 'processing-grant-uid',
+      'processing-upload-grant': {
+        scope: 'upload-grant',
         config: 'PROCESSING_GRANT_UID_PER_MINUTE',
         defaultLimit: 60,
+        windowMs: 60_000,
       },
-      'processing-mutation': {
-        scope: 'processing-mutation-uid',
+      'processing-upload-confirm': {
+        scope: 'upload-confirm',
+        config: 'PROCESSING_GRANT_UID_PER_MINUTE',
+        defaultLimit: 60,
+        windowMs: 60_000,
+      },
+      'processing-download': {
+        scope: 'download',
+        config: 'PROCESSING_GRANT_UID_PER_MINUTE',
+        defaultLimit: 60,
+        windowMs: 60_000,
+      },
+      'processing-retry': {
+        scope: 'retry',
+        config: 'PROCESSING_CREATE_UID_PER_MINUTE',
+        defaultLimit: 30,
+        windowMs: 60_000,
+      },
+      'processing-cancel': {
+        scope: 'cancel',
         config: 'PROCESSING_MUTATION_UID_PER_MINUTE',
         defaultLimit: 60,
+        windowMs: 60_000,
+      },
+      'processing-mutation': {
+        scope: 'mutation',
+        config: 'PROCESSING_MUTATION_UID_PER_MINUTE',
+        defaultLimit: 60,
+        windowMs: 60_000,
+      },
+      'account-deletion': {
+        scope: 'account-deletion',
+        config: 'ACCOUNT_DELETION_UID_PER_HOUR',
+        defaultLimit: 3,
+        windowMs: 3_600_000,
+      },
+      'account-recovery': {
+        scope: 'account-recovery',
+        config: 'ACCOUNT_RECOVERY_UID_PER_HOUR',
+        defaultLimit: 60,
+        windowMs: 3_600_000,
       },
     } as const;
     if (operation && operation in processingBudget) {
       const definition =
         processingBudget[operation as keyof typeof processingBudget];
-      buckets.push({
-        key: this.keys.bucket(definition.scope, signed.uid),
-        limit: this.config.get<number>(
-          definition.config,
-          definition.defaultLimit,
-        ),
-        windowMs: 60_000,
-      });
+      const accountLimit = this.config.get<number>(
+        definition.config,
+        definition.defaultLimit,
+      );
+      buckets.push(
+        {
+          key: this.keys.bucket(
+            `processing-${definition.scope}-account`,
+            signed.uid,
+          ),
+          limit: accountLimit,
+          windowMs: definition.windowMs,
+        },
+        {
+          key: this.keys.bucket(
+            `processing-${definition.scope}-ip`,
+            req.ip ?? 'unknown',
+          ),
+          limit: this.config.get<number>(
+            'PROCESSING_OPERATION_IP_PER_MINUTE',
+            120,
+          ),
+          windowMs: 60_000,
+        },
+        {
+          key: this.keys.bucket('processing-endpoint', definition.scope),
+          limit: this.config.get<number>('PROCESSING_ENDPOINT_PER_MINUTE', 600),
+          windowMs: 60_000,
+        },
+        {
+          key: this.keys.bucket('processing-service', 'global'),
+          limit: this.config.get<number>(
+            'PROCESSING_SERVICE_PER_MINUTE',
+            2_000,
+          ),
+          windowMs: 60_000,
+        },
+      );
     }
     const decision = await this.budgets.reserve(buckets);
     if (!decision.allowed) {
@@ -184,6 +255,18 @@ export class AuthGuard implements CanActivate {
         throw authError('ACCOUNT_DISABLED');
       if (identity.authTimeSec <= user.sessionsRevokedAfterSec)
         throw authError('UNAUTHENTICATED');
+      const restrictedOperation: Partial<
+        Record<AuthOperation, RestrictedOperation>
+      > = {
+        'processing-create': 'job_create',
+        'processing-upload-grant': 'upload_grant',
+        'processing-upload-confirm': 'upload_confirm',
+        'processing-download': 'download_grant',
+        'processing-retry': 'job_retry',
+      };
+      const restricted = operation ? restrictedOperation[operation] : undefined;
+      if (restricted)
+        await this.restrictions.assertAllowed(user._id, restricted);
     } else if (
       !adminRoute &&
       !this.reflector.getAllAndOverride<boolean>(ALLOW_UNPROVISIONED, targets)

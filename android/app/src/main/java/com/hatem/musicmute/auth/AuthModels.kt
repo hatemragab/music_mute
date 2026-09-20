@@ -149,7 +149,11 @@ fun validAuthEmail(email: String): Boolean =
         !email.endsWith('.')
 
 @Serializable
-data class AccountDeletionReceipt(val requestId: String, val status: String)
+data class AccountDeletionReceipt(
+    val requestId: String,
+    val status: String,
+    val recoverUntil: String? = null,
+)
 
 @Serializable
 data class AccountRecoveryRequest(
@@ -167,6 +171,8 @@ data class AccountRecoveryDeletion(
     val requestId: String,
     val requestedAt: String? = null,
     val recoverUntil: String? = null,
+    val phase: String? = null,
+    val failureCode: String? = null,
     val recoveryAvailable: Boolean,
 )
 

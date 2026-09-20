@@ -91,7 +91,7 @@ export function ActivityLogPage() {
         />
         <Input
           aria-label="Filter action"
-          placeholder="Action, e.g. workers.drain"
+          placeholder="Action, e.g. jobs.cancel"
           value={action}
           onChange={(event) => change("action", event.target.value)}
         />

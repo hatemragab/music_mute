@@ -1,13 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import type { ClientSession, Model, PipelineStage } from 'mongoose';
+import type { ClientSession, Model } from 'mongoose';
 import { adminError } from '../admin/admin-errors.js';
 import type { AdminActor } from '../admin/admin.types.js';
 import { Job } from '../jobs/job.schema.js';
-import { WorkerRegistration } from '../worker/worker-registration.schema.js';
-import { WorkerControl } from '../worker/worker-control.schema.js';
-import { WORKER_ID } from '../worker/worker-routes.js';
 import { Release } from '../releases/release.schema.js';
 import { parseOverviewRange, utcDays } from './overview-query.js';
 import type { OverviewSnapshot } from './overview.types.js';
@@ -84,12 +80,7 @@ export class AdminOverviewService {
   >();
   constructor(
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
-    @InjectModel(WorkerRegistration.name)
-    private readonly registrations: Model<WorkerRegistration>,
-    @InjectModel(WorkerControl.name)
-    private readonly controls: Model<WorkerControl>,
     @InjectModel(Release.name) private readonly releases: Model<Release>,
-    private readonly config: ConfigService,
   ) {}
   async read(
     actor: AdminActor,
@@ -178,7 +169,7 @@ export class AdminOverviewService {
     releaseRead: boolean,
   ): Promise<OverviewSnapshot> {
     const now = new Date();
-    const [submittedRows, finishedRows, queueRows, workerRows, releaseRows] =
+    const [submittedRows, finishedRows, queueRows, releaseRows] =
       await Promise.all([
         this.jobs
           .aggregate<SubmissionStats>([
@@ -192,43 +183,17 @@ export class AdminOverviewService {
                 ],
                 timing: [
                   {
-                    $lookup: {
-                      from: 'audio_job_attempts',
-                      localField: '_id',
-                      foreignField: 'jobId',
-                      pipeline: [
-                        { $sort: { startedAt: 1, _id: 1 } },
-                        { $limit: 1 },
-                        { $project: { startedAt: 1 } },
-                      ],
-                      as: 'firstAttempt',
-                    },
-                  },
-                  {
-                    $set: {
-                      validationStartedAt: {
-                        $ifNull: [
-                          { $arrayElemAt: ['$firstAttempt.startedAt', 0] },
-                          '$validatingAt',
-                        ],
-                      },
-                    },
-                  },
-                  {
                     $match: {
                       $expr: {
                         $and: [
                           validDate('$queuedAt'),
-                          validDate('$validationStartedAt'),
-                          { $gte: ['$validationStartedAt', '$queuedAt'] },
+                          validDate('$validatingAt'),
+                          { $gte: ['$validatingAt', '$queuedAt'] },
                           {
                             $or: [
                               { $not: [validDate('$processingStartedAt')] },
                               {
-                                $lte: [
-                                  '$validationStartedAt',
-                                  '$processingStartedAt',
-                                ],
+                                $lte: ['$validatingAt', '$processingStartedAt'],
                               },
                             ],
                           },
@@ -244,7 +209,7 @@ export class AdminOverviewService {
                         $avg: {
                           $divide: [
                             {
-                              $subtract: ['$validationStartedAt', '$queuedAt'],
+                              $subtract: ['$validatingAt', '$queuedAt'],
                             },
                             1000,
                           ],
@@ -363,7 +328,6 @@ export class AdminOverviewService {
             },
           ])
           .option({ maxTimeMS: 2000 }),
-        this.workerCounts(now),
         releaseRead
           ? this.releases
               .aggregate<{ _id: string; count: number; rejected: number }>([
@@ -416,7 +380,6 @@ export class AdminOverviewService {
           processing: processingTiming?.count ?? 0,
         },
       },
-      workers: workerRows[0] ?? { online: 0, total: 0 },
       series,
       ...(releaseRead
         ? {
@@ -434,44 +397,5 @@ export class AdminOverviewService {
           }
         : {}),
     };
-  }
-
-  private workerCounts(now: Date) {
-    const recent = new Date(
-      now.getTime() -
-        this.config.getOrThrow<number>('PROCESSING_LEASE_SECONDS') * 1000,
-    );
-    const summary: PipelineStage.Group = {
-      $group: {
-        _id: null,
-        total: { $sum: 1 },
-        online: { $sum: { $cond: [{ $gt: ['$lastSeenAt', recent] }, 1, 0] } },
-      },
-    };
-    if (this.config.get('PROCESSING_WORKER_AUTH_MODE', 'legacy') === 'legacy')
-      return this.controls
-        .aggregate<{ online: number; total: number }>([
-          { $match: { _id: WORKER_ID } },
-          summary,
-          { $project: { _id: 0 } },
-        ])
-        .option({ maxTimeMS: 2000 });
-    return this.registrations
-      .aggregate<{ online: number; total: number }>([
-        { $match: { state: { $ne: 'revoked' } } },
-        {
-          $lookup: {
-            from: 'audio_worker_control',
-            localField: '_id',
-            foreignField: '_id',
-            pipeline: [{ $project: { lastSeenAt: 1 } }],
-            as: 'control',
-          },
-        },
-        { $set: { lastSeenAt: { $arrayElemAt: ['$control.lastSeenAt', 0] } } },
-        summary,
-        { $project: { _id: 0 } },
-      ])
-      .option({ maxTimeMS: 2000 });
   }
 }

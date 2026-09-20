@@ -1,9 +1,7 @@
 import { model } from 'mongoose';
 import { JobSchema } from './job.schema.js';
-import { WorkerControlSchema } from '../worker/worker-control.schema.js';
 
 const Job = model('JobSchemaBoundaryFixture', JobSchema);
-const Control = model('ControlSchemaBoundaryFixture', WorkerControlSchema);
 
 describe('durable job schema boundaries', () => {
   it('uses the same Unicode title length limit as HTTP validation', () => {
@@ -44,12 +42,26 @@ describe('durable job schema boundaries', () => {
       new Job({ status: 'deleted' }).validateSync()?.errors,
     ).toHaveProperty('status');
   });
-  it('allows distinct validated per-machine slots and rejects unsafe identifiers', () => {
-    expect(
-      new Control({ _id: 'second-worker' }).validateSync(),
-    ).toBeUndefined();
-    expect(
-      new Control({ _id: '../another' }).validateSync()?.errors,
-    ).toHaveProperty('_id');
+  it('freezes admission and recipe snapshots once the job is created', () => {
+    expect(JobSchema.path('admissionSnapshot')?.options.immutable).toBe(true);
+    expect(JobSchema.path('recipeSnapshot')?.options.immutable).toBe(true);
+  });
+  it('contains no execution ownership or claim queue fields and indexes', () => {
+    for (const path of [
+      'workerId',
+      'attemptId',
+      'sessionId',
+      'generation',
+      'leaseExpiresAt',
+      'outputReservation',
+      'queueOrder',
+    ]) {
+      expect(JobSchema.path(path)).toBeUndefined();
+    }
+    const indexes = JobSchema.indexes();
+    expect(indexes.some(([fields]) => 'workerId' in fields)).toBe(false);
+    expect(indexes.some(([, options]) => options.name === 'jobs_fifo')).toBe(
+      false,
+    );
   });
 });

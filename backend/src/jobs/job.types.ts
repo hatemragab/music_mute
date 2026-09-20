@@ -1,5 +1,10 @@
-import type { ProcessingQualification } from '../admin-settings/processing-qualification.js';
-import type { InputSource } from '../admin-settings/processing-policy-v2.js';
+import type {
+  WorkerRecipeId,
+  WorkerRecipeStepId,
+} from '../worker-fleet/protocol/v1/protocol.js';
+
+export type InputSource = 'audio_file' | 'video_file' | 'youtube';
+export const PREPARATION_PROFILE_ID = 'preserve-or-aac-lc-256-v1';
 export const JOB_STATUSES = [
   'awaiting_upload',
   'queued',
@@ -34,31 +39,18 @@ export interface InputReservation extends InputDeclaration {
   key: string;
 }
 export interface AdmissionSnapshot {
-  policyVersion?: 1 | 2;
-  maxDurationSeconds?: number;
-  maxInputBytes?: number;
-  qualification?: ProcessingQualification | null;
-  preparationProfileId?: string;
-  source?: InputSource;
-  queueLimits?: {
-    maxOutstandingJobs: number;
-    maxOutstandingAudioSeconds: number;
-  };
-  estimatedWorkerSeconds?: number;
+  policyVersion: 2;
+  maxDurationSeconds: number;
+  maxInputBytes: number;
+  preparationProfileId: string;
+  source: InputSource;
 
   settingsRevision: number;
-  maxInputBytesExclusive: number;
-  maxDurationSecondsExclusive: number;
-  maxActiveJobsPerUser: number | null;
+  maxWaitingJobs: number;
+  maxProcessingJobs: number;
+  maxInfrastructureAttempts: number;
+  maxClientInputAttempts: number;
   reservationExpiresAt: Date;
-}
-export interface OutputReservation {
-  key: string;
-  bytes: number;
-  durationSeconds: number;
-  sha256: string;
-  contentType: 'audio/mpeg';
-  attemptId: string;
 }
 export interface ObjectIdentity {
   key: string;
@@ -66,18 +58,6 @@ export interface ObjectIdentity {
   bytes: number;
   sha256: string;
   contentType: string;
-}
-export interface WorkerSelector {
-  jobId: string;
-  attemptId: string;
-  sessionId: string;
-  generation: number;
-}
-export interface WorkerAssignment extends WorkerSelector {
-  leaseExpiresAt: string;
-}
-export interface WorkerEvent extends WorkerSelector {
-  eventId: string;
 }
 export interface UploadGrant {
   method: 'PUT';
@@ -101,18 +81,42 @@ export const JOB_FAILURE_CODES = [
   'OUTPUT_UPLOAD_FAILED',
 ] as const;
 export type JobFailureCode = (typeof JOB_FAILURE_CODES)[number];
-export const WORKER_FAILURE_CODES = [
-  'INVALID_AUDIO',
-  'INPUT_TOO_LONG',
-  'INPUT_CHECKSUM_MISMATCH',
-  'SEPARATOR_FAILED',
-  'OUTPUT_INVALID',
-  'DOWNLOAD_FAILED',
-  'OUTPUT_UPLOAD_FAILED',
-] as const satisfies readonly JobFailureCode[];
-export type WorkerFailureCode = (typeof WORKER_FAILURE_CODES)[number];
 export interface SafeJobError {
   code: JobFailureCode;
   message: string;
   at: Date;
+}
+
+export interface WorkerRecipeSnapshot {
+  recipeId: WorkerRecipeId;
+  recipeRevision: number;
+  protocolVersion: 1;
+  recipeDigest: string;
+  modelFilename: 'Kim_Vocal_2.onnx';
+  modelDigest: string;
+  modelBytes: number;
+  preparationProfileId: 'pcm16-stereo-44100-v1';
+  stepIds: WorkerRecipeStepId[];
+  trimEnabled: boolean;
+  denoiseEnabled: boolean;
+  denoisePresetId: 'afftdn-conservative-v1' | null;
+  trimProfileId: 'trim-vocal-gaps-v1' | null;
+  outputFormat: 'mp3';
+  outputBitrateKbps: 192;
+}
+
+export interface WorkerRetryEligibility {
+  eligible: boolean;
+  attemptsRemaining: number;
+  nextAttemptAt: Date | null;
+}
+
+export interface WorkerExecutionOwnership {
+  attemptId: string;
+  machineId: string;
+  workerId: string;
+  sessionId: string;
+  incarnation: string;
+  leaseExpiresAt: Date;
+  deadlineAt: Date;
 }

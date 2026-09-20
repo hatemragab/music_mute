@@ -11,10 +11,10 @@ import { authError } from '../src/auth/auth.errors.js';
 import { FirebaseIdentityService } from '../src/auth/firebase-identity.service.js';
 import { PushRegistrationController } from '../src/notifications/push-registration.controller.js';
 import { PushRegistrationsService } from '../src/notifications/push-registration.service.js';
-import { ProcessingEnabledGuard } from '../src/processing/processing-enabled.guard.js';
 import { RateBudgetService } from '../src/rate-limits/rate-budget.service.js';
 import { RateLimitKeys } from '../src/rate-limits/rate-limit-keys.js';
 import { UsersService } from '../src/users/users.service.js';
+import { AccountRestrictionsService } from '../src/abuse-protection/account-restrictions.service.js';
 
 const installationId = 'd7ea7de6-52e9-4b96-8834-3b517941bdb0';
 const token = 'fixture-token:abc_123-XYZ';
@@ -24,7 +24,7 @@ describe('push registration HTTP boundary', () => {
   let app: Awaited<ReturnType<typeof startApp>>['app'];
   let registrations: Awaited<ReturnType<typeof startApp>>['registrations'];
 
-  async function startApp(processingEnabled = true) {
+  async function startApp() {
     const userId = new Types.ObjectId();
     const user = {
       _id: userId,
@@ -66,9 +66,7 @@ describe('push registration HTTP boundary', () => {
       providers: [
         {
           provide: ConfigService,
-          useValue: new ConfigService({
-            AUDIO_PROCESSING_ENABLED: processingEnabled,
-          }),
+          useValue: new ConfigService(),
         },
         { provide: FirebaseIdentityService, useValue: firebase },
         {
@@ -90,8 +88,11 @@ describe('push registration HTTP boundary', () => {
             bucket: (scope: string, id: string) => `${scope}:${id}`,
           },
         },
+        {
+          provide: AccountRestrictionsService,
+          useValue: { assertAllowed: vi.fn().mockResolvedValue(undefined) },
+        },
         { provide: PushRegistrationsService, useValue: registrations },
-        ProcessingEnabledGuard,
         { provide: APP_GUARD, useClass: AuthGuard },
       ],
     })
@@ -225,20 +226,6 @@ describe('push registration HTTP boundary', () => {
         .send(body)
         .expect(400);
       expect(registrations.deactivate).toHaveBeenCalledTimes(calls);
-    }
-  });
-
-  it('refuses registration while audio processing is disabled', async () => {
-    const disabled = await startApp(false);
-    try {
-      await request(disabled.app.getHttpServer())
-        .put(`/api/v1/devices/${installationId}/push`)
-        .set('Authorization', `Bearer ${bearer}`)
-        .send({ token })
-        .expect(503);
-      expect(disabled.registrations.register).not.toHaveBeenCalled();
-    } finally {
-      await disabled.app.close();
     }
   });
 });

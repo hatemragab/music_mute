@@ -19,7 +19,6 @@ export interface OverviewSnapshot {
     meanProcessingSeconds: number | null;
     sampleCount: { queueWait: number; processing: number };
   };
-  workers: { online: number; total: number };
   series: {
     start: string;
     submitted: number;

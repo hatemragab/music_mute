@@ -19,7 +19,7 @@ describe('bounded export filters', () => {
     expect(() => exportQuery('jobs', { limit: '1' }, now)).toThrow();
     expect(() => exportQuery('jobs', { fields: 'email' }, now)).toThrow();
     expect(() =>
-      exportQuery('overview', { workerId: 'node-a' }, now),
+      exportQuery('overview', { unexpected: 'value' }, now),
     ).toThrow();
   });
   it('accepts exact 90 days and rejects reversed or oversized intervals', () => {
@@ -66,10 +66,9 @@ describe('audited export service', () => {
       _id: new Types.ObjectId(),
       userId: new Types.ObjectId(),
       status: 'ready',
-      workerId: 'node-a',
       createdAt: new Date(),
       queuedAt: null,
-      validatingAt: null,
+      validatingAt: new Date('2026-09-10T12:00:00.000Z'),
       finishedAt: null,
       processingAccumulatedMs: null,
       inputObject: { key: 'PRIVATE_KEY' },
@@ -77,20 +76,11 @@ describe('audited export service', () => {
       displayName: 'PRIVATE_NAME',
       email: 'PRIVATE_EMAIL',
     };
-    const firstAttempt = new Date('2026-09-10T12:00:00.000Z');
     const query = {
       session: vi.fn(),
       option: vi.fn(async () => [
         {
-          items: [
-            {
-              ...job,
-              firstAttempt: {
-                startedAt: firstAttempt,
-                processingStartedAt: null,
-              },
-            },
-          ],
+          items: [job],
         },
       ]),
     };
@@ -148,7 +138,7 @@ describe('audited export service', () => {
     expect(result.csv).toContain('2026-09-10T12:00:00.000Z');
     expect(
       result.csv.startsWith(
-        'id,userId,status,workerId,createdAt,queuedAt,startedAt,finishedAt,elapsedSeconds,errorCode\r\n',
+        'id,userId,status,createdAt,queuedAt,startedAt,finishedAt,elapsedSeconds,errorCode\r\n',
       ),
     ).toBe(true);
     expect(f.mutation()).toMatchObject({
@@ -187,7 +177,6 @@ describe('audited export service', () => {
       {
         items: Array.from({ length: 10001 }, () => ({
           ...oversized.job,
-          firstAttempt: { startedAt: new Date(), processingStartedAt: null },
         })),
       },
     ]);
@@ -201,15 +190,7 @@ describe('audited export service', () => {
       abort.abort();
       return [
         {
-          items: [
-            {
-              ...disconnected.job,
-              firstAttempt: {
-                startedAt: new Date(),
-                processingStartedAt: null,
-              },
-            },
-          ],
+          items: [disconnected.job],
         },
       ];
     });
@@ -250,7 +231,7 @@ describe('audited export service', () => {
       }),
     ).toThrow();
     expect(() =>
-      validateAuditEvent({ ...event, action: 'workers.create' }),
+      validateAuditEvent({ ...event, action: 'not.allowed' }),
     ).toThrow();
   });
 });

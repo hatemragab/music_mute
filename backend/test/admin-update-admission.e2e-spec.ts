@@ -1,120 +1,95 @@
-import { APP_GUARD } from '@nestjs/core';
+import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import { Types } from 'mongoose';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ProcessingAccessGuard } from '../src/app-policy/processing-access.guard.js';
-import { AppPolicyService } from '../src/app-policy/app-policy.service.js';
-import { defaultPolicy } from '../src/app-policy/access-policy.js';
-import { DevicesService } from '../src/devices/devices.service.js';
+import { authError } from '../src/auth/auth.errors.js';
+import type { AuthRequest } from '../src/auth/auth-request.js';
 import { JobActionsService } from '../src/jobs/job-actions.service.js';
 import { JobDeletionService } from '../src/jobs/job-deletion.service.js';
 import { JobMetadataService } from '../src/jobs/job-metadata.service.js';
 import { JobsQueryService } from '../src/jobs/jobs-query.service.js';
 import { JobsController } from '../src/jobs/jobs.controller.js';
 import { JobsService } from '../src/jobs/jobs.service.js';
-import { ProcessingEnabledGuard } from '../src/processing/processing-enabled.guard.js';
-import type { AuthRequest } from '../src/auth/auth-request.js';
+import { PREPARATION_PROFILE_ID } from '../src/jobs/job.types.js';
 
-describe('mobile update processing admission boundary', () => {
+describe('processing admission HTTP boundary', () => {
   let app: INestApplication;
   afterEach(async () => app?.close());
 
-  it('blocks new work and renewal for an outdated build but allows accepted upload confirmation', async () => {
-    const policy = defaultPolicy();
-    policy.platforms.android = {
-      minimumBuild: 10,
-      latestBuild: 10,
-      downloadUrl: 'https://example.invalid/update',
+  it('routes validated processing-start requests to the guarded domain services', async () => {
+    const query = { list: vi.fn(), detail: vi.fn(), download: vi.fn() };
+    const actions = {
+      cancel: vi.fn(),
+      retry: vi.fn().mockResolvedValue({ status: 'queued' }),
     };
     const jobs = {
-      create: vi.fn(),
-      renewUpload: vi.fn(),
-      confirmUpload: vi.fn().mockResolvedValue({
-        id: '64b000000000000000000001',
-        status: 'queued',
-      }),
+      create: vi.fn().mockResolvedValue({ status: 'awaiting_upload' }),
+      renewUpload: vi.fn().mockResolvedValue({ method: 'PUT' }),
+      confirmUpload: vi.fn().mockResolvedValue({ status: 'queued' }),
     };
-    const actions = { retry: vi.fn(), cancel: vi.fn() };
     const module = await Test.createTestingModule({
       controllers: [JobsController],
       providers: [
+        { provide: JobsQueryService, useValue: query },
         { provide: JobsService, useValue: jobs },
-        { provide: JobsQueryService, useValue: {} },
         { provide: JobActionsService, useValue: actions },
-        { provide: JobMetadataService, useValue: {} },
-        { provide: JobDeletionService, useValue: {} },
-        {
-          provide: DevicesService,
-          useValue: {
-            findOwned: vi
-              .fn()
-              .mockResolvedValue({ platform: 'android', buildNumber: 9 }),
-          },
-        },
-        {
-          provide: AppPolicyService,
-          useValue: {
-            current: vi.fn().mockResolvedValue(policy),
-            assertProcessingTargetAvailable: vi.fn(),
-          },
-        },
-        { provide: APP_GUARD, useClass: ProcessingAccessGuard },
+        { provide: JobMetadataService, useValue: { rename: vi.fn() } },
+        { provide: JobDeletionService, useValue: { delete: vi.fn() } },
       ],
-    })
-      .overrideGuard(ProcessingEnabledGuard)
-      .useValue({ canActivate: () => true })
-      .compile();
+    }).compile();
     app = module.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.use((rawRequest: Request, _response: Response, next: NextFunction) => {
       const req = rawRequest as AuthRequest;
-      req.identity = { tokenEmailVerified: true } as never;
       req.user = {
         _id: new Types.ObjectId('64b000000000000000000099'),
       } as never;
       next();
     });
+    app.useGlobalPipes(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        exceptionFactory: () => authError('INVALID_INPUT'),
+      }),
+    );
     await app.init();
     const server = app.getHttpServer();
-    const installation = 'e183f234-ac55-4d06-9d08-b92d5d829ed8';
-    const headers = { 'X-Installation-Id': installation };
-    const missingDevice = await request(server)
-      .post('/api/v1/jobs')
-      .send({})
-      .expect(409);
-    expect(missingDevice.body.code).toBe('DEVICE_SYNC_REQUIRED');
-    const invalidDevice = await request(server)
-      .post('/api/v1/jobs')
-      .set('X-Installation-Id', 'not-a-uuid')
-      .send({})
-      .expect(409);
-    expect(invalidDevice.body.code).toBe('DEVICE_SYNC_REQUIRED');
-    const blocked = await request(server)
-      .post('/api/v1/jobs')
-      .set(headers)
-      .send({})
-      .expect(403);
-    expect(blocked.body.code).toBe('APP_UPDATE_REQUIRED');
-    await request(server)
-      .post('/api/v1/jobs/64b000000000000000000001/upload-url')
-      .set(headers)
-      .send({})
-      .expect(403);
-    await request(server)
-      .post('/api/v1/jobs/64b000000000000000000001/retry')
-      .set(headers)
-      .send({ requestId: '14b2d476-e40e-4aeb-a8dd-24db12337695' })
-      .expect(403);
-    await request(server)
-      .post('/api/v1/jobs/64b000000000000000000001/upload-complete')
-      .send({})
-      .expect(200);
+    const id = '64b000000000000000000001';
+    const input = {
+      extension: 'mp3',
+      contentType: 'audio/mpeg',
+      bytes: 100,
+      durationSeconds: 10,
+      sha256: Buffer.alloc(32).toString('base64'),
+    };
+    const responses = [
+      await request(server).post('/api/v1/jobs').send({
+        policyVersion: 2,
+        preparationProfileId: PREPARATION_PROFILE_ID,
+        source: 'audio_file',
+        requestId: '14b2d476-e40e-4aeb-a8dd-24db12337695',
+        input,
+      }),
+      await request(server)
+        .post(`/api/v1/jobs/${id}/retry`)
+        .send({ requestId: '24b2d476-e40e-4aeb-a8dd-24db12337695' }),
+      await request(server).post(`/api/v1/jobs/${id}/upload-url`).send({
+        requestId: '34b2d476-e40e-4aeb-a8dd-24db12337695',
+      }),
+      await request(server).post(`/api/v1/jobs/${id}/upload-complete`).send({}),
+    ];
+    expect(responses.map((response) => response.status)).toEqual([
+      201, 201, 200, 200,
+    ]);
+    expect(jobs.create).toHaveBeenCalledOnce();
+    expect(actions.retry).toHaveBeenCalledOnce();
+    expect(jobs.renewUpload).toHaveBeenCalledOnce();
     expect(jobs.confirmUpload).toHaveBeenCalledOnce();
-    expect(jobs.create).not.toHaveBeenCalled();
-    expect(jobs.renewUpload).not.toHaveBeenCalled();
-    expect(actions.retry).not.toHaveBeenCalled();
+    expect(query.list).not.toHaveBeenCalled();
+    expect(actions.cancel).not.toHaveBeenCalled();
   });
 });

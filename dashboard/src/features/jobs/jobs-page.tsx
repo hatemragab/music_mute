@@ -37,8 +37,6 @@ import { useVisibleInterval } from "@/hooks/use-visible-interval";
 import { listJobs } from "./jobs-api";
 import { JobSourceLink } from "./job-source-link";
 
-import { QueueSummarySection } from "./queue-summary-panel";
-
 export function JobsPage() {
   const client = useApiClient();
   const { can } = useAdminSession();
@@ -46,7 +44,6 @@ export function JobsPage() {
   const [jobId, setJobId] = useState(params.get("jobId") ?? "");
   const status = params.get("status") ?? "all";
   const userId = params.get("userId") ?? "";
-  const workerId = params.get("workerId") ?? "";
   const fromDate = params.get("from") ?? "";
   const toDate = params.get("to") ?? "";
   const cursor = params.get("cursor");
@@ -56,7 +53,6 @@ export function JobsPage() {
   const filters = {
     status: status === "all" ? undefined : status,
     userId: userId || undefined,
-    workerId: workerId || undefined,
     jobId: params.get("jobId") || undefined,
     from,
     to,
@@ -79,7 +75,7 @@ export function JobsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Jobs"
-        description="Inspect queue position, processing stages and attempt history. Queue positions are observations, not completion estimates."
+        description="Inspect job status, owner, source, timing and finalized results."
         actions={
           can("exports.read") ? (
             <ExportCsvButton
@@ -89,8 +85,7 @@ export function JobsPage() {
           ) : undefined
         }
       />
-      <QueueSummarySection />
-      <div className="grid gap-2 rounded-xl border bg-card p-3 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid gap-2 rounded-xl border bg-card p-3 sm:grid-cols-2 xl:grid-cols-5">
         <Select
           value={status}
           onValueChange={(value) => change("status", value)}
@@ -112,12 +107,6 @@ export function JobsPage() {
           placeholder="Exact user ID"
           value={userId}
           onChange={(event) => change("userId", event.target.value)}
-        />
-        <Input
-          aria-label="Filter by worker ID"
-          placeholder="Exact worker ID"
-          value={workerId}
-          onChange={(event) => change("workerId", event.target.value)}
         />
         <form
           onSubmit={(event) => {
@@ -147,7 +136,7 @@ export function JobsPage() {
         {dateError ? (
           <p
             role="alert"
-            className="text-sm text-destructive sm:col-span-2 xl:col-span-6"
+            className="text-sm text-destructive sm:col-span-2 xl:col-span-5"
           >
             {dateError}
           </p>
@@ -167,7 +156,6 @@ export function JobsPage() {
                   <TableHead>Source URL</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>User</TableHead>
-                  <TableHead>Worker</TableHead>
                   <TableHead>Timing</TableHead>
                   <TableHead>Queue</TableHead>
                 </TableRow>
@@ -200,9 +188,6 @@ export function JobsPage() {
                       <div className="font-mono text-xs text-muted-foreground">
                         {job.userId}
                       </div>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {job.workerId ?? "Unassigned"}
                     </TableCell>
                     <TableCell>{formatDuration(job.elapsedSeconds)}</TableCell>
                     <TableCell>{job.queuePosition ?? "—"}</TableCell>

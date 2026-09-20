@@ -107,6 +107,16 @@ describe('AdminGuard', () => {
     await expect(f.guard.canActivate(f.context)).resolves.toBe(true);
   });
 
+  it('returns an authentication error when guard ordering exposes no identity', async () => {
+    const f = setup();
+    delete (f.req as { identity?: unknown }).identity;
+    await expect(f.guard.canActivate(f.context)).rejects.toMatchObject({
+      status: 401,
+      response: { code: 'UNAUTHENTICATED' },
+    });
+    expect(f.model.findOne).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['password provider', { provider: 'password' }],
     ['unverified token email', { tokenEmailVerified: false }],

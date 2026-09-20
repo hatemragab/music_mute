@@ -1,45 +1,52 @@
-import { describe, expect, it } from 'vitest';
-import { summarizeUsage, cancellationDebit } from './usage-accounting.js';
+import {
+  summarizeMonthlyProcessing,
+  utcMonthPeriod,
+} from './usage-accounting.js';
 
-describe('rolling audio allowance', () => {
-  const now = new Date('2026-09-13T12:00:00Z');
-  it('keeps unfinished reservations across midnight and excludes exact window boundary', () => {
-    const result = summarizeUsage(
-      [
-        { state: 'reserved', audioSeconds: 1800, expiresAt: null },
-        { state: 'used', audioSeconds: 900, expiresAt: now },
+describe('UTC calendar-month account usage', () => {
+  it('renews at the exact UTC month boundary without rolling replenishments', () => {
+    const september = utcMonthPeriod(new Date('2026-09-30T23:59:59.999Z'));
+    const october = utcMonthPeriod(new Date('2026-10-01T00:00:00.000Z'));
+    expect(september).toMatchObject({
+      key: '2026-09',
+      start: new Date('2026-09-01T00:00:00.000Z'),
+      end: new Date('2026-10-01T00:00:00.000Z'),
+    });
+    expect(october).toMatchObject({
+      key: '2026-10',
+      start: new Date('2026-10-01T00:00:00.000Z'),
+      end: new Date('2026-11-01T00:00:00.000Z'),
+    });
+  });
+
+  it('gives a new or empty period the complete 7,200-second allowance', () => {
+    expect(
+      summarizeMonthlyProcessing(
         {
-          state: 'used',
-          audioSeconds: 300,
-          expiresAt: new Date(now.getTime() + 1000),
+          processingUsedSeconds: 0,
+          processingReservedSeconds: 0,
+          processingReleasedSeconds: 0,
         },
-      ],
-      3600,
-      now,
-    );
-    expect(result.reservedAudioSeconds).toBe(1800);
-    expect(result.usedAudioSeconds).toBe(300);
-    expect(result.remainingAudioSeconds).toBe(1500);
-    expect(result.replenishments).toEqual([
-      { at: '2026-09-13T12:00:01.000Z', audioSeconds: 300 },
-    ]);
+        7_200,
+      ),
+    ).toEqual({
+      usedSeconds: 0,
+      reservedSeconds: 0,
+      releasedSeconds: 0,
+      remainingSeconds: 7_200,
+    });
   });
-  it('replenishes terminal pending holds at their conservative expiry', () => {
-    const entries = [{ state: 'pending', audioSeconds: 600, expiresAt: now }];
+
+  it('never returns negative remaining capacity after an admin reduction', () => {
     expect(
-      summarizeUsage(entries, 3600, new Date(now.getTime() - 1))
-        .reservedAudioSeconds,
-    ).toBe(600);
-    expect(summarizeUsage(entries, 3600, now).remainingAudioSeconds).toBe(3600);
-    expect(
-      summarizeUsage([{ ...entries[0]!, expiresAt: null }], 3600, now)
-        .reservedAudioSeconds,
-    ).toBe(600);
-  });
-  it('keeps unresolved cancellation pending instead of returning zero', () => {
-    expect(cancellationDebit(100, null, null)).toBeNull();
-    expect(cancellationDebit(100, 0, 2)).toBe(1);
-    expect(cancellationDebit(100, 21, 2)).toBe(11);
-    expect(cancellationDebit(100, 1000, 2)).toBe(100);
+      summarizeMonthlyProcessing(
+        {
+          processingUsedSeconds: 6_000,
+          processingReservedSeconds: 1_200,
+          processingReleasedSeconds: 300,
+        },
+        3_600,
+      ).remainingSeconds,
+    ).toBe(0);
   });
 });

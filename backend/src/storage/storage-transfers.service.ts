@@ -1,5 +1,6 @@
 import {
   GetObjectCommand,
+  DeleteObjectCommand,
   DeleteObjectsCommand,
   ListObjectVersionsCommand,
   HeadObjectCommand,
@@ -11,35 +12,22 @@ import { ConfigService } from '@nestjs/config';
 import { StorageClient } from '../infrastructure/storage.module.js';
 import { jobError } from '../jobs/job-errors.js';
 import type {
-  DownloadGrant,
   AdmissionSnapshot,
+  DownloadGrant,
   InputReservation,
   ObjectIdentity,
-  OutputReservation,
   UploadGrant,
 } from '../jobs/job.types.js';
 import { StoragePreflightService } from './storage-preflight.service.js';
 import { createImmutableUploadGrant } from './immutable-upload-grant.js';
 
-const REQUEST_TIMEOUT_MILLISECONDS = 5_000;
+const REQUEST_TIMEOUT_MILLISECONDS = 30_000;
+const MAX_SIGNED_URL_SECONDS = 600;
 const MISSING_OBJECT_NAMES = new Set([
   'NotFound',
   'NoSuchKey',
   'NoSuchVersion',
 ]);
-
-export interface TransferJob {
-  inputReservation: InputReservation;
-  admissionSnapshot?: AdmissionSnapshot | null;
-  inputObject: ObjectIdentity | null;
-  outputReservation: OutputReservation | null;
-  outputObject: ObjectIdentity | null;
-}
-
-type ObjectReservation = Pick<
-  InputReservation | OutputReservation,
-  'key' | 'bytes' | 'sha256' | 'contentType'
->;
 
 function confirmedMissing(error: unknown): boolean {
   if (!(error instanceof Error) || !MISSING_OBJECT_NAMES.has(error.name))
@@ -49,11 +37,21 @@ function confirmedMissing(error: unknown): boolean {
   return metadata?.httpStatusCode === 404;
 }
 
+export interface InputTransferJob {
+  inputReservation: InputReservation;
+  admissionSnapshot?: AdmissionSnapshot | null;
+  inputObject: ObjectIdentity | null;
+}
+
+type ObjectReservation = Pick<
+  InputReservation,
+  'key' | 'bytes' | 'sha256' | 'contentType'
+>;
+
 @Injectable()
 export class StorageTransfersService {
   private readonly bucket: string;
   private readonly grantSeconds: number;
-  private readonly outputMaxBytes: number;
 
   constructor(
     private readonly storage: StorageClient,
@@ -61,17 +59,41 @@ export class StorageTransfersService {
     private readonly preflight: StoragePreflightService,
   ) {
     this.bucket = config.getOrThrow<string>('S3_BUCKET');
-    this.grantSeconds = config.getOrThrow<number>('PROCESSING_URL_SECONDS');
-    this.outputMaxBytes = config.getOrThrow<number>(
-      'PROCESSING_OUTPUT_MAX_BYTES',
+    this.grantSeconds = Math.min(
+      MAX_SIGNED_URL_SECONDS,
+      config.getOrThrow<number>('PROCESSING_URL_SECONDS'),
     );
   }
 
-  async createInputGrant(job: TransferJob): Promise<UploadGrant> {
-    return this.createUploadGrant(
-      job.inputReservation,
-      job.admissionSnapshot?.reservationExpiresAt,
-    );
+  async createInputGrant(
+    job: InputTransferJob,
+    expiresAt = job.admissionSnapshot?.reservationExpiresAt,
+  ): Promise<UploadGrant> {
+    return this.createUploadGrant(job.inputReservation, expiresAt);
+  }
+
+  async verifyInput(job: InputTransferJob): Promise<ObjectIdentity> {
+    const identity = await this.inspect(job.inputReservation);
+    if (!identity) throw jobError('UPLOAD_NOT_READY');
+    return identity;
+  }
+
+  /** Deletes one immutable version only. Missing keys/versions are already reconciled. */
+  async deleteExactVersion(key: string, versionId: string): Promise<void> {
+    if (!key || !versionId || versionId === 'null')
+      throw new TypeError('Invalid exact object identity');
+    try {
+      await this.storage.send(
+        new DeleteObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          VersionId: versionId,
+        }),
+        { abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS) },
+      );
+    } catch (error) {
+      if (!confirmedMissing(error)) throw error;
+    }
   }
 
   /** A bounded sweep of versions for one exact reservation key, never a prefix delete. */
@@ -119,40 +141,71 @@ export class StorageTransfersService {
     };
   }
 
-  async verifyInput(job: TransferJob): Promise<ObjectIdentity> {
-    const identity = await this.inspect(job.inputReservation, false);
-    if (!identity) throw jobError('UPLOAD_NOT_READY');
-    return identity;
+  async createDownloadGrant(
+    object: ObjectIdentity,
+    fixedExpiry?: Date,
+  ): Promise<DownloadGrant> {
+    const expiresIn = fixedExpiry
+      ? Math.min(
+          this.grantSeconds,
+          Math.floor((fixedExpiry.getTime() - Date.now()) / 1_000),
+        )
+      : this.grantSeconds;
+    if (expiresIn < 1) throw jobError('DOWNLOAD_RESERVATION_EXPIRED');
+    return this.signDownload(object, expiresIn);
   }
 
-  async createOutputGrant(job: TransferJob): Promise<UploadGrant> {
-    const reservation = this.outputReservation(job);
-    if (
-      !Number.isInteger(reservation.bytes) ||
-      reservation.bytes < 1 ||
-      (job.admissionSnapshot?.policyVersion === 2
-        ? reservation.bytes >
-          (job.admissionSnapshot.qualification?.maxOutputBytes ?? 0)
-        : reservation.bytes >= this.outputMaxBytes) ||
-      reservation.contentType !== 'audio/mpeg'
-    ) {
-      throw new TypeError('Invalid output reservation');
+  async createWorkerOutputGrant(
+    reservation: ObjectReservation,
+    deadlineAt: Date,
+  ): Promise<UploadGrant> {
+    return this.createUploadGrant(
+      reservation,
+      deadlineAt,
+      'INTELLIGENT_TIERING',
+    );
+  }
+
+  async createWorkerInstallationUploadGrant(
+    reservation: ObjectReservation,
+    deadlineAt: Date,
+  ): Promise<UploadGrant> {
+    return this.createUploadGrant(reservation, deadlineAt);
+  }
+
+  async verifyUploadedVersion(
+    reservation: ObjectReservation,
+    versionId: string,
+  ): Promise<ObjectIdentity> {
+    if (!versionId || versionId === 'null') throw jobError('UPLOAD_NOT_READY');
+    let pinned: HeadObjectCommandOutput;
+    try {
+      pinned = await this.head(reservation.key, versionId);
+    } catch (error) {
+      if (confirmedMissing(error)) throw jobError('UPLOAD_NOT_READY');
+      throw error;
     }
-    return this.createUploadGrant(reservation);
+    if (
+      pinned.VersionId !== versionId ||
+      pinned.ContentLength !== reservation.bytes ||
+      pinned.ContentType !== reservation.contentType ||
+      pinned.ChecksumSHA256 !== reservation.sha256
+    )
+      throw jobError('UPLOAD_NOT_READY');
+    return {
+      key: reservation.key,
+      versionId,
+      bytes: reservation.bytes,
+      sha256: reservation.sha256,
+      contentType: reservation.contentType,
+    };
   }
 
-  async verifyOutput(job: TransferJob): Promise<ObjectIdentity> {
-    const identity = await this.inspect(this.outputReservation(job), false);
-    if (!identity) throw jobError('UPLOAD_NOT_READY');
-    return identity;
-  }
-
-  async findOutput(job: TransferJob): Promise<ObjectIdentity | null> {
-    return this.inspect(this.outputReservation(job), true);
-  }
-
-  async createDownloadGrant(object: ObjectIdentity): Promise<DownloadGrant> {
-    return this.signDownload(object, this.grantSeconds);
+  /** Recovers the immutable version after a successful PUT response was lost. */
+  async findUploadedVersion(
+    reservation: ObjectReservation,
+  ): Promise<ObjectIdentity | null> {
+    return this.inspect(reservation);
   }
 
   async isPinnedObjectAvailable(object: ObjectIdentity): Promise<boolean> {
@@ -217,15 +270,10 @@ export class StorageTransfersService {
     };
   }
 
-  private outputReservation(job: TransferJob): OutputReservation {
-    if (!job.outputReservation)
-      throw new TypeError('Output reservation is required');
-    return job.outputReservation;
-  }
-
   private async createUploadGrant(
     reservation: ObjectReservation,
     fixedExpiry?: Date,
+    storageClass?: 'INTELLIGENT_TIERING',
   ): Promise<UploadGrant> {
     await this.preflight.assertReady();
     const now = Date.now();
@@ -243,48 +291,39 @@ export class StorageTransfersService {
       bytes: reservation.bytes,
       contentType: reservation.contentType,
       checksumSha256: reservation.sha256,
+      storageClass,
       expiresIn,
-      expiresAt: new Date(now + expiresIn * 1_000),
+      expiresAt: new Date(now + expiresIn * 1000),
     });
   }
 
   private async inspect(
     reservation: ObjectReservation,
-    missingAsNull: boolean,
   ): Promise<ObjectIdentity | null> {
     let latest: HeadObjectCommandOutput;
     try {
       latest = await this.head(reservation.key);
     } catch (error) {
-      if (confirmedMissing(error)) {
-        if (missingAsNull) return null;
-        throw jobError('UPLOAD_NOT_READY');
-      }
+      if (confirmedMissing(error)) return null;
       throw error;
     }
-    if (!latest.VersionId || latest.VersionId === 'null') {
+    if (!latest.VersionId || latest.VersionId === 'null')
       throw jobError('UPLOAD_NOT_READY');
-    }
 
     let pinned: HeadObjectCommandOutput;
     try {
       pinned = await this.head(reservation.key, latest.VersionId);
     } catch (error) {
-      if (confirmedMissing(error)) {
-        if (missingAsNull) return null;
-        throw jobError('UPLOAD_NOT_READY');
-      }
+      if (confirmedMissing(error)) return null;
       throw error;
     }
-
     if (
       pinned.VersionId !== latest.VersionId ||
       pinned.ContentLength !== reservation.bytes ||
       pinned.ContentType !== reservation.contentType ||
       pinned.ChecksumSHA256 !== reservation.sha256
-    ) {
+    )
       throw jobError('UPLOAD_NOT_READY');
-    }
     return {
       key: reservation.key,
       versionId: latest.VersionId,

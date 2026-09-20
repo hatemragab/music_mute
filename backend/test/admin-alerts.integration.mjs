@@ -37,15 +37,15 @@ test('alert episodes deduplicate across API replicas and recur after resolution'
   );
   await Promise.all(services.map((service) => service.onModuleInit()));
   const condition = {
-    type: 'worker_offline',
-    severity: 'warning',
-    resourceId: 'worker-fixture',
-    message: 'Enabled worker is offline',
+    type: 'dependency_probe_failed',
+    severity: 'critical',
+    resourceId: 'storage',
+    message: 'storage dependency probe failed',
   };
   const firstAt = new Date('2026-09-11T00:00:01Z');
   await Promise.all(
     services.map((service) =>
-      service.reconcile([condition], ['worker_offline'], firstAt),
+      service.reconcile([condition], ['dependency_probe_failed'], firstAt),
     ),
   );
   let episodes = await models[0].find({}).sort({ firstSeenAt: 1 }).lean();
@@ -54,12 +54,12 @@ test('alert episodes deduplicate across API replicas and recur after resolution'
 
   await services[0].reconcile(
     [],
-    ['worker_offline'],
+    ['dependency_probe_failed'],
     new Date('2026-09-11T00:00:31Z'),
   );
   await services[1].reconcile(
     [condition],
-    ['worker_offline'],
+    ['dependency_probe_failed'],
     new Date('2026-09-11T00:01:01Z'),
   );
   episodes = await models[0].find({}).sort({ firstSeenAt: 1 }).lean();
@@ -70,12 +70,12 @@ test('alert episodes deduplicate across API replicas and recur after resolution'
 
   await services[0].reconcile(
     [],
-    ['worker_offline'],
+    ['dependency_probe_failed'],
     new Date('2026-09-11T00:02:01Z'),
   );
   await services[1].reconcile(
     [condition],
-    ['worker_offline'],
+    ['dependency_probe_failed'],
     new Date('2026-09-11T00:01:31Z'),
   );
   episodes = await models[0].find({}).sort({ firstSeenAt: 1 }).lean();

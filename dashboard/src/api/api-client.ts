@@ -114,6 +114,10 @@ export class ApiClient {
     return this.request<T>("PUT", path, { ...options, body });
   }
 
+  delete<T>(path: string, body?: unknown, options?: RequestOptions) {
+    return this.request<T>("DELETE", path, { ...options, body });
+  }
+
   async download(
     path: string,
     signal?: AbortSignal,

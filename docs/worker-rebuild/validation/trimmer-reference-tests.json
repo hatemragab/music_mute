@@ -1,0 +1,73 @@
+{
+  "scope": "Only the unmodified trim_vocal_gaps function extracted from the supplied source; synthetic audio on assistant Linux sandbox. No Kim inference, GPU, project code, S3, Mac or Windows tests executed.",
+  "source_sha256": "b376a185d24811560fbc6cc681542517e61130a6d737077360ace5f502a32f1d",
+  "numpy": "2.3.5",
+  "soundfile": "0.13.1",
+  "sample_rate": 44100,
+  "results": [
+    {
+      "test": "internal_gap",
+      "source_samples": 132300,
+      "output_samples": 105840,
+      "expected_samples": 105840,
+      "passed": true,
+      "stdout": "Trimmed vocals: 3.00s -> 2.40s; removed 0.60s"
+    },
+    {
+      "test": "leading_and_trailing",
+      "source_samples": 132300,
+      "output_samples": 61740,
+      "expected_samples": 61740,
+      "passed": true,
+      "stdout": "Trimmed vocals: 3.00s -> 1.40s; removed 1.60s"
+    },
+    {
+      "test": "all_silent_preserved",
+      "source_samples": 44100,
+      "output_samples": 44100,
+      "expected_samples": 44100,
+      "passed": true,
+      "stdout": "All vocals are below the threshold; preserving audio. Try a lower --silence_db.\nTrimmed vocals: 1.00s -> 1.00s; removed 0.00s"
+    },
+    {
+      "test": "below_minimum_gap",
+      "source_samples": 123039,
+      "output_samples": 123039,
+      "expected_samples": 123039,
+      "passed": true,
+      "stdout": "Trimmed vocals: 2.79s -> 2.79s; removed 0.00s"
+    },
+    {
+      "test": "exact_minimum_gap",
+      "source_samples": 123480,
+      "output_samples": 105840,
+      "expected_samples": 105840,
+      "passed": true,
+      "stdout": "Trimmed vocals: 2.80s -> 2.40s; removed 0.40s"
+    },
+    {
+      "test": "one_loud_channel",
+      "source_samples": 88200,
+      "output_samples": 88200,
+      "expected_samples": 88200,
+      "passed": true,
+      "stdout": "Trimmed vocals: 2.00s -> 2.00s; removed 0.00s"
+    },
+    {
+      "test": "partial_final_window",
+      "source_samples": 79600,
+      "output_samples": 52920,
+      "expected_samples": 52920,
+      "passed": true,
+      "stdout": "Trimmed vocals: 1.80s -> 1.20s; removed 0.60s"
+    },
+    {
+      "test": "sub_frame_loud_clip",
+      "source_samples": 176,
+      "output_samples": 176,
+      "expected_samples": 176,
+      "passed": true,
+      "stdout": "Trimmed vocals: 0.00s -> 0.00s; removed 0.00s"
+    }
+  ]
+}

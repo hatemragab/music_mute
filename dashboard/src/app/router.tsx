@@ -24,6 +24,11 @@ const AccountRecoveryPage = lazy(() =>
     }),
   ),
 );
+const AbuseEventsPage = lazy(() =>
+  import("@/features/abuse/abuse-events-page").then((module) => ({
+    default: module.AbuseEventsPage,
+  })),
+);
 const SystemHealthPage = lazy(() =>
   import("@/features/health/system-health-page").then((module) => ({
     default: module.SystemHealthPage,
@@ -74,14 +79,14 @@ const UsersPage = lazy(() =>
     default: module.UsersPage,
   })),
 );
-const WorkerDetailPage = lazy(() =>
-  import("@/features/workers/worker-detail-page").then((module) => ({
-    default: module.WorkerDetailPage,
+const WorkerFleetPage = lazy(() =>
+  import("@/features/workers/worker-fleet-page").then((module) => ({
+    default: module.WorkerFleetPage,
   })),
 );
-const WorkersPage = lazy(() =>
-  import("@/features/workers/workers-page").then((module) => ({
-    default: module.WorkersPage,
+const WorkerMachinePage = lazy(() =>
+  import("@/features/workers/worker-machine-page").then((module) => ({
+    default: module.WorkerMachinePage,
   })),
 );
 
@@ -103,6 +108,17 @@ function HomeRedirect() {
   return <Navigate to={first?.to ?? "/not-authorized"} replace />;
 }
 
+function NotFoundPage() {
+  return (
+    <div className="rounded-xl border bg-card p-8">
+      <h1 className="text-2xl font-semibold">Page not found</h1>
+      <p className="mt-2 text-muted-foreground">
+        The requested dashboard area does not exist.
+      </p>
+    </div>
+  );
+}
+
 export function AppRouter() {
   return (
     <Routes>
@@ -113,22 +129,6 @@ export function AppRouter() {
           element={
             <Guard permission="overview.read">
               <OverviewPage />
-            </Guard>
-          }
-        />
-        <Route
-          path="workers"
-          element={
-            <Guard permission="workers.read">
-              <WorkersPage />
-            </Guard>
-          }
-        />
-        <Route
-          path="workers/:id"
-          element={
-            <Guard permission="workers.read">
-              <WorkerDetailPage />
             </Guard>
           }
         />
@@ -173,6 +173,14 @@ export function AppRouter() {
           }
         />
         <Route
+          path="abuse-events"
+          element={
+            <Guard permission="abuse.read">
+              <AbuseEventsPage />
+            </Guard>
+          }
+        />
+        <Route
           path="releases"
           element={
             <Guard permission="releases.read">
@@ -201,6 +209,22 @@ export function AppRouter() {
           element={
             <Guard permission="settings.read">
               <ProcessingSettingsPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="workers"
+          element={
+            <Guard permission="workers.read">
+              <WorkerFleetPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="workers/:id"
+          element={
+            <Guard permission="workers.read">
+              <WorkerMachinePage />
             </Guard>
           }
         />
@@ -242,7 +266,7 @@ export function AppRouter() {
             </div>
           }
         />
-        <Route path="*" element={<HomeRedirect />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
   );

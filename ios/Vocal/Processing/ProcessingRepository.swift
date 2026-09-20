@@ -402,6 +402,7 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
             if $0.jobId == nil { $0.jobId = reservation.id }
             guard $0.activeRunToken == token else { return }
             $0.jobStatus = reservation.status
+            if reservation.upload != nil { $0.uploadGrantRequestId = $0.requestId }
             if !$0.cancellationRequested, $0.phase != .stopped {
               $0.phase = reservation.status == "awaiting_upload" ? .uploadPending : .submitted
             }
@@ -444,15 +445,29 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
               if $0.phase != .stopped {
                 $0.phase = job.status == "awaiting_upload" ? .uploadPending : .submitted
               }
+              if job.status == "awaiting_upload" { $0.uploadGrantRequestId = nil }
             }
           }
           try checkRun(operationId, token: token, fence: fence)
           await publish(fence)
         case .uploadPending:
           guard let jobId = operation.jobId else { throw ProcessingStoreFailure.corruptStore }
-          guard operation.uploadAttempts < 3 else { throw ProcessingTransferFailure.retryLimit }
+          guard operation.uploadAttempts < 5 else { throw ProcessingTransferFailure.retryLimit }
           if grant == nil || grant!.expiresAt <= Date() {
-            grant = try await api.renewUpload(id: jobId)
+            let requestId = operation.uploadGrantRequestId ?? UUID()
+            if operation.uploadGrantRequestId == nil {
+              _ = try await mutateRun(operationId, token: token, fence: fence) {
+                $0.uploadGrantRequestId = requestId
+              }
+            }
+            do {
+              grant = try await api.renewUpload(id: jobId, requestId: requestId)
+            } catch JobsFailure.conflict(let code) where code == "UPLOAD_RESERVATION_EXPIRED" {
+              _ = try await mutateRun(operationId, token: token, fence: fence) {
+                $0.uploadGrantRequestId = nil
+              }
+              throw JobsFailure.conflict(code: code)
+            }
           }
           try checkRun(operationId, token: token, fence: fence)
           guard let currentGrant = grant, currentGrant.expiresAt > Date() else {

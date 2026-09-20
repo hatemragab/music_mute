@@ -8,7 +8,6 @@ import type { AdminActor } from '../admin/admin.types.js';
 import { presentAdminJob } from '../admin-jobs/admin-jobs.presenter.js';
 import { AdminOverviewService } from '../admin-observability/admin-overview.service.js';
 import { Job } from '../jobs/job.schema.js';
-import type { JobAttempt } from '../jobs/job-attempt.schema.js';
 import { encodeCsv, type CsvCell } from './csv-encoding.js';
 import {
   exportQuery,
@@ -21,7 +20,6 @@ export const JOB_EXPORT_HEADERS = [
   'id',
   'userId',
   'status',
-  'workerId',
   'createdAt',
   'queuedAt',
   'startedAt',
@@ -41,7 +39,6 @@ export const JOB_EXPORT_PROJECTION = {
   _id: 1,
   userId: 1,
   status: 1,
-  workerId: 1,
   createdAt: 1,
   queuedAt: 1,
   validatingAt: 1,
@@ -50,7 +47,6 @@ export const JOB_EXPORT_PROJECTION = {
   processingIntervalStartedAt: 1,
   processingObservedAt: 1,
   processingElapsedApproximate: 1,
-  leaseExpiresAt: 1,
   'lastError.code': 1,
 } as const;
 
@@ -99,41 +95,11 @@ export class AdminExportsService {
           // A single bounded envelope prevents a getMore cursor under the
           // transaction deadline. Each row contains only small, fixed fields.
           const [snapshot] = await this.jobs
-            .aggregate<{
-              items: (Job & {
-                firstAttempt?: Pick<
-                  JobAttempt,
-                  'startedAt' | 'processingStartedAt'
-                >;
-              })[];
-            }>([
+            .aggregate<{ items: Job[] }>([
               { $match: query.filter! },
               { $sort: { createdAt: -1, _id: -1 } },
               { $limit: MAX_EXPORT_ROWS + 1 },
               { $project: JOB_EXPORT_PROJECTION },
-              {
-                $lookup: {
-                  from: 'audio_job_attempts',
-                  localField: '_id',
-                  foreignField: 'jobId',
-                  pipeline: [
-                    { $sort: { startedAt: 1, _id: 1 } },
-                    { $limit: 1 },
-                    {
-                      $project: {
-                        _id: 0,
-                        startedAt: 1,
-                        processingStartedAt: 1,
-                      },
-                    },
-                  ],
-                  as: 'firstAttempts',
-                },
-              },
-              {
-                $set: { firstAttempt: { $arrayElemAt: ['$firstAttempts', 0] } },
-              },
-              { $unset: 'firstAttempts' },
               { $facet: { items: [{ $match: {} }] } },
             ])
             .session(session)
@@ -142,19 +108,11 @@ export class AdminExportsService {
           requireExportCapacity(jobs.length);
           checkConnected(signal);
           rows = jobs.map((job) => {
-            const value = presentAdminJob(
-              job,
-              actor,
-              null,
-              asOf,
-              false,
-              job.firstAttempt,
-            );
+            const value = presentAdminJob(job, actor, null, asOf, false);
             return [
               value.id,
               value.userId,
               value.status,
-              value.workerId,
               value.createdAt,
               value.queuedAt,
               value.startedAt,

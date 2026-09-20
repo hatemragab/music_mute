@@ -10,6 +10,7 @@ import { StorageTransfersService } from './storage-transfers.service.js';
 
 export interface ScheduleStorageCleanup {
   key: string;
+  versionId?: string | null;
   ownerUserId: Types.ObjectId | null;
   reason: StorageCleanupReason;
   nextAt: Date;
@@ -35,11 +36,13 @@ export class StorageCleanupService implements OnModuleInit {
     session?: ClientSession,
   ): Promise<void> {
     this.validate(task);
+    const versionId = task.versionId ?? null;
     await this.tasks.updateOne(
       { key: task.key },
       {
         $setOnInsert: {
           key: task.key,
+          versionId,
           ownerUserId: task.ownerUserId,
           reason: task.reason,
           leaseUntil: null,
@@ -56,6 +59,13 @@ export class StorageCleanupService implements OnModuleInit {
 
   async hasPendingForOwner(ownerUserId: Types.ObjectId): Promise<boolean> {
     return Boolean(await this.tasks.exists({ ownerUserId, completedAt: null }));
+  }
+
+  async cancelScheduled(key: string, session?: ClientSession): Promise<void> {
+    await this.tasks.deleteOne(
+      { key, versionId: null, leaseToken: null },
+      { session },
+    );
   }
 
   /** Claims and advances one bounded task. Safe across API replicas. */
@@ -81,6 +91,27 @@ export class StorageCleanupService implements OnModuleInit {
       .lean();
     if (!task) return false;
     try {
+      if (task.versionId) {
+        await this.transfers.deleteExactVersion(task.key, task.versionId);
+        const update = await this.tasks.updateOne(
+          {
+            _id: task._id,
+            leaseToken: token,
+            settleUntil: task.settleUntil,
+          },
+          {
+            $set: {
+              leaseToken: null,
+              leaseUntil: null,
+              attempts: 0,
+              completedAt: now,
+              nextAt: null,
+            },
+          },
+        );
+        if (update.matchedCount !== 1) await this.releaseLease(task._id, token);
+        return true;
+      }
       const sweep = await this.transfers.sweepVersionsForKey(task.key);
       const settled = now.getTime() >= task.settleUntil.getTime();
       const completed = sweep.complete && settled && sweep.deleted === 0;
@@ -144,6 +175,15 @@ export class StorageCleanupService implements OnModuleInit {
       task.key.includes('..') ||
       task.key.includes('//') ||
       !/^[A-Za-z0-9][A-Za-z0-9/_.-]*$/.test(task.key) ||
+      (task.versionId !== undefined &&
+        task.versionId !== null &&
+        (task.versionId.length < 1 ||
+          task.versionId.length > 1024 ||
+          Array.from(task.versionId).some((character) => {
+            const code = character.charCodeAt(0);
+            return code < 32 || code === 127;
+          }) ||
+          task.versionId === 'null')) ||
       !Number.isFinite(task.nextAt.getTime()) ||
       !Number.isFinite(task.settleUntil.getTime()) ||
       task.settleUntil < task.nextAt

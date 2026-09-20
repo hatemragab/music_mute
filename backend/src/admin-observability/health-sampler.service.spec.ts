@@ -1,17 +1,26 @@
-import { ConfigService } from '@nestjs/config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HealthSamplerService } from './health-sampler.service.js';
 
 function setup() {
   const database = {
     readyState: 1,
-    db: { command: vi.fn().mockResolvedValue({ ok: 1 }) },
+    db: {
+      command: vi.fn(async (command: Record<string, unknown>) =>
+        command.dbStats
+          ? { ok: 1, dataSize: 10_000_000, indexSize: 2_000_000 }
+          : { ok: 1 },
+      ),
+    },
   };
-  const redis = { ping: vi.fn().mockResolvedValue('PONG') };
+  const redis = {
+    ping: vi.fn().mockResolvedValue('PONG'),
+    info: vi
+      .fn()
+      .mockResolvedValue(
+        'used_memory:1000000\r\nmaxmemory:268435456\r\nmaxmemory_policy:noeviction\r\n',
+      ),
+  };
   const storage = { assertReady: vi.fn().mockResolvedValue(undefined) };
-  const registrations = {
-    aggregate: vi.fn(() => ({ option: vi.fn().mockResolvedValue([]) })),
-  };
   const releases = {
     find: vi.fn(() => ({
       select: () => ({
@@ -27,12 +36,10 @@ function setup() {
     database as never,
     redis as never,
     storage as never,
-    registrations as never,
     releases as never,
     alerts as never,
-    new ConfigService({ PROCESSING_LEASE_SECONDS: 60 }),
   );
-  return { service, database, redis, storage, registrations, releases, alerts };
+  return { service, database, redis, storage, releases, alerts };
 }
 
 describe('HealthSamplerService', () => {
@@ -50,66 +57,57 @@ describe('HealthSamplerService', () => {
       f.service.sample(),
     ]);
     expect(first).toEqual(second);
-    expect(f.database.db.command).toHaveBeenCalledOnce();
+    expect(f.database.db.command).toHaveBeenCalledTimes(2);
     expect(f.redis.ping).toHaveBeenCalledOnce();
+    expect(f.redis.info).toHaveBeenCalledWith('memory');
     expect(f.storage.assertReady).toHaveBeenCalledOnce();
+    expect(first.components.map((item) => item.name)).toEqual([
+      'api',
+      'mongodb',
+      'redis',
+      'storage',
+    ]);
   });
 
-  it('alerts for enabled offline and recovery slots but not draining or revoked idle workers', async () => {
+  it('raises sanitized degraded signals for bounded datastore pressure', async () => {
     const f = setup();
-    const expired = new Date(Date.now() - 120_000);
-    f.registrations.aggregate.mockReturnValue({
-      option: vi.fn().mockResolvedValue([
-        {
-          _id: 'enabled-offline',
-          state: 'enabled',
-          control: { lastSeenAt: expired, activeJobId: null },
-        },
-        {
-          _id: 'draining-offline',
-          state: 'draining',
-          control: { lastSeenAt: expired, activeJobId: null },
-        },
-        {
-          _id: 'stuck-worker',
-          state: 'enabled',
-          control: {
-            lastSeenAt: expired,
-            activeJobId: 'job',
-            leaseExpiresAt: expired,
-          },
-        },
-        {
-          _id: 'revoked-idle',
-          state: 'revoked',
-          control: { lastSeenAt: expired, activeJobId: null },
-        },
-        {
-          _id: 'revoked-active',
-          state: 'revoked',
-          control: {
-            lastSeenAt: new Date(),
-            activeJobId: 'job',
-            leaseExpiresAt: new Date(Date.now() + 120_000),
-          },
-        },
-      ]),
-    });
+    f.database.db.command.mockImplementation(
+      async (command: Record<string, unknown>) =>
+        command.dbStats
+          ? { ok: 1, dataSize: 320_000_000, indexSize: 40_000_000 }
+          : { ok: 1 },
+    );
+    f.redis.info.mockResolvedValue(
+      'used_memory:230000000\r\nmaxmemory:268435456\r\nmaxmemory_policy:noeviction\r\n',
+    );
     const result = await f.service.sample();
     expect(
-      result.components.find((item) => item.name === 'workers')?.status,
-    ).toBe('unavailable');
-    const conditions = f.alerts.reconcile.mock.calls[0]![0];
+      result.components.find((item) => item.name === 'mongodb'),
+    ).toMatchObject({
+      status: 'degraded',
+      code: 'MONGODB_STORAGE_PRESSURE',
+    });
     expect(
-      conditions.map(
-        (item: { type: string; resourceId: string }) =>
-          `${item.type}:${item.resourceId}`,
-      ),
-    ).toEqual([
-      'worker_offline:enabled-offline',
-      'worker_recovery_required:stuck-worker',
-      'worker_recovery_required:revoked-active',
-    ]);
+      result.components.find((item) => item.name === 'redis'),
+    ).toMatchObject({
+      status: 'degraded',
+      code: 'REDIS_MEMORY_PRESSURE',
+    });
+    expect(f.alerts.reconcile).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'datastore_capacity_warning',
+          resourceId: 'mongodb',
+        }),
+        expect.objectContaining({
+          type: 'datastore_capacity_warning',
+          resourceId: 'redis',
+        }),
+      ]),
+      expect.arrayContaining(['datastore_capacity_warning']),
+      expect.any(Date),
+    );
+    expect(JSON.stringify(result)).not.toContain('230000000');
   });
 
   it('returns safe dependency failure codes and observes recovery after the cache expires', async () => {

@@ -12,9 +12,15 @@ export type AuthOperation =
   | 'profile'
   | 'device'
   | 'logout'
+  | 'account-deletion'
+  | 'account-recovery'
   | 'processing-read'
   | 'processing-create'
-  | 'processing-grant'
+  | 'processing-upload-grant'
+  | 'processing-upload-confirm'
+  | 'processing-download'
+  | 'processing-retry'
+  | 'processing-cancel'
   | 'processing-mutation';
 export const Public = () => SetMetadata(PUBLIC_ROUTE, true);
 export const AllowUnprovisioned = () => SetMetadata(ALLOW_UNPROVISIONED, true);

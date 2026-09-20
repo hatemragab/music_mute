@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
+import { AUTH_RATE_LIMIT_DEFAULTS } from '../config/environment.js';
 import { AuthMailService } from './auth-mail.service.js';
 import { FirebaseMailQuotaError } from './firebase-mail.service.js';
 import type { FirebaseMailService } from './firebase-mail.service.js';
@@ -49,7 +50,7 @@ describe('voluntary email and recovery orchestration', () => {
         mail as unknown as FirebaseMailService,
         budgets as unknown as RateBudgetService,
         keys as unknown as RateLimitKeys,
-        new ConfigService(),
+        new ConfigService(AUTH_RATE_LIMIT_DEFAULTS),
       ),
     };
   }

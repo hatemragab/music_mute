@@ -2,27 +2,29 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
-import { trusted, type Model } from 'mongoose';
+import { trusted, type ClientSession, type Model } from 'mongoose';
 import { ProcessingTransactions } from '../processing/processing-transactions.js';
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { StorageTransfersService } from '../storage/storage-transfers.service.js';
 import { NotificationOutbox } from '../notifications/notification-outbox.schema.js';
 import { Job } from './job.schema.js';
-import { JobAttempt } from './job-attempt.schema.js';
 import { objectId } from './job-request.js';
 import { jobError } from './job-errors.js';
+import type { WorkerExecutionOwnership } from './job.types.js';
+import { WorkerAttempt } from '../worker-fleet/jobs/worker-attempt.schema.js';
+import { WorkerSlot } from '../worker-fleet/machines/worker-slot.schema.js';
 
 const CLEANUP_LEASE_MS = 60_000;
-const ATTEMPTS_PER_SWEEP = 10;
 
 @Injectable()
 export class JobDeletionService {
   constructor(
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
-    @InjectModel(JobAttempt.name) private readonly attempts: Model<JobAttempt>,
     @InjectModel(NotificationOutbox.name)
     private readonly outbox: Model<NotificationOutbox>,
     private readonly transactions: ProcessingTransactions,
     private readonly storage: StorageTransfersService,
+    private readonly usage: ProcessingUsageService,
     private readonly config: ConfigService,
   ) {}
 
@@ -38,9 +40,14 @@ export class JobDeletionService {
       if (!['ready', 'failed', 'cancelled'].includes(job.status))
         throw jobError('JOB_ACTIVE');
       const now = new Date();
+      const execution = job.currentExecution;
       // Allow existing upload grants to expire before sweeping unconfirmed versions.
       const graceMs =
-        (this.config.getOrThrow<number>('PROCESSING_URL_SECONDS') + 300) *
+        (Math.min(
+          600,
+          this.config.getOrThrow<number>('PROCESSING_URL_SECONDS'),
+        ) +
+          300) *
         1_000;
       const changed = await this.jobs.updateOne(
         { _id: id, userId: owner, revision: job.revision, deletedAt: null },
@@ -54,13 +61,22 @@ export class JobDeletionService {
             cleanupLeaseUntil: null,
             cleanupToken: null,
             cleanupAttempts: 0,
-            cleanupCursor: null,
+            currentExecution: null,
+            retryEligibility: job.retryEligibility
+              ? {
+                  ...job.retryEligibility,
+                  eligible: false,
+                  attemptsRemaining: 0,
+                  nextAttemptAt: null,
+                }
+              : null,
           },
           $inc: { revision: 1 },
         },
         { session, runValidators: true },
       );
       if (changed.modifiedCount !== 1) throw jobError('JOB_STATE_CONFLICT');
+      await this.fenceAttempt(execution, now, session);
       await this.outbox.updateMany(
         { jobId: id, userId: owner },
         {
@@ -75,6 +91,45 @@ export class JobDeletionService {
         { session },
       );
     });
+  }
+
+  private async fenceAttempt(
+    execution: WorkerExecutionOwnership | null,
+    now: Date,
+    session: ClientSession,
+  ): Promise<void> {
+    if (!execution) return;
+    await this.jobs.db.model<WorkerAttempt>(WorkerAttempt.name).updateOne(
+      {
+        _id: execution.attemptId,
+        state: trusted({ $in: ['claimed', 'running', 'uploading'] }),
+      },
+      {
+        $set: {
+          state: 'cancelled',
+          terminalCode: 'CANCELLED',
+          terminalSummary: 'Job was deleted',
+          finishedAt: now,
+          leaseExpiresAt: now,
+        },
+        $inc: { revision: 1 },
+      },
+      { session, runValidators: true },
+    );
+    await this.jobs.db.model<WorkerSlot>(WorkerSlot.name).updateOne(
+      {
+        _id: execution.workerId,
+        machineId: execution.machineId,
+        sessionId: execution.sessionId,
+        incarnation: execution.incarnation,
+        currentAttemptId: execution.attemptId,
+      },
+      {
+        $set: { state: 'idle', currentAttemptId: null, lastSeenAt: now },
+        $inc: { revision: 1 },
+      },
+      { session, runValidators: true },
+    );
   }
 
   /** Claims one bounded cleanup batch. Safe to run in several API replicas. */
@@ -102,25 +157,11 @@ export class JobDeletionService {
       .lean();
     if (!job) return false;
     try {
-      const attempts = await this.attempts
-        .find({
-          jobId: job._id,
-          ...(job.cleanupCursor
-            ? { _id: trusted({ $gt: job.cleanupCursor }) }
-            : {}),
-        })
-        .sort({ _id: 1 })
-        .limit(ATTEMPTS_PER_SWEEP + 1)
-        .select('_id outputReservation.key')
-        .lean();
-      const page = attempts.slice(0, ATTEMPTS_PER_SWEEP);
       const keys = new Set(
         [
           job.inputReservation.key,
           job.inputObject?.key,
-          job.outputReservation?.key,
           job.outputObject?.key,
-          ...page.map((attempt) => attempt.outputReservation?.key),
         ].filter((key): key is string => Boolean(key)),
       );
       let complete = true;
@@ -145,7 +186,6 @@ export class JobDeletionService {
           $or: [
             { 'inputReservation.key': key },
             { 'inputObject.key': key },
-            { 'outputReservation.key': key },
             { 'outputObject.key': key },
           ],
         });
@@ -155,22 +195,22 @@ export class JobDeletionService {
           break;
         }
       }
-      const finished = complete && attempts.length <= ATTEMPTS_PER_SWEEP;
-      await this.jobs.updateOne(
-        { _id: job._id, cleanupToken: token },
-        {
-          $set: {
-            cleanupToken: null,
-            cleanupLeaseUntil: null,
-            cleanupAttempts: 0,
-            cleanupNextAt: finished ? null : new Date(now.getTime() + 1_000),
-            cleanupCompletedAt: finished ? new Date() : null,
-            ...(complete && page.length
-              ? { cleanupCursor: page.at(-1)!._id }
-              : {}),
+      if (complete) {
+        await this.completeCleanup(job._id, token, now);
+      } else {
+        await this.jobs.updateOne(
+          { _id: job._id, cleanupToken: token },
+          {
+            $set: {
+              cleanupToken: null,
+              cleanupLeaseUntil: null,
+              cleanupAttempts: 0,
+              cleanupNextAt: new Date(now.getTime() + 1_000),
+              cleanupCompletedAt: null,
+            },
           },
-        },
-      );
+        );
+      }
     } catch {
       const failures = Math.min((job.cleanupAttempts ?? 0) + 1, 20);
       await this.jobs.updateOne(
@@ -188,5 +228,42 @@ export class JobDeletionService {
       );
     }
     return true;
+  }
+
+  private async completeCleanup(
+    jobId: Job['_id'],
+    token: string,
+    now: Date,
+  ): Promise<void> {
+    await this.transactions.run(async (session) => {
+      const current = await this.jobs
+        .findOne({ _id: jobId, cleanupToken: token })
+        .session(session)
+        .lean();
+      if (!current) throw new Error('Cleanup lease lost');
+      await this.usage.releaseRetainedOutput(current, session);
+      const releasesRetainedOutput = Boolean(
+        current.outputObject &&
+        current.retainedOutputAccountedAt &&
+        !current.retainedOutputReleasedAt,
+      );
+      const updated = await this.jobs.updateOne(
+        { _id: jobId, cleanupToken: token },
+        {
+          $set: {
+            cleanupToken: null,
+            cleanupLeaseUntil: null,
+            cleanupAttempts: 0,
+            cleanupNextAt: null,
+            cleanupCompletedAt: now,
+            ...(releasesRetainedOutput
+              ? { retainedOutputReleasedAt: now }
+              : {}),
+          },
+        },
+        { session, runValidators: true },
+      );
+      if (updated.modifiedCount !== 1) throw new Error('Cleanup lease lost');
+    });
   }
 }

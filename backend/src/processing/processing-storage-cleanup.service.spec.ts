@@ -1,7 +1,5 @@
-import { ConfigService } from '@nestjs/config';
 import { Types, type Model } from 'mongoose';
 import { describe, expect, it, vi } from 'vitest';
-import type { JobAttempt } from '../jobs/job-attempt.schema.js';
 import type { Job } from '../jobs/job.schema.js';
 import type { ProcessingTransactions } from './processing-transactions.js';
 import type { StorageCleanupService } from '../storage/storage-cleanup.service.js';
@@ -11,48 +9,118 @@ const query = <T>(value: T) => ({
   sort() {
     return this;
   },
-  session() {
-    return this;
-  },
   lean: async () => value,
-});
-
-const referenceQuery = (value: { _id: Types.ObjectId } | null = null) => ({
-  session: vi.fn(async (): Promise<{ _id: Types.ObjectId } | null> => value),
 });
 
 function fixture() {
   const jobs = {
-    db: { model: () => ({ findById: () => ({ session: async () => null }) }) },
-    findOne: vi.fn(),
-    updateOne: vi.fn(async () => ({ matchedCount: 1, modifiedCount: 1 })),
-    exists: vi.fn(() => referenceQuery()),
-  };
-  const attempts = {
+    db: {
+      model: () => ({
+        findById: () => ({ session: async () => null }),
+      }),
+    },
     findOne: vi.fn(),
     updateOne: vi.fn(async () => ({ matchedCount: 1, modifiedCount: 1 })),
   };
   const cleanup = { schedule: vi.fn(async () => undefined) };
+  const usage = { settleJob: vi.fn(async () => undefined) };
   const session = { fixture: true };
   const transactions = {
     run: <T>(action: (session: unknown) => Promise<T>) => action(session),
   };
   const service = new ProcessingStorageCleanupService(
     jobs as unknown as Model<Job>,
-    attempts as unknown as Model<JobAttempt>,
     transactions as unknown as ProcessingTransactions,
     cleanup as unknown as StorageCleanupService,
-    new ConfigService({ PROCESSING_URL_SECONDS: 900 }),
+    usage as never,
   );
-  return { service, jobs, attempts, cleanup, session };
+  return { service, jobs, cleanup, usage, session };
 }
 
 describe('ProcessingStorageCleanupService', () => {
   const now = new Date('2026-09-12T00:30:00.000Z');
   const owner = new Types.ObjectId('507f1f77bcf86cd799439011');
 
+  it('schedules a cancelled unconfirmed upload after its last grant can settle', async () => {
+    const { service, jobs, cleanup, session } = fixture();
+    const job = {
+      _id: new Types.ObjectId('507f1f77bcf86cd799439013'),
+      userId: owner,
+      revision: 4,
+      status: 'cancelled',
+      finishedAt: now,
+      inputObject: null,
+      reservationCleanupScheduledAt: null,
+      inputReservation: {
+        key: `users/${owner.toHexString()}/jobs/cancelled/input/file.mp3`,
+      },
+      admissionSnapshot: {
+        reservationExpiresAt: new Date('2026-09-12T00:35:00.000Z'),
+      },
+    };
+    jobs.findOne.mockReturnValue(query(job));
+
+    await expect(service.scheduleDue(now)).resolves.toBe(true);
+
+    expect(cleanup.schedule).toHaveBeenCalledWith(
+      {
+        key: job.inputReservation.key,
+        versionId: null,
+        ownerUserId: owner,
+        reason: 'AUDIO_INPUT_TERMINAL',
+        nextAt: new Date('2026-09-12T00:40:00.000Z'),
+        settleUntil: new Date('2026-09-12T01:40:00.000Z'),
+      },
+      session,
+    );
+    expect(jobs.updateOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: job._id,
+        status: 'cancelled',
+        reservationCleanupScheduledAt: null,
+      }),
+      { $set: { reservationCleanupScheduledAt: now } },
+      expect.objectContaining({ session }),
+    );
+  });
+
+  it('schedules a successful terminal input by its exact immutable version', async () => {
+    const { service, jobs, cleanup, session } = fixture();
+    const job = {
+      _id: new Types.ObjectId('507f1f77bcf86cd799439014'),
+      userId: owner,
+      revision: 5,
+      status: 'ready',
+      finishedAt: now,
+      reservationCleanupScheduledAt: null,
+      inputReservation: {
+        key: `users/${owner.toHexString()}/jobs/cancelled/input/file.mp3`,
+      },
+      inputObject: {
+        key: `users/${owner.toHexString()}/jobs/cancelled/input/file.mp3`,
+        versionId: 'immutable-input-version',
+      },
+      admissionSnapshot: null,
+    };
+    jobs.findOne.mockReturnValue(query(job));
+
+    await expect(service.scheduleDue(now)).resolves.toBe(true);
+
+    expect(cleanup.schedule).toHaveBeenCalledWith(
+      {
+        key: job.inputObject.key,
+        versionId: job.inputObject.versionId,
+        ownerUserId: owner,
+        reason: 'AUDIO_INPUT_TERMINAL',
+        nextAt: now,
+        settleUntil: now,
+      },
+      session,
+    );
+  });
+
   it('fails an expired unconfirmed input and schedules its exact key atomically', async () => {
-    const { service, jobs, attempts, cleanup, session } = fixture();
+    const { service, jobs, cleanup, session } = fixture();
     const job = {
       _id: new Types.ObjectId('507f1f77bcf86cd799439012'),
       userId: owner,
@@ -65,11 +133,10 @@ describe('ProcessingStorageCleanupService', () => {
         reservationExpiresAt: new Date('2026-09-12T00:15:00.000Z'),
       },
     };
-    jobs.findOne.mockReturnValue(query(job));
-    attempts.findOne.mockReturnValue(query(null));
-
+    jobs.findOne
+      .mockReturnValueOnce(query(null))
+      .mockReturnValueOnce(query(job));
     await expect(service.scheduleDue(now)).resolves.toBe(true);
-
     expect(cleanup.schedule).toHaveBeenCalledWith(
       expect.objectContaining({
         key: job.inputReservation.key,
@@ -93,62 +160,11 @@ describe('ProcessingStorageCleanupService', () => {
     );
   });
 
-  it('schedules terminal attempt output only when no confirmed object references it', async () => {
-    const { service, jobs, attempts, cleanup, session } = fixture();
+  it('returns false when no input reservation has expired', async () => {
+    const { service, jobs, cleanup } = fixture();
     jobs.findOne.mockReturnValue(query(null));
-    const attempt = {
-      _id: new Types.ObjectId('507f1f77bcf86cd799439013'),
-      jobId: new Types.ObjectId('507f1f77bcf86cd799439012'),
-      outcome: 'failed',
-      endedAt: new Date('2026-09-12T00:10:00.000Z'),
-      outputReservation: {
-        key: `users/${owner.toHexString()}/jobs/job/output/attempt/vocals.mp3`,
-      },
-    };
-    attempts.findOne.mockReturnValue(query(attempt));
-
-    await expect(service.scheduleDue(now)).resolves.toBe(true);
-
-    expect(jobs.exists).toHaveBeenCalledWith(
-      expect.objectContaining({
-        'outputObject.key': attempt.outputReservation.key,
-      }),
-    );
-    expect(cleanup.schedule).toHaveBeenCalledWith(
-      expect.objectContaining({
-        key: attempt.outputReservation.key,
-        ownerUserId: owner,
-        reason: 'AUDIO_OUTPUT_ORPHANED',
-      }),
-      session,
-    );
-    expect(attempts.updateOne).toHaveBeenCalledWith(
-      expect.objectContaining({ _id: attempt._id, cleanupScheduledAt: null }),
-      { $set: { cleanupScheduledAt: now } },
-      { session },
-    );
-  });
-
-  it('never schedules an output key already pinned by a job', async () => {
-    const { service, jobs, attempts, cleanup } = fixture();
-    jobs.findOne.mockReturnValue(query(null));
-    jobs.exists.mockReturnValueOnce(
-      referenceQuery({ _id: new Types.ObjectId() }),
-    );
-    attempts.findOne.mockReturnValue(
-      query({
-        _id: new Types.ObjectId('507f1f77bcf86cd799439013'),
-        outcome: 'ready',
-        endedAt: new Date('2026-09-12T00:10:00.000Z'),
-        outputReservation: {
-          key: `users/${owner.toHexString()}/jobs/job/output/attempt/vocals.mp3`,
-        },
-      }),
-    );
-
-    await expect(service.scheduleDue(now)).resolves.toBe(true);
-
+    await expect(service.scheduleDue(now)).resolves.toBe(false);
     expect(cleanup.schedule).not.toHaveBeenCalled();
-    expect(attempts.updateOne).toHaveBeenCalledOnce();
+    expect(jobs.updateOne).not.toHaveBeenCalled();
   });
 });

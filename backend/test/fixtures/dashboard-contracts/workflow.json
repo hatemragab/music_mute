@@ -10,13 +10,13 @@
         "role": "owner",
         "permissions": [
           "overview.read",
-          "workers.read",
-          "workers.manage",
-          "workers.recover",
           "jobs.read",
           "jobs.manage",
           "users.read",
           "users.processing.manage",
+          "users.restrictions.manage",
+          "users.account-recovery.manage",
+          "abuse.read",
           "media.read",
           "releases.read",
           "releases.manage",
@@ -26,6 +26,10 @@
           "alerts.manage",
           "audit.read",
           "exports.read",
+          "workers.read",
+          "workers.manage",
+          "workers.enroll",
+          "workers.logs.read",
           "admin.access.manage"
         ],
         "accessRevision": 0,
@@ -55,14 +59,18 @@
         "role": "support",
         "permissions": [
           "overview.read",
-          "workers.read",
           "jobs.read",
           "jobs.manage",
           "users.read",
           "users.processing.manage",
+          "users.restrictions.manage",
+          "users.account-recovery.manage",
+          "abuse.read",
           "media.read",
           "settings.read",
-          "exports.read"
+          "exports.read",
+          "workers.read",
+          "workers.logs.read"
         ],
         "accessRevision": 0,
         "authTimeSec": 1789079284,
@@ -70,173 +78,46 @@
       }
     },
     {
-      "method": "POST",
-      "path": "/admin/workers",
+      "method": "PUT",
+      "path": "/admin/users/000000000000000000000001/restriction",
       "response": {
-        "worker": {
-          "id": "fixture-worker",
-          "label": "Fixture worker",
-          "state": "enabled",
-          "online": false,
-          "lastSeenAt": null,
-          "activeJobId": null,
-          "activeAttemptId": null,
-          "recoveryRequired": false,
-          "revision": 0
-        },
-        "rawKey": "<one-time-fixture-key>"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/admin/workers/fixture-worker",
-      "response": {
-        "id": "fixture-worker",
-        "label": "Fixture worker",
-        "state": "enabled",
-        "online": true,
-        "lastSeenAt": "2026-01-01T00:00:00.000Z",
-        "activeJobId": "000000000000000000000001",
-        "activeAttemptId": "00000000-0000-4000-8000-000000000001",
-        "recoveryRequired": false,
-        "revision": 3,
-        "protocolVersion": 2,
-        "slotState": "active",
-        "assignment": {
-          "jobId": "000000000000000000000001",
-          "attemptId": "00000000-0000-4000-8000-000000000001",
-          "sessionId": "00000000-0000-4000-8000-000000000001",
-          "generation": 1,
-          "leaseExpiresAt": "2026-01-01T00:00:00.000Z"
-        },
-        "recentEvents": [
-          {
-            "id": "000000000000000000000001",
-            "action": "workers.create",
-            "at": "2026-01-01T00:00:00.000Z",
-            "outcome": "succeeded"
-          }
-        ]
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/workers/fixture-worker/drain",
-      "response": {
-        "id": "fixture-worker",
-        "label": "Fixture worker",
-        "state": "draining",
-        "online": true,
-        "lastSeenAt": "2026-01-01T00:00:00.000Z",
-        "activeJobId": "000000000000000000000001",
-        "activeAttemptId": "00000000-0000-4000-8000-000000000001",
-        "recoveryRequired": false,
-        "revision": 4
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/admin/workers/fixture-worker",
-      "response": {
-        "id": "fixture-worker",
-        "label": "Fixture worker",
-        "state": "draining",
-        "online": true,
-        "lastSeenAt": "2026-01-01T00:00:00.000Z",
-        "activeJobId": "000000000000000000000001",
-        "activeAttemptId": "00000000-0000-4000-8000-000000000001",
-        "recoveryRequired": false,
-        "revision": 4,
-        "protocolVersion": 2,
-        "slotState": "active",
-        "assignment": {
-          "jobId": "000000000000000000000001",
-          "attemptId": "00000000-0000-4000-8000-000000000001",
-          "sessionId": "00000000-0000-4000-8000-000000000001",
-          "generation": 1,
-          "leaseExpiresAt": "2026-01-01T00:00:00.000Z"
-        },
-        "recentEvents": [
-          {
-            "id": "000000000000000000000001",
-            "action": "workers.drain",
-            "at": "2026-01-01T00:00:00.000Z",
-            "outcome": "succeeded"
-          },
-          {
-            "id": "000000000000000000000001",
-            "action": "workers.create",
-            "at": "2026-01-01T00:00:00.000Z",
-            "outcome": "succeeded"
-          }
-        ]
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/workers/fixture-worker/release-stopped",
-      "response": {
-        "id": "fixture-worker",
-        "label": "Fixture worker",
-        "state": "draining",
-        "online": true,
-        "lastSeenAt": "2026-01-01T00:00:00.000Z",
-        "activeJobId": null,
-        "activeAttemptId": null,
-        "recoveryRequired": false,
-        "revision": 5
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/admin/workers/fixture-worker",
-      "response": {
-        "id": "fixture-worker",
-        "label": "Fixture worker",
-        "state": "draining",
-        "online": true,
-        "lastSeenAt": "2026-01-01T00:00:00.000Z",
-        "activeJobId": null,
-        "activeAttemptId": null,
-        "recoveryRequired": false,
-        "revision": 5,
-        "protocolVersion": 2,
-        "slotState": "idle",
-        "assignment": null,
-        "recentEvents": [
-          {
-            "id": "000000000000000000000001",
-            "action": "workers.release-stopped",
-            "at": "2026-01-01T00:00:00.000Z",
-            "outcome": "succeeded"
-          },
-          {
-            "id": "000000000000000000000001",
-            "action": "workers.drain",
-            "at": "2026-01-01T00:00:00.000Z",
-            "outcome": "succeeded"
-          },
-          {
-            "id": "000000000000000000000001",
-            "action": "workers.create",
-            "at": "2026-01-01T00:00:00.000Z",
-            "outcome": "succeeded"
-          }
-        ]
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/users/000000000000000000000001/suspend-processing",
-      "response": {
-        "id": "000000000000000000000001",
-        "email": "user@example.invalid",
-        "displayName": "Fixture user",
+        "id": "000000000000000000000060",
+        "accountId": "000000000000000000000001",
         "status": "active",
-        "processingSuspended": true,
-        "createdAt": "2026-01-01T00:00:00.000Z",
+        "reasonCode": "manual_review",
+        "note": "Owned dashboard integration fixture",
+        "startsAt": "2026-01-01T00:00:00.000Z",
+        "expiresAt": null,
+        "createdBy": "support-fixture",
+        "updatedBy": "support-fixture",
         "updatedAt": "2026-01-01T00:00:00.000Z",
         "revision": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/admin/users/000000000000000000000001/restriction",
+      "response": {
+        "id": "000000000000000000000060",
+        "accountId": "000000000000000000000001",
+        "status": "active",
+        "reasonCode": "manual_review",
+        "note": "Owned dashboard integration fixture",
+        "startsAt": "2026-01-01T00:00:00.000Z",
+        "expiresAt": null,
+        "createdBy": "support-fixture",
+        "updatedBy": "support-fixture",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "revision": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/admin/abuse-events",
+      "response": {
+        "items": [],
+        "nextCursor": null,
+        "asOf": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -257,7 +138,6 @@
         "id": "000000000000000000000001",
         "userId": "000000000000000000000001",
         "status": "queued",
-        "workerId": null,
         "createdAt": "2026-01-01T00:00:00.000Z",
         "queuedAt": "2026-01-01T00:00:00.000Z",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -307,9 +187,7 @@
           "resultAvailable": false
         },
         "userEmail": "user@example.invalid",
-        "userDisplayName": "Fixture user",
-        "recoveryRequired": false,
-        "activeAttemptId": null
+        "userDisplayName": "Fixture user"
       }
     },
     {
@@ -483,10 +361,6 @@
             "processing": 0
           }
         },
-        "workers": {
-          "total": 1,
-          "online": 1
-        },
         "series": [
           {
             "start": "2026-01-01T00:00:00.000Z",
@@ -541,27 +415,6 @@
     },
     {
       "method": "GET",
-      "path": "/admin/workers",
-      "response": {
-        "items": [
-          {
-            "id": "fixture-worker",
-            "label": "Fixture worker",
-            "state": "draining",
-            "online": true,
-            "lastSeenAt": "2026-01-01T00:00:00.000Z",
-            "activeJobId": null,
-            "activeAttemptId": null,
-            "recoveryRequired": false,
-            "revision": 5
-          }
-        ],
-        "nextCursor": null,
-        "asOf": "2026-01-01T00:00:00.000Z"
-      }
-    },
-    {
-      "method": "GET",
       "path": "/admin/jobs",
       "response": {
         "items": [
@@ -569,7 +422,6 @@
             "id": "000000000000000000000001",
             "userId": "000000000000000000000001",
             "status": "queued",
-            "workerId": null,
             "createdAt": "2026-01-01T00:00:00.000Z",
             "queuedAt": "2026-01-01T00:00:00.000Z",
             "startedAt": "2026-01-01T00:00:00.000Z",
@@ -597,7 +449,6 @@
             "email": "user@example.invalid",
             "displayName": "Fixture user",
             "status": "active",
-            "processingSuspended": true,
             "createdAt": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
             "revision": 1
@@ -633,15 +484,40 @@
     },
     {
       "method": "GET",
-      "path": "/admin/settings/processing",
+      "path": "/admin/settings/account-policy",
       "response": {
+        "plan": "standard",
         "revision": 0,
         "acceptNewJobs": true,
         "maintenanceMessageEn": "",
         "maintenanceMessageAr": null,
-        "maxInputBytesExclusive": 30000000,
-        "maxDurationSecondsExclusive": 600,
-        "maxActiveJobsPerUser": null,
+        "values": {
+          "monthlyProcessingSeconds": 7200,
+          "maxDurationSeconds": 1200,
+          "maxPreparedAudioBytes": 50000000,
+          "dailyUploadGrants": 30,
+          "monthlyUploadGrants": 200,
+          "monthlyConfirmedUploadBytes": 1000000000,
+          "maxWaitingJobs": 3,
+          "maxProcessingJobs": 1,
+          "maxInfrastructureAttempts": 3,
+          "maxClientInputAttempts": 5,
+          "monthlyDownloadGrants": 150,
+          "monthlyEstimatedDownloadBytes": 10000000000,
+          "maxRetainedOutputBytes": 1000000000,
+          "signedUrlTtlSeconds": 600,
+          "monthlyServiceOutboundBytes": 80000000000,
+          "deletionGraceHours": 360
+        },
+        "enforcedFeatures": [
+          "processing_minutes",
+          "media_limits",
+          "upload_limits",
+          "download_limits",
+          "retained_storage",
+          "service_outbound"
+        ],
+        "updatedBy": "system",
         "updatedAt": "2026-01-01T00:00:00.000Z"
       }
     },
@@ -675,12 +551,6 @@
             "status": "healthy",
             "checkedAt": "2026-01-01T00:00:00.000Z",
             "code": null
-          },
-          {
-            "name": "workers",
-            "status": "healthy",
-            "checkedAt": "2026-01-01T00:00:00.000Z",
-            "code": null
           }
         ],
         "activeAlertCount": 0
@@ -697,42 +567,12 @@
     },
     {
       "method": "GET",
-      "path": "/admin/jobs/000000000000000000000001/attempts",
-      "response": {
-        "items": [
-          {
-            "id": "00000000-0000-4000-8000-000000000001",
-            "jobId": "000000000000000000000001",
-            "workerId": "fixture-worker",
-            "sessionId": "00000000-0000-4000-8000-000000000001",
-            "generation": 1,
-            "outcome": "interrupted",
-            "startedAt": "2026-01-01T00:00:00.000Z",
-            "endedAt": "2026-01-01T00:00:00.000Z",
-            "interruptedAt": "2026-01-01T00:00:00.000Z",
-            "releasedAt": "2026-01-01T00:00:00.000Z",
-            "recoveryRequired": false,
-            "processingStartedAt": null,
-            "processingEndedAt": null,
-            "processingElapsedApproximate": false,
-            "replacementAttemptId": null,
-            "localDataDeletedAt": null,
-            "durationSeconds": null
-          }
-        ],
-        "nextCursor": null,
-        "asOf": "2026-01-01T00:00:00.000Z"
-      }
-    },
-    {
-      "method": "GET",
       "path": "/admin/users/000000000000000000000001",
       "response": {
         "id": "000000000000000000000001",
         "email": "user@example.invalid",
         "displayName": "Fixture user",
         "status": "active",
-        "processingSuspended": true,
         "createdAt": "2026-01-01T00:00:00.000Z",
         "updatedAt": "2026-01-01T00:00:00.000Z",
         "revision": 1,
@@ -740,11 +580,7 @@
           "queued": 1
         },
         "recentJobIds": ["000000000000000000000001"],
-        "suspension": {
-          "reason": "Owned dashboard integration fixture",
-          "actorUid": "support-fixture",
-          "at": "2026-01-01T00:00:00.000Z"
-        }
+        "deletion": null
       }
     },
     {
@@ -883,53 +719,6 @@
             "at": "2026-01-01T00:00:00.000Z",
             "previousRevision": 0,
             "nextRevision": 1,
-            "outcome": "succeeded"
-          },
-          {
-            "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
-            "action": "workers.release-stopped",
-            "resourceType": "worker",
-            "resourceId": "fixture-worker",
-            "operationId": "00000000-0000-4000-8000-000000000001",
-            "reason": "Owned dashboard integration fixture",
-            "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": 4,
-            "nextRevision": 5,
-            "outcome": "succeeded",
-            "stopEvidence": {
-              "attestation": "Owned fixture worker process terminated; PID 4321 verified exited.",
-              "stoppedAt": "2026-01-01T00:00:00.000Z",
-              "jobId": "000000000000000000000001",
-              "attemptId": "00000000-0000-4000-8000-000000000001",
-              "sessionId": "00000000-0000-4000-8000-000000000001",
-              "generation": 1
-            }
-          },
-          {
-            "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
-            "action": "workers.drain",
-            "resourceType": "worker",
-            "resourceId": "fixture-worker",
-            "operationId": "00000000-0000-4000-8000-000000000001",
-            "reason": "Owned dashboard integration fixture",
-            "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": 3,
-            "nextRevision": 4,
-            "outcome": "succeeded"
-          },
-          {
-            "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
-            "action": "workers.create",
-            "resourceType": "worker",
-            "resourceId": "fixture-worker",
-            "operationId": "00000000-0000-4000-8000-000000000001",
-            "reason": "Owned dashboard integration fixture",
-            "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": null,
-            "nextRevision": 0,
             "outcome": "succeeded"
           },
           {

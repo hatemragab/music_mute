@@ -11,16 +11,18 @@ import { ReleasesModule } from './releases/releases.module.js';
 import { AdminUsersModule } from './admin-users/admin-users.module.js';
 import { AdminJobsModule } from './admin-jobs/admin-jobs.module.js';
 import { AdminMediaModule } from './admin-jobs/admin-media.module.js';
-import { AdminWorkersModule } from './admin-workers/admin-workers.module.js';
 import { AdminObservabilityModule } from './admin-observability/admin-observability.module.js';
 import { AdminExportsModule } from './admin-exports/admin-exports.module.js';
 import { AdminHealthModule } from './admin-observability/admin-health.module.js';
+import { WorkerFleetModule } from './worker-fleet/worker-fleet.module.js';
+import { AbuseProtectionModule } from './abuse-protection/abuse-protection.module.js';
 
 @Module({
   imports: [
     InfrastructureModule,
     SecurityModule,
     AuthModule,
+    AbuseProtectionModule,
     OperationsModule,
     AudioProcessingModule,
     PublicPagesModule,
@@ -29,10 +31,10 @@ import { AdminHealthModule } from './admin-observability/admin-health.module.js'
     AdminUsersModule,
     AdminJobsModule,
     AdminMediaModule,
-    AdminWorkersModule,
     AdminObservabilityModule,
     AdminExportsModule,
     AdminHealthModule,
+    WorkerFleetModule,
   ],
   controllers: [HealthController],
 })

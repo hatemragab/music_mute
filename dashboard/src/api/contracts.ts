@@ -1,7 +1,6 @@
 export const ADMIN_ROLES = [
   "owner",
   "release_manager",
-  "worker_manager",
   "support",
   "viewer",
 ] as const;
@@ -10,14 +9,13 @@ export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export const PERMISSIONS = [
   "overview.read",
-  "workers.read",
-  "workers.manage",
-  "workers.recover",
   "jobs.read",
   "jobs.manage",
   "users.read",
   "users.processing.manage",
+  "users.restrictions.manage",
   "users.account-recovery.manage",
+  "abuse.read",
   "media.read",
   "releases.read",
   "releases.manage",
@@ -27,6 +25,10 @@ export const PERMISSIONS = [
   "alerts.manage",
   "audit.read",
   "exports.read",
+  "workers.read",
+  "workers.manage",
+  "workers.enroll",
+  "workers.logs.read",
   "admin.access.manage",
 ] as const;
 
@@ -58,42 +60,6 @@ export interface AdminAccess {
   updatedAt: string;
 }
 
-export type WorkerState = "enabled" | "draining" | "revoked";
-
-export interface WorkerSummary {
-  id: string;
-  label: string;
-  state: WorkerState;
-  online: boolean;
-  lastSeenAt: string | null;
-  activeJobId: string | null;
-  activeAttemptId: string | null;
-  recoveryRequired: boolean;
-  revision: number;
-}
-
-export interface WorkerAssignment {
-  jobId: string;
-  attemptId: string;
-  sessionId: string;
-  generation: number;
-  leaseExpiresAt: string;
-}
-
-export interface WorkerDetail extends WorkerSummary {
-  protocolVersion: number;
-  mediaPolicyVersion?: 2 | null;
-  mediaCapabilitySeenAt?: string | null;
-  slotState: "idle" | "active" | "reserved" | "recovery_required";
-  assignment: WorkerAssignment | null;
-  recentEvents: Array<{
-    id: string;
-    action: string;
-    at: string;
-    outcome: string;
-  }>;
-}
-
 export const JOB_STATUSES = [
   "awaiting_upload",
   "queued",
@@ -113,7 +79,6 @@ export interface JobSummary {
   id: string;
   userId: string;
   status: JobStatus;
-  workerId: string | null;
   createdAt: string;
   queuedAt: string | null;
   startedAt: string | null;
@@ -133,7 +98,6 @@ export interface JobDetail extends JobSummary {
   declaredBytes?: number | null;
   measuredBytes?: number | null;
   policyVersion?: number;
-  estimatedWorkerSeconds?: number | null;
   retryOfJobId: string | null;
   stageTimings: Array<{
     stage: string;
@@ -144,26 +108,6 @@ export interface JobDetail extends JobSummary {
   declaredDurationSeconds: number | null;
   measuredDurationSeconds: number | null;
   media: { inputAvailable: boolean; resultAvailable: boolean };
-  recoveryRequired: boolean;
-  activeAttemptId: string | null;
-}
-
-export interface AttemptSummary {
-  separatorExecutionSeconds?: number | null;
-  stoppedConfirmed?: boolean;
-  separationCompleted?: boolean;
-  id: string;
-  jobId: string;
-  workerId: string | null;
-  sessionId: string | null;
-  generation: number;
-  outcome: string | null;
-  startedAt: string | null;
-  endedAt: string | null;
-  interruptedAt: string | null;
-  releasedAt: string | null;
-  recoveryRequired: boolean;
-  durationSeconds: number | null;
 }
 
 export interface UserSummary {
@@ -171,7 +115,6 @@ export interface UserSummary {
   email: string | null;
   displayName: string | null;
   status: "active" | "disabled" | "deleting" | string;
-  processingSuspended: boolean;
   createdAt: string;
   updatedAt: string;
   revision: number;
@@ -180,19 +123,64 @@ export interface UserSummary {
 export interface UserDetail extends UserSummary {
   processingCounts: Record<string, number>;
   recentJobIds: string[];
-  suspension: {
-    expiresAt?: string | null;
-    reason: string;
-    actorUid: string;
-    at: string;
-  } | null;
   deletion: {
     requestId: string;
     requestedAt: string | null;
     recoverUntil: string | null;
     purgeStartedAt: string | null;
+    phase: string | null;
+    failureCode: "DEPENDENCY_RETRY" | null;
     recoveryAvailable: boolean;
   } | null;
+}
+
+export type RestrictionReasonCode =
+  | "manual_review"
+  | "repeated_limit_bypass"
+  | "provider_cost_risk"
+  | "terms_violation";
+
+export interface AccountRestriction {
+  id: string;
+  accountId: string;
+  status: "active" | "expired" | "removed";
+  reasonCode: RestrictionReasonCode;
+  note: string;
+  startsAt: string;
+  expiresAt: string | null;
+  createdBy: string;
+  updatedBy: string;
+  updatedAt: string;
+  revision: number;
+  cancelledJobs?: number;
+}
+
+export type AbuseEventType =
+  | "upload_grant_limit"
+  | "upload_attempt_limit"
+  | "invalid_upload_repeat"
+  | "cancel_after_upload_repeat"
+  | "client_retry_limit"
+  | "download_grant_limit"
+  | "download_bytes_limit"
+  | "processing_quota_limit"
+  | "queue_limit"
+  | "endpoint_rate_limit"
+  | "restriction_bypass_attempt"
+  | "service_safety_ceiling";
+
+export interface AbuseEvent {
+  id: string;
+  accountId: string;
+  type: AbuseEventType;
+  severity: "low" | "medium" | "high";
+  operationClass: string;
+  count: number;
+  firstOccurredAt: string;
+  lastOccurredAt: string;
+  policyRevision: number | null;
+  restrictionId: string | null;
+  restrictionStatus: "active" | "expired" | "removed" | "none";
 }
 
 export interface AccountRecoveryRequest {
@@ -211,6 +199,8 @@ export interface AccountRecoveryRequest {
     email: string | null;
     displayName: string | null;
     status: string | null;
+    deletionPhase: string | null;
+    deletionFailureCode: "DEPENDENCY_RETRY" | null;
   };
 }
 
@@ -269,14 +259,34 @@ export interface UpdatePolicy {
   };
 }
 
-export interface ProcessingSettings {
+export interface AccountPolicyValues {
+  monthlyProcessingSeconds: number;
+  maxDurationSeconds: number;
+  maxPreparedAudioBytes: number;
+  dailyUploadGrants: number;
+  monthlyUploadGrants: number;
+  monthlyConfirmedUploadBytes: number;
+  maxWaitingJobs: number;
+  maxProcessingJobs: number;
+  maxInfrastructureAttempts: number;
+  maxClientInputAttempts: number;
+  monthlyDownloadGrants: number;
+  monthlyEstimatedDownloadBytes: number;
+  maxRetainedOutputBytes: number;
+  signedUrlTtlSeconds: number;
+  monthlyServiceOutboundBytes: number;
+  deletionGraceHours: number;
+}
+
+export interface AccountPolicy {
+  plan: "standard";
   revision: number;
   acceptNewJobs: boolean;
   maintenanceMessageEn: string;
   maintenanceMessageAr: string | null;
-  maxInputBytesExclusive: number;
-  maxDurationSecondsExclusive: number;
-  maxActiveJobsPerUser: number | null;
+  values: AccountPolicyValues;
+  enforcedFeatures: string[];
+  updatedBy: string;
   updatedAt: string;
 }
 
@@ -301,7 +311,6 @@ export interface OverviewSnapshot {
     meanProcessingSeconds: number | null;
     sampleCount: { queueWait: number; processing: number };
   };
-  workers: { total: number; online: number };
   series: Array<{
     start: string;
     submitted: number;
@@ -388,86 +397,99 @@ export interface RevisionCommand {
   reason: string;
 }
 
-export interface ProcessingQualification {
-  evidenceReference: string;
-  compatibilityRevision: string;
-  measuredAt: string;
-  expiresAt: string;
-  qualifiedWorkerIds: string[];
-  maxLocalSourceBytes: number;
-  maxSourceDownloadBytes: number;
-  maxPreparationSeconds: number;
-  maxSourceDownloadSeconds: number;
-  maxOutputBytes: number;
-  probeTimeoutSeconds: number;
-  processingTimeoutSeconds: number;
-  maxOutstandingEstimatedWorkerSeconds: number;
-  costModelRevision: string;
-  referenceProcessingSecondsPerAudioSecond: number;
-  fixedJobOverheadSeconds: number;
-}
-
-export interface ProcessingReadiness {
-  evidenceStatus: "verified" | "stale" | "unavailable";
-  expandedAdmissionAvailable: boolean;
-  capableWorkerIds?: string[];
-  costModelRevision: string | null;
-  maxOutstandingEstimatedWorkerSeconds: number | null;
-}
-
-export interface ProcessingPolicyV2 {
-  shortLongThresholdSeconds?: number;
-  schemaVersion: 2;
+export interface AccountPolicyOverride {
   revision: number;
+  values: Partial<
+    Pick<
+      AccountPolicyValues,
+      | "monthlyProcessingSeconds"
+      | "maxDurationSeconds"
+      | "maxPreparedAudioBytes"
+      | "dailyUploadGrants"
+      | "monthlyUploadGrants"
+      | "monthlyConfirmedUploadBytes"
+      | "maxClientInputAttempts"
+      | "monthlyDownloadGrants"
+      | "monthlyEstimatedDownloadBytes"
+      | "maxRetainedOutputBytes"
+      | "signedUrlTtlSeconds"
+    >
+  >;
+  expiresAt: string | null;
+  reason: string;
+  createdBy: string;
+  updatedBy: string;
+  createdAt: string;
   updatedAt: string;
-  acceptNewJobs: boolean;
-  acceptLongJobs: boolean;
-  maxDurationSeconds: number;
-  maxPreparedAudioBytes: number;
-  maxActiveJobsPerUser: 1;
-  allowanceAudioSeconds: number;
-  allowanceWindowSeconds: 86400;
-  maxOutstandingJobs: number;
-  maxOutstandingAudioSeconds: number;
-  agingThresholdSeconds: number;
-  qualification: ProcessingQualification | null;
-  readiness: ProcessingReadiness;
 }
 
-export interface QueueWorkload {
-  shortLongThresholdSeconds?: number;
-  distribution?: {
-    short: { jobs: number; audioSeconds: number };
-    long: { jobs: number; audioSeconds: number };
-  };
-  rejectionSummary?: null;
-  outstandingJobs: number;
-  outstandingAudioSeconds: number;
-  queuedJobs: number;
-  queuedAudioSeconds: number;
-  oldestQueuedAt: string | null;
-  limits: { maxOutstandingJobs: number; maxOutstandingAudioSeconds: number };
-  estimatedWorkerSeconds: number | null;
-  estimatedWaitRange: { minSeconds: number; maxSeconds: number } | null;
-  evidenceStatus: "verified" | "stale" | "unavailable";
-  checkedAt: string;
-}
-
-export interface ProcessingUsage {
-  revision: number;
+export interface AccountUsage {
+  schemaVersion: 2;
+  plan: "standard";
   policyRevision: number;
-  allowanceAudioSeconds: number;
-  usedAudioSeconds: number;
-  reservedAudioSeconds: number;
-  remainingAudioSeconds: number;
-  activeJobs: number;
-  maxActiveJobs: number;
-  nextReplenishmentAt: string | null;
-  replenishments: Array<{ at: string; audioSeconds: number }>;
-  availability: "available" | "busy" | "paused" | "unavailable";
+  overrideRevision: number | null;
+  effectivePolicySource: "global" | "account_override";
+  overrideExpiresAt: string | null;
+  period: {
+    key: string;
+    start: string;
+    end: string;
+    nextResetAt: string;
+  };
+  processing: {
+    limitSeconds: number;
+    usedSeconds: number;
+    reservedSeconds: number;
+    releasedSeconds: number;
+    remainingSeconds: number;
+  };
+  uploads: {
+    dailyGrantLimit: number;
+    dailyGrants: number;
+    dailyRemainingGrants: number;
+    dailyResetAt: string;
+    monthlyGrantLimit: number;
+    monthlyGrants: number;
+    monthlyRemainingGrants: number;
+    monthlyByteLimit: number;
+    confirmedBytes: number;
+    monthlyRemainingBytes: number;
+    monthlyResetAt: string;
+  };
+  storage: {
+    limitBytes: number;
+    retainedBytes: number;
+    remainingBytes: number;
+  };
+  effectiveLimits: {
+    maxDurationSeconds: number;
+    maxPreparedAudioBytes: number;
+    maxClientInputAttempts: number;
+    signedUrlTtlSeconds: number;
+  };
+  downloads: {
+    monthlyGrantLimit: number;
+    monthlyGrants: number;
+    monthlyRemainingGrants: number;
+    monthlyByteLimit: number;
+    estimatedBytes: number;
+    monthlyRemainingBytes: number;
+    monthlyResetAt: string;
+  };
+  usageRevision: number;
+  waitingJobs: number;
+  maxWaitingJobs: number;
+  processingJobs: number;
+  maxProcessingJobs: number;
+  availability: {
+    status: "available" | "blocked";
+    reason:
+      | "paused"
+      | "monthly_limit_reached"
+      | "waiting_job_limit"
+      | "storage_limit_reached"
+      | null;
+  };
   checkedAt: string;
-  allowanceOverride: {
-    allowanceAudioSeconds: number;
-    expiresAt: string;
-  } | null;
+  policyOverride: AccountPolicyOverride | null;
 }

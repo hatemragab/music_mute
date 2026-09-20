@@ -7,5 +7,8 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.e2e-spec.ts'],
+    // Nest test applications share process and reflection state; serial files
+    // keep one harness from changing another harness while requests are active.
+    fileParallelism: false,
   },
 });

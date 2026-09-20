@@ -2,7 +2,6 @@ import 'reflect-metadata';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 import { RequestMethod, type Type } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants.js';
@@ -19,7 +18,6 @@ import { AdminAccessController } from '../src/admin/admin-access.controller.js';
 import { AdminAuditController } from '../src/admin/admin-audit.controller.js';
 import { AdminOperationsController } from '../src/admin/admin-operations.controller.js';
 import { AdminSessionController } from '../src/admin/admin-session.controller.js';
-import { AdminWorkersController } from '../src/admin-workers/admin-workers.controller.js';
 import { AdminUsersController } from '../src/admin-users/admin-users.controller.js';
 import { AdminAccountRecoveryController } from '../src/admin-users/admin-account-recovery.controller.js';
 import { AdminJobsController } from '../src/admin-jobs/admin-jobs.controller.js';
@@ -34,6 +32,9 @@ import { AdminOverviewController } from '../src/admin-observability/admin-overvi
 import { AdminHealthController } from '../src/admin-observability/admin-health.controller.js';
 import { AdminAlertsController } from '../src/admin-observability/admin-alerts.controller.js';
 import { AdminExportsController } from '../src/admin-exports/admin-exports.controller.js';
+import { AdminWorkerEnrollmentController } from '../src/worker-fleet/enrollment/admin-worker-enrollment.controller.js';
+import { AdminWorkerControlController } from '../src/worker-fleet/control/admin-worker-control.controller.js';
+import { AdminAbuseProtectionController } from '../src/abuse-protection/admin-abuse-protection.controller.js';
 import {
   ADMIN_FRESH_AUTH,
   ADMIN_PERMISSION,
@@ -42,6 +43,7 @@ import {
 } from '../src/admin/admin.decorators.js';
 import type { AdminRole } from '../src/admin/admin.types.js';
 import { RateBudgetService } from '../src/rate-limits/rate-budget.service.js';
+import { ADMIN_RATE_LIMIT_DEFAULTS } from '../src/config/environment.js';
 import {
   createAdminHarness,
   type AdminHarness,
@@ -49,7 +51,7 @@ import {
 
 interface RouteFixture {
   controller: string;
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   path: string;
   permissions: string[];
   roles: AdminRole[];
@@ -71,8 +73,8 @@ const controllers: Type[] = [
   AdminAccessController,
   AdminAuditController,
   AdminOperationsController,
-  AdminWorkersController,
   AdminUsersController,
+  AdminAbuseProtectionController,
   AdminAccountRecoveryController,
   AdminJobsController,
   AdminMediaController,
@@ -84,18 +86,15 @@ const controllers: Type[] = [
   AdminHealthController,
   AdminAlertsController,
   AdminExportsController,
+  AdminWorkerEnrollmentController,
+  AdminWorkerControlController,
 ];
 const endpoint = (route: RouteFixture) =>
   route.path
     .replace(':operationId', '2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29')
     .replace(':uploadId', 'bbbbbbbbbbbbbbbbbbbbbbbb')
     .replace(':uid', 'synthetic-target-uid')
-    .replace(
-      ':id',
-      route.path.startsWith('/admin/workers/')
-        ? 'node-a'
-        : 'aaaaaaaaaaaaaaaaaaaaaaaa',
-    );
+    .replace(':id', 'aaaaaaaaaaaaaaaaaaaaaaaa');
 const budgetsByClass = {
   read: { limit: 120, windowMs: 60000 },
   write: { limit: 30, windowMs: 60000 },
@@ -114,7 +113,6 @@ describe('complete administration route authorization contract', () => {
     allowed: true,
     retryAfterSeconds: 0,
   }));
-  const workerKey = 'synthetic-worker-key';
   beforeAll(async () => {
     const services = new Set<Type>();
     for (const controller of controllers) {
@@ -151,16 +149,13 @@ describe('complete administration route authorization contract', () => {
         {
           provide: ConfigService,
           useValue: new ConfigService({
+            ...ADMIN_RATE_LIMIT_DEFAULTS,
             ADMIN_REAUTH_MAX_AGE_SECONDS: 300,
             AUDIO_PROCESSING_ENABLED: true,
-            PROCESSING_WORKER_KEY_SHA256: createHash('sha256')
-              .update(workerKey)
-              .digest('hex'),
           }),
         },
       ],
     });
-    await harness.app.listen(0, '127.0.0.1');
   });
   afterAll(async () => {
     await harness?.close();
@@ -237,9 +232,9 @@ describe('complete administration route authorization contract', () => {
   });
 
   for (const route of inventory.routes) {
-    it(`${route.method} ${route.path}: credentials, five roles, freshness, rate limit and validation`, async () => {
+    it(`${route.method} ${route.path}: credentials, roles, freshness, rate limit and validation`, async () => {
       const method = route.method.toLowerCase() as
-        'get' | 'post' | 'put' | 'patch';
+        'get' | 'post' | 'put' | 'patch' | 'delete';
       const send = (token?: string, body: unknown = route.requestBody) =>
         harness.request(method, endpoint(route), body, token);
       for (const token of [
@@ -247,7 +242,6 @@ describe('complete administration route authorization contract', () => {
         'ordinary-google-token',
         'password-token',
         'revoked-token',
-        workerKey,
       ]) {
         domainCalls.length = 0;
         const response = await send(token);
@@ -257,13 +251,8 @@ describe('complete administration route authorization contract', () => {
         ).toContain(response.status);
         expect(response.headers['cache-control']).toBe('no-store');
         expect(domainCalls).toEqual([]);
-        expect(response.text).not.toMatch(
-          /contractFixture|fixture\.csv|synthetic-worker-key/,
-        );
+        expect(response.text).not.toMatch(/contractFixture|fixture\.csv/);
       }
-      const workerResponse = await send().set('X-Worker-Key', workerKey);
-      expect(workerResponse.status).toBe(401);
-      expect(domainCalls).toEqual([]);
       for (const role of inventory.roles) {
         domainCalls.length = 0;
         const token = harness.signInAs(role);
@@ -321,6 +310,21 @@ describe('complete administration route authorization contract', () => {
           key: `admin-${route.rateClass}-uid:owner-uid`,
           ...budgetsByClass[route.rateClass],
         },
+        {
+          key: `admin-${route.rateClass}-ip:127.0.0.1`,
+          limit: 60,
+          windowMs: 60_000,
+        },
+        {
+          key: expect.stringMatching(/^admin-endpoint:[A-Za-z0-9_.]+$/u),
+          limit: 300,
+          windowMs: 60_000,
+        },
+        {
+          key: 'admin-service:global',
+          limit: 1_000,
+          windowMs: 60_000,
+        },
       ]);
     });
   }
@@ -339,8 +343,6 @@ describe('complete administration route authorization contract', () => {
     const realQueries = new AdminJobsQueryService(
       database as never,
       database as never,
-      database as never,
-      database as never,
     );
     const queryHarness = await createAdminHarness({
       controllers: [AdminJobsController],
@@ -350,12 +352,8 @@ describe('complete administration route authorization contract', () => {
       ],
     });
     try {
-      await queryHarness.app.listen(0, '127.0.0.1');
       const owner = queryHarness.signInAs('owner');
-      for (const path of [
-        '/admin/jobs',
-        '/admin/jobs/aaaaaaaaaaaaaaaaaaaaaaaa/attempts',
-      ]) {
+      for (const path of ['/admin/jobs']) {
         for (const query of [
           'cursor=invalid',
           'limit=1000',

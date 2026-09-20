@@ -1,20 +1,71 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type { Auth } from 'firebase-admin/auth';
-import { randomUUID } from 'node:crypto';
-import { trusted, type Connection, type Model } from 'mongoose';
 import type { Document, Filter } from 'mongodb';
+import { randomUUID } from 'node:crypto';
+import { trusted, type Connection, type Model, type Types } from 'mongoose';
 import { FIREBASE_AUTH } from '../auth/firebase-identity.service.js';
 import { JobActionsService } from '../jobs/job-actions.service.js';
 import { JobDeletionService } from '../jobs/job-deletion.service.js';
 import { Job } from '../jobs/job.schema.js';
+import { StorageCleanupService } from '../storage/storage-cleanup.service.js';
+import { accountRecoveryDeadline } from './account-recovery-policy.js';
 import { UserIdentityFenceService } from './user-identity-fence.service.js';
 import { User } from './user.schema.js';
-import { accountRecoveryDeadline } from './account-recovery-policy.js';
-import { StorageCleanupService } from '../storage/storage-cleanup.service.js';
 
 const LEASE_MS = 60_000;
 const PAGE_SIZE = 20;
+const PROGRESS_RETRY_MS = 15_000;
+const FAILURE_RETRY_MS = 60_000;
+
+const ACTIVE_JOB_STATUSES = [
+  'awaiting_upload',
+  'queued',
+  'validating',
+  'processing',
+  'uploading_result',
+  'interrupted',
+  'cancel_requested',
+] as const;
+
+const ACCOUNT_RECORD_COLLECTIONS = [
+  ['audio_notification_outbox', 'userId'],
+  ['user_devices', 'userId'],
+  ['device_installation_owners', 'userId'],
+  ['push_registrations', 'userId'],
+  ['client_errors', 'userId'],
+  ['account_recovery_requests', 'userId'],
+  ['processing_usage_ledger', 'userId'],
+  ['account_usage_periods', 'accountId'],
+  ['account_daily_usage_periods', 'accountId'],
+  ['upload_grant_receipts', 'accountId'],
+  ['download_grant_receipts', 'accountId'],
+  ['processing_reservations', 'accountId'],
+  ['account_policy_overrides', 'accountId'],
+  ['abuse_event_buckets', 'accountId'],
+  ['abuse_monthly_summaries', 'accountId'],
+  ['account_restrictions', 'accountId'],
+] as const;
+
+type PurgePhase = NonNullable<User['deletionPhase']>;
+type OwnedPurge = {
+  _id: Types.ObjectId;
+  status: 'purging';
+  deletionLeaseToken: string;
+};
+
+type AttemptArtifact = Document & {
+  outputObject?: { key?: unknown; versionId?: unknown } | null;
+  outputReservation?: { key?: unknown } | null;
+};
+
+type DeletionTombstoneDocument = Document & {
+  _id: string;
+  acceptedAt: Date;
+  completedAt: Date;
+  status: 'purged';
+  schemaVersion: 1;
+};
 
 /** Durable intent stays on the fenced user until every provider has succeeded. */
 @Injectable()
@@ -62,41 +113,14 @@ export class AccountDeletionCleanupService {
       )
       .lean();
     if (!user) return false;
+
     if (user.status === 'deleting') {
       const recoverUntil =
         user.deletionRecoverUntil ??
         accountRecoveryDeadline(user.deletionRequestedAt ?? now);
-      const futureDeadline = recoverUntil.getTime() > now.getTime();
-      const scheduleMissing =
-        !user.deletionRecoverUntil ||
-        !user.deletionNextAt ||
-        user.deletionNextAt.getTime() !== recoverUntil.getTime();
-      if (scheduleMissing || futureDeadline) {
-        const normalized = await this.users
-          .findOneAndUpdate(
-            {
-              _id: user._id,
-              status: 'deleting',
-              deletionLeaseToken: token,
-            },
-            {
-              $set: {
-                deletionRecoverUntil: recoverUntil,
-                deletionNextAt: recoverUntil,
-                ...(futureDeadline
-                  ? {
-                      deletionLeaseToken: null,
-                      deletionLeaseUntil: null,
-                    }
-                  : {}),
-              },
-            },
-            { returnDocument: 'after', runValidators: true },
-          )
-          .lean();
-        if (!normalized) return true;
-        user = normalized;
-        if (futureDeadline) return true;
+      if (recoverUntil.getTime() > now.getTime()) {
+        await this.fenceGraceWork(user, token, recoverUntil, now);
+        return true;
       }
       user = await this.users
         .findOneAndUpdate(
@@ -108,7 +132,11 @@ export class AccountDeletionCleanupService {
           {
             $set: {
               status: 'purging',
+              deletionRecoverUntil: recoverUntil,
               deletionPurgeStartedAt: now,
+              deletionPhase: 'identity',
+              deletionCursor: null,
+              deletionFailureCode: null,
             },
           },
           { returnDocument: 'after', runValidators: true },
@@ -116,123 +144,291 @@ export class AccountDeletionCleanupService {
         .lean();
       if (!user) return true;
     }
-    const owned = {
+
+    const owned: OwnedPurge = {
       _id: user._id,
-      status: 'purging' as const,
+      status: 'purging',
       deletionLeaseToken: token,
     };
-    const renew = async () => {
-      const result = await this.users.updateOne(owned, {
-        $set: { deletionLeaseUntil: new Date(Date.now() + LEASE_MS) },
-      });
-      if (result.matchedCount !== 1)
-        throw new Error('Account cleanup lease lost');
-    };
-    let retryMs = 15_000;
+    let retryMs = PROGRESS_RETRY_MS;
+    let failed = false;
     try {
-      await renew();
-      await this.providerCall(() =>
-        this.firebase.revokeRefreshTokens(user.firebaseUid),
-      );
-      await renew();
-      await this.providerCall(() =>
-        this.firebase.updateUser(user.firebaseUid, { disabled: true }),
-      );
-      const live = await this.jobs
-        .find({ userId: user._id, deletedAt: null })
-        .sort({ _id: 1 })
-        .limit(PAGE_SIZE)
-        .lean();
-      for (const job of live) {
-        await renew();
-        if (['ready', 'failed', 'cancelled'].includes(job.status)) {
-          await this.deletion.delete(
-            user._id.toHexString(),
-            job._id.toHexString(),
+      await this.renew(owned);
+      const phase = user.deletionPhase ?? 'identity';
+      if (phase === 'identity') {
+        await this.providerCall(() =>
+          this.firebase.revokeRefreshTokens(user.firebaseUid),
+        );
+        await this.renew(owned);
+        await this.providerCall(() =>
+          this.firebase.updateUser(user.firebaseUid, { disabled: true }),
+        );
+        await this.transition(owned, 'jobs', null);
+      } else if (phase === 'jobs') {
+        if (!(await this.advanceJobs(user._id, owned, now)))
+          await this.transition(
+            owned,
+            'records',
+            ACCOUNT_RECORD_COLLECTIONS[0][0],
           );
-        } else {
-          await this.actions.cancelForAccountDeletion(
-            user._id.toHexString(),
-            job._id.toHexString(),
-          );
-        }
-      }
-      if (live.length) return true;
-      // A lost lease does not establish that the process or its copies stopped.
-      const control = await this.connection
-        .collection('audio_worker_control')
-        .findOne({ activeJobId: { $ne: null } });
-      if (
-        control &&
-        (await this.jobs.exists({ _id: control.activeJobId, userId: user._id }))
-      )
-        return true;
-      if (
-        await this.jobs.exists({ userId: user._id, cleanupCompletedAt: null })
-      )
-        return true;
-
-      // Keep each parent until its bounded child purges finish, preserving lookup keys after a restart.
-      const jobs = await this.jobs
-        .find({ userId: user._id })
-        .sort({ _id: 1 })
-        .limit(PAGE_SIZE)
-        .lean();
-      for (const job of jobs) {
-        await renew();
+      } else if (phase === 'records') {
+        if (!(await this.advanceRecords(user._id, user.deletionCursor, owned)))
+          await this.transition(owned, 'provider', null);
+      } else if (phase === 'provider') {
+        if (await this.storageCleanup.hasPendingForOwner(user._id)) return true;
         if (
-          await this.connection
-            .collection('audio_job_attempts')
-            .findOne({ jobId: job._id, localDataDeletedAt: null })
+          await this.purgeBatch('storage_cleanup_tasks', {
+            ownerUserId: user._id,
+          })
         )
           return true;
-        for (const name of [
-          'audio_job_attempts',
-          'audio_job_receipts',
-          'audio_job_errors',
-        ]) {
-          if (await this.purgeBatch(name, { jobId: job._id })) return true;
-        }
-        if (await this.purgeOutbox({ jobId: job._id }, renew)) return true;
-        await this.connection.collection('audio_jobs').deleteOne({
-          _id: job._id,
-          userId: user._id,
-          cleanupCompletedAt: { $ne: null },
-        });
+        await this.renew(owned);
+        await this.providerCall(() =>
+          this.firebase.deleteUser(user.firebaseUid),
+        );
+        await this.renew(owned);
+        await this.identities.complete(user.firebaseUid, now);
+        await this.transition(owned, 'profile', null);
+      } else if (phase === 'profile') {
+        await this.writeTombstone(user, now);
+        await this.users.deleteOne(owned);
       }
-      if (jobs.length) return true;
-      if (await this.purgeOutbox({ userId: user._id }, renew)) return true;
-      for (const name of [
-        'user_devices',
-        'device_installation_owners',
-        'push_registrations',
-        'client_errors',
-        'account_recovery_requests',
-        'processing_usage_ledger',
-        'processing_execution_usage',
-      ]) {
-        await renew();
-        if (await this.purgeBatch(name, { userId: user._id })) return true;
-      }
-      if (await this.storageCleanup.hasPendingForOwner(user._id)) return true;
-      await renew();
-      await this.providerCall(() => this.firebase.deleteUser(user.firebaseUid));
-      await renew();
-      await this.identities.complete(user.firebaseUid);
-      await this.users.deleteOne(owned);
     } catch {
-      // No provider details or account data are logged. Keep the durable fence for retry.
-      retryMs = 60_000;
+      failed = true;
+      retryMs = FAILURE_RETRY_MS;
     } finally {
       await this.users.updateOne(owned, {
         $set: {
           deletionLeaseToken: null,
           deletionLeaseUntil: null,
-          deletionNextAt: new Date(Date.now() + retryMs),
+          deletionNextAt: new Date(now.getTime() + retryMs),
+          deletionFailureCode: failed ? 'DEPENDENCY_RETRY' : null,
         },
       });
     }
     return true;
+  }
+
+  private async fenceGraceWork(
+    user: User,
+    token: string,
+    recoverUntil: Date,
+    now: Date,
+  ): Promise<void> {
+    let retryAt = recoverUntil;
+    let failed = false;
+    try {
+      const active = await this.jobs
+        .find({
+          userId: user._id,
+          deletedAt: null,
+          status: trusted({ $in: ACTIVE_JOB_STATUSES }),
+        })
+        .sort({ _id: 1 })
+        .limit(PAGE_SIZE)
+        .lean();
+      for (const job of active)
+        await this.actions.cancelForAccountDeletion(
+          user._id.toHexString(),
+          job._id.toHexString(),
+        );
+      if (active.length) retryAt = new Date(now.getTime() + PROGRESS_RETRY_MS);
+    } catch {
+      failed = true;
+      retryAt = new Date(now.getTime() + FAILURE_RETRY_MS);
+    } finally {
+      await this.users.updateOne(
+        {
+          _id: user._id,
+          status: 'deleting',
+          deletionLeaseToken: token,
+        },
+        {
+          $set: {
+            deletionRecoverUntil: recoverUntil,
+            deletionNextAt: retryAt,
+            deletionLeaseToken: null,
+            deletionLeaseUntil: null,
+            deletionPhase: 'grace_fence',
+            deletionCursor: null,
+            deletionFailureCode: failed ? 'DEPENDENCY_RETRY' : null,
+          },
+        },
+      );
+    }
+  }
+
+  private async advanceJobs(
+    userId: Types.ObjectId,
+    owned: OwnedPurge,
+    now: Date,
+  ): Promise<boolean> {
+    const live = await this.jobs
+      .find({ userId, deletedAt: null })
+      .sort({ _id: 1 })
+      .limit(PAGE_SIZE)
+      .lean();
+    for (const job of live) {
+      await this.renew(owned);
+      if (['ready', 'failed', 'cancelled'].includes(job.status))
+        await this.deletion.delete(userId.toHexString(), job._id.toHexString());
+      else
+        await this.actions.cancelForAccountDeletion(
+          userId.toHexString(),
+          job._id.toHexString(),
+        );
+    }
+    if (live.length) return true;
+    if (await this.jobs.exists({ userId, cleanupCompletedAt: null }))
+      return true;
+
+    const jobs = await this.jobs
+      .find({ userId })
+      .sort({ _id: 1 })
+      .limit(PAGE_SIZE)
+      .lean();
+    for (const job of jobs) {
+      await this.renew(owned);
+      if (await this.purgeAttempts(job._id, userId, now)) return true;
+      for (const name of [
+        'audio_job_errors',
+        'upload_grant_receipts',
+        'download_grant_receipts',
+      ]) {
+        if (await this.purgeBatch(name, { jobId: job._id })) return true;
+      }
+      if (await this.purgeOutbox({ jobId: job._id }, owned)) return true;
+      await this.connection.collection('audio_jobs').deleteOne({
+        _id: job._id,
+        userId,
+        cleanupCompletedAt: { $ne: null },
+      });
+    }
+    return jobs.length > 0;
+  }
+
+  private async purgeAttempts(
+    jobId: Types.ObjectId,
+    userId: Types.ObjectId,
+    now: Date,
+  ): Promise<boolean> {
+    const collection =
+      this.connection.collection<AttemptArtifact>('worker_attempts');
+    const attempts = await collection
+      .find({ jobId })
+      .project({ _id: 1, outputObject: 1, outputReservation: 1 })
+      .limit(PAGE_SIZE)
+      .toArray();
+    if (!attempts.length) return false;
+    for (const attempt of attempts) {
+      const reservationKey =
+        typeof attempt.outputReservation?.key === 'string'
+          ? attempt.outputReservation.key
+          : null;
+      const outputKey =
+        typeof attempt.outputObject?.key === 'string'
+          ? attempt.outputObject.key
+          : null;
+      const versionId =
+        typeof attempt.outputObject?.versionId === 'string'
+          ? attempt.outputObject.versionId
+          : null;
+      if (reservationKey)
+        await this.storageCleanup.schedule({
+          key: reservationKey,
+          ownerUserId: userId,
+          reason: 'AUDIO_OUTPUT_ORPHANED',
+          nextAt: now,
+          settleUntil: now,
+        });
+      if (outputKey && outputKey !== reservationKey)
+        await this.storageCleanup.schedule({
+          key: outputKey,
+          versionId,
+          ownerUserId: userId,
+          reason: 'AUDIO_OUTPUT_ORPHANED',
+          nextAt: now,
+          settleUntil: now,
+        });
+    }
+    await collection.deleteMany({
+      jobId,
+      _id: { $in: attempts.map((attempt) => attempt._id) },
+    });
+    return true;
+  }
+
+  private async advanceRecords(
+    userId: Types.ObjectId,
+    cursor: string | null,
+    owned: OwnedPurge,
+  ): Promise<boolean> {
+    const cursorIndex = ACCOUNT_RECORD_COLLECTIONS.findIndex(
+      ([name]) => name === cursor,
+    );
+    const start = cursorIndex >= 0 ? cursorIndex : 0;
+    for (
+      let index = start;
+      index < ACCOUNT_RECORD_COLLECTIONS.length;
+      index++
+    ) {
+      const [name, field] = ACCOUNT_RECORD_COLLECTIONS[index];
+      await this.renew(owned);
+      if (
+        name === 'audio_notification_outbox'
+          ? await this.purgeOutbox({ userId }, owned)
+          : await this.purgeBatch(name, { [field]: userId })
+      )
+        return true;
+      const next = ACCOUNT_RECORD_COLLECTIONS[index + 1]?.[0] ?? null;
+      await this.users.updateOne(owned, {
+        $set: { deletionCursor: next, deletionFailureCode: null },
+      });
+    }
+    return false;
+  }
+
+  private async transition(
+    owned: OwnedPurge,
+    phase: PurgePhase,
+    cursor: string | null,
+  ): Promise<void> {
+    const result = await this.users.updateOne(owned, {
+      $set: {
+        deletionPhase: phase,
+        deletionCursor: cursor,
+        deletionFailureCode: null,
+      },
+    });
+    if (result.matchedCount !== 1)
+      throw new Error('Account cleanup lease lost');
+  }
+
+  private async renew(owned: OwnedPurge): Promise<void> {
+    const result = await this.users.updateOne(owned, {
+      $set: { deletionLeaseUntil: new Date(Date.now() + LEASE_MS) },
+    });
+    if (result.matchedCount !== 1)
+      throw new Error('Account cleanup lease lost');
+  }
+
+  private async writeTombstone(user: User, now: Date): Promise<void> {
+    if (!user.deletionRequestId || !user.deletionRequestedAt)
+      throw new Error('Account deletion intent is incomplete');
+    await this.connection
+      .collection<DeletionTombstoneDocument>('account_deletion_tombstones')
+      .updateOne(
+        { _id: user.deletionRequestId },
+        {
+          $setOnInsert: {
+            acceptedAt: user.deletionRequestedAt,
+            completedAt: now,
+            status: 'purged',
+            schemaVersion: 1,
+          },
+        },
+        { upsert: true },
+      );
   }
 
   private async providerCall(operation: () => Promise<unknown>): Promise<void> {
@@ -266,7 +462,6 @@ export class AccountDeletionCleanupService {
       .limit(100)
       .toArray();
     if (!page.length) return false;
-    // Recheck ownership so an installation transferred during cleanup survives.
     await collection.deleteMany({
       ...filter,
       _id: { $in: page.map((item) => item._id) },
@@ -276,7 +471,7 @@ export class AccountDeletionCleanupService {
 
   private async purgeOutbox(
     filter: Filter<Document>,
-    renew: () => Promise<void>,
+    owned: OwnedPurge,
   ): Promise<boolean> {
     const outbox = this.connection.collection('audio_notification_outbox');
     const page = await outbox
@@ -285,7 +480,7 @@ export class AccountDeletionCleanupService {
       .limit(PAGE_SIZE)
       .toArray();
     for (const record of page) {
-      await renew();
+      await this.renew(owned);
       if (
         await this.purgeBatch('audio_notification_deliveries', {
           outboxId: record._id,

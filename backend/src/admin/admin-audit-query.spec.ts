@@ -10,7 +10,7 @@ import {
 
 describe('admin audit query and receipt boundaries', () => {
   it('binds cursors to the exact filter scope and preserves a unique tiebreaker', () => {
-    const query = auditPage({ action: 'workers.drain', limit: '5' });
+    const query = auditPage({ action: 'jobs.cancel', limit: '5' });
     const id = new Types.ObjectId().toHexString();
     const cursor = encodeAuditCursor(
       query,
@@ -22,7 +22,7 @@ describe('admin audit query and receipt boundaries', () => {
       at: new Date('2026-09-10T12:00:00Z'),
     });
     expect(() =>
-      decodeAuditCursor(auditPage({ action: 'workers.revoke' }), cursor),
+      decodeAuditCursor(auditPage({ action: 'users.disable' }), cursor),
     ).toThrow();
   });
 
@@ -56,11 +56,11 @@ describe('admin audit query and receipt boundaries', () => {
   it('accepts only bounded audit metadata, never arbitrary operation payloads', () => {
     const event = {
       actorUid: 'fixture-owner',
-      action: 'workers.drain',
-      resourceType: 'worker',
-      resourceId: 'z440',
+      action: 'jobs.cancel',
+      resourceType: 'job',
+      resourceId: new Types.ObjectId().toHexString(),
       operationId: '1c2a047d-e63e-40d5-8a71-22ee3b65d804',
-      reason: 'Scheduled maintenance',
+      reason: 'Customer support request',
       previousRevision: 1,
       nextRevision: 2,
       outcome: 'succeeded',

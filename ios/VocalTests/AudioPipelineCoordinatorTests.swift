@@ -160,7 +160,13 @@ import XCTest
         AudioInputInspection(
           duration: 4, hasAudio: true, hasVideo: false, isPlayable: true, container: .mp3)
       },
-      startAccess: { _ in true }, stopAccess: { _ in }, availableCapacity: { _ in 100_000_000 })
+      startAccess: { _ in true }, stopAccess: { _ in }, availableCapacity: { _ in 100_000_000 },
+      prepareMedia: { source, directory, _, _, onPreparation in
+        try await onPreparation()
+        let target = directory.appendingPathComponent("input." + source.pathExtension.lowercased())
+        try FileManager.default.copyItem(at: source, to: target)
+        return target
+      })
     let downloadGate = DownloadGate(root: root)
     self.downloadGate = downloadGate
     coordinator = AudioPipelineCoordinator(

@@ -38,7 +38,7 @@ Google through Firebase Authentication and Credential Manager. Account settings
 support optional email verification, password reset, linked sign-in methods,
 registered installations, local sign-out, and sign-out everywhere. Linking keeps
 the same Firebase UID; unlinking requires fresh authentication with a retained
-method usable on Android. Account deletion requires provider reauthentication and a final destructive confirmation. The backend accepts deletion durably before local sign-out and UID-scoped private cleanup. Acceptance is not a claim that cloud cleanup or backup expiry has finished.
+method usable on Android. Account deletion requires provider reauthentication and a final destructive confirmation. The backend returns and the no-backup journal preserves the exact 15-day recovery deadline before local sign-out and UID-scoped private cleanup. Acceptance is not a claim that cloud cleanup or backup expiry has finished.
 
 `auth/` owns the Firebase gateway, bounded HTTP client, session coordinator, and
 installation metadata. `ui/auth/` owns the sign-in gate and account screens.
@@ -241,7 +241,8 @@ Processing flow:
 3. Confirm rights and select Remove music to upload to private signed S3 storage and track the backend job.
 4. Explicitly Play, Download, Save, or Share the ready voice-only MP3. Output is cached privately per account.
 
-Input must be nonempty, smaller than 30,000,000 bytes and shorter than 600 seconds.
+Prepared input must be nonempty and is accepted up to the inclusive backend-owned
+limits of 50,000,000 bytes and 1,200 seconds.
 Cancellation waits for backend acknowledgement; worker interruption remains visible
 until recovery. Failed-job retry creates a new queue entry. Signing out stops private
 playback and fences stale work; ordinary sign-out retains input/output files. Accepted account deletion purges UID-scoped private data and cancels work. Original provider files and user-exported copies are preserved.
@@ -332,13 +333,10 @@ download, and upload; waiting for a remote worker does not keep this foreground 
 alive. Android force-stop/background restrictions still apply.
 
 `ProcessingMediaPolicy` reads schema 2 and the `preserve-or-aac-lc-256-v1` profile.
-Expanded media limits are inclusive 1,800 seconds and 100,000,000 bytes, bounded by
-the actual server policy. Null original-size/preparation/download evidence fields
-**disable expansion**. The currently supplied backend policy has null evidence and
-acceptNewJobs=false, so safe legacy audio behavior stays below 600 seconds and
-30,000,000 bytes; this change does not claim 30-minute production readiness.
-Unknown profiles fail safely. Backend admission remains authoritative after local
-preparation and can reject a race with another device or a full queue.
+The single active media policy is inclusive 1,200 seconds and 50,000,000 prepared
+bytes, bounded by any lower server value. Unknown profiles fail safely. Backend
+admission remains authoritative after local preparation and can reject a race with
+another installation or a full queue.
 
 The platform engine uses MediaExtractor directly on the provider descriptor without
 copying the original video. It honors the default or sole soundtrack and rejects
@@ -351,12 +349,11 @@ must pass the same inclusive duration/size policy; codec padding handling is not
 license for truncation. Native codec and exact boundary behavior remain unverified
 on Android hardware and must be validated before activating expanded readiness.
 
-Without expanded server readiness, local files use the standard submission path:
-audio must remain below 600 seconds and 30,000,000 bytes. Local extraction accepts
-known-size sources up to 200,000,000 bytes with a 120-second preparation deadline.
-These are conservative client limits, not measured worker qualification; they do
-not enable expanded admission, longer jobs, or additional worker capacity. Server
-maintenance, allowance, and admission checks still apply when submitting the audio.
+When policy refresh is unavailable, local preparation keeps the same 1,200-second
+and 50,000,000-byte safe ceiling; it never raises the backend limit. Local extraction
+accepts known-size sources up to 200,000,000 bytes with a 120-second preparation
+deadline. Server maintenance, allowance, and admission checks still apply when
+submitting the audio.
 
 Video imports use the system document picker so the provider supplies the original
 filename instead of the photo picker's numeric alias. Only the final extension is
@@ -389,8 +386,12 @@ removed. Automatic in-operation extractor updates were removed so an update cann
 escape the source-operation deadline. Live YouTube availability was not tested.
 
 Owner-only usage is refreshed before intake and periodically on the home screen.
-It separates spent, reserved, remaining audio minutes and the server UTC rolling
-replenishment time, shown in local time. Busy/allowance errors are localized in
-English and Arabic without raw diagnostics or automatic queue-full retries. No
+It separates used, reserved, refunded, and remaining audio minutes for the current
+UTC calendar month and validates upload grants/bytes, result grants/estimated bytes,
+retained output, effective media limits, and reset boundaries from the same response.
+Valid private-cache playback does not request another result grant. A stable request
+ID is reused after an uncertain result-transfer failure and rotated only for a known
+expired entitlement. Capacity/allowance errors are localized in English and Arabic
+without raw diagnostics or automatic queue-full retries. No
 queue-position or completion-time promise is shown when estimates are unavailable.
 See `../docs/tasks/media-input-and-queue/evidence/android.md` for current validation.

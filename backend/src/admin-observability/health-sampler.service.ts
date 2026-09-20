@@ -1,5 +1,4 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type { Redis } from 'ioredis';
 import type { Connection, Model } from 'mongoose';
@@ -7,7 +6,6 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { SECURITY_REDIS } from '../rate-limits/security-redis.provider.js';
 import { Release } from '../releases/release.schema.js';
 import { StoragePreflightService } from '../storage/storage-preflight.service.js';
-import { WorkerRegistration } from '../worker/worker-registration.schema.js';
 import type { AlertCondition } from './admin-alerts.service.js';
 import { AdminAlertsService } from './admin-alerts.service.js';
 import type { AlertType } from './admin-alert.schema.js';
@@ -16,7 +14,7 @@ export type HealthComponentStatus =
   'unknown' | 'healthy' | 'degraded' | 'unavailable';
 
 export interface HealthComponent {
-  name: 'api' | 'mongodb' | 'redis' | 'storage' | 'workers';
+  name: 'api' | 'mongodb' | 'redis' | 'storage';
   status: HealthComponentStatus;
   checkedAt: string | null;
   code: string | null;
@@ -29,25 +27,16 @@ export interface HealthSnapshot {
   activeAlertCount: number | null;
 }
 
-interface WorkerObservation {
-  _id: string;
-  state: 'enabled' | 'draining' | 'revoked';
-  control: {
-    activeJobId?: unknown;
-    lastSeenAt?: Date | null;
-    leaseExpiresAt?: Date | null;
-  } | null;
-}
-
 const COMPONENTS: HealthComponent['name'][] = [
   'api',
   'mongodb',
   'redis',
   'storage',
-  'workers',
 ];
 const CACHE_MS = 30_000;
 const PROBE_MS = 2_000;
+const ATLAS_FREE_WARNING_BYTES = 350_000_000;
+const REDIS_MEMORY_WARNING_RATIO = 0.8;
 
 @Injectable()
 export class HealthSamplerService {
@@ -69,11 +58,8 @@ export class HealthSamplerService {
     @InjectConnection() private readonly database: Connection,
     @Inject(SECURITY_REDIS) private readonly redis: Redis,
     private readonly storage: StoragePreflightService,
-    @InjectModel(WorkerRegistration.name)
-    private readonly registrations: Model<WorkerRegistration>,
     @InjectModel(Release.name) private readonly releases: Model<Release>,
     private readonly alerts: AdminAlertsService,
-    private readonly config: ConfigService,
   ) {}
 
   snapshot(): HealthSnapshot {
@@ -98,15 +84,10 @@ export class HealthSamplerService {
     const components = new Map<HealthComponent['name'], HealthComponent>();
     components.set('api', this.component('api', 'healthy', checkedAt));
 
-    const [mongodb, redis, storage, workers, releases] = await Promise.all([
-      this.probe('mongodb', async () => {
-        if (this.database.readyState !== 1 || !this.database.db)
-          throw new Error('not connected');
-        await this.database.db.command({ ping: 1 }, { timeoutMS: PROBE_MS });
-      }),
-      this.probe('redis', () => this.redis.ping()),
+    const [mongodb, redis, storage, releases] = await Promise.all([
+      this.probeMongo(),
+      this.probeRedis(),
       this.probe('storage', () => this.storage.assertReady()),
-      this.readWorkers(),
       this.readRejectedReleases(),
     ]);
 
@@ -120,63 +101,18 @@ export class HealthSamplerService {
           message: `${result.component.name} dependency probe failed`,
         });
       observedTypes.add('dependency_probe_failed');
+      if (
+        result.component.status === 'degraded' &&
+        ['mongodb', 'redis'].includes(result.component.name)
+      )
+        conditions.push({
+          type: 'datastore_capacity_warning',
+          severity: 'warning',
+          resourceId: result.component.name,
+          message: `${result.component.name} datastore capacity needs review`,
+        });
     }
-
-    if (workers.ok) {
-      observedTypes.add('worker_offline');
-      observedTypes.add('worker_recovery_required');
-      const leaseSeconds = this.config.getOrThrow<number>(
-        'PROCESSING_LEASE_SECONDS',
-      );
-      const offlineBefore = now.getTime() - leaseSeconds * 1000;
-      for (const worker of workers.value) {
-        const control = worker.control;
-        const lastSeen = control?.lastSeenAt?.getTime() ?? 0;
-        const recoveryRequired =
-          Boolean(control?.activeJobId) &&
-          (worker.state === 'revoked' ||
-            (control?.leaseExpiresAt?.getTime() ?? 0) <= now.getTime());
-        if (recoveryRequired) {
-          conditions.push({
-            type: 'worker_recovery_required',
-            severity: 'critical',
-            resourceId: worker._id,
-            message: 'Worker recovery is required',
-          });
-        } else if (worker.state === 'enabled' && lastSeen <= offlineBefore) {
-          conditions.push({
-            type: 'worker_offline',
-            severity: 'warning',
-            resourceId: worker._id,
-            message: 'Enabled worker is offline',
-          });
-        }
-      }
-      const workerConditions = conditions.filter((condition) =>
-        condition.type.startsWith('worker_'),
-      );
-      components.set(
-        'workers',
-        this.component(
-          'workers',
-          workerConditions.length ? 'unavailable' : 'healthy',
-          checkedAt,
-          workerConditions.length ? 'WORKER_ATTENTION_REQUIRED' : null,
-        ),
-      );
-    } else {
-      components.set(
-        'workers',
-        this.component('workers', 'unavailable', checkedAt, workers.code),
-      );
-      conditions.push({
-        type: 'dependency_probe_failed',
-        severity: 'critical',
-        resourceId: 'workers',
-        message: 'Worker dependency probe failed',
-      });
-      observedTypes.add('dependency_probe_failed');
-    }
+    observedTypes.add('datastore_capacity_warning');
 
     if (releases.ok) {
       observedTypes.add('apk_rejected');
@@ -249,29 +185,87 @@ export class HealthSamplerService {
     }
   }
 
-  private async readWorkers(): Promise<
-    { ok: true; value: WorkerObservation[] } | { ok: false; code: string }
-  > {
+  private async probeMongo() {
+    const checkedAt = new Date().toISOString();
     try {
-      const query = this.registrations.aggregate<WorkerObservation>([
-        { $project: { _id: 1, state: 1 } },
-        {
-          $lookup: {
-            from: 'audio_worker_control',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'controls',
-          },
-        },
-        { $set: { control: { $arrayElemAt: ['$controls', 0] } } },
-        { $project: { _id: 1, state: 1, control: 1 } },
-      ]);
+      if (this.database.readyState !== 1 || !this.database.db)
+        throw new Error('not connected');
+      await this.bounded(() =>
+        this.database.db!.command({ ping: 1 }, { timeoutMS: PROBE_MS }),
+      );
+      const stats = await this.bounded(() =>
+        this.database.db!.command(
+          { dbStats: 1, scale: 1 },
+          { timeoutMS: PROBE_MS },
+        ),
+      );
+      const dataSize = Number(stats.dataSize);
+      const indexSize = Number(stats.indexSize);
+      if (
+        Number.isFinite(dataSize) &&
+        Number.isFinite(indexSize) &&
+        dataSize + indexSize >= ATLAS_FREE_WARNING_BYTES
+      )
+        return {
+          component: this.component(
+            'mongodb',
+            'degraded',
+            checkedAt,
+            'MONGODB_STORAGE_PRESSURE',
+          ),
+        };
+      return { component: this.component('mongodb', 'healthy', checkedAt) };
+    } catch {
       return {
-        ok: true,
-        value: await this.bounded(() => query.option({ maxTimeMS: PROBE_MS })),
+        component: this.component(
+          'mongodb',
+          'unavailable',
+          checkedAt,
+          'DEPENDENCY_UNAVAILABLE',
+        ),
+      };
+    }
+  }
+
+  private async probeRedis() {
+    const checkedAt = new Date().toISOString();
+    try {
+      await this.bounded(() => this.redis.ping());
+      const info = await this.bounded(() => this.redis.info('memory'));
+      const values = new Map(
+        info
+          .split(/\r?\n/)
+          .map((line) => line.split(':', 2))
+          .filter((entry): entry is [string, string] => entry.length === 2),
+      );
+      const used = Number(values.get('used_memory'));
+      const max = Number(values.get('maxmemory'));
+      const policy = values.get('maxmemory_policy');
+      const code =
+        max === 0
+          ? 'REDIS_MEMORY_UNBOUNDED'
+          : policy !== 'noeviction'
+            ? 'REDIS_EVICTION_POLICY_UNSAFE'
+            : Number.isFinite(used) && used / max >= REDIS_MEMORY_WARNING_RATIO
+              ? 'REDIS_MEMORY_PRESSURE'
+              : null;
+      return {
+        component: this.component(
+          'redis',
+          code ? 'degraded' : 'healthy',
+          checkedAt,
+          code,
+        ),
       };
     } catch {
-      return { ok: false, code: 'DEPENDENCY_UNAVAILABLE' };
+      return {
+        component: this.component(
+          'redis',
+          'unavailable',
+          checkedAt,
+          'DEPENDENCY_UNAVAILABLE',
+        ),
+      };
     }
   }
 

@@ -75,7 +75,8 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
     let (data, response) = try await transport.perform(
       method: "DELETE", path: "/users/me", body: nil, bearer: token)
     let receipt = try decode(AccountDeletionReceipt.self, data: data, response: response)
-    guard response.statusCode == 202, receipt.status == "accepted", !receipt.requestId.isEmpty
+    guard response.statusCode == 202, receipt.status == "accepted", !receipt.requestId.isEmpty,
+      receipt.recoverUntil != nil
     else {
       throw AuthFailure.malformedResponse
     }

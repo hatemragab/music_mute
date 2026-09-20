@@ -6,9 +6,10 @@ import XCTest
 final class MediaPreparationEngineTests: XCTestCase {
   private var root: URL!
   private let policy = ProcessingMediaPolicy(
-    version: 2, maxDuration: 1800,
-    maxBytes: 100_000_000, inclusive: true, maxSourceBytes: 200_000_000,
-    maxPreparationSeconds: 60, profileID: "preserve-or-aac-lc-256-v1")
+    version: 2, maxDuration: 1_200,
+    maxBytes: 50_000_000, maxSourceBytes: 200_000_000,
+    maxPreparationSeconds: 60, profileID: "preserve-or-aac-lc-256-v1",
+    maxSourceDownloadBytes: 50_000_000, maxSourceDownloadSeconds: 120)
   override func setUpWithError() throws {
     root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -45,7 +46,7 @@ final class MediaPreparationEngineTests: XCTestCase {
     XCTAssertEqual(frequency, 880, accuracy: 10)
   }
 
-  func testThirtyMinutePreparedAudioUsesInclusiveVersionTwoLimit() async throws {
+  func testThirtyMinuteSourceIsRejectedByTheStandardDurationLimit() async throws {
     let project = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
       .deletingLastPathComponent().deletingLastPathComponent()
     let source = project.appendingPathComponent("artifacts/media-input/long/audio-1800s.m4a")
@@ -53,13 +54,10 @@ final class MediaPreparationEngineTests: XCTestCase {
       throw XCTSkip(
         "Optional generated 30-minute source is unavailable; run shared fixture generator first")
     }
-    let preparer = AudioInputPreparer(root: root, availableCapacity: { _ in 1_000_000_000 })
-    await preparer.configure(policy: policy)
-    let prepared = try await preparer.prepare(
-      sourceURL: source, ownerUid: "owner", securityScoped: false)
-    XCTAssertEqual(prepared.declaration.durationSeconds, 1800, accuracy: 0.0001)
-    XCTAssertGreaterThan(prepared.declaration.bytes, 30_000_000)
-    XCTAssertEqual(prepared.policyVersion, 2)
+    do {
+      _ = try await MediaSourceInspector.inspect(source, policy: policy)
+      XCTFail("Thirty-minute source was accepted")
+    } catch { XCTAssertEqual(error as? AudioInputPreparationError, .tooLong) }
   }
 
   func testNoAudioRejectedAndUnknownReadinessDoesNotExpand() async throws {
@@ -71,7 +69,12 @@ final class MediaPreparationEngineTests: XCTestCase {
     } catch { XCTAssertEqual(error as? AudioInputPreparationError, .noAudio) }
     do {
       _ = try await AudioPreparationEngine.prepare(
-        source: source, directory: root, policy: .expanded,
+        source: source, directory: root,
+        policy: ProcessingMediaPolicy(
+          version: 2, maxDuration: 1_200, maxBytes: 50_000_000,
+          maxSourceBytes: nil, maxPreparationSeconds: 120,
+          profileID: "preserve-or-aac-lc-256-v1",
+          maxSourceDownloadBytes: 50_000_000, maxSourceDownloadSeconds: 120),
         availableCapacity: { _ in 1_000_000_000 })
       XCTFail("null bounds expanded preparation")
     } catch { XCTAssertEqual(error as? AudioInputPreparationError, .policyUnavailable) }

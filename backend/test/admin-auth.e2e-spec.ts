@@ -32,7 +32,11 @@ describe('administrator HTTP admission', () => {
   it.each([
     ['anonymous', undefined, 401],
     ['ordinary Google user', 'ordinary-google-token', 403],
-    ['worker credential', 'fixture-worker-secret-with-at-least-32-bytes', 401],
+    [
+      'unknown credential',
+      'fixture-unknown-secret-with-at-least-32-bytes',
+      401,
+    ],
     ['password provider', 'password-token', 403],
     ['disabled Google identity', 'disabled-token', 403],
     ['revoked Google identity', 'revoked-token', 401],

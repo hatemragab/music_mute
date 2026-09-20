@@ -6,9 +6,9 @@ MusicMute is an AI-powered audio source separation project with native Android
 and iOS apps. Import audio you have permission to process, submit it for vocal
 isolation, and play, download, or share the voice-only result.
 
-This repository contains the mobile apps, API, administrator dashboard, and
-Windows processing worker. Audio separation runs on an external worker; a mobile
-build alone does not provide offline music removal.
+This repository contains the mobile apps, API, and administrator dashboard.
+New audio processing is temporarily unavailable while the processing architecture
+is redesigned. Existing job history and completed-result access remain available.
 
 [Getting started](#getting-started) · [Architecture](#architecture) ·
 [Documentation](#documentation) · [Contributing](CONTRIBUTING.md) ·
@@ -17,8 +17,7 @@ build alone does not provide offline music removal.
 ## Features
 
 - **Native mobile apps:** Kotlin/Jetpack Compose on Android and Swift/SwiftUI on iOS.
-- **Vocal isolation:** worker-based audio processing with voice-only MP3 output.
-- **Processing library:** track cloud jobs and retrieve results on demand.
+- **Processing library:** retain job history and completed voice-only results.
 - **Private transfers:** authenticated APIs and short-lived S3 upload/download grants.
 - **Job coordination:** durable processing state, cancellation, and recovery support.
 - **Operations console:** a React dashboard for authorized administrators.
@@ -35,17 +34,14 @@ flowchart LR
     API --> Redis[(Redis)]
     API --> S3[(Private S3 storage)]
     Apps -->|Signed transfers| S3
-    Worker[Windows audio worker] -->|Claim jobs and report results| API
-    Worker -->|Download input and upload output| S3
 ```
 
-| Component       | Technology                             | Setup and details                           |
-| --------------- | -------------------------------------- | ------------------------------------------- |
-| Android app     | Kotlin, Jetpack Compose                | [android/](android/README.md)               |
-| iOS app         | Swift, SwiftUI                         | [ios/](ios/README.md)                       |
-| API             | NestJS, TypeScript, MongoDB, Redis, S3 | [backend/](backend/README.md)               |
-| Admin dashboard | React, TypeScript, Vite, Tailwind CSS  | [dashboard/](dashboard/README.md)           |
-| Audio worker    | Windows, DirectML                      | [windows-worker/](windows-worker/README.md) |
+| Component       | Technology                             | Setup and details                 |
+| --------------- | -------------------------------------- | --------------------------------- |
+| Android app     | Kotlin, Jetpack Compose                | [android/](android/README.md)     |
+| iOS app         | Swift, SwiftUI                         | [ios/](ios/README.md)             |
+| API             | NestJS, TypeScript, MongoDB, Redis, S3 | [backend/](backend/README.md)     |
+| Admin dashboard | React, TypeScript, Vite, Tailwind CSS  | [dashboard/](dashboard/README.md) |
 
 ## Getting started
 
@@ -56,37 +52,38 @@ cd music_mute
 
 Choose the component you want to work on; there is no root-level install command.
 
-1. **API:** install Node.js 24 and npm 11, and provide independently running
+1. **API:** install Node.js 24 and pnpm 10, and provide independently running
    MongoDB 8 and Redis 7.4 or later. Follow the [backend setup](backend/README.md)
-   to configure an ignored local environment file, then run `npm ci` and
-   `npm run start:dev` from `backend/`.
+   to configure an ignored local environment file, then run
+   `pnpm install --frozen-lockfile` and `pnpm run start:dev` from `backend/`.
 2. **Dashboard:** follow the [dashboard setup](dashboard/README.md) for its API
    origin and Firebase configuration. Administrator access requires backend
    authorization.
 3. **Mobile apps:** use JDK 17 and Android SDK 36 for Android, or macOS and Xcode
    for iOS. Configure Firebase and the API endpoint using the platform guides
    before building.
-4. **Audio processing:** configure private S3 storage and the
-   [Windows worker](windows-worker/README.md) to run the complete processing flow.
 
 Start with the component guides for exact environment variables and verification
 commands. Local builds and fixture tests do not establish that production
-authentication, storage, notifications, or workers are configured.
+authentication, storage, or notifications are configured.
 
 ## Processing and account behavior
 
 Both apps make local audio import the primary flow. Selected audio is reviewed with
 an explicit rights confirmation before upload and processing. YouTube remains a
 secondary feature with an explicit download action; original downloads stay private.
-The processed library tracks cloud jobs and retrieves voice-only MP3 output on demand. See the
+New processing submissions currently return `PROCESSING_UNAVAILABLE`. The processed
+library retains job history and retrieves completed voice-only MP3 output on demand. See the
 [mobile processing tracker](docs/tasks/mobile-audio-processing.md) for implementation
 status, local test results and separate live-service validation requirements.
 
-Account deletion is available in both apps with recent authentication, durable
-request recovery and account-scoped local cleanup. The backend coordinates worker,
-storage and identity deletion. Public `/delete-account` and `/privacy` pages require
+Account deletion is available in both apps with recent authentication, an exact
+15-day recovery deadline, durable request recovery, and account-scoped local
+cleanup. The backend immediately blocks new costly work, fences active work, and
+coordinates storage and identity deletion after the deadline. Public
+`/delete-account` and `/privacy` pages require
 operator-supplied publication settings. See the [implementation and validation record](docs/validation/2026-09-10-store-readiness.md)
-and [deletion operations guide](backend/docs/account-deletion.md).
+and [deletion operations guide](docs/account-deletion.md).
 
 Both apps use `com.hatem.musicmute`. This replaces the earlier development ID
 `com.hatem.vocal`; the operating systems treat them as separate apps, so old
@@ -155,7 +152,9 @@ With JDK 17 and Android SDK 36 configured:
 
 ```sh
 cd android
-./gradlew :app:assembleDebug :app:lintDebug :app:testDebugUnitTest
+./gradlew :app:assembleDirectDebug :app:assemblePlayDebug \
+  :app:lintDirectDebug :app:lintPlayDebug \
+  :app:testDirectDebugUnitTest :app:testPlayDebugUnitTest
 ```
 
 ## Validate iOS
@@ -165,7 +164,8 @@ for the authorized iPhone 17 Pro simulator and the opt-in real download test.
 
 ## Validate the API and dashboard
 
-From `backend/`, run `npm ci` followed by `npm run verify`. Infrastructure
+From `backend/`, run `pnpm install --frozen-lockfile` followed by
+`pnpm run verify`. Infrastructure
 integration suites have additional requirements documented in the backend guide.
 
 From `dashboard/`, run `npm ci`, then:
@@ -186,10 +186,10 @@ integration tests also require local MongoDB, Redis, and Google Chrome.
 | Guide                                                              | Contents                                                  |
 | ------------------------------------------------------------------ | --------------------------------------------------------- |
 | [Backend](backend/README.md)                                       | Local environments, API verification, and VPS preparation |
-| [Audio API](backend/docs/api/audio-processing.md)                  | Mobile and worker processing contracts                    |
-| [Audio operations](backend/docs/operations/audio-processing.md)    | Storage setup and worker handoff                          |
+| [Audio API](backend/docs/api/audio-processing.md)                  | Mobile history and unavailable-boundary contracts         |
+| [Audio operations](backend/docs/operations/audio-processing.md)    | Storage and retained-job operations                       |
 | [Dashboard](dashboard/README.md)                                   | Administrator setup, checks, and packaging                |
-| [Account deletion](backend/docs/account-deletion.md)               | Identity and storage cleanup operations                   |
+| [Account deletion](docs/account-deletion.md)                       | Identity and storage cleanup operations                   |
 | [Mobile processing tracker](docs/tasks/mobile-audio-processing.md) | Implementation status and validation boundaries           |
 | [Contributing](CONTRIBUTING.md)                                    | Change scope, local checks, and pull requests             |
 

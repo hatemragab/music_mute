@@ -52,11 +52,11 @@ describe('release artifact version pinning', () => {
         'x-amz-checksum-sha256': checksum,
         'If-None-Match': '*',
       },
-      expiresAt: '2026-09-12T00:15:00.000Z',
+      expiresAt: '2026-09-12T00:10:00.000Z',
     });
     const url = new URL(grant.url);
     expect(decodeURIComponent(url.pathname)).toBe('/app-releases/fixture.apk');
-    expect(url.searchParams.get('X-Amz-Expires')).toBe('900');
+    expect(url.searchParams.get('X-Amz-Expires')).toBe('600');
     expect(url.searchParams.has('x-amz-checksum-sha256')).toBe(false);
     expect(url.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toEqual(
       expect.arrayContaining([

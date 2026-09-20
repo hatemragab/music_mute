@@ -1,9 +1,0 @@
-worker.config.json
-worker-secret.dpapi
-backend-worker-key-sha256.txt
-python.path
-state/
-__pycache__/
-*.pyc
-dist/
-.venv/

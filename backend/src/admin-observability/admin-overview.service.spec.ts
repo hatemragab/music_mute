@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConfigService } from '@nestjs/config';
 import { parseOverviewRange } from './overview-query.js';
 import { AdminOverviewService } from './admin-overview.service.js';
 import type { AdminActor } from '../admin/admin.types.js';
@@ -29,19 +28,8 @@ describe('overview date and cache boundaries', () => {
       aggregate: vi.fn(() => ({ option: vi.fn(async () => []) })),
     });
     const jobs = model(),
-      workers = model(),
-      controls = model(),
       releases = model();
-    const service = new AdminOverviewService(
-      jobs as never,
-      workers as never,
-      controls as never,
-      releases as never,
-      new ConfigService({
-        PROCESSING_WORKER_AUTH_MODE: 'fleet',
-        PROCESSING_LEASE_SECONDS: 90,
-      }),
-    );
+    const service = new AdminOverviewService(jobs as never, releases as never);
     const actor = { permissions: ['overview.read'] } as unknown as AdminActor;
     const first = await service.read(actor, range);
     expect(first.timings).toEqual({

@@ -1,4 +1,3 @@
-import { QueuePolicyService } from './queue-policy.service.js';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module.js';
@@ -8,14 +7,19 @@ import {
   AdminSettingsController,
   ProcessingPolicyController,
 } from './admin-settings.controller.js';
-import { ProcessingAdmissionService } from './processing-admission.service.js';
 import {
   ProcessingAdmissionFence,
   ProcessingAdmissionFenceSchema,
-  ProcessingSettings,
-  ProcessingSettingsSchema,
 } from './processing-settings.schema.js';
-import { ProcessingSettingsService } from './processing-settings.service.js';
+import { ProcessingAdmissionService } from './processing-admission.service.js';
+import {
+  AccountPolicy,
+  AccountPolicyOverride,
+  AccountPolicyOverrideSchema,
+  AccountPolicySchema,
+} from './account-policy.schema.js';
+import { AccountPolicyService } from './account-policy.service.js';
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 
 @Module({
   imports: [
@@ -23,7 +27,11 @@ import { ProcessingSettingsService } from './processing-settings.service.js';
     UsersModule,
     ProcessingPersistenceModule,
     MongooseModule.forFeature([
-      { name: ProcessingSettings.name, schema: ProcessingSettingsSchema },
+      { name: AccountPolicy.name, schema: AccountPolicySchema },
+      {
+        name: AccountPolicyOverride.name,
+        schema: AccountPolicyOverrideSchema,
+      },
       {
         name: ProcessingAdmissionFence.name,
         schema: ProcessingAdmissionFenceSchema,
@@ -32,13 +40,14 @@ import { ProcessingSettingsService } from './processing-settings.service.js';
   ],
   controllers: [AdminSettingsController, ProcessingPolicyController],
   providers: [
-    ProcessingSettingsService,
+    AccountPolicyService,
+    ProcessingUsageService,
     ProcessingAdmissionService,
-    QueuePolicyService,
   ],
   exports: [
     MongooseModule,
-    ProcessingSettingsService,
+    AccountPolicyService,
+    ProcessingUsageService,
     ProcessingAdmissionService,
   ],
 })

@@ -67,6 +67,7 @@ import XCTest
 
   func testExpiredStorageGrantRefreshesAuthoritativeStateWithinBudget() async throws {
     let repository = repository()
+    api.grantExpiry = Date().addingTimeInterval(-1)
     transfer.handler = { [weak transfer] _, destination, _ in
       if transfer?.calls == 1 { throw ArtifactDownloadFailure.httpStatus(403) }
       try Data("fixture-mp3".utf8).write(to: destination)
@@ -75,10 +76,12 @@ import XCTest
     XCTAssertEqual(transfer.calls, 2)
     XCTAssertEqual(api.detailCalls, 2)
     XCTAssertEqual(api.downloadCalls, 2)
+    XCTAssertNotEqual(api.requestIDs[0], api.requestIDs[1])
   }
 
   func testGrantRenewalStopsWhenJobIsNoLongerReady() async throws {
     let repository = repository()
+    api.grantExpiry = Date().addingTimeInterval(-1)
     transfer.handler = { [weak api] _, _, _ in
       api?.status = "failed"
       throw ArtifactDownloadFailure.httpStatus(403)
@@ -102,8 +105,8 @@ import XCTest
     } catch {
       XCTAssertEqual(error as? ArtifactDownloadFailure, .httpStatus(403))
     }
-    XCTAssertEqual(transfer.calls, 2)
-    XCTAssertEqual(api.downloadCalls, 2)
+    XCTAssertEqual(transfer.calls, 1)
+    XCTAssertEqual(api.downloadCalls, 1)
   }
 
   func testInvalidOutputAndInterruptedPartialNeverBecomeCache() async throws {
@@ -144,6 +147,8 @@ import XCTest
     transfer.handler = nil
     let result = try await repository.ensureOutput(jobId: jobId)
     XCTAssertEqual(try Data(contentsOf: result), Data("fixture-mp3".utf8))
+    XCTAssertEqual(api.requestIDs.count, 2)
+    XCTAssertEqual(api.requestIDs[0], api.requestIDs[1])
   }
 
   func testSameUidNewEpochFencesLateBytesAndClearsProgress() async throws {
@@ -223,16 +228,22 @@ import XCTest
   var status = "ready"
   var detailCalls = 0
   var downloadCalls = 0
+  var requestIDs: [UUID] = []
+  var grantExpiry = Date().addingTimeInterval(60)
   func detail(id: String) async throws -> Job {
     detailCalls += 1
     return processingJob(id: id, status: status)
   }
   func download(id: String, artifact: String) async throws -> DownloadGrant {
+    try await download(id: id, artifact: artifact, requestId: UUID())
+  }
+  func download(id: String, artifact: String, requestId: UUID) async throws -> DownloadGrant {
     XCTAssertEqual(artifact, "output")
     downloadCalls += 1
+    requestIDs.append(requestId)
     return DownloadGrant(
       url: URL(string: "https://storage.fixture.invalid/output?attempt=\(downloadCalls)")!,
-      expiresAt: Date().addingTimeInterval(60))
+      expiresAt: grantExpiry)
   }
   func create(requestId: UUID, input: InputDeclaration) async throws -> CreateReservation {
     fatalError("Unused")

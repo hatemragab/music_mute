@@ -13,6 +13,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { InlineBusy } from "./page";
+import { ApiError } from "@/api/api-client";
 
 interface ReasonDialogProps {
   open: boolean;
@@ -47,10 +48,12 @@ function OpenReasonDialog({
   const [reauthenticated, setReauthenticated] = useState(!freshAuth);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [requestId, setRequestId] = useState<string | null>(null);
 
   const reauthenticate = async () => {
     setBusy(true);
     setError(null);
+    setRequestId(null);
     try {
       await onReauthenticate?.();
       setReauthenticated(true);
@@ -67,12 +70,16 @@ function OpenReasonDialog({
     if (!reason.trim()) return;
     setBusy(true);
     setError(null);
+    setRequestId(null);
     try {
       await onConfirm(reason.trim());
       onOpenChange(false);
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "The operation failed.",
+      );
+      setRequestId(
+        caught instanceof ApiError ? (caught.requestId ?? null) : null,
       );
     } finally {
       setBusy(false);
@@ -81,7 +88,7 @@ function OpenReasonDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className={summary ? "sm:max-w-4xl" : undefined}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -105,9 +112,12 @@ function OpenReasonDialog({
           </p>
         </div>
         {error ? (
-          <p className="text-sm text-destructive" role="alert">
-            {error}
-          </p>
+          <div className="text-sm text-destructive" role="alert">
+            <p>{error}</p>
+            {requestId ? (
+              <p className="font-mono text-xs">Request {requestId}</p>
+            ) : null}
+          </div>
         ) : null}
         <DialogFooter>
           <DialogClose asChild>

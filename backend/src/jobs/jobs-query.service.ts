@@ -1,18 +1,18 @@
-import { Injectable, Optional } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { QueryFilter, Model } from 'mongoose';
 import { authError } from '../auth/auth.errors.js';
 import { StorageTransfersService } from '../storage/storage-transfers.service.js';
 import { processingIo } from '../processing/processing-io.js';
-import { WorkerControl } from '../worker/worker-control.schema.js';
-import { WorkerRegistryService } from '../worker/worker-registry.service.js';
 import { Job } from './job.schema.js';
 import { objectId } from './job-request.js';
 import { jobError } from './job-errors.js';
 import { JOB_STATUSES, type JobStatus } from './job.types.js';
-import { JobsService } from './jobs.service.js';
 import { presentJob } from './jobs.presenter.js';
+import { AccountAccessService } from '../users/account-access.service.js';
+import { ProcessingTransactions } from '../processing/processing-transactions.js';
+import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
+import type { ObjectIdentity } from './job.types.js';
 
 interface HistoryPosition {
   createdAt: Date;
@@ -53,12 +53,10 @@ export function decodeHistoryCursor(cursor: string): HistoryPosition {
 export class JobsQueryService {
   constructor(
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
-    @InjectModel(WorkerControl.name)
-    private readonly workers: Model<WorkerControl>,
-    private readonly owners: JobsService,
+    private readonly access: AccountAccessService,
     private readonly storage: StorageTransfersService,
-    private readonly config: ConfigService,
-    @Optional() private readonly registry?: WorkerRegistryService,
+    private readonly transactions: ProcessingTransactions,
+    private readonly usage: ProcessingUsageService,
   ) {}
 
   async list(
@@ -118,42 +116,78 @@ export class JobsQueryService {
   }
 
   async detail(userId: string, jobId: string) {
-    const job = await this.owners.findOwned(userId, jobId);
-    if (this.registry)
-      return {
-        ...presentJob(job),
-        workerAvailable: await this.registry.available(job),
-      };
-    if (
-      this.config.get<string>('PROCESSING_WORKER_AUTH_MODE', 'legacy') ===
-      'fleet'
-    )
-      return { ...presentJob(job), workerAvailable: false };
-    const worker = await this.workers.findById('z440').lean();
-    const availableAfter =
-      Date.now() -
-      this.config.getOrThrow<number>('PROCESSING_LEASE_SECONDS') * 1000;
-    return {
-      ...presentJob(job),
-      workerAvailable: Boolean(
-        worker?.lastSeenAt && worker.lastSeenAt.getTime() > availableAfter,
-      ),
-    };
+    return presentJob(await this.findOwned(userId, jobId));
   }
 
-  async download(userId: string, jobId: string, artifact: 'input' | 'output') {
-    const job = await this.owners.findOwned(userId, jobId);
-    const object =
-      artifact === 'input'
-        ? job.inputObject
-        : job.status === 'ready'
-          ? job.outputObject
-          : null;
+  async download(
+    userId: string,
+    jobId: string,
+    artifact: 'input' | 'output',
+    requestId: string,
+  ) {
+    const job = await this.findOwned(userId, jobId);
+    const object = this.downloadObject(job, artifact);
     if (!object) throw jobError('JOB_STATE_CONFLICT');
+    if (
+      !(await processingIo(() => this.storage.isPinnedObjectAvailable(object)))
+    )
+      throw jobError('JOB_STATE_CONFLICT');
+    const entitlement = await this.transactions.run(async (session) => {
+      await this.access.assertActive(userId, session);
+      const current = await this.jobs
+        .findOne({ _id: job._id, userId: job.userId, deletedAt: null })
+        .session(session)
+        .lean();
+      const currentObject = current
+        ? this.downloadObject(current, artifact)
+        : null;
+      if (!current || !currentObject || !sameObject(currentObject, object))
+        throw jobError('JOB_STATE_CONFLICT');
+      return this.usage.reserveDownloadGrant(
+        {
+          accountId: current.userId,
+          jobId: current._id,
+          scope: artifact === 'output' ? 'user_result' : 'user_input',
+          requestId,
+          object: currentObject,
+        },
+        session,
+      );
+    });
     const grant = await processingIo(() =>
-      this.storage.createDownloadGrant(object),
+      this.storage.createDownloadGrant(object, entitlement.expiresAt),
     );
-    await this.owners.findOwned(userId, jobId);
+    await this.findOwned(userId, jobId);
     return grant;
   }
+
+  private downloadObject(
+    job: Job,
+    artifact: 'input' | 'output',
+  ): ObjectIdentity | null {
+    return artifact === 'input'
+      ? job.inputObject
+      : job.status === 'ready'
+        ? job.outputObject
+        : null;
+  }
+
+  private async findOwned(userId: string, jobId: string) {
+    await this.access.assertActive(userId);
+    const job = await this.jobs
+      .findOne({ _id: objectId(jobId), userId: objectId(userId) })
+      .lean();
+    if (!job || job.deletedAt) throw jobError('JOB_NOT_FOUND');
+    return job;
+  }
+}
+
+function sameObject(left: ObjectIdentity, right: ObjectIdentity): boolean {
+  return (
+    left.key === right.key &&
+    left.versionId === right.versionId &&
+    left.bytes === right.bytes &&
+    left.sha256 === right.sha256 &&
+    left.contentType === right.contentType
+  );
 }

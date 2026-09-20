@@ -1,7 +1,4 @@
-import {
-  PREPARATION_PROFILE_ID,
-  type InputSource,
-} from '../admin-settings/processing-policy-v2.js';
+import { PREPARATION_PROFILE_ID, type InputSource } from './job.types.js';
 import { jobError } from './job-errors.js';
 import { authError } from '../auth/auth.errors.js';
 
@@ -44,20 +41,14 @@ export function normalizeYouTubeSourceUrl(value: unknown): string {
 export function normalizeJobMetadata(metadata: JobMetadata): JobMetadata {
   const result: JobMetadata = {};
   if (
-    metadata.policyVersion !== undefined ||
-    metadata.preparationProfileId !== undefined ||
-    metadata.source !== undefined
-  ) {
-    if (
-      metadata.policyVersion !== 2 ||
-      metadata.preparationProfileId !== PREPARATION_PROFILE_ID ||
-      !['audio_file', 'video_file', 'youtube'].includes(metadata.source ?? '')
-    )
-      throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
-    result.policyVersion = 2;
-    result.preparationProfileId = metadata.preparationProfileId;
-    result.source = metadata.source;
-  }
+    metadata.policyVersion !== 2 ||
+    metadata.preparationProfileId !== PREPARATION_PROFILE_ID ||
+    !['audio_file', 'video_file', 'youtube'].includes(metadata.source ?? '')
+  )
+    throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
+  result.policyVersion = 2;
+  result.preparationProfileId = metadata.preparationProfileId;
+  result.source = metadata.source;
   if (metadata.sourceTitle !== undefined)
     result.sourceTitle = normalizeAudioName(metadata.sourceTitle);
   if (metadata.sourceKind !== undefined) {

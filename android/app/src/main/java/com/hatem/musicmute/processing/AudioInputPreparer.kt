@@ -35,12 +35,12 @@ data class PreparedInput(
     val file: File,
     val declaration: InputDeclaration,
     val displayName: String,
-    val mediaPolicy: ProcessingMediaPolicy = ProcessingMediaPolicy.LEGACY,
+    val mediaPolicy: ProcessingMediaPolicy = ProcessingMediaPolicy.STANDARD,
     val mediaSource: String = "audio_file",
 )
 
 fun validProcessingInput(bytes: Long, durationSeconds: Double): Boolean =
-    bytes in 1..29_999_999 && durationSeconds.isFinite() && durationSeconds > 0 && durationSeconds < 600
+    ProcessingMediaPolicy.STANDARD.acceptsPrepared(bytes, durationSeconds)
 
 fun processingOwnerDirectory(root: File, uid: String): File {
     require(uid.isNotBlank())
@@ -61,7 +61,7 @@ fun processingContentType(extension: String): String? = when (extension) {
 /** Copies once into operation-owned storage; upload retries always read these exact bytes. */
 class AudioInputPreparer(
     private val root: File,
-    private val maxBytes: Long = 30_000_000,
+    private val maxBytes: Long = ProcessingMediaPolicy.STANDARD.maxPreparedAudioBytes,
     private val validateDecoded: suspend (File, ProcessingMediaPolicy) -> Unit = { _, _ -> },
     private val inspect: (File) -> AudioInspection,
 ) {
@@ -69,7 +69,7 @@ class AudioInputPreparer(
         ownerUid: String,
         displayName: String,
         operationId: String = UUID.randomUUID().toString(),
-        policy: ProcessingMediaPolicy = ProcessingMediaPolicy.LEGACY,
+        policy: ProcessingMediaPolicy = ProcessingMediaPolicy.STANDARD,
         mediaSource: String = "audio_file",
         open: () -> InputStream,
     ): PreparedInput =
@@ -120,7 +120,7 @@ class AudioInputPreparer(
                                 if (count < 0) break
                                 if (count == 0) continue
                                 bytes += count
-                                if (if (policy.version == 1) bytes >= minOf(maxBytes, policy.maxPreparedAudioBytes) else bytes > policy.maxPreparedAudioBytes) throw InputPreparationException(InputPreparationError.TOO_LARGE)
+                                if (bytes > minOf(maxBytes, policy.maxPreparedAudioBytes)) throw InputPreparationException(InputPreparationError.TOO_LARGE)
                                 digest.update(buffer, 0, count)
                                 destination.write(buffer, 0, count)
                             }

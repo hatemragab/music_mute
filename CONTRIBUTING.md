@@ -2,7 +2,7 @@
 
 Start with the [README](README.md) and the setup guide for the affected component.
 Search existing issues and source code before proposing a new feature or utility.
-For changes spanning the API, apps, and workers, describe the contract change and
+For changes spanning the API and apps, describe the contract change and
 compatibility impact in an issue before starting a large implementation.
 
 ## Local development
@@ -10,13 +10,12 @@ compatibility impact in an issue before starting a large implementation.
 Clone `https://github.com/hatemragab/music_mute.git` and create a focused branch.
 Each component owns its dependencies and commands; there is no root package install.
 
-| Component      | Guide                             | Relevant checks                                  |
-| -------------- | --------------------------------- | ------------------------------------------------ |
-| Android        | [Setup](android/README.md)        | Gradle build, lint, and unit tests               |
-| iOS            | [Setup](ios/README.md)            | Xcode build/tests and Swift formatting           |
-| Backend        | [Setup](backend/README.md)        | `npm run verify`; relevant infrastructure suites |
-| Dashboard      | [Setup](dashboard/README.md)      | Format, lint, typecheck, tests, and build        |
-| Windows worker | [Setup](windows-worker/README.md) | Worker tests and packaging checks                |
+| Component | Guide                        | Relevant checks                                  |
+| --------- | ---------------------------- | ------------------------------------------------ |
+| Android   | [Setup](android/README.md)   | Gradle build, lint, and unit tests               |
+| iOS       | [Setup](ios/README.md)       | Xcode build/tests and Swift formatting           |
+| Backend   | [Setup](backend/README.md)   | `pnpm run verify`; relevant infrastructure suites |
+| Dashboard | [Setup](dashboard/README.md) | Format, lint, typecheck, tests, and build        |
 
 Run commands from the component directory. Follow the existing simulator policy
 in the iOS guide for runtime/UI checks; do not automatically substitute devices.
@@ -25,7 +24,7 @@ Documentation-only changes need link and formatting checks rather than app build
 ## Change guidelines
 
 - Keep changes focused and follow existing architecture, naming, and formatting.
-- Preserve compatibility between clients, API contracts, and worker versions.
+- Preserve compatibility between clients and API contracts.
 - Add meaningful tests for behavior changes, including failure and recovery paths.
 - Update component documentation when setup, configuration, or behavior changes.
 - Do not include credentials, `.env` files, production Firebase configuration,

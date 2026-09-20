@@ -43,12 +43,12 @@ describe('account deletion acceptance', () => {
     expect(receipt).toMatchObject({
       status: 'accepted',
       requestId: expect.any(String),
-      recoverUntil: '1970-04-01T00:16:40.000Z',
+      recoverUntil: '1970-01-16T00:16:40.000Z',
     });
     expect(f.user.status).toBe('deleting');
     expect(
       (f.user as { deletionRecoverUntil?: Date }).deletionRecoverUntil,
-    ).toEqual(new Date('1970-04-01T00:16:40.000Z'));
+    ).toEqual(new Date('1970-01-16T00:16:40.000Z'));
     expect(
       await f.service.requestDeletion(
         f.user._id.toHexString(),

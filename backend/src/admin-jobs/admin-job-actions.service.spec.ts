@@ -5,7 +5,6 @@ import type { AdminActor } from '../admin/admin.types.js';
 import { AdminJobActionsService } from './admin-job-actions.service.js';
 
 const sourceId = '64b000000000000000000001';
-const newId = '64b000000000000000000002';
 const actor: AdminActor = {
   uid: 'support-fixture',
   verifiedEmail: 'support@example.invalid',
@@ -23,18 +22,10 @@ const dto = () => ({
 function fixture() {
   const session = { inTransaction: () => true };
   const actions = {
-    prepareRetry: vi.fn().mockResolvedValue(undefined),
     cancelAsAdmin: vi.fn().mockResolvedValue({
       jobId: sourceId,
-      status: 'cancel_requested',
+      status: 'cancelled',
       revision: 4,
-    }),
-    retryAsAdmin: vi.fn().mockResolvedValue({
-      sourceJobId: sourceId,
-      newJobId: newId,
-      status: 'queued',
-      sourceRevision: 4,
-      revision: 0,
     }),
     administrativeState: vi.fn().mockResolvedValue({
       jobId: sourceId,
@@ -51,13 +42,17 @@ function fixture() {
       };
     }),
   };
-  const audit = { record: vi.fn().mockResolvedValue(undefined) };
+  const unavailable = {
+    reject: vi.fn(() => {
+      throw jobError('PROCESSING_UNAVAILABLE');
+    }),
+  };
   const service = new AdminJobActionsService(
     actions as never,
     operations as never,
-    audit as never,
+    unavailable as never,
   );
-  return { service, actions, operations, audit, session };
+  return { service, actions, operations, unavailable, session };
 }
 
 describe('administrative job actions', () => {
@@ -66,7 +61,7 @@ describe('administrative job actions', () => {
       body = dto();
     await expect(f.service.cancel(actor, sourceId, body)).resolves.toEqual({
       jobId: sourceId,
-      status: 'cancel_requested',
+      status: 'cancelled',
       revision: 4,
     });
     expect(f.actions.cancelAsAdmin).toHaveBeenCalledWith(
@@ -86,50 +81,16 @@ describe('administrative job actions', () => {
     );
   });
 
-  it('records source and new job references without copying private media into the audit', async () => {
-    const f = fixture(),
-      body = dto();
-    await expect(f.service.retry(actor, sourceId, body)).resolves.toEqual({
-      sourceJobId: sourceId,
-      newJobId: newId,
-      status: 'queued',
-    });
-    expect(f.actions.retryAsAdmin).toHaveBeenCalledWith(
-      actor,
-      sourceId,
-      3,
-      expect.any(String),
-      f.session,
-    );
-    expect(f.audit.record).toHaveBeenCalledWith(
-      {
-        actorUid: actor.uid,
-        action: 'jobs.retry.source',
-        resourceType: 'job',
-        resourceId: sourceId,
-        operationId: body.operationId,
-        reason: body.reason,
-        previousRevision: 3,
-        nextRevision: 4,
-        outcome: 'succeeded',
-      },
-      f.session,
-    );
-  });
-
-  it('replays a successful retry from its safe receipt without enqueuing another job', async () => {
+  it('rejects retry through the shared unavailable boundary', async () => {
     const f = fixture();
-    f.operations.run.mockResolvedValueOnce({
-      value: undefined,
-      receipt: { resourceId: newId },
-    });
-    await expect(f.service.retry(actor, sourceId, dto())).resolves.toEqual({
-      sourceJobId: sourceId,
-      newJobId: newId,
-      status: 'queued',
-    });
-    expect(f.actions.retryAsAdmin).not.toHaveBeenCalled();
-    expect(f.audit.record).not.toHaveBeenCalled();
+    await expect(f.service.retry(actor, sourceId, dto())).rejects.toMatchObject(
+      {
+        response: { code: 'PROCESSING_UNAVAILABLE' },
+        status: 503,
+      },
+    );
+    expect(f.unavailable.reject).toHaveBeenCalledOnce();
+    expect(f.operations.run).not.toHaveBeenCalled();
   });
 
   it('returns the current cancellation state on receipt replay', async () => {
@@ -145,22 +106,4 @@ describe('administrative job actions', () => {
     });
     expect(f.actions.cancelAsAdmin).not.toHaveBeenCalled();
   });
-
-  it.each([
-    'NEW_INPUT_REQUIRED',
-    'WORKER_RECOVERY_REQUIRED',
-    'JOB_STATE_CONFLICT',
-  ] as const)(
-    'preserves safe %s domain errors in the administrative error contract',
-    async (code) => {
-      const f = fixture();
-      f.actions.retryAsAdmin.mockRejectedValueOnce(jobError(code));
-      await expect(
-        f.service.retry(actor, sourceId, dto()),
-      ).rejects.toMatchObject({
-        response: { code, requestId: expect.any(String) },
-        status: code === 'NEW_INPUT_REQUIRED' ? 422 : 409,
-      });
-    },
-  );
 });

@@ -4,21 +4,24 @@ export interface ProcessingChangeMetadata {
   after: string | number | boolean | null;
 }
 const processingAuditFields = new Set([
-  'allowanceAudioSeconds',
-  'allowanceExpiresAt',
-  'processingSuspended',
-  'suspensionExpiresAt',
+  'monthlyProcessingSeconds',
+  'overrideExpiresAt',
   'acceptNewJobs',
-  'acceptLongJobs',
   'maxDurationSeconds',
   'maxPreparedAudioBytes',
-  'maxActiveJobsPerUser',
-  'allowanceWindowSeconds',
-  'maxOutstandingJobs',
-  'maxOutstandingAudioSeconds',
-  'agingThresholdSeconds',
-  'qualificationEvidenceReference',
-  'qualificationExpiresAt',
+  'dailyUploadGrants',
+  'monthlyUploadGrants',
+  'monthlyConfirmedUploadBytes',
+  'maxWaitingJobs',
+  'maxProcessingJobs',
+  'maxInfrastructureAttempts',
+  'maxClientInputAttempts',
+  'monthlyDownloadGrants',
+  'monthlyEstimatedDownloadBytes',
+  'maxRetainedOutputBytes',
+  'signedUrlTtlSeconds',
+  'monthlyServiceOutboundBytes',
+  'deletionGraceHours',
 ]);
 import { createHash } from 'node:crypto';
 import { Types } from 'mongoose';
@@ -39,15 +42,6 @@ export interface AuditPageQuery {
   resourceId?: string;
 }
 
-export interface StopEvidenceMetadata {
-  attestation: string;
-  stoppedAt: string;
-  jobId: string;
-  attemptId: string;
-  sessionId: string;
-  generation: number;
-}
-
 export interface AuditExportMetadata {
   dataset: 'jobs' | 'overview';
   from: string;
@@ -58,7 +52,6 @@ export interface AuditExportMetadata {
 export interface AuditEventInput {
   processingChanges?: ProcessingChangeMetadata[] | null;
   exportMetadata?: AuditExportMetadata | null;
-  stopEvidence?: StopEvidenceMetadata | null;
   actorUid: string;
   action: string;
   resourceType: string;
@@ -242,7 +235,6 @@ export function validateAuditEvent(
     Object.keys(value).some(
       (key) =>
         key !== 'processingChanges' &&
-        key !== 'stopEvidence' &&
         key !== 'exportMetadata' &&
         !keys.includes(key),
     ) ||
@@ -276,7 +268,9 @@ export function validateAuditEvent(
     if (
       !Array.isArray(value.processingChanges) ||
       value.processingChanges.length > 20 ||
-      !['user', 'processing_settings'].includes(String(value.resourceType))
+      !['user', 'account_policy', 'account_policy_override'].includes(
+        String(value.resourceType),
+      )
     )
       throw adminError('INVALID_REQUEST');
     for (const change of value.processingChanges as ProcessingChangeMetadata[]) {
@@ -300,27 +294,6 @@ export function validateAuditEvent(
         )
           throw adminError('INVALID_REQUEST');
     }
-  }
-  if (value.stopEvidence != null) {
-    const evidence = value.stopEvidence as StopEvidenceMetadata;
-    if (
-      typeof evidence !== 'object' ||
-      Array.isArray(evidence) ||
-      Object.keys(evidence).sort().join(',') !==
-        'attemptId,attestation,generation,jobId,sessionId,stoppedAt' ||
-      !bounded(evidence.attestation, 1000) ||
-      evidence.attestation.length < 20 ||
-      evidence.attestation.trim() !== evidence.attestation ||
-      !/^[a-f0-9]{24}$/.test(evidence.jobId) ||
-      !validOperationId(evidence.attemptId) ||
-      !validOperationId(evidence.sessionId) ||
-      !Number.isSafeInteger(evidence.generation) ||
-      evidence.generation < 1 ||
-      typeof evidence.stoppedAt !== 'string' ||
-      !Number.isFinite(Date.parse(evidence.stoppedAt)) ||
-      new Date(evidence.stoppedAt).toISOString() !== evidence.stoppedAt
-    )
-      throw adminError('INVALID_REQUEST');
   }
   if (value.exportMetadata != null) {
     const metadata = value.exportMetadata as AuditExportMetadata;

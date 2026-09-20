@@ -90,18 +90,6 @@ export class AdminAuditService implements OnModuleInit {
               },
             }
           : {}),
-        ...(event.stopEvidence
-          ? {
-              stopEvidence: {
-                attestation: event.stopEvidence.attestation,
-                stoppedAt: event.stopEvidence.stoppedAt,
-                jobId: event.stopEvidence.jobId,
-                attemptId: event.stopEvidence.attemptId,
-                sessionId: event.stopEvidence.sessionId,
-                generation: event.stopEvidence.generation,
-              },
-            }
-          : {}),
       })),
       nextCursor:
         hasMore && last

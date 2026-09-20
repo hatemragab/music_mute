@@ -1,10 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   Param,
-  Post,
   Put,
   Query,
   Req,
@@ -17,10 +17,9 @@ import {
 } from '../admin/admin.decorators.js';
 import { AdminUsersService } from './admin-users.service.js';
 import {
-  AdminUserProcessingDto,
-  AdminAllowanceDto,
-  AdminSuspensionDto,
-} from './dto/admin-user.dto.js';
+  DeleteAccountPolicyOverrideDto,
+  PutAccountPolicyOverrideDto,
+} from '../admin-settings/dto/account-policy.dto.js';
 
 @Controller('admin/users')
 @RequireAdminPermission('users.read')
@@ -37,57 +36,33 @@ export class AdminUsersController {
     return this.users.detail(id);
   }
 
-  @Get(':id/processing-usage')
+  @Get(':id/account-usage')
   @Header('Cache-Control', 'no-store')
   usage(@Param('id') id: string) {
-    return this.users.processingUsage(id);
+    return this.users.accountUsage(id);
   }
 
-  @Put(':id/processing-allowance')
+  @Put(':id/account-policy-override')
   @RequireAdminPermission('users.processing.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
-  allowance(
+  policyOverride(
     @Req() request: AuthRequest,
     @Param('id') id: string,
-    @Body() body: AdminAllowanceDto,
+    @Body() body: PutAccountPolicyOverrideDto,
   ) {
-    return this.users.changeAllowance(request.adminActor!, id, body);
+    return this.users.putPolicyOverride(request.adminActor!, id, body);
   }
 
-  @Post(':id/clear-processing-allowance')
+  @Delete(':id/account-policy-override')
   @RequireAdminPermission('users.processing.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
-  clearAllowance(
+  clearPolicyOverride(
     @Req() request: AuthRequest,
     @Param('id') id: string,
-    @Body() body: AdminUserProcessingDto,
+    @Body() body: DeleteAccountPolicyOverrideDto,
   ) {
-    return this.users.changeAllowance(request.adminActor!, id, body, true);
-  }
-
-  @Post(':id/suspend-processing')
-  @RequireAdminPermission('users.processing.manage')
-  @RequireFreshAdminAuth()
-  @LimitAdmin('sensitive')
-  suspend(
-    @Req() request: AuthRequest,
-    @Param('id') id: string,
-    @Body() body: AdminSuspensionDto,
-  ) {
-    return this.users.suspend(request.adminActor!, id, body);
-  }
-
-  @Post(':id/resume-processing')
-  @RequireAdminPermission('users.processing.manage')
-  @RequireFreshAdminAuth()
-  @LimitAdmin('sensitive')
-  resume(
-    @Req() request: AuthRequest,
-    @Param('id') id: string,
-    @Body() body: AdminUserProcessingDto,
-  ) {
-    return this.users.resume(request.adminActor!, id, body);
+    return this.users.deletePolicyOverride(request.adminActor!, id, body);
   }
 }

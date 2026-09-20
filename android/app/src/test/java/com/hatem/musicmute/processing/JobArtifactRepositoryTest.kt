@@ -122,7 +122,8 @@ class JobArtifactRepositoryTest {
 
     @Test fun interruptedTransferRemovesOnlyItsPartialAndCanRetry() = runTest {
         var fail = true
-        val repository = repository(FakeApi(), ArtifactDownloader { _, file, _ ->
+        val api = FakeApi()
+        val repository = repository(api, ArtifactDownloader { _, file, _ ->
             file.writeBytes(mp3)
             if (fail) throw IOException("private URL must not escape")
         }, backgroundScope)
@@ -131,6 +132,8 @@ class JobArtifactRepositoryTest {
         assertFalse(temporary.root.walkTopDown().any { it.isFile })
         fail = false
         assertArrayEquals(mp3, repository.ensureOutput(id).readBytes())
+        assertEquals(2, api.grantRequestIds.size)
+        assertEquals(api.grantRequestIds[0], api.grantRequestIds[1])
     }
 
     @Test fun expiredGrantRenewsOnceAfterAuthenticatedReadyRefresh() = runTest {
@@ -140,6 +143,7 @@ class JobArtifactRepositoryTest {
         api.onGrant = { count -> if (count > 1) DownloadGrant("https://storage.invalid/new", now.plusSeconds(60)) else api.grant }
         assertArrayEquals(mp3, repository.ensureOutput(id).readBytes())
         assertEquals(2, api.grants)
+        assertNotEquals(api.grantRequestIds[0], api.grantRequestIds[1])
         assertEquals(2, api.details)
         assertEquals(1, downloads)
     }
@@ -262,14 +266,19 @@ class JobArtifactRepositoryTest {
         var status = "ready"
         var grant = DownloadGrant("https://storage.invalid/output", now.plusSeconds(60))
         var onGrant: ((Int) -> DownloadGrant)? = null
+        val grantRequestIds = mutableListOf<String>()
         override suspend fun detail(id: String): Job {
             check(allowNetwork) { "Offline detail request" }
             details++
             return Job(id, status, now, now, JobInput("mp3", 1, 1.0), true, status == "ready", workerAvailable = true)
         }
         override suspend fun download(id: String, artifact: String): DownloadGrant {
+            return download(id, artifact, java.util.UUID.randomUUID().toString())
+        }
+        override suspend fun download(id: String, artifact: String, requestId: String): DownloadGrant {
             check(allowNetwork) { "Offline grant request" }
             assertEquals("output", artifact)
+            grantRequestIds += requestId
             grants++
             return onGrant?.invoke(grants) ?: grant
         }

@@ -1,173 +1,252 @@
 import { ConfigService } from '@nestjs/config';
+import { Types } from 'mongoose';
+import { jobError } from '../jobs/job-errors.js';
+import { DEFAULT_ACCOUNT_POLICY_VALUES } from './account-policy.schema.js';
 import { ProcessingAdmissionService } from './processing-admission.service.js';
 
-describe('ProcessingAdmissionService', () => {
-  afterEach(() => vi.useRealTimers());
-  function fixture(overrides: Record<string, unknown> = {}) {
-    const fences = {
-      updateOne: vi.fn().mockResolvedValue({ acknowledged: true }),
-    };
-    const users = {
-      updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
-    };
-    const count = vi.fn().mockResolvedValue(0);
-    const emptyQuery = () => ({
-      session() {
-        return this;
-      },
-      lean: async () => null,
-    });
-    const jobs = {
-      countDocuments: vi.fn(() => ({ session: count })),
-      findById: emptyQuery,
-      db: {
-        model: () => ({
-          findById: emptyQuery,
-          updateOne: async () => ({ acknowledged: true }),
-        }),
-      },
-      aggregate: () => ({
-        session() {
-          return this;
-        },
-        option: async () => [],
-      }),
-    };
-    const effective = vi.fn().mockResolvedValue({
-      revision: 2,
+const session = { inTransaction: () => true };
+const metadata = {
+  policyVersion: 2 as const,
+  preparationProfileId: 'preserve-or-aac-lc-256-v1',
+  source: 'audio_file' as const,
+};
+
+function fixture(enabled = true) {
+  const countDocuments = vi.fn(() => ({
+    session: vi.fn().mockResolvedValue(0),
+  }));
+  const jobs = { countDocuments, base: { Types } };
+  const fences = {
+    updateOne: vi.fn().mockResolvedValue({ acknowledged: true }),
+  };
+  const users = {
+    updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+  };
+  const policies = {
+    touchGlobalFence: vi.fn().mockResolvedValue(undefined),
+    effective: vi.fn().mockResolvedValue({
+      globalRevision: 4,
+      overrideRevision: null,
+      source: 'global',
       acceptNewJobs: true,
-      maintenanceMessageEn: '',
-      maintenanceMessageAr: null,
-      maxInputBytesExclusive: 1000,
-      maxDurationSecondsExclusive: 300,
-      maxActiveJobsPerUser: 1,
-      updatedAt: new Date(),
-      ...overrides,
-    });
-    const settings = { touchGlobalFence: vi.fn(), effective };
-    const service = new ProcessingAdmissionService(
+      values: DEFAULT_ACCOUNT_POLICY_VALUES,
+    }),
+  };
+  const usage = {
+    assertRetainedCapacity: vi.fn().mockResolvedValue(undefined),
+    reserveForJob: vi.fn().mockResolvedValue(undefined),
+    hasReservedProcessing: vi.fn().mockResolvedValue(true),
+  };
+  return {
+    service: new ProcessingAdmissionService(
       fences as never,
       users as never,
       jobs as never,
-      settings as never,
+      policies as never,
+      usage as never,
       new ConfigService({
-        AUDIO_PROCESSING_ENABLED: true,
-        PROCESSING_URL_SECONDS: 900,
+        AUDIO_PROCESSING_ENABLED: enabled,
+        PROCESSING_URL_SECONDS: 600,
       }),
-    );
-    return {
-      service,
-      fences,
-      users,
-      jobs,
-      count,
-      settings,
-    };
-  }
+    ),
+    fences,
+    jobs,
+    countDocuments,
+    policies,
+    users,
+    usage,
+  };
+}
 
-  it('accepts values strictly below the captured ceilings', async () => {
-    const { service } = fixture();
+describe('processing admission', () => {
+  it('fails closed behind the explicit processing feature gate', async () => {
+    const f = fixture(false);
     await expect(
-      service.assertNewWork(
-        '507f1f77bcf86cd799439011',
-        { bytes: 999, durationSeconds: 299.9 },
-        {} as never,
+      f.service.assertNewWork(
+        new Types.ObjectId(),
+        { bytes: 1024, durationSeconds: 30 },
+        session as never,
+        new Types.ObjectId(),
+      ),
+    ).rejects.toMatchObject({ response: { code: 'PROCESSING_UNAVAILABLE' } });
+    expect(f.usage.reserveForJob).not.toHaveBeenCalled();
+    expect(f.usage.assertRetainedCapacity).not.toHaveBeenCalled();
+  });
+
+  it('serializes admission and reserves monthly account usage in one transaction', async () => {
+    const f = fixture();
+    const owner = new Types.ObjectId();
+    const jobId = new Types.ObjectId();
+    await expect(
+      f.service.assertNewWork(
+        owner,
+        { bytes: 50_000_000, durationSeconds: 1_200 },
+        session as never,
+        jobId,
+        metadata,
       ),
     ).resolves.toMatchObject({
-      settingsRevision: 2,
-      maxInputBytesExclusive: 1000,
-      maxDurationSecondsExclusive: 300,
-      maxActiveJobsPerUser: 1,
+      policyVersion: 2,
+      settingsRevision: 4,
+      maxWaitingJobs: 3,
+      maxProcessingJobs: 1,
+      maxInfrastructureAttempts: 3,
+      maxClientInputAttempts: 5,
+      maxDurationSeconds: 1_200,
+      maxInputBytes: 50_000_000,
     });
-  });
-
-  it.each([
-    { bytes: 1000, durationSeconds: 10 },
-    { bytes: 100, durationSeconds: 300 },
-  ])('rejects the exclusive boundary %j', async (input) => {
-    await expect(
-      fixture().service.assertNewWork('user', input, {} as never),
-    ).rejects.toMatchObject({ status: 503 });
-  });
-
-  it('serializes and rejects a full per-user active quota', async () => {
-    const { service, count, fences } = fixture();
-    count.mockResolvedValue(1);
-    await expect(
-      service.assertNewWork(
-        'user',
-        { bytes: 100, durationSeconds: 10 },
-        {} as never,
-      ),
-    ).rejects.toMatchObject({ status: 409 });
-    expect(fences.updateOne).toHaveBeenCalledWith(
-      { _id: 'user:user' },
-      expect.anything(),
-      expect.objectContaining({ session: expect.anything() }),
+    expect(f.fences.updateOne).toHaveBeenCalledTimes(1);
+    expect(f.users.updateOne).toHaveBeenCalledTimes(1);
+    expect(f.usage.reserveForJob).toHaveBeenCalledWith(
+      jobId,
+      owner,
+      1_200,
+      session,
+    );
+    expect(f.usage.assertRetainedCapacity).toHaveBeenCalledWith(
+      owner,
+      1_000_000_000,
+      session,
     );
   });
 
-  it('excludes only the renewed reservation from a lowered active quota', async () => {
-    const { service, count, jobs } = fixture();
-    count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+  it('allows a waiting job while one job is processing', async () => {
+    const f = fixture();
+    f.countDocuments
+      .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(2) })
+      .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(1) });
+
     await expect(
-      service.assertNewWork(
-        '507f1f77bcf86cd799439011',
-        { bytes: 100, durationSeconds: 10 },
-        {} as never,
-        '507f1f77bcf86cd799439012',
+      f.service.assertNewWork(
+        new Types.ObjectId(),
+        { bytes: 1_024, durationSeconds: 30 },
+        session as never,
+        new Types.ObjectId(),
+        metadata,
       ),
-    ).resolves.toBeDefined();
-    await expect(
-      service.assertNewWork(
-        '507f1f77bcf86cd799439011',
-        { bytes: 100, durationSeconds: 10 },
-        {} as never,
-        '507f1f77bcf86cd799439012',
-      ),
-    ).rejects.toMatchObject({ status: 409 });
-    const filter = (
-      jobs.countDocuments.mock.calls as unknown as [{ _id: { $ne: unknown } }][]
-    )[0]![0];
-    expect(filter._id.$ne).toBe('507f1f77bcf86cd799439012');
+    ).resolves.toMatchObject({ maxWaitingJobs: 3, maxProcessingJobs: 1 });
+    expect(f.usage.reserveForJob).toHaveBeenCalledOnce();
   });
 
-  it('rejects maintenance and suspended accounts without counting jobs', async () => {
-    const maintenance = fixture({ acceptNewJobs: false });
-    await expect(
-      maintenance.service.assertNewWork(
-        'user',
-        { bytes: 100, durationSeconds: 10 },
-        {} as never,
-      ),
-    ).rejects.toMatchObject({ status: 503 });
-    const suspended = fixture();
-    suspended.users.updateOne.mockResolvedValue({ modifiedCount: 0 });
-    await expect(
-      suspended.service.assertNewWork(
-        'user',
-        { bytes: 100, durationSeconds: 10 },
-        {} as never,
-      ),
-    ).rejects.toMatchObject({ status: 503 });
-    expect(suspended.jobs.countDocuments).not.toHaveBeenCalled();
-  });
+  it('rejects the fourth waiting job with safe capacity guidance', async () => {
+    const f = fixture();
+    f.countDocuments
+      .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(3) })
+      .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(1) });
 
-  it('applies immutable legacy ceilings and an inferred legacy expiry', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-09-11T00:10:00Z'));
-    const { service } = fixture();
-    const legacy = {
-      createdAt: new Date('2026-09-11T00:00:00Z'),
-      admissionSnapshot: null,
-      inputReservation: { bytes: 29_999_999, durationSeconds: 599.9 },
-    };
-    expect(service.assertAcceptedReservation(legacy as never)).toMatchObject({
-      settingsRevision: 0,
-      maxInputBytesExclusive: 30_000_000,
-      maxDurationSecondsExclusive: 600,
+    await expect(
+      f.service.assertNewWork(
+        new Types.ObjectId(),
+        { bytes: 1_024, durationSeconds: 30 },
+        session as never,
+        new Types.ObjectId(),
+        metadata,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'PROCESSING_LIMIT_REACHED',
+        nextResetAt: null,
+        action: 'wait_for_job_to_finish',
+        capacity: {
+          waitingJobs: 3,
+          maxWaitingJobs: 3,
+          processingJobs: 1,
+          maxProcessingJobs: 1,
+        },
+      },
     });
-    vi.setSystemTime(new Date('2026-09-11T00:16:00Z'));
-    expect(() => service.assertAcceptedReservation(legacy as never)).toThrow();
+    expect(f.usage.reserveForJob).not.toHaveBeenCalled();
+  });
+
+  it('serializes processing claims behind the account fence', async () => {
+    const f = fixture();
+    f.countDocuments.mockReturnValueOnce({
+      session: vi.fn().mockResolvedValue(1),
+    });
+
+    await expect(
+      f.service.claimProcessingSlot(
+        {
+          _id: new Types.ObjectId(),
+          userId: new Types.ObjectId(),
+          admissionSnapshot: { maxProcessingJobs: 1 },
+        } as never,
+        session as never,
+      ),
+    ).resolves.toBe(false);
+    expect(f.fences.updateOne).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed for restricted or deleting accounts', async () => {
+    const f = fixture();
+    f.users.updateOne.mockResolvedValue({ modifiedCount: 0 });
+
+    await expect(
+      f.service.assertNewWork(
+        new Types.ObjectId(),
+        { bytes: 1_024, durationSeconds: 30 },
+        session as never,
+        new Types.ObjectId(),
+        metadata,
+      ),
+    ).rejects.toMatchObject({ response: { code: 'PROCESSING_UNAVAILABLE' } });
+    expect(f.usage.reserveForJob).not.toHaveBeenCalled();
+  });
+
+  it('does not claim a processing slot after an account is restricted or starts deletion', async () => {
+    const f = fixture();
+    f.users.updateOne.mockResolvedValue({ modifiedCount: 0 });
+
+    await expect(
+      f.service.claimProcessingSlot(
+        {
+          _id: new Types.ObjectId(),
+          userId: new Types.ObjectId(),
+          admissionSnapshot: { maxProcessingJobs: 1 },
+        } as never,
+        session as never,
+      ),
+    ).resolves.toBe(false);
+    expect(f.fences.updateOne).toHaveBeenCalledOnce();
+    expect(f.usage.hasReservedProcessing).not.toHaveBeenCalled();
+  });
+
+  it('does not admit work when monthly quota reservation fails', async () => {
+    const f = fixture();
+    f.usage.reserveForJob.mockRejectedValue(
+      jobError('PROCESSING_ALLOWANCE_EXHAUSTED'),
+    );
+
+    await expect(
+      f.service.assertNewWork(
+        new Types.ObjectId(),
+        { bytes: 1_024, durationSeconds: 30 },
+        session as never,
+        new Types.ObjectId(),
+        metadata,
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'PROCESSING_ALLOWANCE_EXHAUSTED' },
+    });
+  });
+
+  it('blocks later admission when retained successful output is at the ceiling', async () => {
+    const f = fixture();
+    f.usage.assertRetainedCapacity.mockRejectedValue(
+      jobError('RETAINED_STORAGE_LIMIT_REACHED'),
+    );
+
+    await expect(
+      f.service.assertNewWork(
+        new Types.ObjectId(),
+        { bytes: 1_024, durationSeconds: 30 },
+        session as never,
+        new Types.ObjectId(),
+        metadata,
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'RETAINED_STORAGE_LIMIT_REACHED' },
+    });
+    expect(f.usage.reserveForJob).not.toHaveBeenCalled();
   });
 });

@@ -26,6 +26,7 @@ class UploadRecoveryTest {
         var status = "awaiting_upload"
         var confirms = 0
         var renewals = 0
+        val renewalRequestIds = mutableListOf<String>()
         var during: (String) -> Unit = {}
         var retried: suspend () -> Unit = {}
         val retryRequests = mutableListOf<String>()
@@ -41,6 +42,10 @@ class UploadRecoveryTest {
         )
         override suspend fun create(requestId: String, input: InputDeclaration): CreateReservation { requests += requestId; created(); during("create"); return CreateReservation(id,status,if(status == "awaiting_upload") grant else null) }
         override suspend fun renewUpload(id: String): UploadGrant { renewals++; during("renew"); return grant }
+        override suspend fun renewUpload(id: String, requestId: String): UploadGrant {
+            renewalRequestIds += requestId
+            return renewUpload(id)
+        }
         override suspend fun confirmUpload(id: String): JobMutation { confirms++; during("confirm"); if (!exists) throw JobsFailure(JobsProblem.UPLOAD_NOT_READY); status = "queued"; return JobMutation(id,status) }
         override suspend fun detail(id: String): Job { during("detail"); return Job(id,status,Instant.EPOCH,Instant.EPOCH,JobInput("mp3",3,1.0),exists,false,workerAvailable=false) }
         override suspend fun list(cursor: String?, status: String?) = JobPage(emptyList())
@@ -119,6 +124,7 @@ class UploadRecoveryTest {
         assertEquals(ProcessingRunResult.COMPLETE,repository.runUpload("owner",op.operationId,1))
         assertEquals(2,uploads)
         assertEquals(1,api.renewals)
+        assertEquals(api.renewalRequestIds.single(), store.get("owner",op.operationId)!!.uploadGrantRequestId)
         assertEquals(3,api.confirms)
     }
 

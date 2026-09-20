@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "./api-client";
-import { ALERT_SEVERITIES, JOB_STATUSES } from "./contracts";
+import {
+  ADMIN_ROLES,
+  ALERT_SEVERITIES,
+  JOB_STATUSES,
+  PERMISSIONS,
+} from "./contracts";
+import { NAV_ITEMS } from "@/app/app-shell";
+import { ROLE_DETAILS } from "@/features/administrators/role-permissions";
 import { requestMediaGrant } from "@/features/jobs/jobs-api";
 import {
   getReleaseProposal,
@@ -10,7 +17,6 @@ import {
   updateRelease,
   withdrawRelease,
 } from "@/features/releases/releases-api";
-import { workerAction } from "@/features/workers/workers-api";
 import {
   decideAccountRecoveryRequest,
   getAccountRecoverySummary,
@@ -63,27 +69,38 @@ describe("dashboard/backend contract alignment", () => {
     });
   });
 
-  it("sends the required emergency decision only for worker revocation", async () => {
-    const api = client();
-    const revision = {
-      expectedRevision: 4,
-      operationId: "operation-worker",
-      reason: "Revoke a compromised worker credential",
-    };
-
-    await workerAction(api, "worker-1", "revoke", revision);
-    await workerAction(api, "worker-1", "drain", revision);
-
-    expect(api.post).toHaveBeenNthCalledWith(
-      1,
-      "/admin/workers/worker-1/revoke",
-      { ...revision, emergency: false },
+  it("exposes the current administrator roles and navigation", () => {
+    expect(ADMIN_ROLES).toEqual([
+      "owner",
+      "release_manager",
+      "support",
+      "viewer",
+    ]);
+    expect(PERMISSIONS).toContain("jobs.read");
+    expect(NAV_ITEMS.map((item) => item.to)).toContain("/jobs");
+    expect(PERMISSIONS).toEqual(
+      expect.arrayContaining([
+        "workers.read",
+        "workers.manage",
+        "workers.enroll",
+        "workers.logs.read",
+      ]),
     );
-    expect(api.post).toHaveBeenNthCalledWith(
-      2,
-      "/admin/workers/worker-1/drain",
-      revision,
+    expect(NAV_ITEMS.map((item) => item.to)).toContain("/workers");
+    expect(ROLE_DETAILS.owner.permissions).toEqual(
+      expect.arrayContaining([
+        "workers.read",
+        "workers.manage",
+        "workers.enroll",
+        "workers.logs.read",
+      ]),
     );
+    expect(ROLE_DETAILS.support.permissions).toEqual(
+      expect.arrayContaining(["workers.read", "workers.logs.read"]),
+    );
+    expect(ROLE_DETAILS.support.permissions).not.toContain("workers.manage");
+    expect(ROLE_DETAILS.viewer.permissions).toContain("workers.read");
+    expect(ROLE_DETAILS.viewer.permissions).not.toContain("workers.logs.read");
   });
 
   it("removes immutable fields from release edits", async () => {
@@ -201,12 +218,14 @@ describe("dashboard/backend contract alignment", () => {
       revision: 2,
       deletionRequestId: "deletion-1",
       deletionRequestedAt: "2026-09-10T00:00:00.000Z",
-      recoverUntil: "2026-12-10T00:00:00.000Z",
+      recoverUntil: "2026-09-25T00:00:00.000Z",
       user: {
         id: "user-1",
         email: null,
         displayName: "Listener",
         status: "deleting",
+        deletionPhase: "grace_fence",
+        deletionFailureCode: null,
       },
     };
     const command = {

@@ -6,7 +6,7 @@ title: ""
 
 ## Affected component
 
-Android / iOS / backend / dashboard / Windows worker / documentation
+Android / iOS / backend / dashboard / documentation
 
 ## What happened?
 

@@ -1,11 +1,10 @@
-import { suspensionExpiry } from "./processing-access-validation";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, PauseCircle, PlayCircle } from "lucide-react";
+import { ArrowLeft, ShieldOff, ShieldX } from "lucide-react";
 import { Link, useParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
-import type { UserDetail } from "@/api/contracts";
+import type { RestrictionReasonCode } from "@/api/contracts";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import {
   ErrorState,
@@ -17,55 +16,86 @@ import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatDateTime } from "@/lib/format";
-import { getUser, setProcessingSuspended } from "./users-api";
-
+import { AccountRestrictionExpiryField } from "./account-restriction-expiry-field";
+import { restrictionExpiry } from "./processing-access-validation";
 import { ProcessingUsageSection } from "./processing-usage-panel";
-
-import { SuspensionExpiryField } from "./processing-suspension-dialog";
+import {
+  getAccountRestriction,
+  getUser,
+  putAccountRestriction,
+  removeAccountRestriction,
+} from "./users-api";
 
 export function UserDetailPage() {
   const { id = "" } = useParams();
   const client = useApiClient();
   const queryClient = useQueryClient();
   const { can, reauthenticate } = useAdminSession();
-  const [changing, setChanging] = useState<UserDetail | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [expiry, setExpiry] = useState("");
+  const [reasonCode, setReasonCode] =
+    useState<RestrictionReasonCode>("manual_review");
   const user = useQuery({
     queryKey: ["user", id],
     queryFn: () => getUser(client, id),
     enabled: Boolean(id),
   });
+  const restriction = useQuery({
+    queryKey: ["account-restriction", id],
+    queryFn: () => getAccountRestriction(client, id),
+    enabled: Boolean(id),
+  });
+  const active = restriction.data?.status === "active";
   const update = useMutation({
-    mutationFn: ({
-      current,
-      reason,
-    }: {
-      current: UserDetail;
-      reason: string;
-    }) =>
-      setProcessingSuspended(client, current.id, !current.processingSuspended, {
-        expectedRevision: current.revision,
+    mutationFn: async (note: string) => {
+      if (restriction.data?.status === "active") {
+        return removeAccountRestriction(client, id, {
+          expectedRevision: restriction.data.revision,
+          operationId: createOperationId(),
+          reason: note,
+        });
+      }
+      const expiresAt = restrictionExpiry(expiry);
+      return putAccountRestriction(client, id, {
+        expectedRevision: restriction.data?.revision ?? 0,
         operationId: createOperationId(),
-        reason,
-        ...(current.processingSuspended
-          ? {}
-          : { expiresAt: suspensionExpiry(expiry) }),
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["user", id] });
-      await queryClient.invalidateQueries({ queryKey: ["users"] });
-      await queryClient.invalidateQueries({
-        queryKey: ["processing-usage", id],
+        reasonCode,
+        note,
+        ...(expiresAt ? { expiresAt } : {}),
       });
-      await queryClient.invalidateQueries({ queryKey: ["audit"] });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["account-restriction", id],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["user", id] }),
+        queryClient.invalidateQueries({ queryKey: ["users"] }),
+        queryClient.invalidateQueries({ queryKey: ["abuse-events"] }),
+        queryClient.invalidateQueries({ queryKey: ["audit"] }),
+      ]);
     },
   });
-  if (user.isLoading) return <LoadingState />;
+
+  if (user.isLoading || restriction.isLoading) return <LoadingState />;
   if (user.isError || !user.data)
     return <ErrorState error={user.error} retry={() => void user.refetch()} />;
+  if (restriction.isError)
+    return (
+      <ErrorState
+        error={restriction.error}
+        retry={() => void restriction.refetch()}
+      />
+    );
   const data = user.data;
-  const actionUser = changing ?? data;
   return (
     <div className="space-y-6">
       <Link
@@ -78,22 +108,21 @@ export function UserDetailPage() {
         title={data.displayName || data.email || "User"}
         description={data.id}
         actions={
-          can("users.processing.manage") ? (
+          can("users.restrictions.manage") ? (
             <Button
-              variant={data.processingSuspended ? "default" : "destructive"}
+              variant={active ? "default" : "destructive"}
               onClick={() => {
                 setExpiry("");
-                setChanging(data);
+                setReasonCode("manual_review");
+                setDialogOpen(true);
               }}
             >
-              {data.processingSuspended ? (
-                <PlayCircle aria-hidden="true" />
+              {active ? (
+                <ShieldOff aria-hidden="true" />
               ) : (
-                <PauseCircle aria-hidden="true" />
+                <ShieldX aria-hidden="true" />
               )}
-              {data.processingSuspended
-                ? "Resume processing"
-                : "Suspend processing"}
+              {active ? "Remove restriction" : "Restrict account"}
             </Button>
           ) : undefined
         }
@@ -117,10 +146,6 @@ export function UserDetailPage() {
                   <dt className="text-muted-foreground">Created</dt>
                   <dd>{formatDateTime(data.createdAt)}</dd>
                 </div>
-                <div>
-                  <dt className="text-muted-foreground">Updated</dt>
-                  <dd>{formatDateTime(data.updatedAt)}</dd>
-                </div>
                 {data.deletion ? (
                   <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
                     <dt className="font-medium text-red-700 dark:text-red-300">
@@ -132,16 +157,14 @@ export function UserDetailPage() {
                         ? formatDateTime(data.deletion.recoverUntil)
                         : "Unavailable"}
                     </dd>
-                    {data.deletion.recoveryAvailable ? (
-                      <Button
-                        asChild
-                        variant="link"
-                        className="mt-1 h-auto p-0"
-                      >
-                        <Link to="/account-recovery">
-                          Review recovery queue
-                        </Link>
-                      </Button>
+                    <dd className="mt-1 text-muted-foreground">
+                      Phase: {data.deletion.phase || "pending"}
+                    </dd>
+                    {data.deletion.failureCode ? (
+                      <dd className="mt-1 text-amber-700 dark:text-amber-300">
+                        Cleanup is waiting for a dependency and will retry
+                        automatically.
+                      </dd>
                     ) : null}
                   </div>
                 ) : null}
@@ -151,43 +174,41 @@ export function UserDetailPage() {
         </Card>
         <Card>
           <CardContent className="p-5">
-            <PageSection title="Processing access">
-              <div className="mb-4">
-                <StatusBadge
-                  value={data.processingSuspended ? "warning" : "active"}
-                  label={
-                    data.processingSuspended
-                      ? "Processing suspended"
-                      : "Processing allowed"
-                  }
-                />
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {data.processingSuspended
-                  ? "New processing submissions are blocked. Existing jobs and results remain available."
-                  : "New processing submissions are allowed, subject to global limits."}
+            <PageSection title="Abuse restriction">
+              <StatusBadge
+                value={active ? "warning" : "active"}
+                label={active ? "Restricted" : "Not restricted"}
+              />
+              <p className="mt-3 text-sm text-muted-foreground">
+                {active
+                  ? "New jobs, uploads, downloads, and user retries are blocked. Authentication, account status, deletion, and recovery remain available."
+                  : "No manual abuse restriction is active. Normal account quotas and service limits still apply."}
               </p>
-              {data.suspension ? (
+              {restriction.data ? (
                 <dl className="mt-4 grid gap-2 text-sm">
                   <div>
-                    <dt className="text-muted-foreground">Suspension expiry</dt>
+                    <dt className="text-muted-foreground">Reason type</dt>
+                    <dd>{restriction.data.reasonCode.replaceAll("_", " ")}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Note</dt>
+                    <dd>{restriction.data.note}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Expiry</dt>
                     <dd>
-                      {data.suspension.expiresAt
-                        ? formatDateTime(data.suspension.expiresAt)
-                        : "Until resumed"}
+                      {restriction.data.expiresAt
+                        ? formatDateTime(restriction.data.expiresAt)
+                        : "No automatic expiry"}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Reason</dt>
-                    <dd>{data.suspension.reason}</dd>
+                    <dt className="text-muted-foreground">Updated by</dt>
+                    <dd className="font-mono">{restriction.data.updatedBy}</dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Changed by</dt>
-                    <dd className="font-mono">{data.suspension.actorUid}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Changed at</dt>
-                    <dd>{formatDateTime(data.suspension.at)}</dd>
+                    <dt className="text-muted-foreground">Revision</dt>
+                    <dd className="font-mono">{restriction.data.revision}</dd>
                   </div>
                 </dl>
               ) : null}
@@ -233,44 +254,53 @@ export function UserDetailPage() {
       </Card>
       <ProcessingUsageSection key={id} userId={id} />
       <ReasonDialog
-        open={Boolean(changing)}
-        onOpenChange={(open) => {
-          if (!open) setChanging(null);
-        }}
-        title={
-          actionUser.processingSuspended
-            ? "Resume processing"
-            : "Suspend processing"
-        }
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        title={active ? "Remove account restriction" : "Restrict account"}
         description={
-          actionUser.processingSuspended
-            ? "This allows new processing only if the account itself is active. It does not change a disabled or deleting account."
-            : "New processing will be blocked. Existing jobs and results remain available."
+          active
+            ? "Normal processing access will resume subject to account quotas and service limits."
+            : "This immediately cancels unfinished work and blocks new cost-creating processing actions."
         }
-        confirmLabel={
-          actionUser.processingSuspended
-            ? "Resume processing"
-            : "Suspend processing"
-        }
-        destructive={!actionUser.processingSuspended}
+        confirmLabel={active ? "Remove restriction" : "Restrict account"}
+        destructive={!active}
         freshAuth
         onReauthenticate={reauthenticate}
         summary={
-          <>
-            <p>{actionUser.displayName || actionUser.email}</p>
-            {!actionUser.processingSuspended ? (
-              <SuspensionExpiryField value={expiry} onChange={setExpiry} />
-            ) : null}
-            <p className="text-muted-foreground">
-              Account remains {actionUser.status}
-            </p>
-          </>
+          !active ? (
+            <div className="space-y-3">
+              <Select
+                value={reasonCode}
+                onValueChange={(value) =>
+                  setReasonCode(value as RestrictionReasonCode)
+                }
+              >
+                <SelectTrigger aria-label="Restriction reason type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manual_review">Manual review</SelectItem>
+                  <SelectItem value="repeated_limit_bypass">
+                    Repeated limit bypass
+                  </SelectItem>
+                  <SelectItem value="provider_cost_risk">
+                    Provider cost risk
+                  </SelectItem>
+                  <SelectItem value="terms_violation">
+                    Terms violation
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <AccountRestrictionExpiryField
+                value={expiry}
+                onChange={setExpiry}
+              />
+            </div>
+          ) : (
+            <p>{restriction.data?.note}</p>
+          )
         }
-        onConfirm={(reason) =>
-          update
-            .mutateAsync({ current: actionUser, reason })
-            .then(() => undefined)
-        }
+        onConfirm={(reason) => update.mutateAsync(reason).then(() => undefined)}
       />
     </div>
   );

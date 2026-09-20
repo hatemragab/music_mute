@@ -5,7 +5,6 @@ import type { AdminRole } from './admin.types.js';
 export const ADMIN_ROLES: readonly AdminRole[] = [
   'owner',
   'release_manager',
-  'worker_manager',
   'support',
   'viewer',
 ];

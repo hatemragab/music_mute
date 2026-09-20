@@ -38,16 +38,12 @@ export function presentJobTiming(job: Job, now: Date) {
   let processingElapsedMs = job.processingAccumulatedMs ?? null;
   let processingElapsedApproximate = Boolean(job.processingElapsedApproximate);
   if (job.processingIntervalStartedAt && processingElapsedMs !== null) {
-    const expired =
-      !job.leaseExpiresAt || job.leaseExpiresAt.getTime() <= now.getTime();
-    const end = expired
-      ? (job.processingObservedAt ?? job.processingIntervalStartedAt)
-      : now;
+    const end = job.processingObservedAt ?? now;
     processingElapsedMs += Math.max(
       0,
       end.getTime() - job.processingIntervalStartedAt.getTime(),
     );
-    processingElapsedApproximate ||= expired;
+    processingElapsedApproximate ||= job.processingObservedAt !== null;
   }
   const start = job.clientStartedAt?.getTime();
   const end = (job.finishedAt ?? now).getTime();

@@ -23,7 +23,6 @@ import { FirebaseIdentityService } from '../../src/auth/firebase-identity.servic
 import { UsersService } from '../../src/users/users.service.js';
 import { RateBudgetService } from '../../src/rate-limits/rate-budget.service.js';
 import { RateLimitKeys } from '../../src/rate-limits/rate-limit-keys.js';
-import { WorkerAuthGuard } from '../../src/worker/worker-auth.guard.js';
 import { AdminAccess } from '../../src/admin/admin-access.schema.js';
 import {
   AdminRoute,
@@ -35,6 +34,7 @@ import { AdminRateLimitService } from '../../src/admin/admin-rate-limit.service.
 import { AdminSessionController } from '../../src/admin/admin-session.controller.js';
 import type { AdminRole } from '../../src/admin/admin.types.js';
 import { PublicExceptionFilter } from '../../src/http/public-exception.filter.js';
+import { AccountRestrictionsService } from '../../src/abuse-protection/account-restrictions.service.js';
 
 interface IdentityState {
   uid: string;
@@ -78,7 +78,7 @@ export interface AdminHarness {
   seedAdmin(role?: AdminRole): void;
   signInAs(role: AdminRole): string;
   request(
-    method: 'get' | 'post' | 'put' | 'patch',
+    method: 'get' | 'post' | 'put' | 'patch' | 'delete',
     path: string,
     body?: unknown,
     token?: string,
@@ -187,7 +187,6 @@ export async function createAdminHarness(
   const config = new ConfigService({
     ADMIN_REAUTH_MAX_AGE_SECONDS: 300,
     AUDIO_PROCESSING_ENABLED: true,
-    PROCESSING_WORKER_KEY_SHA256: '0'.repeat(64),
   });
 
   @Module({
@@ -202,10 +201,13 @@ export async function createAdminHarness(
       { provide: UsersService, useValue: users },
       { provide: RateBudgetService, useValue: budgets },
       { provide: RateLimitKeys, useValue: keys },
+      {
+        provide: AccountRestrictionsService,
+        useValue: { assertAllowed: vi.fn().mockResolvedValue(undefined) },
+      },
       { provide: getModelToken(AdminAccess.name), useValue: model },
       AdminRateLimitService,
       { provide: APP_GUARD, useClass: AuthGuard },
-      { provide: APP_GUARD, useClass: WorkerAuthGuard },
       { provide: APP_GUARD, useClass: AdminGuard },
       ...(options.providers ?? []),
     ],
@@ -226,7 +228,7 @@ export async function createAdminHarness(
       exceptionFactory: () => authError('INVALID_INPUT'),
     }),
   );
-  await app.init();
+  await app.listen(0, '127.0.0.1');
 
   const seedAdmin = (role: AdminRole = 'owner') => {
     access.set('owner-uid', {

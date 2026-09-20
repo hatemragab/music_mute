@@ -1,22 +1,22 @@
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
-import { ProcessingUsageLedger } from '../processing-usage/processing-usage.schema.js';
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isUUID } from 'class-validator';
 import { Types, trusted, type ClientSession, type Model } from 'mongoose';
+import { ProcessingAdmissionService } from '../admin-settings/processing-admission.service.js';
 import { authError } from '../auth/auth.errors.js';
 import { ProcessingTransactions } from '../processing/processing-transactions.js';
 import { AccountAccessService } from '../users/account-access.service.js';
-import { EnqueueService } from './enqueue.service.js';
 import { Job } from './job.schema.js';
 import { nextCancellationState } from './job-state.js';
-import type { JobFailureCode } from './job.types.js';
 import { jobError } from './job-errors.js';
 import { isDuplicateKey, objectId, requestHash } from './job-request.js';
-import { ProcessingAdmissionService } from '../admin-settings/processing-admission.service.js';
+import type { JobFailureCode } from './job.types.js';
+import type { WorkerExecutionOwnership } from './job.types.js';
+import { WorkerAttempt } from '../worker-fleet/jobs/worker-attempt.schema.js';
+import { WorkerSlot } from '../worker-fleet/machines/worker-slot.schema.js';
 import { adminError } from '../admin/admin-errors.js';
 import type { AdminActor } from '../admin/admin.types.js';
-import { WorkerControl } from '../worker/worker-control.schema.js';
 
 type JobActionPrincipal =
   | { kind: 'owner'; userId: Types.ObjectId }
@@ -39,20 +39,10 @@ export class JobActionsService {
   constructor(
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
     private readonly transactions: ProcessingTransactions,
-    private readonly enqueue: EnqueueService,
     private readonly accountAccess: AccountAccessService,
     private readonly admission: ProcessingAdmissionService,
-    @Optional()
-    @InjectModel(WorkerControl.name)
-    private readonly workerControls?: Model<WorkerControl>,
+    private readonly usage: ProcessingUsageService,
   ) {}
-
-  private get usage() {
-    return new ProcessingUsageService(
-      this.jobs.db.model<ProcessingUsageLedger>(ProcessingUsageLedger.name),
-      this.jobs,
-    );
-  }
 
   async cancel(userId: string, jobId: string) {
     const principal: JobActionPrincipal = {
@@ -78,14 +68,26 @@ export class JobActionsService {
         session,
       );
       const status = nextCancellationState(current.status);
-      if (status === current.status) return current;
+      if (status === current.status && !current.currentExecution)
+        return current;
+      const execution = current.currentExecution;
+      const now = new Date();
       const updated = await this.jobs
         .findOneAndUpdate(
           this.writeAuthority(current, principal),
           {
             $set: {
               status,
-              ...(status === 'cancelled' ? { finishedAt: new Date() } : {}),
+              currentExecution: null,
+              retryEligibility: current.retryEligibility
+                ? {
+                    ...current.retryEligibility,
+                    eligible: false,
+                    attemptsRemaining: 0,
+                    nextAttemptAt: null,
+                  }
+                : null,
+              ...(status === 'cancelled' ? { finishedAt: now } : {}),
             },
             $inc: { revision: 1 },
           },
@@ -93,6 +95,7 @@ export class JobActionsService {
         )
         .lean();
       if (!updated) throw jobError('JOB_STATE_CONFLICT');
+      await this.fenceAttempt(execution, now, session);
       await this.usage.settleJob(updated, session);
       return updated;
     });
@@ -123,15 +126,31 @@ export class JobActionsService {
     const job = await this.findForAction(principal, id, session);
     const status = nextCancellationState(job.status);
     await this.accountAccess.assertActive(job.userId, session);
-    if (status === job.status && principal.kind === 'owner') return job;
+    if (
+      status === job.status &&
+      principal.kind === 'owner' &&
+      !job.currentExecution
+    )
+      return job;
+    const execution = job.currentExecution;
+    const now = new Date();
     const updated = await this.jobs
       .findOneAndUpdate(
         this.writeAuthority(job, principal),
         {
           $set: {
             status,
+            currentExecution: null,
+            retryEligibility: job.retryEligibility
+              ? {
+                  ...job.retryEligibility,
+                  eligible: false,
+                  attemptsRemaining: 0,
+                  nextAttemptAt: null,
+                }
+              : null,
             ...(status === 'cancelled' && status !== job.status
-              ? { finishedAt: new Date() }
+              ? { finishedAt: now }
               : {}),
           },
           $inc: { revision: 1 },
@@ -140,6 +159,7 @@ export class JobActionsService {
       )
       .lean();
     if (!updated) this.changed(principal);
+    await this.fenceAttempt(execution, now, session);
     await this.usage.settleJob(updated, session);
     return updated;
   }
@@ -148,7 +168,6 @@ export class JobActionsService {
     if (!isUUID(requestId, '4')) throw authError('INVALID_INPUT');
     requestId = requestId.toLowerCase();
     const owner = objectId(userId);
-    const principal: JobActionPrincipal = { kind: 'owner', userId: owner };
     const originalId = objectId(jobId);
     const hash = requestHash({
       operation: 'retry',
@@ -158,11 +177,6 @@ export class JobActionsService {
       .findOne({ userId: owner, requestId })
       .lean();
     if (existing) return this.presentRetry(existing, hash);
-    const source = await this.jobs
-      .findOne({ _id: originalId, userId: owner })
-      .lean();
-    this.assertRetryable(source);
-    await this.prepareRetry();
 
     try {
       return await this.transactions.run(async (session) => {
@@ -172,14 +186,71 @@ export class JobActionsService {
           .session(session)
           .lean();
         if (repeated) return this.presentRetry(repeated, hash);
-        const { job: created } = await this.retryInTransaction(
-          principal,
-          originalId,
-          requestId,
-          hash,
+        const original = await this.jobs
+          .findOne({ _id: originalId, userId: owner })
+          .session(session)
+          .lean();
+        this.assertRetryable(original);
+        const originalAdmission = original.admissionSnapshot;
+        if (!originalAdmission)
+          throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
+
+        const newJobId = new Types.ObjectId();
+        const admissionSnapshot = await this.admission.assertNewWork(
+          owner,
+          original.inputReservation,
           session,
+          newJobId,
+          {
+            policyVersion: 2,
+            preparationProfileId: originalAdmission.preparationProfileId,
+            source: originalAdmission.source,
+          },
         );
-        return this.presentRetry(created, hash);
+        const touched = await this.jobs.updateOne(
+          {
+            _id: original._id,
+            userId: owner,
+            deletedAt: null,
+            revision: original.revision,
+          },
+          { $inc: { revision: 1 } },
+          { session },
+        );
+        if (touched.modifiedCount !== 1) throw jobError('JOB_STATE_CONFLICT');
+
+        const queuedAt = new Date();
+        const [created] = await this.jobs.create(
+          [
+            {
+              _id: newJobId,
+              userId: owner,
+              logicalAudioId: original.logicalAudioId,
+              requestId,
+              requestHash: hash,
+              retryOfJobId: original._id,
+              sourceTitle: original.sourceTitle ?? null,
+              displayName: original.displayName ?? original.sourceTitle ?? null,
+              sourceKind: original.sourceKind ?? null,
+              sourceUrl: original.sourceUrl ?? null,
+              clientStartedAt: queuedAt,
+              processingAccumulatedMs: 0,
+              status: 'queued',
+              inputReservation: { ...original.inputReservation },
+              admissionSnapshot,
+              inputObject: { ...original.inputObject },
+              recipeSnapshot: { ...original.recipeSnapshot },
+              retryEligibility: {
+                eligible: true,
+                attemptsRemaining: admissionSnapshot.maxInfrastructureAttempts,
+                nextAttemptAt: null,
+              },
+              queuedAt,
+            },
+          ],
+          { session },
+        );
+        return this.presentRetry(created.toObject(), hash);
       });
     } catch (error) {
       if (!isDuplicateKey(error)) throw error;
@@ -189,113 +260,6 @@ export class JobActionsService {
       if (!repeated) throw error;
       return this.presentRetry(repeated, hash);
     }
-  }
-
-  /** Initialize only the shared FIFO counter; allocation remains inside the supplied transaction. */
-  prepareRetry(): Promise<void> {
-    return this.enqueue.prepare();
-  }
-
-  async retryAsAdmin(
-    actor: AdminActor,
-    jobId: string,
-    expectedRevision: number,
-    requestId: string,
-    session: ClientSession,
-  ) {
-    const principal = this.adminPrincipal(actor, expectedRevision, session);
-    if (!isUUID(requestId, '4')) throw adminError('INVALID_REQUEST');
-    const originalId = objectId(jobId);
-    const hash = requestHash({
-      operation: 'admin-retry',
-      originalJobId: originalId.toHexString(),
-      actorUid: actor.uid,
-      requestId,
-    });
-    const { job, sourceRevision } = await this.retryInTransaction(
-      principal,
-      originalId,
-      requestId.toLowerCase(),
-      hash,
-      session,
-    );
-    return {
-      sourceJobId: originalId.toHexString(),
-      newJobId: job._id.toHexString(),
-      status: 'queued' as const,
-      sourceRevision,
-      revision: job.adminRevision ?? 0,
-    };
-  }
-
-  private async retryInTransaction(
-    principal: JobActionPrincipal,
-    originalId: Types.ObjectId,
-    requestId: string,
-    hash: string,
-    session: ClientSession,
-  ) {
-    const original = await this.findForAction(principal, originalId, session);
-    if (principal.kind === 'admin' && original.status === 'interrupted')
-      throw jobError('WORKER_RECOVERY_REQUIRED');
-    this.assertRetryable(original);
-    const controls =
-      this.workerControls ??
-      this.jobs.db.model<WorkerControl>(WorkerControl.name);
-    if (await controls.exists({ activeJobId: original._id }).session(session))
-      throw jobError('WORKER_RECOVERY_REQUIRED');
-    await this.accountAccess.assertActive(original.userId, session);
-    const newJobId = new Types.ObjectId();
-    const admissionSnapshot = await this.admission.assertNewWork(
-      original.userId,
-      original.inputReservation,
-      session,
-      undefined,
-      newJobId,
-      original.admissionSnapshot?.policyVersion === 2
-        ? {
-            policyVersion: 2,
-            preparationProfileId:
-              original.admissionSnapshot.preparationProfileId,
-            source: original.admissionSnapshot.source,
-          }
-        : {},
-    );
-    // Retry and source deletion/rename write the same source revision. The new
-    // reference commits with this fence, before cleanup may remove pinned input.
-    const touched = await this.jobs.updateOne(
-      this.writeAuthority(original, principal),
-      { $inc: { revision: 1 } },
-      { session },
-    );
-    if (touched.modifiedCount !== 1) this.changed(principal);
-    const queuedAt = new Date();
-    const queueOrder = await this.enqueue.next(session);
-    const [created] = await this.jobs.create(
-      [
-        {
-          _id: newJobId,
-          userId: original.userId,
-          requestId,
-          requestHash: hash,
-          retryOfJobId: original._id,
-          sourceTitle: original.sourceTitle ?? null,
-          displayName: original.displayName ?? original.sourceTitle ?? null,
-          sourceKind: original.sourceKind ?? null,
-          sourceUrl: original.sourceUrl ?? null,
-          clientStartedAt: queuedAt,
-          processingAccumulatedMs: 0,
-          status: 'queued',
-          inputReservation: { ...original.inputReservation },
-          admissionSnapshot,
-          inputObject: { ...original.inputObject },
-          queueOrder,
-          queuedAt,
-        },
-      ],
-      { session },
-    );
-    return { job: created, sourceRevision: (original.adminRevision ?? 0) + 1 };
   }
 
   private async findForAction(
@@ -389,13 +353,13 @@ export class JobActionsService {
     const input = job.inputObject;
     if (
       !input ||
-      typeof input.versionId !== 'string' ||
-      !input.versionId.trim() ||
+      !input.versionId ||
       input.versionId === 'null' ||
       input.key !== job.inputReservation.key ||
       input.bytes !== job.inputReservation.bytes ||
       input.sha256 !== job.inputReservation.sha256 ||
       input.contentType !== job.inputReservation.contentType ||
+      !job.recipeSnapshot ||
       requiresNewInputForRetry(job.lastError?.code)
     )
       throw jobError('NEW_INPUT_REQUIRED');
@@ -409,5 +373,44 @@ export class JobActionsService {
       status: job.status,
       retryOfJobId: job.retryOfJobId?.toHexString() ?? null,
     };
+  }
+
+  private async fenceAttempt(
+    execution: WorkerExecutionOwnership | null,
+    now: Date,
+    session: ClientSession,
+  ): Promise<void> {
+    if (!execution) return;
+    await this.jobs.db.model<WorkerAttempt>(WorkerAttempt.name).updateOne(
+      {
+        _id: execution.attemptId,
+        state: trusted({ $in: ['claimed', 'running', 'uploading'] }),
+      },
+      {
+        $set: {
+          state: 'cancelled',
+          terminalCode: 'CANCELLED',
+          terminalSummary: 'Job ownership was cancelled',
+          finishedAt: now,
+          leaseExpiresAt: now,
+        },
+        $inc: { revision: 1 },
+      },
+      { session, runValidators: true },
+    );
+    await this.jobs.db.model<WorkerSlot>(WorkerSlot.name).updateOne(
+      {
+        _id: execution.workerId,
+        machineId: execution.machineId,
+        sessionId: execution.sessionId,
+        incarnation: execution.incarnation,
+        currentAttemptId: execution.attemptId,
+      },
+      {
+        $set: { state: 'idle', currentAttemptId: null, lastSeenAt: now },
+        $inc: { revision: 1 },
+      },
+      { session, runValidators: true },
+    );
   }
 }
