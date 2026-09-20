@@ -1,5 +1,67 @@
 # Package changes
 
+## Revision 4.19
+
+- Corrected the installed Mac worker's local API base to include `/api/v1`,
+  preserving its existing machine credential and restarting it through the
+  native LaunchDaemon with normal administrator consent.
+- Added an external Mac service integration gate and generalized the external
+  harness across the declared platform/provider pairs. The test raises the
+  isolated processing-read limit and polls at a bounded five-second interval
+  so a long native inference cannot exhaust the API rate limit.
+- Proved the installed `0.1.1` `_musicmute` LaunchDaemon through a compiled
+  local backend, isolated MongoDB/Redis, real versioned S3 and CoreML. The
+  10-second input reached `ready`, the result downloaded as MP3, and both exact
+  object versions were removed. Only whole-object PUTs were used.
+- Marked D4 and F4 complete now that both declared MVP platforms have passed
+  real installed-service jobs. Logged-out/reboot recovery and the real mobile
+  product flow remain later gates. No deployment, logout or reboot occurred.
+- After acceptance, the supported uninstall paths removed the Mac LaunchDaemon
+  and Windows Service while preserving their protected releases and state. The
+  fresh one-command bootstrap test is intentionally deferred until after this
+  branch is merged; production remains untouched.
+
+## Revision 4.18
+
+- Corrected the installed Windows worker's local API base from the origin-only
+  URL to the actual `/api/v1` base after route-only diagnostics identified the
+  startup `HTTP_404` without exposing the machine credential.
+- Proved an installed `0.1.1` Windows `LocalService` through a real DirectML,
+  compiled-backend and versioned-S3 job using one whole-object PUT.
+- Promoted the verified `0.1.3` package with the rollback-safe installer. Its
+  four service-context DirectML qualifications and durable start passed, and
+  `0.1.3` is now the active release. A later ephemeral-backend attempt recorded
+  `completion-uncertain`, so it is retained as partial integration evidence
+  rather than overstated as a second clean end-to-end pass.
+- Removed the temporary loopback proxy, private installation inputs and exact
+  test object versions. The service is intentionally left stopped; no
+  deployment, logout or reboot occurred.
+
+## Revision 4.17
+
+- Added compiled API/worker integration coverage over isolated MongoDB and
+  Redis, with claim ownership, replay, cancellation, lease recovery and
+  revoked-machine assertions.
+- Added a separate real-S3 integration gate which preserves the bucket
+  preflight, performs only signed whole-object PUTs, downloads the exact pinned
+  result and removes only the exact versioned reservation keys created by the
+  run.
+- Fixed real completion after output upload by projecting only the five
+  `ObjectIdentity` fields. The previous object spread leaked enriched
+  reservation fields into the strict MongoDB object and left jobs in
+  `uploading_result`.
+- Increased bounded S3 metadata timeouts from five to thirty seconds after the
+  live preflight and `HeadObject` path exceeded five seconds on the accepted
+  network. The worker's whole-object transfer timeout remains two hours; no
+  multipart path was introduced.
+- Slimmed native packages by excluding development-only runtime trees and
+  static/debug artifacts, and by including only the Node executable and
+  optional license from the Node distribution.
+- Reconciled F1–F6 evidence. Real-S3 orchestration passes, but the deterministic
+  processing child keeps F1/F2/F3/F5 simulated and Mac administrator consent,
+  logged-out/reboot acceptance and live installed-service execution keep F4
+  blocked. No deployment or production enablement occurred.
+
 ## Revision 4.16
 
 - Added the protected worker fleet dashboard: stable server-filtered machine

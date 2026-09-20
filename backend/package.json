@@ -36,6 +36,8 @@
     "test:deletion:integration": "pnpm run build && node --test test/account-deletion-request.integration.mjs test/account-deletion.integration.mjs test/account-recovery.integration.mjs",
     "test:auth:integration": "pnpm run build && node --test test/auth.integration.mjs test/users.integration.mjs test/devices.integration.mjs test/app-policy.integration.mjs test/rate-limits.integration.mjs test/operations.integration.mjs test/firebase-tokens.integration.mjs test/helpers/isolated-services.test.mjs",
     "test:processing:integration": "pnpm run build && node --test test/processing-persistence.integration.mjs test/processing-usage.integration.mjs test/job-actions.integration.mjs test/push-registrations.integration.mjs test/notifications.integration.mjs",
+    "test:worker:integration": "pnpm run build && pnpm --dir ../worker run build && node --test --test-concurrency=1 test/worker-fleet.integration.mjs",
+    "test:worker:integration:s3": "pnpm run build && pnpm --dir ../worker run build && node --env-file=.env.production --test --test-concurrency=1 test/worker-fleet-s3.integration.mjs",
     "ops:auth": "node dist/operations/cli.js",
     "lint": "oxlint --deny-warnings src/ test/",
     "test": "vitest run",

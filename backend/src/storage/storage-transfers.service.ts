@@ -20,7 +20,7 @@ import type {
 import { StoragePreflightService } from './storage-preflight.service.js';
 import { createImmutableUploadGrant } from './immutable-upload-grant.js';
 
-const REQUEST_TIMEOUT_MILLISECONDS = 5_000;
+const REQUEST_TIMEOUT_MILLISECONDS = 30_000;
 const MISSING_OBJECT_NAMES = new Set([
   'NotFound',
   'NoSuchKey',
@@ -155,7 +155,13 @@ export class StorageTransfersService {
       pinned.ChecksumSHA256 !== reservation.sha256
     )
       throw jobError('UPLOAD_NOT_READY');
-    return { ...reservation, versionId };
+    return {
+      key: reservation.key,
+      versionId,
+      bytes: reservation.bytes,
+      sha256: reservation.sha256,
+      contentType: reservation.contentType,
+    };
   }
 
   /** Recovers the immutable version after a successful PUT response was lost. */

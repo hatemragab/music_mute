@@ -71,6 +71,15 @@ describe('StorageTransfersService', () => {
     const url = new URL(grant.url);
     expect(decodeURIComponent(url.pathname)).toBe(`/${reservation.key}`);
     expect(url.searchParams.get('x-id')).toBe('PutObject');
+    expect(url.searchParams.has('x-amz-checksum-sha256')).toBe(false);
+    expect(url.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toEqual(
+      expect.arrayContaining([
+        'content-type',
+        'host',
+        'if-none-match',
+        'x-amz-checksum-sha256',
+      ]),
+    );
     client.destroy();
   });
 
@@ -171,6 +180,8 @@ describe('StorageTransfersService', () => {
       bytes: object.bytes,
       sha256: object.sha256,
       contentType: object.contentType,
+      measuredDurationSeconds: 30,
+      grantExpiresAt: new Date(Date.now() + 60_000),
     };
     send.mockResolvedValueOnce({
       VersionId: 'worker-version',
@@ -180,7 +191,13 @@ describe('StorageTransfersService', () => {
     } as never);
     await expect(
       service.verifyUploadedVersion(reservation, 'worker-version'),
-    ).resolves.toEqual({ ...reservation, versionId: 'worker-version' });
+    ).resolves.toEqual({
+      key: reservation.key,
+      versionId: 'worker-version',
+      bytes: reservation.bytes,
+      sha256: reservation.sha256,
+      contentType: reservation.contentType,
+    });
     expect((send.mock.calls[0][0] as HeadObjectCommand).input.VersionId).toBe(
       'worker-version',
     );

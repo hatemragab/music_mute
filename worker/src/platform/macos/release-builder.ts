@@ -15,6 +15,7 @@ import {
   writeMacReleaseManifest,
 } from "./release-manifest.js";
 import { auditMacRuntimeBinary } from "./macho-audit.js";
+import { shouldCopyReleaseTreeEntry } from "../release-tree-filter.js";
 
 export interface MacReleaseBuildOptions {
   workerRoot: string;
@@ -94,7 +95,14 @@ export async function buildMacRelease(
       join(workerRoot, "package.json"),
       join(temporary, "app", "package.json"),
     );
-    await copyTree(nodeRoot, join(temporary, "runtime", "node"));
+    await copyFile(
+      join(nodeRoot, "bin", "node"),
+      join(temporary, "runtime", "node", "bin", "node"),
+    );
+    await copyOptionalFile(
+      join(nodeRoot, "LICENSE"),
+      join(temporary, "runtime", "node", "LICENSE"),
+    );
     await copyTree(pythonRoot, join(temporary, "runtime", "python"));
     await copyFile(ffmpeg, join(temporary, "runtime", "bin", "ffmpeg"));
     await copyFile(ffprobe, join(temporary, "runtime", "bin", "ffprobe"));
@@ -126,13 +134,21 @@ async function copyTree(source: string, destination: string): Promise<void> {
     force: false,
     preserveTimestamps: true,
     verbatimSymlinks: true,
-    filter: (path) => {
-      const name = basename(path);
-      return (
-        name !== "__pycache__" && name !== ".DS_Store" && !name.endsWith(".pyc")
-      );
-    },
+    filter: (path) => shouldCopyReleaseTreeEntry(source, path),
   });
+}
+
+async function copyOptionalFile(
+  source: string,
+  destination: string,
+): Promise<void> {
+  try {
+    await assertRegularFile(source, "optional release file");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  await copyFile(source, destination);
 }
 
 async function copyFile(source: string, destination: string): Promise<void> {

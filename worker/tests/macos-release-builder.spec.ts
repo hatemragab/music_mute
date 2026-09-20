@@ -33,10 +33,42 @@ describe("macOS release builder", () => {
     await mkdir(join(workerRoot, "engine"), { recursive: true });
     await writeFile(join(workerRoot, "engine", "module.py"), "VALUE = 1\n");
     await writeFile(join(workerRoot, "engine", "ignored.pyc"), "ignored\n");
+    await mkdir(join(workerRoot, "engine", "tests"), { recursive: true });
+    await writeFile(
+      join(workerRoot, "engine", "tests", "ignored.py"),
+      "ignored\n",
+    );
     await writeFile(join(workerRoot, "package.json"), '{"private":true}\n');
     await executable(join(nodeRoot, "bin", "node"));
+    await writeFile(join(nodeRoot, "LICENSE"), "Node license\n");
+    await mkdir(join(nodeRoot, "share", "doc"), { recursive: true });
+    await writeFile(join(nodeRoot, "share", "doc", "ignored.md"), "ignored\n");
     await executable(join(pythonRoot, "bin", "python3.13"));
     await symlink("python3.13", join(pythonRoot, "bin", "python3"));
+    await mkdir(
+      join(pythonRoot, "lib", "python3.13", "site-packages", "pkg", "tests"),
+      { recursive: true },
+    );
+    await writeFile(
+      join(pythonRoot, "lib", "python3.13", "site-packages", "runtime.dylib"),
+      "runtime\n",
+    );
+    await writeFile(
+      join(pythonRoot, "lib", "python3.13", "site-packages", "static.a"),
+      "ignored\n",
+    );
+    await writeFile(
+      join(
+        pythonRoot,
+        "lib",
+        "python3.13",
+        "site-packages",
+        "pkg",
+        "tests",
+        "fixture.py",
+      ),
+      "ignored\n",
+    );
     await mediaRuntime(mediaRoot);
 
     const built = await buildMacRelease({
@@ -57,6 +89,24 @@ describe("macOS release builder", () => {
     ).toBe(0o755);
     expect(built.entries.map((entry) => entry.path)).not.toContain(
       "app/engine/ignored.pyc",
+    );
+    expect(built.entries.map((entry) => entry.path)).not.toContain(
+      "app/engine/tests/ignored.py",
+    );
+    expect(built.entries.map((entry) => entry.path)).not.toContain(
+      "runtime/python/lib/python3.13/site-packages/static.a",
+    );
+    expect(built.entries.map((entry) => entry.path)).not.toContain(
+      "runtime/python/lib/python3.13/site-packages/pkg/tests/fixture.py",
+    );
+    expect(built.entries.map((entry) => entry.path)).not.toContain(
+      "runtime/node/share/doc/ignored.md",
+    );
+    expect(built.entries.map((entry) => entry.path)).toContain(
+      "runtime/node/LICENSE",
+    );
+    expect(built.entries.map((entry) => entry.path)).toContain(
+      "runtime/python/lib/python3.13/site-packages/runtime.dylib",
     );
     expect(built.entries.map((entry) => entry.path)).toContain(
       "runtime/media-source-manifest.json",

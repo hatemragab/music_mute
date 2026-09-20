@@ -86,8 +86,8 @@ All PRs use `codex/worker-rebuild` as their base. A feature branch begins from t
 - [x] **D1:** Implement the Node supervisor and bounded Python child protocol.
 - [x] **D2:** Implement and verify the versioned Kim recipe family and processing order.
 - [x] **D3:** Implement polling, ownership, renewal, recovery and S3 execution.
-- [ ] **D4:** Package and prove the accepted Mac runtime as a system service.
-- [ ] **D5:** Package and prove the accepted Windows runtime as a system service.
+- [x] **D4:** Package and prove the accepted Mac runtime as a system service.
+- [x] **D5:** Package and prove the accepted Windows runtime as a system service.
 - [x] **D6:** Verify local safety, one-job capacity and future provider/platform adapter boundaries.
 
 ### E. Dashboard
@@ -103,9 +103,9 @@ All PRs use `codex/worker-rebuild` as their base. A feature branch begins from t
 - [ ] **F1:** Prove complete app/API/S3/worker/result flow.
 - [ ] **F2:** Prove ownership, concurrency, expiry and recovery invariants.
 - [ ] **F3:** Prove cancellation, account deletion, policy and finalization races.
-- [ ] **F4:** Prove real background-service behavior on declared platforms.
+- [x] **F4:** Prove real background-service behavior on declared platforms.
 - [ ] **F5:** Complete security and resilience scenarios.
-- [ ] **F6:** Reconcile A–F evidence and unsupported-platform claims.
+- [x] **F6:** Reconcile A–F evidence and unsupported-platform claims.
 
 ### G. Release readiness
 

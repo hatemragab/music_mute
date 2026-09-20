@@ -14,7 +14,7 @@ import { StorageClient } from '../infrastructure/storage.module.js';
 import { StartupDependencyError } from '../startup-error.js';
 
 const CACHE_MILLISECONDS = 60_000;
-const REQUEST_TIMEOUT_MILLISECONDS = 5_000;
+const REQUEST_TIMEOUT_MILLISECONDS = 30_000;
 const PUBLIC_ACL_GROUPS = new Set([
   'http://acs.amazonaws.com/groups/global/AllUsers',
   'http://acs.amazonaws.com/groups/global/AuthenticatedUsers',
