@@ -1,5 +1,12 @@
 # Backend security planning changelog
 
+## 2026-09-20 — Completion audit normalized historical branch state
+
+- Reconciled the Branch 1–4 task and evidence files with authoritative merged PRs
+  #10–#13 and their verified merge commits.
+- Removed stale review-waiting and successor-authorization wording while retaining
+  historical changelog entries and the provider/deployment boundary.
+
 ## 2026-09-20 — Branch 5 merged and roadmap complete
 
 - Merged Branch 5 PR #14 into `codex/backend-security-cost-hardening` at

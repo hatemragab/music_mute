@@ -101,4 +101,5 @@ behavior.
 - [x] Confirm device identity has no enforcement role and automatic bans are absent.
 - [x] Update progress/evidence/changelog and prepare the PR.
 
-**Exit:** reviewed PR is ready against the collection branch. Stop before branch 5.
+**Exit:** PR #13 is merged into the collection branch. Branch 5 subsequently
+completed and merged as PR #14.

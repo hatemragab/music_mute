@@ -18,8 +18,8 @@
 - Branch status: `MERGED`
 - Completed checkpoints: E1, E2, E3, E4, E5, E6
 - Merge commit: `b0b69a6d57021a86327bf438acab360ad2098633`
-- Next item: maintainer review of the completed collection before any separately
-  authorized merge to `main` or deployment
+- Post-roadmap boundary: any merge to `main` or deployment requires separate
+  maintainer authorization
 - Blocking input: none
 
 ## Delivered behavior

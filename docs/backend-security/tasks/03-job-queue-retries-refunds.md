@@ -4,8 +4,8 @@
 **Create from:** updated collection after branch 2 merge
 **PR base:** `codex/backend-security-cost-hardening`
 **Checkpoints:** C1–C7
-**Status:** `READY_FOR_REVIEW`
-**Current checkpoint:** complete
+**Status:** `MERGED`
+**Current checkpoint:** none
 **Evidence:** `../evidence/03-job-queue-retries-refunds.md`
 
 ## Assignment
@@ -113,4 +113,5 @@ stale result.
 - [x] Search for obsolete active-job/retry constants and explain remaining matches.
 - [x] Update task, roadmap, manifest, evidence, and changelog.
 
-**Exit:** reviewed PR is ready against the collection branch. Stop before branch 4.
+**Exit:** PR #12 is merged into the collection branch. Branch 4 subsequently
+completed and merged as PR #13.
