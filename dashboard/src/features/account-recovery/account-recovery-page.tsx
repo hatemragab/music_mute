@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, RefreshCw, ShieldAlert, XCircle } from "lucide-react";
+import { CheckCircle2, ShieldAlert, XCircle } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
@@ -13,6 +13,7 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
+  RefreshButton,
 } from "@/components/page";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
@@ -94,9 +95,10 @@ export function AccountRecoveryPage() {
         title="Account recovery"
         description="High-priority requests from people who signed in while their account was scheduled for deletion. Review before the recovery deadline."
         actions={
-          <Button variant="outline" onClick={() => void requests.refetch()}>
-            <RefreshCw aria-hidden="true" /> Refresh
-          </Button>
+          <RefreshButton
+            refreshing={requests.isFetching}
+            onRefresh={() => void requests.refetch()}
+          />
         }
       />
       {status === "pending" ? (

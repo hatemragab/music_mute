@@ -19,6 +19,7 @@ import {
   LoadingState,
   PageHeader,
   PageSection,
+  RefreshButton,
 } from "@/components/page";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
@@ -182,9 +183,18 @@ export function WorkerMachinePage() {
         title={data.machine.label}
         description={`${data.machine.machineId} · revision ${data.machine.revision}`}
         actions={
-          can("workers.manage") && data.machine.status !== "revoked" ? (
-            <MachineActions data={data} onAction={setPendingAction} />
-          ) : undefined
+          <>
+            <RefreshButton
+              refreshing={machine.isFetching || diagnostics.isFetching}
+              onRefresh={() => {
+                void machine.refetch();
+                if (can("workers.logs.read")) void diagnostics.refetch();
+              }}
+            />
+            {can("workers.manage") && data.machine.status !== "revoked" ? (
+              <MachineActions data={data} onAction={setPendingAction} />
+            ) : null}
+          </>
         }
       />
       <div className="grid gap-4 xl:grid-cols-3">

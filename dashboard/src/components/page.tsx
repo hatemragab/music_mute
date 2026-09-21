@@ -33,6 +33,31 @@ export function PageHeader({
   );
 }
 
+export function RefreshButton({
+  onRefresh,
+  refreshing = false,
+}: {
+  onRefresh: () => void;
+  refreshing?: boolean;
+}) {
+  return (
+    <Button
+      variant="outline"
+      disabled={refreshing}
+      onClick={onRefresh}
+      aria-label={refreshing ? "Refreshing" : "Refresh"}
+    >
+      <RefreshCw
+        aria-hidden="true"
+        className={
+          refreshing ? "animate-spin motion-reduce:animate-none" : undefined
+        }
+      />
+      {refreshing ? "Refreshing…" : "Refresh"}
+    </Button>
+  );
+}
+
 export function PageSection({
   title,
   description,

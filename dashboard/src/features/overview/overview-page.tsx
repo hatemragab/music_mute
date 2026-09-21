@@ -16,6 +16,7 @@ import {
   LoadingState,
   PageHeader,
   PageSection,
+  RefreshButton,
 } from "@/components/page";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime, formatDuration } from "@/lib/format";
@@ -63,6 +64,10 @@ export function OverviewPage() {
         description="Job activity and outcomes for the selected UTC interval."
         actions={
           <div className="flex flex-wrap items-start justify-end gap-2">
+            <RefreshButton
+              refreshing={overview.isFetching}
+              onRefresh={() => void overview.refetch()}
+            />
             <DateRangeFilter range={range} onChange={setRange} />
             {can("exports.read") ? (
               <ExportCsvButton

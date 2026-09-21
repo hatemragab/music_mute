@@ -12,6 +12,7 @@ import {
   LoadingState,
   PageHeader,
   PageSection,
+  RefreshButton,
 } from "@/components/page";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
@@ -85,15 +86,17 @@ export function JobDetailPage() {
         title={data.displayName || `Job ${data.id.slice(-8)}`}
         description={data.id}
         actions={
-          can("jobs.manage") ? (
-            <div className="flex gap-2">
-              {cancelEligible ? (
-                <Button variant="outline" onClick={() => setCancelling(true)}>
-                  <Ban aria-hidden="true" /> Request cancellation
-                </Button>
-              ) : null}
-            </div>
-          ) : undefined
+          <>
+            <RefreshButton
+              refreshing={job.isFetching}
+              onRefresh={() => void job.refetch()}
+            />
+            {can("jobs.manage") && cancelEligible ? (
+              <Button variant="outline" onClick={() => setCancelling(true)}>
+                <Ban aria-hidden="true" /> Request cancellation
+              </Button>
+            ) : null}
+          </>
         }
       />
       <div className="grid gap-4 lg:grid-cols-2">

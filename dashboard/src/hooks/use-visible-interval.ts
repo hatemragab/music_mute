@@ -18,10 +18,8 @@ export function useVisibleInterval(
       if (document.visibilityState === "visible") callbackRef.current();
     };
     const timer = window.setInterval(run, milliseconds);
-    document.addEventListener("visibilitychange", run);
     return () => {
       window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", run);
     };
   }, [enabled, milliseconds]);
 }
