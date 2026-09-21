@@ -105,9 +105,7 @@ class JobsApiClient(
         return decode(request("GET", "/jobs$query"))
     }
 
-    override suspend fun detail(id: String): Job = decode<Job>(request("GET", path(id))).also {
-        if (it.workerAvailable == null) invalidResponse()
-    }
+    override suspend fun detail(id: String): Job = decode(request("GET", path(id)))
 
     override suspend fun cancel(id: String): JobMutation =
         decode(request("POST", "${path(id)}/cancel", "{}"))

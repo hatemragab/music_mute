@@ -12,6 +12,7 @@ import androidx.media3.common.Timeline
 import kotlin.random.Random
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import com.hatem.musicmute.library.LibraryKey
 import com.hatem.musicmute.processing.ProcessingSession
 import androidx.media3.session.SessionCommand
@@ -119,6 +120,24 @@ class AudioPlaybackService : MediaSessionService() {
                 checkpoint()
             }
             override fun onPlayerError(error: PlaybackException) {
+                val diagnostic = classifyPlaybackFailure(error)
+                Log.e(
+                    "MusicMutePlayback",
+                    "playback_error source=${diagnostic.source} code=${diagnostic.code} " +
+                        "retryable=${diagnostic.retryable} cause=${diagnostic.causeType} " +
+                        "queueIndex=${player.currentMediaItemIndex}",
+                )
+                player.currentMediaItem?.queueTrack()?.key?.let { key ->
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            dependencies?.reportPlaybackFailure(key, diagnostic)
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: Exception) {
+                            // Diagnostics are best effort and never alter playback behavior.
+                        }
+                    }
+                }
                 failedItems.add(player.currentMediaItemIndex)
                 val next = player.nextMediaItemIndex
                 if (!autoNext || player.repeatMode == Player.REPEAT_MODE_ONE || !player.playWhenReady || next == C.INDEX_UNSET || next in failedItems) {

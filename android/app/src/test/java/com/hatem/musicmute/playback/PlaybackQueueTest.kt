@@ -1,6 +1,9 @@
 package com.hatem.musicmute.playback
 
 import com.hatem.musicmute.library.LibraryKey
+import com.hatem.musicmute.processing.ClientErrorCode
+import com.hatem.musicmute.processing.JobsFailure
+import com.hatem.musicmute.processing.JobsProblem
 import java.nio.file.Files
 import com.hatem.musicmute.processing.ProcessingSession
 import java.io.IOException
@@ -114,5 +117,21 @@ class PlaybackQueueTest {
                 fail("Empty file accepted")
             } catch (_: IOException) { }
         } finally { root.deleteRecursively() }
+    }
+
+    @Test fun playbackFailureClassificationIsStructuredAndDoesNotExposeCauseMessages() {
+        val secret = "https://storage.example/output?token=private"
+        val error = IOException(
+            "Audio unavailable: $secret",
+            JobsFailure(JobsProblem.SERVICE_UNAVAILABLE),
+        )
+
+        val diagnostic = classifyPlaybackFailure(error)
+
+        assertEquals(PlaybackFailureSource.JOB_API, diagnostic.source)
+        assertEquals(ClientErrorCode.SERVER, diagnostic.code)
+        assertTrue(diagnostic.retryable)
+        assertEquals("JobsFailure", diagnostic.causeType)
+        assertFalse(diagnostic.toString().contains(secret))
     }
 }
