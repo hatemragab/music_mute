@@ -24,6 +24,7 @@ import com.hatem.musicmute.processing.*
 import com.hatem.musicmute.playback.AudioPlaybackService
 import com.hatem.musicmute.updates.*
 import java.io.File
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -52,6 +53,21 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
     val audioPlayback by lazy { com.hatem.musicmute.playback.AudioPlaybackController(this) }
     override suspend fun resolvePlaybackFile(key: com.hatem.musicmute.library.LibraryKey): File =
         libraryRepository.ensureLocal(key)
+    override suspend fun reportPlaybackFailure(
+        key: com.hatem.musicmute.library.LibraryKey,
+        diagnostic: com.hatem.musicmute.playback.PlaybackFailureDiagnostic,
+    ) {
+        if (processingSession()?.uid != key.ownerUid) return
+        clientErrorOutbox.capture(
+            operationId = UUID.randomUUID().toString(),
+            jobId = key.jobId,
+            stage = ClientErrorStage.PLAYBACK,
+            code = diagnostic.code,
+            retryable = diagnostic.retryable,
+            appVersion = BuildConfig.VERSION_NAME,
+            osVersion = Build.VERSION.RELEASE,
+        )
+    }
     val googleCredentials by lazy { GoogleCredentialProvider(this) }
     private val firebaseIdentity by lazy {
         val firebase =

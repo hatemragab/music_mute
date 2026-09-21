@@ -105,15 +105,40 @@ class JobsApiClientTest {
 
     @Test fun statusesAndAbsentDatesAreSafeAndMalformedDataFails() = runTest {
         for (status in JobStatus.entries.map { it.wireValue } + "future_state") {
-            val result = client(AuthHttpTransport { _,_,_,_ -> AuthHttpResponse(200, job(status).dropLast(1) + ",\"workerAvailable\":true}") }).detail(id)
+            val result = client(AuthHttpTransport { _,_,_,_ -> AuthHttpResponse(200, job(status)) }).detail(id)
             assertNull(result.queuedAt)
             assertNull(result.finishedAt)
             assertEquals(status == "future_state", result.knownStatus == null)
+            assertNull(result.workerAvailable)
         }
-        for (body in listOf("{}", job("ready"), job("ready").replace("2026-09-09T12:00:00Z", "bad"), job("ready").replace("\"bytes\":42", "\"bytes\":\"42\""))) {
+        for (body in listOf(
+            "{}",
+            job("ready").replace("\"status\":\"ready\",", ""),
+            job("ready").replace("2026-09-09T12:00:00Z", "bad"),
+            job("ready").replace("\"bytes\":42", "\"bytes\":\"42\""),
+        )) {
             val error = runCatching { client(AuthHttpTransport { _,_,_,_ -> AuthHttpResponse(200, body) }).detail(id) }.exceptionOrNull()
             assertTrue(error is JobsFailure)
         }
+    }
+
+    @Test fun readyJobWithoutWorkerAvailabilityCanResolveArtifact() = runTest {
+        val requests = mutableListOf<String>()
+        val api = client(AuthHttpTransport { url, _, _, _ ->
+            requests += url.removePrefix("https://api.example.test/api/v1")
+            AuthHttpResponse(200, when {
+                url.endsWith("/download-url") -> grant
+                else -> job("ready").replace("\"canDownloadOutput\":false", "\"canDownloadOutput\":true")
+            })
+        })
+
+        val readyJob = api.detail(id)
+        assertEquals("ready", readyJob.status)
+        assertNull(readyJob.workerAvailable)
+        assertTrue(readyJob.canDownloadOutput)
+
+        api.download(id, "output", requestId)
+        assertEquals(listOf("/jobs/$id", "/jobs/$id/download-url"), requests)
     }
 
     @Test fun refreshOnceKeepsExactIntentAndHeaders() = runTest {

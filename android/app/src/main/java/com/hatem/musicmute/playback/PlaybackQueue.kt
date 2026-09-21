@@ -1,6 +1,11 @@
 package com.hatem.musicmute.playback
 
 import com.hatem.musicmute.library.LibraryKey
+import com.hatem.musicmute.processing.ArtifactException
+import com.hatem.musicmute.processing.ArtifactProblem
+import com.hatem.musicmute.processing.ClientErrorCode
+import com.hatem.musicmute.processing.JobsFailure
+import com.hatem.musicmute.processing.JobsProblem
 import com.hatem.musicmute.processing.ProcessingSession
 import java.io.File
 import java.io.IOException
@@ -29,6 +34,69 @@ internal class OwnerQueueRestore {
     fun canCheckpoint(owner: ProcessingSession?): Boolean = owner != null && attached == owner && ready
 }
 data class QueueTrack(val key: LibraryKey, val title: String)
+
+enum class PlaybackFailureSource { JOB_API, ARTIFACT, LOCAL_IO, PLAYER }
+
+data class PlaybackFailureDiagnostic(
+    val source: PlaybackFailureSource,
+    val code: ClientErrorCode,
+    val retryable: Boolean,
+    val causeType: String,
+)
+
+internal fun classifyPlaybackFailure(error: Throwable): PlaybackFailureDiagnostic {
+    val causes = generateSequence(error) { it.cause }.take(16).toList()
+    causes.filterIsInstance<JobsFailure>().firstOrNull()?.let { failure ->
+        val (code, retryable) = when (failure.problem) {
+            JobsProblem.OFFLINE -> ClientErrorCode.NETWORK to true
+            JobsProblem.UNAUTHENTICATED,
+            JobsProblem.ACCOUNT_DISABLED,
+            JobsProblem.EMAIL_VERIFICATION_REQUIRED,
+            JobsProblem.PROFILE_SYNC_REQUIRED,
+            JobsProblem.DEVICE_SYNC_REQUIRED,
+            JobsProblem.DEVICE_REPORT_CONFLICT,
+            JobsProblem.APP_UPDATE_REQUIRED,
+            JobsProblem.POLICY_DENIED -> ClientErrorCode.AUTHENTICATION to false
+            JobsProblem.JOB_NOT_FOUND -> ClientErrorCode.JOB_NOT_FOUND to false
+            JobsProblem.JOB_STATE_CONFLICT,
+            JobsProblem.IDEMPOTENCY_CONFLICT,
+            JobsProblem.NEW_INPUT_REQUIRED -> ClientErrorCode.JOB_CONFLICT to false
+            JobsProblem.SERVICE_UNAVAILABLE,
+            JobsProblem.RATE_LIMITED,
+            JobsProblem.PROCESSING_CAPACITY_UNAVAILABLE -> ClientErrorCode.SERVER to true
+            else -> ClientErrorCode.SERVER to false
+        }
+        return PlaybackFailureDiagnostic(
+            PlaybackFailureSource.JOB_API,
+            code,
+            retryable,
+            failure::class.java.simpleName,
+        )
+    }
+    causes.filterIsInstance<ArtifactException>().firstOrNull()?.let { failure ->
+        val (code, retryable) = when (failure.problem) {
+            ArtifactProblem.NOT_READY,
+            ArtifactProblem.EXPIRED_GRANT -> ClientErrorCode.SOURCE_UNAVAILABLE to true
+            ArtifactProblem.INVALID_OUTPUT -> ClientErrorCode.INVALID_MEDIA to false
+            ArtifactProblem.TRANSFER -> ClientErrorCode.NETWORK to true
+            ArtifactProblem.STORAGE -> ClientErrorCode.STORAGE to false
+        }
+        return PlaybackFailureDiagnostic(
+            PlaybackFailureSource.ARTIFACT,
+            code,
+            retryable,
+            failure::class.java.simpleName,
+        )
+    }
+    val cause = causes.lastOrNull() ?: error
+    return PlaybackFailureDiagnostic(
+        if (cause is IOException) PlaybackFailureSource.LOCAL_IO else PlaybackFailureSource.PLAYER,
+        if (cause is IOException) ClientErrorCode.LOCAL_IO else ClientErrorCode.UNKNOWN,
+        false,
+        cause::class.java.simpleName,
+    )
+}
+
 interface QueueCommands {
     fun playQueue(tracks: List<QueueTrack>, startKey: LibraryKey)
     fun next()
@@ -44,6 +112,7 @@ interface PlaybackDependencies {
     val playbackSessions: StateFlow<ProcessingSession?>
     val playbackQueueStore: PlaybackQueueStore
     suspend fun resolvePlaybackFile(key: LibraryKey): File
+    suspend fun reportPlaybackFailure(key: LibraryKey, diagnostic: PlaybackFailureDiagnostic) {}
 }
 
 /** Fence both sides of a possibly long transfer, including same-user sign-out/sign-in epochs. */
