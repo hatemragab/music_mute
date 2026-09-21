@@ -37,6 +37,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useApiClient } from "@/auth/admin-session";
 import { useVisibleInterval } from "@/hooks/use-visible-interval";
 import { getAccountRecoverySummary } from "@/features/account-recovery/account-recovery-api";
+import { DASHBOARD_POLL_INTERVAL_MS } from "./polling";
 
 interface NavItem {
   label: string;
@@ -181,7 +182,7 @@ export function AppShell() {
   });
   useVisibleInterval(() => {
     if (can("users.account-recovery.manage")) void recovery.refetch();
-  }, 15_000);
+  }, DASHBOARD_POLL_INTERVAL_MS.background);
   const pendingRecoveryCount = recovery.data?.pendingCount ?? 0;
   return (
     <div className="min-h-svh bg-background text-foreground">

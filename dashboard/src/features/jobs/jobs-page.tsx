@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router";
 
 import { JOB_STATUSES } from "@/api/contracts";
 import { withQuery } from "@/api/query-string";
+import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
 import { validateDateRange } from "@/components/date-range";
@@ -63,7 +64,10 @@ export function JobsPage() {
     queryFn: () => listJobs(client, filters),
     enabled: !dateError,
   });
-  useVisibleInterval(() => void jobs.refetch(), 10_000);
+  useVisibleInterval(
+    () => void jobs.refetch(),
+    DASHBOARD_POLL_INTERVAL_MS.live,
+  );
   const change = (name: string, value: string) => {
     const next = new URLSearchParams(params);
     if (value && value !== "all") next.set(name, value);

@@ -12,6 +12,7 @@ import {
 import { Link, useParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
+import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import {
   ErrorState,
@@ -112,7 +113,7 @@ export function WorkerMachinePage() {
   useVisibleInterval(() => {
     void machine.refetch();
     if (can("workers.logs.read")) void diagnostics.refetch();
-  }, 10_000);
+  }, DASHBOARD_POLL_INTERVAL_MS.live);
   const mutation = useMutation({
     mutationFn: async ({
       action,

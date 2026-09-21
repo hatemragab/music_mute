@@ -5,6 +5,7 @@ import { Link, useSearchParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
 import type { AccountRecoveryRequest } from "@/api/contracts";
+import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
 import {
@@ -52,7 +53,10 @@ export function AccountRecoveryPage() {
         cursor,
       }),
   });
-  useVisibleInterval(() => void requests.refetch(), 15_000);
+  useVisibleInterval(
+    () => void requests.refetch(),
+    DASHBOARD_POLL_INTERVAL_MS.background,
+  );
   const decide = useMutation({
     mutationFn: ({ target, reason }: { target: Decision; reason: string }) =>
       decideAccountRecoveryRequest(client, target.request, target.action, {

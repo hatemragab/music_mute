@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
 import { ALERT_SEVERITIES, type AlertRecord } from "@/api/contracts";
+import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
 import {
@@ -72,7 +73,7 @@ export function SystemHealthPage() {
   useVisibleInterval(() => {
     void health.refetch();
     void alerts.refetch();
-  }, 30_000);
+  }, DASHBOARD_POLL_INTERVAL_MS.background);
   const acknowledge = useMutation({
     mutationFn: ({ alert, reason }: { alert: AlertRecord; reason: string }) =>
       acknowledgeAlert(client, alert.id, {
