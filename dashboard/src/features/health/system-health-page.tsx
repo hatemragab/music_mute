@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
 import { useSearchParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
@@ -14,10 +13,10 @@ import {
   LoadingState,
   PageHeader,
   PageSection,
+  RefreshButton,
 } from "@/components/page";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
@@ -92,15 +91,13 @@ export function SystemHealthPage() {
         title="System health"
         description="Safe dependency status and durable alert episodes. Unknown or stale checks are never displayed as healthy."
         actions={
-          <Button
-            variant="outline"
-            onClick={() => {
+          <RefreshButton
+            refreshing={health.isFetching || alerts.isFetching}
+            onRefresh={() => {
               void health.refetch();
               void alerts.refetch();
             }}
-          >
-            <RefreshCw aria-hidden="true" /> Refresh
-          </Button>
+          />
         }
       />
       {health.isLoading ? (

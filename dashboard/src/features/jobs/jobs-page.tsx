@@ -14,6 +14,7 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
+  RefreshButton,
 } from "@/components/page";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -81,12 +82,18 @@ export function JobsPage() {
         title="Jobs"
         description="Inspect job status, owner, source, timing and finalized results."
         actions={
-          can("exports.read") ? (
-            <ExportCsvButton
-              path={withQuery("/admin/exports/jobs.csv", filters)}
-              filename="musicmute-jobs.csv"
+          <>
+            <RefreshButton
+              refreshing={jobs.isFetching}
+              onRefresh={() => void jobs.refetch()}
             />
-          ) : undefined
+            {can("exports.read") ? (
+              <ExportCsvButton
+                path={withQuery("/admin/exports/jobs.csv", filters)}
+                filename="musicmute-jobs.csv"
+              />
+            ) : null}
+          </>
         }
       />
       <div className="grid gap-2 rounded-xl border bg-card p-3 sm:grid-cols-2 xl:grid-cols-5">

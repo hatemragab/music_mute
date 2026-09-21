@@ -12,6 +12,7 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
+  RefreshButton,
 } from "@/components/page";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
@@ -131,15 +132,28 @@ export function WorkerFleetPage() {
         title="Worker fleet"
         description="Enroll qualified machines, watch current work and control bounded fleet capacity without exposing worker credentials."
         actions={
-          can("workers.enroll") ? (
-            <WorkerEnrollmentDialog
-              onCreated={() =>
-                queryClient.invalidateQueries({
-                  queryKey: ["worker-invitations"],
-                })
-              }
-            />
-          ) : undefined
+          <>
+            {activeTab === "machines" ? (
+              <RefreshButton
+                refreshing={machines.isFetching}
+                onRefresh={() => void machines.refetch()}
+              />
+            ) : activeTab === "enrollment" && can("workers.enroll") ? (
+              <RefreshButton
+                refreshing={invitations.isFetching}
+                onRefresh={() => void invitations.refetch()}
+              />
+            ) : null}
+            {can("workers.enroll") ? (
+              <WorkerEnrollmentDialog
+                onCreated={() =>
+                  queryClient.invalidateQueries({
+                    queryKey: ["worker-invitations"],
+                  })
+                }
+              />
+            ) : null}
+          </>
         }
       />
       <Tabs value={activeTab} onValueChange={setActiveTab}>

@@ -33,7 +33,7 @@ describe("useVisibleInterval", () => {
     expect(callback).toHaveBeenCalledTimes(2);
 
     setVisibility("visible");
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => vi.advanceTimersByTime(1_000));
     expect(callback).toHaveBeenCalledTimes(3);
 
     unmount();
