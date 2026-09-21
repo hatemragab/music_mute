@@ -32,6 +32,46 @@ describe("ApiClient", () => {
     expect(getToken).toHaveBeenNthCalledWith(2, true);
   });
 
+  it("returns null for an empty successful JSON response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(null, {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    const client = new ApiClient({
+      origin: "https://api.example.test",
+      getToken: vi.fn().mockResolvedValue("token"),
+    });
+
+    await expect(client.get("/admin/users/user-1/restriction")).resolves.toBe(
+      null,
+    );
+  });
+
+  it("still rejects malformed non-empty JSON responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response("not-json", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    const client = new ApiClient({
+      origin: "https://api.example.test",
+      getToken: vi.fn().mockResolvedValue("token"),
+    });
+
+    await expect(client.get("/admin/users/user-1")).rejects.toBeInstanceOf(
+      SyntaxError,
+    );
+  });
+
   it("never replays a mutation after an authentication failure", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
