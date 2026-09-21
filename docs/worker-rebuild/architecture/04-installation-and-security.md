@@ -1,5 +1,13 @@
 # Installation, enrollment and security specification
 
+> **macOS direction update:** the system LaunchDaemon and dedicated-account
+> sections below describe the implemented/historical worker rebuild. The
+> accepted replacement is a no-admin per-user LaunchAgent; its authoritative
+> design, paths, enrollment UX, migration policy, security trade-offs, and
+> acceptance criteria are in
+> [08-macos-user-launchagent.md](08-macos-user-launchagent.md). Windows remains
+> unchanged.
+
 ## 1. Trust model
 
 Only the owner's or explicitly trusted operators' machines join the MVP fleet. A machine can inspect audio assigned to it. Scoped URLs limit access to other objects but cannot hide current input from the machine's owner. No confidential-computing or hostile-worker attestation claim is made.
@@ -37,8 +45,17 @@ Retain or transition the installation log upload permission long enough to ackno
 1. Start bootstrap log, check basic platform, discover required privilege boundary, establish restricted installation session.
 2. Detect architecture, OS version, GPU devices, drivers, dedicated/unified memory, disk/RAM and network. Do not enumerate all user hardware identifiers or environment variables.
 3. Select an approved platform/backend bundle, verify authenticated metadata and artifact digests, prepare an isolated installation root.
-4. Install managed pinned runtimes/dependencies and FFmpeg as required. Avoid altering the user's global Python/Node packages or GPU drivers. `npx` requires Node/npm; shell/PowerShell bootstrap covers clean machines.
-5. Download model and benchmark fixture, verify their digests, and run a cheap preparation check. Actual activation depends on the final service-context GPU check.
+4. Inspect the protected MusicMute cache and private runtime first. Reuse only
+   exact verified artifacts and supported versions; install a newer immutable
+   private runtime when Node or the complete FFmpeg/FFprobe pair is missing,
+   older, or incompatible. Avoid altering the user's global Python/Node
+   packages or GPU drivers. `npx` requires Node/npm; shell/PowerShell bootstrap
+   covers clean machines.
+5. Download the model directly from the exact owner-authorized upstream URL in
+   authenticated catalog metadata, download the benchmark fixture from
+   MusicMute S3, verify both digests, and run a cheap preparation check. Never
+   copy or proxy model weights through MusicMute S3. Actual activation depends
+   on the final service-context GPU check.
 6. Register the machine supervisor service under the intended service identity; create restricted credentials/state directories. Start in **installation mode** with user-job claiming disabled.
 7. Through that service, run Kim GPU validation, benchmark and fixture result-upload smoke test. Validate output and record evidence.
 8. Submit sanitized capability/benchmark report and activate the machine only if every mandatory check passes.
@@ -51,11 +68,11 @@ Every stage is idempotent or has an explicit recovery action. A second installer
 
 Suggested layout; actual installer paths must be recorded in its tests:
 
-| Platform | Service | Data root |
-| --- | --- | --- |
-| macOS ARM64 | System LaunchDaemon, not a per-user LaunchAgent | `/Library/Application Support/MusicMuteWorker/` |
-| Windows x86_64 | Windows Service through a pinned wrapper | `%ProgramData%\MusicMuteWorker\` |
-| Linux x86_64 | System `systemd` service | `/var/lib/musicmute-worker/` plus root-owned executable location |
+| Platform       | Service                                         | Data root                                                        |
+| -------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
+| macOS ARM64    | System LaunchDaemon, not a per-user LaunchAgent | `/Library/Application Support/MusicMuteWorker/`                  |
+| Windows x86_64 | Windows Service through a pinned wrapper        | `%ProgramData%\MusicMuteWorker\`                                 |
+| Linux x86_64   | System `systemd` service                        | `/var/lib/musicmute-worker/` plus root-owned executable location |
 
 A dedicated non-interactive identity is preferred; grant only GPU/device/filesystem access actually required. Protect credentials with file ownership/permissions or NTFS ACLs appropriate to the actual service identity. Do not rely on the logged-in user's unlocked keychain, home directory or interactive shell PATH. Keep CLI-to-service control local and permission-checked; it is not an unauthenticated network admin port.
 
@@ -79,6 +96,14 @@ Disk and network are finite. Set explicit spool quotas and surface backlog/colle
 
 ## 8. Release authenticity and bootstrap trust
 
-Validate bundle/model hashes against authenticated metadata. MVP bundle verification uses a pinned public signing key; signing keys never reach machines or Git. HTTPS and a pinned npm/bootstrap artifact establish initial installer trust. A checksum fetched from the same compromised location is not an independent authenticity guarantee.
+Validate bundle/model hashes against authenticated metadata. For a model, bind
+the owner-hosted source URL, allowed redirect hosts, byte count, digest, model
+identity/version, and direct-source-only authorization condition into that
+metadata. Never accept a URL from the enrollment code, command line, model
+file, redirect response, or other untrusted input. MVP bundle verification uses
+a pinned public signing key; signing keys never reach machines or Git. HTTPS
+and a pinned npm/bootstrap artifact establish initial installer trust. A
+checksum fetched from the same compromised location is not an independent
+authenticity guarantee.
 
 The initial bootstrap remains a trust decision by the operator; do not imply its own signature code can retroactively protect against an already malicious first script. Document the trusted download origin and fixed version. Use documented update design in the next specification, not in-place package upgrades.

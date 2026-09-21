@@ -55,6 +55,9 @@ RUN apt-get update \
 
 COPY --from=apk-verifier --chown=root:root /opt/android-sdk /opt/android-sdk
 COPY --from=build --chown=node:node /app/dist ./dist
+COPY --chown=node:node backend/config/worker-installation-catalog.json ./config/worker-installation-catalog.json
+
+ENV WORKER_INSTALLATION_CATALOG_PATH=/app/config/worker-installation-catalog.json
 
 USER node
 

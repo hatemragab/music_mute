@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "releases": {
+    "darwin-arm64": {
+      "version": "0.1.0-mvp.2",
+      "filename": "musicmute-worker-darwin-arm64-0.1.0-mvp.2.tar.gz",
+      "key": "worker-installation-artifacts/releases/darwin-arm64/0.1.0-mvp.2.tar.gz",
+      "versionId": "V98TatBouroizPQlmxp.bq__e7N4.uMQ",
+      "bytes": 313766495,
+      "sha256": "e2c74bda9f735ea38cf68c026637a3de0d9e8781994aa1e804eb53e0ef950513",
+      "contentType": "application/gzip",
+      "sequence": 1,
+      "publishedAt": "2026-09-21T11:00:00.000Z",
+      "expiresAt": "2027-09-21T11:00:00.000Z",
+      "keyId": "worker-release-2026-01",
+      "signature": "UehBFRT-1FY_ShmzZXqHfFZ4eIqj22wCG5086ipgOiZRwsDLry2yPBg0FjcASKkLbVWBqq8K4uDXCXEbUFdkDA"
+    }
+  },
+  "model": {
+    "filename": "Kim_Vocal_2.onnx",
+    "bytes": 66759214,
+    "sha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b",
+    "contentType": "application/octet-stream",
+    "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Vocal_2.onnx",
+    "sourcePolicy": "direct-owner-source-only",
+    "allowedHosts": ["github.com", "release-assets.githubusercontent.com"],
+    "maxRedirects": 2
+  },
+  "fixture": {
+    "filename": "qualification-v1.wav",
+    "key": "worker-installation-artifacts/fixtures/qualification-v1.wav",
+    "versionId": "oagkp1bnbFPwsuSxoOn4GcQfh27nJqFt",
+    "bytes": 2116878,
+    "sha256": "495012a80265f5ba53d1458c266bb346470c417987dad5048d988a42d182e884",
+    "contentType": "audio/wav"
+  }
+}

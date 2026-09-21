@@ -10,6 +10,10 @@ import {
 const workerRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const engineRoot = resolve(workerRoot, "engine");
 const hangingFixture = resolve(workerRoot, "tests/fixtures/hanging-child.mjs");
+const closedStdinFixture = resolve(
+  workerRoot,
+  "tests/fixtures/closed-stdin-child.mjs",
+);
 let child: WorkerChildProcess | null = null;
 
 afterEach(async () => {
@@ -123,5 +127,21 @@ describe("worker child lifecycle", () => {
     expect(child.diagnosticTail()).toContain("/Users/[REDACTED]/fixture");
     expect(child.diagnosticTail()).toContain("[REDACTED_URL]");
     expect(child.diagnosticTail()).not.toContain("X-Amz-Signature");
+  });
+
+  it("handles a closed child pipe without an uncaught EPIPE", async () => {
+    child = new WorkerChildProcess({
+      command: process.execPath,
+      args: [closedStdinFixture],
+      cwd: workerRoot,
+      startTimeoutMs: 2_000,
+      requestTimeoutMs: 2_000,
+      stopTimeoutMs: 100,
+    });
+    await child.start();
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    await expect(child.request("ping", {})).rejects.toThrow(
+      /Worker child (pipe|is not running)/u,
+    );
   });
 });

@@ -2,6 +2,11 @@ import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectConnection } from '@nestjs/mongoose';
 import type { Connection } from 'mongoose';
+import { Job } from '../jobs/job.schema.js';
+import {
+  DEFAULT_WORKER_RECIPE_ID,
+  workerRecipeSnapshot,
+} from '../jobs/worker-recipes.js';
 import { StartupDependencyError } from '../startup-error.js';
 import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
 import { WorkerFleetPolicy } from './policy/worker-fleet-policy.schema.js';
@@ -43,11 +48,56 @@ export class WorkerFleetStartupService implements OnModuleInit {
           },
           { upsert: true, setDefaultsOnInsert: true },
         );
+      await this.backfillLegacyQueuedJobs();
     } catch (error) {
       throw new StartupDependencyError(
         'Worker fleet schema initialization failed',
         error,
       );
     }
+  }
+
+  private async backfillLegacyQueuedJobs(): Promise<void> {
+    const recipe = workerRecipeSnapshot(DEFAULT_WORKER_RECIPE_ID);
+    const remainingAttempts = {
+      $max: [
+        0,
+        {
+          $subtract: [
+            '$admissionSnapshot.maxInfrastructureAttempts',
+            { $ifNull: ['$attemptNumber', 0] },
+          ],
+        },
+      ],
+    };
+    await this.connection.model<Job>(Job.name).collection.updateMany(
+      {
+        status: 'queued',
+        deletedAt: null,
+        currentExecution: null,
+        inputObject: { $ne: null },
+        'admissionSnapshot.maxInfrastructureAttempts': {
+          $type: 'number',
+        },
+        $or: [{ recipeSnapshot: null }, { retryEligibility: null }],
+      },
+      [
+        {
+          $set: {
+            recipeSnapshot: { $ifNull: ['$recipeSnapshot', recipe] },
+            retryEligibility: {
+              $ifNull: [
+                '$retryEligibility',
+                {
+                  eligible: { $gt: [remainingAttempts, 0] },
+                  attemptsRemaining: remainingAttempts,
+                  nextAttemptAt: null,
+                },
+              ],
+            },
+          },
+        },
+      ],
+    );
   }
 }

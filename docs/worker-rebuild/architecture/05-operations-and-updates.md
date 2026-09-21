@@ -1,5 +1,11 @@
 # Operations, diagnostics, capacity and release lifecycle
 
+> **macOS command update:** the authoritative semantics for the new top-level
+> `install`, lifecycle, update, unpair, uninstall, and purge commands are in
+> [08-macos-user-launchagent.md](08-macos-user-launchagent.md). This document
+> continues to define the shared control-plane, release, and rollback
+> invariants.
+
 **MVP scope:** monitoring, diagnostics, capacity, immutable versioned packages, explicit per-machine manual update, and local rollback. Fleet-wide automatic targeting, canary promotion, and update orchestration are retained below as a post-MVP extension design and are not MVP release gates.
 
 ## 1. Heartbeat versus lease versus history
@@ -19,6 +25,28 @@ MongoDB `expiresAt` with a TTL index provides sampled-history cleanup, but delet
 Persist crashes, installation failures, revocations, policy changes and update outcomes as operational/audit events without heartbeat sampling. Do not apply the heartbeat's two-day TTL to installation records or serious errors. No automatic installation-history deletion is introduced in v1; the owner may later approve a separate retention policy.
 
 ## 2. Log transport and storage
+
+The macOS per-user MVP keeps its local operator surface bounded: LaunchAgent
+stdout and stderr rotate at 5 MiB with five private gzip archives per stream;
+fatal failures retain a sanitized code and bounded detail; structured event and
+error views support follow mode plus attempt, time, and severity filters.
+`status` reports heartbeat, current/last jobs, child/spool state, and log disk
+use. `diagnostics` exports a private sanitized ZIP without secrets, media,
+models, signed URLs, or configuration values. All seven behaviors stay inside
+the current-user installation and require no administrator privilege.
+
+Rotation truncates the active stream only after the compressed copy is safely
+written, preserving the LaunchAgent file descriptor. The 8 MiB structured
+spool remains fail-closed for job admission rather than silently discarding an
+unsafe logging condition.
+
+The explicit `logs --clear` maintenance path acquires the normal owner-only
+command lock and, when loaded, drains and stops the LaunchAgent before touching
+the spool. It truncates only the two active streams, deletes only their five
+known archive generations and the three known spool files, then restores the
+previously loaded service. It does not recursively delete a directory or touch
+configuration, credentials, models, jobs, support ZIPs, or unknown files.
+Forced drain bypass remains an explicit `--force` operator choice.
 
 Supervisors/bootstraps send bounded batches over HTTPS. A useful starting maximum is 256 KiB uncompressed per batch, with sequential identifiers, digest and a receipt covering the highest durably stored contiguous sequence. Enforce per-stream rates and decompression limits. Duplicate batches return the same acknowledgement; mismatched payloads for an existing sequence are rejected.
 
@@ -50,7 +78,13 @@ The dashboard offers the same narrow operational actions through typed requests,
 
 ## 5. Machine-level releases
 
-Update the supervisor and its matching Python environment together at the machine level. Do not run a different runtime version in each child slot in the first release. Model files are content-addressed and recipe-versioned independently but are included in compatibility checks.
+Update the supervisor and its matching Python environment together at the
+machine level. Do not run a different runtime version in each child slot in the
+first release. Model files are content-addressed and recipe-versioned
+independently but are included in compatibility checks. The CLI downloads each
+model only from its owner-authorized upstream URL and then stores the verified
+bytes in the local content-addressed cache. MusicMute must not mirror, proxy,
+or upload those model bytes to its S3 buckets.
 
 Suggested layout under the installation root:
 
@@ -70,7 +104,13 @@ Prepare every release in its **final versioned path** or use a verified relocata
 
 A release manifest includes schema version, release ID/build sequence, creation/expiry, platform/architecture/backend, runtime package identity, artifact sizes/hashes, model/recipe compatibility, supported backend protocol range, entry points and health-check policy. Sign exact canonical bytes using an established library/algorithm, such as Ed25519 with a pinned trusted public key.
 
-Verify signature, expiry, platform, sizes/hashes and protocol compatibility before extraction/activation. Prevent archive path traversal and reject executable paths outside the owned release tree. Pin download origins and do not accept unsigned post-install shell commands. The signing secret stays outside Git and outside worker machines.
+Verify signature, expiry, platform, sizes/hashes and protocol compatibility
+before extraction/activation. Prevent archive path traversal and reject
+executable paths outside the owned release tree. Pin download origins. A model
+descriptor pins the exact owner URL plus the minimum provider-controlled
+redirect-host set needed by that URL; redirects to any other host fail closed.
+Do not accept unsigned post-install shell commands. The signing secret stays
+outside Git and outside worker machines.
 
 This is a verified manual package lifecycle, **not a claim of implementing the full TUF specification or an automatic fleet updater**. TUF supplies the documented principles of authenticated metadata, hash validation and expiry. [T9] Record a monotonic release sequence, and allow local rollback only to the explicitly saved known-good installation. An intentional downgrade requires an explicitly authorized package and operator action, not a replayed old manifest.
 

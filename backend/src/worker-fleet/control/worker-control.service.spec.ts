@@ -39,7 +39,7 @@ function fixture() {
     updateMany: vi.fn(),
     exists: vi.fn(),
   };
-  const slots = { find: vi.fn(), exists: vi.fn() };
+  const slots = { find: vi.fn(), exists: vi.fn(), updateMany: vi.fn() };
   const attempts = { find: vi.fn() };
   const policies = { findById: vi.fn(), updateOne: vi.fn() };
   const invitations = { find: vi.fn() };
@@ -94,6 +94,7 @@ function fixture() {
     attempts,
     invitations,
     installations,
+    diagnostics,
     policies,
     commands,
     operations,
@@ -313,6 +314,39 @@ describe('worker control plane', () => {
     );
   });
 
+  it('presents an expired pending command as expired in machine history', async () => {
+    const f = fixture();
+    f.machines.findById.mockReturnValue(query(currentMachine()));
+    f.slots.find.mockReturnValue(query([]));
+    f.attempts.find.mockReturnValue(query([]));
+    f.diagnostics.find.mockReturnValue(query([]));
+    f.installations.findOne.mockReturnValue(query(null));
+    f.commands.find.mockReturnValue(
+      query([
+        {
+          _id: '64bb4ddc-ab7f-4115-af11-1948bdab1329',
+          kind: 'doctor',
+          state: 'pending',
+          checks: ['service'],
+          recipeId: null,
+          iterations: null,
+          requestedAt: new Date(Date.now() - 120_000),
+          expiresAt: new Date(Date.now() - 60_000),
+          summary: null,
+          metrics: [],
+          completedAt: null,
+          revision: 0,
+        },
+      ]),
+    );
+
+    const result = await f.service.machineDetail(actor, machineId);
+
+    expect(result.commands).toEqual([
+      expect.objectContaining({ state: 'expired' }),
+    ]);
+  });
+
   it('returns only current-session configuration and pending commands', async () => {
     const f = fixture();
     f.machines.findById.mockReturnValue(query(currentMachine()));
@@ -349,6 +383,25 @@ describe('worker control plane', () => {
     expect(result.commands).toHaveLength(1);
     expect(f.commands.find).toHaveBeenCalledWith(
       expect.objectContaining({ machineId, state: 'pending' }),
+    );
+    expect(f.machines.updateOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: machineId,
+        'currentSession.sessionId': sessionId,
+        'currentSession.incarnation': incarnation,
+      }),
+      {
+        $set: {
+          lastSeenAt: expect.any(Date),
+          'currentSession.lastSeenAt': expect.any(Date),
+        },
+      },
+      { runValidators: true },
+    );
+    expect(f.slots.updateMany).toHaveBeenCalledWith(
+      { machineId, sessionId, incarnation },
+      { $set: { lastSeenAt: expect.any(Date) } },
+      { runValidators: true },
     );
   });
 

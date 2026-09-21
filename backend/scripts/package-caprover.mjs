@@ -13,6 +13,7 @@ const files = [
   'backend/pnpm-lock.yaml',
   'backend/.npmrc',
   'backend/nest-cli.json',
+  'backend/config/worker-installation-catalog.json',
   'backend/scripts/install-apk-verifier.sh',
   ...readdirSync(join(root, 'backend'))
     .filter((name) => /^tsconfig.*\.json$/.test(name))

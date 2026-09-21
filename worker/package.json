@@ -3,7 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "description": "MusicMute machine supervisor and native processing child",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hatemragab/music_mute.git",
+    "directory": "worker"
+  },
+  "files": [
+    "dist/src/",
+    "dist/protocol/",
+    "engine/musicmute_engine/*.py",
+    "LICENSE",
+    "README.md"
+  ],
   "type": "module",
   "engines": {
     "node": ">=24 <25",

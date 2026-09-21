@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { lstat, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { ChildCommandError } from "../agent/child-process.js";
+import {
+  ChildCommandError,
+  sanitizeDiagnostic,
+} from "../agent/child-process.js";
 import type { ChildResponse } from "../agent/ipc/child-protocol.js";
 import {
   ControlPlaneError,
@@ -15,9 +18,17 @@ import {
   type ConfigResponse,
   type ObjectIdentity,
   type OutputGrantResponse,
+  type WorkerCommandResult,
+  type WorkerRemoteCommand,
   type WorkerRecipeId,
 } from "./contracts.js";
 import { LeaseAuthority, OwnershipLostError } from "./lease-authority.js";
+import {
+  loadLocalLifecycle,
+  localLifecycleAllowsClaims,
+} from "./local-lifecycle.js";
+import { writeLocalRuntimeStatus } from "./local-runtime-status.js";
+import type { RuntimeJobSummary } from "./local-runtime-status.js";
 import {
   DiagnosticSpool,
   type RuntimeDiagnostics,
@@ -28,6 +39,7 @@ import {
 } from "./resource-limits.js";
 import { TransferError, type WorkerTransferClient } from "./transfers.js";
 import { WorkspaceManager, type AttemptWorkspace } from "./workspace.js";
+import type { RuntimeCommandExecutor } from "./remote-command-executor.js";
 
 export interface RuntimeSlotDefinition {
   workerId: string;
@@ -42,6 +54,8 @@ export interface WorkerRuntimeOptions {
   machineId: string;
   slots: readonly RuntimeSlotDefinition[];
   workRoot: string;
+  localLifecyclePath?: string;
+  localRuntimeStatusPath?: string;
   modelCacheRoot: string;
   ffmpegPath: string;
   ffprobePath: string;
@@ -52,6 +66,7 @@ export interface WorkerRuntimeOptions {
   uploadAttempts?: number;
   diagnostics?: RuntimeDiagnostics;
   resources?: Pick<RuntimeResourceGate, "assertAvailable">;
+  commandExecutor?: RuntimeCommandExecutor;
   onEvent?: (event: RuntimeEvent) => void;
 }
 
@@ -62,11 +77,18 @@ export interface RuntimeEvent {
     | "attempt-succeeded"
     | "attempt-failed"
     | "attempt-stopped"
+    | "child-failed"
+    | "transfer-failed"
     | "child-unavailable"
-    | "resource-blocked";
+    | "child-recovered"
+    | "resource-blocked"
+    | "command-started"
+    | "command-completed"
+    | "command-report-deferred";
   workerId?: string;
   attemptId?: string;
   code?: string;
+  detail?: string;
 }
 
 interface RuntimeControlPlane {
@@ -80,6 +102,7 @@ interface RuntimeControlPlane {
   outputGrant: WorkerControlPlaneClient["outputGrant"];
   complete: WorkerControlPlaneClient["complete"];
   fail: WorkerControlPlaneClient["fail"];
+  completeCommand: WorkerControlPlaneClient["completeCommand"];
 }
 
 interface RuntimeTransfers {
@@ -102,6 +125,7 @@ interface ProcessingChild {
   ): Promise<ChildResponse>;
   terminateActive(): void;
   isProcessing(): boolean;
+  diagnosticTail?(): string;
 }
 
 class PublicationUncertainError extends Error {
@@ -118,10 +142,23 @@ export class WorkerRuntime {
   private readonly diagnostics: RuntimeDiagnostics;
   private readonly resources: Pick<RuntimeResourceGate, "assertAvailable">;
   private readonly busy = new Map<string, Promise<void>>();
+  private readonly activeAttemptIds = new Map<string, string>();
+  private readonly activeJobs = new Map<
+    string,
+    { attemptId: string; jobId: string }
+  >();
   private readonly pendingClaims = new Map<string, string>();
   private readonly unavailable = new Set<string>();
+  private readonly childRecoveryAfter = new Map<string, number>();
+  private readonly pendingCommandResults = new Map<
+    string,
+    { requestId: string; result: WorkerCommandResult }
+  >();
   private readonly stopping = new AbortController();
   private machineId = "";
+  private childState: "ready" | "unavailable" | "stopped" = "ready";
+  private lastSuccessfulJob?: RuntimeJobSummary;
+  private lastFailedJob?: RuntimeJobSummary & { code: string };
   private started = false;
   private wakeResolver: (() => void) | null = null;
   private wakeGeneration = 0;
@@ -166,6 +203,7 @@ export class WorkerRuntime {
         );
       }
       this.started = true;
+      await this.publishLocalStatus();
       this.emit({ kind: "started" });
     } catch (error) {
       await this.supervisor.stop();
@@ -197,14 +235,24 @@ export class WorkerRuntime {
   async reconcileOnce(): Promise<number> {
     this.assertStarted();
     if (this.stopping.signal.aborted) return 0;
+    const config = await this.synchronizeConfig();
+    await this.publishLocalStatus();
+    await this.processRemoteCommands(config);
+    await this.recoverChildren();
+    await this.publishLocalStatus();
     if (!(await this.diagnostics.canAdmitJobs())) return 0;
     const idle = this.options.slots.filter(
       (slot) =>
         !this.busy.has(slot.workerId) && !this.unavailable.has(slot.workerId),
     );
     if (idle.length === 0) return 0;
-    const config = await this.synchronizeConfig();
     if (!config.claimAllowed) return 0;
+    if (this.options.localLifecyclePath !== undefined) {
+      const lifecycle = await loadLocalLifecycle(
+        this.options.localLifecyclePath,
+      );
+      if (!localLifecycleAllowsClaims(lifecycle)) return 0;
+    }
     let claimed = 0;
     for (const slot of idle) {
       const requestId = this.pendingClaims.get(slot.workerId) ?? randomUUID();
@@ -226,11 +274,20 @@ export class WorkerRuntime {
         response.serverTime,
       )
         .catch(() => undefined)
-        .finally(() => {
+        .finally(async () => {
           this.busy.delete(slot.workerId);
+          this.activeAttemptIds.delete(slot.workerId);
+          this.activeJobs.delete(slot.workerId);
+          await this.publishLocalStatus();
           this.wake();
         });
       this.busy.set(slot.workerId, attempt);
+      this.activeAttemptIds.set(slot.workerId, response.claim.attemptId);
+      this.activeJobs.set(slot.workerId, {
+        attemptId: response.claim.attemptId,
+        jobId: response.claim.jobId,
+      });
+      await this.publishLocalStatus();
     }
     return claimed;
   }
@@ -253,8 +310,31 @@ export class WorkerRuntime {
     }
     await this.waitForIdle();
     await this.supervisor.stop();
+    this.childState = "stopped";
+    await this.publishLocalStatus();
     await this.diagnostics.flush();
     this.started = false;
+  }
+
+  private async publishLocalStatus(): Promise<void> {
+    if (this.options.localRuntimeStatusPath === undefined) return;
+    await writeLocalRuntimeStatus(
+      this.options.localRuntimeStatusPath,
+      [...this.activeAttemptIds.values()],
+      {
+        currentAttempts: [...this.activeJobs].map(([workerId, attempt]) => ({
+          workerId,
+          ...attempt,
+        })),
+        childState: this.childState,
+        ...(this.lastSuccessfulJob === undefined
+          ? {}
+          : { lastSuccessfulJob: this.lastSuccessfulJob }),
+        ...(this.lastFailedJob === undefined
+          ? {}
+          : { lastFailedJob: this.lastFailedJob }),
+      },
+    );
   }
 
   private async synchronizeConfig(): Promise<ConfigResponse> {
@@ -379,11 +459,22 @@ export class WorkerRuntime {
           },
           Math.max(
             100,
-            Math.min(7_200_000, Math.floor(authority.remainingMs())),
+            Math.min(7_200_000, Math.floor(authority.deadlineRemainingMs())),
           ),
         );
       } catch (error) {
-        if (!(error instanceof ChildCommandError)) childTerminated = true;
+        if (!(error instanceof ChildCommandError)) {
+          childTerminated = true;
+          if (!controller.signal.aborted && !this.stopping.signal.aborted) {
+            this.emit({
+              kind: "child-failed",
+              workerId: slot.workerId,
+              attemptId: claim.attemptId,
+              code: "child-process-failed",
+              detail: safeChildDiagnostic(error, child),
+            });
+          }
+        }
         throw error;
       }
       if (childResponse.type !== "result")
@@ -423,6 +514,11 @@ export class WorkerRuntime {
         throw new PublicationUncertainError();
       }
       terminal = true;
+      this.lastSuccessfulJob = {
+        jobId: claim.jobId,
+        attemptId: claim.attemptId,
+        at: new Date().toISOString(),
+      };
       this.emit({
         kind: "attempt-succeeded",
         workerId: slot.workerId,
@@ -458,6 +554,21 @@ export class WorkerRuntime {
         });
       } else {
         const failure = failureFor(error);
+        this.lastFailedJob = {
+          jobId: claim.jobId,
+          attemptId: claim.attemptId,
+          code: failure.code,
+          at: new Date().toISOString(),
+        };
+        if (error instanceof TransferError) {
+          this.emit({
+            kind: "transfer-failed",
+            workerId: slot.workerId,
+            attemptId: claim.attemptId,
+            code: error.code,
+            detail: sanitizeDiagnostic(error.diagnostic ?? "transfer-failed"),
+          });
+        }
         try {
           authority.assertCurrent();
           await this.control.fail(
@@ -486,12 +597,16 @@ export class WorkerRuntime {
       if (childTerminated && !this.stopping.signal.aborted) {
         try {
           await this.supervisor.restart(slot.workerId);
-        } catch {
+        } catch (error) {
           this.unavailable.add(slot.workerId);
+          this.childState = "unavailable";
+          this.childRecoveryAfter.set(slot.workerId, Date.now() + 5_000);
           this.emit({
             kind: "child-unavailable",
             workerId: slot.workerId,
             attemptId: claim.attemptId,
+            code: "child-restart-failed",
+            detail: safeChildDiagnostic(error, child),
           });
         }
       }
@@ -539,6 +654,116 @@ export class WorkerRuntime {
       }
     }
     throw lastError ?? new TransferError("OUTPUT_UPLOAD_FAILED", true);
+  }
+
+  private async processRemoteCommands(config: ConfigResponse): Promise<void> {
+    const executor = this.options.commandExecutor;
+    if (!executor) return;
+    const serverTime = Date.parse(config.serverTime);
+    for (const command of config.commands) {
+      if (Date.parse(command.expiresAt) <= serverTime) continue;
+      if (command.kind === "benchmark" && this.busy.size > 0) continue;
+      let pending = this.pendingCommandResults.get(command.commandId);
+      if (!pending) {
+        this.emit({
+          kind: "command-started",
+          code: command.kind,
+          detail: command.commandId,
+        });
+        const result = await this.executeRemoteCommand(executor, command);
+        pending = { requestId: randomUUID(), result };
+        this.pendingCommandResults.set(command.commandId, pending);
+      }
+      try {
+        await this.control.completeCommand(
+          command.commandId,
+          this.sessionId,
+          this.incarnation,
+          pending.requestId,
+          pending.result,
+          this.stopping.signal,
+        );
+        this.pendingCommandResults.delete(command.commandId);
+        this.emit({
+          kind: "command-completed",
+          code: pending.result.outcome,
+          detail: command.commandId,
+        });
+      } catch (error) {
+        if (
+          error instanceof ControlPlaneError &&
+          ["WORKER_EXPIRED", "WORKER_CONFLICT"].includes(error.code)
+        )
+          this.pendingCommandResults.delete(command.commandId);
+        this.emit({
+          kind: "command-report-deferred",
+          code:
+            error instanceof ControlPlaneError ? error.code : "report-failed",
+          detail: command.commandId,
+        });
+      }
+    }
+  }
+
+  private async executeRemoteCommand(
+    executor: RuntimeCommandExecutor,
+    command: WorkerRemoteCommand,
+  ): Promise<WorkerCommandResult> {
+    if (command.kind !== "benchmark")
+      return executor.execute(command, this.stopping.signal);
+    await this.supervisor.stop();
+    let result: WorkerCommandResult;
+    let childrenAvailable = true;
+    try {
+      result = await executor.execute(command, this.stopping.signal);
+    } finally {
+      if (!this.stopping.signal.aborted) {
+        try {
+          await this.supervisor.start();
+          this.childState = "ready";
+          this.unavailable.clear();
+          this.childRecoveryAfter.clear();
+        } catch {
+          childrenAvailable = false;
+          this.childState = "unavailable";
+          for (const slot of this.options.slots) {
+            this.unavailable.add(slot.workerId);
+            this.childRecoveryAfter.set(slot.workerId, Date.now() + 5_000);
+          }
+        }
+      }
+    }
+    if (!childrenAvailable)
+      return {
+        outcome: "failed",
+        summary: "Benchmark finished but worker child recovery failed",
+        metrics: [],
+      };
+    return result;
+  }
+
+  private async recoverChildren(): Promise<void> {
+    const now = Date.now();
+    for (const [workerId, retryAt] of this.childRecoveryAfter) {
+      if (retryAt > now || this.busy.has(workerId)) continue;
+      try {
+        await this.supervisor.restart(workerId);
+        this.unavailable.delete(workerId);
+        this.childState = "ready";
+        this.childRecoveryAfter.delete(workerId);
+        this.emit({ kind: "child-recovered", workerId });
+      } catch (error) {
+        this.childRecoveryAfter.set(workerId, now + 30_000);
+        this.emit({
+          kind: "child-unavailable",
+          workerId,
+          code: "child-recovery-failed",
+          detail: sanitizeDiagnostic(
+            error instanceof Error ? error.message : "Child recovery failed",
+          ).slice(-2_000),
+        });
+      }
+    }
   }
 
   private async renewAttempt(
@@ -680,6 +905,12 @@ function validateOptions(options: WorkerRuntimeOptions): void {
     options.modelCacheRoot,
     options.ffmpegPath,
     options.ffprobePath,
+    ...(options.localLifecyclePath === undefined
+      ? []
+      : [options.localLifecyclePath]),
+    ...(options.localRuntimeStatusPath === undefined
+      ? []
+      : [options.localRuntimeStatusPath]),
   ]) {
     if (resolve(path) !== path)
       throw new TypeError("Worker runtime paths must be absolute");
@@ -796,6 +1027,15 @@ function failureFor(error: unknown): {
     return { code, summary: safeFailureSummary(code) };
   }
   return { code: "SEPARATOR_FAILED", summary: "Worker processing failed" };
+}
+
+function safeChildDiagnostic(error: unknown, child: ProcessingChild): string {
+  const message =
+    error instanceof Error ? error.message : "Worker child failed";
+  const tail = child.diagnosticTail?.().trim();
+  const safeMessage = sanitizeDiagnostic(message).slice(0, 500);
+  const safeTail = tail ? sanitizeDiagnostic(tail).slice(-1_400) : "";
+  return safeTail ? `${safeMessage}\n${safeTail}` : safeMessage;
 }
 
 function childFailureCode(code: string): WorkerFailureCode {

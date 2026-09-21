@@ -1,5 +1,13 @@
 # MusicMute worker runtime
 
+> **macOS per-user MVP implementation:** the no-admin installer, logged-in-user
+> LaunchAgent, lifecycle commands, direct-owner model download, signed manual
+> updater, rollback, and self-unpair paths are implemented on this branch. The
+> older `_musicmute` system LaunchDaemon tooling remains below only for legacy
+> migration and compatibility until its separately controlled removal. See
+> [`docs/worker-rebuild/architecture/08-macos-user-launchagent.md`](../docs/worker-rebuild/architecture/08-macos-user-launchagent.md)
+> for the approved design and migration boundary.
+
 This component contains the native machine supervisor and the isolated Python
 processing child. It is intentionally separate from the NestJS backend and the
 administrator dashboard.
@@ -69,8 +77,10 @@ musicmute-worker run --config /absolute/path/runtime.json
 
 Use mode `0600` for the credential on POSIX systems. Plain HTTP is rejected
 except when `allowInsecureLoopback` is explicitly true for isolated local
-development. The model is not redistributed by this repository; it must be in
-the verified content-addressed cache.
+development. The model is not redistributed by this repository or through
+MusicMute S3. The installer must download it from the exact owner-authorized
+upstream URL in authenticated catalog metadata, verify its size and SHA-256,
+and only then place it in the local content-addressed cache.
 
 The runtime also keeps an ordered private diagnostic spool beside the attempt
 root. Records are capped at 8 KiB, the spool is capped at 8 MiB and signed URLs,
@@ -94,7 +104,140 @@ unqualified architectures remain disabled. D6 verifies this local boundary,
 but passing local tests does not certify service startup, live S3, logged-out
 GPU execution or production readiness; those remain D4/D5 platform gates.
 
-## macOS private release and LaunchDaemon
+## macOS per-user CLI and LaunchAgent
+
+The public MVP entry point is a current-user install with no `sudo`:
+
+```bash
+npm install -g @musicmute/worker
+musicmute-worker install --label "Studio Mac"
+```
+
+The command reads the one-use enrollment code from `/dev/tty` with echo
+disabled, uses `https://api.music-mute.com/api/v1`, downloads the service
+runtime beside any active release, verifies it, runs CoreML qualification, and
+then installs `~/Library/LaunchAgents/com.musicmute.worker.plist`. The
+LaunchAgent always runs MusicMute's immutable private Node/Python/FFmpeg
+runtime; it never mutates Homebrew, MacPorts, `/usr/local`, or the npm prefix.
+If installation is interrupted, rerunning the same command reuses the protected
+transaction credential instead of requesting another one-use code. After a
+conservative `uninstall`, running `musicmute-worker install` with no flags
+verifies and reactivates the preserved paired release without enrollment or a
+network download. A failed recovery removes the activation pointer again.
+
+Installation checks existing MusicMute-owned artifacts before network transfer.
+An exact cached Kim Vocal 2 file is copied locally into the protected transaction
+and causes no model request; an exact cached release archive or fixture is also
+reused. The prepared service runtime is checked again before activation. Node
+must report `>=24.18.0 <25`; FFmpeg and FFprobe must be the same version in
+`>=8.0.3 <9`. Missing, older, untrusted, incomplete, or incompatible private
+components require a newer verified private release. Global tools are detected
+only for diagnostics and are never changed or spliced into the service. A model
+cache miss downloads only from its owner-authorized upstream URL, never from
+MusicMute S3.
+
+Available local commands are `status`, `start`, `stop`, `restart`, `pause`,
+`drain`, `resume`, `logs`, `doctor`, `benchmark`, `update --check`, `update`,
+`unpair`, and `uninstall`. Every command prints a human-readable terminal view
+by default; pass `--json` only when stable machine-readable output is needed by
+a script or monitoring tool. `benchmark` deliberately requires the worker to
+be already drained and stopped. `update --check` verifies signed metadata
+without minting a download grant or changing local state. `update` downloads a
+verified candidate, checks the private Node/FFmpeg versions, qualifies CoreML,
+switches the release pointer atomically, starts the agent, runs the packaged
+runtime doctor, and restores the known-good release if either startup or the
+doctor fails. Failed candidates are locally quarantined. Mutating CLI commands
+hold an owner-only process lock; a concurrent operation fails without changing
+state, and a lock left by a dead process is recovered safely. `uninstall`
+preserves state by default; `uninstall --purge` requires a backend-confirmed
+`unpair` receipt first. Missing or manually deleted credential/config files are
+not accepted as proof of unpairing.
+
+Dashboard Doctor and Benchmark requests use the same running per-user worker
+and never invoke `sudo`, install system packages, or modify the LaunchAgent.
+Doctor runs only the requested bounded checks and reports sanitized metrics.
+Dashboard Benchmark is deferred while a job is active; once idle, it
+temporarily stops the private processing child, runs only the requested frozen
+recipe for one to five iterations against the installed qualification fixture,
+restarts the child, and reports aggregate timing and output-size metrics. A
+lost result response is retried with the same request identity without rerunning
+the diagnostic or benchmark. This remote idle-only behavior is separate from
+the local `benchmark` command, whose explicit drained-and-stopped precondition
+remains unchanged.
+
+### Logs and support diagnostics
+
+The per-user service writes owner-only stdout/stderr logs under
+`~/Library/Application Support/MusicMuteWorker/logs/` and structured runtime
+events under `jobs/logs/`. Stdout and stderr rotate automatically at 5 MiB,
+keeping five gzip archives per stream. The structured diagnostic spool remains
+hard-capped at 8 MiB and stops new claims if durable diagnostics become unsafe.
+
+```bash
+musicmute-worker logs
+musicmute-worker logs --events --since 2h
+musicmute-worker logs --errors --attempt-id <attempt-uuid>
+musicmute-worker logs --events --level error --follow
+musicmute-worker logs --clear
+musicmute-worker diagnostics
+```
+
+`logs` shows readable stdout/stderr by default. Structured views accept
+`--attempt-id`, `--since` (`s`, `m`, `h`, or `d`, up to 30 days), and
+`--level info|warning|error`; scripts may add `--json` except while following.
+`status` includes the runtime heartbeat, child state, current and last jobs,
+spool state, and total log disk use.
+
+`logs --clear` is the explicit destructive maintenance command. If the
+LaunchAgent is loaded, it drains active work, stops the service, truncates the
+active stdout/stderr streams, removes their five known archive generations,
+resets the structured event spool, and starts the service again. It preserves
+configuration, credentials, models, job files, diagnostic ZIP exports, and
+unrecognized files. Use `--force` only to bypass a drain that cannot complete;
+add `--json` for automation.
+
+`diagnostics` creates an owner-only ZIP in `~/Downloads`, or at an absolute
+path inside the current home supplied with `--output`. It contains sanitized
+status, Doctor results, recent events/errors, and configuration field names
+only. It never includes credentials, configuration values, media, models,
+signed URLs, or unredacted user paths. These commands never request `sudo`.
+
+`status` combines protected local lifecycle/runtime state with the read-only
+machine-authenticated `GET /api/v1/worker/v1/status` response. It reports the
+dashboard machine status, policy revision, last contact, active-attempt count,
+and effective claim permission. If the backend is offline, remote state is
+explicitly unavailable and the command returns an unhealthy exit instead of
+guessing that local `resume` overrides dashboard authority.
+
+The service publishes only bounded active-attempt IDs to its protected local
+runtime-status file. Normal `drain`, `stop`, `restart`, and `update` therefore
+stop new claims and wait up to ten minutes for active work. Missing status or a
+deadline expiry fails closed; `--force` is the explicit lease-recovery escape
+hatch for stop, restart, and update.
+
+Update metadata uses Ed25519 and a monotonic sequence. The reviewed production
+public key is a built-in CLI trust anchor keyed by the catalog `keyId`, so a
+missing optional local trust file does not break read-only update checks.
+Additional rotation keys may be placed in the owner-only
+`~/Library/Application Support/MusicMuteWorker/config/update-trust.json` map.
+Malformed local trust, attempts to replace a built-in key, and unknown catalog
+keys fail closed. Production private signing keys stay outside Git, npm
+packages, backend responses, and worker machines.
+
+If an older system LaunchDaemon is detected, fresh installation refuses to run
+beside it. After draining and revoking that legacy machine, the operator can run
+the deliberately hidden administrator helper:
+
+```bash
+sudo "$(command -v musicmute-worker)" legacy-cleanup --confirm-backup
+```
+
+It targets only `system/com.musicmute.worker`, the exact legacy plist, and the
+exact legacy application root. It stops that service and moves the files into a
+timestamped root-owned backup; it never deletes the backup or copies the old
+machine credential into the user installation.
+
+## Legacy macOS private release and LaunchDaemon
 
 The macOS packager accepts only a native Darwin ARM64 host and an already
 qualified, private runtime. It copies the compiled worker, engine, standalone

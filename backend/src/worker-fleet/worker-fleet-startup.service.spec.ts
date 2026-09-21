@@ -6,11 +6,13 @@ import { WorkerFleetStartupService } from './worker-fleet-startup.service.js';
 function fixture(enabled: boolean) {
   const init = vi.fn().mockResolvedValue(undefined);
   const updateOne = vi.fn().mockResolvedValue({ acknowledged: true });
-  const model = vi.fn(() => ({ init, updateOne }));
+  const updateMany = vi.fn().mockResolvedValue({ acknowledged: true });
+  const model = vi.fn(() => ({ init, updateOne, collection: { updateMany } }));
   return {
     init,
     model,
     updateOne,
+    updateMany,
     startup: new WorkerFleetStartupService(
       { model } as never,
       new ConfigService({ AUDIO_PROCESSING_ENABLED: enabled }),
@@ -28,7 +30,7 @@ describe('worker fleet startup', () => {
   it('initializes every declared worker collection while enabled', async () => {
     const f = fixture(true);
     await expect(f.startup.onModuleInit()).resolves.toBeUndefined();
-    expect(f.model).toHaveBeenCalledTimes(WORKER_FLEET_MODELS.length + 1);
+    expect(f.model).toHaveBeenCalledTimes(WORKER_FLEET_MODELS.length + 2);
     expect(f.init).toHaveBeenCalledTimes(WORKER_FLEET_MODELS.length);
     expect(f.updateOne).toHaveBeenCalledWith(
       { _id: 'worker-fleet' },
@@ -39,6 +41,22 @@ describe('worker fleet startup', () => {
         }),
       }),
       { upsert: true, setDefaultsOnInsert: true },
+    );
+    expect(f.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'queued',
+        currentExecution: null,
+        inputObject: { $ne: null },
+        $or: [{ recipeSnapshot: null }, { retryEligibility: null }],
+      }),
+      [
+        {
+          $set: expect.objectContaining({
+            recipeSnapshot: expect.any(Object),
+            retryEligibility: expect.any(Object),
+          }),
+        },
+      ],
     );
   });
 

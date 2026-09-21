@@ -27,6 +27,8 @@ import { WorkerRecoveryMaintenanceService } from './leases/worker-recovery-maint
 import { WorkerFleetStartupService } from './worker-fleet-startup.service.js';
 import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
 import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js';
+import { WorkerMachineLifecycleController } from './machines/worker-machine-lifecycle.controller.js';
+import { WorkerMachineLifecycleService } from './machines/worker-machine-lifecycle.service.js';
 
 @Module({
   imports: [
@@ -47,6 +49,7 @@ import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js'
     WorkerRuntimeDiagnosticsController,
     AdminWorkerEnrollmentController,
     AdminWorkerControlController,
+    WorkerMachineLifecycleController,
   ],
   providers: [
     WorkerAuthGuard,
@@ -60,6 +63,7 @@ import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js'
     WorkerEnrollmentService,
     WorkerInstallationArtifactsService,
     WorkerInstallationQualificationService,
+    WorkerMachineLifecycleService,
     WorkerFleetStartupService,
   ],
   exports: [MongooseModule, WorkerAuthGuard, WorkerEnrollmentService],

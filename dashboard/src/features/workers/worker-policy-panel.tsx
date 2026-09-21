@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { formatDateTime } from "@/lib/format";
 import { getWorkerFleetPolicy, updateWorkerFleetPolicy } from "./worker-api";
+import { workerRecipeLabel } from "./worker-recipes";
 import type { WorkerFleetPolicy } from "./worker-types";
 
 const validPolicy = (policy: WorkerFleetPolicy) =>
@@ -134,9 +135,16 @@ export function WorkerPolicyPanel() {
                 key={recipe.recipeId}
                 className="grid items-center gap-3 rounded-lg border p-3 sm:grid-cols-[1fr_auto_9rem]"
               >
-                <code className="break-all text-xs">{recipe.recipeId}</code>
+                <div>
+                  <p className="text-sm font-medium">
+                    {workerRecipeLabel(recipe.recipeId)}
+                  </p>
+                  <code className="break-all text-xs text-muted-foreground">
+                    Recipe contract: {recipe.recipeId}
+                  </code>
+                </div>
                 <Switch
-                  aria-label={`Enable ${recipe.recipeId}`}
+                  aria-label={`Enable ${workerRecipeLabel(recipe.recipeId)}`}
                   checked={recipe.enabled}
                   disabled={!editable}
                   onCheckedChange={(enabled) => {
@@ -146,7 +154,7 @@ export function WorkerPolicyPanel() {
                   }}
                 />
                 <Input
-                  aria-label={`Maximum slots for ${recipe.recipeId}`}
+                  aria-label={`Maximum slots for ${workerRecipeLabel(recipe.recipeId)}`}
                   type="number"
                   min={1}
                   max={16}

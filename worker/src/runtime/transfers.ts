@@ -11,6 +11,7 @@ const UPLOAD_HEADER_NAMES = new Set([
   "content-type",
   "if-none-match",
   "x-amz-checksum-sha256",
+  "x-amz-storage-class",
 ]);
 const DEFAULT_TRANSFER_TIMEOUT_MS = 2 * 60 * 60_000;
 
@@ -18,6 +19,7 @@ export class TransferError extends Error {
   constructor(
     readonly code: "DOWNLOAD_FAILED" | "OUTPUT_UPLOAD_FAILED",
     readonly retryable: boolean,
+    readonly diagnostic?: string,
   ) {
     super(
       code === "DOWNLOAD_FAILED"
@@ -147,7 +149,7 @@ export class WorkerTransferClient {
     validateGrantUrl(grant, this.allowInsecureLoopback, "OUTPUT_UPLOAD_FAILED");
     validateUploadHeaders(grant, expected);
     if (Date.parse(grant.expiresAt) <= Date.now())
-      throw new TransferError("OUTPUT_UPLOAD_FAILED", true);
+      throw new TransferError("OUTPUT_UPLOAD_FAILED", true, "grant-expired");
     try {
       const sourceStat = await lstat(source);
       if (
@@ -155,7 +157,11 @@ export class WorkerTransferClient {
         sourceStat.isSymbolicLink() ||
         sourceStat.size !== expected.bytes
       )
-        throw new TransferError("OUTPUT_UPLOAD_FAILED", false);
+        throw new TransferError(
+          "OUTPUT_UPLOAD_FAILED",
+          false,
+          "output-identity-mismatch",
+        );
       const body = await readFile(source);
       const digest = createHash("sha256").update(body).digest();
       const expectedDigest = Buffer.from(expected.sha256, "base64");
@@ -163,7 +169,11 @@ export class WorkerTransferClient {
         digest.length !== expectedDigest.length ||
         !timingSafeEqual(digest, expectedDigest)
       )
-        throw new TransferError("OUTPUT_UPLOAD_FAILED", false);
+        throw new TransferError(
+          "OUTPUT_UPLOAD_FAILED",
+          false,
+          "output-checksum-mismatch",
+        );
       const timeout = AbortSignal.timeout(this.timeoutMs);
       const requestSignal = signal
         ? AbortSignal.any([signal, timeout])
@@ -183,17 +193,31 @@ export class WorkerTransferClient {
             response.status === 412 ||
             response.status === 429 ||
             response.status >= 500,
+          `upload-http-${response.status}`,
         );
       const versionId = response.headers.get("x-amz-version-id");
       if (!versionId || versionId === "null" || versionId.length > 1024)
-        throw new TransferError("OUTPUT_UPLOAD_FAILED", true);
+        throw new TransferError(
+          "OUTPUT_UPLOAD_FAILED",
+          true,
+          "upload-version-id-missing",
+        );
       return versionId;
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
       if (error instanceof TransferError) throw error;
-      throw new TransferError("OUTPUT_UPLOAD_FAILED", true);
+      throw new TransferError(
+        "OUTPUT_UPLOAD_FAILED",
+        true,
+        `upload-transport-${transferErrorName(error)}`,
+      );
     }
   }
+}
+
+function transferErrorName(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown";
+  return error.name.replace(/[^a-z0-9-]/gi, "-").slice(0, 64) || "error";
 }
 
 function validateGrantUrl(
@@ -225,14 +249,22 @@ function validateUploadHeaders(
       value,
     ]),
   );
+  const storageClass = headers.get("x-amz-storage-class");
   if (
-    headers.size !== 3 ||
+    headers.size < 3 ||
+    headers.size > 4 ||
+    Object.keys(grant.headers).length !== headers.size ||
     [...headers.keys()].some((name) => !UPLOAD_HEADER_NAMES.has(name)) ||
     headers.get("content-type") !== expected.contentType ||
     headers.get("x-amz-checksum-sha256") !== expected.sha256 ||
-    headers.get("if-none-match") !== "*"
+    headers.get("if-none-match") !== "*" ||
+    (storageClass !== undefined && storageClass !== "INTELLIGENT_TIERING")
   )
-    throw new TransferError("OUTPUT_UPLOAD_FAILED", false);
+    throw new TransferError(
+      "OUTPUT_UPLOAD_FAILED",
+      false,
+      "upload-header-mismatch",
+    );
 }
 
 function boundedTimeout(value: number): number {

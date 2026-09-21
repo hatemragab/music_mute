@@ -627,9 +627,13 @@ function artifactManifest(platform: "darwin-arm64" | "windows-amd64") {
     },
     model: {
       filename: "kim-vocal-2.onnx",
-      ...common,
+      bytes: common.bytes,
+      sha256: common.sha256,
       contentType: "application/octet-stream",
-      url: "https://storage.example.invalid/model?signature=model",
+      url: "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Vocal_2.onnx",
+      sourcePolicy: "direct-owner-source-only",
+      allowedHosts: ["github.com", "release-assets.githubusercontent.com"],
+      maxRedirects: 2,
     },
     fixture: {
       filename: "qualification.wav",
@@ -657,6 +661,11 @@ function localArtifactManifest(
     url: `${baseUrl}/${name}?signature=temporary`,
     expiresAt,
   });
+  const model = artifact(
+    "model",
+    "kim-vocal-2.onnx",
+    "application/octet-stream",
+  );
   return {
     schemaVersion: 1,
     platform: "darwin-arm64",
@@ -668,7 +677,16 @@ function localArtifactManifest(
         "application/gzip",
       ),
     },
-    model: artifact("model", "kim-vocal-2.onnx", "application/octet-stream"),
+    model: {
+      filename: model.filename,
+      bytes: model.bytes,
+      sha256: model.sha256,
+      contentType: "application/octet-stream",
+      url: model.url,
+      sourcePolicy: "direct-owner-source-only",
+      allowedHosts: [new URL(baseUrl).hostname],
+      maxRedirects: 0,
+    },
     fixture: artifact("fixture", "qualification.wav", "audio/wav"),
   };
 }

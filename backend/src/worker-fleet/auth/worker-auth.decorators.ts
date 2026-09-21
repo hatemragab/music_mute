@@ -3,6 +3,9 @@ import { WorkerAuthGuard } from './worker-auth.guard.js';
 
 export const WORKER_ROUTE = Symbol('WORKER_ROUTE');
 export const WORKER_CREDENTIAL_KIND = Symbol('WORKER_CREDENTIAL_KIND');
+export const WORKER_ALLOW_REVOKED_MACHINE = Symbol(
+  'WORKER_ALLOW_REVOKED_MACHINE',
+);
 
 export type WorkerCredentialKind = 'enrollment' | 'installation' | 'machine';
 
@@ -12,3 +15,6 @@ export const WorkerRoute = (credential: WorkerCredentialKind) =>
     SetMetadata(WORKER_CREDENTIAL_KIND, credential),
     UseGuards(WorkerAuthGuard),
   );
+
+export const AllowRevokedMachine = () =>
+  SetMetadata(WORKER_ALLOW_REVOKED_MACHINE, true);

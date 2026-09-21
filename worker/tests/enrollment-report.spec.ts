@@ -12,7 +12,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WORKER_RECIPE_IDS } from "../protocol/v1/protocol.js";
-import { createEnrollmentReport } from "../src/enrollment/report-builder.js";
+import {
+  createEnrollmentReport,
+  parseQualificationEvidence,
+} from "../src/enrollment/report-builder.js";
 import { writeMacReleaseManifest } from "../src/platform/macos/release-manifest.js";
 import { writeWindowsReleaseManifest } from "../src/platform/windows/release-manifest.js";
 
@@ -28,6 +31,16 @@ afterEach(async () => {
 });
 
 describe("qualified enrollment report", () => {
+  it("accepts a non-root macOS LaunchAgent user identity", () => {
+    const evidence = qualification("darwin-arm64", "c".repeat(64));
+    evidence.serviceIdentity = "hatem";
+    expect(() => parseQualificationEvidence(evidence)).not.toThrow();
+    evidence.serviceIdentity = "root";
+    expect(() => parseQualificationEvidence(evidence)).toThrow(
+      "service identity is invalid",
+    );
+  });
+
   it("derives the Mac report from a verified release, doctor and host GPU", async () => {
     const root = await temporaryRoot();
     const release = join(root, "release");
