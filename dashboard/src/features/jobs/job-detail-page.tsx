@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
 import type { JobDetail } from "@/api/contracts";
+import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import {
   ErrorState,
@@ -33,7 +34,14 @@ export function JobDetailPage() {
     queryFn: () => getJob(client, id),
     enabled: Boolean(id),
   });
-  useVisibleInterval(() => void job.refetch(), 10_000);
+  const isTerminal = ["ready", "failed", "cancelled"].includes(
+    job.data?.status ?? "",
+  );
+  useVisibleInterval(
+    () => void job.refetch(),
+    DASHBOARD_POLL_INTERVAL_MS.criticalDetail,
+    Boolean(id) && !isTerminal,
+  );
   const mutate = useMutation({
     mutationFn: async ({
       current,

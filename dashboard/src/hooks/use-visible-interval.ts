@@ -1,6 +1,10 @@
 import { useEffect, useRef } from "react";
 
-export function useVisibleInterval(callback: () => void, milliseconds: number) {
+export function useVisibleInterval(
+  callback: () => void,
+  milliseconds: number,
+  enabled = true,
+) {
   const callbackRef = useRef(callback);
 
   useEffect(() => {
@@ -8,6 +12,8 @@ export function useVisibleInterval(callback: () => void, milliseconds: number) {
   }, [callback]);
 
   useEffect(() => {
+    if (!enabled) return;
+
     const run = () => {
       if (document.visibilityState === "visible") callbackRef.current();
     };
@@ -17,5 +23,5 @@ export function useVisibleInterval(callback: () => void, milliseconds: number) {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", run);
     };
-  }, [milliseconds]);
+  }, [enabled, milliseconds]);
 }

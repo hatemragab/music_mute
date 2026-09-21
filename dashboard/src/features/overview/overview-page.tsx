@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { withQuery } from "@/api/query-string";
+import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { DateRangeFilter } from "@/components/date-range-filter";
 import {
   createRange,
@@ -44,7 +45,10 @@ export function OverviewPage() {
           : data,
       ),
   });
-  useVisibleInterval(() => void overview.refetch(), 30_000);
+  useVisibleInterval(
+    () => void overview.refetch(),
+    DASHBOARD_POLL_INTERVAL_MS.background,
+  );
   useEffect(() => {
     const url = new URL(window.location.href);
     url.searchParams.set("from", range.from);

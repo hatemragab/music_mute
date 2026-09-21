@@ -4,6 +4,7 @@ import { ArrowUpRight, RotateCcw } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
+import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
 import {
@@ -60,6 +61,7 @@ export function WorkerFleetPage() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const { can, reauthenticate } = useAdminSession();
+  const [activeTab, setActiveTab] = useState("machines");
   const [params, setParams] = useSearchParams();
   const status = params.get("status") ?? "all";
   const platform = params.get("platform") ?? "all";
@@ -77,16 +79,23 @@ export function WorkerFleetPage() {
   const machines = useQuery({
     queryKey: ["worker-machines", filters],
     queryFn: () => listWorkerMachines(client, filters),
+    enabled: activeTab === "machines",
   });
   const invitations = useQuery({
     queryKey: ["worker-invitations"],
     queryFn: () => listWorkerInvitations(client),
-    enabled: can("workers.enroll"),
+    enabled: activeTab === "enrollment" && can("workers.enroll"),
   });
-  useVisibleInterval(() => {
-    void machines.refetch();
-    if (can("workers.enroll")) void invitations.refetch();
-  }, 15_000);
+  useVisibleInterval(
+    () => void machines.refetch(),
+    DASHBOARD_POLL_INTERVAL_MS.live,
+    activeTab === "machines",
+  );
+  useVisibleInterval(
+    () => void invitations.refetch(),
+    DASHBOARD_POLL_INTERVAL_MS.background,
+    activeTab === "enrollment" && can("workers.enroll"),
+  );
 
   const [revokeTarget, setRevokeTarget] = useState<WorkerInvitation | null>(
     null,
@@ -133,7 +142,7 @@ export function WorkerFleetPage() {
           ) : undefined
         }
       />
-      <Tabs defaultValue="machines">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList aria-label="Worker fleet sections">
           <TabsTrigger value="machines">Machines</TabsTrigger>
           {can("workers.enroll") ? (
