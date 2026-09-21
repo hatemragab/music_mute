@@ -1,5 +1,12 @@
 # Test and release strategy
 
+> **macOS LaunchAgent update:** the authoritative validation ladder and concrete
+> CLI/package/LaunchAgent/CoreML/login-session acceptance matrix for the
+> per-user redesign are in
+> [08-macos-user-launchagent.md, section 12](08-macos-user-launchagent.md#12-validation-and-acceptance-strategy).
+> The evidence categories and shared backend correctness requirements below
+> still apply.
+
 ## 1. Evidence categories
 
 `PASS`: actually executed check met its assertions. `FAIL`: executed check did not. `NOT_RUN`: not executed. `BLOCKED`: an identified prerequisite prevents it. `SIMULATED`: orchestration behavior verified with a fake engine/service; not GPU/hardware evidence.
@@ -33,7 +40,16 @@ Fake engines are explicitly test-only and impossible to activate with production
 
 Run concurrent claim requests from several machines and slots; assert exactly one **accepted owner at a time** per job, not exactly-once physical computation. Inject a lost claim response and retry the same request ID; it returns the same claim rather than another job. Enforce one active attempt per logical slot even under duplicate requests.
 
-Terminate a child while the supervisor remains healthy. Stop the supervisor, block only its backend communication, and restart the backend. Observe bounded lease expiry and requeue. Reconnect the former worker and attempt completion/renewal/upload-grant creation; all stale operations are rejected. A new worker restarts from input, not a fictitious checkpoint.
+Terminate a child while the supervisor remains healthy, including the narrow
+window where an active request rejects before the operating-system exit event
+settles. A restart must allocate a fresh lifecycle wrapper and process
+incarnation; it must not reuse the terminated wrapper. Stop the supervisor,
+block only its backend communication, and restart the backend. Observe bounded
+lease expiry and requeue. Reconnect the former worker and attempt
+completion/renewal/upload-grant creation; all stale operations are rejected. A
+new worker restarts from input, not a fictitious checkpoint. Record a bounded,
+redacted child diagnostic before replacement so an unexpected native exit does
+not collapse into an unexplained generic separator failure.
 
 Race renewal versus expiry scanning, cancellation versus completion, account deletion versus output publication, and policy change versus claim. Verify preserved usage/outbox idempotency. Test slot generation/session replacement so an orphan child cannot retain ownership.
 
@@ -49,7 +65,15 @@ A model benchmark reports cold/warm timings and memory with model/recipe/runtime
 
 ## 6. Security and installation checks
 
-Reject unsupported CPU/Intel/x86 Mac hosts before production activation. Test missing driver, missing package, corrupted model, bad signature, malformed archive, insufficient disk, path traversal, environment inheritance, cross-machine requests and cross-user object access.
+Reject unsupported CPU/Intel/x86 Mac hosts before production activation. Test
+missing driver, missing package, corrupted model, bad signature, malformed
+archive, insufficient disk, path traversal, environment inheritance,
+cross-machine requests and cross-user object access. For direct model
+downloads, test the exact owner URL, the allowed provider redirect chain,
+redirect loops/limits, an unapproved redirect host, timeout/rate-limit/retry,
+wrong content type, oversized/truncated bytes, wrong digest, safe partial-file
+cleanup, verified-cache reuse, and proof that no model object is written to or
+read from MusicMute S3.
 
 Exercise expiring/replayed enrollment, lost exchange response, idempotent activation and machine revocation. Collect pre-activation success/failure diagnostics; simulate offline upload/reconnect and duplicate batches. Verify no credential or full presigned URL in local/backend logs, errors, process arguments beyond acknowledged one-use enrollment limitations, evidence or archive.
 
@@ -69,6 +93,11 @@ Both M4 and Z440 must pass actual model, end-to-end S3, service-context, restart
 
 All new requests remain gated outside the isolated test environment until owner release approval. Preserve existing history and user data. Keep a backwards-compatible backend window for last-known-good workers and an explicit rollback runbook.
 
-Final evidence includes artifact checksums/signature verification, runtime and license/provenance record, exact tested platform builds, all checkpoints, residual risks, and operator cutover/recovery commands. A release-readiness PR is not deployment authorization.
+Final evidence includes artifact checksums/signature verification, runtime and
+license/provenance record, a confidential authorization-record reference for
+each model, proof that every model came from its approved owner-hosted URL,
+exact tested platform builds, all checkpoints, residual risks, and operator
+cutover/recovery commands. A release-readiness PR is not deployment
+authorization.
 
 Detailed host procedures are in [Mac/local](../runbooks/MAC-LOCAL-TESTING.md), [Windows/SSH](../runbooks/WINDOWS-SSH-TESTING.md), and [release operations](../runbooks/RELEASE-OPERATIONS.md).

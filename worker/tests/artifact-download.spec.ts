@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   downloadInstallationArtifacts,
   downloadVerifiedArtifact,
@@ -84,7 +84,7 @@ describe("verified enrollment artifact downloads", () => {
       fixture: Buffer.from("fixture"),
     };
     const expired = installationManifest(payloads);
-    expired.model.expiresAt = "2020-01-01T00:00:00.000Z";
+    expired.fixture.expiresAt = "2020-01-01T00:00:00.000Z";
     const fetchMock = async () => new Response();
 
     await expect(
@@ -102,6 +102,62 @@ describe("verified enrollment artifact downloads", () => {
         fetch: fetchMock as typeof fetch,
       }),
     ).rejects.toThrow("filename is unsafe");
+  });
+
+  it("rejects insufficient disk before any installation download", async () => {
+    const outputRoot = await protectedRoot();
+    const payloads = {
+      release: Buffer.from("release"),
+      model: Buffer.from("model"),
+      fixture: Buffer.from("fixture"),
+    };
+    const fetchMock = vi.fn();
+    await expect(
+      downloadInstallationArtifacts(installationManifest(payloads), {
+        outputRoot,
+        fetch: fetchMock as unknown as typeof fetch,
+        allowInsecureLoopback: true,
+        availableDiskBytes: async () => 1,
+      }),
+    ).rejects.toThrow("Insufficient disk space");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("copies an exact installed model locally and does not download it again", async () => {
+    const outputRoot = await protectedRoot();
+    const cacheRoot = await protectedRoot();
+    const payloads = {
+      release: Buffer.from("release"),
+      model: Buffer.from("model"),
+      fixture: Buffer.from("fixture"),
+    };
+    const manifest = installationManifest(payloads);
+    const reusableModelPath = join(cacheRoot, "Kim_Vocal_2.onnx");
+    await writeFile(reusableModelPath, payloads.model, { mode: 0o600 });
+    const requests: string[] = [];
+    const fetchMock = async (input: string | URL | Request) => {
+      const name = new URL(String(input)).pathname.slice(
+        1,
+      ) as keyof typeof payloads;
+      requests.push(name);
+      const artifact = name === "release" ? manifest.release : manifest.fixture;
+      return new Response(payloads[name], {
+        headers: {
+          "Content-Length": String(payloads[name].length),
+          "Content-Type": artifact.contentType,
+        },
+      });
+    };
+
+    const result = await downloadInstallationArtifacts(manifest, {
+      outputRoot,
+      reusableModelPath,
+      fetch: fetchMock as typeof fetch,
+    });
+
+    expect(requests).toEqual(["release", "fixture"]);
+    expect(result.model.reused).toBe(true);
+    expect(await readFile(result.model.path)).toEqual(payloads.model);
   });
 
   it("streams, verifies and safely reuses an exact artifact", async () => {
@@ -262,6 +318,65 @@ describe("verified enrollment artifact downloads", () => {
       }),
     ).rejects.toThrow("conflicts with download metadata");
   });
+
+  it("follows only the model descriptor's approved redirect chain", async () => {
+    const payload = Buffer.from("owner-hosted model");
+    const digest = createHash("sha256").update(payload).digest("hex");
+    const root = await protectedRoot();
+    const outputPath = join(root, "model.onnx");
+    const requested: string[] = [];
+    const fetchMock = async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      requested.push(url.hostname);
+      if (url.hostname === "github.com")
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: "https://release-assets.githubusercontent.com/model.onnx",
+          },
+        });
+      return new Response(payload, {
+        status: 200,
+        headers: {
+          "Content-Length": String(payload.length),
+          "Content-Type": "application/octet-stream",
+        },
+      });
+    };
+    await expect(
+      downloadVerifiedArtifact({
+        url: "https://github.com/owner/model.onnx",
+        outputPath,
+        expectedBytes: payload.length,
+        expectedSha256: digest,
+        expectedContentType: "application/octet-stream",
+        allowedRedirectHosts: [
+          "github.com",
+          "release-assets.githubusercontent.com",
+        ],
+        maxRedirects: 2,
+        fetch: fetchMock as typeof fetch,
+      }),
+    ).resolves.toMatchObject({ reused: false });
+    expect(requested).toEqual([
+      "github.com",
+      "release-assets.githubusercontent.com",
+    ]);
+
+    await rm(outputPath);
+    await expect(
+      downloadVerifiedArtifact({
+        url: "https://github.com/owner/model.onnx",
+        outputPath,
+        expectedBytes: payload.length,
+        expectedSha256: digest,
+        expectedContentType: "application/octet-stream",
+        allowedRedirectHosts: ["github.com"],
+        maxRedirects: 2,
+        fetch: fetchMock as typeof fetch,
+      }),
+    ).rejects.toThrow("redirect host is not approved");
+  });
 });
 
 async function protectedRoot(): Promise<string> {
@@ -290,6 +405,11 @@ function installationManifest(payloads: {
     url: `https://storage.example.invalid/${name}`,
     expiresAt: "2099-09-20T12:00:00.000Z",
   });
+  const model = artifact(
+    "model",
+    "kim-vocal-2.onnx",
+    "application/octet-stream",
+  );
   return {
     schemaVersion: 1,
     platform: "darwin-arm64",
@@ -301,7 +421,16 @@ function installationManifest(payloads: {
         "application/gzip",
       ),
     },
-    model: artifact("model", "kim-vocal-2.onnx", "application/octet-stream"),
+    model: {
+      filename: model.filename,
+      bytes: model.bytes,
+      sha256: model.sha256,
+      contentType: "application/octet-stream",
+      url: model.url,
+      sourcePolicy: "direct-owner-source-only",
+      allowedHosts: ["storage.example.invalid"],
+      maxRedirects: 0,
+    },
     fixture: artifact("fixture", "qualification.wav", "audio/wav"),
   };
 }

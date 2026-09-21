@@ -26,13 +26,24 @@ Allow slot-level policy to narrow machine settings. Disabling a slot drains it. 
 
 `doctor`, benchmark, and log retrieval requests are named commands with typed parameters and request IDs. The UI never exposes a generic command textbox. A benchmark request requires idle/drained capacity or an explicit deferred status. MVP updates are initiated locally by an operator, not through a dashboard command.
 
+The worker receives pending Doctor/Benchmark commands in its authenticated
+configuration heartbeat and completes them through the typed command-result
+endpoint. Doctor may execute while the service is active. Benchmark waits until
+there are no active attempts, temporarily cycles only the private processing
+children, and restarts them before normal claims resume. Neither command may
+request elevation, run `sudo`, modify the user LaunchAgent, or install global
+dependencies. Result delivery is idempotent: the worker retains the completed
+result and request ID across transient reporting failures instead of rerunning
+the command. Expired pending commands are presented as expired in machine
+history rather than remaining visually pending forever.
+
 ## 4. Pipeline controls
 
 Separate two panels:
 
 **New-job defaults:** Choose one of the four Kim recipe combinations and approved trim/bitrate/preset parameters. Publishing a change creates a new immutable recipe/settings revision. Clearly state: applies to new jobs only; queued/running jobs retain their snapshot. Preview the order `Kim → optional denoise → optional trim → encode`.
 
-**Machine/worker eligibility:** Allow or disallow supported recipe IDs and optional steps for this machine; a slot may narrow these choices. The UI uses labels such as `Accept denoise-required jobs` so disabling it is not mistaken for silently bypassing a job requirement. The backend remains the eligibility authority.
+**Machine/worker eligibility:** Allow or disallow supported recipe IDs and optional steps for this machine; a slot may narrow these choices. The UI identifies the installed model as **Kim Vocal 2** and renders raw IDs such as `kim-vocals-trim-v1` only as secondary recipe-contract metadata; the ID's `v1` suffix must not be presented as the model generation. The UI uses labels such as `Accept denoise-required jobs` so disabling it is not mistaken for silently bypassing a job requirement. The backend remains the eligibility authority.
 
 Warn if a policy change leaves a queued recipe with no eligible capacity. Show queued jobs as waiting for compatible workers rather than changing their audio recipe. Provide a separate global default change action for future jobs. Do not mutate recipes in place to clear the queue.
 

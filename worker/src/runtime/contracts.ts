@@ -57,6 +57,36 @@ export interface FleetPolicy {
   processingDeadlineSeconds: number;
 }
 
+export type WorkerDoctorCheck =
+  "service" | "storage" | "model" | "provider" | "ffmpeg";
+
+export interface WorkerRemoteCommand {
+  commandId: string;
+  kind: "doctor" | "benchmark";
+  state: "pending";
+  checks: WorkerDoctorCheck[];
+  recipeId: WorkerRecipeId | null;
+  iterations: number | null;
+  requestedAt: string;
+  expiresAt: string;
+  summary: null;
+  metrics: [];
+  completedAt: null;
+  revision: number;
+}
+
+export interface WorkerCommandMetric {
+  name: string;
+  value: number;
+  unit: string;
+}
+
+export interface WorkerCommandResult {
+  outcome: "succeeded" | "failed";
+  summary: string;
+  metrics: WorkerCommandMetric[];
+}
+
 export interface ConfigResponse {
   machineId: string;
   machineStatus: "pending" | "active" | "paused" | "draining" | "revoked";
@@ -64,6 +94,7 @@ export interface ConfigResponse {
   appliedRevision: number;
   claimAllowed: boolean;
   policy: FleetPolicy;
+  commands: WorkerRemoteCommand[];
   serverTime: string;
 }
 
@@ -344,6 +375,8 @@ export function parseConfigResponse(value: unknown): ConfigResponse {
   const policy = record(item.policy, "policy");
   if (!Array.isArray(policy.recipes) || policy.recipes.length > 16)
     throw new TypeError("policy.recipes is invalid");
+  if (!Array.isArray(item.commands) || item.commands.length > 20)
+    throw new TypeError("commands is invalid");
   return {
     machineId: text(item.machineId, "machineId", UUID_V4, 36),
     machineStatus: oneOf(
@@ -390,7 +423,72 @@ export function parseConfigResponse(value: unknown): ConfigResponse {
         7200,
       ),
     },
+    commands: item.commands.map(parseRemoteCommand),
     serverTime: isoTimestamp(item.serverTime, "serverTime"),
+  };
+}
+
+function parseRemoteCommand(
+  value: unknown,
+  index: number,
+): WorkerRemoteCommand {
+  const item = record(value, `commands[${index}]`);
+  const kind = oneOf(
+    item.kind,
+    ["doctor", "benchmark"] as const,
+    `commands[${index}].kind`,
+  );
+  if (!Array.isArray(item.checks) || item.checks.length > 8)
+    throw new TypeError(`commands[${index}].checks is invalid`);
+  const checks = item.checks.map((candidate, checkIndex) =>
+    oneOf(
+      candidate,
+      ["service", "storage", "model", "provider", "ffmpeg"] as const,
+      `commands[${index}].checks[${checkIndex}]`,
+    ),
+  );
+  if (new Set(checks).size !== checks.length)
+    throw new TypeError(`commands[${index}].checks contains duplicates`);
+  const recipeId =
+    item.recipeId === null
+      ? null
+      : oneOf(item.recipeId, WORKER_RECIPE_IDS, `commands[${index}].recipeId`);
+  const iterations =
+    item.iterations === null
+      ? null
+      : integer(item.iterations, `commands[${index}].iterations`, 1, 5);
+  if (
+    (kind === "doctor" &&
+      (checks.length === 0 || recipeId !== null || iterations !== null)) ||
+    (kind === "benchmark" &&
+      (checks.length !== 0 || recipeId === null || iterations === null)) ||
+    item.summary !== null ||
+    !Array.isArray(item.metrics) ||
+    item.metrics.length !== 0 ||
+    item.completedAt !== null
+  )
+    throw new TypeError(`commands[${index}] is inconsistent`);
+  return {
+    commandId: text(
+      item.commandId,
+      `commands[${index}].commandId`,
+      UUID_V4,
+      36,
+    ),
+    kind,
+    state: oneOf(item.state, ["pending"] as const, `commands[${index}].state`),
+    checks,
+    recipeId,
+    iterations,
+    requestedAt: isoTimestamp(
+      item.requestedAt,
+      `commands[${index}].requestedAt`,
+    ),
+    expiresAt: isoTimestamp(item.expiresAt, `commands[${index}].expiresAt`),
+    summary: null,
+    metrics: [],
+    completedAt: null,
+    revision: integer(item.revision, `commands[${index}].revision`),
   };
 }
 

@@ -11,7 +11,6 @@ const DEVELOPMENT_DIRECTORIES = new Set([
   "include",
   "includes",
   "test",
-  "testing",
   "tests",
 ]);
 

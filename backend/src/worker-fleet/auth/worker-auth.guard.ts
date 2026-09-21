@@ -14,6 +14,7 @@ import {
 import { WorkerMachine } from '../machines/worker-machine.schema.js';
 import {
   WORKER_CREDENTIAL_KIND,
+  WORKER_ALLOW_REVOKED_MACHINE,
   WORKER_ROUTE,
   type WorkerCredentialKind,
 } from './worker-auth.decorators.js';
@@ -42,6 +43,11 @@ export class WorkerAuthGuard implements CanActivate {
       WORKER_CREDENTIAL_KIND,
       targets,
     );
+    const allowRevokedMachine =
+      this.reflector.getAllAndOverride<boolean>(
+        WORKER_ALLOW_REVOKED_MACHINE,
+        targets,
+      ) === true;
     if (!kind) throw workerError('WORKER_UNAUTHENTICATED');
     const request = context.switchToHttp().getRequest<WorkerRequest>();
     const header = request.headers.authorization;
@@ -94,7 +100,7 @@ export class WorkerAuthGuard implements CanActivate {
       .findOne({ credentialDigest: digest })
       .maxTimeMS(2000)
       .lean();
-    if (!machine || machine.status === 'revoked')
+    if (!machine || (machine.status === 'revoked' && !allowRevokedMachine))
       throw workerError('WORKER_UNAUTHENTICATED');
     request.workerPrincipal = {
       kind,

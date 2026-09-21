@@ -45,6 +45,10 @@ export const ENROLLMENT_USAGE = `Usage:
   musicmute-worker enroll --backend-url <api-base-url> --enrollment-file <absolute-path> --report <absolute-path> --output <existing-protected-directory> [--allow-insecure-loopback <true|false>]
   musicmute-worker enroll --backend-url <api-base-url> --enrollment-file <absolute-path> --release <absolute-path> [--diagnostics <absolute-path>] --qualification <absolute-path> --label <name> [--group-id <id>] [--service-root <absolute-path>] --output <existing-protected-directory> [--allow-insecure-loopback <true|false>]`;
 
+export interface InstallationPreparationReuse {
+  reusableModelPath?: string;
+}
+
 interface EnrollmentState {
   schemaVersion: 1;
   exchangeRequestId: string;
@@ -63,6 +67,7 @@ interface EnrollmentState {
 
 export async function runInstallationPreparationCommand(
   arguments_: string[],
+  reuse: InstallationPreparationReuse = {},
 ): Promise<void> {
   const flags = parseFlags(arguments_);
   exactFlags(
@@ -111,6 +116,9 @@ export async function runInstallationPreparationCommand(
   const downloads = await downloadInstallationArtifacts(manifest, {
     outputRoot: artifactRoot,
     allowInsecureLoopback,
+    ...(reuse.reusableModelPath === undefined
+      ? {}
+      : { reusableModelPath: reuse.reusableModelPath }),
   });
   const release = await prepareInstallationRelease({
     archivePath: downloads.release.path,

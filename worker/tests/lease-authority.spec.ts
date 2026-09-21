@@ -29,9 +29,11 @@ describe("lease authority", () => {
       clock,
     );
     expect(authority.remainingMs()).toBe(85_000);
+    expect(authority.deadlineRemainingMs()).toBe(295_000);
 
     clock.monotonic += 10_000;
     expect(authority.remainingMs()).toBe(75_000);
+    expect(authority.deadlineRemainingMs()).toBe(285_000);
 
     clock.wall += 80_000;
     expect(authority.remainingMs()).toBe(5_000);
@@ -59,6 +61,7 @@ describe("lease authority", () => {
     expect(authority.remainingMs()).toBe(83_000);
 
     authority.lose("cancelled");
+    expect(authority.deadlineRemainingMs()).toBe(0);
     expect(() =>
       authority.refresh(
         "2026-01-01T00:00:40.000Z",

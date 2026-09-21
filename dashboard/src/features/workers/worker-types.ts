@@ -103,7 +103,7 @@ export interface WorkerSlot {
 export interface WorkerCommand {
   commandId: string;
   kind: "doctor" | "benchmark";
-  state: "pending" | "succeeded" | "failed";
+  state: "pending" | "succeeded" | "failed" | "expired";
   checks: string[];
   recipeId: string | null;
   iterations: number | null;

@@ -13,6 +13,12 @@ const principal: WorkerPrincipal = {
   subjectId: installationId,
   credential: 'x'.repeat(43),
 };
+const machinePrincipal: WorkerPrincipal = {
+  kind: 'machine',
+  subjectId: installationId,
+  credential: 'm'.repeat(43),
+  machineStatus: 'active',
+};
 const digest = 'ab'.repeat(32);
 const expiresAt = '2026-09-20T12:00:00.000Z';
 const roots: string[] = [];
@@ -24,6 +30,94 @@ afterEach(async () => {
 });
 
 describe('worker installation artifact grants', () => {
+  it('returns machine-authenticated signed update metadata and one release grant', async () => {
+    const base = catalog();
+    const value = {
+      ...base,
+      releases: {
+        ...base.releases,
+        'darwin-arm64': {
+          ...base.releases['darwin-arm64'],
+          sequence: 7,
+          publishedAt: '2026-09-21T00:00:00.000Z',
+          expiresAt: '2026-09-23T00:00:00.000Z',
+          keyId: 'release-2026',
+          signature: 's'.repeat(86),
+        },
+      },
+    };
+    const f = await fixture(value);
+
+    await expect(
+      f.service.createUpdateGrant(machinePrincipal, 'darwin-arm64'),
+    ).resolves.toEqual({
+      schemaVersion: 1,
+      platform: 'darwin-arm64',
+      signed: {
+        keyId: 'release-2026',
+        metadata: {
+          schemaVersion: 1,
+          sequence: 7,
+          platform: 'darwin-arm64',
+          releaseVersion: '0.1.1',
+          publishedAt: '2026-09-21T00:00:00.000Z',
+          expiresAt: '2026-09-23T00:00:00.000Z',
+          release: {
+            filename: 'musicmute-worker-darwin-arm64.tar.gz',
+            bytes: 101,
+            sha256: digest,
+            contentType: 'application/gzip',
+          },
+        },
+        signature: 's'.repeat(86),
+      },
+      grant: {
+        url: 'https://storage.example.invalid/grant/1',
+        expiresAt,
+      },
+    });
+    expect(f.transfers.createDownloadGrant).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed when update metadata is absent or the caller is not a machine', async () => {
+    const f = await fixture(catalog());
+    await expect(
+      f.service.createUpdateGrant(machinePrincipal, 'darwin-arm64'),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+    });
+    await expect(
+      f.service.createUpdateGrant(principal, 'darwin-arm64'),
+    ).rejects.toMatchObject({ response: { code: 'WORKER_NOT_FOUND' } });
+  });
+
+  it('checks signed update metadata without minting a download grant', async () => {
+    const base = catalog();
+    const value = {
+      ...base,
+      releases: {
+        ...base.releases,
+        'darwin-arm64': {
+          ...base.releases['darwin-arm64'],
+          sequence: 7,
+          publishedAt: '2026-09-21T00:00:00.000Z',
+          expiresAt: '2026-09-23T00:00:00.000Z',
+          keyId: 'release-2026',
+          signature: 's'.repeat(86),
+        },
+      },
+    };
+    const f = await fixture(value);
+    const result = await f.service.createUpdateGrant(
+      machinePrincipal,
+      'darwin-arm64',
+      false,
+    );
+    expect(result).not.toHaveProperty('grant');
+    expect(result).toHaveProperty('signed.metadata.releaseVersion', '0.1.1');
+    expect(f.transfers.createDownloadGrant).not.toHaveBeenCalled();
+  });
+
   it('returns only verified platform artifacts and hides storage identities', async () => {
     const f = await fixture(catalog());
 
@@ -50,15 +144,17 @@ describe('worker installation artifact grants', () => {
         bytes: 202,
         sha256: digest,
         contentType: 'application/octet-stream',
-        url: 'https://storage.example.invalid/grant/2',
-        expiresAt,
+        url: 'https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Vocal_2.onnx',
+        sourcePolicy: 'direct-owner-source-only',
+        allowedHosts: ['github.com', 'release-assets.githubusercontent.com'],
+        maxRedirects: 2,
       },
       fixture: {
         filename: 'qualification.wav',
         bytes: 303,
         sha256: digest,
         contentType: 'audio/wav',
-        url: 'https://storage.example.invalid/grant/3',
+        url: 'https://storage.example.invalid/grant/2',
         expiresAt,
       },
     });
@@ -66,8 +162,8 @@ describe('worker installation artifact grants', () => {
     expect(JSON.stringify(result)).not.toContain(
       'worker-installation-artifacts/',
     );
-    expect(f.transfers.isPinnedObjectAvailable).toHaveBeenCalledTimes(3);
-    expect(f.transfers.createDownloadGrant).toHaveBeenCalledTimes(3);
+    expect(f.transfers.isPinnedObjectAvailable).toHaveBeenCalledTimes(2);
+    expect(f.transfers.createDownloadGrant).toHaveBeenCalledTimes(2);
     expect(
       f.transfers.isPinnedObjectAvailable.mock.calls.map(([value]) => value),
     ).toEqual(expectedObjects('darwin-arm64'));
@@ -95,6 +191,25 @@ describe('worker installation artifact grants', () => {
     ).toEqual(expectedObjects('windows-amd64'));
   });
 
+  it('allows a staged single-platform catalog and fails closed for an unavailable platform', async () => {
+    const value = catalog();
+    delete (value.releases as Partial<typeof value.releases>)['windows-amd64'];
+    const f = await fixture(value);
+
+    await expect(
+      f.service.createDownloadGrants(principal, installationId, 'darwin-arm64'),
+    ).resolves.toHaveProperty('release.version', '0.1.1');
+    await expect(
+      f.service.createDownloadGrants(
+        principal,
+        installationId,
+        'windows-amd64',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+    });
+  });
+
   it('hides whether an installation exists when the principal does not own it', async () => {
     const f = await fixture(catalog());
 
@@ -113,10 +228,10 @@ describe('worker installation artifact grants', () => {
     ['invalid JSON', '{'],
     ['unknown fields', JSON.stringify({ ...catalog(), unexpected: true })],
     [
-      'unsafe storage key',
+      'unsafe model source host',
       JSON.stringify({
         ...catalog(),
-        model: { ...catalog().model, key: 'jobs/private-model.onnx' },
+        model: { ...catalog().model, url: 'https://music-mute.com/model.onnx' },
       }),
     ],
   ])('fails closed for %s', async (_name, value) => {
@@ -134,8 +249,7 @@ describe('worker installation artifact grants', () => {
     const f = await fixture(catalog());
     f.transfers.isPinnedObjectAvailable
       .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+      .mockResolvedValueOnce(false);
 
     await expect(
       f.service.createDownloadGrants(principal, installationId, 'darwin-arm64'),
@@ -209,11 +323,13 @@ function catalog() {
     },
     model: {
       filename: 'kim-vocal-2.onnx',
-      key: 'worker-installation-artifacts/models/kim-vocal-2.onnx',
-      versionId: 'model-version',
       bytes: 202,
       sha256: digest,
       contentType: 'application/octet-stream',
+      url: 'https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Vocal_2.onnx',
+      sourcePolicy: 'direct-owner-source-only',
+      allowedHosts: ['github.com', 'release-assets.githubusercontent.com'],
+      maxRedirects: 2,
     },
     fixture: {
       filename: 'qualification.wav',
@@ -228,7 +344,7 @@ function catalog() {
 
 function expectedObjects(platform: 'darwin-arm64' | 'windows-amd64') {
   const value = catalog();
-  return [value.releases[platform], value.model, value.fixture].map(
+  return [value.releases[platform], value.fixture].map(
     ({ key, versionId, bytes, sha256, contentType }) => ({
       key,
       versionId,

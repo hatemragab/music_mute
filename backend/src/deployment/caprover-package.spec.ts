@@ -37,6 +37,7 @@ describe('CapRover dashboard package', () => {
         '.dockerignore',
         'captain-definition',
         'backend/Dockerfile',
+        'backend/config/worker-installation-catalog.json',
         'backend/package.json',
         'backend/pnpm-lock.yaml',
         'backend/scripts/install-apk-verifier.sh',
@@ -66,5 +67,23 @@ describe('CapRover dashboard package', () => {
     expect(scriptsDirectory).toBeGreaterThan(backendExclusion);
     expect(scriptsContents).toBeGreaterThan(scriptsDirectory);
     expect(installer).toBeGreaterThan(scriptsContents);
+  });
+
+  it('keeps the worker installation catalog in the Docker allowlist', () => {
+    const rules = readFileSync(join(backendRoot, '..', '.dockerignore'), 'utf8')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'));
+    const backendExclusion = rules.indexOf('backend/*');
+    const configDirectory = rules.indexOf('!backend/config/');
+    const configContents = rules.indexOf('backend/config/*');
+    const catalog = rules.indexOf(
+      '!backend/config/worker-installation-catalog.json',
+    );
+
+    expect(backendExclusion).toBeGreaterThanOrEqual(0);
+    expect(configDirectory).toBeGreaterThan(backendExclusion);
+    expect(configContents).toBeGreaterThan(configDirectory);
+    expect(catalog).toBeGreaterThan(configContents);
   });
 });

@@ -1,5 +1,181 @@
 # Package changes
 
+## Revision 4.29
+
+- Identified the production output-upload failure as a worker/backend signed
+  header contract mismatch. Production grants include
+  `x-amz-storage-class: INTELLIGENT_TIERING`, but the worker allowlisted only
+  the other three required PUT headers and therefore rejected the valid grant
+  before sending any bytes to S3.
+- The worker now accepts that exact optional fourth header and rejects every
+  other storage-class value with the bounded `upload-header-mismatch`
+  diagnostic. Whole-object PUT, checksum, immutable-key, and version-ID
+  requirements are unchanged; multipart upload remains unused.
+- Focused formatting, zero-warning Oxlint, typecheck, production build, and 17
+  transfer/runtime tests pass. Immutable `0.1.0-mvp.11` was layered on the
+  accepted `0.1.0-mvp.10` baseline with only `transfers.js`, its source map,
+  and the regenerated 12,706-entry manifest changed.
+- `0.1.0-mvp.11` is active locally. The LaunchAgent restarted on PID 65277,
+  Doctor passes all 13 checks, and the worker is connected, idle, and accepting
+  jobs with no post-activation error event. Fresh Android-to-S3 acceptance is
+  still required.
+
+## Revision 4.28
+
+- Added `musicmute-worker logs --clear [--force] [--json]` for deliberate local
+  log cleanup without `sudo`.
+- The command takes the normal owner-only lock, gracefully drains and stops a
+  loaded LaunchAgent, clears only explicit stdout/stderr streams, their five
+  archive generations, and structured-spool files, then restores the service.
+- Configuration, credentials, models, job files, diagnostic ZIP exports, and
+  unknown files are preserved. Focused tests cover bounded targeting, reported
+  byte/file totals, incompatible flags, and service restoration.
+- Built and activated immutable local release `0.1.0-mvp.10` on top of
+  `0.1.0-mvp.9`; the pre-deployment active job drained normally. All 12,706
+  manifest entries verify, Doctor passes all 13 checks, and the worker is
+  active, connected, idle, and accepting jobs. The matching unpublished local
+  npm tarball is installed in the user-owned Homebrew prefix.
+
+## Revision 4.27
+
+- Corrected structured error filtering so `--since`, `--attempt-id`, and
+  `--level` views no longer append the unstructured stderr tail, which cannot
+  be attributed reliably to those filters. Plain `logs --errors` still includes
+  the sanitized stderr tail for backward-compatible broad diagnostics.
+- Added an explicit child-stdin error listener. A closed Python pipe now rejects
+  pending work through the supervisor instead of emitting an uncaught `EPIPE`
+  that can terminate the Node service.
+- Added regressions for filtered stderr isolation and an OS-level closed stdin
+  descriptor. Focused formatting, zero-warning Oxlint, TypeScript typecheck,
+  production build, and 25 CLI/child lifecycle tests pass.
+- Built and activated immutable local release `0.1.0-mvp.9`; all 12,706
+  manifest entries and the changed ESM modules verify. The current-user
+  LaunchAgent restarted on PID 44226, all 13 Doctor checks pass, and the worker
+  is active, connected, idle, and accepting jobs. The unpublished local npm
+  tarball was also installed into the user-owned Homebrew npm prefix so the
+  public CLI uses the same fixed renderer; nothing was uploaded to npm.
+
+## Revision 4.26
+
+- Live error-follow validation of a fresh production job exposed a second,
+  independent timeout defect: the Python request timer was initialized from
+  the first renewable lease window. Lease renewals kept backend ownership
+  current, but could not extend that already-created child timer, so processing
+  was killed after about 55 seconds with `SEPARATOR_FAILED`.
+- Added a deadline-only remaining-time calculation and now bound the child
+  request by the immutable processing deadline, capped at 7,200 seconds. The
+  renewable lease watchdog remains authoritative and still terminates the
+  child immediately if renewal or ownership fails.
+- Added regression assertions that distinguish the short lease window from the
+  longer processing deadline. Focused formatting, zero-warning Oxlint,
+  TypeScript typecheck, the production build, and 13 lease/runtime tests pass.
+- Built immutable local release `0.1.0-mvp.8` from verified `0.1.0-mvp.7` with
+  only the two deadline modules changed. All 12,706 manifest entries verify;
+  the current-user LaunchAgent restarted on the candidate, Doctor passes all
+  13 checks, and the worker is active, connected, idle, and claimable. A fresh
+  production job is still required to prove processing beyond the old
+  55-second boundary and the subsequent S3 publication path.
+
+## Revision 4.25
+
+- Added automatic 5 MiB stdout/stderr rotation with five private gzip archives.
+- Added sanitized fatal-error details plus structured event/error log views,
+  follow mode, and attempt/time/severity filters.
+- Enriched local status with heartbeat, current and last jobs, processing-child
+  state, diagnostic-spool state, and total log disk use.
+- Added an owner-only sanitized diagnostics ZIP and documented its privacy
+  boundary. All operations remain per-user and require no `sudo`.
+- Live validation caught and removed a misleading fatal record emitted during
+  normal LaunchAgent shutdown, and compacted multiline child progress in the
+  readable error view. Immutable release `0.1.0-mvp.7` is active locally;
+  Doctor passes all 13 checks and a deliberate restart added no fatal record.
+- Reinstalled the verified local npm tarball into the user-owned Homebrew npm
+  prefix so the public `musicmute-worker` command matches the active release;
+  nothing was uploaded to npm and no administrator privilege was used.
+
+## Revision 4.24
+
+- A newly submitted production job (`6ab1431b0288918db41d6982`) proved that
+  the current 7,200-second policy reaches Kim Vocal 2 processing without the
+  old 60-second termination. Separation completed, but publication failed with
+  `OUTPUT_UPLOAD_FAILED`; the attempt-scoped S3 prefix contained no object, so
+  S3 never accepted the result PUT.
+- Added bounded private transfer diagnostics for grant expiry, local identity
+  mismatch, checksum mismatch, HTTP status, missing immutable version ID, and
+  transport error class. Signed URLs, response bodies, credentials, object
+  contents, and user paths are never included. The public failure envelope is
+  unchanged.
+- Added focused coverage for HTTP rejection diagnostics and private runtime
+  event delivery. The focused formatter, linter, and 16 transfer/runtime tests
+  pass. Complete verification remains blocked by unrelated in-progress changes
+  in `operational-logs.ts` and `local-runtime-status.ts`.
+- A first isolated diagnostic overlay (`0.1.0-mvp.4`) used the wrong generated
+  module format, was rejected at import, and was immediately rolled back to the
+  verified `0.1.0-mvp.3`. Corrected `0.1.0-mvp.5` verified all 12,697 manifest
+  entries and its required ESM exports before activation. The job must now be
+  retried by its owner to capture the precise S3 rejection.
+
+## Revision 4.23
+
+- Fixed the processing-child recovery race by creating a fresh lifecycle
+  wrapper for every process incarnation. A child that exits after rejecting an
+  active request can no longer leave the Node supervisor alive with no Python
+  child because its old exit handler had not settled yet.
+- Added bounded, redacted `child-failed` and restart-failure details to the
+  private diagnostic stream. Public job failures retain their safe error
+  envelope; native stderr, signed URLs, credentials, and user-home components
+  are not exposed through the public API.
+- Built and locally activated immutable macOS release `0.1.0-mvp.3` without
+  changing the existing pairing. The packaged Kim Vocal 2/CoreML four-recipe
+  qualification passed, and a production deadline termination automatically
+  started a replacement Python child under the same LaunchAgent.
+- The existing failed production job retained its frozen 60-second deadline
+  across backend retries. Production policy revision 0 now exposes the
+  intended 7,200-second deadline, so the owner must submit a new mobile job
+  before claiming a successful production S3 result upload; retrying the old
+  job cannot adopt a newer policy.
+
+## Revision 4.22
+
+- Implemented authenticated remote Doctor and Benchmark delivery in the worker
+  configuration heartbeat, strict command parsing, bounded execution, and
+  replay-safe result reporting. Transient result-delivery failures reuse the
+  same request identity without rerunning the command.
+- Kept the flow fully per-user and no-sudo. Doctor reports only requested,
+  sanitized checks. Benchmark waits for idle capacity, cycles only private
+  processing children, runs the selected frozen recipe for one to five
+  iterations, and reports aggregate timing/output metrics.
+- Continued configuration heartbeats when slots are unavailable, added bounded
+  child recovery after restart failures, and present expired dashboard commands
+  as expired rather than permanently pending.
+
+## Revision 4.21
+
+- Corrected worker-dashboard recipe presentation to identify the qualified model
+  as **Kim Vocal 2** across machine capabilities and fleet policy. The immutable
+  `*-v1` recipe IDs remain visible only as secondary contract metadata so they
+  cannot be mistaken for the model generation.
+- Preserved the existing recipe IDs and digests for queued-job, capability and
+  rollback compatibility. Added focused label coverage and documented the
+  distinction between Kim Vocal 2 and recipe-contract revision 1.
+
+## Revision 4.20
+
+- Changed the public macOS CLI to render readable terminal summaries by
+  default. `status` now explains installation, service, job, dashboard and
+  claim state; `doctor` shows a pass/fail checklist; logs retain named streams;
+  benchmark and lifecycle commands show labeled results instead of JSON syntax.
+- Made compact JSON explicitly opt-in through `--json` for every public macOS
+  command while preserving the existing JSON field names and exit codes for
+  scripts. Added focused coverage for both human and JSON output paths.
+- Prevented Python engine tests from writing bytecode into the source tree and
+  narrowed npm package contents to the engine's Python source files so any
+  pre-existing bytecode caches cannot enter the release tarball.
+- Embedded the reviewed Ed25519 production public key as the updater's trust
+  anchor. Existing installations can now run the read-only `update --check`
+  without a local trust file; optional local keys remain supported for rotation
+  but cannot replace a built-in key.
+
 ## Revision 4.19
 
 - Corrected the installed Mac worker's local API base to include `/api/v1`,

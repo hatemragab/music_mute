@@ -95,6 +95,9 @@ export class WorkerChildProcess {
     this.child = child;
     child.stdout.on("data", (chunk: Buffer) => this.onData(chunk));
     child.stderr.on("data", (chunk: Buffer) => this.onStderr(chunk));
+    child.stdin.on("error", () =>
+      this.fail(new Error("Worker child pipe failed"), child),
+    );
     child.once("error", (error) => this.fail(error, child));
     child.once("exit", (code, signal) => {
       const detail = code === 0 ? "stopped" : `exited (${code ?? signal})`;

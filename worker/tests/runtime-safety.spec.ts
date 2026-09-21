@@ -19,6 +19,7 @@ describe("runtime local safety", () => {
     roots.push(root);
     const credentialFile = join(root, "machine.credential");
     const configFile = join(root, "runtime.json");
+    const localLifecyclePath = join(root, "state", "lifecycle.json");
     await writeFile(credentialFile, `${"x".repeat(43)}\n`, { mode: 0o600 });
     await writeFile(
       configFile,
@@ -27,6 +28,7 @@ describe("runtime local safety", () => {
         backendBaseUrl: "https://api.example.invalid/api/v1",
         machineId: "cb56441d-f2df-4b44-a320-6f37dfa81f7f",
         credentialFile,
+        localLifecyclePath,
         workRoot: join(root, "work"),
         modelCacheRoot: join(root, "models"),
         engineRoot: join(root, "engine"),
@@ -51,6 +53,7 @@ describe("runtime local safety", () => {
       arch: "arm64",
     });
     expect(config.credential).toBe("x".repeat(43));
+    expect(config.localLifecyclePath).toBe(localLifecyclePath);
     expect(config.slots[0]).toMatchObject({ provider: "coreml", slotIndex: 0 });
   });
 

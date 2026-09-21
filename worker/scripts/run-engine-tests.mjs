@@ -17,7 +17,11 @@ const python =
 const completed = spawnSync(
   python,
   ["-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
-  { cwd: resolve(workerRoot, "engine"), stdio: "inherit" },
+  {
+    cwd: resolve(workerRoot, "engine"),
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
+    stdio: "inherit",
+  },
 );
 if (completed.error) throw completed.error;
 process.exit(completed.status ?? 1);

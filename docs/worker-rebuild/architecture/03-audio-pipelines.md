@@ -30,18 +30,18 @@ Use the pinned separator's existing preprocessing/model implementation behind a 
 
 The v1 step is `trim_vocal_gaps`, not an edge-only trim and not FFmpeg `silenceremove` under a new name.
 
-| Property | Reference behavior |
-| --- | --- |
-| Analysis window | `max(1, round(sampleRate * 0.01))`, nonoverlapping nominal 10 ms windows |
-| Level estimate | RMS per channel, then use the **largest** channel RMS |
-| Threshold | Strictly below `10 ** (thresholdDb / 20)`; default -45 dBFS |
-| Partial final window | Compute RMS from its actual sample count |
-| Eligible run | Silent duration at least `round(minSilenceSeconds * sampleRate)`; default 0.8 seconds |
-| Padding | Preserve 0.2 seconds next to adjacent non-silent phrases; do not add imaginary padding outside the recording |
-| Cut locations | Leading silence, trailing silence, **and qualifying internal gaps** |
-| Retained boundaries | Up to 5 ms linear fades, limited to half a retained region; no overlap/crossfade shortening |
-| All below threshold | Preserve the recording rather than return empty output |
-| PCM output | Explicit nearest-integer `rint`, clipping and int16 conversion; preserve existing quantization |
+| Property             | Reference behavior                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Analysis window      | `max(1, round(sampleRate * 0.01))`, nonoverlapping nominal 10 ms windows                                     |
+| Level estimate       | RMS per channel, then use the **largest** channel RMS                                                        |
+| Threshold            | Strictly below `10 ** (thresholdDb / 20)`; default -45 dBFS                                                  |
+| Partial final window | Compute RMS from its actual sample count                                                                     |
+| Eligible run         | Silent duration at least `round(minSilenceSeconds * sampleRate)`; default 0.8 seconds                        |
+| Padding              | Preserve 0.2 seconds next to adjacent non-silent phrases; do not add imaginary padding outside the recording |
+| Cut locations        | Leading silence, trailing silence, **and qualifying internal gaps**                                          |
+| Retained boundaries  | Up to 5 ms linear fades, limited to half a retained region; no overlap/crossfade shortening                  |
+| All below threshold  | Preserve the recording rather than return empty output                                                       |
+| PCM output           | Explicit nearest-integer `rint`, clipping and int16 conversion; preserve existing quantization               |
 
 Read samples in bounded blocks. The reference still allocates masks proportional to the number of 10 ms windows and interval lists; it is not strictly constant-memory. Apply the job-duration bound and measure memory with the largest allowed fixture.
 
@@ -73,12 +73,18 @@ Evaluate clean speech, noisy speech, singing, quiet phrases, stereo imbalance an
 
 Support four named combinations rather than a workflow editor:
 
-| Recipe ID | Trim | Denoise |
-| --- | --- | --- |
-| `kim-vocals-v1` | Off | Off |
-| `kim-vocals-trim-v1` | On | Off; initial default |
-| `kim-vocals-denoise-v1` | Off | On |
-| `kim-vocals-denoise-trim-v1` | On | On |
+| Dashboard label                        | Recipe ID                    | Trim | Denoise              |
+| -------------------------------------- | ---------------------------- | ---- | -------------------- |
+| Kim Vocal 2                            | `kim-vocals-v1`              | Off  | Off                  |
+| Kim Vocal 2 · Gap trimming             | `kim-vocals-trim-v1`         | On   | Off; initial default |
+| Kim Vocal 2 · Denoise                  | `kim-vocals-denoise-v1`      | Off  | On                   |
+| Kim Vocal 2 · Denoise and gap trimming | `kim-vocals-denoise-trim-v1` | On   | On                   |
+
+All four recipes use the verified `Kim_Vocal_2.onnx` model. The `v1` suffix is
+the immutable recipe-contract revision; it is not the Kim model generation.
+Operator-facing surfaces display **Kim Vocal 2** as the model and show the raw
+recipe ID only as secondary contract metadata. Renaming these IDs would break
+queued-job snapshots, capability matching and deterministic recipe digests.
 
 A recipe snapshot contains the recipe ID/revision, model filename and verified artifact digest, ordered step versions/parameters, encoder/bitrate, preparation profile, and a deterministic recipe digest. The backend chooses and stores it when creating the job. Unknown steps, fields, URLs or digest mismatches are rejected.
 

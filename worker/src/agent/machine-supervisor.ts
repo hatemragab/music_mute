@@ -43,10 +43,30 @@ export class MachineSupervisor {
   }
 
   async restart(workerId: string): Promise<WorkerChildProcess> {
-    const child = this.child(workerId);
-    await child.stop();
-    await child.start();
-    return child;
+    const slot = this.slots.find(
+      (candidate) => candidate.workerId === workerId,
+    );
+    if (!slot) throw new Error("Worker slot is not configured");
+
+    const previous = this.children.get(workerId);
+    if (previous) await previous.stop();
+
+    // A terminated process can reject its active request before Node has
+    // delivered the exit event that clears WorkerChildProcess.child. Reusing
+    // that wrapper races with the exit handler and can leave the slot
+    // permanently unavailable. A restart is a new process incarnation, so it
+    // must also use a fresh lifecycle wrapper.
+    const replacement = new WorkerChildProcess(slot.child);
+    this.children.set(workerId, replacement);
+    try {
+      await replacement.start();
+      return replacement;
+    } catch (error) {
+      await replacement.stop();
+      if (this.children.get(workerId) === replacement)
+        this.children.delete(workerId);
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {

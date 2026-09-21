@@ -24,13 +24,24 @@ Review failures in the installation view, not only the active-machine list. Reje
 
 Use `musicmute-worker status` and `doctor` to inspect the local service and real capability state. `logs` returns sanitized diagnostics; `benchmark` runs an approved fixture under controlled load. `drain` prevents new jobs while active jobs finish. A normal stop/restart drains by default; force explicitly abandons work through the lease lifecycle.
 
+`doctor` executes the packaged Python runtime doctor and validates the model,
+CoreML provider, exact locked Python packages, network-disabled FFmpeg
+capabilities, configuration, credential shape, file permissions, and the
+running LaunchAgent. An update is not recorded healthy merely because launchd
+loaded it; a failed post-activation doctor restores and restarts the known-good
+release and quarantines the candidate.
+
 Change pipeline defaults in the dashboard for new jobs. Use machine/slot eligibility to opt devices out of recipes without modifying queued/running jobs. Display the reason when no eligible machine is available. Raise concurrency only after measured total-throughput and memory validation.
 
 ## Preparing an MVP release package
 
 Owner-approved packaging uses explicit tested versions, scoped registry/storage permissions and signing keys kept outside source control. Produce immutable artifacts first, verify their digests and then record authenticated metadata/catalog entries. Never use `latest` as an unreviewed substitute for a pinned candidate.
 
-Register the candidate without assigning it remotely to machines. The dashboard uses worker-specific release records, not mobile app releases. Keep the previously working binaries, environments and model digests available for rollback.
+Register the candidate without assigning it remotely to machines. The dashboard
+uses worker-specific release records, not mobile app releases. Keep the
+previously working binaries, environments, model digests, exact owner-hosted
+model URLs, allowed redirect hosts, and confidential authorization-record
+references available for rollback. Never upload model weights to MusicMute S3.
 
 The current runtime branch can emit the catalog artifact directly while it
 builds the verified release directory:
@@ -45,15 +56,45 @@ contains the release version, byte count, SHA-256 and content type needed by
 the operator-owned backend catalog. Keep the archive parent owner-protected;
 upload and catalog registration remain explicit release-operator actions.
 
-On the target host, `prepare-installation` exchanges the invitation and
-downloads the exact release/model/fixture set. It now materializes the release
-through a protected temporary directory, checks archive paths and the full
-platform manifest, then reports a versioned `releaseRoot`. Native `stage` runs
+For a macOS release that can be selected by the manual updater, the catalog's
+`releases.darwin-arm64` entry also carries the signed metadata fields
+`sequence`, `publishedAt`, `expiresAt`, `keyId`, and `signature`. The signature
+is Ed25519 over the canonical JSON payload returned as `signed.metadata` by
+`POST /api/v1/worker/v1/update`. That payload binds the platform, release
+version, sequence, validity window, filename, byte count, SHA-256, and content
+type. Do not sign a temporary S3 URL; the authenticated backend mints that
+short-lived grant only when the CLI runs `update`, not for `update --check`.
+
+The reviewed production public SPKI PEM is embedded in the CLI as a trust
+anchor under the catalog `keyId`. Verify that public key before packaging a CLI
+release. Use the target user's protected `config/update-trust.json` only to add
+reviewed rotation keys; it must not replace a built-in key. Keep the Ed25519
+private key in the release operator's external secret system. This repository
+contains the public verification key only and never the production private key.
+
+On the target host, `prepare-installation` exchanges the invitation, downloads
+the exact release/fixture set from MusicMute S3, and downloads the model only
+from the signed owner-hosted source descriptor. It materializes the release
+through a protected temporary directory, checks the model redirect chain,
+size/digest, archive paths, and the full platform manifest, then reports a
+versioned `releaseRoot`. Native `stage` runs
 service-identity qualification without a fake machine credential. Enrollment
 uploads the selected result and creates the real runtime config only after
-backend activation; native `activate` then installs that config/credential and
-starts the normal service. These are currently explicit recovery-safe phases;
-the final single bootstrap command still must orchestrate them.
+backend activation. The public `install` command now orchestrates these
+recovery-safe phases, writes the final config/credential, and starts the normal
+per-user LaunchAgent.
+
+For a machine that still has the legacy system LaunchDaemon, first drain and
+revoke/unpair the old machine. Then run the exact backup-first cleanup helper:
+
+```text
+sudo "$(command -v musicmute-worker)" legacy-cleanup --confirm-backup
+```
+
+The helper has no arbitrary path/label options. It stops only
+`system/com.musicmute.worker` and moves the exact legacy plist and application
+root into a timestamped root-owned backup. Review that backup before performing
+the normal fresh per-user enrollment; do not reuse the old credential.
 
 ## Manual per-machine activation
 

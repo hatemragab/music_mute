@@ -1,5 +1,15 @@
 # Music Mute worker rebuild: start here
 
+## Accepted macOS lifecycle redesign
+
+The accepted next macOS direction is a no-admin per-user LaunchAgent installed
+from a public npm CLI. The current source and historical evidence still describe
+the privileged `_musicmute` system LaunchDaemon; do not confuse that evidence
+with the not-yet-implemented redesign. Read
+[macOS per-user worker installation and lifecycle redesign](architecture/08-macos-user-launchagent.md)
+before changing macOS installation, lifecycle commands, updates, enrollment UX,
+or removal behavior.
+
 **Package revision:** 3.1. **Prepared:** September 17, 2026.
 
 This package contains completed design documents and implementation instructions for the Music Mute worker rebuild. It is not an implemented worker, an instruction to deploy immediately, or evidence that GPU tests have passed.
@@ -28,7 +38,7 @@ The only Python file supplied is the maintainer's unchanged historical reference
 | Secrets | Owner may provide `.local.env`; it is never committed, attached to a PR, uploaded as logs, or sent to workers |
 | Processing | Kim Vocal 2; reference-compatible gap trimming; optional real denoise; voice-only MP3 |
 | Pipeline controls | Dashboard controls new-job defaults and machine/worker eligibility; current jobs retain frozen recipes |
-| Distribution | WebSocket notifications and heartbeat; HTTPS ownership and grants; direct worker ↔ S3 data |
+| Distribution | WebSocket notifications and heartbeat; HTTPS ownership and grants; direct worker ↔ S3 user/runtime data; models download only from owner-authorized upstream links and are never mirrored to MusicMute S3 |
 | Recovery | Renewable leases, new attempt IDs, conditional finalization, bounded retries, no cross-machine resume |
 | Updates | MVP uses immutable versioned bundles with manual update and independent local rollback; automatic fleet rollout is post-MVP |
 
@@ -48,6 +58,7 @@ No more product questions are needed to begin the documentation and backend bran
 | Logs, capacity, heartbeats, releases and rollback | [architecture/05-operations-and-updates.md](architecture/05-operations-and-updates.md) |
 | Dashboard behavior and states | [architecture/06-dashboard-spec.md](architecture/06-dashboard-spec.md) |
 | Tests, evidence and release gate | [architecture/07-test-strategy.md](architecture/07-test-strategy.md) |
+| macOS runtime download URLs and license approval gate | [reference/MACOS-RUNTIME-LICENSE-APPROVAL.md](reference/MACOS-RUNTIME-LICENSE-APPROVAL.md) |
 | Source-derived review of the attached script | [reference/TRIMMER-REVIEW.md](reference/TRIMMER-REVIEW.md) |
 | Source provenance and external documentation | [reference/SOURCES.md](reference/SOURCES.md) |
 

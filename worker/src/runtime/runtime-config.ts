@@ -18,6 +18,8 @@ const CONFIG_KEYS = new Set([
   "backendBaseUrl",
   "machineId",
   "credentialFile",
+  "localLifecyclePath",
+  "localRuntimeStatusPath",
   "workRoot",
   "modelCacheRoot",
   "engineRoot",
@@ -41,6 +43,8 @@ export interface RuntimeConfig {
   machineId: string;
   credentialFile: string;
   credential: string;
+  localLifecyclePath?: string;
+  localRuntimeStatusPath?: string;
   workRoot: string;
   modelCacheRoot: string;
   engineRoot: string;
@@ -116,11 +120,29 @@ export async function loadRuntimeConfig(
   };
   for (const [name, current] of Object.entries(paths))
     assertAbsolute(current, name);
+  const localLifecyclePath =
+    value.localLifecyclePath === undefined
+      ? undefined
+      : requiredText(value.localLifecyclePath, "localLifecyclePath", 4096);
+  if (localLifecyclePath !== undefined)
+    assertAbsolute(localLifecyclePath, "localLifecyclePath");
+  const localRuntimeStatusPath =
+    value.localRuntimeStatusPath === undefined
+      ? undefined
+      : requiredText(
+          value.localRuntimeStatusPath,
+          "localRuntimeStatusPath",
+          4096,
+        );
+  if (localRuntimeStatusPath !== undefined)
+    assertAbsolute(localRuntimeStatusPath, "localRuntimeStatusPath");
   return {
     backendBaseUrl: requiredText(value.backendBaseUrl, "backendBaseUrl", 2048),
     machineId: uuid(value.machineId, "machineId"),
     credentialFile,
     credential,
+    ...(localLifecyclePath === undefined ? {} : { localLifecyclePath }),
+    ...(localRuntimeStatusPath === undefined ? {} : { localRuntimeStatusPath }),
     ...paths,
     allowInsecureLoopback: value.allowInsecureLoopback === true,
     slots,

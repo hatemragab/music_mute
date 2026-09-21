@@ -78,6 +78,11 @@ export class LeaseAuthority {
     );
   }
 
+  deadlineRemainingMs(): number {
+    if (this.lostReason) return 0;
+    return Math.max(0, this.remaining(this.deadline) - this.safetyMarginMs);
+  }
+
   sample(): { monotonicMs: number; wallMs: number } {
     return this.localAnchor();
   }

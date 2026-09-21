@@ -94,11 +94,22 @@ export interface InstallationReleaseGrant extends InstallationArtifactGrant {
   version: string;
 }
 
+export interface InstallationModelDescriptor {
+  filename: string;
+  bytes: number;
+  sha256: string;
+  contentType: "application/octet-stream";
+  url: string;
+  sourcePolicy: "direct-owner-source-only";
+  allowedHosts: string[];
+  maxRedirects: number;
+}
+
 export interface InstallationArtifactsResult {
   schemaVersion: 1;
   platform: WorkerPlatform;
   release: InstallationReleaseGrant;
-  model: InstallationArtifactGrant;
+  model: InstallationModelDescriptor;
   fixture: InstallationArtifactGrant;
 }
 
@@ -208,13 +219,7 @@ export class WorkerEnrollmentClient {
       this.allowInsecureLoopback,
       true,
     );
-    const model = parseArtifactGrant(
-      value.model,
-      "model",
-      "application/octet-stream",
-      this.allowInsecureLoopback,
-      false,
-    );
+    const model = parseModelDescriptor(value.model, this.allowInsecureLoopback);
     const fixture = parseArtifactGrant(
       value.fixture,
       "fixture",
@@ -515,6 +520,80 @@ export class WorkerEnrollmentClient {
     if (lastError instanceof WorkerEnrollmentError) throw lastError;
     throw new WorkerEnrollmentError("NETWORK_UNAVAILABLE", 0, true);
   }
+}
+
+function parseModelDescriptor(
+  value: unknown,
+  allowInsecureLoopback: boolean,
+): InstallationModelDescriptor {
+  const record = strictRecord(
+    value,
+    new Set([
+      "filename",
+      "bytes",
+      "sha256",
+      "contentType",
+      "url",
+      "sourcePolicy",
+      "allowedHosts",
+      "maxRedirects",
+    ]),
+    "Installation model descriptor",
+  );
+  const filename = boundedText(
+    record.filename,
+    "installation model filename",
+    120,
+  );
+  if (!SAFE_FILENAME.test(filename))
+    throw new TypeError("installation model filename is invalid");
+  const bytes = boundedInteger(
+    record.bytes,
+    1,
+    MAX_ARTIFACT_BYTES,
+    "installation model size",
+  );
+  if (typeof record.sha256 !== "string" || !SHA256.test(record.sha256))
+    throw new TypeError("installation model digest is invalid");
+  if (
+    record.contentType !== "application/octet-stream" ||
+    record.sourcePolicy !== "direct-owner-source-only" ||
+    !Array.isArray(record.allowedHosts) ||
+    record.allowedHosts.length < 1 ||
+    record.allowedHosts.length > 8 ||
+    record.allowedHosts.some(
+      (host) =>
+        typeof host !== "string" ||
+        !/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/u.test(host),
+    )
+  )
+    throw new TypeError("installation model source policy is invalid");
+  const allowedHosts = record.allowedHosts as string[];
+  if (new Set(allowedHosts).size !== allowedHosts.length)
+    throw new TypeError("installation model source hosts contain duplicates");
+  const url = safeArtifactUrl(
+    record.url,
+    "installation model URL",
+    allowInsecureLoopback,
+  );
+  if (!allowedHosts.includes(new URL(url).hostname))
+    throw new TypeError("installation model URL host is not approved");
+  const maxRedirects = boundedInteger(
+    record.maxRedirects,
+    0,
+    4,
+    "installation model redirects",
+  );
+  return {
+    filename,
+    bytes,
+    sha256: record.sha256,
+    contentType: "application/octet-stream",
+    url,
+    sourcePolicy: "direct-owner-source-only",
+    allowedHosts,
+    maxRedirects,
+  };
 }
 
 function parseArtifactGrant(

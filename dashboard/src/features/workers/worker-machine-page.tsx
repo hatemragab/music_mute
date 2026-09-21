@@ -47,6 +47,7 @@ import {
   redactPrivateDiagnosticText,
   workerContactState,
 } from "./worker-status";
+import { workerRecipeLabel } from "./worker-recipes";
 import type { WorkerMachineDetail } from "./worker-types";
 
 type MachineAction =
@@ -316,9 +317,16 @@ export function WorkerMachinePage() {
                       GPU {capability.gpuId} · up to {capability.maxSlots} slot
                       {capability.maxSlots === 1 ? "" : "s"}
                     </p>
-                    <ul className="mt-2 space-y-1 font-mono text-xs">
+                    <ul className="mt-2 space-y-2 text-xs">
                       {capability.recipeIds.map((recipe) => (
-                        <li key={recipe}>{recipe}</li>
+                        <li key={recipe}>
+                          <p className="font-medium text-foreground">
+                            {workerRecipeLabel(recipe)}
+                          </p>
+                          <code className="break-all text-muted-foreground">
+                            Recipe contract: {recipe}
+                          </code>
+                        </li>
                       ))}
                     </ul>
                   </li>

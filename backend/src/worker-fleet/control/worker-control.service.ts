@@ -53,6 +53,33 @@ export class WorkerControlService {
 
   async config(principal: WorkerPrincipal, query: WorkerConfigQueryDto) {
     const machine = await this.currentMachine(principal, query);
+    const now = new Date();
+    await Promise.all([
+      this.machines.updateOne(
+        {
+          _id: machine._id,
+          status: trusted({ $ne: 'revoked' }),
+          'currentSession.sessionId': query.sessionId,
+          'currentSession.incarnation': query.incarnation,
+        },
+        {
+          $set: {
+            lastSeenAt: now,
+            'currentSession.lastSeenAt': now,
+          },
+        },
+        { runValidators: true },
+      ),
+      this.slots.updateMany(
+        {
+          machineId: machine._id,
+          sessionId: query.sessionId,
+          incarnation: query.incarnation,
+        },
+        { $set: { lastSeenAt: now } },
+        { runValidators: true },
+      ),
+    ]);
     const policy = await this.policies
       .findById('worker-fleet')
       .maxTimeMS(2000)
@@ -80,7 +107,7 @@ export class WorkerControlService {
       policy: presentPolicy(policy),
       compatibleRelease: null,
       commands: commands.map(presentCommand),
-      serverTime: new Date().toISOString(),
+      serverTime: now.toISOString(),
     };
   }
 
@@ -687,7 +714,10 @@ function presentCommand(command: WorkerCommand) {
   return {
     commandId: command._id,
     kind: command.kind,
-    state: command.state,
+    state:
+      command.state === 'pending' && command.expiresAt <= new Date()
+        ? 'expired'
+        : command.state,
     checks: command.checks,
     recipeId: command.recipeId,
     iterations: command.iterations,

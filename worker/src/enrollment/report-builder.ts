@@ -224,7 +224,9 @@ export function parseQualificationEvidence(
     100,
   );
   if (
-    (platform === "darwin-arm64" && serviceIdentity !== "_musicmute") ||
+    (platform === "darwin-arm64" &&
+      (serviceIdentity === "root" ||
+        !/^[A-Za-z_][A-Za-z0-9._-]{0,99}$/u.test(serviceIdentity))) ||
     (platform === "windows-amd64" && serviceIdentity !== "S-1-5-19")
   )
     throw new TypeError("Qualification service identity is invalid");

@@ -4,16 +4,27 @@ import json
 import os
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
 
 from musicmute_engine.qualification import (
     QualificationError,
     summarize_profiles,
+    selected_recipe_ids,
     write_private_report,
 )
 
 
 class QualificationTests(unittest.TestCase):
+    def test_remote_benchmark_selects_one_recipe_for_requested_iterations(self) -> None:
+        self.assertEqual(
+            selected_recipe_ids(
+                Namespace(recipe_id="kim-vocals-trim-v1", iterations=3)
+            ),
+            ["kim-vocals-trim-v1"] * 3,
+        )
+        self.assertEqual(len(selected_recipe_ids(Namespace())), 4)
+
     def test_profile_summary_requires_accelerated_nodes_without_cpu_nodes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             profile = Path(directory) / "profile.json"

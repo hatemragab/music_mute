@@ -97,6 +97,7 @@ describe("worker transfers", () => {
         "Content-Type": "audio/mpeg",
         "x-amz-checksum-sha256": digest,
         "If-None-Match": "*",
+        "x-amz-storage-class": "INTELLIGENT_TIERING",
       });
       return new Response(null, {
         status: 200,
@@ -122,12 +123,86 @@ describe("worker transfers", () => {
             "Content-Type": "audio/mpeg",
             "x-amz-checksum-sha256": digest,
             "If-None-Match": "*",
+            "x-amz-storage-class": "INTELLIGENT_TIERING",
           },
         },
         source,
         { bytes: body.length, sha256: digest, contentType: "audio/mpeg" },
       ),
     ).resolves.toBe("output-version");
+  });
+
+  it("rejects an unexpected signed storage class before upload", async () => {
+    const body = Buffer.from("bounded-output");
+    const digest = createHash("sha256").update(body).digest("base64");
+    const root = await mkdtemp(join(tmpdir(), "musicmute-transfer-"));
+    roots.push(root);
+    const source = join(root, "vocals.mp3");
+    await writeFile(source, body, { mode: 0o600 });
+    const fetchMock = vi.fn();
+    const client = new WorkerTransferClient({
+      fetch: fetchMock as unknown as typeof fetch,
+      allowInsecureLoopback: true,
+    });
+
+    await expect(
+      client.upload(
+        {
+          method: "PUT",
+          url: "http://127.0.0.1/output",
+          expiresAt: future(),
+          headers: {
+            "Content-Type": "audio/mpeg",
+            "x-amz-checksum-sha256": digest,
+            "If-None-Match": "*",
+            "x-amz-storage-class": "STANDARD",
+          },
+        },
+        source,
+        { bytes: body.length, sha256: digest, contentType: "audio/mpeg" },
+      ),
+    ).rejects.toMatchObject({
+      code: "OUTPUT_UPLOAD_FAILED",
+      retryable: false,
+      diagnostic: "upload-header-mismatch",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("records only the rejected upload status in its private diagnostic", async () => {
+    const body = Buffer.from("bounded-output");
+    const digest = createHash("sha256").update(body).digest("base64");
+    const root = await mkdtemp(join(tmpdir(), "musicmute-transfer-"));
+    roots.push(root);
+    const source = join(root, "vocals.mp3");
+    await writeFile(source, body, { mode: 0o600 });
+    const client = new WorkerTransferClient({
+      fetch: vi.fn(
+        async () => new Response(null, { status: 403 }),
+      ) as unknown as typeof fetch,
+      allowInsecureLoopback: true,
+    });
+
+    await expect(
+      client.upload(
+        {
+          method: "PUT",
+          url: "http://127.0.0.1/output",
+          expiresAt: future(),
+          headers: {
+            "Content-Type": "audio/mpeg",
+            "x-amz-checksum-sha256": digest,
+            "If-None-Match": "*",
+          },
+        },
+        source,
+        { bytes: body.length, sha256: digest, contentType: "audio/mpeg" },
+      ),
+    ).rejects.toMatchObject({
+      code: "OUTPUT_UPLOAD_FAILED",
+      retryable: false,
+      diagnostic: "upload-http-403",
+    });
   });
 
   it("rejects redirects and removes a partial input", async () => {

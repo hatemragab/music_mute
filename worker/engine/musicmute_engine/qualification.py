@@ -37,7 +37,7 @@ except ImportError:  # Windows does not provide the POSIX account database.
 PROFILE_LIMIT_BYTES = 64 * 1024 * 1024
 RELEASE_MANIFEST_LIMIT_BYTES = 16 * 1024 * 1024
 REPORT_SCHEMA_VERSION = 1
-QUALIFIED_IDENTITIES = {"Darwin": "_musicmute", "Windows": "S-1-5-19"}
+QUALIFIED_IDENTITIES = {"Windows": "S-1-5-19"}
 
 
 class QualificationError(RuntimeError):
@@ -125,14 +125,28 @@ def summarize_profiles(
     }
 
 
+def selected_recipe_ids(arguments: argparse.Namespace) -> list[str]:
+    selected_recipe = getattr(arguments, "recipe_id", None)
+    iterations = getattr(arguments, "iterations", 1)
+    return (
+        [selected_recipe] * iterations
+        if selected_recipe is not None
+        else list(RECIPE_DEFINITIONS)
+    )
+
+
 def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
     system = platform.system()
-    expected_identity = QUALIFIED_IDENTITIES.get(system)
     identity = service_identity()
-    if (
-        expected_identity is None
-        or identity.casefold() != expected_identity.casefold()
-    ):
+    expected_identity = QUALIFIED_IDENTITIES.get(system)
+    if system == "Darwin":
+        identity_is_valid = identity.casefold() != "root"
+    else:
+        identity_is_valid = (
+            expected_identity is not None
+            and identity.casefold() == expected_identity.casefold()
+        )
+    if not identity_is_valid:
         raise QualificationError(
             "Qualification must run as the worker service identity"
         )
@@ -191,7 +205,8 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
     started = time.monotonic()
     profile_paths: tuple[Path, ...] = ()
     try:
-        for recipe_id in RECIPE_DEFINITIONS:
+        selected_recipe = getattr(arguments, "recipe_id", None)
+        for recipe_id in selected_recipe_ids(arguments):
             attempt_id = str(uuid.uuid4())
             attempt = qualification_root / attempt_id
             attempt.mkdir(mode=0o700)
@@ -235,7 +250,9 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
                     "endToEndSeconds": elapsed,
                 }
             )
-            if recipe_id == "kim-vocals-v1":
+            if upload_candidate is None and (
+                selected_recipe is not None or recipe_id == "kim-vocals-v1"
+            ):
                 upload_candidate = {
                     "path": str(output),
                     "resultDigest": sha256_hex(output),
@@ -308,6 +325,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ffmpeg", type=Path, required=True)
     parser.add_argument("--ffprobe", type=Path, required=True)
     parser.add_argument("--directml-device-id", type=int, default=0)
+    parser.add_argument("--recipe-id", choices=tuple(RECIPE_DEFINITIONS))
+    parser.add_argument("--iterations", type=int, default=1)
     parser.add_argument("--report", type=Path, required=True)
     arguments = parser.parse_args()
     if not all(
@@ -333,6 +352,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--fixture-sha256 must be lowercase hexadecimal SHA-256")
     if not 0 <= arguments.directml_device_id <= 15:
         parser.error("--directml-device-id must be between 0 and 15")
+    if not 1 <= arguments.iterations <= 5:
+        parser.error("--iterations must be between 1 and 5")
+    if arguments.recipe_id is None and arguments.iterations != 1:
+        parser.error("--iterations requires --recipe-id")
     return arguments
 
 

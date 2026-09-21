@@ -12,10 +12,17 @@ import {
   type LeaseResult,
   type OutputGrantResponse,
   type SessionResponse,
+  type WorkerCommandResult,
   type WorkerRecipeId,
 } from "./contracts.js";
+import {
+  parseMacUpdateCandidate,
+  type MacUpdateCandidate,
+} from "../platform/macos/update-metadata.js";
 
 const RESPONSE_LIMIT_BYTES = 64 * 1024;
+const UUID_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
 const WORKER_ERROR_CODES = new Set([
   "WORKER_INVALID_REQUEST",
@@ -31,6 +38,17 @@ export interface WorkerIdentity {
   workerId: string;
   sessionId: string;
   incarnation: string;
+}
+
+export interface WorkerMachineStatus {
+  machineId: string;
+  status: "pending" | "active" | "paused" | "draining";
+  groupId: string | null;
+  policyRevision: number;
+  revision: number;
+  lastSeenAt: string | null;
+  activeAttempts: number;
+  claimsAllowed: boolean;
 }
 
 export interface ControlPlaneClientOptions {
@@ -280,6 +298,109 @@ export class WorkerControlPlaneClient {
       throw new TypeError("Failure response is invalid");
   }
 
+  async completeCommand(
+    commandId: string,
+    sessionId: string,
+    incarnation: string,
+    requestId: string,
+    result: WorkerCommandResult,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!UUID_V4.test(commandId) || !UUID_V4.test(requestId))
+      throw new TypeError("Worker command identity is invalid");
+    const response = asRecord(
+      await this.request(
+        `worker/v1/commands/${commandId}/result`,
+        "POST",
+        { requestId, sessionId, incarnation, ...result },
+        signal,
+      ),
+    );
+    if (
+      response.commandId !== commandId ||
+      response.state !== result.outcome ||
+      typeof response.replayed !== "boolean"
+    )
+      throw new TypeError("Worker command completion response is invalid");
+  }
+
+  async unpair(
+    force = false,
+    signal?: AbortSignal,
+  ): Promise<{
+    machineId: string;
+    status: "revoked";
+    confirmed: true;
+    revision: number;
+  }> {
+    const response = asRecord(
+      await this.request("worker/v1/unpair", "POST", { force }, signal),
+    );
+    if (
+      typeof response.machineId !== "string" ||
+      !UUID_V4.test(response.machineId) ||
+      response.status !== "revoked" ||
+      response.confirmed !== true ||
+      !Number.isSafeInteger(response.revision) ||
+      (response.revision as number) < 1
+    )
+      throw new TypeError("Unpair response is invalid");
+    return {
+      machineId: response.machineId,
+      status: "revoked",
+      confirmed: true,
+      revision: response.revision as number,
+    };
+  }
+
+  async machineStatus(signal?: AbortSignal): Promise<WorkerMachineStatus> {
+    const response = asRecord(
+      await this.request("worker/v1/status", "GET", null, signal),
+    );
+    const allowed = new Set([
+      "machineId",
+      "status",
+      "groupId",
+      "policyRevision",
+      "revision",
+      "lastSeenAt",
+      "activeAttempts",
+      "claimsAllowed",
+    ]);
+    if (
+      Object.keys(response).some((key) => !allowed.has(key)) ||
+      typeof response.machineId !== "string" ||
+      !UUID_V4.test(response.machineId) ||
+      !["pending", "active", "paused", "draining"].includes(
+        String(response.status),
+      ) ||
+      (response.groupId !== null && typeof response.groupId !== "string") ||
+      !boundedStatusInteger(response.policyRevision) ||
+      !boundedStatusInteger(response.revision) ||
+      !boundedStatusInteger(response.activeAttempts) ||
+      (response.lastSeenAt !== null &&
+        (typeof response.lastSeenAt !== "string" ||
+          !Number.isFinite(Date.parse(response.lastSeenAt)))) ||
+      typeof response.claimsAllowed !== "boolean"
+    )
+      throw new TypeError("Machine status response is invalid");
+    return response as unknown as WorkerMachineStatus;
+  }
+
+  async macUpdateCandidate(
+    download = false,
+    signal?: AbortSignal,
+  ): Promise<MacUpdateCandidate> {
+    return parseMacUpdateCandidate(
+      await this.request(
+        "worker/v1/update",
+        "POST",
+        { platform: "darwin-arm64", download },
+        signal,
+      ),
+    );
+  }
+
   private async request(
     path: string,
     method: "GET" | "POST",
@@ -377,6 +498,10 @@ async function readJson(response: Response): Promise<unknown> {
   } catch {
     throw new ControlPlaneError("RESPONSE_INVALID", response.status, false);
   }
+}
+
+function boundedStatusInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
 async function responseError(response: Response): Promise<ControlPlaneError> {
