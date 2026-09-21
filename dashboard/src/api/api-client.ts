@@ -187,7 +187,9 @@ export class ApiClient {
     if (options.responseType === "text") return (await response.text()) as T;
     if (options.responseType === "blob") return (await response.blob()) as T;
     if (response.status === 204) return undefined as T;
-    return (await response.json()) as T;
+    const text = await response.text();
+    if (!text.trim()) return null as T;
+    return JSON.parse(text) as T;
   }
 
   private async throwApiError(response: Response): Promise<never> {
