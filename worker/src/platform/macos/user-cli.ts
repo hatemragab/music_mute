@@ -23,10 +23,12 @@ import {
 } from "../../runtime/control-plane-client.js";
 import { loadRuntimeConfig } from "../../runtime/runtime-config.js";
 import { readHiddenTerminalLine } from "./secret-prompt.js";
+import { WorkerEnrollmentError } from "../../enrollment/enrollment-client.js";
 import {
   installMacUserWorker,
   readPendingMacUserEnrollmentCredential,
   recoverMacUserWorker,
+  resetPendingMacUserEnrollment,
   type MacUserInstallationResult,
   type MacUserRecoveryResult,
 } from "./user-installer.js";
@@ -78,7 +80,7 @@ interface MacUserHost {
 }
 
 export const MAC_USER_USAGE = `Usage:
-  musicmute-worker install --label <name> [--group-id <id>] [--json]
+  musicmute-worker install --label <name> [--group-id <id>] [--new-code] [--json]
   musicmute-worker install [--json]  # recover a preserved paired installation
   musicmute-worker status [--json]
   musicmute-worker start [--json]
@@ -178,7 +180,8 @@ async function runUnlocked(
 
   switch (command) {
     case "install": {
-      const jsonFlag = extractBooleanFlag(arguments_, "--json");
+      const newCodeFlag = extractBooleanFlag(arguments_, "--new-code");
+      const jsonFlag = extractBooleanFlag(newCodeFlag.remaining, "--json");
       const flags = parseValueFlags(
         jsonFlag.remaining,
         new Set(["label", "group-id"]),
@@ -214,6 +217,7 @@ async function runUnlocked(
         );
       const label = flags.get("label");
       if (label === undefined) throw new TypeError("install requires --label");
+      if (newCodeFlag.present) await resetPendingMacUserEnrollment(layout);
       const pendingCredential =
         await readPendingMacUserEnrollmentCredential(layout);
       const enrollmentCredential =
@@ -233,13 +237,26 @@ async function runUnlocked(
             ...(input.groupId === undefined ? {} : { groupId: input.groupId }),
             launchAgent,
           }));
-      const result = await install({
-        enrollmentCredential,
-        label,
-        ...(flags.get("group-id") === undefined
-          ? {}
-          : { groupId: flags.get("group-id")! }),
-      });
+      let result: MacUserInstallationResult;
+      try {
+        result = await install({
+          enrollmentCredential,
+          label,
+          ...(flags.get("group-id") === undefined
+            ? {}
+            : { groupId: flags.get("group-id")! }),
+        });
+      } catch (error) {
+        if (
+          error instanceof WorkerEnrollmentError &&
+          error.code === "WORKER_CONFLICT"
+        )
+          throw new Error(
+            "Enrollment code conflicts with an earlier exchange. Create a new one-use code and retry install with --new-code.",
+            { cause: error },
+          );
+        throw error;
+      }
       stdout(
         formatActionResult(
           { status: "ok", action: "install", ...result },

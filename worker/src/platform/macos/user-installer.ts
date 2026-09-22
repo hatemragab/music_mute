@@ -5,6 +5,7 @@ import {
   lstat,
   mkdir,
   open,
+  readdir,
   readFile,
   rename,
   rm,
@@ -121,6 +122,75 @@ export async function readPendingMacUserEnrollmentCredential(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+}
+
+export async function resetPendingMacUserEnrollment(
+  layout: MacUserLayout,
+): Promise<void> {
+  const transactionRoot = join(layout.transactionRoot, "install");
+  let entries;
+  try {
+    const info = await lstat(transactionRoot);
+    if (
+      !info.isDirectory() ||
+      info.isSymbolicLink() ||
+      (info.mode & 0o077) !== 0
+    )
+      throw new TypeError("Pending enrollment directory is unsafe");
+    entries = await readdir(transactionRoot, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  const allowed = new Set(["enrollment.credential", ".enrollment-state.json"]);
+  if (entries.some((entry) => !entry.isFile() || !allowed.has(entry.name)))
+    throw new Error(
+      "Pending installation has progressed; its enrollment code cannot be replaced",
+    );
+  const statePath = join(transactionRoot, ".enrollment-state.json");
+  if (entries.some((entry) => entry.name === ".enrollment-state.json")) {
+    const info = await lstat(statePath);
+    if (info.size < 2 || info.size > 64 * 1024 || (info.mode & 0o077) !== 0)
+      throw new TypeError("Pending enrollment state is unsafe");
+    const value: unknown = JSON.parse(await readFile(statePath, "utf8"));
+    if (!isPreExchangeEnrollmentState(value))
+      throw new Error(
+        "Pending installation has progressed; its enrollment code cannot be replaced",
+      );
+  }
+  await readPendingMacUserEnrollmentCredential(layout);
+  await rm(join(transactionRoot, "enrollment.credential"), { force: true });
+  await rm(statePath, { force: true });
+}
+
+function isPreExchangeEnrollmentState(value: unknown): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return false;
+  const state = value as Record<string, unknown>;
+  const required = [
+    "exchangeRequestId",
+    "reportRequestId",
+    "activationRequestId",
+  ];
+  const optional = [
+    "qualificationGrantRequestId",
+    "qualificationConfirmRequestId",
+  ];
+  if (state.schemaVersion !== 1) return false;
+  if (required.some((key) => !UUID_V4.test(String(state[key] ?? ""))))
+    return false;
+  if (
+    optional.some(
+      (key) => state[key] !== undefined && !UUID_V4.test(String(state[key])),
+    )
+  )
+    return false;
+  return Object.keys(state).every(
+    (key) =>
+      key === "schemaVersion" ||
+      required.includes(key) ||
+      optional.includes(key),
+  );
 }
 
 export async function recoverMacUserWorker(options: {

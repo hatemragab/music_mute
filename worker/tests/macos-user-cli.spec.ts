@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WorkerEnrollmentError } from "../src/enrollment/enrollment-client.js";
 import { initializeLocalLifecycle } from "../src/runtime/local-lifecycle.js";
 import { writeLocalRuntimeStatus } from "../src/runtime/local-runtime-status.js";
 import {
@@ -289,6 +290,77 @@ describe("macOS public user commands", () => {
       "MusicMute Worker Install\n\nResult: Success",
     );
     expect(f.output[0]).not.toMatch(/^\s*\{/u);
+  });
+
+  it("prompts for a new code after explicitly resetting a pre-exchange attempt", async () => {
+    const f = await fixture(false);
+    const pendingRoot = join(f.layout.transactionRoot, "install");
+    await mkdir(pendingRoot, { recursive: true, mode: 0o700 });
+    await writeFile(
+      join(pendingRoot, "enrollment.credential"),
+      `${"p".repeat(43)}\n`,
+      { mode: 0o600 },
+    );
+    await writeFile(
+      join(pendingRoot, ".enrollment-state.json"),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        exchangeRequestId: "32410a14-e85a-4a1d-bb99-61fa54b07eaa",
+        reportRequestId: "32410a14-e85a-4a1d-bb99-61fa54b07eab",
+        activationRequestId: "32410a14-e85a-4a1d-bb99-61fa54b07eac",
+      })}\n`,
+      { mode: 0o600 },
+    );
+    const readEnrollmentCode = vi.fn(async () => "x".repeat(43));
+    const install = vi.fn(async () => installationResult());
+
+    await expect(
+      runMacUserCommand("install", ["--label", "Studio Mac", "--new-code"], {
+        host: {
+          platform: "darwin",
+          arch: "arm64",
+          uid: process.getuid!(),
+          home: f.layout.homeRoot,
+        },
+        layout: f.layout,
+        launchAgent: f.launchAgent,
+        readEnrollmentCode,
+        install,
+        stdout: (value: string) => f.output.push(value),
+      }),
+    ).resolves.toBe(0);
+    expect(readEnrollmentCode).toHaveBeenCalledOnce();
+    expect(install).toHaveBeenCalledWith({
+      enrollmentCredential: "x".repeat(43),
+      label: "Studio Mac",
+    });
+    await expect(
+      lstat(join(pendingRoot, "enrollment.credential")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      lstat(join(pendingRoot, ".enrollment-state.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("explains how to recover from a consumed-code conflict", async () => {
+    const f = await fixture(false);
+    const install = vi.fn(async () => {
+      throw new WorkerEnrollmentError("WORKER_CONFLICT", 409, false);
+    });
+    await expect(
+      runMacUserCommand("install", ["--label", "Studio Mac"], {
+        host: {
+          platform: "darwin",
+          arch: "arm64",
+          uid: process.getuid!(),
+          home: f.layout.homeRoot,
+        },
+        layout: f.layout,
+        launchAgent: f.launchAgent,
+        readEnrollmentCode: async () => "x".repeat(43),
+        install,
+      }),
+    ).rejects.toThrow("retry install with --new-code");
   });
 
   it("recovers preserved pairing and release state after conservative uninstall", async () => {

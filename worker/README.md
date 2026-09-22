@@ -133,6 +133,13 @@ conservative `uninstall`, running `musicmute-worker install` with no flags
 verifies and reactivates the preserved paired release without enrollment or a
 network download. A failed recovery removes the activation pointer again.
 
+If an old one-use code was already consumed by a different exchange, create a
+new code in the dashboard and run `musicmute-worker install --label "Studio Mac"
+--new-code`. The flag discards only a protected, pre-exchange local attempt and
+prompts for the new code; it refuses to replace an attempt that has already
+received an installation identity. A normal retry without this flag preserves
+the original code and request identity for safe interrupted-install recovery.
+
 Installation checks existing MusicMute-owned artifacts before network transfer.
 An exact cached Kim Vocal 2 file is copied locally into the protected transaction
 and causes no model request; an exact cached release archive or fixture is also
