@@ -5,6 +5,7 @@ import {
   lstat,
   mkdir,
   open,
+  readdir,
   readFile,
   rename,
   rm,
@@ -15,7 +16,6 @@ import {
   runInstallationPreparationCommand,
 } from "../../enrollment/cli.js";
 import { parseQualificationEvidence } from "../../enrollment/report-builder.js";
-import { WORKER_RECIPE_IDS } from "../../../protocol/v1/protocol.js";
 import {
   initializeLocalLifecycle,
   loadLocalLifecycle,
@@ -38,6 +38,7 @@ import {
 } from "./user-release.js";
 import { createMacUserDirectories, type MacUserLayout } from "./user-paths.js";
 import { inspectMacUserHealth } from "./user-health.js";
+import { MAC_RECIPE_IDS } from "./runtime-recipes.js";
 
 export const PRODUCTION_BACKEND_BASE_URL = "https://api.music-mute.com/api/v1";
 
@@ -82,7 +83,6 @@ export interface MacUserInstallationOptions {
       "bootstrap" | "bootout" | "status"
     >,
   ) => Promise<string>;
-  legacyDaemonPath?: string;
   inspectRuntime?: typeof inspectInstalledMacRuntime;
 }
 
@@ -122,6 +122,75 @@ export async function readPendingMacUserEnrollmentCredential(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+}
+
+export async function resetPendingMacUserEnrollment(
+  layout: MacUserLayout,
+): Promise<void> {
+  const transactionRoot = join(layout.transactionRoot, "install");
+  let entries;
+  try {
+    const info = await lstat(transactionRoot);
+    if (
+      !info.isDirectory() ||
+      info.isSymbolicLink() ||
+      (info.mode & 0o077) !== 0
+    )
+      throw new TypeError("Pending enrollment directory is unsafe");
+    entries = await readdir(transactionRoot, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  const allowed = new Set(["enrollment.credential", ".enrollment-state.json"]);
+  if (entries.some((entry) => !entry.isFile() || !allowed.has(entry.name)))
+    throw new Error(
+      "Pending installation has progressed; its enrollment code cannot be replaced",
+    );
+  const statePath = join(transactionRoot, ".enrollment-state.json");
+  if (entries.some((entry) => entry.name === ".enrollment-state.json")) {
+    const info = await lstat(statePath);
+    if (info.size < 2 || info.size > 64 * 1024 || (info.mode & 0o077) !== 0)
+      throw new TypeError("Pending enrollment state is unsafe");
+    const value: unknown = JSON.parse(await readFile(statePath, "utf8"));
+    if (!isPreExchangeEnrollmentState(value))
+      throw new Error(
+        "Pending installation has progressed; its enrollment code cannot be replaced",
+      );
+  }
+  await readPendingMacUserEnrollmentCredential(layout);
+  await rm(join(transactionRoot, "enrollment.credential"), { force: true });
+  await rm(statePath, { force: true });
+}
+
+function isPreExchangeEnrollmentState(value: unknown): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return false;
+  const state = value as Record<string, unknown>;
+  const required = [
+    "exchangeRequestId",
+    "reportRequestId",
+    "activationRequestId",
+  ];
+  const optional = [
+    "qualificationGrantRequestId",
+    "qualificationConfirmRequestId",
+  ];
+  if (state.schemaVersion !== 1) return false;
+  if (required.some((key) => !UUID_V4.test(String(state[key] ?? ""))))
+    return false;
+  if (
+    optional.some(
+      (key) => state[key] !== undefined && !UUID_V4.test(String(state[key])),
+    )
+  )
+    return false;
+  return Object.keys(state).every(
+    (key) =>
+      key === "schemaVersion" ||
+      required.includes(key) ||
+      optional.includes(key),
+  );
 }
 
 export async function recoverMacUserWorker(options: {
@@ -199,10 +268,6 @@ export async function installMacUserWorker(
     throw new TypeError("Worker label is invalid");
   if (await exists(options.layout.configPath))
     throw new Error("MusicMute worker is already installed; use update");
-  await rejectLegacyDaemon(
-    options.legacyDaemonPath ??
-      "/Library/LaunchDaemons/com.musicmute.worker.plist",
-  );
   await createMacUserDirectories(options.layout);
   const transactionRoot = join(options.layout.transactionRoot, "install");
   await mkdir(transactionRoot, { recursive: true, mode: 0o700 });
@@ -397,13 +462,15 @@ export function buildMacUserRuntimeConfig(
     ffmpegPath: layout.ffmpegPath,
     ffprobePath: layout.ffprobePath,
     allowInsecureLoopback,
+    validatedMaxWorkersPerGpu: 1 as const,
+    capacityValidationFile: layout.capacityValidationPath,
     slots: [
       {
         workerId: enrollment.workerId,
         gpuId: "gpu0",
         slotIndex: 0,
-        recipeIds: [...WORKER_RECIPE_IDS],
-        provider: "coreml" as const,
+        recipeIds: [...MAC_RECIPE_IDS],
+        provider: "mps" as const,
       },
     ],
   };
@@ -446,7 +513,7 @@ export async function qualifyMacUserRelease(
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    throw new Error("CoreML qualification timed out");
+    throw new Error("MPS qualification timed out");
   } finally {
     if ((await launchAgent.status()).loaded) await launchAgent.bootout();
     await writeLaunchAgentPlist(layout);
@@ -583,11 +650,4 @@ function asRecord(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     throw new TypeError(`${label} is invalid`);
   return value as Record<string, unknown>;
-}
-
-async function rejectLegacyDaemon(path: string): Promise<void> {
-  if (await exists(path))
-    throw new Error(
-      "Legacy MusicMute LaunchDaemon detected; run the documented administrator migration first",
-    );
 }

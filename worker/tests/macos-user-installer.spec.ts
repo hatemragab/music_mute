@@ -18,12 +18,14 @@ import {
   PRODUCTION_BACKEND_BASE_URL,
   readPendingMacUserEnrollmentCredential,
   recoverMacUserWorker,
+  resetPendingMacUserEnrollment,
 } from "../src/platform/macos/user-installer.js";
 import {
   createMacUserDirectories,
   createMacUserLayout,
 } from "../src/platform/macos/user-paths.js";
 import { loadRuntimeConfig } from "../src/runtime/runtime-config.js";
+import { MAC_RECIPE_IDS } from "../src/platform/macos/runtime-recipes.js";
 
 const machineId = "32410a14-e85a-4a1d-bb99-61fa54b07eaa";
 const workerId = "718bd89b-bd03-43f7-adb7-9cb5ff415918";
@@ -128,7 +130,6 @@ describe("macOS one-command user installation", () => {
         enroll,
         qualify,
         inspectRuntime: vi.fn(async () => compatibleRuntime),
-        legacyDaemonPath: join(root, "missing-legacy.plist"),
       }),
     ).resolves.toMatchObject({
       machineId,
@@ -144,6 +145,11 @@ describe("macOS one-command user installation", () => {
       machineId,
       localLifecyclePath: layout.lifecyclePath,
       credential: "m".repeat(43),
+      slots: [
+        {
+          recipeIds: [...MAC_RECIPE_IDS],
+        },
+      ],
     });
     expect(launchAgent.bootstrap).toHaveBeenCalledWith(layout.plistPath);
     expect(prepare).toHaveBeenCalledWith(expect.any(Array), {
@@ -275,6 +281,36 @@ describe("macOS one-command user installation", () => {
     await expect(
       readPendingMacUserEnrollmentCredential(layout),
     ).rejects.toThrow("unsafe");
+  });
+
+  it("refuses to replace a code after an installation identity exists", async () => {
+    const root = await temporaryRoot();
+    const home = join(root, "home");
+    await mkdir(home, { mode: 0o700 });
+    const layout = createMacUserLayout(home);
+    await createMacUserDirectories(layout);
+    const pendingRoot = join(layout.transactionRoot, "install");
+    await mkdir(pendingRoot, { recursive: true, mode: 0o700 });
+    const credentialPath = join(pendingRoot, "enrollment.credential");
+    await writeFile(credentialPath, `${"p".repeat(43)}\n`, { mode: 0o600 });
+    await writeFile(
+      join(pendingRoot, ".enrollment-state.json"),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        exchangeRequestId: "32410a14-e85a-4a1d-bb99-61fa54b07eaa",
+        reportRequestId: "32410a14-e85a-4a1d-bb99-61fa54b07eab",
+        activationRequestId: "32410a14-e85a-4a1d-bb99-61fa54b07eac",
+        installationId: "32410a14-e85a-4a1d-bb99-61fa54b07ead",
+      })}\n`,
+      { mode: 0o600 },
+    );
+
+    await expect(resetPendingMacUserEnrollment(layout)).rejects.toThrow(
+      "has progressed",
+    );
+    await expect(readFile(credentialPath, "utf8")).resolves.toBe(
+      `${"p".repeat(43)}\n`,
+    );
   });
 });
 

@@ -385,12 +385,7 @@ export class DashboardFixture {
         platform: "windows-amd64",
         provider: "directml",
         gpuId: "0",
-        recipeIds: [
-          "kim-vocals-v1",
-          "kim-vocals-trim-v1",
-          "kim-vocals-denoise-v1",
-          "kim-vocals-denoise-trim-v1",
-        ],
+        recipeIds: ["kim-vocals-v2"],
         maxSlots: 1,
       },
     ],
@@ -529,22 +524,7 @@ export class DashboardFixture {
     acceptClaims: true,
     recipes: [
       {
-        recipeId: "kim-vocals-v1",
-        enabled: true,
-        maxSlotsPerMachine: 1,
-      },
-      {
-        recipeId: "kim-vocals-trim-v1",
-        enabled: true,
-        maxSlotsPerMachine: 1,
-      },
-      {
-        recipeId: "kim-vocals-denoise-v1",
-        enabled: true,
-        maxSlotsPerMachine: 1,
-      },
-      {
-        recipeId: "kim-vocals-denoise-trim-v1",
+        recipeId: "kim-vocals-v2",
         enabled: true,
         maxSlotsPerMachine: 1,
       },

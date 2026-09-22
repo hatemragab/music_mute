@@ -51,7 +51,7 @@ async function fixture() {
     pythonPath: join(root, "python"),
     ffmpegPath: join(root, "bin", "ffmpeg"),
     ffprobePath: join(root, "bin", "ffprobe"),
-    provider: "coreml",
+    provider: "mps",
     serviceCheck,
     runFile,
   });
@@ -101,31 +101,31 @@ describe("packaged remote command executor", () => {
     expect(f.serviceCheck).toHaveBeenCalledOnce();
   });
 
-  it("runs only the requested benchmark recipe and aggregates iterations", async () => {
+  it("runs exactly one Kim Vocal 2 benchmark pass", async () => {
     const f = await fixture();
     const result = await f.executor.execute(
       command({
         kind: "benchmark",
         checks: [],
-        recipeId: "kim-vocals-trim-v1",
-        iterations: 3,
+        recipeId: "kim-vocals-v2",
+        iterations: 1,
       }),
     );
 
     expect(result).toMatchObject({
       outcome: "succeeded",
       metrics: expect.arrayContaining([
-        { name: "benchmark.iterations", value: 3, unit: "count" },
-        { name: "benchmark.mean_seconds", value: 2, unit: "seconds" },
+        { name: "benchmark.iterations", value: 1, unit: "count" },
+        { name: "benchmark.mean_seconds", value: 1, unit: "seconds" },
       ]),
     });
     expect(f.runFile).toHaveBeenCalledWith(
       expect.any(String),
       expect.arrayContaining([
         "--recipe-id",
-        "kim-vocals-trim-v1",
+        "kim-vocals-v2",
         "--iterations",
-        "3",
+        "1",
       ]),
       expect.objectContaining({ timeout: 7_200_000 }),
     );

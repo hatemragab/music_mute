@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AdminActor } from '../../admin/admin.types.js';
+import { WORKER_RECIPE_IDS } from '../protocol/v1/protocol.js';
 import { WorkerEnrollmentService } from './worker-enrollment.service.js';
 
 const actor = {
@@ -230,9 +231,9 @@ describe('worker enrollment lifecycle', () => {
       capabilities: [
         {
           platform: 'darwin-arm64' as const,
-          provider: 'coreml' as const,
+          provider: 'mps' as const,
           gpuId: 'gpu0',
-          recipeIds: ['kim-vocals-trim-v1' as const],
+          recipeIds: ['kim-vocals-v2' as const],
           maxSlots: 1,
         },
       ],
@@ -358,9 +359,9 @@ describe('worker enrollment lifecycle', () => {
         capabilities: [
           {
             platform: 'darwin-arm64',
-            provider: 'coreml',
+            provider: 'mps',
             gpuId: 'gpu0',
-            recipeIds: ['kim-vocals-trim-v1'],
+            recipeIds: [...WORKER_RECIPE_IDS],
             maxSlots: 1,
           },
         ],
@@ -432,9 +433,9 @@ describe('worker enrollment lifecycle', () => {
         capabilities: [
           {
             platform: 'darwin-arm64',
-            provider: 'coreml',
+            provider: 'mps',
             gpuId: 'gpu0',
-            recipeIds: ['kim-vocals-trim-v1'],
+            recipeIds: [...WORKER_RECIPE_IDS],
             maxSlots: 1,
           },
         ],

@@ -908,7 +908,7 @@
       "requestBody": {
         "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "expectedRevision": 0,
-        "recipeId": "kim-vocals-trim-v1",
+        "recipeId": "kim-vocals-v2",
         "iterations": 1,
         "reason": "Synthetic contract fixture"
       },
@@ -956,7 +956,7 @@
         "acceptClaims": true,
         "recipes": [
           {
-            "recipeId": "kim-vocals-trim-v1",
+            "recipeId": "kim-vocals-v2",
             "enabled": true,
             "maxSlotsPerMachine": 1
           }

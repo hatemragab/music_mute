@@ -15,7 +15,11 @@ import {
   type ChildResponse,
 } from "./ipc/child-protocol.js";
 
-const DEFAULT_START_TIMEOUT_MS = 10_000;
+// Native provider startup includes verified model loading and one warm-up pass.
+// A cold MPS launch can exceed ten seconds even though steady-state jobs are
+// fast, so keep the supervisor bounded without turning normal preload into a
+// restart loop.
+const DEFAULT_START_TIMEOUT_MS = 300_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_STOP_TIMEOUT_MS = 5_000;
 const STDERR_LIMIT_BYTES = 16 * 1024;

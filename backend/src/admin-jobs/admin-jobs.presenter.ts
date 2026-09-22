@@ -70,6 +70,7 @@ export function presentAdminJob(
             ),
             stage('uploading_result', job.uploadingResultAt, job.finishedAt),
           ],
+          workerStageTimings: job.workerStageTimings ?? [],
           source:
             job.admissionSnapshot?.source ??
             (job.sourceKind === 'url' ? 'youtube' : 'audio_file'),

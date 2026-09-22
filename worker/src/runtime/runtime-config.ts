@@ -7,6 +7,7 @@ import {
 import {
   runtimePlatformAdapter,
   type RuntimePlatformAdapter,
+  type RuntimeProvider,
 } from "../platform/runtime-adapter.js";
 import type { RuntimeSlotDefinition } from "./worker-runtime.js";
 
@@ -27,6 +28,8 @@ const CONFIG_KEYS = new Set([
   "ffmpegPath",
   "ffprobePath",
   "allowInsecureLoopback",
+  "validatedMaxWorkersPerGpu",
+  "capacityValidationFile",
   "slots",
 ]);
 const SLOT_KEYS = new Set([
@@ -52,6 +55,8 @@ export interface RuntimeConfig {
   ffmpegPath: string;
   ffprobePath: string;
   allowInsecureLoopback: boolean;
+  validatedMaxWorkersPerGpu: 1 | 2;
+  capacityValidationFile?: string;
   slots: RuntimeSlotDefinition[];
 }
 
@@ -105,6 +110,28 @@ export async function loadRuntimeConfig(
   const slots = value.slots.map((slot, index) =>
     parseSlot(slot, index, adapter),
   );
+  const validatedMaxWorkersPerGpu = safeInteger(
+    value.validatedMaxWorkersPerGpu ?? 1,
+    "validatedMaxWorkersPerGpu",
+    1,
+    2,
+  ) as 1 | 2;
+  const capacityValidationFile =
+    value.capacityValidationFile === undefined
+      ? undefined
+      : requiredText(
+          value.capacityValidationFile,
+          "capacityValidationFile",
+          4096,
+        );
+  if (capacityValidationFile !== undefined)
+    assertAbsolute(capacityValidationFile, "capacityValidationFile");
+  if (validatedMaxWorkersPerGpu === 2) {
+    if (capacityValidationFile === undefined)
+      throw new TypeError("Two-worker capacity requires benchmark evidence");
+    await assertCapacityValidation(capacityValidationFile, value.machineId);
+  }
+  assertSlotCapacity(slots, validatedMaxWorkersPerGpu);
   if (
     value.allowInsecureLoopback !== undefined &&
     typeof value.allowInsecureLoopback !== "boolean"
@@ -145,8 +172,103 @@ export async function loadRuntimeConfig(
     ...(localRuntimeStatusPath === undefined ? {} : { localRuntimeStatusPath }),
     ...paths,
     allowInsecureLoopback: value.allowInsecureLoopback === true,
+    validatedMaxWorkersPerGpu,
+    ...(capacityValidationFile === undefined ? {} : { capacityValidationFile }),
     slots,
   };
+}
+
+async function assertCapacityValidation(
+  path: string,
+  machineId: unknown,
+): Promise<void> {
+  const info = await lstat(path);
+  if (
+    !info.isFile() ||
+    info.isSymbolicLink() ||
+    info.size < 2 ||
+    info.size > CONFIG_LIMIT_BYTES ||
+    (info.mode & 0o077) !== 0
+  )
+    throw new TypeError("Capacity benchmark evidence is unsafe");
+  let value: unknown;
+  try {
+    value = JSON.parse(await readFile(path, "utf8")) as unknown;
+  } catch {
+    throw new TypeError("Capacity benchmark evidence is invalid");
+  }
+  const record = strictRecord(
+    value,
+    new Set([
+      "schemaVersion",
+      "status",
+      "machineId",
+      "validatedMaxWorkersPerGpu",
+      "baselineSeconds",
+      "concurrentWallSeconds",
+      "concurrentWorkerSeconds",
+      "throughputSpeedup",
+      "releaseManifestDigest",
+      "modelDigest",
+      "fixtureDigest",
+      "validatedAt",
+      "expiresAt",
+    ]),
+    "Capacity benchmark evidence",
+  );
+  if (
+    record.schemaVersion !== 1 ||
+    record.status !== "PASS" ||
+    typeof record.machineId !== "string" ||
+    !UUID_V4.test(record.machineId) ||
+    record.machineId !== machineId ||
+    record.validatedMaxWorkersPerGpu !== 2 ||
+    !positiveFinite(record.baselineSeconds) ||
+    !positiveFinite(record.concurrentWallSeconds) ||
+    !Array.isArray(record.concurrentWorkerSeconds) ||
+    record.concurrentWorkerSeconds.length !== 2 ||
+    !record.concurrentWorkerSeconds.every(positiveFinite) ||
+    typeof record.throughputSpeedup !== "number" ||
+    !Number.isFinite(record.throughputSpeedup) ||
+    record.throughputSpeedup < 1.1 ||
+    typeof record.releaseManifestDigest !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(record.releaseManifestDigest) ||
+    typeof record.modelDigest !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(record.modelDigest) ||
+    typeof record.fixtureDigest !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(record.fixtureDigest) ||
+    typeof record.validatedAt !== "string" ||
+    !Number.isFinite(Date.parse(record.validatedAt)) ||
+    Date.parse(record.validatedAt) > Date.now() + 5 * 60_000 ||
+    typeof record.expiresAt !== "string" ||
+    !Number.isFinite(Date.parse(record.expiresAt)) ||
+    Date.parse(record.expiresAt) <= Date.now() ||
+    Date.parse(record.expiresAt) >
+      Date.parse(record.validatedAt as string) + 7 * 24 * 60 * 60_000
+  )
+    throw new TypeError("Capacity benchmark evidence did not pass");
+}
+
+function positiveFinite(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function assertSlotCapacity(
+  slots: readonly RuntimeSlotDefinition[],
+  validatedMaxWorkersPerGpu: number,
+): void {
+  const counts = new Map<string, number>();
+  const identities = new Set<string>();
+  for (const slot of slots) {
+    const identity = `${slot.gpuId}\0${slot.slotIndex}`;
+    if (identities.has(identity))
+      throw new TypeError("Runtime slot indexes must be unique per GPU");
+    identities.add(identity);
+    const count = (counts.get(slot.gpuId) ?? 0) + 1;
+    if (count > validatedMaxWorkersPerGpu)
+      throw new TypeError("Runtime slots exceed validated GPU capacity");
+    counts.set(slot.gpuId, count);
+  }
 }
 
 function parseSlot(
@@ -192,7 +314,7 @@ function parseSlot(
     gpuId: requiredText(slot.gpuId, `slots[${index}].gpuId`, 128),
     slotIndex: safeInteger(slot.slotIndex, `slots[${index}].slotIndex`, 0, 15),
     recipeIds,
-    provider: adapter.provider,
+    provider: provider as RuntimeProvider,
     ...(directmlDeviceId === undefined ? {} : { directmlDeviceId }),
   };
 }

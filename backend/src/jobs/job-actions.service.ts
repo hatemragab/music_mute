@@ -1,5 +1,5 @@
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isUUID } from 'class-validator';
 import { Types, trusted, type ClientSession, type Model } from 'mongoose';
@@ -17,6 +17,7 @@ import { WorkerAttempt } from '../worker-fleet/jobs/worker-attempt.schema.js';
 import { WorkerSlot } from '../worker-fleet/machines/worker-slot.schema.js';
 import { adminError } from '../admin/admin-errors.js';
 import type { AdminActor } from '../admin/admin.types.js';
+import { WorkerHintService } from '../worker-hints/worker-hint.service.js';
 
 type JobActionPrincipal =
   | { kind: 'owner'; userId: Types.ObjectId }
@@ -42,6 +43,7 @@ export class JobActionsService {
     private readonly accountAccess: AccountAccessService,
     private readonly admission: ProcessingAdmissionService,
     private readonly usage: ProcessingUsageService,
+    @Optional() private readonly hints?: WorkerHintService,
   ) {}
 
   async cancel(userId: string, jobId: string) {
@@ -179,7 +181,7 @@ export class JobActionsService {
     if (existing) return this.presentRetry(existing, hash);
 
     try {
-      return await this.transactions.run(async (session) => {
+      const result = await this.transactions.run(async (session) => {
         await this.accountAccess.assertActive(owner, session);
         const repeated = await this.jobs
           .findOne({ userId: owner, requestId })
@@ -252,6 +254,8 @@ export class JobActionsService {
         );
         return this.presentRetry(created.toObject(), hash);
       });
+      void this.hints?.publish('work_available').catch(() => undefined);
+      return result;
     } catch (error) {
       if (!isDuplicateKey(error)) throw error;
       const repeated = await this.jobs

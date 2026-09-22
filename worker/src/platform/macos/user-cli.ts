@@ -1,4 +1,4 @@
-import { lstat, readFile, rm } from "node:fs/promises";
+import { lstat, readFile, readlink, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import {
   initializeLocalLifecycle,
@@ -23,10 +23,12 @@ import {
 } from "../../runtime/control-plane-client.js";
 import { loadRuntimeConfig } from "../../runtime/runtime-config.js";
 import { readHiddenTerminalLine } from "./secret-prompt.js";
+import { WorkerEnrollmentError } from "../../enrollment/enrollment-client.js";
 import {
   installMacUserWorker,
   readPendingMacUserEnrollmentCredential,
   recoverMacUserWorker,
+  resetPendingMacUserEnrollment,
   type MacUserInstallationResult,
   type MacUserRecoveryResult,
 } from "./user-installer.js";
@@ -35,7 +37,10 @@ import {
   updateMacUserWorker,
   type MacUserUpdateCheck,
 } from "./user-updater.js";
-import { benchmarkMacUserWorker } from "./user-benchmark.js";
+import {
+  benchmarkMacUserFile,
+  benchmarkMacUserWorker,
+} from "./user-benchmark.js";
 import { waitForLocalDrain } from "./local-drain.js";
 import {
   loadLocalRuntimeStatus,
@@ -61,6 +66,11 @@ import {
   createMacDiagnosticBundle,
   type MacDiagnosticBundleResult,
 } from "./diagnostic-bundle.js";
+import {
+  DEFAULT_MAC_RECIPE_ID,
+  MAC_RECIPE_IDS,
+  type MacRecipeId,
+} from "./runtime-recipes.js";
 
 interface MacUserHost {
   platform: NodeJS.Platform;
@@ -70,7 +80,7 @@ interface MacUserHost {
 }
 
 export const MAC_USER_USAGE = `Usage:
-  musicmute-worker install --label <name> [--group-id <id>] [--json]
+  musicmute-worker install --label <name> [--group-id <id>] [--new-code] [--json]
   musicmute-worker install [--json]  # recover a preserved paired installation
   musicmute-worker status [--json]
   musicmute-worker start [--json]
@@ -88,7 +98,8 @@ export const MAC_USER_USAGE = `Usage:
   musicmute-worker logs --clear [--force] [--json]
   musicmute-worker diagnostics [--output </absolute/path.zip>] [--json]
   musicmute-worker doctor [--json]
-  musicmute-worker benchmark [--json]`;
+  musicmute-worker benchmark [--workers <1|2>] [--json]
+  musicmute-worker benchmark-file --input </absolute/song> [--recipe <kim-vocals-v2|kim-vocals-v2-trim>] [--iterations <1|2>] [--json]`;
 
 interface LaunchAgentActions {
   bootstrap(plistPath: string): Promise<void>;
@@ -119,7 +130,12 @@ export interface MacUserCommandContext {
     releaseVersion: string;
     sequence: number;
   }>;
-  benchmark?: () => Promise<unknown>;
+  benchmark?: (workers: 1 | 2) => Promise<unknown>;
+  benchmarkFile?: (input: {
+    inputPath: string;
+    recipeId: MacRecipeId;
+    iterations: 1 | 2;
+  }) => Promise<unknown>;
   health?: () => Promise<MacUserHealth>;
   remoteStatus?: () => Promise<WorkerMachineStatus>;
   preflight?: () => Promise<boolean>;
@@ -164,7 +180,8 @@ async function runUnlocked(
 
   switch (command) {
     case "install": {
-      const jsonFlag = extractBooleanFlag(arguments_, "--json");
+      const newCodeFlag = extractBooleanFlag(arguments_, "--new-code");
+      const jsonFlag = extractBooleanFlag(newCodeFlag.remaining, "--json");
       const flags = parseValueFlags(
         jsonFlag.remaining,
         new Set(["label", "group-id"]),
@@ -200,6 +217,7 @@ async function runUnlocked(
         );
       const label = flags.get("label");
       if (label === undefined) throw new TypeError("install requires --label");
+      if (newCodeFlag.present) await resetPendingMacUserEnrollment(layout);
       const pendingCredential =
         await readPendingMacUserEnrollmentCredential(layout);
       const enrollmentCredential =
@@ -219,13 +237,26 @@ async function runUnlocked(
             ...(input.groupId === undefined ? {} : { groupId: input.groupId }),
             launchAgent,
           }));
-      const result = await install({
-        enrollmentCredential,
-        label,
-        ...(flags.get("group-id") === undefined
-          ? {}
-          : { groupId: flags.get("group-id")! }),
-      });
+      let result: MacUserInstallationResult;
+      try {
+        result = await install({
+          enrollmentCredential,
+          label,
+          ...(flags.get("group-id") === undefined
+            ? {}
+            : { groupId: flags.get("group-id")! }),
+        });
+      } catch (error) {
+        if (
+          error instanceof WorkerEnrollmentError &&
+          error.code === "WORKER_CONFLICT"
+        )
+          throw new Error(
+            "Enrollment code conflicts with an earlier exchange. Create a new one-use code and retry install with --new-code.",
+            { cause: error },
+          );
+        throw error;
+      }
       stdout(
         formatActionResult(
           { status: "ok", action: "install", ...result },
@@ -549,22 +580,70 @@ async function runUnlocked(
       return result.healthy ? 0 : 1;
     }
     case "benchmark": {
-      exactArguments(arguments_, new Set(["--json"]));
+      const jsonFlag = extractBooleanFlag(arguments_, "--json");
+      const flags = parseValueFlags(jsonFlag.remaining, new Set(["workers"]));
+      const workersValue = flags.get("workers") ?? "1";
+      if (workersValue !== "1" && workersValue !== "2")
+        throw new TypeError("Benchmark workers must be 1 or 2");
+      const workers = Number(workersValue) as 1 | 2;
       await requireInstalled(layout);
       const result = await (
         context.benchmark ??
-        (() =>
+        ((selectedWorkers) =>
           benchmarkMacUserWorker({
             layout,
             uid: host.uid,
             launchAgent,
+            workers: selectedWorkers,
           }))
-      )();
+      )(workers);
       stdout(
         formatDetailedResult(
           "MusicMute Worker Benchmark",
           result,
-          arguments_.includes("--json"),
+          jsonFlag.present,
+        ),
+      );
+      return 0;
+    }
+    case "benchmark-file": {
+      const jsonFlag = extractBooleanFlag(arguments_, "--json");
+      const flags = parseValueFlags(
+        jsonFlag.remaining,
+        new Set(["input", "recipe", "iterations"]),
+      );
+      const inputPath = flags.get("input");
+      if (inputPath === undefined)
+        throw new TypeError("benchmark-file requires --input");
+      const recipe = flags.get("recipe") ?? DEFAULT_MAC_RECIPE_ID;
+      if (!MAC_RECIPE_IDS.includes(recipe as MacRecipeId))
+        throw new TypeError(
+          `benchmark-file recipe must be one of: ${MAC_RECIPE_IDS.join(", ")}`,
+        );
+      const iterationValue = flags.get("iterations") ?? "1";
+      if (iterationValue !== "1" && iterationValue !== "2")
+        throw new TypeError("benchmark-file iterations must be 1 or 2");
+      const iterations = Number(iterationValue) as 1 | 2;
+      await requireInstalled(layout);
+      const result = await (
+        context.benchmarkFile ??
+        ((input) =>
+          benchmarkMacUserFile({
+            layout,
+            uid: host.uid,
+            launchAgent,
+            ...input,
+          }))
+      )({
+        inputPath,
+        recipeId: recipe as MacRecipeId,
+        iterations,
+      });
+      stdout(
+        formatDetailedResult(
+          "MusicMute Worker File Benchmark",
+          result,
+          jsonFlag.present,
         ),
       );
       return 0;
@@ -592,6 +671,7 @@ function mutatesLocalState(
     "unpair",
     "uninstall",
     "benchmark",
+    "benchmark-file",
     "diagnostics",
   ]).has(command);
 }
@@ -733,6 +813,9 @@ async function readStatus(
   remoteStatus?: () => Promise<WorkerMachineStatus>,
 ) {
   const installed = await isRegularFile(layout.configPath);
+  const activeReleaseVersion = installed
+    ? await readActiveReleaseVersion(layout)
+    : null;
   const lifecycle = installed
     ? await loadLocalLifecycle(layout.lifecyclePath).catch(() => null)
     : null;
@@ -759,6 +842,7 @@ async function readStatus(
   return {
     schemaVersion: 1,
     installed,
+    activeReleaseVersion,
     lifecycle: lifecycle?.intent ?? "unknown",
     service,
     runtime: {
@@ -781,6 +865,22 @@ async function readStatus(
       (service.running || lifecycle.intent !== "active") &&
       remote.available,
   };
+}
+
+async function readActiveReleaseVersion(
+  layout: MacUserLayout,
+): Promise<string | null> {
+  try {
+    const info = await lstat(layout.currentLink);
+    if (!info.isSymbolicLink()) return null;
+    const target = await readlink(layout.currentLink);
+    const match = /^releases\/([A-Za-z0-9][A-Za-z0-9._+-]{0,63})$/u.exec(
+      target,
+    );
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 async function readRemoteStatus(
@@ -1091,6 +1191,7 @@ function formatStatus(
     "",
     `Overall: ${status.healthy ? "Healthy" : "Needs attention"}`,
     `Installation: ${status.installed ? "Installed" : "Not installed"}`,
+    `Active release: ${status.activeReleaseVersion ?? "Not available"}`,
     `Local state: ${humanizeLabel(status.lifecycle)}`,
     `Service: ${service}`,
     `Active jobs: ${status.runtime.activeAttempts ?? "Unknown"}`,

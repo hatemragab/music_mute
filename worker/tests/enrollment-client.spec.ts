@@ -594,9 +594,9 @@ function report() {
     capabilities: [
       {
         platform: "darwin-arm64",
-        provider: "coreml",
+        provider: "mps",
         gpuId: "gpu0",
-        recipeIds: ["kim-vocals-trim-v1"],
+        recipeIds: ["kim-vocals-v2"],
         maxSlots: 1,
       },
     ],

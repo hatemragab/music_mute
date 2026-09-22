@@ -29,7 +29,7 @@ export interface PackagedRuntimeCommandExecutorOptions {
   pythonPath: string;
   ffmpegPath: string;
   ffprobePath: string;
-  provider: "coreml" | "directml";
+  provider: "mps" | "directml";
   directmlDeviceId?: number;
   serviceCheck: () => Promise<void>;
   runFile?: (
@@ -147,7 +147,7 @@ export class PackagedRuntimeCommandExecutor implements RuntimeCommandExecutor {
     command: WorkerRemoteCommand,
     signal?: AbortSignal,
   ): Promise<WorkerCommandResult> {
-    if (command.recipeId === null || command.iterations === null)
+    if (command.recipeId !== "kim-vocals-v2" || command.iterations !== 1)
       throw new TypeError("Benchmark command is incomplete");
     const commandRoot = join(dirname(this.options.workRoot), "commands");
     await mkdir(commandRoot, { recursive: true, mode: 0o700 });
@@ -222,7 +222,7 @@ export class PackagedRuntimeCommandExecutor implements RuntimeCommandExecutor {
       );
       return {
         outcome: "succeeded",
-        summary: `${command.recipeId} completed ${command.iterations} benchmark iteration${command.iterations === 1 ? "" : "s"}`,
+        summary: `${command.recipeId} completed one benchmark pass`,
         metrics: [
           metric("benchmark.iterations", command.iterations, "count"),
           metric("benchmark.mean_seconds", mean(seconds), "seconds"),

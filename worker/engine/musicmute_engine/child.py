@@ -7,10 +7,12 @@ import os
 import sys
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, BinaryIO
 
 from .ipc import ProtocolFailure, UUID_V4, read_frame, write_frame
 from .pipeline import ProcessRequest, ProcessingFailure, RuntimePipeline
+from .provider_adapter import Provider
 from .recipes import RECIPE_DEFINITIONS
 
 
@@ -46,11 +48,23 @@ def isolate_protocol_output() -> BinaryIO:
     return protocol_output
 
 
-def run(incarnation: str) -> int:
+def run(
+    incarnation: str,
+    *,
+    model_cache_root: Path | None = None,
+    provider: Provider | None = None,
+    directml_device_id: int = 0,
+) -> int:
     pipeline = RuntimePipeline()
     protocol_input = sys.stdin.buffer
     protocol_output = isolate_protocol_output()
     try:
+        if model_cache_root is not None and provider is not None:
+            pipeline.preload(
+                model_cache_root,
+                provider,
+                directml_device_id,
+            )
         write_frame(
             protocol_output,
             response(
@@ -131,15 +145,34 @@ def run(incarnation: str) -> int:
         protocol_output.close()
 
 
-def main() -> int:
+def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--incarnation", required=True)
-    arguments = parser.parse_args()
+    parser.add_argument("--model-cache-root", type=Path)
+    parser.add_argument("--provider", choices=("mps", "directml"))
+    parser.add_argument("--directml-device-id", type=int, default=0)
+    parsed = parser.parse_args(arguments)
+    if (parsed.model_cache_root is None) != (parsed.provider is None):
+        parser.error("--model-cache-root and --provider must be used together")
+    if parsed.model_cache_root is not None and not parsed.model_cache_root.is_absolute():
+        parser.error("--model-cache-root must be absolute")
+    if not 0 <= parsed.directml_device_id <= 15:
+        parser.error("--directml-device-id must be between 0 and 15")
+    return parsed
+
+
+def main() -> int:
+    arguments = parse_args()
     try:
         if not UUID_V4.fullmatch(arguments.incarnation):
             raise ValueError("invalid incarnation")
-        return run(arguments.incarnation)
-    except (ValueError, ProtocolFailure):
+        return run(
+            arguments.incarnation,
+            model_cache_root=arguments.model_cache_root,
+            provider=arguments.provider,
+            directml_device_id=arguments.directml_device_id,
+        )
+    except (OSError, ProcessingFailure, ProtocolFailure, ValueError):
         print("MusicMute child protocol failure", file=sys.stderr)
         return 2
 

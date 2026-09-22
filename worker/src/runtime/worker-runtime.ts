@@ -46,7 +46,7 @@ export interface RuntimeSlotDefinition {
   gpuId: string;
   slotIndex: number;
   recipeIds: readonly WorkerRecipeId[];
-  provider: "coreml" | "directml";
+  provider: "mps" | "directml";
   directmlDeviceId?: number;
 }
 
@@ -64,10 +64,17 @@ export interface WorkerRuntimeOptions {
   idlePollMinimumMs?: number;
   idlePollMaximumMs?: number;
   uploadAttempts?: number;
+  validatedMaxWorkersPerGpu?: 1 | 2;
   diagnostics?: RuntimeDiagnostics;
   resources?: Pick<RuntimeResourceGate, "assertAvailable">;
   commandExecutor?: RuntimeCommandExecutor;
   onEvent?: (event: RuntimeEvent) => void;
+  hintClientFactory?: (onHint: () => void) => RuntimeHintClient;
+}
+
+export interface RuntimeHintClient {
+  start(signal?: AbortSignal): void;
+  stop(): Promise<void>;
 }
 
 export interface RuntimeEvent {
@@ -155,6 +162,7 @@ export class WorkerRuntime {
     { requestId: string; result: WorkerCommandResult }
   >();
   private readonly stopping = new AbortController();
+  private readonly hintClient: RuntimeHintClient | undefined;
   private machineId = "";
   private childState: "ready" | "unavailable" | "stopped" = "ready";
   private lastSuccessfulJob?: RuntimeJobSummary;
@@ -176,6 +184,9 @@ export class WorkerRuntime {
       new DiagnosticSpool(join(dirname(options.workRoot), "logs"));
     this.resources =
       options.resources ?? new RuntimeResourceGate(options.workRoot);
+    this.hintClient = options.hintClientFactory?.(() =>
+      this.hintAvailableWork(),
+    );
   }
 
   async start(): Promise<void> {
@@ -203,9 +214,11 @@ export class WorkerRuntime {
         );
       }
       this.started = true;
+      this.hintClient?.start(this.stopping.signal);
       await this.publishLocalStatus();
       this.emit({ kind: "started" });
     } catch (error) {
+      await this.hintClient?.stop();
       await this.supervisor.stop();
       throw error;
     }
@@ -309,6 +322,7 @@ export class WorkerRuntime {
         this.supervisor.child(slot.workerId).terminateActive();
     }
     await this.waitForIdle();
+    await this.hintClient?.stop();
     await this.supervisor.stop();
     this.childState = "stopped";
     await this.publishLocalStatus();
@@ -506,6 +520,7 @@ export class WorkerRuntime {
             denoiseEnabled: result.denoiseEnabled,
             outputFormat: result.outputFormat,
             outputBitrateKbps: result.outputBitrateKbps,
+            stageTimings: result.stageTimings,
           },
           controller.signal,
         );
@@ -895,11 +910,17 @@ function validateOptions(options: WorkerRuntimeOptions): void {
     options.slots.length
   )
     throw new TypeError("Worker runtime slot IDs must be unique");
-  if (
-    new Set(options.slots.map((slot) => slot.gpuId)).size !==
-    options.slots.length
-  )
-    throw new TypeError("Worker runtime allows one initial slot per GPU");
+  const validatedMaxWorkersPerGpu = options.validatedMaxWorkersPerGpu ?? 1;
+  const perGpu = new Map<string, Set<number>>();
+  for (const slot of options.slots) {
+    const indexes = perGpu.get(slot.gpuId) ?? new Set<number>();
+    if (indexes.has(slot.slotIndex))
+      throw new TypeError("Worker runtime slot indexes must be unique per GPU");
+    indexes.add(slot.slotIndex);
+    if (indexes.size > validatedMaxWorkersPerGpu)
+      throw new TypeError("Worker runtime exceeds validated GPU capacity");
+    perGpu.set(slot.gpuId, indexes);
+  }
   for (const path of [
     options.workRoot,
     options.modelCacheRoot,

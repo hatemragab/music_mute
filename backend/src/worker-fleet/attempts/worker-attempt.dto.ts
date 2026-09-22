@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  ArrayUnique,
   Equals,
   IsBoolean,
   IsIn,
@@ -10,12 +12,23 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import type { JobFailureCode } from '../../jobs/job.types.js';
 import {
   WORKER_RECIPE_IDS,
   type WorkerRecipeId,
 } from '../protocol/v1/protocol.js';
+import {
+  WORKER_PROCESSING_STAGE_IDS,
+  type WorkerProcessingStageId,
+} from '../worker-fleet.types.js';
+
+export class WorkerProcessingStageTimingDto {
+  @IsIn(WORKER_PROCESSING_STAGE_IDS) stage!: WorkerProcessingStageId;
+  @IsInt() @Min(0) @Max(7_200_000) durationMs!: number;
+}
 
 export class WorkerAttemptOwnershipDto {
   @IsUUID('4') requestId!: string;
@@ -45,7 +58,12 @@ export class CompleteWorkerAttemptDto extends WorkerAttemptOwnershipDto {
   @IsBoolean() trimEnabled!: boolean;
   @IsBoolean() denoiseEnabled!: boolean;
   @Equals('mp3') outputFormat!: 'mp3';
-  @Equals(192) outputBitrateKbps!: 192;
+  @Equals(320) outputBitrateKbps!: 320;
+  @ArrayMaxSize(WORKER_PROCESSING_STAGE_IDS.length)
+  @ArrayUnique((timing: WorkerProcessingStageTimingDto) => timing.stage)
+  @ValidateNested({ each: true })
+  @Type(() => WorkerProcessingStageTimingDto)
+  stageTimings!: WorkerProcessingStageTimingDto[];
 }
 
 const WORKER_FAILURE_CODES: readonly JobFailureCode[] = [

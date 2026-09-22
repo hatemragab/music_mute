@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WORKER_RECIPE_IDS } from "../protocol/v1/protocol.js";
 import {
   runWindowsCommand,
   type WindowsCommandRuntime,
@@ -39,7 +40,7 @@ describe("Windows CLI qualification", () => {
     expect(JSON.parse(String(output.mock.calls[0]?.[0]))).toEqual({
       status: "ok",
       action: "qualification-check",
-      recipeCount: 4,
+      recipeCount: WORKER_RECIPE_IDS.length,
     });
   });
 
@@ -214,12 +215,7 @@ function qualificationReport(fixtureDigest: string) {
       cpuNodeEvents: 0,
       proven: true,
     },
-    recipes: [
-      "kim-vocals-v1",
-      "kim-vocals-trim-v1",
-      "kim-vocals-denoise-v1",
-      "kim-vocals-denoise-trim-v1",
-    ].map((recipeId) => ({
+    recipes: WORKER_RECIPE_IDS.map((recipeId) => ({
       recipeId,
       recipeDigest: "e".repeat(64),
       resultDigest: "f".repeat(64),

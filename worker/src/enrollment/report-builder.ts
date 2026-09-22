@@ -13,6 +13,7 @@ import {
   MAC_RELEASE_MANIFEST,
   verifyMacRelease,
 } from "../platform/macos/release-manifest.js";
+import { DEFAULT_MAC_RECIPE_ID } from "../platform/macos/runtime-recipes.js";
 import {
   WINDOWS_RELEASE_MANIFEST,
   verifyWindowsRelease,
@@ -33,13 +34,14 @@ interface ServiceDiagnostics {
   platform: "darwin" | "win32";
   architecture: "arm64" | "x64";
   onnxRuntime: string;
-  provider: "CoreMLExecutionProvider" | "DmlExecutionProvider";
+  provider: "MPS" | "DmlExecutionProvider";
+  torch?: string;
   modelSha256: string;
 }
 
 export interface QualificationEvidence {
   platform: "darwin-arm64" | "windows-amd64";
-  provider: "coreml" | "directml";
+  provider: "mps" | "directml";
   gpuId: string;
   releaseManifestDigest: string;
   modelDigest: string;
@@ -161,7 +163,10 @@ export async function createEnrollmentReportFromDiagnostics(
       protocolVersion: WORKER_PROTOCOL_VERSION,
       manifestDigest,
       modelDigest: diagnostics.modelSha256,
-      providerRuntimeVersion: `onnxruntime ${diagnostics.onnxRuntime}`,
+      providerRuntimeVersion:
+        diagnostics.provider === "MPS"
+          ? `torch ${diagnostics.torch}`
+          : `onnxruntime ${diagnostics.onnxRuntime}`,
     },
     capabilities: [
       {
@@ -199,6 +204,7 @@ export function parseQualificationEvidence(
       "providerDispatch",
       "recipes",
       "uploadCandidate",
+      "preloadSeconds",
       "totalSeconds",
     ]),
     "Qualification evidence",
@@ -212,7 +218,7 @@ export function parseQualificationEvidence(
   );
   const provider = oneOf(
     object.provider,
-    ["coreml", "directml"] as const,
+    ["mps", "directml"] as const,
     "qualification provider",
   );
   const gpuId = boundedText(object.gpuId, "qualification GPU ID", 128);
@@ -242,8 +248,7 @@ export function parseQualificationEvidence(
     object.fixtureDigest,
     "qualification fixture digest",
   );
-  const expectedProvider =
-    provider === "coreml" ? "CoreMLExecutionProvider" : "DmlExecutionProvider";
+  const expectedProvider = provider === "mps" ? "MPS" : "DmlExecutionProvider";
   const runtimeDiagnostics =
     object.runtimeDiagnostics === undefined
       ? undefined
@@ -261,6 +266,8 @@ export function parseQualificationEvidence(
       "Qualification runtime diagnostics do not match qualification",
     );
   positiveFinite(object.totalSeconds, "qualification duration");
+  if (object.preloadSeconds !== undefined)
+    positiveFinite(object.preloadSeconds, "qualification preload duration");
 
   const dispatch = strictRecord(
     object.providerDispatch,
@@ -278,10 +285,10 @@ export function parseQualificationEvidence(
     dispatch.proven !== true ||
     boundedInteger(
       dispatch.profileCount,
-      1,
+      provider === "mps" ? 0 : 1,
       32,
       "qualification profile count",
-    ) < 1 ||
+    ) < (provider === "mps" ? 0 : 1) ||
     boundedInteger(
       dispatch.acceleratedNodeEvents,
       1,
@@ -313,6 +320,7 @@ export function parseQualificationEvidence(
         "sourceDurationSeconds",
         "outputDurationSeconds",
         "endToEndSeconds",
+        "stageTimings",
       ]),
       "Qualification recipe result",
     );
@@ -341,6 +349,26 @@ export function parseQualificationEvidence(
       "qualification output duration",
     );
     positiveFinite(recipe.endToEndSeconds, "qualification recipe duration");
+    if (recipe.stageTimings !== undefined) {
+      const timings = strictRecord(
+        recipe.stageTimings,
+        new Set([
+          "modelValidation",
+          "inputIdentity",
+          "mediaValidation",
+          "preparation",
+          "modelLoad",
+          "separation",
+          "denoise",
+          "trim",
+          "encode",
+          "outputValidation",
+        ]),
+        "Qualification stage timings",
+      );
+      for (const [stage, seconds] of Object.entries(timings))
+        positiveFinite(seconds, `qualification ${stage} duration`);
+    }
     return { recipeId, resultDigest, resultBytes };
   });
   const recipeIds = recipeResults.map((result) => result.recipeId);
@@ -378,7 +406,7 @@ export function parseQualificationEvidence(
     contentType: "audio/mpeg",
   };
   const sourceResult = recipeResults.find(
-    (result) => result.recipeId === "kim-vocals-v1",
+    (result) => result.recipeId === DEFAULT_MAC_RECIPE_ID,
   );
   const candidateIsAbsolute =
     platform === "windows-amd64"
@@ -407,7 +435,7 @@ export function parseQualificationEvidence(
 function assertQualificationMatchesHost(
   qualification: QualificationEvidence,
   platform: NodeJS.Platform,
-  provider: "coreml" | "directml",
+  provider: "mps" | "directml",
   releaseManifestDigest: string,
   modelDigest: string,
 ): void {
@@ -571,6 +599,7 @@ function parseDiagnostics(value: unknown): ServiceDiagnostics {
       "architecture",
       "python",
       "onnxRuntime",
+      "torch",
       "audioSeparator",
       "provider",
       "modelSha256",
@@ -595,7 +624,7 @@ function parseDiagnostics(value: unknown): ServiceDiagnostics {
   );
   const provider = oneOf(
     object.provider,
-    ["CoreMLExecutionProvider", "DmlExecutionProvider"] as const,
+    ["MPS", "DmlExecutionProvider"] as const,
     "diagnostic provider",
   );
   const modelSha256 = boundedText(
@@ -605,31 +634,37 @@ function parseDiagnostics(value: unknown): ServiceDiagnostics {
   );
   if (!SHA256.test(modelSha256))
     throw new TypeError("Diagnostic model digest is invalid");
+  const torch =
+    object.torch === undefined
+      ? undefined
+      : boundedText(object.torch, "PyTorch version", 100);
+  if (provider === "MPS" && torch === undefined)
+    throw new TypeError("MPS diagnostics are missing PyTorch version");
   return {
     platform,
     architecture,
     provider,
     modelSha256,
     onnxRuntime: boundedText(object.onnxRuntime, "ONNX Runtime version", 100),
+    ...(torch === undefined ? {} : { torch }),
   };
 }
 
 function assertDiagnosticsMatchHost(
   diagnostics: ServiceDiagnostics,
   platform: NodeJS.Platform,
-  provider: "coreml" | "directml",
+  provider: "mps" | "directml",
 ): void {
   if (
     (platform === "darwin" &&
       (diagnostics.platform !== "darwin" ||
         diagnostics.architecture !== "arm64" ||
-        diagnostics.provider !== "CoreMLExecutionProvider")) ||
+        diagnostics.provider !== "MPS")) ||
     (platform === "win32" &&
       (diagnostics.platform !== "win32" ||
         diagnostics.architecture !== "x64" ||
         diagnostics.provider !== "DmlExecutionProvider")) ||
-    (provider === "coreml" &&
-      diagnostics.provider !== "CoreMLExecutionProvider") ||
+    (provider === "mps" && diagnostics.provider !== "MPS") ||
     (provider === "directml" && diagnostics.provider !== "DmlExecutionProvider")
   )
     throw new TypeError("Service diagnostics do not match the host adapter");

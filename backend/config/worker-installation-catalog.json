@@ -2,18 +2,18 @@
   "schemaVersion": 1,
   "releases": {
     "darwin-arm64": {
-      "version": "0.1.0-mvp.2",
-      "filename": "musicmute-worker-darwin-arm64-0.1.0-mvp.2.tar.gz",
-      "key": "worker-installation-artifacts/releases/darwin-arm64/0.1.0-mvp.2.tar.gz",
-      "versionId": "V98TatBouroizPQlmxp.bq__e7N4.uMQ",
-      "bytes": 313766495,
-      "sha256": "e2c74bda9f735ea38cf68c026637a3de0d9e8781994aa1e804eb53e0ef950513",
+      "version": "0.1.0-mvp.33",
+      "filename": "musicmute-worker-darwin-arm64-0.1.0-mvp.33.tar.gz",
+      "key": "worker-installation-artifacts/releases/darwin-arm64/0.1.0-mvp.33.tar.gz",
+      "versionId": "S_eL35UrdMy01fRMpv7PrAH8oamGGwD8",
+      "bytes": 313835588,
+      "sha256": "fa670332969470d79f40188da08f756f654e5a28e30019d0d4f3e389ab411eac",
       "contentType": "application/gzip",
-      "sequence": 1,
-      "publishedAt": "2026-09-21T11:00:00.000Z",
-      "expiresAt": "2027-09-21T11:00:00.000Z",
-      "keyId": "worker-release-2026-01",
-      "signature": "UehBFRT-1FY_ShmzZXqHfFZ4eIqj22wCG5086ipgOiZRwsDLry2yPBg0FjcASKkLbVWBqq8K4uDXCXEbUFdkDA"
+      "sequence": 2,
+      "publishedAt": "2026-09-22T17:08:54.229Z",
+      "expiresAt": "2027-09-22T17:08:54.229Z",
+      "keyId": "worker-release-2026-09",
+      "signature": "Lz0fEQDWcNrERDEIryLjEo5zsk54Odb_T_IYIZTNqQLjy1ZaB1nOIi0ig9iOrAJf-f4PabghVBnLBCCxbUMUBg"
     }
   },
   "model": {

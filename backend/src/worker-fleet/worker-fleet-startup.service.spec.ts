@@ -1,5 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
+import { WorkerMachine } from './machines/worker-machine.schema.js';
+import { WorkerFleetPolicy } from './policy/worker-fleet-policy.schema.js';
 import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
 import { WorkerFleetStartupService } from './worker-fleet-startup.service.js';
 
@@ -7,8 +9,19 @@ function fixture(enabled: boolean) {
   const init = vi.fn().mockResolvedValue(undefined);
   const updateOne = vi.fn().mockResolvedValue({ acknowledged: true });
   const updateMany = vi.fn().mockResolvedValue({ acknowledged: true });
-  const model = vi.fn(() => ({ init, updateOne, collection: { updateMany } }));
+  const findPolicyById = vi.fn(() => ({
+    select: vi.fn(() => ({
+      lean: vi.fn().mockResolvedValue({ _id: 'worker-fleet', revision: 1 }),
+    })),
+  }));
+  const model = vi.fn((name: string) => {
+    if (name === WorkerFleetPolicy.name)
+      return { init, updateOne, findById: findPolicyById };
+    if (name === WorkerMachine.name) return { init, updateMany };
+    return { init };
+  });
   return {
+    findPolicyById,
     init,
     model,
     updateOne,
@@ -42,22 +55,17 @@ describe('worker fleet startup', () => {
       }),
       { upsert: true, setDefaultsOnInsert: true },
     );
+    expect(f.updateOne).toHaveBeenCalledOnce();
+    expect(f.findPolicyById).toHaveBeenCalledWith('worker-fleet');
     expect(f.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: 'queued',
-        currentExecution: null,
-        inputObject: { $ne: null },
-        $or: [{ recipeSnapshot: null }, { retryEligibility: null }],
-      }),
-      [
-        {
-          $set: expect.objectContaining({
-            recipeSnapshot: expect.any(Object),
-            retryEligibility: expect.any(Object),
-          }),
-        },
-      ],
+      expect.objectContaining({ status: { $ne: 'revoked' } }),
+      {
+        $set: { policyRevision: 1, desiredRevision: 1 },
+        $inc: { revision: 1 },
+      },
+      { runValidators: true },
     );
+    expect(f.updateMany).toHaveBeenCalledOnce();
   });
 
   it('fails with a fixed redacted startup stage', async () => {

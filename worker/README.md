@@ -1,12 +1,10 @@
 # MusicMute worker runtime
 
-> **macOS per-user MVP implementation:** the no-admin installer, logged-in-user
+> **macOS per-user implementation:** the no-admin installer, logged-in-user
 > LaunchAgent, lifecycle commands, direct-owner model download, signed manual
-> updater, rollback, and self-unpair paths are implemented on this branch. The
-> older `_musicmute` system LaunchDaemon tooling remains below only for legacy
-> migration and compatibility until its separately controlled removal. See
-> [`docs/worker-rebuild/architecture/08-macos-user-launchagent.md`](../docs/worker-rebuild/architecture/08-macos-user-launchagent.md)
-> for the approved design and migration boundary.
+> updater, rollback, and self-unpair paths are the only supported macOS runtime.
+> See the worker architecture documents for the approved lifecycle and security
+> boundary.
 
 This component contains the native machine supervisor and the isolated Python
 processing child. It is intentionally separate from the NestJS backend and the
@@ -24,7 +22,9 @@ backend or S3 credentials.
 corepack enable
 pnpm install --frozen-lockfile
 uv venv .venv --python 3.13
-uv pip sync --python .venv/bin/python ../tools/worker-gpu-feasibility/requirements-coreml.lock.txt
+uv pip sync --python .venv/bin/python ../tools/worker-gpu-feasibility/requirements-mps-base.lock.txt
+uv pip install --python .venv/bin/python --no-deps \
+  -r ../tools/worker-gpu-feasibility/requirements-mps-overlay.lock.txt
 pnpm run verify
 ```
 
@@ -33,6 +33,11 @@ On Windows, create the venv with the accepted Python 3.12 runtime and sync
 runner at an already-qualified interpreter. Do not mix ONNX Runtime
 distributions or install these locks globally.
 
+The separate MPS overlay intentionally uses `--no-deps`: the MPS base lock
+already supplies the `onnx` module through `onnx-weekly`, while upstream
+`onnx2pytorch` declares the stable `onnx` distribution. Installing both would
+make the packaged module namespace order-dependent.
+
 The generated TypeScript protocol under `protocol/v1/` is copied from the
 backend's canonical pure-data protocol. Run `pnpm protocol:sync` after an
 intentional backend protocol change. `pnpm protocol:check` fails on drift.
@@ -40,9 +45,10 @@ intentional backend protocol change. `pnpm protocol:check` fails on drift.
 Checkpoint D3 adds the authoritative HTTPS runtime loop: machine sessions,
 policy acknowledgement, stable slot registration, same-request claim replay,
 lease renewal/cancellation, attempt workspaces, exact-version transfers and
-idempotent completion/failure. WebSocket work hints may call
-`hintAvailableWork()`, but they never replace HTTPS reconciliation or MongoDB
-ownership.
+idempotent completion/failure. A machine opens one raw WebSocket using a
+30-second, one-use ticket minted over authenticated HTTPS. Work, policy and
+command hints only wake reconciliation; they never replace HTTPS claiming,
+fallback polling or MongoDB ownership.
 
 The service entry point reads a strict JSON config and a separate protected
 machine-credential file:
@@ -63,13 +69,15 @@ musicmute-worker run --config /absolute/path/runtime.json
   "pythonPath": "/absolute/release/python",
   "ffmpegPath": "/absolute/release/ffmpeg",
   "ffprobePath": "/absolute/release/ffprobe",
+  "validatedMaxWorkersPerGpu": 1,
+  "capacityValidationFile": "/absolute/private/capacity-validation.json",
   "slots": [
     {
       "workerId": "00000000-0000-4000-8000-000000000001",
       "gpuId": "gpu-0",
       "slotIndex": 0,
-      "recipeIds": ["kim-vocals-trim-v1"],
-      "provider": "coreml"
+      "recipeIds": ["kim-vocals-v2", "kim-vocals-v2-trim"],
+      "provider": "mps"
     }
   ]
 }
@@ -97,7 +105,7 @@ child's `PATH`. This lets `audio-separator` discover the same qualified,
 immutable FFmpeg binary that the request names explicitly, without depending
 on Homebrew, a logged-in shell or another global installation.
 
-Only two runtime adapters are enabled: native macOS ARM64/CoreML with launchd
+Only two runtime adapters are enabled: native macOS ARM64/PyTorch MPS with launchd
 and owner-only POSIX credentials, and Windows x64/DirectML adapter 0 with a
 Windows Service and LocalService NTFS ACLs. Linux, CUDA, MIGraphX, Intel Mac and
 unqualified architectures remain disabled. D6 verifies this local boundary,
@@ -115,7 +123,7 @@ musicmute-worker install --label "Studio Mac"
 
 The command reads the one-use enrollment code from `/dev/tty` with echo
 disabled, uses `https://api.music-mute.com/api/v1`, downloads the service
-runtime beside any active release, verifies it, runs CoreML qualification, and
+runtime beside any active release, verifies it, runs MPS qualification, and
 then installs `~/Library/LaunchAgents/com.musicmute.worker.plist`. The
 LaunchAgent always runs MusicMute's immutable private Node/Python/FFmpeg
 runtime; it never mutates Homebrew, MacPorts, `/usr/local`, or the npm prefix.
@@ -124,6 +132,13 @@ transaction credential instead of requesting another one-use code. After a
 conservative `uninstall`, running `musicmute-worker install` with no flags
 verifies and reactivates the preserved paired release without enrollment or a
 network download. A failed recovery removes the activation pointer again.
+
+If an old one-use code was already consumed by a different exchange, create a
+new code in the dashboard and run `musicmute-worker install --label "Studio Mac"
+--new-code`. The flag discards only a protected, pre-exchange local attempt and
+prompts for the new code; it refuses to replace an attempt that has already
+received an installation identity. A normal retry without this flag preserves
+the original code and request identity for safe interrupted-install recovery.
 
 Installation checks existing MusicMute-owned artifacts before network transfer.
 An exact cached Kim Vocal 2 file is copied locally into the protected transaction
@@ -141,9 +156,16 @@ Available local commands are `status`, `start`, `stop`, `restart`, `pause`,
 `unpair`, and `uninstall`. Every command prints a human-readable terminal view
 by default; pass `--json` only when stable machine-readable output is needed by
 a script or monitoring tool. `benchmark` deliberately requires the worker to
-be already drained and stopped. `update --check` verifies signed metadata
+be already drained and stopped. `benchmark --workers 2` first records the
+single-worker baseline, then runs two isolated MPS qualifications
+concurrently. It writes an owner-only, seven-day capacity receipt only when
+both accelerated runs preserve the model/release/fixture identity and improve
+throughput by at least 1.1x. Runtime configuration defaults to one worker per
+GPU, requires that fresh receipt to select two, and rejects more than two;
+backend-approved machine capability and policy remain additional hard gates.
+`update --check` verifies signed metadata
 without minting a download grant or changing local state. `update` downloads a
-verified candidate, checks the private Node/FFmpeg versions, qualifies CoreML,
+verified candidate, checks the private Node/FFmpeg versions, qualifies MPS,
 switches the release pointer atomically, starts the agent, runs the packaged
 runtime doctor, and restores the known-good release if either startup or the
 doctor fails. Failed candidates are locally quarantined. Mutating CLI commands
@@ -157,8 +179,8 @@ Dashboard Doctor and Benchmark requests use the same running per-user worker
 and never invoke `sudo`, install system packages, or modify the LaunchAgent.
 Doctor runs only the requested bounded checks and reports sanitized metrics.
 Dashboard Benchmark is deferred while a job is active; once idle, it
-temporarily stops the private processing child, runs only the requested frozen
-recipe for one to five iterations against the installed qualification fixture,
+temporarily stops the private processing child, runs the one frozen Kim Vocal 2
+recipe exactly once against the installed qualification fixture,
 restarts the child, and reports aggregate timing and output-size metrics. A
 lost result response is retried with the same request identity without rerunning
 the diagnostic or benchmark. This remote idle-only behavior is separate from
@@ -224,92 +246,23 @@ Malformed local trust, attempts to replace a built-in key, and unknown catalog
 keys fail closed. Production private signing keys stay outside Git, npm
 packages, backend responses, and worker machines.
 
-If an older system LaunchDaemon is detected, fresh installation refuses to run
-beside it. After draining and revoking that legacy machine, the operator can run
-the deliberately hidden administrator helper:
-
-```bash
-sudo "$(command -v musicmute-worker)" legacy-cleanup --confirm-backup
-```
-
-It targets only `system/com.musicmute.worker`, the exact legacy plist, and the
-exact legacy application root. It stops that service and moves the files into a
-timestamped root-owned backup; it never deletes the backup or copies the old
-machine credential into the user installation.
-
-## Legacy macOS private release and LaunchDaemon
+## macOS per-user release package
 
 The macOS packager accepts only a native Darwin ARM64 host and an already
-qualified, private runtime. It copies the compiled worker, engine, standalone
-Node root, standalone Python root and a complete media-runtime root into a new
-versioned directory and writes a complete content/mode/symlink manifest. The
-Node, Python and media executables must pass a Mach-O audit: ARM64 code, no
-mutable Homebrew or other non-system absolute dependencies, and no external
-RPATH. Media provenance and LGPL notices are packaged with the binaries.
-Models, credentials, configuration and job data are never included in the
-release.
+qualified private runtime. It packages the compiled worker, processing engine,
+standalone Node and Python roots, and the media runtime without configuration,
+credentials, models, or job data.
 
 ```bash
-./scripts/build-macos-media-runtime.sh /absolute/private/media-runtime
 pnpm run build
-node dist/src/cli/main.js macos package \
+musicmute-worker package-macos \
   --worker-root /absolute/source/worker \
-  --output /absolute/staging/musicmute-worker-0.1.0 \
+  --output /absolute/staging/musicmute-worker \
   --version 0.1.0 \
   --node-root /absolute/private/node \
   --python-root /absolute/private/python \
   --media-root /absolute/private/media-runtime
 ```
-
-The Python root must contain `bin/python3` and the exact CoreML lock. The Node
-root must contain `bin/node`. The media builder verifies the official FFmpeg
-signature and pinned source hashes, then produces network-disabled FFmpeg
-8.0.3 binaries with statically linked LAME 3.100. Never substitute a Homebrew
-binary just because it runs on the build machine; its external library paths
-make the release non-private and the packager rejects it.
-
-Installation uses an existing dedicated macOS account and normal administrator
-consent. It does not create accounts, collect a password or edit global
-Node/Python. The runtime config must point at these stable default paths:
-
-- `/Library/Application Support/MusicMuteWorker/current/app/engine`
-- `/Library/Application Support/MusicMuteWorker/current/runtime/python/bin/python3`
-- `/Library/Application Support/MusicMuteWorker/current/runtime/bin/ffmpeg`
-- `/Library/Application Support/MusicMuteWorker/current/runtime/bin/ffprobe`
-- `/Library/Application Support/MusicMuteWorker/state/{attempts,cache,models,tmp}`
-- `/Library/Application Support/MusicMuteWorker/state/machine.credential`
-
-Python bytecode and library/compiler caches are redirected into the protected
-state cache. The immutable release must remain byte-for-byte unchanged after
-doctor and processing runs.
-
-```bash
-sudo node dist/src/cli/main.js macos install \
-  --release /absolute/staging/musicmute-worker-0.1.0 \
-  --config /absolute/private/runtime.json \
-  --credential /absolute/private/machine.credential \
-  --model-source /absolute/private/Kim_Vocal_2.onnx \
-  --service-user _musicmute \
-  --service-group _musicmute
-```
-
-`repair` accepts the same arguments and is idempotent for identical release
-bytes. It rejects changing an installed version in place, verifies the exact
-Kim artifact before activation, restores the previous `current` release when
-activation/diagnostics fail, and then attempts to restart the previous service.
-`doctor` validates the manifest, private permissions, config paths, dedicated
-account ownership, model hash, CoreML environment and loaded system service:
-
-```bash
-sudo node dist/src/cli/main.js macos doctor \
-  --service-user _musicmute \
-  --service-group _musicmute
-```
-
-`uninstall` unloads the LaunchDaemon and removes only its plist and `current`
-pointer. Versioned releases, the credential, model cache and job-state root are
-preserved for explicit recovery or separately authorized deletion. Automated
-fleet updates and destructive state removal are not part of this command.
 
 ## Windows private release and service
 
@@ -359,3 +312,15 @@ PowerShell policy, alter global Node/Python, or install/replace a GPU driver.
 Local package tests do not prove LocalService GPU access, logged-out operation,
 restart/reboot recovery, live S3, or actual Z440 execution; those stay `NOT_RUN`
 until the owner-authorized Windows host run.
+
+### Offline song benchmark (macOS)
+
+With the worker already drained and stopped, benchmark the packaged UVR-compatible MPS engine directly. This command does not contact the backend, S3, or a database. Each invocation runs one selected Kim Vocal 2 recipe pass:
+
+```sh
+musicmute-worker benchmark-file --input /absolute/path/song.mp3 --recipe kim-vocals-v2-trim --iterations 2 --json
+```
+
+The command preloads the model once, then runs exactly one full song pass. The report separates model preload, one-pass latency and combined cold latency, with per-stage timings for preparation, separation, optional reference-compatible gap trimming, 320 kbps MP3 encoding and validation. Production children preload the verified model before announcing readiness and keep it resident between jobs; their bounded startup timeout covers the private Python import and PyTorch MPS initialization. Kim Vocal 2 uses UVR's `onnx2pytorch` MPS path, segment size 256, batch size 1, denoise disabled, and model-specific **Default** overlap. Use `--json` for machine-readable output.
+
+The worker advertises `kim-vocals-v2` for an untrimmed vocal stem and `kim-vocals-v2-trim` for the default product behavior. The trimmed recipe preserves the reference `separate.py` algorithm: 10 ms louder-channel RMS windows, a strict -45 dBFS threshold, 0.8-second minimum gaps, 0.2-second retained padding, 5 ms boundary fades, and all-silent preservation. CoreML, denoise recipe variants, and multi-iteration file benchmarks remain outside this local-development contract.

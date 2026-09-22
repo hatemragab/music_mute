@@ -39,7 +39,7 @@ class PipelineTests(unittest.TestCase):
         self.ffmpeg = str(Path(ffmpeg).resolve(strict=True))
         self.ffprobe = str(Path(ffprobe).resolve(strict=True))
 
-    def test_all_four_recipes_use_exact_optional_steps_and_reuse_model(self) -> None:
+    def test_each_recipe_runs_one_kim_vocal_2_pass_and_reuses_model(self) -> None:
         frames = np.arange(RATE, dtype=np.float32)
         wave = 0.25 * np.sin(2 * np.pi * 440 * frames / RATE)
         tone = np.column_stack((wave, wave))
@@ -78,7 +78,7 @@ class PipelineTests(unittest.TestCase):
                 else:
                     self.assertEqual(result["removedSamples"], 0)
                     self.assertEqual(result["editMap"]["rangeCount"], 1)
-            self.assertEqual(fake.calls, 4)
+            self.assertEqual(fake.calls, len(RECIPE_DEFINITIONS))
 
     def test_request_rejects_recipe_tampering_and_untrusted_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -91,17 +91,41 @@ class PipelineTests(unittest.TestCase):
             cache = root / "models"
             cache.mkdir()
             payload = self.payload(
-                attempt_id, attempt, source, cache, "kim-vocals-trim-v1"
+                attempt_id, attempt, source, cache, "kim-vocals-v2"
             )
-            payload["recipe"] = {**payload["recipe"], "trimEnabled": False}
+            payload["recipe"] = {**payload["recipe"], "outputBitrateKbps": 192}
             with self.assertRaises(ProcessingFailure):
                 ProcessRequest.from_payload(payload)
             payload = self.payload(
-                attempt_id, attempt, source, cache, "kim-vocals-trim-v1"
+                attempt_id, attempt, source, cache, "kim-vocals-v2"
             )
             payload["attemptDirectory"] = str(root / "wrong-name")
             with self.assertRaises(ProcessingFailure):
                 ProcessRequest.from_payload(payload)
+
+    def test_preload_reuses_the_same_separator_for_processing(self) -> None:
+        fake = FakeSeparator()
+        factory_calls: list[tuple[str, Path, int]] = []
+
+        def factory(provider: str, model: Path, device: int) -> FakeSeparator:
+            factory_calls.append((provider, model, device))
+            return fake
+
+        pipeline = RuntimePipeline(factory)  # type: ignore[arg-type]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "models"
+            cache.mkdir()
+            model = root / "qualified.onnx"
+            model.write_bytes(b"test-only-model-sentinel")
+            with patch(
+                "musicmute_engine.pipeline.verified_cached_model",
+                return_value=model,
+            ):
+                pipeline.preload(cache, "mps")
+                pipeline.preload(cache, "mps")
+
+        self.assertEqual(factory_calls, [("mps", model, 0)])
 
     def payload(
         self,
@@ -120,7 +144,7 @@ class PipelineTests(unittest.TestCase):
                 "sha256": sha256_base64(source),
             },
             "modelCacheRoot": str(cache),
-            "provider": "coreml",
+            "provider": "mps",
             "directmlDeviceId": 0,
             "ffmpegPath": self.ffmpeg,
             "ffprobePath": self.ffprobe,

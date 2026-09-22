@@ -43,9 +43,9 @@ if (
 )
   throw new Error('External worker integration platform is unsupported');
 const externalMac = externalPlatform === 'darwin-arm64';
-const externalProvider = externalMac ? 'coreml' : 'directml';
+const externalProvider = externalMac ? 'mps' : 'directml';
 const externalPlatformMarker = externalMac
-  ? 'macos-coreml-service'
+  ? 'macos-mps-service'
   : 'windows-directml-service';
 const runId = process.env.WORKER_INTEGRATION_RUN_ID ?? 'fixture';
 if (!/^[a-z0-9-]{1,64}$/.test(runId))
@@ -505,14 +505,9 @@ try {
     approvedCapabilities: [
       {
         platform: externalService ? externalPlatform : 'darwin-arm64',
-        provider: externalService ? externalProvider : 'coreml',
+        provider: externalService ? externalProvider : 'mps',
         gpuId,
-        recipeIds: [
-          'kim-vocals-v1',
-          'kim-vocals-trim-v1',
-          'kim-vocals-denoise-v1',
-          'kim-vocals-denoise-trim-v1',
-        ],
+        recipeIds: ['kim-vocals-v2'],
         maxSlots: 1,
       },
     ],
@@ -581,8 +576,8 @@ try {
             workerId,
             gpuId,
             slotIndex: 0,
-            recipeIds: ['kim-vocals-trim-v1'],
-            provider: 'coreml',
+            recipeIds: ['kim-vocals-v2'],
+            provider: 'mps',
           },
         ],
         workRoot: join(root, 'attempts'),
@@ -699,7 +694,7 @@ try {
             platform: 'windows-amd64',
             provider: 'directml',
             gpuId,
-            recipeIds: ['kim-vocals-trim-v1'],
+            recipeIds: ['kim-vocals-v2'],
             maxSlots: 1,
           },
         ],
@@ -752,7 +747,7 @@ try {
           incarnation,
           gpuId,
           slotIndex: 0,
-          recipeIds: ['kim-vocals-trim-v1'],
+          recipeIds: ['kim-vocals-v2'],
         },
         { worker: credential, expected: 201 },
       );

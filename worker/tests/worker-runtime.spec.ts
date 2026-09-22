@@ -33,7 +33,7 @@ const outputSha = createHash("sha256").update(outputBytes).digest("base64");
 const roots: string[] = [];
 
 const recipe: WorkerRecipeSnapshot = {
-  recipeId: "kim-vocals-trim-v1",
+  recipeId: "kim-vocals-v2",
   recipeRevision: 1,
   protocolVersion: 1,
   recipeDigest: "a".repeat(64),
@@ -44,16 +44,15 @@ const recipe: WorkerRecipeSnapshot = {
   stepIds: [
     "prepare-pcm16-stereo-44100-v1",
     "separate-kim-vocal-2-v1",
-    "trim-vocal-gaps-v1",
-    "encode-mp3-192k-v1",
+    "encode-mp3-320k-v1",
     "validate-audio-v1",
   ],
-  trimEnabled: true,
+  trimEnabled: false,
   denoiseEnabled: false,
   denoisePresetId: null,
-  trimProfileId: "trim-vocal-gaps-v1",
+  trimProfileId: null,
   outputFormat: "mp3",
-  outputBitrateKbps: 192,
+  outputBitrateKbps: 320,
 };
 
 afterEach(async () => {
@@ -110,6 +109,11 @@ class FakeChild {
         denoiseEnabled: recipe.denoiseEnabled,
         outputFormat: recipe.outputFormat,
         outputBitrateKbps: recipe.outputBitrateKbps,
+        stageTimings: {
+          modelLoad: 0.125,
+          separation: 1.5,
+          encode: 0.25,
+        },
       },
     };
   }
@@ -279,7 +283,7 @@ async function runtimeFixture(
           gpuId: "gpu-0",
           slotIndex: 0,
           recipeIds: [recipe.recipeId],
-          provider: "coreml",
+          provider: "mps",
         },
       ],
       workRoot: join(root, "attempts"),
@@ -433,8 +437,8 @@ describe("worker runtime ownership", () => {
       kind: "benchmark",
       state: "pending",
       checks: [],
-      recipeId: "kim-vocals-trim-v1",
-      iterations: 2,
+      recipeId: "kim-vocals-v2",
+      iterations: 1,
       requestedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       summary: null,
@@ -525,7 +529,14 @@ describe("worker runtime ownership", () => {
     expect(f.control.complete).toHaveBeenCalledWith(
       attemptId,
       expect.objectContaining({ workerId }),
-      expect.objectContaining({ versionId: "output-version" }),
+      expect.objectContaining({
+        versionId: "output-version",
+        stageTimings: [
+          { stage: "modelLoad", durationMs: 125 },
+          { stage: "separation", durationMs: 1_500 },
+          { stage: "encode", durationMs: 250 },
+        ],
+      }),
       expect.any(AbortSignal),
     );
     expect(f.control.fail).not.toHaveBeenCalled();

@@ -71,14 +71,14 @@ function fixture() {
     processingFinishedAt: null,
     uploadingResultAt: null,
     recipeSnapshot: {
-      recipeId: 'kim-vocals-trim-v1',
+      recipeId: 'kim-vocals-v2',
       recipeRevision: 1,
       recipeDigest: 'b'.repeat(64),
       modelDigest: 'a'.repeat(64),
       trimEnabled: true,
       denoiseEnabled: false,
       outputFormat: 'mp3',
-      outputBitrateKbps: 192,
+      outputBitrateKbps: 320,
     },
   };
   const transaction = {
@@ -194,14 +194,18 @@ const output = {
 const completion = {
   ...ownership,
   versionId: 'output-v1',
-  recipeId: 'kim-vocals-trim-v1' as const,
+  recipeId: 'kim-vocals-v2' as const,
   recipeRevision: 1,
   recipeDigest: 'b'.repeat(64),
   modelDigest: 'a'.repeat(64),
   trimEnabled: true,
   denoiseEnabled: false,
   outputFormat: 'mp3' as const,
-  outputBitrateKbps: 192 as const,
+  outputBitrateKbps: 320 as const,
+  stageTimings: [
+    { stage: 'modelLoad' as const, durationMs: 125 },
+    { stage: 'separation' as const, durationMs: 1_500 },
+  ],
 };
 
 describe('worker attempt transfers and finalization', () => {

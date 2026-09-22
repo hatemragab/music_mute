@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { runtimePlatformAdapter } from "../src/platform/runtime-adapter.js";
 
 describe("qualified runtime platform adapters", () => {
-  it("maps macOS ARM64 to CoreML, launchd and owner-only credentials", () => {
+  it("maps macOS ARM64 to MPS, launchd and owner-only credentials", () => {
     const adapter = runtimePlatformAdapter({
       platform: "darwin",
       arch: "arm64",
     });
     expect(adapter).toMatchObject({
-      id: "macos-arm64-coreml-v1",
-      provider: "coreml",
+      id: "macos-arm64-mps-v1",
+      provider: "mps",
       serviceKind: "launchd",
       credentialProtection: "posix-owner-only",
     });

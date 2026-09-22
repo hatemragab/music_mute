@@ -1,0 +1,4 @@
+# Install with --no-deps after requirements-mps-base.lock.txt. The base lock already
+# supplies ONNX via onnx-weekly; resolving this package normally would install a
+# second distribution into the same onnx module namespace.
+onnx2pytorch==0.5.1

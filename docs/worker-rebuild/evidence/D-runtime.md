@@ -66,10 +66,10 @@ one-child-per-GPU capacity.
 
 ## D2 versioned Kim recipe family
 
-- Frozen exactly four recipes: `kim-vocals-v1`, `kim-vocals-trim-v1`,
-  `kim-vocals-denoise-v1` and `kim-vocals-denoise-trim-v1`. Disabled steps are
+- Frozen exactly four recipes: `kim-vocals-v2`, `kim-vocals-trim-v2`,
+  `kim-vocals-denoise-v2` and `kim-vocals-denoise-trim-v2`. Disabled steps are
   absent from the ordered step list and execution timings rather than simulated
-  with no-op parameters. `kim-vocals-trim-v1` remains the initial default.
+  with no-op parameters. `kim-vocals-trim-v2` remains the initial default.
 - The backend and Python runtime independently derive the same canonical
   SHA-256 recipe digests. A child rejects unknown fields, unknown recipes or any
   mismatch in the model, step, trim, denoise, preparation or encoding snapshot.
@@ -104,7 +104,7 @@ Python process command. Result: PASS.
 - source/output were 352,800 samples, with one identity edit range because this
   fixture's separated vocal stem had no qualifying gap;
 - recipe digest was
-  `1a70379331fafb360f4cd388e17f4c6ce511031e4082f34ba63676957d8c34c3`;
+  `a1b3be857b9604429edf9b9cc48df6a84be2bcf4a2bb9a2da2c4e829f1d6ef52`;
 - executed stages were model validation/load, input identity, media validation,
   preparation, separation, trim, encode and output validation;
 - third-party progress text initially corrupted stdout framing. The child now
@@ -356,7 +356,7 @@ matched 66,759,214 bytes and SHA-256
 `ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b`.
 
 The standalone runtime produced a valid 193,767-byte stereo 44.1 kHz MP3 from
-the owned eight-second fixture through `kim-vocals-trim-v1`. A separate ONNX
+the owned eight-second fixture through `kim-vocals-trim-v2`. A separate ONNX
 Runtime profile assigned all six model node events to
 `CoreMLExecutionProvider` (1,114,292 profiled microseconds) and no node event to
 the CPU provider. Result: PASS for the private Python/model/CoreML boundary.
@@ -369,7 +369,7 @@ dynamic dependencies; the host's Homebrew FFmpeg remains correctly rejected.
 
 A complete 33,798-entry private release then passed manifest verification and
 the packaged runtime doctor. Using only the packaged Python and media binaries,
-`kim-vocals-denoise-trim-v1` produced a valid 193,767-byte MP3 with two channels,
+`kim-vocals-denoise-trim-v2` produced a valid 193,767-byte MP3 with two channels,
 44.1 kHz sample rate and 192 kb/s bitrate. A second manifest verification after
 processing passed, proving runtime caches did not mutate the release.
 
@@ -379,7 +379,7 @@ through `PATH`; a LaunchDaemon does not inherit the interactive Homebrew path.
 The supervisor now prepends only the configured immutable media directory to
 the child environment. The resulting 33,828-entry package passed the runtime
 doctor with CoreML, Python 3.13.7, ONNX Runtime 1.30.0 and the exact Kim model.
-`kim-vocals-trim-v1` then produced a valid 193,767-byte stereo 44.1 kHz MP3 at
+`kim-vocals-trim-v2` then produced a valid 193,767-byte stereo 44.1 kHz MP3 at
 192 kb/s, and every manifest entry verified unchanged after processing.
 
 ### D4 verification and remaining release acceptance

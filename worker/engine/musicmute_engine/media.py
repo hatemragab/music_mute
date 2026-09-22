@@ -180,7 +180,7 @@ def encode_mp3(source: Path, destination: Path, ffmpeg: Path) -> Path:
             "-c:a",
             "libmp3lame",
             "-b:a",
-            "192k",
+            "320k",
             "-ar",
             str(SAMPLE_RATE),
             "-ac",

@@ -1,6 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Schema as MongoSchema, type Types } from 'mongoose';
-import type { ObjectIdentity } from '../../jobs/job.types.js';
+import type {
+  ObjectIdentity,
+  WorkerProcessingStageTiming,
+} from '../../jobs/job.types.js';
 import {
   JOB_FAILURE_CLASSES,
   type JobFailureClass,
@@ -12,6 +15,7 @@ import {
   WORKER_ATTEMPT_STATES,
   type WorkerAttemptStage,
   type WorkerAttemptState,
+  WORKER_PROCESSING_STAGE_IDS,
 } from '../worker-fleet.types.js';
 
 export interface WorkerStageTiming {
@@ -41,6 +45,20 @@ const stageTiming = new MongoSchema<WorkerStageTiming>(
       min: 0,
       validate: (value: number | null) =>
         value === null || Number.isSafeInteger(value),
+    },
+  },
+  { _id: false, strict: 'throw' },
+);
+
+const processingStageTiming = new MongoSchema<WorkerProcessingStageTiming>(
+  {
+    stage: { type: String, required: true, enum: WORKER_PROCESSING_STAGE_IDS },
+    durationMs: {
+      type: Number,
+      required: true,
+      min: 0,
+      max: 7_200_000,
+      validate: Number.isSafeInteger,
     },
   },
   { _id: false, strict: 'throw' },
@@ -132,6 +150,8 @@ export class WorkerAttempt {
       Array.isArray(value) && value.length <= 32,
   })
   timings!: WorkerStageTiming[];
+  @Prop({ type: [processingStageTiming], default: [] })
+  processingStageTimings!: WorkerProcessingStageTiming[];
   @Prop({ type: outputObject, default: null })
   outputObject!: ObjectIdentity | null;
   @Prop({ type: outputReservation, default: null })

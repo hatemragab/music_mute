@@ -2,6 +2,12 @@ import type {
   WorkerRecipeId,
   WorkerRecipeStepId,
 } from '../worker-fleet/protocol/v1/protocol.js';
+import type { WorkerProcessingStageId } from '../worker-fleet/worker-fleet.types.js';
+
+export interface WorkerProcessingStageTiming {
+  stage: WorkerProcessingStageId;
+  durationMs: number;
+}
 
 export type InputSource = 'audio_file' | 'video_file' | 'youtube';
 export const PREPARATION_PROFILE_ID = 'preserve-or-aac-lc-256-v1';
@@ -102,7 +108,7 @@ export interface WorkerRecipeSnapshot {
   denoisePresetId: 'afftdn-conservative-v1' | null;
   trimProfileId: 'trim-vocal-gaps-v1' | null;
   outputFormat: 'mp3';
-  outputBitrateKbps: 192;
+  outputBitrateKbps: 320;
 }
 
 export interface WorkerRetryEligibility {

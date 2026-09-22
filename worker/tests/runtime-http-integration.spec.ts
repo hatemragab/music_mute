@@ -26,7 +26,7 @@ const roots: string[] = [];
 const servers: ReturnType<typeof createServer>[] = [];
 
 const recipe: WorkerRecipeSnapshot = {
-  recipeId: "kim-vocals-trim-v1",
+  recipeId: "kim-vocals-v2",
   recipeRevision: 1,
   protocolVersion: 1,
   recipeDigest: "a".repeat(64),
@@ -37,16 +37,15 @@ const recipe: WorkerRecipeSnapshot = {
   stepIds: [
     "prepare-pcm16-stereo-44100-v1",
     "separate-kim-vocal-2-v1",
-    "trim-vocal-gaps-v1",
-    "encode-mp3-192k-v1",
+    "encode-mp3-320k-v1",
     "validate-audio-v1",
   ],
-  trimEnabled: true,
+  trimEnabled: false,
   denoiseEnabled: false,
   denoisePresetId: null,
-  trimProfileId: "trim-vocal-gaps-v1",
+  trimProfileId: null,
   outputFormat: "mp3",
-  outputBitrateKbps: 192,
+  outputBitrateKbps: 320,
 };
 
 afterEach(async () => {
@@ -102,6 +101,7 @@ class HttpFixtureChild {
         denoiseEnabled: recipe.denoiseEnabled,
         outputFormat: recipe.outputFormat,
         outputBitrateKbps: recipe.outputBitrateKbps,
+        stageTimings: { separation: 1.5, encode: 0.25 },
       },
     };
   }
@@ -301,7 +301,7 @@ describe("worker runtime HTTP integration", () => {
             gpuId: "gpu-0",
             slotIndex: 0,
             recipeIds: [recipe.recipeId],
-            provider: "coreml",
+            provider: "mps",
           },
         ],
         workRoot: join(root, "attempts"),

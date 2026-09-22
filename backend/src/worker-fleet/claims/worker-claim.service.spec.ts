@@ -50,7 +50,7 @@ function fixture() {
         acceptClaims: true,
         recipes: [
           {
-            recipeId: 'kim-vocals-trim-v1',
+            recipeId: 'kim-vocals-v2',
             enabled: true,
             maxSlotsPerMachine: 1,
           },
@@ -114,9 +114,9 @@ const activeMachine = {
   approvedCapabilities: [
     {
       platform: 'darwin-arm64',
-      provider: 'coreml',
+      provider: 'mps',
       gpuId: 'gpu0',
-      recipeIds: ['kim-vocals-trim-v1'],
+      recipeIds: ['kim-vocals-v2'],
       maxSlots: 1,
     },
   ],
@@ -158,7 +158,7 @@ describe('worker atomic claims', () => {
         _id: jobId,
         currentExecution: { attemptId },
         inputObject: { key: 'input', versionId: 'v1' },
-        recipeSnapshot: { recipeId: 'kim-vocals-trim-v1' },
+        recipeSnapshot: { recipeId: 'kim-vocals-v2' },
       }),
     );
     const result = await f.service.claim(principal, claimDto);
@@ -182,7 +182,7 @@ describe('worker atomic claims', () => {
         incarnation,
         state: 'idle',
         currentAttemptId: null,
-        allowedRecipeIds: ['kim-vocals-trim-v1'],
+        allowedRecipeIds: ['kim-vocals-v2'],
         revision: 2,
       }),
     );
@@ -213,7 +213,7 @@ describe('worker atomic claims', () => {
         sha256: 'sha',
         contentType: 'audio/wav',
       },
-      recipeSnapshot: { recipeId: 'kim-vocals-trim-v1' },
+      recipeSnapshot: { recipeId: 'kim-vocals-v2' },
     };
     const slot = {
       _id: workerId,
@@ -224,7 +224,7 @@ describe('worker atomic claims', () => {
       incarnation,
       state: 'idle',
       currentAttemptId: null,
-      allowedRecipeIds: ['kim-vocals-trim-v1'],
+      allowedRecipeIds: ['kim-vocals-v2'],
       revision: 2,
     };
     f.machines.findById.mockReturnValue(sessionLean(activeMachine));
@@ -278,7 +278,7 @@ describe('worker atomic claims', () => {
       processingStartedAt: null,
       admissionSnapshot: { maxProcessingJobs: 1 },
       inputObject: { key: 'input', versionId: 'v1' },
-      recipeSnapshot: { recipeId: 'kim-vocals-trim-v1' },
+      recipeSnapshot: { recipeId: 'kim-vocals-v2' },
     };
     const slot = {
       _id: workerId,
@@ -289,7 +289,7 @@ describe('worker atomic claims', () => {
       incarnation,
       state: 'idle',
       currentAttemptId: null,
-      allowedRecipeIds: ['kim-vocals-trim-v1'],
+      allowedRecipeIds: ['kim-vocals-v2'],
       revision: 2,
     };
     f.machines.findById.mockReturnValue(sessionLean(activeMachine));
@@ -326,7 +326,7 @@ describe('worker atomic claims', () => {
         sha256: 'older-sha',
         contentType: 'audio/wav',
       },
-      recipeSnapshot: { recipeId: 'kim-vocals-trim-v1' },
+      recipeSnapshot: { recipeId: 'kim-vocals-v2' },
     };
     const eligible = {
       ...older,
@@ -350,7 +350,7 @@ describe('worker atomic claims', () => {
       incarnation,
       state: 'idle',
       currentAttemptId: null,
-      allowedRecipeIds: ['kim-vocals-trim-v1'],
+      allowedRecipeIds: ['kim-vocals-v2'],
       revision: 2,
     };
     f.machines.findById.mockReturnValue(sessionLean(activeMachine));
@@ -432,7 +432,7 @@ describe('worker atomic claims', () => {
         _id: jobId,
         currentExecution: { attemptId },
         inputObject: { key: 'input', versionId: 'v1' },
-        recipeSnapshot: { recipeId: 'kim-vocals-trim-v1' },
+        recipeSnapshot: { recipeId: 'kim-vocals-v2' },
       }),
     );
     await expect(f.service.claim(principal, claimDto)).resolves.toMatchObject({

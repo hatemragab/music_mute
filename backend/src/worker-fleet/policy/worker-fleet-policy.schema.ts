@@ -19,7 +19,7 @@ const recipePolicy = new MongoSchema<WorkerRecipePolicy>(
       type: Number,
       required: true,
       min: 1,
-      max: 16,
+      max: 2,
       validate: Number.isSafeInteger,
     },
   },

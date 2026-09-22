@@ -56,15 +56,31 @@ export function renderLaunchAgentPlist(
       "qualification release",
     );
   }
+  const qualificationPythonPath =
+    qualification === undefined
+      ? layout.pythonPath
+      : join(qualification.releaseRoot, "runtime", "python", "bin", "python3");
+  const qualificationFfmpegPath =
+    qualification === undefined
+      ? layout.ffmpegPath
+      : join(qualification.releaseRoot, "runtime", "bin", "ffmpeg");
+  const qualificationFfprobePath =
+    qualification === undefined
+      ? layout.ffprobePath
+      : join(qualification.releaseRoot, "runtime", "bin", "ffprobe");
+  const qualificationNodeBinPath =
+    qualification === undefined
+      ? dirname(layout.nodePath)
+      : join(qualification.releaseRoot, "runtime", "node", "bin");
   const arguments_ =
     qualification === undefined
       ? [layout.nodePath, layout.cliPath, "run", "--config", layout.configPath]
       : [
-          layout.pythonPath,
+          qualificationPythonPath,
           "-m",
           "musicmute_engine.qualification",
           "--provider",
-          "coreml",
+          "mps",
           "--fixture",
           qualification.fixturePath,
           "--fixture-sha256",
@@ -76,15 +92,17 @@ export function renderLaunchAgentPlist(
           "--model-cache",
           layout.modelRoot,
           "--ffmpeg",
-          layout.ffmpegPath,
+          qualificationFfmpegPath,
           "--ffprobe",
-          layout.ffprobePath,
+          qualificationFfprobePath,
           "--report",
           qualification.reportPath,
         ];
   const workingDirectory =
-    qualification === undefined ? layout.installRoot : layout.engineRoot;
-  const runtimePath = `${dirname(layout.ffmpegPath)}:${dirname(layout.nodePath)}:/usr/bin:/bin:/usr/sbin:/sbin`;
+    qualification === undefined
+      ? layout.installRoot
+      : join(qualification.releaseRoot, "app", "engine");
+  const runtimePath = `${dirname(qualificationFfmpegPath)}:${qualificationNodeBinPath}:/usr/bin:/bin:/usr/sbin:/sbin`;
   const keepAlive =
     qualification === undefined
       ? `  <key>KeepAlive</key>
@@ -113,11 +131,21 @@ ${arguments_.map((argument) => `    <string>${xml(argument)}</string>`).join("\n
     <key>PATH</key>
     <string>${xml(runtimePath)}</string>
     <key>MUSICMUTE_PROVIDER</key>
-    <string>coreml</string>
+    <string>mps</string>
+    <key>MPLCONFIGDIR</key>
+    <string>${xml(join(layout.cacheRoot, "matplotlib"))}</string>
     <key>NUMBA_CACHE_DIR</key>
     <string>${xml(join(layout.cacheRoot, "numba"))}</string>
     <key>PYTHONDONTWRITEBYTECODE</key>
     <string>1</string>
+    <key>PYTHONNOUSERSITE</key>
+    <string>1</string>
+    <key>PYTHONPYCACHEPREFIX</key>
+    <string>${xml(join(layout.cacheRoot, "python"))}</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>XDG_CACHE_HOME</key>
+    <string>${xml(layout.cacheRoot)}</string>
   </dict>
   <key>WorkingDirectory</key>
   <string>${xml(workingDirectory)}</string>

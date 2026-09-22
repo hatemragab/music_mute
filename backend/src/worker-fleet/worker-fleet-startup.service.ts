@@ -2,12 +2,8 @@ import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectConnection } from '@nestjs/mongoose';
 import type { Connection } from 'mongoose';
-import { Job } from '../jobs/job.schema.js';
-import {
-  DEFAULT_WORKER_RECIPE_ID,
-  workerRecipeSnapshot,
-} from '../jobs/worker-recipes.js';
 import { StartupDependencyError } from '../startup-error.js';
+import { WorkerMachine } from './machines/worker-machine.schema.js';
 import { WORKER_FLEET_MODELS } from './worker-fleet.models.js';
 import { WorkerFleetPolicy } from './policy/worker-fleet-policy.schema.js';
 import { WORKER_RECIPE_IDS } from './protocol/v1/protocol.js';
@@ -27,77 +23,58 @@ export class WorkerFleetStartupService implements OnModuleInit {
           this.connection.model(name).init(),
         ),
       );
-      await this.connection
-        .model<WorkerFleetPolicy>(WorkerFleetPolicy.name)
-        .updateOne(
-          { _id: 'worker-fleet' },
-          {
-            $setOnInsert: {
-              revision: 0,
-              acceptClaims: true,
-              recipes: WORKER_RECIPE_IDS.map((recipeId) => ({
-                recipeId,
-                enabled: true,
-                maxSlotsPerMachine: 1,
-              })),
-              leaseSeconds: 60,
-              processingDeadlineSeconds: 7200,
-              updatedAt: new Date(),
-              updatedByUid: 'system-bootstrap',
-            },
+      const policyModel = this.connection.model<WorkerFleetPolicy>(
+        WorkerFleetPolicy.name,
+      );
+      await policyModel.updateOne(
+        { _id: 'worker-fleet' },
+        {
+          $setOnInsert: {
+            revision: 0,
+            acceptClaims: true,
+            recipes: WORKER_RECIPE_IDS.map((recipeId) => ({
+              recipeId,
+              enabled: true,
+              maxSlotsPerMachine: 1,
+            })),
+            leaseSeconds: 60,
+            processingDeadlineSeconds: 7200,
+            updatedAt: new Date(),
+            updatedByUid: 'system-bootstrap',
           },
-          { upsert: true, setDefaultsOnInsert: true },
-        );
-      await this.backfillLegacyQueuedJobs();
+        },
+        { upsert: true, setDefaultsOnInsert: true },
+      );
+      const policy = await policyModel
+        .findById('worker-fleet')
+        .select({ revision: 1 })
+        .lean();
+      if (!policy) throw new Error('Worker fleet policy was not initialized');
+      const machineModel = this.connection.model<WorkerMachine>(
+        WorkerMachine.name,
+      );
+      await machineModel.updateMany(
+        {
+          status: { $ne: 'revoked' },
+          $or: [
+            { policyRevision: { $ne: policy.revision } },
+            { desiredRevision: { $ne: policy.revision } },
+          ],
+        },
+        {
+          $set: {
+            policyRevision: policy.revision,
+            desiredRevision: policy.revision,
+          },
+          $inc: { revision: 1 },
+        },
+        { runValidators: true },
+      );
     } catch (error) {
       throw new StartupDependencyError(
         'Worker fleet schema initialization failed',
         error,
       );
     }
-  }
-
-  private async backfillLegacyQueuedJobs(): Promise<void> {
-    const recipe = workerRecipeSnapshot(DEFAULT_WORKER_RECIPE_ID);
-    const remainingAttempts = {
-      $max: [
-        0,
-        {
-          $subtract: [
-            '$admissionSnapshot.maxInfrastructureAttempts',
-            { $ifNull: ['$attemptNumber', 0] },
-          ],
-        },
-      ],
-    };
-    await this.connection.model<Job>(Job.name).collection.updateMany(
-      {
-        status: 'queued',
-        deletedAt: null,
-        currentExecution: null,
-        inputObject: { $ne: null },
-        'admissionSnapshot.maxInfrastructureAttempts': {
-          $type: 'number',
-        },
-        $or: [{ recipeSnapshot: null }, { retryEligibility: null }],
-      },
-      [
-        {
-          $set: {
-            recipeSnapshot: { $ifNull: ['$recipeSnapshot', recipe] },
-            retryEligibility: {
-              $ifNull: [
-                '$retryEligibility',
-                {
-                  eligible: { $gt: [remainingAttempts, 0] },
-                  attemptsRemaining: remainingAttempts,
-                  nextAttemptAt: null,
-                },
-              ],
-            },
-          },
-        },
-      ],
-    );
   }
 }

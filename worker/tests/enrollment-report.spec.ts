@@ -104,18 +104,21 @@ describe("qualified enrollment report", () => {
         workerVersion: "0.1.0",
         protocolVersion: 1,
         modelDigest,
-        providerRuntimeVersion: "onnxruntime 1.30.0",
+        providerRuntimeVersion: "torch 2.14.0",
       },
       capabilities: [
         {
           platform: "darwin-arm64",
-          provider: "coreml",
+          provider: "mps",
           gpuId: "gpu0",
           maxSlots: 1,
         },
       ],
     });
-    expect(report.capabilities[0]?.recipeIds).toHaveLength(4);
+    expect(report.capabilities[0]?.recipeIds).toEqual([
+      "kim-vocals-v2",
+      "kim-vocals-v2-trim",
+    ]);
     expect(report.runtime.manifestDigest).toBe(
       createHash("sha256")
         .update(await readFile(join(release, "release-manifest.json")))
@@ -154,10 +157,10 @@ describe("qualified enrollment report", () => {
         }),
     });
 
-    expect(report.runtime.providerRuntimeVersion).toBe("onnxruntime 1.30.0");
+    expect(report.runtime.providerRuntimeVersion).toBe("torch 2.14.0");
     expect(report.capabilities[0]).toMatchObject({
       platform: "darwin-arm64",
-      provider: "coreml",
+      provider: "mps",
       maxSlots: 1,
     });
   });
@@ -241,8 +244,8 @@ describe("qualified enrollment report", () => {
       JSON.stringify({
         ...qualification("darwin-arm64", await releaseDigest(release)),
         providerDispatch: {
-          expectedProvider: "CoreMLExecutionProvider",
-          profileCount: 1,
+          expectedProvider: "MPS",
+          profileCount: 0,
           acceleratedNodeEvents: 6,
           cpuNodeEvents: 1,
           proven: false,
@@ -341,10 +344,8 @@ function doctor(platform: "darwin" | "win32") {
     python: platform === "darwin" ? "3.13.7" : "3.12.10",
     onnxRuntime: platform === "darwin" ? "1.30.0" : "1.24.4",
     audioSeparator: "0.47.0",
-    provider:
-      platform === "darwin"
-        ? "CoreMLExecutionProvider"
-        : "DmlExecutionProvider",
+    provider: platform === "darwin" ? "MPS" : "DmlExecutionProvider",
+    ...(platform === "darwin" ? { torch: "2.14.0" } : {}),
     modelSha256: modelDigest,
     modelBytes: 66_759_214,
     ffmpeg: "ffmpeg version 8.0.3 MusicMute",
@@ -363,7 +364,7 @@ function qualification(
   platform: "darwin-arm64" | "windows-amd64",
   releaseManifestDigest: string,
 ) {
-  const provider = platform === "darwin-arm64" ? "coreml" : "directml";
+  const provider = platform === "darwin-arm64" ? "mps" : "directml";
   return {
     schemaVersion: 1,
     status: "PASS",
@@ -376,11 +377,8 @@ function qualification(
     modelDigest,
     fixtureDigest: "a".repeat(64),
     providerDispatch: {
-      expectedProvider:
-        provider === "coreml"
-          ? "CoreMLExecutionProvider"
-          : "DmlExecutionProvider",
-      profileCount: 1,
+      expectedProvider: provider === "mps" ? "MPS" : "DmlExecutionProvider",
+      profileCount: provider === "mps" ? 0 : 1,
       acceleratedNodeEvents: 6,
       cpuNodeEvents: 0,
       proven: true,
@@ -399,8 +397,8 @@ function qualification(
         platform === "darwin-arm64"
           ? "/Library/Application Support/MusicMute/attempts/qualification.mp3"
           : "C:\\ProgramData\\MusicMute\\attempts\\qualification.mp3",
-      resultDigest: "4".repeat(64),
-      resultBytes: 10_000,
+      resultDigest: "5".repeat(64),
+      resultBytes: 10_001,
       contentType: "audio/mpeg",
     },
     totalSeconds: 20,

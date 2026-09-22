@@ -1,10 +1,10 @@
-export type RuntimeProvider = "coreml" | "directml";
+export type RuntimeProvider = "mps" | "directml";
 export type PlatformServiceKind = "launchd" | "windows-service";
 export type CredentialProtection =
   "posix-owner-only" | "ntfs-local-service-acl";
 
 export interface RuntimePlatformAdapter {
-  id: "macos-arm64-coreml-v1" | "windows-x64-directml-v1";
+  id: "macos-arm64-mps-v1" | "windows-x64-directml-v1";
   platform: NodeJS.Platform;
   arch: "arm64" | "x64";
   provider: RuntimeProvider;
@@ -16,10 +16,10 @@ export interface RuntimePlatformAdapter {
 
 const ADAPTERS: readonly RuntimePlatformAdapter[] = [
   {
-    id: "macos-arm64-coreml-v1",
+    id: "macos-arm64-mps-v1",
     platform: "darwin",
     arch: "arm64",
-    provider: "coreml",
+    provider: "mps",
     serviceKind: "launchd",
     credentialProtection: "posix-owner-only",
     credentialModeIsSafe: (mode) => (mode & 0o077) === 0,

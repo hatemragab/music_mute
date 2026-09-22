@@ -17,7 +17,7 @@ const requiredEnvironment = [
 ];
 
 test(
-  'installed macOS service completes a CoreML job through local API and real S3',
+  'installed macOS service completes an MPS job through local API and real S3',
   { timeout: 20 * 60_000 },
   async () => {
     for (const key of requiredEnvironment)
@@ -91,7 +91,7 @@ test(
       assert.equal(child.exitCode, 0, child.output);
       assert.match(
         child.output,
-        /WORKER_FLEET_INTEGRATION_OK storage=s3 platform=macos-coreml-service status=ready/,
+        /WORKER_FLEET_INTEGRATION_OK storage=s3 platform=macos-mps-service status=ready/,
       );
       assert.match(child.output, /WORKER_FLEET_S3_CLEANUP_OK deleted=2/);
     } finally {

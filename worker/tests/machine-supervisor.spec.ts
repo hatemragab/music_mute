@@ -19,14 +19,29 @@ describe("machine supervisor capacity", () => {
     ).not.toThrow();
   });
 
-  it("rejects multiple initial children for one GPU", () => {
+  it("rejects multiple children without validated capacity", () => {
     expect(
       () =>
         new MachineSupervisor([
           { workerId: randomUUID(), gpuId: "gpu-0", child },
           { workerId: randomUUID(), gpuId: "gpu-0", child },
         ]),
-    ).toThrow("one initial child per GPU");
+    ).toThrow("exceeds validated GPU capacity");
+  });
+
+  it("allows at most two children after capacity validation", () => {
+    const slots = [
+      { workerId: randomUUID(), gpuId: "gpu-0", child },
+      { workerId: randomUUID(), gpuId: "gpu-0", child },
+    ];
+    expect(() => new MachineSupervisor(slots, 2)).not.toThrow();
+    expect(
+      () =>
+        new MachineSupervisor(
+          [...slots, { workerId: randomUUID(), gpuId: "gpu-0", child }],
+          2,
+        ),
+    ).toThrow("exceeds validated GPU capacity");
   });
 
   it("replaces a terminated child even before its exit handler settles", async () => {

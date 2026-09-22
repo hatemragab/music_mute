@@ -83,6 +83,29 @@ describe("worker control-plane client", () => {
     });
   });
 
+  it("mints a short-lived hint ticket over HTTPS and derives the raw socket URL", async () => {
+    const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) =>
+      json({
+        ticket: "t".repeat(43),
+        path: "/api/v1/worker/v1/hints/socket",
+        expiresAt: new Date(Date.now() + 30_000).toISOString(),
+      }),
+    );
+    const client = new WorkerControlPlaneClient({
+      baseUrl: "https://api.music-mute.com/api/v1",
+      credential: "x".repeat(43),
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    await expect(client.hintTicket()).resolves.toMatchObject({
+      socketUrl: `wss://api.music-mute.com/api/v1/worker/v1/hints/socket?ticket=${"t".repeat(43)}`,
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://api.music-mute.com/api/v1/worker/v1/hints/ticket",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+  });
+
   it("parses pending remote commands from worker configuration", async () => {
     const client = new WorkerControlPlaneClient({
       baseUrl: "http://localhost/api/v1",

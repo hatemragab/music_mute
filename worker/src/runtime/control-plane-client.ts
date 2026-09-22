@@ -6,6 +6,7 @@ import {
   parseLeaseResponse,
   parseOutputGrantResponse,
   parseSessionResponse,
+  parseWorkerHintTicket,
   type ClaimResponse,
   type ConfigResponse,
   type InputGrantResponse,
@@ -131,6 +132,18 @@ export class WorkerControlPlaneClient {
         signal,
       ),
     );
+  }
+
+  async hintTicket(
+    signal?: AbortSignal,
+  ): Promise<{ socketUrl: string; expiresAt: string }> {
+    const ticket = parseWorkerHintTicket(
+      await this.request("worker/v1/hints/ticket", "POST", {}, signal),
+    );
+    const socketUrl = new URL(ticket.path, this.baseUrl);
+    socketUrl.protocol = socketUrl.protocol === "https:" ? "wss:" : "ws:";
+    socketUrl.searchParams.set("ticket", ticket.ticket);
+    return { socketUrl: socketUrl.toString(), expiresAt: ticket.expiresAt };
   }
 
   async applyConfig(
@@ -264,7 +277,8 @@ export class WorkerControlPlaneClient {
       trimEnabled: boolean;
       denoiseEnabled: boolean;
       outputFormat: "mp3";
-      outputBitrateKbps: 192;
+      outputBitrateKbps: 320;
+      stageTimings: Array<{ stage: string; durationMs: number }>;
     },
     signal?: AbortSignal,
   ): Promise<void> {

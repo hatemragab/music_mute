@@ -1,6 +1,6 @@
 {
   "name": "@musicmute/worker",
-  "version": "0.1.0",
+  "version": "0.1.0-mvp.34",
   "private": true,
   "description": "MusicMute machine supervisor and native processing child",
   "license": "Apache-2.0",
@@ -39,9 +39,11 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
     "oxlint": "^1.58.0",
     "prettier": "^3.4.2",
     "typescript": "~5.9.3",
-    "vitest": "^4.1.2"
+    "vitest": "^4.1.2",
+    "ws": "^8.21.3"
   }
 }

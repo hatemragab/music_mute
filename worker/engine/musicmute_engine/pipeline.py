@@ -88,7 +88,7 @@ class ProcessRequest:
         input_sha256 = input_value.get("sha256")
         if not isinstance(attempt_id, str) or not UUID_V4.fullmatch(attempt_id):
             raise ProcessingFailure("INVALID_REQUEST", "Attempt ID is invalid")
-        if provider not in ("coreml", "directml"):
+        if provider not in ("mps", "directml"):
             raise ProcessingFailure("INVALID_REQUEST", "Provider is invalid")
         if (
             isinstance(directml_device_id, bool)
@@ -158,6 +158,26 @@ class RuntimePipeline:
         )
         self._separator: VocalSeparator | None = None
         self._separator_key: tuple[Provider, Path, int] | None = None
+
+    def preload(
+        self,
+        model_cache_root: Path,
+        provider: Provider,
+        directml_device_id: int = 0,
+    ) -> None:
+        """Validate and load the stable model before this child accepts work."""
+        try:
+            model = verified_cached_model(model_cache_root)
+        except ModelArtifactError as error:
+            raise ProcessingFailure(
+                "MODEL_INVALID", "Qualified model is unavailable"
+            ) from error
+        try:
+            self._get_separator(provider, model, directml_device_id)
+        except SeparatorError as error:
+            raise ProcessingFailure(
+                "SEPARATOR_FAILED", "Vocal separator could not be preloaded"
+            ) from error
 
     def process(
         self, request: ProcessRequest, progress: Progress | None = None

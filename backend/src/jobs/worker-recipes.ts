@@ -5,7 +5,7 @@ import type { WorkerRecipeSnapshot } from './job.types.js';
 export const QUALIFIED_MODEL_DIGEST =
   'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b';
 export const QUALIFIED_MODEL_BYTES = 66_759_214;
-export const DEFAULT_WORKER_RECIPE_ID = 'kim-vocals-trim-v1' as const;
+export const DEFAULT_WORKER_RECIPE_ID = 'kim-vocals-v2-trim' as const;
 
 function canonical(value: unknown): string {
   if (
@@ -29,15 +29,14 @@ function canonical(value: unknown): string {
 
 function createRecipe(
   recipeId: WorkerRecipeId,
-  trimEnabled: boolean,
-  denoiseEnabled: boolean,
+  options: { trimEnabled?: boolean } = {},
 ): Readonly<WorkerRecipeSnapshot> {
+  const trimEnabled = options.trimEnabled === true;
   const stepIds: WorkerRecipeSnapshot['stepIds'] = [
     'prepare-pcm16-stereo-44100-v1',
     'separate-kim-vocal-2-v1',
-    ...(denoiseEnabled ? (['denoise-afftdn-conservative-v1'] as const) : []),
     ...(trimEnabled ? (['trim-vocal-gaps-v1'] as const) : []),
-    'encode-mp3-192k-v1',
+    'encode-mp3-320k-v1',
     'validate-audio-v1',
   ];
   const material: Omit<WorkerRecipeSnapshot, 'recipeDigest'> = {
@@ -50,11 +49,11 @@ function createRecipe(
     preparationProfileId: 'pcm16-stereo-44100-v1',
     stepIds,
     trimEnabled,
-    denoiseEnabled,
-    denoisePresetId: denoiseEnabled ? 'afftdn-conservative-v1' : null,
+    denoiseEnabled: false,
+    denoisePresetId: null,
     trimProfileId: trimEnabled ? 'trim-vocal-gaps-v1' : null,
     outputFormat: 'mp3',
-    outputBitrateKbps: 192,
+    outputBitrateKbps: 320,
   };
   return Object.freeze({
     ...material,
@@ -70,14 +69,10 @@ function createRecipe(
 export const WORKER_RECIPES: Readonly<
   Record<WorkerRecipeId, Readonly<WorkerRecipeSnapshot>>
 > = Object.freeze({
-  'kim-vocals-v1': createRecipe('kim-vocals-v1', false, false),
-  'kim-vocals-trim-v1': createRecipe('kim-vocals-trim-v1', true, false),
-  'kim-vocals-denoise-v1': createRecipe('kim-vocals-denoise-v1', false, true),
-  'kim-vocals-denoise-trim-v1': createRecipe(
-    'kim-vocals-denoise-trim-v1',
-    true,
-    true,
-  ),
+  'kim-vocals-v2': createRecipe('kim-vocals-v2'),
+  'kim-vocals-v2-trim': createRecipe('kim-vocals-v2-trim', {
+    trimEnabled: true,
+  }),
 });
 
 export function workerRecipeSnapshot(

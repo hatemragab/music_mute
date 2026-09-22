@@ -41,7 +41,7 @@ export class ApplyWorkerConfigDto extends WorkerConfigQueryDto {
 export class WorkerRecipePolicyDto {
   @IsIn(WORKER_RECIPE_IDS) recipeId!: WorkerRecipeId;
   @IsBoolean() enabled!: boolean;
-  @IsInt() @Min(1) @Max(16) maxSlotsPerMachine!: number;
+  @IsInt() @Min(1) @Max(2) maxSlotsPerMachine!: number;
 }
 
 export class UpdateWorkerFleetPolicyDto {
@@ -93,7 +93,7 @@ export class RequestWorkerBenchmarkDto {
   @IsUUID('4') operationId!: string;
   @IsInt() @Min(0) @Max(Number.MAX_SAFE_INTEGER - 1) expectedRevision!: number;
   @IsIn(WORKER_RECIPE_IDS) recipeId!: WorkerRecipeId;
-  @IsInt() @Min(1) @Max(5) iterations!: number;
+  @IsInt() @Min(1) @Max(1) iterations!: number;
   @Transform(trim) @IsString() @Length(1, 500) reason!: string;
 }
 

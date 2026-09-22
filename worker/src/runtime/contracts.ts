@@ -36,13 +36,19 @@ export interface WorkerRecipeSnapshot {
   denoisePresetId: "afftdn-conservative-v1" | null;
   trimProfileId: "trim-vocal-gaps-v1" | null;
   outputFormat: "mp3";
-  outputBitrateKbps: 192;
+  outputBitrateKbps: 320;
 }
 
 export interface SessionResponse {
   machineId: string;
   policyRevision: number;
   serverTime: string;
+}
+
+export interface WorkerHintTicket {
+  ticket: string;
+  path: string;
+  expiresAt: string;
 }
 
 export interface FleetPolicy {
@@ -168,7 +174,27 @@ export interface ChildProcessResult {
   trimEnabled: boolean;
   denoiseEnabled: boolean;
   outputFormat: "mp3";
-  outputBitrateKbps: 192;
+  outputBitrateKbps: 320;
+  stageTimings: WorkerProcessingStageTiming[];
+}
+
+export const WORKER_PROCESSING_STAGE_IDS = [
+  "modelValidation",
+  "inputIdentity",
+  "mediaValidation",
+  "preparation",
+  "modelLoad",
+  "separation",
+  "denoise",
+  "trim",
+  "encode",
+  "outputValidation",
+] as const;
+export type WorkerProcessingStageId =
+  (typeof WORKER_PROCESSING_STAGE_IDS)[number];
+export interface WorkerProcessingStageTiming {
+  stage: WorkerProcessingStageId;
+  durationMs: number;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -326,9 +352,9 @@ function recipe(value: unknown): WorkerRecipeSnapshot {
     outputBitrateKbps: integer(
       item.outputBitrateKbps,
       "recipe.outputBitrateKbps",
-      192,
-      192,
-    ) as 192,
+      320,
+      320,
+    ) as 320,
   };
 }
 
@@ -370,6 +396,23 @@ export function parseSessionResponse(value: unknown): SessionResponse {
   };
 }
 
+export function parseWorkerHintTicket(value: unknown): WorkerHintTicket {
+  const item = record(value, "worker hint ticket");
+  const expiresAt = isoTimestamp(item.expiresAt, "expiresAt");
+  if (Date.parse(expiresAt) <= Date.now())
+    throw new TypeError("Worker hint ticket is expired");
+  return {
+    ticket: text(item.ticket, "ticket", /^[A-Za-z0-9_-]{43}$/u, 43),
+    path: text(
+      item.path,
+      "path",
+      /^\/api\/v1\/worker\/v1\/hints\/socket$/u,
+      128,
+    ),
+    expiresAt,
+  };
+}
+
 export function parseConfigResponse(value: unknown): ConfigResponse {
   const item = record(value, "config response");
   const policy = record(item.policy, "policy");
@@ -406,7 +449,7 @@ export function parseConfigResponse(value: unknown): ConfigResponse {
             current.maxSlotsPerMachine,
             `policy.recipes[${index}].maxSlotsPerMachine`,
             1,
-            16,
+            2,
           ),
         };
       }),
@@ -456,7 +499,7 @@ function parseRemoteCommand(
   const iterations =
     item.iterations === null
       ? null
-      : integer(item.iterations, `commands[${index}].iterations`, 1, 5);
+      : integer(item.iterations, `commands[${index}].iterations`, 1, 1);
   if (
     (kind === "doctor" &&
       (checks.length === 0 || recipeId !== null || iterations !== null)) ||
@@ -590,6 +633,13 @@ export function parseOutputGrantResponse(value: unknown): OutputGrantResponse {
 
 export function parseChildProcessResult(value: unknown): ChildProcessResult {
   const item = record(value, "child result");
+  const rawStageTimings = record(item.stageTimings, "stageTimings");
+  const unknownStages = Object.keys(rawStageTimings).filter(
+    (stage) =>
+      !WORKER_PROCESSING_STAGE_IDS.includes(stage as WorkerProcessingStageId),
+  );
+  if (unknownStages.length > 0)
+    throw new TypeError("stageTimings contains an unknown processing stage");
   return {
     attemptId: text(item.attemptId, "attemptId", UUID_V4, 36),
     outputPath: text(item.outputPath, "outputPath", undefined, 4096),
@@ -616,8 +666,20 @@ export function parseChildProcessResult(value: unknown): ChildProcessResult {
     outputBitrateKbps: integer(
       item.outputBitrateKbps,
       "outputBitrateKbps",
-      192,
-      192,
-    ) as 192,
+      320,
+      320,
+    ) as 320,
+    stageTimings: WORKER_PROCESSING_STAGE_IDS.flatMap((stage) => {
+      const seconds = rawStageTimings[stage];
+      if (seconds === undefined) return [];
+      return [
+        {
+          stage,
+          durationMs: Math.round(
+            numberValue(seconds, `stageTimings.${stage}`, 0, 7_200) * 1_000,
+          ),
+        },
+      ];
+    }),
   };
 }
