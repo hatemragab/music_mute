@@ -120,7 +120,7 @@ function policy(revision = 3) {
     revision,
     acceptClaims: true,
     recipes: [
-      { recipeId: 'kim-vocals-trim-v1', enabled: true, maxSlotsPerMachine: 1 },
+      { recipeId: 'kim-vocals-v2', enabled: true, maxSlotsPerMachine: 1 },
     ],
     leaseSeconds: 60,
     processingDeadlineSeconds: 900,
@@ -140,7 +140,7 @@ describe('worker control plane', () => {
             platform: 'windows-amd64',
             provider: 'directml',
             gpuId: '0',
-            recipeIds: ['kim-vocals-trim-v1'],
+            recipeIds: ['kim-vocals-v2'],
             maxSlots: 1,
           },
         ],
@@ -442,7 +442,7 @@ describe('worker control plane', () => {
       acceptClaims: true,
       recipes: [
         {
-          recipeId: 'kim-vocals-trim-v1',
+          recipeId: 'kim-vocals-v2',
           enabled: true,
           maxSlotsPerMachine: 2,
         },
@@ -473,7 +473,7 @@ describe('worker control plane', () => {
         acceptClaims: true,
         recipes: [
           {
-            recipeId: 'kim-vocals-trim-v1',
+            recipeId: 'kim-vocals-v2',
             enabled: true,
             maxSlotsPerMachine: 1,
           },

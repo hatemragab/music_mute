@@ -13,10 +13,16 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import verified_cached_model
+from .provider_adapter import discover_provider
 from .recipes import MODEL_BYTES, MODEL_SHA256
 
-EXPECTED_PYTHON = {"coreml": (3, 13), "directml": (3, 12)}
-EXPECTED_ONNXRUNTIME = {"coreml": "1.30.0", "directml": "1.24.4"}
+EXPECTED_PYTHON = {"mps": (3, 13), "directml": (3, 12)}
+EXPECTED_ONNXRUNTIME = {
+    "mps": "1.30.0",
+    "directml": "1.24.4",
+}
+EXPECTED_TORCH = "2.14.0"
+EXPECTED_ONNX2PYTORCH = "0.5.1"
 EXPECTED_AUDIO_SEPARATOR = "0.47.0"
 EXPECTED_FFMPEG = "8.0.3"
 OUTPUT_LIMIT = 16 * 1024
@@ -33,7 +39,7 @@ class ServiceDoctorError(RuntimeError):
 
 
 def collect_diagnostics(
-    *, model_cache: Path, ffmpeg: Path, ffprobe: Path, provider: str = "coreml"
+    *, model_cache: Path, ffmpeg: Path, ffprobe: Path, provider: str = "mps"
 ) -> dict[str, Any]:
     system, architecture, distribution, provider_name = accepted_runtime(provider)
     if sys.version_info[:2] != EXPECTED_PYTHON[provider]:
@@ -47,16 +53,32 @@ def collect_diagnostics(
         raise ServiceDoctorError("ONNX Runtime version is not accepted")
     if separator_version != EXPECTED_AUDIO_SEPARATOR:
         raise ServiceDoctorError("Audio Separator version is not accepted")
+    torch_version: str | None = None
+    if provider == "mps":
+        try:
+            torch_version = importlib.metadata.version("torch")
+            converter_version = importlib.metadata.version("onnx2pytorch")
+            import torch
+        except (ImportError, importlib.metadata.PackageNotFoundError) as error:
+            raise ServiceDoctorError("UVR MPS runtime is incomplete") from error
+        if (
+            torch_version != EXPECTED_TORCH
+            or converter_version != EXPECTED_ONNX2PYTORCH
+            or not torch.backends.mps.is_built()
+            or not torch.backends.mps.is_available()
+        ):
+            raise ServiceDoctorError("UVR MPS runtime is not accepted")
     try:
         import onnxruntime as ort
     except ImportError as error:
         raise ServiceDoctorError("ONNX Runtime is unavailable") from error
-    providers = ort.get_available_providers()
-    if provider_name not in providers:
+    if provider == "mps":
+        discover_provider("mps", 0)
+    elif provider_name not in ort.get_available_providers():
         raise ServiceDoctorError("Accepted execution provider is unavailable")
     conflicting = (
         ("onnxruntime-directml",)
-        if provider == "coreml"
+        if provider == "mps"
         else ("onnxruntime", "onnxruntime-gpu")
     )
     for package in conflicting:
@@ -73,6 +95,7 @@ def collect_diagnostics(
         "architecture": architecture,
         "python": platform.python_version(),
         "onnxRuntime": onnx_version,
+        **({"torch": torch_version} if torch_version is not None else {}),
         "audioSeparator": separator_version,
         "provider": provider_name,
         "modelSha256": MODEL_SHA256,
@@ -84,10 +107,10 @@ def collect_diagnostics(
 
 
 def accepted_runtime(provider: str) -> tuple[str, str, str, str]:
-    if provider == "coreml":
+    if provider == "mps":
         if platform.system() != "Darwin" or platform.machine() != "arm64":
             raise ServiceDoctorError("Service host is not Darwin ARM64")
-        return "darwin", "arm64", "onnxruntime", "CoreMLExecutionProvider"
+        return "darwin", "arm64", "onnxruntime", "MPS"
     if provider == "directml":
         if platform.system() != "Windows" or platform.machine().lower() not in {
             "amd64",
@@ -171,7 +194,7 @@ def _media_command(path: Path, arguments: tuple[str, ...], limit: int) -> bytes:
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
-        "--provider", choices=("coreml", "directml"), default="coreml"
+        "--provider", choices=("mps", "directml"), default="mps"
     )
     parser.add_argument("--model-cache", type=Path, required=True)
     parser.add_argument("--ffmpeg", type=Path, required=True)

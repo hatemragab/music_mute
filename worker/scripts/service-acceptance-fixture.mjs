@@ -26,11 +26,11 @@ let claimed = false;
 let completed = false;
 
 const recipe = {
-  recipeId: "kim-vocals-trim-v1",
+  recipeId: "kim-vocals-v2",
   recipeRevision: 1,
   protocolVersion: 1,
   recipeDigest:
-    "1a70379331fafb360f4cd388e17f4c6ce511031e4082f34ba63676957d8c34c3",
+    "a1b3be857b9604429edf9b9cc48df6a84be2bcf4a2bb9a2da2c4e829f1d6ef52",
   modelFilename: "Kim_Vocal_2.onnx",
   modelDigest:
     "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b",
@@ -39,16 +39,15 @@ const recipe = {
   stepIds: [
     "prepare-pcm16-stereo-44100-v1",
     "separate-kim-vocal-2-v1",
-    "trim-vocal-gaps-v1",
-    "encode-mp3-192k-v1",
+    "encode-mp3-320k-v1",
     "validate-audio-v1",
   ],
-  trimEnabled: true,
+  trimEnabled: false,
   denoiseEnabled: false,
   denoisePresetId: null,
-  trimProfileId: "trim-vocal-gaps-v1",
+  trimProfileId: null,
   outputFormat: "mp3",
-  outputBitrateKbps: 192,
+  outputBitrateKbps: 320,
 };
 
 function send(response, status, value) {

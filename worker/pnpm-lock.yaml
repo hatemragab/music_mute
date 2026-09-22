@@ -10,6 +10,9 @@ importers:
       "@types/node":
         specifier: ^24.0.0
         version: 24.13.6
+      "@types/ws":
+        specifier: ^8.18.1
+        version: 8.18.1
       oxlint:
         specifier: ^1.58.0
         version: 1.83.0
@@ -22,6 +25,9 @@ importers:
       vitest:
         specifier: ^4.1.2
         version: 4.1.11(@types/node@24.13.6)(vite@8.3.0(@types/node@24.13.6))
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
 
 packages:
   "@jridgewell/sourcemap-codec@1.6.0":
@@ -376,6 +382,12 @@ packages:
     resolution:
       {
         integrity: sha512-SGrw/h3KPFshy3OE6ZL53LMBG5vGQQ8/gIpiqz/kRZhPJ7HgwCEs8LBuNtWLa8dvGZVpSF7+Bf+c11HUrCb/yg==,
+      }
+
+  "@types/ws@8.18.1":
+    resolution:
+      {
+        integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==,
       }
 
   "@vitest/expect@4.1.11":
@@ -843,6 +855,21 @@ packages:
     engines: { node: ">=8" }
     hasBin: true
 
+  ws@8.21.3:
+    resolution:
+      {
+        integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==,
+      }
+    engines: { node: ">=10.0.0" }
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: ">=5.0.2"
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
 snapshots:
   "@jridgewell/sourcemap-codec@1.6.0": {}
 
@@ -966,6 +993,10 @@ snapshots:
   "@types/node@24.13.6":
     dependencies:
       undici-types: 7.18.2
+
+  "@types/ws@8.18.1":
+    dependencies:
+      "@types/node": 24.13.6
 
   "@vitest/expect@4.1.11":
     dependencies:
@@ -1210,3 +1241,5 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  ws@8.21.3: {}

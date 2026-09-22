@@ -108,7 +108,7 @@ export class WorkerCapabilityDto {
   @ArrayMaxSize(16)
   @IsIn(WORKER_RECIPE_IDS, { each: true })
   recipeIds!: WorkerRecipeId[];
-  @IsInt() @Min(1) @Max(16) maxSlots!: number;
+  @IsInt() @Min(1) @Max(2) maxSlots!: number;
 }
 
 export class ReportWorkerInstallationDto {

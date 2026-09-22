@@ -9,15 +9,15 @@ import {
 } from "../agent/child-process.js";
 import { MachineSupervisor } from "../agent/machine-supervisor.js";
 import { WorkerControlPlaneClient } from "../runtime/control-plane-client.js";
+import { WorkerHintClient } from "../runtime/worker-hint-client.js";
 import { loadRuntimeConfig } from "../runtime/runtime-config.js";
 import { PackagedRuntimeCommandExecutor } from "../runtime/remote-command-executor.js";
 import { WorkerTransferClient } from "../runtime/transfers.js";
 import { WorkerRuntime } from "../runtime/worker-runtime.js";
 import {
-  MACOS_USAGE,
-  macosCommandErrorSummary,
-  runMacosCommand,
-} from "../platform/macos/cli.js";
+  MAC_PACKAGE_USAGE,
+  runMacPackageCommand,
+} from "../platform/macos/package-cli.js";
 import {
   MAC_USER_USAGE,
   runMacUserCommand,
@@ -33,7 +33,6 @@ import {
   runEnrollmentCommand,
   runInstallationPreparationCommand,
 } from "../enrollment/cli.js";
-import { runMacLegacyCleanupCommand } from "../platform/macos/legacy-cleanup.js";
 import { createMacUserLayout } from "../platform/macos/user-paths.js";
 import {
   appendMacFatalError,
@@ -55,6 +54,7 @@ const macUserCommands = new Set([
   "resume",
   "update",
   "benchmark",
+  "benchmark-file",
   "unpair",
   "uninstall",
 ]);
@@ -67,15 +67,6 @@ if (command === "--help" || command === "help") {
   } catch (error) {
     console.error(
       `MusicMute worker command: FAILED (${error instanceof Error ? error.message : "unknown error"})\n${MAC_USER_USAGE}`,
-    );
-    process.exitCode = error instanceof TypeError ? 2 : 1;
-  }
-} else if (command === "legacy-cleanup") {
-  try {
-    process.exitCode = await runMacLegacyCleanupCommand(process.argv.slice(3));
-  } catch (error) {
-    console.error(
-      `MusicMute legacy cleanup: FAILED (${error instanceof Error ? error.message : "unknown error"})`,
     );
     process.exitCode = error instanceof TypeError ? 2 : 1;
   }
@@ -100,12 +91,12 @@ if (command === "--help" || command === "help") {
   } finally {
     await child.stop();
   }
-} else if (command === "macos") {
+} else if (command === "package-macos") {
   try {
-    await runMacosCommand(process.argv.slice(3));
+    await runMacPackageCommand(process.argv.slice(3));
   } catch (error) {
     console.error(
-      `MusicMute macOS service command: FAILED (${macosCommandErrorSummary(error)})\n${MACOS_USAGE}`,
+      `MusicMute macOS package: FAILED (${error instanceof Error ? error.message : "operation failed"})\n${MAC_PACKAGE_USAGE}`,
     );
     process.exitCode = 1;
   }
@@ -160,13 +151,23 @@ if (command === "--help" || command === "help") {
           gpuId: slot.gpuId,
           child: {
             command: config.pythonPath,
-            args: ["-m", "musicmute_engine.child"],
+            args: [
+              "-m",
+              "musicmute_engine.child",
+              "--model-cache-root",
+              config.modelCacheRoot,
+              "--provider",
+              slot.provider,
+              "--directml-device-id",
+              String(slot.directmlDeviceId ?? 0),
+            ],
             cwd: config.engineRoot,
             env: { MUSICMUTE_PROVIDER: slot.provider },
             trustedExecutableDirectory: dirname(config.ffmpegPath),
             requestTimeoutMs: 7_200_000,
           },
         })),
+        config.validatedMaxWorkersPerGpu,
       );
       const control = new WorkerControlPlaneClient({
         baseUrl: config.backendBaseUrl,
@@ -200,6 +201,7 @@ if (command === "--help" || command === "help") {
         {
           machineId: config.machineId,
           slots: config.slots,
+          validatedMaxWorkersPerGpu: config.validatedMaxWorkersPerGpu,
           workRoot: config.workRoot,
           ...(config.localLifecyclePath === undefined
             ? {}
@@ -211,6 +213,7 @@ if (command === "--help" || command === "help") {
           ffmpegPath: config.ffmpegPath,
           ffprobePath: config.ffprobePath,
           commandExecutor,
+          hintClientFactory: (onHint) => new WorkerHintClient(control, onHint),
           onEvent: (event) => {
             console.log(JSON.stringify(event));
             if (logLayout !== null && Date.now() >= nextLogMaintenanceAt) {

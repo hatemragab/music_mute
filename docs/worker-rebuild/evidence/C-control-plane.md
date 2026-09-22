@@ -162,10 +162,12 @@ which permits same-request response recovery without storing plaintext.
   fencing. The machine stores the highest acknowledged diagnostic sequence.
 - Extended the independent dashboard-route inventory with all C6 permissions,
   role boundaries, fresh-auth requirements, rate classes and DTO validation.
-- No WebSocket/Redis delivery path was made authoritative. The runtime branch
-  can add bounded presence/progress/cancellation hints when it has a real
-  consumer; configuration, commands, claims, leases and results already
-  reconcile durably over HTTPS and MongoDB.
+- Added a bounded raw WebSocket delivery path backed by Redis fan-out. A worker
+  mints a 30-second, one-use socket ticket through its authenticated HTTPS
+  machine route; no permanent credential appears in the socket protocol.
+  Work, policy and command messages are receive-only hints that coalesce into
+  the existing reconciliation wake-up. Socket loss, Redis delivery loss and
+  backend restart still converge through HTTPS polling and MongoDB authority.
 
 ## Verification
 

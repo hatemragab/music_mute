@@ -88,10 +88,7 @@ function isQualified(dto: {
   return dto.capabilities.every((capability) => {
     if (!gpuIds.has(capability.gpuId)) return false;
     if (!capability.recipeIds.includes(DEFAULT_WORKER_RECIPE_ID)) return false;
-    if (
-      capability.platform === 'darwin-arm64' &&
-      capability.provider === 'coreml'
-    )
+    if (capability.platform === 'darwin-arm64' && capability.provider === 'mps')
       return (
         ['arm64', 'aarch64'].includes(architecture) &&
         (os.includes('darwin') || os.includes('mac'))

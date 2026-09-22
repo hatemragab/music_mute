@@ -18,6 +18,7 @@ describe('admin job queries and privacy', () => {
       queuedAt: new Date(0),
       validatingAt: new Date(10000),
       processingStartedAt: null,
+      workerStageTimings: [{ stage: 'separation', durationMs: 1_500 }],
       inputReservation: {},
     } as unknown as Job;
     const actor = { permissions: ['jobs.read'] } as unknown as AdminActor;
@@ -30,6 +31,9 @@ describe('admin job queries and privacy', () => {
       shown.stageTimings?.find((stage) => stage.stage === 'validating')
         ?.durationSeconds,
     ).toBeNull();
+    expect(shown.workerStageTimings).toEqual([
+      { stage: 'separation', durationMs: 1_500 },
+    ]);
   });
   it('preserves validated server operators when query sanitization is active', () => {
     const args = {

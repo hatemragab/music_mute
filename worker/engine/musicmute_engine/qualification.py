@@ -21,11 +21,16 @@ from .media import sha256_base64
 from .pipeline import ProcessRequest, RuntimePipeline
 from .provider_adapter import (
     CPU_PROVIDER,
-    COREML_PROVIDER,
     DIRECTML_PROVIDER,
     Provider,
+    discover_provider,
 )
-from .recipes import MODEL_SHA256, RECIPE_DEFINITIONS, recipe_snapshot
+from .recipes import (
+    DEFAULT_RECIPE_ID,
+    MODEL_SHA256,
+    RECIPE_DEFINITIONS,
+    recipe_snapshot,
+)
 from .separator import KimSeparator
 from .service_doctor import collect_diagnostics
 
@@ -127,12 +132,9 @@ def summarize_profiles(
 
 def selected_recipe_ids(arguments: argparse.Namespace) -> list[str]:
     selected_recipe = getattr(arguments, "recipe_id", None)
-    iterations = getattr(arguments, "iterations", 1)
-    return (
-        [selected_recipe] * iterations
-        if selected_recipe is not None
-        else list(RECIPE_DEFINITIONS)
-    )
+    if selected_recipe is not None:
+        return [selected_recipe] * getattr(arguments, "iterations", 1)
+    return list(RECIPE_DEFINITIONS)
 
 
 def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
@@ -203,6 +205,15 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
     results: list[dict[str, object]] = []
     upload_candidate: dict[str, object] | None = None
     started = time.monotonic()
+    preload_started = time.monotonic()
+    pipeline.preload(
+        arguments.model_cache.resolve(strict=True),
+        arguments.provider,
+        arguments.directml_device_id,
+    )
+    preload_seconds = time.monotonic() - preload_started
+    if not math.isfinite(preload_seconds) or preload_seconds <= 0:
+        raise QualificationError("Qualification preload timing is invalid")
     profile_paths: tuple[Path, ...] = ()
     try:
         selected_recipe = getattr(arguments, "recipe_id", None)
@@ -248,10 +259,11 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
                     "sourceDurationSeconds": result["sourceDurationSeconds"],
                     "outputDurationSeconds": result["measuredOutputDurationSeconds"],
                     "endToEndSeconds": elapsed,
+                    "stageTimings": result["stageTimings"],
                 }
             )
             if upload_candidate is None and (
-                selected_recipe is not None or recipe_id == "kim-vocals-v1"
+                selected_recipe is not None or recipe_id == DEFAULT_RECIPE_ID
             ):
                 upload_candidate = {
                     "path": str(output),
@@ -261,11 +273,12 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
                 }
         if len(captured) != 1:
             raise QualificationError("Qualification did not use one stable Kim runtime")
-        profile_paths = captured[0].finish_profiles()
-        expected_provider = (
-            COREML_PROVIDER if arguments.provider == "coreml" else DIRECTML_PROVIDER
-        )
-        dispatch = summarize_profiles(profile_paths, expected_provider)
+        if arguments.provider == "mps":
+            discover_provider("mps", arguments.directml_device_id)
+            dispatch = captured[0].mps_dispatch_evidence()
+        else:
+            profile_paths = captured[0].finish_profiles()
+            dispatch = summarize_profiles(profile_paths, DIRECTML_PROVIDER)
         if not dispatch["proven"]:
             raise QualificationError("Accelerated provider dispatch was not proven")
     finally:
@@ -292,6 +305,7 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
         "providerDispatch": dispatch,
         "recipes": results,
         "uploadCandidate": upload_candidate,
+        "preloadSeconds": preload_seconds,
         "totalSeconds": total_seconds,
     }
 
@@ -316,7 +330,7 @@ def write_private_report(path: Path, report: dict[str, object]) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--provider", choices=("coreml", "directml"), required=True)
+    parser.add_argument("--provider", choices=("mps", "directml"), required=True)
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--fixture-sha256", required=True)
     parser.add_argument("--work-root", type=Path, required=True)
@@ -352,10 +366,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--fixture-sha256 must be lowercase hexadecimal SHA-256")
     if not 0 <= arguments.directml_device_id <= 15:
         parser.error("--directml-device-id must be between 0 and 15")
-    if not 1 <= arguments.iterations <= 5:
-        parser.error("--iterations must be between 1 and 5")
-    if arguments.recipe_id is None and arguments.iterations != 1:
-        parser.error("--iterations requires --recipe-id")
+    if arguments.iterations not in (1, 2):
+        parser.error("--iterations must be 1 or 2")
+    if arguments.iterations == 2 and arguments.recipe_id is None:
+        parser.error("--iterations 2 requires --recipe-id")
     return arguments
 
 

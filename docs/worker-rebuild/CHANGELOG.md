@@ -1,5 +1,28 @@
 # Package changes
 
+## Revision 4.31
+
+- Restored the preserved vocal-gap trimmer as the post-separation,
+  pre-encoding `trim-vocal-gaps-v1` stage without adding a second model.
+- Added `kim-vocals-v2-trim` as the backend default while retaining
+  `kim-vocals-v2` for untrimmed comparison and rollback.
+- The trim stage keeps the reference 10 ms louder-channel RMS analysis,
+  -45 dBFS threshold, 0.8-second minimum silence, 0.2-second padding, 5 ms
+  fades, PCM16 quantization, and all-silent preservation.
+- Offline file benchmarking accepts either frozen recipe and reports trim time
+  independently from separation and MP3 encoding.
+
+## Revision 4.30
+
+- Replaced the macOS CoreML contract with UVR5's PyTorch MPS execution path:
+  `onnx.load` plus `onnx2pytorch.ConvertModel`, resident on Apple MPS and warmed
+  once before the worker announces readiness.
+- Reduced the processing catalog to one `kim-vocals-v2` pass with UVR default
+  MDX windowing, no trim, no denoise, vocals-only output, and 320 kbps MP3.
+- Local and remote file benchmarks now accept exactly one pass. Backend,
+  dashboard, protocol, qualification, doctor, installer, updater, and tests use
+  the same breaking local-development contract.
+
 ## Revision 4.29
 
 - Identified the production output-upload failure as a worker/backend signed
@@ -549,7 +572,7 @@ production readiness. Those remain D4-D6 and later integration gates.
 ## Revision 4.0
 
 - Completed checkpoint D2 with the four frozen Kim recipe combinations, a
-  deterministic cross-language recipe digest and `kim-vocals-trim-v1` as the
+  deterministic cross-language recipe digest and `kim-vocals-trim-v2` as the
   initial default.
 - Added exact content-addressed model verification/installation, bounded local
   media probing, PCM16 stereo 44.1 kHz preparation, the qualified CoreML/

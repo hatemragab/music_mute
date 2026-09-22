@@ -26,6 +26,7 @@ export interface MacUserLayout {
   unpairReceiptPath: string;
   commandLockPath: string;
   runtimeStatusPath: string;
+  capacityValidationPath: string;
   stdoutPath: string;
   stderrPath: string;
   launchAgentsRoot: string;
@@ -75,6 +76,7 @@ export function createMacUserLayout(homeRoot: string): MacUserLayout {
     unpairReceiptPath: join(stateRoot, "unpaired.json"),
     commandLockPath: join(stateRoot, "command.lock"),
     runtimeStatusPath: join(stateRoot, "runtime-status.json"),
+    capacityValidationPath: join(stateRoot, "capacity-validation.json"),
     stdoutPath: join(logRoot, "worker.stdout.log"),
     stderrPath: join(logRoot, "worker.stderr.log"),
     launchAgentsRoot,

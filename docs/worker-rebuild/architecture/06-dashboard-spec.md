@@ -41,13 +41,13 @@ history rather than remaining visually pending forever.
 
 Separate two panels:
 
-**New-job defaults:** Choose one of the four Kim recipe combinations and approved trim/bitrate/preset parameters. Publishing a change creates a new immutable recipe/settings revision. Clearly state: applies to new jobs only; queued/running jobs retain their snapshot. Preview the order `Kim → optional denoise → optional trim → encode`.
+**New-job defaults:** The only supported processing contract is `Kim Vocal 2 → 320 kbps MP3`. Publishing a change creates a new immutable recipe/settings revision. Clearly state: applies to new jobs only; queued/running jobs retain their snapshot.
 
-**Machine/worker eligibility:** Allow or disallow supported recipe IDs and optional steps for this machine; a slot may narrow these choices. The UI identifies the installed model as **Kim Vocal 2** and renders raw IDs such as `kim-vocals-trim-v1` only as secondary recipe-contract metadata; the ID's `v1` suffix must not be presented as the model generation. The UI uses labels such as `Accept denoise-required jobs` so disabling it is not mistaken for silently bypassing a job requirement. The backend remains the eligibility authority.
+**Machine/worker eligibility:** Allow or disallow `kim-vocals-v2` for this machine; a slot may narrow this choice. The UI identifies the installed model as **Kim Vocal 2** and renders the raw recipe ID only as secondary contract metadata. The backend remains the eligibility authority.
 
 Warn if a policy change leaves a queued recipe with no eligible capacity. Show queued jobs as waiting for compatible workers rather than changing their audio recipe. Provide a separate global default change action for future jobs. Do not mutate recipes in place to clear the queue.
 
-Expose basic trim settings with validation and explanation that qualifying **internal gaps are removed**. Initial defaults: -45 dBFS, 0.8 s minimum silence, 0.2 s padding; trim enabled. Denoise is disabled by default and offers the single approved conservative preset. Do not offer arbitrary FFmpeg filters, Python snippets, model URLs or drag-and-drop graph editing.
+Do not expose trim, denoise, overlap, segment, model, provider, or arbitrary FFmpeg controls while this single UVR-compatible recipe is frozen.
 
 ## 5. Worker release visibility
 

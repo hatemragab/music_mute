@@ -16,7 +16,7 @@ from .recipes import RECIPE_DEFINITIONS, recipe_snapshot
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--provider", choices=("coreml", "directml"), required=True)
+    parser.add_argument("--provider", choices=("mps", "directml"), required=True)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--work-root", type=Path, required=True)
     parser.add_argument("--model-cache", type=Path, required=True)

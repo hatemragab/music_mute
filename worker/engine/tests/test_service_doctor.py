@@ -14,6 +14,16 @@ from musicmute_engine.service_doctor import (
 
 
 class ServiceDoctorTests(unittest.TestCase):
+    def test_accepts_the_declared_mps_host(self) -> None:
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("platform.machine", return_value="arm64"),
+        ):
+            self.assertEqual(
+                accepted_runtime("mps"),
+                ("darwin", "arm64", "onnxruntime", "MPS"),
+            )
+
     def test_accepts_only_the_declared_directml_host(self) -> None:
         with (
             mock.patch("platform.system", return_value="Windows"),

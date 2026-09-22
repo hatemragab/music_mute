@@ -10,6 +10,7 @@ import type {
   WorkerExecutionOwnership,
   WorkerRecipeSnapshot,
   WorkerRetryEligibility,
+  WorkerProcessingStageTiming,
 } from './job.types.js';
 import { isSha256 } from './job-state.js';
 import { isAudioName, YOUTUBE_SOURCE_URL_PATTERN } from './job-metadata.js';
@@ -17,6 +18,21 @@ import {
   WORKER_RECIPE_IDS,
   WORKER_RECIPE_STEP_IDS,
 } from '../worker-fleet/protocol/v1/protocol.js';
+import { WORKER_PROCESSING_STAGE_IDS } from '../worker-fleet/worker-fleet.types.js';
+
+const processingStageTiming = new MongoSchema<WorkerProcessingStageTiming>(
+  {
+    stage: { type: String, required: true, enum: WORKER_PROCESSING_STAGE_IDS },
+    durationMs: {
+      type: Number,
+      required: true,
+      min: 0,
+      max: 7_200_000,
+      validate: Number.isSafeInteger,
+    },
+  },
+  { _id: false, strict: 'throw' },
+);
 
 const objectIdentity = new MongoSchema<ObjectIdentity>(
   {
@@ -180,7 +196,7 @@ const workerRecipeSnapshot = new MongoSchema<WorkerRecipeSnapshot>(
       default: null,
     },
     outputFormat: { type: String, required: true, enum: ['mp3'] },
-    outputBitrateKbps: { type: Number, required: true, enum: [192] },
+    outputBitrateKbps: { type: Number, required: true, enum: [320] },
   },
   { _id: false, strict: 'throw' },
 );
@@ -341,6 +357,8 @@ export class Job {
   @Prop({ type: Date, default: null }) validatingAt!: Date | null;
   @Prop({ type: Date, default: null }) processingStartedAt!: Date | null;
   @Prop({ type: Date, default: null }) processingFinishedAt!: Date | null;
+  @Prop({ type: [processingStageTiming], default: [] })
+  workerStageTimings!: WorkerProcessingStageTiming[];
   @Prop({
     type: Number,
     default: null,

@@ -5,6 +5,7 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { configureHttp } from './http/configure-http.js';
 import { startupFailureReason } from './startup-error.js';
+import { WorkerHintService } from './worker-hints/worker-hint.service.js';
 
 async function bootstrap() {
   const { AppModule } = await import('./app.module.js');
@@ -15,6 +16,7 @@ async function bootstrap() {
   });
   app.useLogger(new ConsoleLogger({ json: true }));
   configureHttp(app);
+  app.get(WorkerHintService).attach(app.getHttpServer());
   const config = app.get(ConfigService);
   await app.listen(
     config.getOrThrow<number>('PORT'),

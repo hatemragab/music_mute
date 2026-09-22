@@ -1,4 +1,4 @@
-"""Explicit provider discovery and ONNX session-creation adapters."""
+"""Explicit GPU provider discovery and ONNX session-creation adapters."""
 
 from __future__ import annotations
 
@@ -9,8 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Literal
 
-Provider = Literal["coreml", "directml"]
-COREML_PROVIDER = "CoreMLExecutionProvider"
+Provider = Literal["mps", "directml"]
 DIRECTML_PROVIDER = "DmlExecutionProvider"
 CPU_PROVIDER = "CPUExecutionProvider"
 RUNTIME_DISTRIBUTIONS = (
@@ -51,6 +50,8 @@ class ProviderAdapter:
         machine = platform.machine().lower()
         if system not in self.systems or machine not in self.machines:
             raise ProviderAdapterError("Worker platform does not match the provider lock")
+        if self.provider == "mps":
+            return _discover_mps(self, system, machine, device_id)
         installed = {
             name for name in RUNTIME_DISTRIBUTIONS if _package_version(name) is not None
         }
@@ -75,37 +76,23 @@ class ProviderAdapter:
         self, ort: Any, device_id: int
     ) -> tuple[Any, list[object]]:
         options = ort.SessionOptions()
-        if self.provider == "coreml":
-            selected: list[object] = [
-                (
-                    COREML_PROVIDER,
-                    {
-                        "MLComputeUnits": "CPUAndGPU",
-                        "ModelFormat": "MLProgram",
-                        "RequireStaticInputShapes": "0",
-                        "EnableOnSubgraphs": "0",
-                    },
-                ),
-                CPU_PROVIDER,
-            ]
-        else:
-            options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-            options.enable_mem_pattern = False
-            selected = [
-                (DIRECTML_PROVIDER, {"device_id": str(device_id)}),
-                CPU_PROVIDER,
-            ]
+        options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        options.enable_mem_pattern = False
+        selected: list[object] = [
+            (DIRECTML_PROVIDER, {"device_id": str(device_id)}),
+            CPU_PROVIDER,
+        ]
         return options, selected
 
 
 ADAPTERS: dict[Provider, ProviderAdapter] = {
-    "coreml": ProviderAdapter(
-        provider="coreml",
-        adapter_id="macos-arm64-coreml-v1",
+    "mps": ProviderAdapter(
+        provider="mps",
+        adapter_id="macos-arm64-mps-v1",
         systems=("Darwin",),
         machines=("arm64",),
-        distribution="onnxruntime",
-        execution_provider=COREML_PROVIDER,
+        distribution="torch",
+        execution_provider="MPS",
     ),
     "directml": ProviderAdapter(
         provider="directml",
@@ -138,6 +125,15 @@ def provider_session(
 ) -> Iterator[list[Any]]:
     adapter = provider_adapter(provider)
     adapter.discover(device_id)
+    if provider == "mps":
+        if profile_directory is not None and (
+            not profile_directory.is_absolute() or not profile_directory.is_dir()
+        ):
+            raise ProviderAdapterError(
+                "Profile directory must be an existing absolute directory"
+            )
+        yield []
+        return
     ort = _onnxruntime()
     original = ort.InferenceSession
     sessions: list[Any] = []
@@ -192,6 +188,31 @@ def _package_version(name: str) -> str | None:
         return importlib.metadata.version(name)
     except importlib.metadata.PackageNotFoundError:
         return None
+
+
+def _discover_mps(
+    adapter: ProviderAdapter, system: str, machine: str, device_id: int
+) -> ProviderDiscovery:
+    if any(
+        _package_version(name) is None
+        for name in ("torch", "onnx2pytorch")
+    ):
+        raise ProviderAdapterError("Qualified MPS runtime packages are unavailable")
+    try:
+        import torch
+    except ImportError as error:
+        raise ProviderAdapterError("PyTorch is unavailable") from error
+    if not torch.backends.mps.is_built() or not torch.backends.mps.is_available():
+        raise ProviderAdapterError("Apple MPS provider is unavailable")
+    return ProviderDiscovery(
+        provider="mps",
+        adapter_id=adapter.adapter_id,
+        distribution=adapter.distribution,
+        execution_provider=adapter.execution_provider,
+        system=system,
+        machine=machine,
+        device_id=device_id,
+    )
 
 
 def _onnxruntime() -> Any:

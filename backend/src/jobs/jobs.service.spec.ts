@@ -1,7 +1,10 @@
 import { Types } from 'mongoose';
 import { jobError } from './job-errors.js';
 import { JobsService } from './jobs.service.js';
-import { workerRecipeSnapshot } from './worker-recipes.js';
+import {
+  DEFAULT_WORKER_RECIPE_ID,
+  workerRecipeSnapshot,
+} from './worker-recipes.js';
 
 const ownerId = new Types.ObjectId('64b000000000000000000002');
 const jobId = new Types.ObjectId('64b000000000000000000001');
@@ -126,7 +129,7 @@ describe('public job admission', () => {
     });
     const created = f.jobs.create.mock.calls[0]?.[0][0];
     expect(created.recipeSnapshot).toEqual(
-      workerRecipeSnapshot('kim-vocals-trim-v1'),
+      workerRecipeSnapshot(DEFAULT_WORKER_RECIPE_ID),
     );
     expect(f.storage.createInputGrant).toHaveBeenCalledOnce();
   });
@@ -134,7 +137,7 @@ describe('public job admission', () => {
   it('queues only the exact verified object and preserves the frozen recipe', async () => {
     const f = fixture();
     const recipeSnapshot = {
-      recipeId: 'kim-vocals-trim-v1',
+      recipeId: 'kim-vocals-v2',
       recipeRevision: 1,
     };
     const job = {

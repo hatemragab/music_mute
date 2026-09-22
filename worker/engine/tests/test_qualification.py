@@ -16,14 +16,23 @@ from musicmute_engine.qualification import (
 
 
 class QualificationTests(unittest.TestCase):
-    def test_remote_benchmark_selects_one_recipe_for_requested_iterations(self) -> None:
+    def test_explicit_qualification_selects_the_requested_iterations(self) -> None:
+        self.assertEqual(
+            selected_recipe_ids(Namespace(recipe_id="kim-vocals-v2", iterations=1)),
+            ["kim-vocals-v2"],
+        )
         self.assertEqual(
             selected_recipe_ids(
-                Namespace(recipe_id="kim-vocals-trim-v1", iterations=3)
+                Namespace(recipe_id="kim-vocals-v2-trim", iterations=2)
             ),
-            ["kim-vocals-trim-v1"] * 3,
+            ["kim-vocals-v2-trim", "kim-vocals-v2-trim"],
         )
-        self.assertEqual(len(selected_recipe_ids(Namespace())), 4)
+
+    def test_installation_qualification_covers_every_advertised_recipe(self) -> None:
+        self.assertEqual(
+            selected_recipe_ids(Namespace()),
+            ["kim-vocals-v2", "kim-vocals-v2-trim"],
+        )
 
     def test_profile_summary_requires_accelerated_nodes_without_cpu_nodes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -31,14 +40,14 @@ class QualificationTests(unittest.TestCase):
             profile.write_text(
                 json.dumps(
                     [
-                        {"args": {"provider": "CoreMLExecutionProvider"}},
-                        {"args": {"provider": "CoreMLExecutionProvider"}},
+                        {"args": {"provider": "DmlExecutionProvider"}},
+                        {"args": {"provider": "DmlExecutionProvider"}},
                         {"args": {"op_name": "metadata-only"}},
                     ]
                 ),
                 encoding="utf-8",
             )
-            summary = summarize_profiles([profile], "CoreMLExecutionProvider")
+            summary = summarize_profiles([profile], "DmlExecutionProvider")
             self.assertEqual(summary["profileCount"], 1)
             self.assertEqual(summary["acceleratedNodeEvents"], 2)
             self.assertEqual(summary["cpuNodeEvents"], 0)
@@ -61,7 +70,7 @@ class QualificationTests(unittest.TestCase):
             profile = Path(directory) / "profile.json"
             profile.write_text("{}", encoding="utf-8")
             with self.assertRaises(QualificationError):
-                summarize_profiles([profile], "CoreMLExecutionProvider")
+                summarize_profiles([profile], "DmlExecutionProvider")
 
     def test_private_report_is_exclusive_and_owner_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

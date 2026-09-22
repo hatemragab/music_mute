@@ -4,10 +4,8 @@ import { workerRecipeLabel } from "./worker-recipes";
 
 describe("worker recipe presentation", () => {
   it.each([
-    ["kim-vocals-v1", "Kim Vocal 2"],
-    ["kim-vocals-trim-v1", "Kim Vocal 2 · Gap trimming"],
-    ["kim-vocals-denoise-v1", "Kim Vocal 2 · Denoise"],
-    ["kim-vocals-denoise-trim-v1", "Kim Vocal 2 · Denoise and gap trimming"],
+    ["kim-vocals-v2", "Kim Vocal 2"],
+    ["kim-vocals-v2-trim", "Kim Vocal 2 + vocal-gap trim"],
   ])("labels %s as a Kim Vocal 2 recipe", (recipeId, label) => {
     expect(workerRecipeLabel(recipeId)).toBe(label);
   });

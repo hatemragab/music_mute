@@ -24,6 +24,7 @@ import {
   createMacUserLayout,
 } from "../src/platform/macos/user-paths.js";
 import { loadRuntimeConfig } from "../src/runtime/runtime-config.js";
+import { MAC_RECIPE_IDS } from "../src/platform/macos/runtime-recipes.js";
 
 const machineId = "32410a14-e85a-4a1d-bb99-61fa54b07eaa";
 const workerId = "718bd89b-bd03-43f7-adb7-9cb5ff415918";
@@ -128,7 +129,6 @@ describe("macOS one-command user installation", () => {
         enroll,
         qualify,
         inspectRuntime: vi.fn(async () => compatibleRuntime),
-        legacyDaemonPath: join(root, "missing-legacy.plist"),
       }),
     ).resolves.toMatchObject({
       machineId,
@@ -144,6 +144,11 @@ describe("macOS one-command user installation", () => {
       machineId,
       localLifecyclePath: layout.lifecyclePath,
       credential: "m".repeat(43),
+      slots: [
+        {
+          recipeIds: [...MAC_RECIPE_IDS],
+        },
+      ],
     });
     expect(launchAgent.bootstrap).toHaveBeenCalledWith(layout.plistPath);
     expect(prepare).toHaveBeenCalledWith(expect.any(Array), {

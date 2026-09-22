@@ -2,16 +2,16 @@ import {
   WORKER_PLATFORMS,
   WORKER_RECIPE_IDS,
   type WorkerPlatform,
+  type WorkerRecipeId,
 } from "../../protocol/v1/protocol.js";
-import {
-  createMacServiceLayout,
-  DEFAULT_MAC_INSTALL_ROOT,
-} from "../platform/macos/launchd.js";
+import { homedir } from "node:os";
+import { createMacUserLayout } from "../platform/macos/user-paths.js";
 import {
   createWindowsReleaseLayout,
   createWindowsServiceLayout,
   DEFAULT_WINDOWS_INSTALL_ROOT,
 } from "../platform/windows/service-definition.js";
+import { MAC_RECIPE_IDS } from "../platform/macos/runtime-recipes.js";
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -31,6 +31,8 @@ export interface ServiceRuntimeConfigDocument {
   backendBaseUrl: string;
   machineId: string;
   credentialFile: string;
+  localLifecyclePath?: string;
+  localRuntimeStatusPath?: string;
   workRoot: string;
   modelCacheRoot: string;
   engineRoot: string;
@@ -38,13 +40,14 @@ export interface ServiceRuntimeConfigDocument {
   ffmpegPath: string;
   ffprobePath: string;
   allowInsecureLoopback: boolean;
+  validatedMaxWorkersPerGpu: 1;
   slots: [
     {
       workerId: string;
       gpuId: "gpu0";
       slotIndex: 0;
-      recipeIds: [...typeof WORKER_RECIPE_IDS];
-      provider: "coreml" | "directml";
+      recipeIds: WorkerRecipeId[];
+      provider: "mps" | "directml";
       directmlDeviceId?: 0;
     },
   ];
@@ -67,28 +70,29 @@ export function buildServiceRuntimeConfig(
       throw new TypeError(
         "Mac runtime config does not accept a release version",
       );
-    const layout = createMacServiceLayout(
-      options.installRoot ?? DEFAULT_MAC_INSTALL_ROOT,
-    );
+    const layout = createMacUserLayout(options.installRoot ?? homedir());
     return {
       schemaVersion: 1,
       backendBaseUrl,
       machineId: options.machineId,
       credentialFile: layout.credentialPath,
+      localLifecyclePath: layout.lifecyclePath,
+      localRuntimeStatusPath: layout.runtimeStatusPath,
       workRoot: layout.workRoot,
-      modelCacheRoot: layout.modelCacheRoot,
+      modelCacheRoot: layout.modelRoot,
       engineRoot: layout.engineRoot,
       pythonPath: layout.pythonPath,
       ffmpegPath: layout.ffmpegPath,
       ffprobePath: layout.ffprobePath,
       allowInsecureLoopback: options.allowInsecureLoopback === true,
+      validatedMaxWorkersPerGpu: 1,
       slots: [
         {
           workerId: options.workerId,
           gpuId: "gpu0",
           slotIndex: 0,
-          recipeIds: [...WORKER_RECIPE_IDS],
-          provider: "coreml",
+          recipeIds: [...MAC_RECIPE_IDS],
+          provider: "mps",
         },
       ],
     };
@@ -113,6 +117,7 @@ export function buildServiceRuntimeConfig(
     ffmpegPath: release.ffmpegPath,
     ffprobePath: release.ffprobePath,
     allowInsecureLoopback: options.allowInsecureLoopback === true,
+    validatedMaxWorkersPerGpu: 1,
     slots: [
       {
         workerId: options.workerId,

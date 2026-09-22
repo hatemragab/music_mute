@@ -76,7 +76,7 @@ describe("macOS public user commands", () => {
     const f = await fixture(true);
     const benchmark = vi.fn(async () => ({
       platform: "darwin-arm64",
-      provider: "coreml",
+      provider: "mps",
       processingSeconds: 4.2,
     }));
     const context = {
@@ -93,13 +93,83 @@ describe("macOS public user commands", () => {
     };
     await expect(runMacUserCommand("benchmark", [], context)).resolves.toBe(0);
     expect(f.output.pop()).toContain(
-      "MusicMute Worker Benchmark\n\nPlatform: darwin-arm64\nProvider: coreml",
+      "MusicMute Worker Benchmark\n\nPlatform: darwin-arm64\nProvider: mps",
     );
     await expect(
       runMacUserCommand("benchmark", ["--json"], context),
     ).resolves.toBe(0);
-    expect(benchmark).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(f.output.pop()!)).toMatchObject({ provider: "coreml" });
+    await expect(
+      runMacUserCommand("benchmark", ["--workers", "2", "--json"], context),
+    ).resolves.toBe(0);
+    expect(benchmark.mock.calls).toEqual([[1], [1], [2]]);
+    expect(JSON.parse(f.output.pop()!)).toMatchObject({ provider: "mps" });
+  });
+
+  it("runs offline file benchmarks for plain and trimmed Kim Vocal 2", async () => {
+    const f = await fixture(true);
+    const benchmarkFile = vi.fn(async () => ({
+      status: "PASS",
+      scope: "local-engine-only",
+      coldSeconds: 16.3,
+      warm: { meanSeconds: 10.5 },
+    }));
+    const context = {
+      host: {
+        platform: "darwin" as const,
+        arch: "arm64",
+        uid: process.getuid!(),
+        home: f.layout.homeRoot,
+      },
+      layout: f.layout,
+      launchAgent: f.launchAgent,
+      benchmarkFile,
+      stdout: (value: string) => f.output.push(value),
+    };
+
+    await expect(
+      runMacUserCommand(
+        "benchmark-file",
+        [
+          "--input",
+          "/Users/test/song.mp3",
+          "--recipe",
+          "kim-vocals-v2",
+          "--iterations",
+          "2",
+          "--json",
+        ],
+        context,
+      ),
+    ).resolves.toBe(0);
+    expect(benchmarkFile).toHaveBeenCalledWith({
+      inputPath: "/Users/test/song.mp3",
+      recipeId: "kim-vocals-v2",
+      iterations: 2,
+    });
+    expect(JSON.parse(f.output.pop()!)).toMatchObject({
+      status: "PASS",
+      scope: "local-engine-only",
+    });
+    benchmarkFile.mockClear();
+    await expect(
+      runMacUserCommand(
+        "benchmark-file",
+        ["--input", "/Users/test/song.mp3", "--json"],
+        context,
+      ),
+    ).resolves.toBe(0);
+    expect(benchmarkFile).toHaveBeenCalledWith({
+      inputPath: "/Users/test/song.mp3",
+      recipeId: "kim-vocals-v2-trim",
+      iterations: 1,
+    });
+    await expect(
+      runMacUserCommand(
+        "benchmark-file",
+        ["--input", "/Users/test/song.mp3", "--recipe", "denoise"],
+        context,
+      ),
+    ).rejects.toThrow("kim-vocals-v2-trim");
   });
 
   it("reads the one-use enrollment code outside argv for install", async () => {
@@ -257,6 +327,7 @@ describe("macOS public user commands", () => {
     await expect(f.run("status", ["--json"])).resolves.toBe(1);
     expect(JSON.parse(f.output[0]!)).toMatchObject({
       installed: false,
+      activeReleaseVersion: null,
       lifecycle: "unknown",
       healthy: false,
     });
@@ -268,6 +339,7 @@ describe("macOS public user commands", () => {
     expect(f.output[0]).toContain("MusicMute Worker Status");
     expect(f.output[0]).toContain("Overall: Needs attention");
     expect(f.output[0]).toContain("Installation: Not installed");
+    expect(f.output[0]).toContain("Active release: Not available");
     expect(f.output[0]).not.toMatch(/^\s*\{/u);
   });
 
@@ -337,6 +409,7 @@ describe("macOS public user commands", () => {
       }),
     ).resolves.toBe(0);
     expect(JSON.parse(f.output.pop()!)).toMatchObject({
+      activeReleaseVersion: "test",
       remote: {
         available: true,
         state: { status: "paused", claimsAllowed: false },

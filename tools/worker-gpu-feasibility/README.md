@@ -4,7 +4,26 @@ This directory is a bounded B1–B4 probe, not worker runtime code. It tests the
 `Kim_Vocal_2.onnx` graph with an owned deterministic fixture and records sanitized
 evidence. Models, fixture WAVs, output stems and raw ONNX profiles stay outside Git.
 
-## macOS/CoreML setup
+## macOS UVR-compatible MPS worker setup
+
+The current worker uses native ARM64 Python 3.13, PyTorch MPS, and
+`onnx2pytorch`, matching UVR5's Apple GPU path. Install the frozen base and then
+the converter without dependency resolution so `onnx-weekly` remains the only
+provider of the `onnx` module:
+
+```bash
+python3.13 -m venv /tmp/musicmute-mps-py313
+/tmp/musicmute-mps-py313/bin/python -m pip install --upgrade pip
+/tmp/musicmute-mps-py313/bin/python -m pip install \
+  -r tools/worker-gpu-feasibility/requirements-mps-base.lock.txt
+/tmp/musicmute-mps-py313/bin/python -m pip install --no-deps \
+  -r tools/worker-gpu-feasibility/requirements-mps-overlay.lock.txt
+```
+
+## Historical CoreML feasibility probe
+
+The following probe is retained only as historical feasibility evidence. It is
+not an accepted current macOS worker provider.
 
 Use native ARM64 Python 3.13. CoreML and DirectML must use separate environments;
 never install competing ONNX Runtime distributions together.
@@ -14,6 +33,8 @@ python3.13 -m venv /tmp/musicmute-gpu-feasibility-py313
 /tmp/musicmute-gpu-feasibility-py313/bin/python -m pip install --upgrade pip
 /tmp/musicmute-gpu-feasibility-py313/bin/python -m pip install \
   -r tools/worker-gpu-feasibility/requirements-coreml.lock.txt
+/tmp/musicmute-gpu-feasibility-py313/bin/python -m pip install --no-deps \
+  -r tools/worker-gpu-feasibility/requirements-mps-overlay.lock.txt
 
 mkdir -p /tmp/musicmute-kim-model-cache
 curl --fail --location \

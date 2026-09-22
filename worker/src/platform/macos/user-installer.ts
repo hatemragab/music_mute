@@ -15,7 +15,6 @@ import {
   runInstallationPreparationCommand,
 } from "../../enrollment/cli.js";
 import { parseQualificationEvidence } from "../../enrollment/report-builder.js";
-import { WORKER_RECIPE_IDS } from "../../../protocol/v1/protocol.js";
 import {
   initializeLocalLifecycle,
   loadLocalLifecycle,
@@ -38,6 +37,7 @@ import {
 } from "./user-release.js";
 import { createMacUserDirectories, type MacUserLayout } from "./user-paths.js";
 import { inspectMacUserHealth } from "./user-health.js";
+import { MAC_RECIPE_IDS } from "./runtime-recipes.js";
 
 export const PRODUCTION_BACKEND_BASE_URL = "https://api.music-mute.com/api/v1";
 
@@ -82,7 +82,6 @@ export interface MacUserInstallationOptions {
       "bootstrap" | "bootout" | "status"
     >,
   ) => Promise<string>;
-  legacyDaemonPath?: string;
   inspectRuntime?: typeof inspectInstalledMacRuntime;
 }
 
@@ -199,10 +198,6 @@ export async function installMacUserWorker(
     throw new TypeError("Worker label is invalid");
   if (await exists(options.layout.configPath))
     throw new Error("MusicMute worker is already installed; use update");
-  await rejectLegacyDaemon(
-    options.legacyDaemonPath ??
-      "/Library/LaunchDaemons/com.musicmute.worker.plist",
-  );
   await createMacUserDirectories(options.layout);
   const transactionRoot = join(options.layout.transactionRoot, "install");
   await mkdir(transactionRoot, { recursive: true, mode: 0o700 });
@@ -397,13 +392,15 @@ export function buildMacUserRuntimeConfig(
     ffmpegPath: layout.ffmpegPath,
     ffprobePath: layout.ffprobePath,
     allowInsecureLoopback,
+    validatedMaxWorkersPerGpu: 1 as const,
+    capacityValidationFile: layout.capacityValidationPath,
     slots: [
       {
         workerId: enrollment.workerId,
         gpuId: "gpu0",
         slotIndex: 0,
-        recipeIds: [...WORKER_RECIPE_IDS],
-        provider: "coreml" as const,
+        recipeIds: [...MAC_RECIPE_IDS],
+        provider: "mps" as const,
       },
     ],
   };
@@ -446,7 +443,7 @@ export async function qualifyMacUserRelease(
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    throw new Error("CoreML qualification timed out");
+    throw new Error("MPS qualification timed out");
   } finally {
     if ((await launchAgent.status()).loaded) await launchAgent.bootout();
     await writeLaunchAgentPlist(layout);
@@ -583,11 +580,4 @@ function asRecord(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     throw new TypeError(`${label} is invalid`);
   return value as Record<string, unknown>;
-}
-
-async function rejectLegacyDaemon(path: string): Promise<void> {
-  if (await exists(path))
-    throw new Error(
-      "Legacy MusicMute LaunchDaemon detected; run the documented administrator migration first",
-    );
 }

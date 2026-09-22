@@ -16,11 +16,13 @@ import { AdminExportsModule } from './admin-exports/admin-exports.module.js';
 import { AdminHealthModule } from './admin-observability/admin-health.module.js';
 import { WorkerFleetModule } from './worker-fleet/worker-fleet.module.js';
 import { AbuseProtectionModule } from './abuse-protection/abuse-protection.module.js';
+import { WorkerHintsModule } from './worker-hints/worker-hints.module.js';
 
 @Module({
   imports: [
     InfrastructureModule,
     SecurityModule,
+    WorkerHintsModule,
     AuthModule,
     AbuseProtectionModule,
     OperationsModule,

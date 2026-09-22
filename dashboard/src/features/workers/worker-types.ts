@@ -8,7 +8,7 @@ export const WORKER_MACHINE_STATUSES = [
 
 export type WorkerMachineStatus = (typeof WORKER_MACHINE_STATUSES)[number];
 export type WorkerPlatform = "darwin-arm64" | "windows-amd64";
-export type WorkerProvider = "coreml" | "directml";
+export type WorkerProvider = "mps" | "directml";
 
 export interface WorkerCapability {
   platform: WorkerPlatform;

@@ -15,16 +15,15 @@ MODEL_SOURCE = (
     "all_public_uvr_models/Kim_Vocal_2.onnx"
 )
 PREPARATION_PROFILE_ID = "pcm16-stereo-44100-v1"
-DENOISE_PRESET_ID = "afftdn-conservative-v1"
-TRIM_PROFILE_ID = "trim-vocal-gaps-v1"
 OUTPUT_FORMAT = "mp3"
-OUTPUT_BITRATE_KBPS = 192
+OUTPUT_BITRATE_KBPS = 320
 
 BASE_STEPS = (
     "prepare-pcm16-stereo-44100-v1",
     "separate-kim-vocal-2-v1",
 )
-FINAL_STEPS = ("encode-mp3-192k-v1", "validate-audio-v1")
+FINAL_STEPS = ("encode-mp3-320k-v1", "validate-audio-v1")
+TRIM_STEP = "trim-vocal-gaps-v1"
 
 
 class RecipeValidationError(ValueError):
@@ -47,15 +46,13 @@ def recipe_digest(snapshot_without_digest: Mapping[str, Any]) -> str:
 @dataclass(frozen=True)
 class RecipeDefinition:
     recipe_id: str
-    trim_enabled: bool
-    denoise_enabled: bool
+    trim_enabled: bool = False
+    denoise_enabled: bool = False
 
     def snapshot(self) -> dict[str, Any]:
-        steps = list(BASE_STEPS)
-        if self.denoise_enabled:
-            steps.append("denoise-afftdn-conservative-v1")
+        steps = [*BASE_STEPS]
         if self.trim_enabled:
-            steps.append("trim-vocal-gaps-v1")
+            steps.append(TRIM_STEP)
         steps.extend(FINAL_STEPS)
         snapshot: dict[str, Any] = {
             "recipeId": self.recipe_id,
@@ -68,8 +65,8 @@ class RecipeDefinition:
             "stepIds": steps,
             "trimEnabled": self.trim_enabled,
             "denoiseEnabled": self.denoise_enabled,
-            "denoisePresetId": DENOISE_PRESET_ID if self.denoise_enabled else None,
-            "trimProfileId": TRIM_PROFILE_ID if self.trim_enabled else None,
+            "denoisePresetId": None,
+            "trimProfileId": TRIM_STEP if self.trim_enabled else None,
             "outputFormat": OUTPUT_FORMAT,
             "outputBitrateKbps": OUTPUT_BITRATE_KBPS,
         }
@@ -78,21 +75,12 @@ class RecipeDefinition:
 
 
 RECIPE_DEFINITIONS = {
-    definition.recipe_id: definition
-    for definition in (
-        RecipeDefinition("kim-vocals-v1", trim_enabled=False, denoise_enabled=False),
-        RecipeDefinition(
-            "kim-vocals-trim-v1", trim_enabled=True, denoise_enabled=False
-        ),
-        RecipeDefinition(
-            "kim-vocals-denoise-v1", trim_enabled=False, denoise_enabled=True
-        ),
-        RecipeDefinition(
-            "kim-vocals-denoise-trim-v1", trim_enabled=True, denoise_enabled=True
-        ),
-    )
+    "kim-vocals-v2": RecipeDefinition("kim-vocals-v2"),
+    "kim-vocals-v2-trim": RecipeDefinition(
+        "kim-vocals-v2-trim", trim_enabled=True
+    ),
 }
-DEFAULT_RECIPE_ID = "kim-vocals-trim-v1"
+DEFAULT_RECIPE_ID = "kim-vocals-v2-trim"
 SNAPSHOT_KEYS = frozenset((*next(iter(RECIPE_DEFINITIONS.values())).snapshot().keys(),))
 
 

@@ -31,7 +31,7 @@ running LaunchAgent. An update is not recorded healthy merely because launchd
 loaded it; a failed post-activation doctor restores and restarts the known-good
 release and quarantines the candidate.
 
-Change pipeline defaults in the dashboard for new jobs. Use machine/slot eligibility to opt devices out of recipes without modifying queued/running jobs. Display the reason when no eligible machine is available. Raise concurrency only after measured total-throughput and memory validation.
+Change pipeline defaults in the dashboard for new jobs. Use machine/slot eligibility to opt devices out of recipes without modifying queued/running jobs. Display the reason when no eligible machine is available. Keep one worker per GPU by default. On macOS, run the worker drained and stopped with `musicmute-worker benchmark --workers 2`; a second slot requires its fresh local capacity receipt plus backend-approved capability and policy, and the experimental ceiling is two. Treat the fixture result as a throughput gate, then confirm memory pressure and real-job stability before enabling the second slot for production work.
 
 ## Preparing an MVP release package
 
@@ -83,18 +83,6 @@ uploads the selected result and creates the real runtime config only after
 backend activation. The public `install` command now orchestrates these
 recovery-safe phases, writes the final config/credential, and starts the normal
 per-user LaunchAgent.
-
-For a machine that still has the legacy system LaunchDaemon, first drain and
-revoke/unpair the old machine. Then run the exact backup-first cleanup helper:
-
-```text
-sudo "$(command -v musicmute-worker)" legacy-cleanup --confirm-backup
-```
-
-The helper has no arbitrary path/label options. It stops only
-`system/com.musicmute.worker` and moves the exact legacy plist and application
-root into a timestamped root-owned backup. Review that backup before performing
-the normal fresh per-user enrollment; do not reuse the old credential.
 
 ## Manual per-machine activation
 

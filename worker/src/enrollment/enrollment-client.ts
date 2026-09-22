@@ -835,7 +835,7 @@ export function assertInstallationReport(
       })
     )
       throw new TypeError("Worker recipe list is invalid");
-    boundedInteger(capability.maxSlots, 1, 16, "worker slot count");
+    boundedInteger(capability.maxSlots, 1, 2, "worker slot count");
   }
 }
 

@@ -56,6 +56,21 @@ export const WORKER_ATTEMPT_STAGES = [
 ] as const;
 export type WorkerAttemptStage = (typeof WORKER_ATTEMPT_STAGES)[number];
 
+export const WORKER_PROCESSING_STAGE_IDS = [
+  'modelValidation',
+  'inputIdentity',
+  'mediaValidation',
+  'preparation',
+  'modelLoad',
+  'separation',
+  'denoise',
+  'trim',
+  'encode',
+  'outputValidation',
+] as const;
+export type WorkerProcessingStageId =
+  (typeof WORKER_PROCESSING_STAGE_IDS)[number];
+
 export const WORKER_DIAGNOSTIC_KINDS = [
   'installation_log',
   'runtime_log',

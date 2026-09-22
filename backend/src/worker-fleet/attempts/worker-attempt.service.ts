@@ -227,7 +227,7 @@ export class WorkerAttemptService {
     const first = await this.loadAttemptAndJob(principal, attemptId, dto);
     this.assertRecipe(first.job, dto);
     if (first.attempt.state === 'succeeded')
-      return this.presentCompletion(first.attempt, dto.versionId, true);
+      return this.presentCompletion(first.attempt, dto, true);
     this.assertCurrent(first.attempt, first.job, new Date());
     const reservation = first.attempt.outputReservation;
     if (!reservation) throw workerError('WORKER_CONFLICT');
@@ -246,7 +246,7 @@ export class WorkerAttemptService {
         );
         this.assertRecipe(current.job, dto);
         if (current.attempt.state === 'succeeded')
-          return this.presentCompletion(current.attempt, dto.versionId, true);
+          return this.presentCompletion(current.attempt, dto, true);
         const now = new Date();
         this.assertCurrent(current.attempt, current.job, now);
         this.assertReservation(current.attempt.outputReservation, reservation);
@@ -269,6 +269,7 @@ export class WorkerAttemptService {
               terminalSummary: null,
               finishedAt: now,
               leaseExpiresAt: now,
+              processingStageTimings: dto.stageTimings,
             },
             $inc: { revision: 1 },
           },
@@ -292,6 +293,7 @@ export class WorkerAttemptService {
                 retainedOutputReleasedAt: null,
                 currentExecution: null,
                 finishedAt: now,
+                workerStageTimings: dto.stageTimings,
                 retryEligibility: {
                   eligible: false,
                   attemptsRemaining: 0,
@@ -618,10 +620,15 @@ export class WorkerAttemptService {
 
   private presentCompletion(
     attempt: WorkerAttempt,
-    versionId: string,
+    dto: CompleteWorkerAttemptDto,
     replayed: boolean,
   ) {
-    if (!attempt.outputObject || attempt.outputObject.versionId !== versionId)
+    if (
+      !attempt.outputObject ||
+      attempt.outputObject.versionId !== dto.versionId ||
+      JSON.stringify(attempt.processingStageTimings) !==
+        JSON.stringify(dto.stageTimings)
+    )
       throw workerError('WORKER_CONFLICT');
     return {
       attemptId: attempt._id,

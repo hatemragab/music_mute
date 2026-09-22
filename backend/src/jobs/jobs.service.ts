@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
 import { isUUID } from 'class-validator';
@@ -21,6 +21,7 @@ import {
   DEFAULT_WORKER_RECIPE_ID,
   workerRecipeSnapshot,
 } from './worker-recipes.js';
+import { WorkerHintService } from '../worker-hints/worker-hint.service.js';
 
 const UPLOAD_EXPIRY_GRACE_MS = 300_000;
 const VERSION_SETTLEMENT_MS = 3_600_000;
@@ -35,6 +36,7 @@ export class JobsService {
     private readonly admission: ProcessingAdmissionService,
     private readonly usage: ProcessingUsageService,
     private readonly cleanup: StorageCleanupService,
+    @Optional() private readonly hints?: WorkerHintService,
   ) {}
 
   async create(
@@ -165,7 +167,7 @@ export class JobsService {
       }
       throw error;
     }
-    return this.transactions.run(async (session) => {
+    const result = await this.transactions.run(async (session) => {
       await this.access.assertActive(userId, session);
       const current = await this.jobs
         .findOne({ _id: job._id, userId: job.userId })
@@ -195,6 +197,8 @@ export class JobsService {
       if (queued.modifiedCount !== 1) throw jobError('JOB_STATE_CONFLICT');
       return { id: jobId, status: 'queued' as const };
     });
+    void this.hints?.publish('work_available').catch(() => undefined);
+    return result;
   }
 
   private async findOwned(userId: string, jobId: string) {

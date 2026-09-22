@@ -51,7 +51,7 @@ describe("worker dashboard API contracts", () => {
     await getWorkerDiagnostics(api, "machine/unsafe");
     await requestWorkerBenchmark(api, "machine/unsafe", {
       ...command,
-      recipeId: "kim-vocals-trim-v1",
+      recipeId: "kim-vocals-v2",
       iterations: 1,
     });
 
@@ -71,7 +71,7 @@ describe("worker dashboard API contracts", () => {
     expect(api.post).toHaveBeenNthCalledWith(
       3,
       "/admin/worker-fleet/machines/machine%2Funsafe/benchmark",
-      expect.objectContaining({ recipeId: "kim-vocals-trim-v1" }),
+      expect.objectContaining({ recipeId: "kim-vocals-v2" }),
     );
   });
 
@@ -84,7 +84,7 @@ describe("worker dashboard API contracts", () => {
       acceptClaims: true,
       recipes: [
         {
-          recipeId: "kim-vocals-v1",
+          recipeId: "kim-vocals-v2",
           enabled: true,
           maxSlotsPerMachine: 1,
         },

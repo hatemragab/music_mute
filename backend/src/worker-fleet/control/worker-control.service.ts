@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
 import { isUUID } from 'class-validator';
@@ -28,6 +28,7 @@ import type {
   UpdateWorkerFleetPolicyDto,
   WorkerConfigQueryDto,
 } from './worker-control.dto.js';
+import { WorkerHintService } from '../../worker-hints/worker-hint.service.js';
 
 @Injectable()
 export class WorkerControlService {
@@ -49,6 +50,7 @@ export class WorkerControlService {
     @InjectModel(WorkerCommand.name)
     private readonly commands: Model<WorkerCommand>,
     private readonly operations: AdminOperationsService,
+    @Optional() private readonly hints?: WorkerHintService,
   ) {}
 
   async config(principal: WorkerPrincipal, query: WorkerConfigQueryDto) {
@@ -498,6 +500,7 @@ export class WorkerControlService {
         };
       },
     );
+    void this.hints?.publish('policy_changed').catch(() => undefined);
     return { revision: result.receipt.revision, replayed: result.replayed };
   }
 
@@ -560,6 +563,7 @@ export class WorkerControlService {
         };
       },
     );
+    void this.hints?.publish('command_available', id).catch(() => undefined);
     return {
       commandId: result.receipt.resourceId,
       deferred: result.value?.deferred ?? null,

@@ -33,6 +33,12 @@ describe("macOS user LaunchAgent", () => {
     expect(plist).toContain(
       "<key>NUMBA_CACHE_DIR</key>\n    <string>/Users/Music &amp; Mute/Library/Application Support/MusicMuteWorker/cache/numba</string>",
     );
+    expect(plist).toContain(
+      "<key>PYTHONPYCACHEPREFIX</key>\n    <string>/Users/Music &amp; Mute/Library/Application Support/MusicMuteWorker/cache/python</string>",
+    );
+    expect(plist).toContain(
+      "<key>XDG_CACHE_HOME</key>\n    <string>/Users/Music &amp; Mute/Library/Application Support/MusicMuteWorker/cache</string>",
+    );
     expect(plist).not.toContain("UserName");
     expect(plist).not.toContain("GroupName");
     expect(plist).not.toContain("credential");
@@ -64,16 +70,27 @@ describe("macOS user LaunchAgent", () => {
     ]);
   });
 
-  it("renders a one-shot CoreML qualification without KeepAlive", () => {
+  it("renders a one-shot MPS qualification without KeepAlive", () => {
     const layout = createMacUserLayout("/Users/tester");
+    const releaseRoot = join(layout.releasesRoot, "0.1.0");
     const plist = renderLaunchAgentPlist(layout, {
       fixturePath: join(layout.stateRoot, "qualification.wav"),
       fixtureSha256: "a".repeat(64),
       reportPath: join(layout.stateRoot, "qualification.json"),
-      releaseRoot: join(layout.releasesRoot, "0.1.0"),
+      releaseRoot,
     });
     expect(plist).toContain("musicmute_engine.qualification");
-    expect(plist).toContain("<string>coreml</string>");
+    expect(plist).toContain("<string>mps</string>");
+    expect(plist).toContain(
+      `<string>${join(releaseRoot, "runtime", "python", "bin", "python3")}</string>`,
+    );
+    expect(plist).toContain(
+      `<string>${join(releaseRoot, "app", "engine")}</string>`,
+    );
+    expect(plist).toContain(
+      `<string>${join(releaseRoot, "runtime", "bin", "ffmpeg")}</string>`,
+    );
+    expect(plist).not.toContain(`<string>${layout.pythonPath}</string>`);
     expect(plist).not.toContain("<key>KeepAlive</key>");
   });
 

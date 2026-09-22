@@ -6,6 +6,7 @@ import {
   ChildCommandError,
   WorkerChildProcess,
 } from "../src/agent/child-process.js";
+import { WORKER_RECIPE_IDS } from "../protocol/v1/protocol.js";
 
 const workerRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const engineRoot = resolve(workerRoot, "engine");
@@ -36,12 +37,7 @@ describe("worker child lifecycle", () => {
     expect(ready.incarnation).toBe(child.incarnation);
     expect(ready.payload).toEqual({
       processCapacity: 1,
-      recipeIds: [
-        "kim-vocals-denoise-trim-v1",
-        "kim-vocals-denoise-v1",
-        "kim-vocals-trim-v1",
-        "kim-vocals-v1",
-      ],
+      recipeIds: [...WORKER_RECIPE_IDS],
     });
 
     const pong = await child.request("ping", {});

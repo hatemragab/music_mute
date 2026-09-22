@@ -134,7 +134,7 @@ export const WorkerCapabilitySchema = new MongoSchema<WorkerCapability>(
       type: Number,
       required: true,
       min: 1,
-      max: 16,
+      max: 2,
       validate: Number.isSafeInteger,
     },
   },

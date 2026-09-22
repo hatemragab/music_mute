@@ -71,36 +71,38 @@ Evaluate clean speech, noisy speech, singing, quiet phrases, stereo imbalance an
 
 ## 5. Recipes and immutable configuration
 
-Support four named combinations rather than a workflow editor:
+Support two frozen production recipes rather than a workflow editor. The
+reference-compatible trimmed variant is the backend default; the plain variant
+is retained for comparison and rollback:
 
-| Dashboard label                        | Recipe ID                    | Trim | Denoise              |
-| -------------------------------------- | ---------------------------- | ---- | -------------------- |
-| Kim Vocal 2                            | `kim-vocals-v1`              | Off  | Off                  |
-| Kim Vocal 2 · Gap trimming             | `kim-vocals-trim-v1`         | On   | Off; initial default |
-| Kim Vocal 2 · Denoise                  | `kim-vocals-denoise-v1`      | Off  | On                   |
-| Kim Vocal 2 · Denoise and gap trimming | `kim-vocals-denoise-trim-v1` | On   | On                   |
+| Dashboard label              | Recipe ID            | Trim | Denoise | MP3 bitrate |
+| ---------------------------- | -------------------- | ---- | ------- | ----------- |
+| Kim Vocal 2                  | `kim-vocals-v2`      | Off  | Off     | 320 kbps    |
+| Kim Vocal 2 + vocal-gap trim | `kim-vocals-v2-trim` | On   | Off     | 320 kbps    |
 
-All four recipes use the verified `Kim_Vocal_2.onnx` model. The `v1` suffix is
-the immutable recipe-contract revision; it is not the Kim model generation.
+The recipe uses the verified `Kim_Vocal_2.onnx` model. The `v2` suffix is the
+immutable recipe-contract revision; it is not the Kim model generation.
 Operator-facing surfaces display **Kim Vocal 2** as the model and show the raw
-recipe ID only as secondary contract metadata. Renaming these IDs would break
+recipe ID only as secondary contract metadata. Renaming this ID would break
 queued-job snapshots, capability matching and deterministic recipe digests.
 
 A recipe snapshot contains the recipe ID/revision, model filename and verified artifact digest, ordered step versions/parameters, encoder/bitrate, preparation profile, and a deterministic recipe digest. The backend chooses and stores it when creating the job. Unknown steps, fields, URLs or digest mismatches are rejected.
 
 The runtime reports both **installed validated capabilities** and **allowed policy**. Effective eligibility is their intersection, narrowed by any child-worker override. The dashboard changes new-job defaults separately from machine/worker allowlists.
 
-Example: the fleet default is denoise+trim. The owner disables denoise for the Z440. New denoise jobs must use the M4 or remain queued with an accurate capacity explanation. They must **not** silently run on the Z440 without denoise. The owner can change the global default to a non-denoise recipe for future submissions. Existing jobs, including retries on another machine, keep their old recipe.
+The backend and worker reject every recipe other than `kim-vocals-v2` and
+`kim-vocals-v2-trim`. Existing local-development jobs using older recipe
+identifiers must be recreated after this intentional breaking change.
 
 Policy changes have `desiredRevision` and `appliedRevision`. Apply admission changes between jobs; active jobs continue their snapshot unless explicitly cancelled. Removing a model/runtime needed by an active attempt waits for drain. Per-worker overrides can narrow but not exceed machine capabilities/capacity. A replacement process inherits its stable slot policy.
 
 ## 6. Output contract and timing metadata
 
-Keep the current product's voice-only MP3 as the required output, with `audio/mpeg` and a default 192 kbps bitrate. Allow only the reference bitrate set if configuration exposes it: 64, 96, 128, 192, 256, 320 kbps. Do not add instrumental output or multistem billing/client changes in this MVP.
+Keep the product's voice-only MP3 as the required output, with `audio/mpeg` and a fixed 320 kbps bitrate matching the UVR comparison settings. Do not add instrumental output, a bitrate selector, or multistem billing/client changes in this MVP.
 
 Record source/measured input duration, final output duration, removed samples, sample rate, recipe digest, and per-stage times. When trim removes internal intervals, a single leading offset cannot describe alignment. Keep retained source sample ranges and corresponding output ranges, or an equivalent compact edit map, in attempt metadata. Report separately if only codec padding explains a small encoded-duration difference.
 
-The no-denoise trim-on path must match reference PCM16 output for the same separated input. Do not require bit-identical Kim model results across CoreML/DirectML floating-point implementations. Require validity and explicitly bounded quality/numerical regression checks on common fixtures.
+Do not require bit-identical Kim model results across MPS/DirectML floating-point implementations. Require validity and explicitly bounded quality/numerical regression checks on common fixtures.
 
 Output uploads use fresh attempt-specific keys and pinned S3 versions. The client-visible job reference is assigned only by successful backend finalization.
 

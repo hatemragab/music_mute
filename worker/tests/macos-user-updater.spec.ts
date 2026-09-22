@@ -25,6 +25,7 @@ import { installMacUserRelease } from "../src/platform/macos/user-release.js";
 import {
   BUILT_IN_MAC_UPDATE_TRUST,
   checkMacUserUpdate,
+  compareWorkerReleaseVersions,
   loadMacUpdateTrust,
   updateMacUserWorker,
 } from "../src/platform/macos/user-updater.js";
@@ -47,6 +48,16 @@ afterEach(async () => {
 });
 
 describe("macOS transactional updater", () => {
+  it.each([
+    ["0.1.0-mvp.11", "0.1.0-mvp.2", 1],
+    ["0.1.0-mvp.2", "0.1.0-mvp.11", -1],
+    ["0.2.0", "0.1.99", 1],
+    ["1.0.0", "1.0.0-rc.9", 1],
+    ["1.0.0+build.2", "1.0.0+build.1", 0],
+  ] as const)("orders release %s against %s", (left, right, expected) => {
+    expect(Math.sign(compareWorkerReleaseVersions(left, right))).toBe(expected);
+  });
+
   it("uses the built-in production key when the optional trust file is absent", async () => {
     const root = await temporaryRoot();
     const home = join(root, "home");
@@ -58,7 +69,7 @@ describe("macOS transactional updater", () => {
 
     expect(trust).toEqual(BUILT_IN_MAC_UPDATE_TRUST);
     expect(
-      createPublicKey(trust["worker-release-2026-01"]!).asymmetricKeyType,
+      createPublicKey(trust["worker-release-2026-09"]!).asymmetricKeyType,
     ).toBe("ed25519");
     await expect(lstat(layout.updateTrustPath)).rejects.toMatchObject({
       code: "ENOENT",
@@ -86,7 +97,7 @@ describe("macOS transactional updater", () => {
     });
     await writeFile(
       layout.updateTrustPath,
-      `${JSON.stringify({ "worker-release-2026-01": additional })}\n`,
+      `${JSON.stringify({ "worker-release-2026-09": additional })}\n`,
       { mode: 0o600 },
     );
     await expect(loadMacUpdateTrust(layout.updateTrustPath)).rejects.toThrow(
@@ -144,6 +155,9 @@ describe("macOS transactional updater", () => {
     expect(
       JSON.parse(await readFile(fixture.layout.installationStatePath, "utf8")),
     ).toMatchObject({ releaseVersion: "0.2.0" });
+    expect(
+      JSON.parse(await readFile(fixture.layout.configPath, "utf8")),
+    ).toMatchObject({ slots: [{ provider: "mps" }] });
   });
 
   it("restores the known-good release and quarantines a failed candidate", async () => {
@@ -161,6 +175,9 @@ describe("macOS transactional updater", () => {
       }),
     ).rejects.toThrow("failed to start");
     expect(await readlink(fixture.layout.currentLink)).toBe("releases/0.1.0");
+    expect(
+      JSON.parse(await readFile(fixture.layout.configPath, "utf8")),
+    ).toMatchObject({ slots: [{ provider: "mps" }] });
     expect(
       JSON.parse(await readFile(fixture.layout.updateStatePath, "utf8")),
     ).toMatchObject({
@@ -235,7 +252,7 @@ describe("macOS transactional updater", () => {
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("quarantines a candidate when CoreML qualification fails", async () => {
+  it("quarantines a candidate when MPS qualification fails", async () => {
     const fixture = await updateFixture();
     await expect(
       updateMacUserWorker({
@@ -245,11 +262,11 @@ describe("macOS transactional updater", () => {
         now: fixture.now,
         fetch: fixture.fetch,
         qualify: async () => {
-          throw new Error("CoreML qualification failed");
+          throw new Error("MPS qualification failed");
         },
         launchAgent: fixture.launchAgent,
       }),
-    ).rejects.toThrow("CoreML qualification failed");
+    ).rejects.toThrow("MPS qualification failed");
     expect(await readlink(fixture.layout.currentLink)).toBe("releases/0.1.0");
     expect(
       JSON.parse(await readFile(fixture.layout.updateStatePath, "utf8")),
@@ -277,19 +294,18 @@ async function updateFixture() {
   await writeFile(layout.credentialPath, `${"m".repeat(43)}\n`, {
     mode: 0o600,
   });
+  const generatedRuntimeConfig = buildMacUserRuntimeConfig(
+    layout,
+    "https://api.music-mute.com/api/v1",
+    false,
+    {
+      machineId,
+      workerId,
+    },
+  );
   await writeFile(
     layout.configPath,
-    `${JSON.stringify(
-      buildMacUserRuntimeConfig(
-        layout,
-        "https://api.music-mute.com/api/v1",
-        false,
-        {
-          machineId,
-          workerId,
-        },
-      ),
-    )}\n`,
+    `${JSON.stringify(generatedRuntimeConfig)}\n`,
     { mode: 0o600 },
   );
   await writeFile(

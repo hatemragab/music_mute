@@ -7,23 +7,20 @@ export const WORKER_PROTOCOL_MAX_STRING_LENGTH = 4096;
 export const WORKER_PLATFORMS = ['darwin-arm64', 'windows-amd64'] as const;
 export type WorkerPlatform = (typeof WORKER_PLATFORMS)[number];
 
-export const WORKER_PROVIDERS = ['coreml', 'directml'] as const;
+export const WORKER_PROVIDERS = ['mps', 'directml'] as const;
 export type WorkerProvider = (typeof WORKER_PROVIDERS)[number];
 
 export const WORKER_RECIPE_IDS = [
-  'kim-vocals-v1',
-  'kim-vocals-trim-v1',
-  'kim-vocals-denoise-v1',
-  'kim-vocals-denoise-trim-v1',
+  'kim-vocals-v2',
+  'kim-vocals-v2-trim',
 ] as const;
 export type WorkerRecipeId = (typeof WORKER_RECIPE_IDS)[number];
 
 export const WORKER_RECIPE_STEP_IDS = [
   'prepare-pcm16-stereo-44100-v1',
   'separate-kim-vocal-2-v1',
-  'denoise-afftdn-conservative-v1',
   'trim-vocal-gaps-v1',
-  'encode-mp3-192k-v1',
+  'encode-mp3-320k-v1',
   'validate-audio-v1',
 ] as const;
 export type WorkerRecipeStepId = (typeof WORKER_RECIPE_STEP_IDS)[number];

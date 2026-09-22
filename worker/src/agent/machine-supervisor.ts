@@ -12,15 +12,23 @@ export interface WorkerSlotDefinition {
 export class MachineSupervisor {
   private readonly children = new Map<string, WorkerChildProcess>();
 
-  constructor(private readonly slots: readonly WorkerSlotDefinition[]) {
+  constructor(
+    private readonly slots: readonly WorkerSlotDefinition[],
+    validatedMaxWorkersPerGpu: 1 | 2 = 1,
+  ) {
     if (slots.length === 0 || slots.length > 16)
       throw new TypeError("Machine supervisor requires 1 to 16 slots");
     if (new Set(slots.map((slot) => slot.workerId)).size !== slots.length)
       throw new TypeError("Machine supervisor worker IDs must be unique");
-    if (new Set(slots.map((slot) => slot.gpuId)).size !== slots.length)
-      throw new TypeError(
-        "Machine supervisor allows only one initial child per GPU",
-      );
+    const perGpu = new Map<string, number>();
+    for (const slot of slots) {
+      const count = (perGpu.get(slot.gpuId) ?? 0) + 1;
+      if (count > validatedMaxWorkersPerGpu)
+        throw new TypeError(
+          "Machine supervisor exceeds validated GPU capacity",
+        );
+      perGpu.set(slot.gpuId, count);
+    }
   }
 
   async start(): Promise<void> {

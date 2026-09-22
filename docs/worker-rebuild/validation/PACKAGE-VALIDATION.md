@@ -333,10 +333,11 @@ The package build contains no environment files, credentials, models, audio fixt
 
 ## Not executed or claimed
 
-No live S3 integration, WebSocket hint transport, listening-quality review,
+No live S3 integration, production WebSocket deployment, listening-quality review,
 npm publication, signing with production keys or deployment has occurred. The
-C1-C6 backend, D1-D3 runtime and E1-E5 dashboard work are locally verified
-only. D4 and D5 now
+The raw WebSocket ticket, one-use rejection, hint delivery and worker wake-up
+paths have local automated coverage only. C1-C6 backend, D1-D3 runtime and
+E1-E5 dashboard work are locally verified only. D4 and D5 now
 have native package, installed-service, accelerated processing and final
 four-recipe qualification evidence on the two MVP hosts, but neither checkpoint
 is complete. D6 has local automated evidence. Android and iOS were not changed.
