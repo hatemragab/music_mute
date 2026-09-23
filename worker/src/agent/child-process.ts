@@ -14,6 +14,11 @@ import {
   type ChildRequestCommand,
   type ChildResponse,
 } from "./ipc/child-protocol.js";
+import {
+  CHILD_PROGRESS_STAGES,
+  parseChildProgress,
+  type ChildProgress,
+} from "./ipc/child-progress.js";
 
 // Native provider startup includes verified model loading and one warm-up pass.
 // A cold MPS launch can exceed ten seconds even though steady-state jobs are
@@ -33,12 +38,15 @@ export interface ChildProcessOptions {
   startTimeoutMs?: number;
   requestTimeoutMs?: number;
   stopTimeoutMs?: number;
+  onStartupStage?: (stage: "loading" | "warming") => void;
 }
 
 interface PendingRequest {
   resolve: (response: ChildResponse) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
+  onProgress?: (progress: ChildProgress) => void;
+  lastProgress?: ChildProgress;
 }
 
 export class ChildCommandError extends Error {
@@ -126,12 +134,13 @@ export class WorkerChildProcess {
     command: Exclude<ChildRequestCommand, "cancel" | "shutdown">,
     payload: Record<string, unknown>,
     timeoutMs?: number,
+    onProgress?: (progress: ChildProgress) => void,
   ): Promise<ChildResponse> {
     if (command === "process") {
       if (this.activeProcessRequestId)
         throw new Error("Worker child already has an active process request");
     }
-    const pending = this.send(command, payload, timeoutMs);
+    const pending = this.send(command, payload, timeoutMs, onProgress);
     if (command === "process") {
       this.activeProcessRequestId = pending.requestId;
       const clear = () => {
@@ -202,6 +211,7 @@ export class WorkerChildProcess {
     command: ChildRequestCommand,
     payload: Record<string, unknown>,
     timeoutMs?: number,
+    onProgress?: (progress: ChildProgress) => void,
   ): { requestId: string; response: Promise<ChildResponse> } {
     const child = this.child;
     if (!child || child.exitCode !== null || !child.stdin.writable)
@@ -228,7 +238,12 @@ export class WorkerChildProcess {
           this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
         ),
       );
-      this.pending.set(requestId, { resolve, reject, timeout });
+      this.pending.set(requestId, {
+        resolve,
+        reject,
+        timeout,
+        ...(onProgress === undefined ? {} : { onProgress }),
+      });
       child.stdin.write(encodeChildFrame(message), (error) => {
         if (!error) return;
         clearTimeout(timeout);
@@ -252,14 +267,54 @@ export class WorkerChildProcess {
             "MESSAGE_INVALID",
             "Worker child incarnation changed",
           );
+        if (message.type === "startup-progress") {
+          if (
+            this.resolveReady !== null &&
+            Object.keys(message.payload).length === 1 &&
+            (message.payload.stage === "loading" ||
+              message.payload.stage === "warming")
+          ) {
+            try {
+              this.options.onStartupStage?.(message.payload.stage);
+            } catch {
+              // A status observer cannot change child readiness.
+            }
+          }
+          continue;
+        }
         if (message.type === "ready") {
           this.resolveReady?.(message);
           continue;
         }
-        if (message.type === "accepted" || message.type === "progress")
-          continue;
+        if (message.type === "accepted") continue;
         const pending = this.pending.get(message.requestId);
         if (!pending) continue;
+        if (message.type === "progress") {
+          if (message.requestId !== this.activeProcessRequestId) continue;
+          const progress = parseChildProgress(message.payload);
+          if (progress === null) continue;
+          const previous = pending.lastProgress;
+          if (previous !== undefined) {
+            const currentRank = CHILD_PROGRESS_STAGES.indexOf(progress.stage);
+            const previousRank = CHILD_PROGRESS_STAGES.indexOf(previous.stage);
+            if (currentRank < previousRank) continue;
+            if (currentRank === previousRank) {
+              if (
+                progress.work === undefined ||
+                (previous.work !== undefined &&
+                  progress.work.completed <= previous.work.completed)
+              )
+                continue;
+            }
+          }
+          pending.lastProgress = progress;
+          try {
+            pending.onProgress?.(progress);
+          } catch {
+            // Observability must not turn a valid processing result into a failure.
+          }
+          continue;
+        }
         clearTimeout(pending.timeout);
         this.pending.delete(message.requestId);
         if (message.type === "error") {

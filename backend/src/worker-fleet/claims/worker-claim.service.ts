@@ -380,6 +380,7 @@ export class WorkerClaimService {
               $set: {
                 status: 'processing',
                 currentExecution: execution,
+                workerProgress: null,
                 processingStartedAt: candidate.processingStartedAt ?? now,
               },
               $inc: { attemptNumber: 1, revision: 1 },

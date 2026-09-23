@@ -7,9 +7,9 @@ import {
 
 const EXPECTED_DIGESTS = {
   'kim-vocals-v2':
-    '4d5075f55c3adad6712d4f823e3455df1189f8fa064d3b173317c3adbc46b17a',
+    'af00fff596b93554498142a731c4d161a706614438e0d5643f804c08f49c1ff1',
   'kim-vocals-v2-trim':
-    '8dc89087f05cfe5e561b66e5091a75cdd50f42a2ebf69cbac374b31e3767b11d',
+    '2989b222ff771dc1abfd44fbe46e37bd65e79478fb410ee2c1b565c122fa6e05',
 } as const;
 
 describe('worker recipe catalog', () => {

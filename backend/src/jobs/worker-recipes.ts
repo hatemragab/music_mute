@@ -36,12 +36,12 @@ function createRecipe(
     'prepare-pcm16-stereo-44100-v1',
     'separate-kim-vocal-2-v1',
     ...(trimEnabled ? (['trim-vocal-gaps-v1'] as const) : []),
-    'encode-mp3-320k-v1',
+    'encode-mp3-up-to-160k-v1',
     'validate-audio-v1',
   ];
   const material: Omit<WorkerRecipeSnapshot, 'recipeDigest'> = {
     recipeId,
-    recipeRevision: 1,
+    recipeRevision: 3,
     protocolVersion: 1,
     modelFilename: 'Kim_Vocal_2.onnx',
     modelDigest: QUALIFIED_MODEL_DIGEST,
@@ -53,7 +53,7 @@ function createRecipe(
     denoisePresetId: null,
     trimProfileId: trimEnabled ? 'trim-vocal-gaps-v1' : null,
     outputFormat: 'mp3',
-    outputBitrateKbps: 320,
+    outputBitrateKbps: 160,
   };
   return Object.freeze({
     ...material,

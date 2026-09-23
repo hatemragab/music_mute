@@ -13,12 +13,15 @@ import {
   MaxLength,
   Min,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { JobFailureCode } from '../../jobs/job.types.js';
 import {
   WORKER_RECIPE_IDS,
+  WORKER_PROGRESS_PHASES,
   type WorkerRecipeId,
+  type WorkerProgressPhase,
 } from '../protocol/v1/protocol.js';
 import {
   WORKER_PROCESSING_STAGE_IDS,
@@ -39,6 +42,16 @@ export class WorkerAttemptOwnershipDto {
 
 export class WorkerInputGrantDto extends WorkerAttemptOwnershipDto {}
 
+export class UpdateWorkerAttemptProgressDto extends WorkerAttemptOwnershipDto {
+  @IsInt() @Min(1) @Max(1_000_000) sequence!: number;
+  @IsIn(WORKER_PROGRESS_PHASES) phase!: WorkerProgressPhase;
+  @ValidateIf((_object: unknown, value: unknown) => value !== null)
+  @IsInt()
+  @Min(0)
+  @Max(99)
+  phasePercent!: number | null;
+}
+
 export class WorkerOutputGrantDto extends WorkerAttemptOwnershipDto {
   @IsInt() @Min(1) @Max(30_000_000) bytes!: number;
   @Matches(/^[A-Za-z0-9+/]{43}=$/) sha256!: string;
@@ -58,7 +71,7 @@ export class CompleteWorkerAttemptDto extends WorkerAttemptOwnershipDto {
   @IsBoolean() trimEnabled!: boolean;
   @IsBoolean() denoiseEnabled!: boolean;
   @Equals('mp3') outputFormat!: 'mp3';
-  @Equals(320) outputBitrateKbps!: 320;
+  @IsInt() @Min(32) @Max(160) outputBitrateKbps!: number;
   @ArrayMaxSize(WORKER_PROCESSING_STAGE_IDS.length)
   @ArrayUnique((timing: WorkerProcessingStageTimingDto) => timing.stage)
   @ValidateNested({ each: true })

@@ -27,7 +27,7 @@ let completed = false;
 
 const recipe = {
   recipeId: "kim-vocals-v2",
-  recipeRevision: 1,
+  recipeRevision: 3,
   protocolVersion: 1,
   recipeDigest:
     "a1b3be857b9604429edf9b9cc48df6a84be2bcf4a2bb9a2da2c4e829f1d6ef52",
@@ -39,7 +39,7 @@ const recipe = {
   stepIds: [
     "prepare-pcm16-stereo-44100-v1",
     "separate-kim-vocal-2-v1",
-    "encode-mp3-320k-v1",
+    "encode-mp3-up-to-160k-v1",
     "validate-audio-v1",
   ],
   trimEnabled: false,
@@ -47,7 +47,7 @@ const recipe = {
   denoisePresetId: null,
   trimProfileId: null,
   outputFormat: "mp3",
-  outputBitrateKbps: 320,
+  outputBitrateKbps: 160,
 };
 
 function send(response, status, value) {

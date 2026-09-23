@@ -27,7 +27,7 @@ const servers: ReturnType<typeof createServer>[] = [];
 
 const recipe: WorkerRecipeSnapshot = {
   recipeId: "kim-vocals-v2",
-  recipeRevision: 1,
+  recipeRevision: 3,
   protocolVersion: 1,
   recipeDigest: "a".repeat(64),
   modelFilename: "Kim_Vocal_2.onnx",
@@ -37,7 +37,7 @@ const recipe: WorkerRecipeSnapshot = {
   stepIds: [
     "prepare-pcm16-stereo-44100-v1",
     "separate-kim-vocal-2-v1",
-    "encode-mp3-320k-v1",
+    "encode-mp3-up-to-160k-v1",
     "validate-audio-v1",
   ],
   trimEnabled: false,
@@ -45,7 +45,7 @@ const recipe: WorkerRecipeSnapshot = {
   denoisePresetId: null,
   trimProfileId: null,
   outputFormat: "mp3",
-  outputBitrateKbps: 320,
+  outputBitrateKbps: 160,
 };
 
 afterEach(async () => {
@@ -65,6 +65,7 @@ afterEach(async () => {
 });
 
 class HttpFixtureChild {
+  readonly incarnation = randomUUID();
   processing = false;
 
   async request(
@@ -92,6 +93,7 @@ class HttpFixtureChild {
         bytes: output.length,
         sha256: outputSha,
         contentType: "audio/mpeg",
+        measuredInputDurationSeconds: 1,
         measuredOutputDurationSeconds: 1,
         recipeId: recipe.recipeId,
         recipeRevision: recipe.recipeRevision,

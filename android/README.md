@@ -161,15 +161,22 @@ to execute yt-dlp **on Android**. The supplied Fiftee branch URL returned 404
 publicly; it is not a downloader dependency. This implementation follows the
 previously agreed youtubedl-android integration.
 
-The selection is `bestaudio[protocol=https]`: the best available audio-only stream
+The selection is `bestaudio[protocol=https][abr<=160]/bestaudio[protocol=https]`:
+the best available audio-only stream at or below 160 kbps when yt-dlp reports one,
+with an audio-only fallback
 delivered directly over HTTPS. There is no combined video fallback and no HLS
 conversion path. `--no-playlist` limits each request to one video, and
 `--fixup never` disables automatic repairs. No `-x`, audio-format, audio-quality,
 recode, or remux operation is requested. FFmpeg is not included.
 
-The original container and codec are retained, commonly WebM/Opus or M4A/AAC.
-YouTube already compresses its audio; this app adds **no further compression**.
-It does not invent a higher bitrate or convert to MP3. See the upstream
+The downloaded library copy retains its original container and codec, commonly
+WebM/Opus or M4A/AAC. For cloud processing, the app first uses Android's track
+bitrate and falls back to yt-dlp's selected-format bitrate when Android does not
+report one. Audio over 160 kbps or with unknown bitrate is encoded once to AAC/M4A
+at 160 kbps before upload. It is not converted to MP3 on the phone. Downloaded
+audio is inspected and hashed during staging without another full mobile decode;
+the worker validates and decodes the complete input before separation. Picked
+phone media retains full mobile decode validation. See the upstream
 [yt-dlp format selection documentation](https://github.com/yt-dlp/yt-dlp#format-selection).
 If a direct audio-only format is unavailable, the app reports a retryable failure.
 
@@ -332,7 +339,7 @@ work is serialized, cancellable, and distinguished as inspecting, preparing, sou
 download, and upload; waiting for a remote worker does not keep this foreground work
 alive. Android force-stop/background restrictions still apply.
 
-`ProcessingMediaPolicy` reads schema 2 and the `preserve-or-aac-lc-256-v1` profile.
+`ProcessingMediaPolicy` reads schema 2 and the `audio-cap-aac-lc-160-v1` profile.
 The single active media policy is inclusive 1,200 seconds and 50,000,000 prepared
 bytes, bounded by any lower server value. Unknown profiles fail safely. Backend
 admission remains authoritative after local preparation and can reject a race with
@@ -340,14 +347,19 @@ another installation or a full queue.
 
 The platform engine uses MediaExtractor directly on the provider descriptor without
 copying the original video. It honors the default or sole soundtrack and rejects
-ambiguous/unusable defaults. Compatible audio is copied unchanged. Selected AAC
-video tracks are remuxed to audio-only M4A; other decodable ordinary mono/stereo
-tracks use MediaCodec AAC-LC at 256 kbps. Multichannel conversion and known spatial
-codecs are rejected rather than downmixed. Prepared schema-2 audio is decoded under
-a deadline before immutable checksum publication and upload. Final prepared output
-must pass the same inclusive duration/size policy; codec padding handling is not a
-license for truncation. Native codec and exact boundary behavior remain unverified
-on Android hardware and must be validated before activating expanded readiness.
+ambiguous/unusable defaults. Compatible audio at or below 160 kbps is copied
+unchanged. Selected AAC video tracks at or below 160 kbps are remuxed to audio-only
+M4A; higher or unknown rates use MediaCodec AAC-LC at no more than 160 kbps.
+Multichannel conversion and known spatial codecs are rejected rather than downmixed.
+The first AAC packet may have a negative presentation time for encoder priming;
+only MediaExtractor's `-1` sentinel means no selected sample is available. Directly
+copied local audio is decoded under a deadline. Locally generated M4A is inspected
+and checksummed without a second complete decode; the worker validates the uploaded
+audio before separation. Final prepared output must pass the same inclusive
+duration/size policy; codec padding handling is not a license for truncation. A
+Xiaomi 23043RP34G hardware probe passed MP3 copy, 192 kbps M4A conversion, and
+128/192 kbps MP4 soundtrack preparation on 2026-09-23. Other devices and media
+formats still need validation.
 
 When policy refresh is unavailable, local preparation keeps the same 1,200-second
 and 50,000,000-byte safe ceiling; it never raises the backend limit. Local extraction

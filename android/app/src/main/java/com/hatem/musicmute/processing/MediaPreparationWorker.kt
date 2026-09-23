@@ -77,7 +77,9 @@ class MediaPreparationWorker(context: Context, parameters: WorkerParameters) : C
                     policy.requireLongJobAvailable(inspection.audio.durationSeconds)
                     val sourceKind = if (inspection.hasVideo) "video_file" else "audio_file"
                     repository.store.update(owner, operationId) { it.copy(mediaSource = sourceKind, phase = ProcessingPhase.PREPARING_INPUT) }
-                    val canCopy = !inspection.hasVideo && inspection.audioTrackCount == 1 && processingContentType(name.substringAfterLast('.', "").lowercase()) != null
+                    val canCopy = !inspection.hasVideo && inspection.audioTrackCount == 1 &&
+                        inspection.audio.bitRate != null && inspection.audio.bitRate <= 160_000 &&
+                        processingContentType(name.substringAfterLast('.', "").lowercase()) != null
                     try {
                         if (!canCopy) throw InputPreparationException(InputPreparationError.UNSUPPORTED)
                         app.audioInputPreparer.prepare(owner, name, operationId, policy, sourceKind) {
@@ -86,7 +88,11 @@ class MediaPreparationWorker(context: Context, parameters: WorkerParameters) : C
                     } catch (error: InputPreparationException) {
                         if (!policy.localPreparationReady || error.reason !in setOf(InputPreparationError.UNSUPPORTED, InputPreparationError.TOO_LARGE, InputPreparationError.INVALID_AUDIO)) throw error
                         engine.prepare(uri, temporary, policy)
-                        app.audioInputPreparer.prepare(owner, "${name.substringBeforeLast('.', name)}.m4a", operationId, policy, sourceKind) { temporary.inputStream() }
+                        // The engine already inspected the generated audio and decoded the
+                        // source when conversion was needed. Staging still checks its
+                        // container, duration, size and checksum before upload.
+                        app.audioInputPreparer.prepare(owner, "${name.substringBeforeLast('.', name)}.m4a",
+                            operationId, policy, sourceKind, validateFullDecode = false) { temporary.inputStream() }
                     }
                 }
                 checkOwner()

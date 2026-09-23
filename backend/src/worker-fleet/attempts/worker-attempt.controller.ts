@@ -6,6 +6,7 @@ import {
   FailWorkerAttemptDto,
   WorkerInputGrantDto,
   WorkerOutputGrantDto,
+  UpdateWorkerAttemptProgressDto,
 } from './worker-attempt.dto.js';
 import { WorkerAttemptService } from './worker-attempt.service.js';
 
@@ -30,6 +31,15 @@ export class WorkerAttemptController {
     @Body() dto: WorkerOutputGrantDto,
   ) {
     return this.attempts.outputGrant(request.workerPrincipal!, id, dto);
+  }
+
+  @Post(':id/progress')
+  progress(
+    @Req() request: WorkerRequest,
+    @Param('id') id: string,
+    @Body() dto: UpdateWorkerAttemptProgressDto,
+  ) {
+    return this.attempts.progress(request.workerPrincipal!, id, dto);
   }
 
   @Post(':id/complete')

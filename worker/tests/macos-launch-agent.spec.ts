@@ -65,7 +65,7 @@ describe("macOS user LaunchAgent", () => {
           "/Users/tester/Library/LaunchAgents/test.plist",
         ],
       ],
-      ["/bin/launchctl", ["kickstart", "-k", "gui/501/com.musicmute.worker"]],
+      ["/bin/launchctl", ["kickstart", "gui/501/com.musicmute.worker"]],
       ["/bin/launchctl", ["bootout", "gui/501/com.musicmute.worker"]],
     ]);
   });

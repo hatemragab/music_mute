@@ -58,6 +58,36 @@ describe('audio experience job presentation', () => {
     ).toMatchObject({ timing: { totalElapsedMs: null } });
   });
 
+  it('shows only fresh current-attempt public progress', () => {
+    const attemptId = '75438e3a-bda0-4521-a789-2b46473080e3';
+    const active = {
+      ...job,
+      status: 'processing',
+      currentExecution: { attemptId },
+      workerProgress: {
+        attemptId,
+        sequence: 4,
+        phase: 'separating',
+        phasePercent: 40,
+        observedAt: new Date(),
+      },
+    } as Job;
+    expect(presentJob(active).processingProgress).toMatchObject({
+      phase: 'separating',
+      phasePercent: 40,
+      stale: false,
+    });
+    expect(
+      presentJob({
+        ...active,
+        currentExecution: { attemptId: '79d83cf4-43db-4536-9422-4665f0686b9c' },
+      } as Job).processingProgress,
+    ).toBeNull();
+    expect(
+      presentJob({ ...active, status: 'ready' } as Job).processingProgress,
+    ).toBeNull();
+  });
+
   it('never exposes worker ownership or frozen internal recipe fields', () => {
     const presented = presentJob(
       Object.assign(

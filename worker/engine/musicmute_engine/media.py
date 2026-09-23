@@ -8,7 +8,7 @@ import json
 import math
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .limits import (
@@ -23,6 +23,7 @@ from .limits import (
     MAX_TOOL_OUTPUT_BYTES,
     SAMPLE_RATE,
 )
+from .recipes import OUTPUT_BITRATE_KBPS
 
 FFMPEG_TIMEOUT_SECONDS = 7_200
 PROBE_TIMEOUT_SECONDS = 60
@@ -39,6 +40,7 @@ class AudioInfo:
     duration_seconds: float
     sample_rate: int
     channels: int
+    bit_rate: int | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -88,7 +90,7 @@ def probe_audio(path: Path, ffprobe: Path) -> AudioInfo:
             "-select_streams",
             "a:0",
             "-show_entries",
-            "stream=sample_rate,channels:format=duration",
+            "stream=sample_rate,channels,bit_rate:format=duration",
             "-of",
             "json",
             str(path),
@@ -113,7 +115,14 @@ def probe_audio(path: Path, ffprobe: Path) -> AudioInfo:
         or channels <= 0
     ):
         raise MediaProcessingError("Audio metadata is outside worker limits")
-    return AudioInfo(duration, sample_rate, channels)
+    raw_bit_rate = stream.get("bit_rate")
+    try:
+        bit_rate = int(raw_bit_rate) if raw_bit_rate is not None else None
+    except (TypeError, ValueError):
+        bit_rate = None
+    if bit_rate is not None and bit_rate <= 0:
+        bit_rate = None
+    return AudioInfo(duration, sample_rate, channels, bit_rate=bit_rate)
 
 
 def prepare_audio(source: Path, destination: Path, ffmpeg: Path) -> Path:
@@ -168,7 +177,22 @@ def denoise_audio(source: Path, destination: Path, ffmpeg: Path) -> Path:
     return destination
 
 
-def encode_mp3(source: Path, destination: Path, ffmpeg: Path) -> Path:
+MP3_BITRATES_KBPS = (32, 40, 48, 56, 64, 80, 96, 112, 128, 160)
+
+
+def output_bitrate_kbps(input_bit_rate: int | None) -> int:
+    """Select a supported MP3 rate without raising a known compressed input rate."""
+    if input_bit_rate is None:
+        return OUTPUT_BITRATE_KBPS
+    allowed = [rate for rate in MP3_BITRATES_KBPS if rate <= OUTPUT_BITRATE_KBPS and rate * 1000 <= input_bit_rate]
+    if not allowed:
+        raise MediaProcessingError("Input bitrate is below supported MP3 output rates")
+    return allowed[-1]
+
+
+def encode_mp3(source: Path, destination: Path, ffmpeg: Path, bitrate_kbps: int = OUTPUT_BITRATE_KBPS) -> Path:
+    if bitrate_kbps not in MP3_BITRATES_KBPS or bitrate_kbps > OUTPUT_BITRATE_KBPS:
+        raise MediaProcessingError("Unsupported MP3 output bitrate")
     destination.parent.mkdir(parents=True, exist_ok=True)
     _run_ffmpeg(
         ffmpeg,
@@ -180,7 +204,7 @@ def encode_mp3(source: Path, destination: Path, ffmpeg: Path) -> Path:
             "-c:a",
             "libmp3lame",
             "-b:a",
-            "320k",
+            f"{bitrate_kbps}k",
             "-ar",
             str(SAMPLE_RATE),
             "-ac",

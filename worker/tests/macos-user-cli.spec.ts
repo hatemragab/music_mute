@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -11,13 +12,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkerEnrollmentError } from "../src/enrollment/enrollment-client.js";
-import { initializeLocalLifecycle } from "../src/runtime/local-lifecycle.js";
-import { writeLocalRuntimeStatus } from "../src/runtime/local-runtime-status.js";
+import {
+  initializeLocalLifecycle,
+  loadLocalLifecycle,
+} from "../src/runtime/local-lifecycle.js";
+import {
+  loadLocalRuntimeStatus,
+  writeLocalRuntimeStatus,
+} from "../src/runtime/local-runtime-status.js";
 import {
   initializeMacUserServiceFiles,
   runMacUserCommand,
+  waitForReady,
 } from "../src/platform/macos/user-cli.js";
 import { createMacUserLayout } from "../src/platform/macos/user-paths.js";
+import type { LaunchAgentStatus } from "../src/platform/macos/launch-agent.js";
 
 const roots: string[] = [];
 
@@ -135,18 +144,23 @@ describe("macOS public user commands", () => {
           "/Users/test/song.mp3",
           "--recipe",
           "kim-vocals-v2",
-          "--iterations",
-          "2",
+          "--runs",
+          "4",
           "--json",
         ],
         context,
       ),
     ).resolves.toBe(0);
-    expect(benchmarkFile).toHaveBeenCalledWith({
-      inputPath: "/Users/test/song.mp3",
-      recipeId: "kim-vocals-v2",
-      iterations: 2,
-    });
+    expect(benchmarkFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputPath: "/Users/test/song.mp3",
+        recipeId: "kim-vocals-v2",
+        warmupRuns: 1,
+        measuredRuns: 4,
+        groupSize: 1,
+        onProgress: expect.any(Function),
+      }),
+    );
     expect(JSON.parse(f.output.pop()!)).toMatchObject({
       status: "PASS",
       scope: "local-engine-only",
@@ -159,11 +173,32 @@ describe("macOS public user commands", () => {
         context,
       ),
     ).resolves.toBe(0);
-    expect(benchmarkFile).toHaveBeenCalledWith({
-      inputPath: "/Users/test/song.mp3",
-      recipeId: "kim-vocals-v2-trim",
-      iterations: 1,
-    });
+    expect(benchmarkFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputPath: "/Users/test/song.mp3",
+        recipeId: "kim-vocals-v2-trim",
+        warmupRuns: 1,
+        measuredRuns: 3,
+        groupSize: 1,
+      }),
+    );
+    await expect(
+      runMacUserCommand(
+        "benchmark-file",
+        ["--input", "/Users/test/song.mp3", "--group-size", "2"],
+        context,
+      ),
+    ).resolves.toBe(0);
+    expect(benchmarkFile).toHaveBeenLastCalledWith(
+      expect.objectContaining({ groupSize: 2 }),
+    );
+    await expect(
+      runMacUserCommand(
+        "benchmark-file",
+        ["--input", "/Users/test/song.mp3", "--group-size", "3"],
+        context,
+      ),
+    ).rejects.toThrow("window group must be 1, 2, or 4");
     await expect(
       runMacUserCommand(
         "benchmark-file",
@@ -456,6 +491,13 @@ describe("macOS public user commands", () => {
 
   it("combines local intent with remote authority in status", async () => {
     const f = await fixture(true);
+    await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [], {
+      childState: "ready",
+      sessionId: randomUUID(),
+      incarnation: randomUUID(),
+      processId: process.pid,
+      slots: [{ workerId: randomUUID(), gpuId: "gpu-0", provider: "mps" }],
+    });
     f.launchAgent.status.mockResolvedValue({ loaded: true, running: true });
     await expect(
       runMacUserCommand("status", ["--json"], {
@@ -487,8 +529,256 @@ describe("macOS public user commands", () => {
         state: { status: "paused", claimsAllowed: false },
       },
       effectiveClaimsAllowed: false,
+      readiness: {
+        claimEligible: false,
+        blockers: ["backend-paused", "backend-claims-disabled"],
+      },
       healthy: true,
     });
+  });
+
+  it("reports local readiness without contacting the backend", async () => {
+    const f = await fixture(true);
+    const remoteStatus = vi.fn(async () => {
+      throw new Error("must not call backend");
+    });
+    await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [], {
+      childState: "ready",
+      sessionId: randomUUID(),
+      incarnation: randomUUID(),
+      processId: process.pid,
+      slots: [{ workerId: randomUUID(), gpuId: "gpu-0", provider: "mps" }],
+      cachedPolicy: {
+        machineStatus: "active",
+        claimAllowed: true,
+        revision: 3,
+        observedAt: new Date().toISOString(),
+      },
+    });
+    f.launchAgent.status.mockResolvedValue({
+      loaded: true,
+      running: true,
+      pid: process.pid,
+    });
+    await expect(
+      runMacUserCommand("status", ["--local", "--json"], {
+        host: {
+          platform: "darwin",
+          arch: "arm64",
+          uid: process.getuid!(),
+          home: f.layout.homeRoot,
+        },
+        layout: f.layout,
+        launchAgent: f.launchAgent,
+        remoteStatus,
+        stdout: (value) => f.output.push(value),
+      }),
+    ).resolves.toBe(0);
+    expect(remoteStatus).not.toHaveBeenCalled();
+    expect(JSON.parse(f.output.pop()!)).toMatchObject({
+      readiness: { phase: "ready", modelReady: true, claimEligible: null },
+      remote: { available: false, checkedAt: null },
+      runtime: { cachedPolicy: { machineStatus: "active" } },
+    });
+  });
+
+  it("rejects a stale or wrong-process status as readiness proof", async () => {
+    const f = await fixture(true);
+    await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [], {
+      childState: "ready",
+      sessionId: randomUUID(),
+      incarnation: randomUUID(),
+      processId: process.pid,
+      slots: [{ workerId: randomUUID(), gpuId: "gpu-0", provider: "mps" }],
+    });
+    f.launchAgent.status.mockResolvedValue({
+      loaded: true,
+      running: true,
+      pid: process.pid + 1,
+    });
+    await expect(f.run("status", ["--local", "--json"])).resolves.toBe(1);
+    expect(JSON.parse(f.output.pop()!)).toMatchObject({
+      readiness: {
+        modelReady: false,
+        phase: "failed",
+        blockers: ["runtime-process-mismatch"],
+      },
+    });
+    const status = await loadLocalRuntimeStatus(f.layout.runtimeStatusPath);
+    await writeFile(
+      f.layout.runtimeStatusPath,
+      `${JSON.stringify({ ...status, updatedAt: "2020-01-01T00:00:00.000Z" })}\n`,
+      { mode: 0o600 },
+    );
+    f.launchAgent.status.mockResolvedValue({
+      loaded: true,
+      running: true,
+      pid: process.pid,
+    });
+    await expect(f.run("status", ["--local", "--json"])).resolves.toBe(1);
+    expect(JSON.parse(f.output.pop()!)).toMatchObject({
+      readiness: { modelReady: false, blockers: ["runtime-heartbeat-stale"] },
+    });
+  });
+
+  it("shows full capacity and diagnostic blockage without killing processing", async () => {
+    const f = await fixture(true);
+    const workerId = randomUUID();
+    const attemptId = randomUUID();
+    await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [attemptId], {
+      childState: "ready",
+      sessionId: randomUUID(),
+      incarnation: randomUUID(),
+      processId: process.pid,
+      slots: [{ workerId, gpuId: "gpu-0", provider: "mps" }],
+      currentAttempts: [
+        {
+          workerId,
+          attemptId,
+          jobId: "64b000000000000000000001",
+          stage: "separation",
+          startedAt: new Date().toISOString(),
+          stageStartedAt: new Date().toISOString(),
+          lastProgressAt: "2020-01-01T00:00:00.000Z",
+          work: { unit: "windows", completed: 2, total: 20 },
+        },
+      ],
+      diagnostics: {
+        blockedReason: "write-failed",
+        earliestAvailableAt: null,
+        incompleteHistory: true,
+        retainedBytes: 100,
+      },
+    });
+    f.launchAgent.status.mockResolvedValue({
+      loaded: true,
+      running: true,
+      pid: process.pid,
+    });
+    await expect(f.run("status", ["--local", "--json"])).resolves.toBe(1);
+    expect(JSON.parse(f.output.pop()!)).toMatchObject({
+      readiness: {
+        phase: "processing",
+        modelReady: true,
+        localReady: false,
+        progressStale: true,
+        blockers: ["diagnostics-write-failed", "capacity-full"],
+      },
+      runtime: {
+        currentAttempts: [
+          { stage: "separation", work: { completed: 2, total: 20 } },
+        ],
+      },
+    });
+  });
+
+  it("stops status watch on interruption without mutating the service", async () => {
+    const f = await fixture(true);
+    const output: string[] = [];
+    await expect(
+      runMacUserCommand("status", ["--local", "--watch", "--json"], {
+        host: {
+          platform: "darwin",
+          arch: "arm64",
+          uid: process.getuid!(),
+          home: f.layout.homeRoot,
+        },
+        layout: f.layout,
+        launchAgent: f.launchAgent,
+        remoteStatus: vi.fn(async () => {
+          throw new Error("must not call backend");
+        }),
+        wait: async () => {
+          process.emit("SIGINT");
+        },
+        stdout: (value) => output.push(value),
+      }),
+    ).resolves.toBe(0);
+    expect(output).toHaveLength(1);
+    expect(JSON.parse(output[0]!)).toHaveProperty("schemaVersion", 2);
+    expect(f.launchAgent.bootout).not.toHaveBeenCalled();
+    expect(f.launchAgent.kickstart).not.toHaveBeenCalled();
+  });
+
+  it("waits for a real ready child before returning from start", async () => {
+    const f = await fixture(true);
+    const identity = {
+      sessionId: randomUUID(),
+      incarnation: randomUUID(),
+      processId: process.pid,
+      slots: [
+        { workerId: randomUUID(), gpuId: "gpu-0", provider: "mps" as const },
+      ],
+    };
+    await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [], {
+      ...identity,
+      childState: "loading",
+    });
+    f.launchAgent.status.mockResolvedValue({
+      loaded: true,
+      running: true,
+      pid: process.pid,
+    });
+    await expect(
+      runMacUserCommand("start", ["--wait-ready", "--json"], {
+        host: {
+          platform: "darwin",
+          arch: "arm64",
+          uid: process.getuid!(),
+          home: f.layout.homeRoot,
+        },
+        layout: f.layout,
+        launchAgent: f.launchAgent,
+        remoteStatus: async () => ({
+          machineId: randomUUID(),
+          status: "active",
+          groupId: null,
+          policyRevision: 1,
+          revision: 1,
+          lastSeenAt: null,
+          activeAttempts: 0,
+          claimsAllowed: true,
+        }),
+        wait: async () => {
+          await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [], {
+            ...identity,
+            childState: "ready",
+          });
+        },
+        stdout: (value) => f.output.push(value),
+      }),
+    ).resolves.toBe(0);
+    expect(f.output.map((value) => JSON.parse(value).phase)).toContain(
+      "loading",
+    );
+    expect(JSON.parse(f.output.at(-1)!)).toMatchObject({
+      action: "start",
+      readiness: { modelReady: true, claimEligible: true },
+    });
+    expect(f.launchAgent.kickstart).not.toHaveBeenCalled();
+  });
+
+  it("times out wait-ready with the last observed blocker", async () => {
+    let now = 0;
+    const read = async () =>
+      ({
+        readiness: {
+          phase: "loading",
+          modelReady: false,
+          blockers: ["model-loading"],
+        },
+      }) as never;
+    await expect(
+      waitForReady(
+        read,
+        async (milliseconds) => {
+          now += milliseconds;
+        },
+        undefined,
+        2_000,
+        () => now,
+      ),
+    ).rejects.toThrow("model-loading");
   });
 
   it("starts, stops, and restarts through the user launchctl domain", async () => {
@@ -502,7 +792,9 @@ describe("macOS public user commands", () => {
       .mockResolvedValueOnce({ loaded: false, running: false });
 
     await expect(f.run("start", [])).resolves.toBe(0);
-    expect(f.output.at(-1)).toBe("MusicMute Worker Start\n\nResult: Success");
+    expect(f.output.at(-1)).toBe(
+      "MusicMute Worker Start\n\nResult: Success\nOutcome: Service Started",
+    );
     expect(f.launchAgent.bootstrap).toHaveBeenCalledWith(f.layout.plistPath);
     await expect(f.run("stop", ["--json"])).resolves.toBe(0);
     expect(JSON.parse(f.output.at(-1)!)).toMatchObject({ action: "stop" });
@@ -532,6 +824,85 @@ describe("macOS public user commands", () => {
     expect(f.launchAgent.kickstart).not.toHaveBeenCalled();
   });
 
+  it("keeps a running service and active attempt intact on repeated start", async () => {
+    const f = await fixture(true);
+    f.launchAgent.status.mockResolvedValue({
+      loaded: true,
+      running: true,
+    });
+    await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [
+      "99f8016b-67f3-4f4b-beb4-205a7b87147e",
+    ]);
+
+    await f.run("start", ["--json"]);
+    await f.run("start", ["--json"]);
+
+    expect(f.output.map((value) => JSON.parse(value).outcome)).toEqual([
+      "already-running",
+      "already-running",
+    ]);
+    expect(f.launchAgent.kickstart).not.toHaveBeenCalled();
+    expect(f.launchAgent.bootstrap).not.toHaveBeenCalled();
+    expect(f.launchAgent.bootout).not.toHaveBeenCalled();
+    expect(
+      (await loadLocalRuntimeStatus(f.layout.runtimeStatusPath))
+        .activeAttemptIds,
+    ).toEqual(["99f8016b-67f3-4f4b-beb4-205a7b87147e"]);
+  });
+
+  it("starts a loaded but stopped service without replacing a running PID", async () => {
+    const f = await fixture(true);
+    f.launchAgent.status.mockResolvedValue({ loaded: true, running: false });
+
+    await f.run("start", ["--json"]);
+
+    expect(JSON.parse(f.output.at(-1)!)).toMatchObject({
+      action: "start",
+      outcome: "service-started",
+    });
+    expect(f.launchAgent.kickstart).toHaveBeenCalledOnce();
+    expect(f.launchAgent.bootstrap).not.toHaveBeenCalled();
+  });
+
+  it("unloads a stopped service without waiting on stale attempt state", async () => {
+    const f = await fixture(true);
+    f.launchAgent.status
+      .mockResolvedValueOnce({ loaded: true, running: false })
+      .mockResolvedValueOnce({ loaded: false, running: false });
+    await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [
+      "99f8016b-67f3-4f4b-beb4-205a7b87147e",
+    ]);
+
+    await f.run("stop", ["--json"]);
+
+    expect(f.launchAgent.bootout).toHaveBeenCalledOnce();
+    expect(f.launchAgent.kickstart).not.toHaveBeenCalled();
+  });
+
+  it("resume on a stopped service reports intent without starting it", async () => {
+    const f = await fixture(true);
+    await f.run("pause", ["--json"]);
+    await f.run("resume", ["--json"]);
+    const revision = (await loadLocalLifecycle(f.layout.lifecyclePath))
+      .revision;
+    await f.run("resume", ["--json"]);
+
+    expect(f.output.map((value) => JSON.parse(value).outcome)).toEqual([
+      "intent-updated",
+      "intent-updated",
+      "already-set",
+    ]);
+    expect(JSON.parse(f.output.at(-1)!)).toMatchObject({
+      action: "active",
+      serviceRunning: false,
+    });
+    expect((await loadLocalLifecycle(f.layout.lifecyclePath)).revision).toBe(
+      revision,
+    );
+    expect(f.launchAgent.kickstart).not.toHaveBeenCalled();
+    expect(f.launchAgent.bootstrap).not.toHaveBeenCalled();
+  });
+
   it("persists pause, drain, and resume without changing backend authority", async () => {
     const f = await fixture(true);
     f.launchAgent.status.mockResolvedValue({ loaded: true, running: true });
@@ -545,7 +916,12 @@ describe("macOS public user commands", () => {
       "draining",
       "active",
     ]);
-    expect(f.launchAgent.kickstart).toHaveBeenCalledOnce();
+    expect(f.launchAgent.kickstart).not.toHaveBeenCalled();
+    expect(JSON.parse(f.output.at(-1)!)).toMatchObject({
+      action: "active",
+      outcome: "intent-updated",
+      serviceRunning: true,
+    });
   });
 
   it("reads bounded logs and validates arguments", async () => {
@@ -561,6 +937,36 @@ describe("macOS public user commands", () => {
     await expect(f.run("logs", ["--lines", "0"])).rejects.toThrow(
       "between 1 and 1000",
     );
+  });
+
+  it("exposes bounded local job and error investigations through the CLI", async () => {
+    const f = await fixture(true);
+    const jobId = "507461bf507461bf507461bf";
+    await expect(f.run("job", [jobId, "--json"])).resolves.toBe(2);
+    expect(JSON.parse(f.output.pop()!)).toMatchObject({
+      scope: "local-worker-history",
+      foundLocally: false,
+    });
+    await expect(
+      f.run("errors", ["--since", "1d", "--limit", "10", "--json"]),
+    ).resolves.toBe(0);
+    expect(JSON.parse(f.output.pop()!)).toMatchObject({
+      groups: [],
+      groupLimit: 10,
+    });
+    await expect(f.run("explain", ["TIMEOUT", "--json"])).resolves.toBe(0);
+    expect(JSON.parse(f.output.pop()!)).toMatchObject({
+      code: "TIMEOUT",
+      observedCountInRetainedHistory: 0,
+    });
+    await expect(f.run("perf", ["--last", "5", "--json"])).resolves.toBe(0);
+    expect(JSON.parse(f.output.pop()!)).toMatchObject({
+      scope: "local-worker-history",
+      selectedAttempts: 0,
+      last: 5,
+    });
+    await expect(f.run("errors", ["--limit", "101"])).rejects.toThrow("limit");
+    await expect(f.run("perf", ["--last", "0"])).rejects.toThrow("count");
   });
 
   it("clears logs safely and restores a previously loaded service", async () => {
@@ -593,8 +999,8 @@ describe("macOS public user commands", () => {
     });
     expect((await lstat(f.layout.stdoutPath)).size).toBe(0);
     expect((await lstat(f.layout.stderrPath)).size).toBe(0);
-    expect(f.launchAgent.bootout).toHaveBeenCalledOnce();
-    expect(f.launchAgent.bootstrap).toHaveBeenCalledWith(f.layout.plistPath);
+    expect(f.launchAgent.bootout).not.toHaveBeenCalled();
+    expect(f.launchAgent.bootstrap).not.toHaveBeenCalled();
     await expect(f.run("logs", ["--clear", "--events"])).rejects.toThrow(
       "cannot be combined",
     );
@@ -837,7 +1243,10 @@ async function fixture(installed: boolean) {
     bootstrap: vi.fn(async () => undefined),
     bootout: vi.fn(async () => undefined),
     kickstart: vi.fn(async () => undefined),
-    status: vi.fn(async () => ({ loaded: false, running: false })),
+    status: vi.fn(async (): Promise<LaunchAgentStatus> => ({
+      loaded: false,
+      running: false,
+    })),
   };
   const output: string[] = [];
   const run = async (command: string, arguments_: string[]) =>

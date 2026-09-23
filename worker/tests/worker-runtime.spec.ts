@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChildResponse } from "../src/agent/ipc/child-protocol.js";
+import type { ChildProgress } from "../src/agent/ipc/child-progress.js";
 import { ControlPlaneError } from "../src/runtime/control-plane-client.js";
 import type {
   Claim,
@@ -34,7 +35,7 @@ const roots: string[] = [];
 
 const recipe: WorkerRecipeSnapshot = {
   recipeId: "kim-vocals-v2",
-  recipeRevision: 1,
+  recipeRevision: 3,
   protocolVersion: 1,
   recipeDigest: "a".repeat(64),
   modelFilename: "Kim_Vocal_2.onnx",
@@ -44,7 +45,7 @@ const recipe: WorkerRecipeSnapshot = {
   stepIds: [
     "prepare-pcm16-stereo-44100-v1",
     "separate-kim-vocal-2-v1",
-    "encode-mp3-320k-v1",
+    "encode-mp3-up-to-160k-v1",
     "validate-audio-v1",
   ],
   trimEnabled: false,
@@ -52,7 +53,7 @@ const recipe: WorkerRecipeSnapshot = {
   denoisePresetId: null,
   trimProfileId: null,
   outputFormat: "mp3",
-  outputBitrateKbps: 320,
+  outputBitrateKbps: 160,
 };
 
 afterEach(async () => {
@@ -62,20 +63,33 @@ afterEach(async () => {
 });
 
 class FakeChild {
+  readonly incarnation = randomUUID();
   processing = false;
   terminate = vi.fn(() => undefined);
   requestTimeoutMs: number | undefined;
   private rejectProcess: ((error: Error) => void) | null = null;
 
-  constructor(private readonly hang = false) {}
+  constructor(
+    private readonly hang = false,
+    private readonly progress = false,
+  ) {}
 
   async request(
     _command: "ping" | "process",
     payload: Record<string, unknown>,
     timeoutMs?: number,
+    onProgress?: (progress: ChildProgress) => void,
   ): Promise<ChildResponse> {
     this.requestTimeoutMs = timeoutMs;
     this.processing = true;
+    if (this.progress) {
+      onProgress?.({ stage: "preparation" });
+      onProgress?.({ stage: "separation" });
+      onProgress?.({
+        stage: "separation",
+        work: { unit: "windows", completed: 2, total: 4 },
+      });
+    }
     if (this.hang) {
       return new Promise<ChildResponse>((_resolve, reject) => {
         this.rejectProcess = reject;
@@ -100,6 +114,7 @@ class FakeChild {
         bytes: outputBytes.length,
         sha256: outputSha,
         contentType: "audio/mpeg",
+        measuredInputDurationSeconds: 1.25,
         measuredOutputDurationSeconds: 1.25,
         recipeId: recipe.recipeId,
         recipeRevision: recipe.recipeRevision,
@@ -129,7 +144,9 @@ class FakeChild {
   }
 }
 
-function fixture(options: { hang?: boolean; cancelled?: boolean } = {}) {
+function fixture(
+  options: { hang?: boolean; cancelled?: boolean; progress?: boolean } = {},
+) {
   const now = Date.now();
   const claim: Claim = {
     attemptId,
@@ -242,7 +259,7 @@ function fixture(options: { hang?: boolean; cancelled?: boolean } = {}) {
     }),
     upload: vi.fn(async () => "output-version"),
   };
-  const child = new FakeChild(options.hang);
+  const child = new FakeChild(options.hang, options.progress);
   const supervisor = {
     start: vi.fn(async () => undefined),
     stop: vi.fn(async () => undefined),
@@ -266,6 +283,7 @@ async function runtimeFixture(
       metrics: Array<{ name: string; value: number; unit: string }>;
     }>;
   },
+  pollMs = 100,
 ) {
   const root = await mkdtemp(join(tmpdir(), "musicmute-runtime-"));
   roots.push(root);
@@ -294,8 +312,8 @@ async function runtimeFixture(
       ffprobePath: "/usr/local/bin/ffprobe",
       leaseRenewIntervalMs: 100,
       leaseSafetyMarginMs: 100,
-      idlePollMinimumMs: 100,
-      idlePollMaximumMs: 100,
+      idlePollMinimumMs: pollMs,
+      idlePollMaximumMs: pollMs,
       resources,
       ...(commandExecutor === undefined ? {} : { commandExecutor }),
       onEvent: (event) => events.push(event),
@@ -475,6 +493,13 @@ describe("worker runtime ownership", () => {
 
     expect(f.supervisor.stop).toHaveBeenCalledOnce();
     expect(f.supervisor.start).toHaveBeenCalledTimes(2);
+    expect(f.events).toContainEqual(
+      expect.objectContaining({
+        kind: "model-ready",
+        loadReason: "remote-benchmark",
+        childIncarnation: f.child.incarnation,
+      }),
+    );
     expect(f.control.completeCommand).toHaveBeenCalledOnce();
     await f.runtime.stop();
   });
@@ -519,6 +544,39 @@ describe("worker runtime ownership", () => {
     await f.runtime.stop();
   });
 
+  it("wakes a paused service on local resume without replacing its child", async () => {
+    const f = await runtimeFixture(
+      fixture(),
+      undefined,
+      true,
+      false,
+      undefined,
+      10_000,
+    );
+    await setLocalLifecycleIntent(f.localLifecyclePath, "paused");
+    const running = f.runtime.run();
+    try {
+      await vi.waitFor(() =>
+        expect(f.control.config.mock.calls.length).toBeGreaterThanOrEqual(2),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(f.control.claim).not.toHaveBeenCalled();
+
+      await setLocalLifecycleIntent(f.localLifecyclePath, "active");
+      await vi.waitFor(
+        () =>
+          expect(f.control.claim.mock.calls.length).toBeGreaterThanOrEqual(1),
+        { timeout: 2_000 },
+      );
+      await f.runtime.waitForIdle();
+      expect(f.supervisor.start).toHaveBeenCalledOnce();
+      expect(f.supervisor.restart).not.toHaveBeenCalled();
+    } finally {
+      await f.runtime.stop();
+      await running;
+    }
+  });
+
   it("claims, downloads, processes, uploads, completes and cleans one attempt", async () => {
     const f = await runtimeFixture();
     await f.runtime.start();
@@ -541,11 +599,104 @@ describe("worker runtime ownership", () => {
     );
     expect(f.control.fail).not.toHaveBeenCalled();
     expect(f.events.map((event) => event.kind)).toEqual([
+      "model-ready",
       "started",
       "attempt-started",
+      "attempt-progress",
+      "attempt-progress",
+      "attempt-progress",
+      "attempt-progress",
       "attempt-succeeded",
     ]);
+    expect(f.events).toContainEqual(
+      expect.objectContaining({
+        kind: "model-ready",
+        childIncarnation: f.child.incarnation,
+        loadReason: "initial-start",
+        provider: "mps",
+      }),
+    );
+    expect(f.events).toContainEqual(
+      expect.objectContaining({
+        kind: "attempt-started",
+        childIncarnation: f.child.incarnation,
+        modelLoadState: "preloaded",
+      }),
+    );
+    expect(
+      f.events
+        .filter((event) => event.kind === "attempt-progress")
+        .map((event) => event.stage),
+    ).toEqual([
+      "resource-check",
+      "input-download",
+      "output-upload",
+      "completion",
+    ]);
     expect(await readdir(join(f.root, "attempts"))).toEqual([]);
+    await f.runtime.stop();
+  });
+
+  it("records typed observed progress with ordered metadata and no fabricated percentage", async () => {
+    const f = await runtimeFixture(fixture({ progress: true }));
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+
+    const progress = f.events.filter(
+      (event) => event.kind === "attempt-progress",
+    );
+    expect(progress).toMatchObject([
+      { stage: "resource-check", jobId: f.claim.jobId, attemptId },
+      { stage: "input-download", jobId: f.claim.jobId, attemptId },
+      { stage: "preparation", jobId: f.claim.jobId, attemptId },
+      { stage: "separation", jobId: f.claim.jobId, attemptId },
+      {
+        stage: "separation",
+        work: { unit: "windows", completed: 2, total: 4 },
+        jobId: f.claim.jobId,
+        attemptId,
+      },
+      { stage: "output-upload", jobId: f.claim.jobId, attemptId },
+      { stage: "completion", jobId: f.claim.jobId, attemptId },
+    ]);
+    expect(f.events.map((event) => event.sequence)).toEqual(
+      f.events.map((_event, index) => index + 1),
+    );
+    for (const event of f.events) {
+      expect(event.schemaVersion).toBe(2);
+      expect(event.sessionId).toBe(f.runtime.sessionId);
+      expect(event.incarnation).toBe(f.runtime.incarnation);
+      expect(Number.isFinite(Date.parse(event.recordedAt))).toBe(true);
+      expect(event).not.toHaveProperty("fraction");
+    }
+    await f.runtime.stop();
+  });
+
+  it("publishes the active stage and observed work for local CLI status", async () => {
+    const f = await runtimeFixture(
+      fixture({ hang: true, progress: true }),
+      undefined,
+      false,
+      true,
+    );
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await vi.waitFor(async () => {
+      const status = await loadLocalRuntimeStatus(f.localRuntimeStatusPath);
+      expect(status.currentAttempts?.[0]).toMatchObject({
+        stage: "separation",
+        work: { unit: "windows", completed: 2, total: 4 },
+        provider: "mps",
+      });
+      expect(status.sessionId).toBe(f.runtime.sessionId);
+      expect(status.incarnation).toBe(f.runtime.incarnation);
+      expect(status.slots).toHaveLength(1);
+      expect(status.cachedPolicy).toMatchObject({
+        machineStatus: "active",
+        claimAllowed: true,
+      });
+    });
     await f.runtime.stop();
   });
 
@@ -568,13 +719,17 @@ describe("worker runtime ownership", () => {
       }),
       expect.any(AbortSignal),
     );
-    expect(f.events).toContainEqual({
-      kind: "transfer-failed",
-      workerId,
-      attemptId,
-      code: "OUTPUT_UPLOAD_FAILED",
-      detail: "upload-http-403",
-    });
+    expect(f.events).toContainEqual(
+      expect.objectContaining({
+        kind: "transfer-failed",
+        workerId,
+        attemptId,
+        code: "OUTPUT_UPLOAD_FAILED",
+        detail: "upload-http-403",
+        schemaVersion: 2,
+        severity: "error",
+      }),
+    );
     await f.runtime.stop();
   });
 
@@ -627,6 +782,13 @@ describe("worker runtime ownership", () => {
 
     expect(f.child.terminate).toHaveBeenCalledOnce();
     expect(f.supervisor.restart).toHaveBeenCalledOnce();
+    expect(f.events).toContainEqual(
+      expect.objectContaining({
+        kind: "model-ready",
+        loadReason: "attempt-recovery",
+        childIncarnation: f.child.incarnation,
+      }),
+    );
     expect(f.control.outputGrant).not.toHaveBeenCalled();
     expect(f.control.complete).not.toHaveBeenCalled();
     expect(f.control.fail).not.toHaveBeenCalled();

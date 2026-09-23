@@ -1,10 +1,11 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, extname, join } from 'node:path';
+import { dirname, extname, isAbsolute, join } from 'node:path';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Test } from '@nestjs/testing';
@@ -30,9 +31,14 @@ const { WorkerTransferClient } =
   await import('../../../worker/dist/src/runtime/transfers.js');
 const { WorkerRuntime } =
   await import('../../../worker/dist/src/runtime/worker-runtime.js');
+const { WorkerChildProcess } =
+  await import('../../../worker/dist/src/agent/child-process.js');
 
 const useRealS3 = process.env.WORKER_INTEGRATION_STORAGE === 's3';
 const externalService = process.env.WORKER_INTEGRATION_EXTERNAL === 'true';
+const realGpu = process.env.WORKER_INTEGRATION_REAL_GPU === 'true';
+if (realGpu && (externalService || useRealS3))
+  throw new Error('Real GPU fixture requires isolated local storage');
 if (externalService && !useRealS3)
   throw new Error('External worker integration requires real S3');
 const externalPlatform =
@@ -85,22 +91,32 @@ if (
 )
   throw new Error('Invalid worker integration input size');
 const inputPath = process.env.WORKER_INTEGRATION_INPUT_PATH;
-const input = externalService
-  ? await readFile(inputPath ?? '')
-  : Buffer.alloc(requestedInputBytes, 0x5a);
+if (realGpu && (!inputPath || !isAbsolute(inputPath)))
+  throw new Error('Real GPU fixture requires an absolute input path');
+const input =
+  externalService || realGpu
+    ? await readFile(inputPath ?? '')
+    : Buffer.alloc(requestedInputBytes, 0x5a);
 if (input.length < 1 || input.length > 30_000_000)
   throw new Error('Invalid external worker input');
-const inputExtension = externalService
-  ? extname(inputPath ?? '')
-      .slice(1)
-      .toLowerCase()
-  : 'mp3';
+const inputExtension =
+  externalService || realGpu
+    ? extname(inputPath ?? '')
+        .slice(1)
+        .toLowerCase()
+    : 'mp3';
 const inputContentTypes = { m4a: 'audio/mp4', mp3: 'audio/mpeg' };
 const inputContentType = inputContentTypes[inputExtension];
 if (!inputContentType) throw new Error('Unsupported external worker input');
-const inputDurationSeconds = externalService ? 10 : 1;
+const inputDurationSeconds = realGpu
+  ? Number(process.env.WORKER_INTEGRATION_INPUT_DURATION_SECONDS)
+  : externalService
+    ? 10
+    : 1;
+if (!Number.isFinite(inputDurationSeconds) || inputDurationSeconds <= 0)
+  throw new Error('Invalid real GPU fixture duration');
 const output = Buffer.from('musicmute-worker-integration-output');
-const transferTimeoutMs = useRealS3 ? 120_000 : 10_000;
+const transferTimeoutMs = useRealS3 || realGpu ? 120_000 : 10_000;
 const digestBase64 = (value) =>
   createHash('sha256').update(value).digest('base64');
 
@@ -351,6 +367,7 @@ class FixtureChild {
         bytes: output.length,
         sha256: digestBase64(output),
         contentType: 'audio/mpeg',
+        measuredInputDurationSeconds: 1,
         measuredOutputDurationSeconds: 1,
         recipeId: recipe.recipeId,
         recipeRevision: recipe.recipeRevision,
@@ -360,6 +377,7 @@ class FixtureChild {
         denoiseEnabled: recipe.denoiseEnabled,
         outputFormat: recipe.outputFormat,
         outputBitrateKbps: recipe.outputBitrateKbps,
+        stageTimings: {},
       },
     };
   }
@@ -466,7 +484,7 @@ try {
     '/jobs',
     {
       policyVersion: 2,
-      preparationProfileId: 'preserve-or-aac-lc-256-v1',
+      preparationProfileId: 'audio-cap-aac-lc-160-v1',
       source: 'audio_file',
       requestId: randomUUID(),
       input: {
@@ -507,7 +525,7 @@ try {
         platform: externalService ? externalPlatform : 'darwin-arm64',
         provider: externalService ? externalProvider : 'mps',
         gpuId,
-        recipeIds: ['kim-vocals-v2'],
+        recipeIds: ['kim-vocals-v2', 'kim-vocals-v2-trim'],
         maxSlots: 1,
       },
     ],
@@ -561,7 +579,39 @@ try {
       await delay(5_000);
     }
   } else {
-    const child = new FixtureChild();
+    const realGpuPaths = realGpu
+      ? {
+          python: process.env.WORKER_INTEGRATION_PYTHON,
+          modelCache: process.env.WORKER_INTEGRATION_MODEL_CACHE,
+          ffmpeg: process.env.WORKER_INTEGRATION_FFMPEG,
+          ffprobe: process.env.WORKER_INTEGRATION_FFPROBE,
+          engine: process.env.WORKER_INTEGRATION_ENGINE,
+        }
+      : null;
+    if (
+      realGpuPaths &&
+      Object.values(realGpuPaths).some((value) => !value || !isAbsolute(value))
+    )
+      throw new Error('Real GPU fixture requires absolute runtime paths');
+    const child = realGpuPaths
+      ? new WorkerChildProcess({
+          command: realGpuPaths.python,
+          args: [
+            '-B',
+            '-m',
+            'musicmute_engine.child',
+            '--model-cache-root',
+            realGpuPaths.modelCache,
+            '--provider',
+            'mps',
+          ],
+          cwd: realGpuPaths.engine,
+          trustedExecutableDirectory: dirname(realGpuPaths.ffmpeg),
+          startTimeoutMs: 120_000,
+        })
+      : new FixtureChild();
+    if (realGpu) await child.start();
+    const runtimeEvents = [];
     const supervisor = {
       start: async () => undefined,
       stop: async () => undefined,
@@ -576,15 +626,26 @@ try {
             workerId,
             gpuId,
             slotIndex: 0,
-            recipeIds: ['kim-vocals-v2'],
+            recipeIds: ['kim-vocals-v2', 'kim-vocals-v2-trim'],
             provider: 'mps',
           },
         ],
         workRoot: join(root, 'attempts'),
-        modelCacheRoot: join(root, 'models'),
-        ffmpegPath: '/usr/bin/false',
-        ffprobePath: '/usr/bin/false',
+        modelCacheRoot: realGpuPaths?.modelCache ?? join(root, 'models'),
+        ffmpegPath: realGpuPaths?.ffmpeg ?? '/usr/bin/false',
+        ffprobePath: realGpuPaths?.ffprobe ?? '/usr/bin/false',
         resources: { assertAvailable: async () => undefined },
+        onEvent: (event) =>
+          runtimeEvents.push({
+            kind: event.kind,
+            code: event.code ?? null,
+            ...(event.kind === 'attempt-succeeded'
+              ? {
+                  stageTimings: event.stageTimings,
+                  outputBytes: event.outputBytes,
+                }
+              : {}),
+          }),
       },
       new WorkerControlPlaneClient({
         baseUrl,
@@ -596,10 +657,64 @@ try {
     );
     await runtime.start();
     try {
-      await runtime.reconcileOnce();
+      const flowStartedAt = performance.now();
+      const claimed = await runtime.reconcileOnce();
+      let observedPublicWindowProgress = false;
+      if (realGpu) {
+        const progressDeadline = Date.now() + 30_000;
+        while (Date.now() < progressDeadline) {
+          const detail = await api('GET', `/jobs/${created.id}`);
+          if (
+            detail.processingProgress?.phase === 'separating' &&
+            Number.isInteger(detail.processingProgress.phasePercent)
+          ) {
+            observedPublicWindowProgress = true;
+            break;
+          }
+          if (detail.status === 'ready' || detail.status === 'failed') break;
+          await delay(100);
+        }
+      }
       await runtime.waitForIdle();
+      const flowDurationMs = performance.now() - flowStartedAt;
+      const state = await api('GET', `/jobs/${created.id}`);
+      if (state.status !== 'ready') {
+        const savedJob = await app
+          .get(getModelToken('Job'))
+          .findById(created.id)
+          .lean();
+        const savedMachine = await machines.findById(machineId).lean();
+        throw new Error(
+          JSON.stringify({
+            claimed,
+            status: state.status,
+            runtimeEvents,
+            policyRevision: savedMachine?.policyRevision,
+            appliedRevision: savedMachine?.appliedRevision,
+            queuedAt: Boolean(savedJob?.queuedAt),
+            inputObject: Boolean(savedJob?.inputObject),
+            recipeId: savedJob?.recipeSnapshot?.recipeId,
+            retry: savedJob?.retryEligibility,
+            attemptNumber: savedJob?.attemptNumber,
+          }),
+        );
+      }
+      if (realGpu) {
+        assert.equal(observedPublicWindowProgress, true);
+        const success = runtimeEvents.find(
+          (event) => event.kind === 'attempt-succeeded',
+        );
+        assert.ok(success);
+        console.log(
+          `WORKER_FLEET_REAL_GPU_STAGES ${JSON.stringify(success.stageTimings)}`,
+        );
+        console.log(
+          `WORKER_FLEET_REAL_GPU_FLOW_MS ${flowDurationMs.toFixed(3)}`,
+        );
+      }
     } finally {
       await runtime.stop();
+      if (realGpu) await child.stop();
     }
   }
 
@@ -614,9 +729,38 @@ try {
   });
   assert.equal(downloaded.status, 200);
   const downloadedOutput = Buffer.from(await downloaded.arrayBuffer());
-  if (externalService) {
+  if (externalService || realGpu) {
     assert.ok(downloadedOutput.length > 1_000);
     assert.match(downloaded.headers.get('content-type') ?? '', /^audio\/mpeg/);
+    if (realGpu) {
+      const resultPath = join(root, 'result.mp3');
+      await writeFile(resultPath, downloadedOutput, { mode: 0o600 });
+      const probe = JSON.parse(
+        execFileSync(
+          process.env.WORKER_INTEGRATION_FFPROBE,
+          [
+            '-v',
+            'error',
+            '-select_streams',
+            'a:0',
+            '-show_entries',
+            'stream=codec_name,bit_rate,sample_rate,channels:format=duration',
+            '-of',
+            'json',
+            resultPath,
+          ],
+          { encoding: 'utf8', timeout: 30_000 },
+        ),
+      );
+      assert.equal(probe.streams?.[0]?.codec_name, 'mp3');
+      assert.equal(Number(probe.streams?.[0]?.bit_rate), 160_000);
+      assert.equal(Number(probe.streams?.[0]?.sample_rate), 44_100);
+      assert.equal(Number(probe.streams?.[0]?.channels), 2);
+      assert.ok(Number(probe.format?.duration) > 0);
+      console.log(
+        `WORKER_FLEET_REAL_GPU_OK inputBytes=${input.length} outputBytes=${downloadedOutput.length} durationSeconds=${probe.format.duration}`,
+      );
+    }
   } else {
     assert.deepEqual(downloadedOutput, output);
   }
@@ -646,7 +790,7 @@ try {
         '/jobs',
         {
           policyVersion: 2,
-          preparationProfileId: 'preserve-or-aac-lc-256-v1',
+          preparationProfileId: 'audio-cap-aac-lc-160-v1',
           source: 'audio_file',
           requestId: randomUUID(),
           input: {
@@ -694,7 +838,7 @@ try {
             platform: 'windows-amd64',
             provider: 'directml',
             gpuId,
-            recipeIds: ['kim-vocals-v2'],
+            recipeIds: ['kim-vocals-v2', 'kim-vocals-v2-trim'],
             maxSlots: 1,
           },
         ],
@@ -747,7 +891,7 @@ try {
           incarnation,
           gpuId,
           slotIndex: 0,
-          recipeIds: ['kim-vocals-v2'],
+          recipeIds: ['kim-vocals-v2', 'kim-vocals-v2-trim'],
         },
         { worker: credential, expected: 201 },
       );
@@ -798,6 +942,46 @@ try {
     assert.equal(replay.claim.attemptId, winnerClaim.attemptId);
     assert.equal(replay.claim.replayed, true);
 
+    const progressPath = `/worker/v1/attempts/${winnerClaim.attemptId}/progress`;
+    const firstProgress = {
+      ...ownership(winner),
+      sequence: 1,
+      phase: 'separating',
+      phasePercent: 25,
+    };
+    const progressAccepted = await api('POST', progressPath, firstProgress, {
+      worker: winner.credential,
+      expected: 201,
+    });
+    assert.equal(progressAccepted.accepted, true);
+    assert.equal(progressAccepted.sequence, 1);
+    const progressReplay = await api('POST', progressPath, firstProgress, {
+      worker: winner.credential,
+      expected: 201,
+    });
+    assert.equal(progressReplay.accepted, false);
+    const publicProgress = await api('GET', `/jobs/${racedJob.id}`);
+    assert.deepEqual(
+      {
+        phase: publicProgress.processingProgress?.phase,
+        phasePercent: publicProgress.processingProgress?.phasePercent,
+        stale: publicProgress.processingProgress?.stale,
+      },
+      { phase: 'separating', phasePercent: 25, stale: false },
+    );
+    const forgedProgress = await api(
+      'POST',
+      progressPath,
+      {
+        ...ownership(loser),
+        sequence: 2,
+        phase: 'separating',
+        phasePercent: 50,
+      },
+      { worker: loser.credential, expected: 409 },
+    );
+    assert.equal(forgedProgress.code, 'WORKER_CONFLICT');
+
     const forged = await api(
       'POST',
       `/worker/v1/attempts/${winnerClaim.attemptId}/input-grant`,
@@ -807,6 +991,8 @@ try {
     assert.equal(forged.code, 'WORKER_CONFLICT');
     const cancelled = await api('POST', `/jobs/${racedJob.id}/cancel`, {});
     assert.equal(cancelled.status, 'cancelled');
+    const cancelledDetail = await api('GET', `/jobs/${racedJob.id}`);
+    assert.equal(cancelledDetail.processingProgress, null);
     const staleAfterCancel = await api(
       'POST',
       `/worker/v1/attempts/${winnerClaim.attemptId}/input-grant`,

@@ -199,7 +199,7 @@ export class MacLaunchAgentController {
   }
 
   public async kickstart(): Promise<void> {
-    await this.execute("/bin/launchctl", ["kickstart", "-k", this.service]);
+    await this.execute("/bin/launchctl", ["kickstart", this.service]);
   }
 
   public async status(): Promise<LaunchAgentStatus> {

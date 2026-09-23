@@ -15,7 +15,7 @@ MAX_DEPTH = 8
 MAX_ITEMS = 100
 MAX_STRING_LENGTH = 4096
 REQUEST_COMMANDS = {"ping", "process", "cancel", "shutdown"}
-RESPONSE_TYPES = {"ready", "accepted", "progress", "result", "cancelled", "error"}
+RESPONSE_TYPES = {"startup-progress", "ready", "accepted", "progress", "result", "cancelled", "error"}
 UUID_V4 = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
     re.IGNORECASE,

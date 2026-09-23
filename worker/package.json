@@ -23,7 +23,8 @@
   },
   "packageManager": "pnpm@10.14.0",
   "bin": {
-    "musicmute-worker": "./dist/src/cli/main.js"
+    "musicmute-worker": "./dist/src/cli/main.js",
+    "mw": "./dist/src/cli/main.js"
   },
   "scripts": {
     "protocol:sync": "node scripts/sync-protocol.mjs",

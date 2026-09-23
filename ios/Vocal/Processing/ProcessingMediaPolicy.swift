@@ -13,7 +13,7 @@ struct ProcessingMediaPolicy: Codable, Equatable, Sendable {
   static let standard = Self(
     version: 2, maxDuration: 1_200, maxBytes: 50_000_000,
     maxSourceBytes: 200_000_000, maxPreparationSeconds: 120,
-    profileID: "preserve-or-aac-lc-256-v1",
+    profileID: "audio-cap-aac-lc-160-v1",
     maxSourceDownloadBytes: 50_000_000, maxSourceDownloadSeconds: 120)
 
   func accepts(bytes: Int64, duration: Double) -> Bool {
@@ -54,11 +54,11 @@ struct ProcessingPolicyResponse: Decodable, Sendable {
       limits.maxDurationSeconds <= ProcessingMediaPolicy.standard.maxDuration,
       limits.maxPreparedAudioBytes > 0,
       limits.maxPreparedAudioBytes <= ProcessingMediaPolicy.standard.maxBytes,
-      preparationProfile.id == "preserve-or-aac-lc-256-v1",
+      preparationProfile.id == "audio-cap-aac-lc-160-v1",
       preparationProfile.preserveCompatibleAudio,
       preparationProfile.fallbackConversion.codec == "aac-lc",
       preparationProfile.fallbackConversion.outputContentType == "audio/mp4",
-      preparationProfile.fallbackConversion.targetBitrate == 256_000,
+      preparationProfile.fallbackConversion.targetBitrate == 160_000,
       limits.longJobThresholdSeconds.isFinite, limits.longJobThresholdSeconds > 0,
       limits.maxLocalSourceBytes.map({
         $0 > 0 && $0 <= ProcessingMediaPolicy.standard.maxSourceBytes!

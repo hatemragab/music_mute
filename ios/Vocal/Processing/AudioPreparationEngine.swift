@@ -28,6 +28,7 @@ enum AudioPreparationEngine {
         try Task.checkCancellation()
         // Preserve compatible audio without an extra lossy generation.
         if !media.hasVideo, Int64(size) <= policy.maxBytes,
+          let bitRate = media.audioBitRate, bitRate <= 160_000,
           let inspected = try? await AudioInputPreparer.inspectAudio(source),
           policy.accepts(bytes: Int64(size), duration: inspected.duration),
           ["m4a", "mp4", "mp3", "aac"].contains(source.pathExtension.lowercased())
@@ -48,12 +49,17 @@ enum AudioPreparationEngine {
         try track.insertTimeRange(range, of: media.track, at: .zero)
         let target = directory.appendingPathComponent("input.m4a")
         let temporary = directory.appendingPathComponent("export.m4a")
-        // First try audio-only passthrough, then Apple's high-quality AAC encoder.
-        for preset in [AVAssetExportPresetPassthrough, AVAssetExportPresetAppleM4A] {
+        let canPassThrough = media.audioBitRate.map { $0 <= 160_000 } == true
+        for preset in canPassThrough
+          ? [AVAssetExportPresetPassthrough, AVAssetExportPresetAppleM4A]
+          : [AVAssetExportPresetAppleM4A]
+        {
           try Task.checkCancellation()
           do {
             if preset == AVAssetExportPresetAppleM4A {
-              try await transcode(composition, to: temporary, maxBytes: policy.maxBytes)
+              try await transcode(
+                composition, to: temporary, maxBytes: policy.maxBytes,
+                bitRate: min(media.audioBitRate ?? 160_000, 160_000))
             } else {
               guard let export = AVAssetExportSession(asset: composition, presetName: preset),
                 export.supportedFileTypes.contains(.m4a)
@@ -72,7 +78,9 @@ enum AudioPreparationEngine {
               }
             }
             let checked = try await AudioInputPreparer.inspectAudio(temporary)
-            let bytes = Int64(try temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+            let bytes =
+              (try FileManager.default.attributesOfItem(atPath: temporary.path)[.size]
+              as? NSNumber)?.int64Value ?? 0
             guard !checked.hasVideo, checked.hasAudio,
               policy.accepts(bytes: bytes, duration: checked.duration),
               checked.duration >= media.duration - 0.05
@@ -97,7 +105,10 @@ enum AudioPreparationEngine {
     }
   }
 
-  private static func transcode(_ composition: AVComposition, to target: URL, maxBytes: Int64)
+  private static func transcode(
+    _ composition: AVComposition, to target: URL, maxBytes: Int64,
+    bitRate: Int
+  )
     async throws
   {
     let reader = try AVAssetReader(asset: composition)
@@ -116,7 +127,7 @@ enum AudioPreparationEngine {
       mediaType: .audio,
       outputSettings: [
         AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48_000,
-        AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 256_000,
+        AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: bitRate,
         AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
       ])
     input.expectsMediaDataInRealTime = false
@@ -139,7 +150,9 @@ enum AudioPreparationEngine {
       }
       guard let buffer = output.copyNextSampleBuffer() else { break }
       guard input.append(buffer) else { throw AudioInputPreparationError.invalidAudio }
-      let bytes = Int64((try? target.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+      let bytes =
+        ((try? FileManager.default.attributesOfItem(atPath: target.path)[.size])
+        as? NSNumber)?.int64Value ?? 0
       guard bytes <= maxBytes else { throw AudioInputPreparationError.invalidSize }
     }
     guard reader.status == .completed else { throw AudioInputPreparationError.invalidAudio }

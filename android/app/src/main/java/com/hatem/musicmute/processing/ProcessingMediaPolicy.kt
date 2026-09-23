@@ -10,7 +10,7 @@ data class ProcessingMediaPolicy(
     val revision: Int = 0,
     val maxDurationSeconds: Double = 1_200.0,
     val maxPreparedAudioBytes: Long = 50_000_000,
-    val profileId: String = "preserve-or-aac-lc-256-v1",
+    val profileId: String = "audio-cap-aac-lc-160-v1",
     val maxLocalSourceBytes: Long? = 200_000_000,
     val maxPreparationSeconds: Long? = 120,
     val maxSourceDownloadBytes: Long? = 50_000_000,
@@ -46,9 +46,9 @@ data class ProcessingMediaPolicy(
                 require(profile["preserveCompatibleAudio"]?.jsonPrimitive?.booleanOrNull == true)
                 require(fallback["codec"]?.jsonPrimitive?.content == "aac-lc")
                 require(fallback["outputContentType"]?.jsonPrimitive?.content == "audio/mp4")
-                require(fallback.number("targetBitrate") == 256000.0)
+                require(fallback.number("targetBitrate") == 160000.0)
                 val id = profile.getValue("id").jsonPrimitive.content
-                require(id == "preserve-or-aac-lc-256-v1")
+                require(id == "audio-cap-aac-lc-160-v1")
                 fun positiveBound(key: String): Long? {
                     if (limits[key] == null || limits[key] is JsonNull) return null
                     val value = limits.number(key) ?: error("Invalid bound")

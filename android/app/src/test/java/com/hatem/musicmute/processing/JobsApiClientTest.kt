@@ -51,7 +51,7 @@ class JobsApiClientTest {
             AuthHttpResponse(409, """{"code":"PROCESSING_QUEUE_FULL","message":"private diagnostic"}""")
         })
         val error = runCatching { api.createWithMetadata(requestId, input,
-            CreateJobMetadata(policyVersion = 2, preparationProfileId = "preserve-or-aac-lc-256-v1", source = "video_file")) }.exceptionOrNull() as JobsFailure
+            CreateJobMetadata(policyVersion = 2, preparationProfileId = "audio-cap-aac-lc-160-v1", source = "video_file")) }.exceptionOrNull() as JobsFailure
         assertEquals(2, sent?.get("policyVersion")?.jsonPrimitive?.int)
         assertEquals("video_file", sent?.get("source")?.jsonPrimitive?.content)
         assertEquals(JobsProblem.PROCESSING_QUEUE_FULL, error.problem)

@@ -47,6 +47,12 @@ import {
   writeLocalRuntimeStatus,
 } from "../../runtime/local-runtime-status.js";
 import { inspectMacUserHealth, type MacUserHealth } from "./user-health.js";
+import {
+  explainError,
+  investigateErrors,
+  investigateJob,
+} from "./investigation.js";
+import { queryPerformanceReport } from "./performance-report.js";
 import { withMacUserCommandLock } from "./command-lock.js";
 import {
   loadConfirmedUnpairReceipt,
@@ -54,11 +60,14 @@ import {
 } from "./unpair-receipt.js";
 import {
   formatOperationalEvent,
+  createOperationalLogCursor,
   clearMacUserLogs,
   inspectOperationalLogUsage,
   maintainMacUserLogs,
   parseSince,
   readOperationalEvents,
+  readNewOperationalEvents,
+  readNewTextLog,
   readTextLogTail,
   type OperationalLogLevel,
 } from "./operational-logs.js";
@@ -80,26 +89,35 @@ interface MacUserHost {
 }
 
 export const MAC_USER_USAGE = `Usage:
-  musicmute-worker install --label <name> [--group-id <id>] [--new-code] [--json]
-  musicmute-worker install [--json]  # recover a preserved paired installation
-  musicmute-worker status [--json]
-  musicmute-worker start [--json]
-  musicmute-worker stop [--force] [--json]
-  musicmute-worker restart [--force] [--json]
-  musicmute-worker pause [--json]
-  musicmute-worker drain [--json]
-  musicmute-worker resume [--json]
-  musicmute-worker update [--check | --force] [--json]
-  musicmute-worker unpair [--force] [--json]
-  musicmute-worker uninstall [--purge] [--json]
-  musicmute-worker logs [--lines <1-1000>] [--events | --errors] [--follow]
+  mw install --label <name> [--group-id <id>] [--new-code] [--json]
+  mw install [--json]  # recover a preserved paired installation
+  mw status [--local] [--watch] [--json]
+  mw start [--wait-ready] [--json]
+  mw stop [--force] [--json]
+  mw restart [--force] [--json]
+  mw pause [--json]
+  mw drain [--json]
+  mw resume [--json]
+  mw update [--check | --force] [--json]
+  mw unpair [--force] [--json]
+  mw uninstall [--purge] [--json]
+  mw logs [--lines <1-1000>] [--events | --errors] [--follow]
                         [--attempt-id <id>] [--since <1s-30d>]
                         [--level <info|warning|error>] [--json]
-  musicmute-worker logs --clear [--force] [--json]
-  musicmute-worker diagnostics [--output </absolute/path.zip>] [--json]
-  musicmute-worker doctor [--json]
-  musicmute-worker benchmark [--workers <1|2>] [--json]
-  musicmute-worker benchmark-file --input </absolute/song> [--recipe <kim-vocals-v2|kim-vocals-v2-trim>] [--iterations <1|2>] [--json]`;
+  mw logs --clear [--json]
+  mw job <job-id> [--json]
+  mw errors [--since <1s-30d>] [--limit <1-100>] [--json]
+  mw explain <code> [--since <1s-30d>] [--json]
+  mw perf [--last <1-100>] [--since <1s-30d>] [--recipe <id>] [--json]
+  mw diagnostics [--job <job-id>] [--since <1s-30d>]
+                               [--output </absolute/path.zip>] [--json]
+  mw doctor [--full] [--json]
+  mw benchmark [--workers <1|2>] [--json]
+  mw benchmark-file --input </absolute/song> [--recipe <kim-vocals-v2|kim-vocals-v2-trim>]
+                                  [--warmup-runs <0-2>] [--runs <3-10>] [--group-size <1|2|4>]
+                                  [--candidate-engine </absolute/worker/engine>]
+                                  [--report </absolute/report.json>] [--save-audio-dir </absolute/dir>]
+                                  [--baseline-report </absolute/report.json>] [--json]`;
 
 interface LaunchAgentActions {
   bootstrap(plistPath: string): Promise<void>;
@@ -134,12 +152,23 @@ export interface MacUserCommandContext {
   benchmarkFile?: (input: {
     inputPath: string;
     recipeId: MacRecipeId;
-    iterations: 1 | 2;
+    warmupRuns: number;
+    measuredRuns: number;
+    groupSize: 1 | 2 | 4;
+    candidateEngineRoot?: string;
+    outputReportPath?: string;
+    saveAudioDir?: string;
+    baselineReportPath?: string;
+    onProgress: (event: Record<string, unknown>) => void;
   }) => Promise<unknown>;
-  health?: () => Promise<MacUserHealth>;
+  health?: (depth?: "quick" | "full") => Promise<MacUserHealth>;
   remoteStatus?: () => Promise<WorkerMachineStatus>;
   preflight?: () => Promise<boolean>;
-  diagnostics?: (outputPath?: string) => Promise<MacDiagnosticBundleResult>;
+  diagnostics?: (
+    outputPath?: string,
+    jobId?: string,
+    since?: number,
+  ) => Promise<MacDiagnosticBundleResult>;
   followLogs?: (flags: LogArguments) => Promise<void>;
 }
 
@@ -266,21 +295,48 @@ async function runUnlocked(
       return 0;
     }
     case "status": {
-      exactArguments(arguments_, new Set(["--json"]));
-      const status = await readStatus(
-        layout,
-        launchAgent,
-        context.remoteStatus,
-      );
-      stdout(formatStatus(status, arguments_.includes("--json")));
+      exactArguments(arguments_, new Set(["--local", "--watch", "--json"]));
+      const localOnly = arguments_.includes("--local");
+      const json = arguments_.includes("--json");
+      const reader = () =>
+        readStatus(layout, launchAgent, context.remoteStatus, { localOnly });
+      if (arguments_.includes("--watch")) {
+        await watchStatus(reader, stdout, json, context.wait);
+        return 0;
+      }
+      const status = await reader();
+      stdout(formatStatus(status, json));
       return status.healthy ? 0 : 1;
     }
     case "start": {
-      exactArguments(arguments_, new Set(["--json"]));
-      await start(layout, launchAgent, context.preflight);
+      exactArguments(arguments_, new Set(["--wait-ready", "--json"]));
+      const result = await start(layout, launchAgent, context.preflight);
+      let readiness: Awaited<ReturnType<typeof readStatus>> | null = null;
+      if (arguments_.includes("--wait-ready")) {
+        await waitForReady(
+          () => readStatus(layout, launchAgent, undefined, { localOnly: true }),
+          context.wait,
+          (status) =>
+            stdout(
+              arguments_.includes("--json")
+                ? JSON.stringify({
+                    type: "readiness-update",
+                    phase: status.readiness.phase,
+                    blockers: status.readiness.blockers,
+                  })
+                : `Waiting: ${humanizeLabel(status.readiness.phase)}`,
+            ),
+        );
+        readiness = await readStatus(layout, launchAgent, context.remoteStatus);
+      }
       stdout(
         formatActionResult(
-          { status: "ok", action: "start" },
+          {
+            status: "ok",
+            action: "start",
+            outcome: result,
+            ...(readiness === null ? {} : { readiness: readiness.readiness }),
+          },
           arguments_.includes("--json"),
         ),
       );
@@ -514,16 +570,7 @@ async function runUnlocked(
     case "logs": {
       const flags = parseLogArguments(arguments_);
       if (flags.clear) {
-        const service = await launchAgent.status();
-        if (service.loaded)
-          await gracefulStop(layout, launchAgent, flags.force, {
-            ...(context.wait === undefined ? {} : { wait: context.wait }),
-            ...(context.drainTimeoutMs === undefined
-              ? {}
-              : { timeoutMs: context.drainTimeoutMs }),
-          });
         const result = await clearMacUserLogs(layout);
-        if (service.loaded) await start(layout, launchAgent, context.preflight);
         stdout(
           formatActionResult(
             { status: "ok", action: "logs-cleared", ...result },
@@ -542,28 +589,120 @@ async function runUnlocked(
       stdout(await renderLogs(layout, flags));
       return 0;
     }
+    case "job": {
+      const [jobId, ...flags] = arguments_;
+      if (jobId === undefined) throw new TypeError("job requires a job ID");
+      exactArguments(flags, new Set(["--json"]));
+      const result = await investigateJob(layout, jobId);
+      stdout(
+        formatDetailedResult(
+          "MusicMute Worker Job",
+          result,
+          flags.includes("--json"),
+        ),
+      );
+      return result.foundLocally ? 0 : 2;
+    }
+    case "errors": {
+      const jsonFlag = extractBooleanFlag(arguments_, "--json");
+      const flags = parseValueFlags(
+        jsonFlag.remaining,
+        new Set(["since", "limit"]),
+      );
+      const since = parseSince(flags.get("since") ?? "7d");
+      const limit = Number(flags.get("limit") ?? "100");
+      const result = await investigateErrors(layout, since, limit);
+      stdout(
+        formatDetailedResult(
+          "MusicMute Worker Errors",
+          result,
+          jsonFlag.present,
+        ),
+      );
+      return 0;
+    }
+    case "explain": {
+      const [code, ...rest] = arguments_;
+      if (code === undefined)
+        throw new TypeError("explain requires an error code");
+      const jsonFlag = extractBooleanFlag(rest, "--json");
+      const flags = parseValueFlags(jsonFlag.remaining, new Set(["since"]));
+      const result = await explainError(
+        layout,
+        code,
+        parseSince(flags.get("since") ?? "7d"),
+      );
+      stdout(
+        formatDetailedResult(
+          "MusicMute Worker Error Explanation",
+          result,
+          jsonFlag.present,
+        ),
+      );
+      return 0;
+    }
+    case "perf": {
+      const jsonFlag = extractBooleanFlag(arguments_, "--json");
+      const flags = parseValueFlags(
+        jsonFlag.remaining,
+        new Set(["last", "since", "recipe"]),
+      );
+      const last = Number(flags.get("last") ?? "20");
+      const since = flags.get("since");
+      const recipeId = flags.get("recipe");
+      const result = await queryPerformanceReport(layout, {
+        last,
+        ...(since === undefined ? {} : { since: parseSince(since) }),
+        ...(recipeId === undefined ? {} : { recipeId }),
+      });
+      stdout(
+        formatDetailedResult(
+          "MusicMute Worker Performance",
+          result,
+          jsonFlag.present,
+        ),
+      );
+      return 0;
+    }
     case "diagnostics": {
       const jsonFlag = extractBooleanFlag(arguments_, "--json");
-      const values = parseValueFlags(jsonFlag.remaining, new Set(["output"]));
+      const values = parseValueFlags(
+        jsonFlag.remaining,
+        new Set(["output", "job", "since"]),
+      );
       const outputPath = values.get("output");
+      const jobId = values.get("job");
+      const since =
+        values.get("since") === undefined
+          ? undefined
+          : parseSince(values.get("since")!);
+      if (jobId !== undefined && !/^[0-9a-f]{24}$/iu.test(jobId))
+        throw new TypeError("Diagnostic job ID must be 24 hex characters");
       const health = await (
-        context.health ?? (() => inspectMacUserHealth(layout, launchAgent))
-      )();
+        context.health ??
+        ((depth = "full") =>
+          inspectMacUserHealth(layout, launchAgent, { depth }))
+      )("full");
       const status = await readStatus(
         layout,
         launchAgent,
         context.remoteStatus,
       );
-      const result = await (
+      const diagnostics =
         context.diagnostics ??
-        ((output?: string) =>
+        ((output?: string, selectedJobId?: string, selectedSince?: number) =>
           createMacDiagnosticBundle({
             layout,
             status,
             health,
             ...(output === undefined ? {} : { outputPath: output }),
-          }))
-      )(outputPath);
+            ...(selectedJobId === undefined ? {} : { jobId: selectedJobId }),
+            ...(selectedSince === undefined ? {} : { since: selectedSince }),
+          }));
+      const result =
+        jobId === undefined && since === undefined
+          ? await diagnostics(outputPath)
+          : await diagnostics(outputPath, jobId, since);
       stdout(
         jsonFlag.present
           ? formatJson(result)
@@ -572,10 +711,13 @@ async function runUnlocked(
       return 0;
     }
     case "doctor": {
-      exactArguments(arguments_, new Set(["--json"]));
+      exactArguments(arguments_, new Set(["--json", "--full"]));
+      const depth = arguments_.includes("--full") ? "full" : "quick";
       const result = await (
-        context.health ?? (() => inspectMacUserHealth(layout, launchAgent))
-      )();
+        context.health ??
+        ((selected = "quick") =>
+          inspectMacUserHealth(layout, launchAgent, { depth: selected }))
+      )(depth);
       stdout(formatHealth(result, arguments_.includes("--json")));
       return result.healthy ? 0 : 1;
     }
@@ -610,7 +752,17 @@ async function runUnlocked(
       const jsonFlag = extractBooleanFlag(arguments_, "--json");
       const flags = parseValueFlags(
         jsonFlag.remaining,
-        new Set(["input", "recipe", "iterations"]),
+        new Set([
+          "input",
+          "recipe",
+          "warmup-runs",
+          "runs",
+          "group-size",
+          "candidate-engine",
+          "report",
+          "save-audio-dir",
+          "baseline-report",
+        ]),
       );
       const inputPath = flags.get("input");
       if (inputPath === undefined)
@@ -620,10 +772,19 @@ async function runUnlocked(
         throw new TypeError(
           `benchmark-file recipe must be one of: ${MAC_RECIPE_IDS.join(", ")}`,
         );
-      const iterationValue = flags.get("iterations") ?? "1";
-      if (iterationValue !== "1" && iterationValue !== "2")
-        throw new TypeError("benchmark-file iterations must be 1 or 2");
-      const iterations = Number(iterationValue) as 1 | 2;
+      const warmupRuns = Number(flags.get("warmup-runs") ?? "1");
+      const measuredRuns = Number(flags.get("runs") ?? "3");
+      const groupSize = Number(flags.get("group-size") ?? "1");
+      if (!Number.isSafeInteger(warmupRuns) || warmupRuns < 0 || warmupRuns > 2)
+        throw new TypeError("benchmark-file warm-up runs must be 0-2");
+      if (
+        !Number.isSafeInteger(measuredRuns) ||
+        measuredRuns < 3 ||
+        measuredRuns > 10
+      )
+        throw new TypeError("benchmark-file measured runs must be 3-10");
+      if (![1, 2, 4].includes(groupSize))
+        throw new TypeError("benchmark-file window group must be 1, 2, or 4");
       await requireInstalled(layout);
       const result = await (
         context.benchmarkFile ??
@@ -637,7 +798,27 @@ async function runUnlocked(
       )({
         inputPath,
         recipeId: recipe as MacRecipeId,
-        iterations,
+        warmupRuns,
+        measuredRuns,
+        groupSize: groupSize as 1 | 2 | 4,
+        ...(flags.get("candidate-engine") === undefined
+          ? {}
+          : { candidateEngineRoot: flags.get("candidate-engine")! }),
+        ...(flags.get("report") === undefined
+          ? {}
+          : { outputReportPath: flags.get("report")! }),
+        ...(flags.get("save-audio-dir") === undefined
+          ? {}
+          : { saveAudioDir: flags.get("save-audio-dir")! }),
+        ...(flags.get("baseline-report") === undefined
+          ? {}
+          : { baselineReportPath: flags.get("baseline-report")! }),
+        onProgress: (event) =>
+          stdout(
+            jsonFlag.present
+              ? formatJson({ type: "benchmark-progress", ...event })
+              : `Benchmark: ${String(event.type ?? "progress")}${event.index ? ` run ${event.index}` : ""}${event.stage ? ` (${event.stage})` : ""}`,
+          ),
       });
       stdout(
         formatDetailedResult(
@@ -650,6 +831,76 @@ async function runUnlocked(
     }
     default:
       throw new TypeError(`Unknown macOS user command: ${command}`);
+  }
+}
+
+async function watchStatus(
+  read: () => Promise<Awaited<ReturnType<typeof readStatus>>>,
+  stdout: (value: string) => void,
+  json: boolean,
+  wait?: (milliseconds: number) => Promise<void>,
+): Promise<void> {
+  let stopped = false;
+  let previous = "";
+  let wakeStop: (() => void) | undefined;
+  let timer: NodeJS.Timeout | undefined;
+  const stop = () => {
+    stopped = true;
+    wakeStop?.();
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  try {
+    while (!stopped) {
+      const status = await read();
+      const rendered = formatStatus(status, json);
+      if (json || rendered !== previous) stdout(rendered);
+      previous = rendered;
+      if (stopped) break;
+      const pause = wait
+        ? wait(2_000)
+        : new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, 2_000);
+          });
+      await Promise.race([
+        pause,
+        new Promise<void>((resolve) => {
+          wakeStop = resolve;
+        }),
+      ]);
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      wakeStop = undefined;
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+    process.removeListener("SIGINT", stop);
+    process.removeListener("SIGTERM", stop);
+  }
+}
+
+export async function waitForReady(
+  read: () => Promise<Awaited<ReturnType<typeof readStatus>>>,
+  wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  onPhase?: (status: Awaited<ReturnType<typeof readStatus>>) => void,
+  timeoutMs = 360_000,
+  now: () => number = Date.now,
+): Promise<Awaited<ReturnType<typeof readStatus>>> {
+  const deadline = now() + timeoutMs;
+  let previousPhase = "";
+  while (true) {
+    const status = await read();
+    if (status.readiness.phase !== previousPhase) {
+      onPhase?.(status);
+      previousPhase = status.readiness.phase;
+    }
+    if (status.readiness.modelReady) return status;
+    if (now() >= deadline)
+      throw new Error(
+        `Worker did not become model-ready within ${timeoutMs / 1_000} seconds: ${status.readiness.blockers.join(", ")}`,
+      );
+    await wait(Math.min(2_000, deadline - now()));
   }
 }
 
@@ -712,8 +963,10 @@ async function start(
   layout: MacUserLayout,
   launchAgent: LaunchAgentActions,
   preflight?: () => Promise<boolean>,
-): Promise<void> {
+): Promise<"already-running" | "service-started"> {
   await requireInstalled(layout);
+  const current = await launchAgent.status();
+  if (current.running) return "already-running";
   await maintainMacUserLogs(layout);
   const healthy = await (
     preflight ??
@@ -725,9 +978,9 @@ async function start(
       ).healthy)
   )();
   if (!healthy) throw new Error("MusicMute worker failed start preflight");
-  const current = await launchAgent.status();
   if (current.loaded) await launchAgent.kickstart();
   else await launchAgent.bootstrap(layout.plistPath);
+  return "service-started";
 }
 
 async function transition(
@@ -738,12 +991,21 @@ async function transition(
   json: boolean,
 ): Promise<number> {
   await requireInstalled(layout);
-  const state = await setLocalLifecycleIntent(layout.lifecyclePath, intent);
-  if (intent === "active" && (await launchAgent.status()).loaded)
-    await launchAgent.kickstart();
+  const previous = await loadLocalLifecycle(layout.lifecyclePath);
+  const state =
+    previous.intent === intent
+      ? previous
+      : await setLocalLifecycleIntent(layout.lifecyclePath, intent);
+  const service = await launchAgent.status();
   stdout(
     formatActionResult(
-      { status: "ok", action: intent, revision: state.revision },
+      {
+        status: "ok",
+        action: intent,
+        outcome: previous.intent === intent ? "already-set" : "intent-updated",
+        revision: state.revision,
+        serviceRunning: service.running,
+      },
       json,
     ),
   );
@@ -779,14 +1041,15 @@ async function gracefulStop(
   const service = await launchAgent.status();
   try {
     if (service.loaded) {
-      await waitForLocalDrain({
-        runtimeStatusPath: layout.runtimeStatusPath,
-        force,
-        ...(options.wait === undefined ? {} : { wait: options.wait }),
-        ...(options.timeoutMs === undefined
-          ? {}
-          : { timeoutMs: options.timeoutMs }),
-      });
+      if (service.running)
+        await waitForLocalDrain({
+          runtimeStatusPath: layout.runtimeStatusPath,
+          force,
+          ...(options.wait === undefined ? {} : { wait: options.wait }),
+          ...(options.timeoutMs === undefined
+            ? {}
+            : { timeoutMs: options.timeoutMs }),
+        });
       await launchAgent.bootout();
       await waitForLaunchAgentUnload(launchAgent, options.wait);
     }
@@ -811,7 +1074,9 @@ async function readStatus(
   layout: MacUserLayout,
   launchAgent: LaunchAgentActions,
   remoteStatus?: () => Promise<WorkerMachineStatus>,
+  options: { localOnly?: boolean; now?: number } = {},
 ) {
+  const now = options.now ?? Date.now();
   const installed = await isRegularFile(layout.configPath);
   const activeReleaseVersion = installed
     ? await readActiveReleaseVersion(layout)
@@ -826,44 +1091,168 @@ async function readStatus(
   const update = installed
     ? await readOptionalBoundedJson(layout.updateStatePath)
     : null;
-  const remote = installed
-    ? await readRemoteStatus(layout, remoteStatus)
-    : { available: false as const, state: null };
+  const remote =
+    installed && !options.localOnly
+      ? await readRemoteStatus(layout, remoteStatus)
+      : {
+          available: false as const,
+          state: null,
+          checkedAt: null,
+          errorCode: null,
+        };
   const logs = installed
     ? await inspectOperationalLogUsage(layout).catch(() => null)
     : null;
-  const effectiveClaimsAllowed =
-    installed &&
-    lifecycle?.intent === "active" &&
-    service.loaded &&
+  const heartbeatAgeMs = runtime
+    ? Math.max(0, now - Date.parse(runtime.updatedAt))
+    : null;
+  const heartbeatStale = heartbeatAgeMs === null || heartbeatAgeMs > 180_000;
+  const wrongProcess =
     service.running &&
-    remote.available &&
-    remote.state.claimsAllowed;
+    service.pid !== undefined &&
+    runtime?.processId !== undefined &&
+    service.pid !== runtime.processId;
+  const identityUnverified =
+    runtime !== null &&
+    (runtime.sessionId === undefined ||
+      runtime.incarnation === undefined ||
+      (service.pid !== undefined && runtime.processId === undefined));
+  const capacitySlots = runtime?.slots?.length ?? null;
+  const capacityFull =
+    capacitySlots !== null &&
+    capacitySlots > 0 &&
+    runtime!.activeAttemptIds.length >= capacitySlots;
+  const diagnosticBlocked =
+    runtime?.diagnostics?.blockedReason !== null &&
+    runtime?.diagnostics?.blockedReason !== undefined
+      ? runtime.diagnostics.blockedReason
+      : logs?.diagnosticSpoolBlocked
+        ? "diagnostic-marker-present"
+        : null;
+  const modelReady =
+    installed &&
+    service.running &&
+    runtime !== null &&
+    !heartbeatStale &&
+    !wrongProcess &&
+    !identityUnverified &&
+    runtime.childState === "ready";
+  const localReady =
+    modelReady &&
+    lifecycle?.intent === "active" &&
+    !capacityFull &&
+    diagnosticBlocked === null;
+  const blockers: string[] = [];
+  if (!installed) blockers.push("not-installed");
+  if (!service.running) blockers.push("service-stopped");
+  if (runtime === null) blockers.push("runtime-status-missing");
+  else if (heartbeatStale) blockers.push("runtime-heartbeat-stale");
+  if (wrongProcess) blockers.push("runtime-process-mismatch");
+  if (identityUnverified) blockers.push("runtime-identity-unverified");
+  if (lifecycle?.intent === "paused") blockers.push("local-paused");
+  if (lifecycle?.intent === "draining") blockers.push("local-draining");
+  if (runtime?.childState === "loading") blockers.push("model-loading");
+  if (runtime?.childState === "warming") blockers.push("model-warming");
+  if (runtime?.childState === "unavailable") blockers.push("child-unavailable");
+  if (runtime !== null && runtime.childState === undefined)
+    blockers.push("child-state-unknown");
+  if (diagnosticBlocked !== null)
+    blockers.push(`diagnostics-${diagnosticBlocked}`);
+  if (capacityFull) blockers.push("capacity-full");
+  if (!options.localOnly) {
+    if (!remote.available) blockers.push("backend-unavailable");
+    else {
+      if (remote.state.status !== "active")
+        blockers.push(`backend-${remote.state.status}`);
+      if (!remote.state.claimsAllowed) blockers.push("backend-claims-disabled");
+    }
+  }
+  const phase =
+    !installed || !service.running
+      ? "stopped"
+      : lifecycle?.intent === "paused"
+        ? "paused"
+        : lifecycle?.intent === "draining"
+          ? "draining"
+          : heartbeatStale || wrongProcess
+            ? "failed"
+            : identityUnverified
+              ? "starting"
+              : runtime?.childState === "loading"
+                ? "loading"
+                : runtime?.childState === "warming"
+                  ? "warming"
+                  : runtime?.childState === "unavailable"
+                    ? "recovering"
+                    : (runtime?.activeAttemptIds.length ?? 0) > 0
+                      ? "processing"
+                      : runtime?.childState === "ready"
+                        ? "ready"
+                        : "starting";
+  const claimEligible =
+    options.localOnly || !remote.available
+      ? null
+      : localReady &&
+        remote.state.status === "active" &&
+        remote.state.claimsAllowed;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     installed,
     activeReleaseVersion,
     lifecycle: lifecycle?.intent ?? "unknown",
     service,
     runtime: {
       activeAttempts: runtime?.activeAttemptIds.length ?? null,
-      currentAttempts: runtime?.currentAttempts ?? [],
+      currentAttempts: (runtime?.currentAttempts ?? []).map((attempt) => ({
+        ...attempt,
+        stageElapsedMs: attempt.stageStartedAt
+          ? Math.max(0, now - Date.parse(attempt.stageStartedAt))
+          : null,
+        lastProgressAgeMs: attempt.lastProgressAt
+          ? Math.max(0, now - Date.parse(attempt.lastProgressAt))
+          : null,
+      })),
       childState: runtime?.childState ?? "unknown",
+      sessionId: runtime?.sessionId ?? null,
+      incarnation: runtime?.incarnation ?? null,
+      processId: runtime?.processId ?? null,
+      slots: runtime?.slots ?? [],
+      cachedPolicy: runtime?.cachedPolicy ?? null,
+      cachedPolicyAgeMs: runtime?.cachedPolicy
+        ? Math.max(0, now - Date.parse(runtime.cachedPolicy.observedAt))
+        : null,
+      diagnostics: runtime?.diagnostics ?? null,
       lastSuccessfulJob: runtime?.lastSuccessfulJob ?? null,
       lastFailedJob: runtime?.lastFailedJob ?? null,
       updatedAt: runtime?.updatedAt ?? null,
     },
     logs,
+    telemetry: { gpuMemoryBytes: null, note: "not-sampled" },
     update,
     remote,
-    effectiveClaimsAllowed,
+    readiness: {
+      phase,
+      modelReady,
+      localReady,
+      claimEligible,
+      blockers,
+      heartbeatAgeMs,
+      progressStale: (runtime?.currentAttempts ?? []).some(
+        (attempt) =>
+          attempt.lastProgressAt !== undefined &&
+          now - Date.parse(attempt.lastProgressAt) > 300_000,
+      ),
+    },
+    effectiveClaimsAllowed: claimEligible === true,
     healthy:
       installed &&
       lifecycle !== null &&
       runtime !== null &&
       service.loaded &&
-      (service.running || lifecycle.intent !== "active") &&
-      remote.available,
+      service.running &&
+      modelReady &&
+      diagnosticBlocked === null &&
+      (options.localOnly || remote.available),
   };
 }
 
@@ -887,11 +1276,23 @@ async function readRemoteStatus(
   layout: MacUserLayout,
   remoteStatus?: () => Promise<WorkerMachineStatus>,
 ): Promise<
-  | { available: true; state: WorkerMachineStatus }
-  | { available: false; state: null }
+  | {
+      available: true;
+      state: WorkerMachineStatus;
+      checkedAt: string;
+      errorCode: null;
+    }
+  | {
+      available: false;
+      state: null;
+      checkedAt: string;
+      errorCode: string;
+    }
 > {
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
   try {
-    const state = await (
+    const request = (
       remoteStatus ??
       (async () => {
         const config = await loadRuntimeConfig(layout.configPath);
@@ -899,12 +1300,32 @@ async function readRemoteStatus(
           baseUrl: config.backendBaseUrl,
           credential: config.credential,
           allowInsecureLoopback: config.allowInsecureLoopback,
-        }).machineStatus();
+        }).machineStatus(controller.signal);
       })
     )();
-    return { available: true, state };
-  } catch {
-    return { available: false, state: null };
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error("Backend status timed out"));
+      }, 2_500);
+    });
+    const state = await Promise.race([request, timeout]);
+    return {
+      available: true,
+      state,
+      checkedAt: new Date().toISOString(),
+      errorCode: null,
+    };
+  } catch (error) {
+    return {
+      available: false,
+      state: null,
+      checkedAt: new Date().toISOString(),
+      errorCode:
+        error instanceof ControlPlaneError ? error.code : "BACKEND_UNAVAILABLE",
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -968,7 +1389,6 @@ interface LogArguments {
   errors: boolean;
   follow: boolean;
   clear: boolean;
-  force: boolean;
   attemptId?: string;
   since?: number;
   level?: OperationalLogLevel;
@@ -981,7 +1401,6 @@ function parseLogArguments(arguments_: readonly string[]): LogArguments {
   let errors = false;
   let follow = false;
   let clear = false;
-  let force = false;
   let attemptId: string | undefined;
   let since: number | undefined;
   let level: OperationalLogLevel | undefined;
@@ -992,7 +1411,6 @@ function parseLogArguments(arguments_: readonly string[]): LogArguments {
     else if (current === "--errors") errors = true;
     else if (current === "--follow") follow = true;
     else if (current === "--clear") clear = true;
-    else if (current === "--force") force = true;
     else if (current === "--lines") {
       const value = Number(arguments_[index + 1]);
       if (!Number.isSafeInteger(value) || value < 1 || value > 1000)
@@ -1020,8 +1438,6 @@ function parseLogArguments(arguments_: readonly string[]): LogArguments {
   }
   if (events && errors)
     throw new TypeError("logs accepts either --events or --errors");
-  if (follow && json) throw new TypeError("logs --follow cannot use --json");
-  if (force && !clear) throw new TypeError("logs --force requires --clear");
   if (
     clear &&
     (events ||
@@ -1046,7 +1462,6 @@ function parseLogArguments(arguments_: readonly string[]): LogArguments {
     errors,
     follow,
     clear,
-    force,
     ...(attemptId === undefined ? {} : { attemptId }),
     ...(since === undefined ? {} : { since }),
     ...(level === undefined ? {} : { level }),
@@ -1096,7 +1511,9 @@ async function followLogs(
   flags: LogArguments,
   stdout: (value: string) => void,
 ): Promise<void> {
-  let previous = "";
+  const eventCursor = createOperationalLogCursor();
+  const stdoutCursor = createOperationalLogCursor();
+  const stderrCursor = createOperationalLogCursor();
   let stopped = false;
   const stop = () => {
     stopped = true;
@@ -1105,15 +1522,55 @@ async function followLogs(
   process.once("SIGTERM", stop);
   try {
     while (!stopped) {
-      const rendered = await renderLogs(layout, flags);
-      if (rendered !== previous) {
-        stdout(
-          previous && rendered.startsWith(previous)
-            ? rendered.slice(previous.length)
-            : rendered,
+      if (flags.events || flags.errors) {
+        const events = await readNewOperationalEvents(
+          layout,
+          {
+            lines: flags.lines,
+            errorsOnly: flags.errors,
+            ...(flags.attemptId === undefined
+              ? {}
+              : { attemptId: flags.attemptId }),
+            ...(flags.since === undefined ? {} : { since: flags.since }),
+            ...(flags.level === undefined ? {} : { level: flags.level }),
+          },
+          eventCursor,
         );
-        previous = rendered;
+        for (const event of events)
+          stdout(
+            flags.json ? JSON.stringify(event) : formatOperationalEvent(event),
+          );
+        if (
+          flags.errors &&
+          flags.attemptId === undefined &&
+          flags.since === undefined &&
+          flags.level === undefined
+        ) {
+          const stderr = await readNewTextLog(layout.stderrPath, stderrCursor);
+          if (stderr)
+            stdout(
+              flags.json
+                ? JSON.stringify({ stream: "stderr", text: stderr })
+                : `== worker stderr ==\n${stderr}`,
+            );
+        }
+      } else {
+        const normal = await readNewTextLog(layout.stdoutPath, stdoutCursor);
+        const errors = await readNewTextLog(layout.stderrPath, stderrCursor);
+        if (normal)
+          stdout(
+            flags.json
+              ? JSON.stringify({ stream: "stdout", text: normal })
+              : `== worker stdout ==\n${normal}`,
+          );
+        if (errors)
+          stdout(
+            flags.json
+              ? JSON.stringify({ stream: "stderr", text: errors })
+              : `== worker stderr ==\n${errors}`,
+          );
       }
+      await maintainMacUserLogs(layout);
       await new Promise((resolve) => setTimeout(resolve, 750));
     }
   } finally {
@@ -1194,11 +1651,17 @@ function formatStatus(
     `Active release: ${status.activeReleaseVersion ?? "Not available"}`,
     `Local state: ${humanizeLabel(status.lifecycle)}`,
     `Service: ${service}`,
+    `Phase: ${humanizeLabel(status.readiness.phase)}`,
     `Active jobs: ${status.runtime.activeAttempts ?? "Unknown"}`,
     `Processing child: ${humanizeLabel(status.runtime.childState)}`,
-    `Accepting jobs: ${status.effectiveClaimsAllowed ? "Yes" : "No"}`,
-    `Dashboard: ${status.remote.available ? "Connected" : "Unavailable"}`,
+    "GPU memory: Unknown (not sampled)",
+    `Model ready: ${status.readiness.modelReady ? "Yes" : "No"}`,
+    `Locally ready for a claim: ${status.readiness.localReady ? "Yes" : "No"}`,
+    `Eligible to claim: ${status.readiness.claimEligible === null ? "Unknown" : status.readiness.claimEligible ? "Yes" : "No"}`,
+    `Dashboard: ${status.remote.checkedAt === null ? "Not checked" : status.remote.available ? "Connected" : "Unavailable"}`,
   ];
+  if (status.readiness.blockers.length > 0)
+    lines.push(`Blockers: ${status.readiness.blockers.join(", ")}`);
   if (status.service.detail !== undefined)
     lines.push(`Service detail: ${status.service.detail}`);
   if (status.remote.available) {
@@ -1211,11 +1674,29 @@ function formatStatus(
     );
   }
   if (status.runtime.updatedAt !== null)
-    lines.push(`Runtime heartbeat: ${status.runtime.updatedAt}`);
+    lines.push(
+      `Runtime heartbeat: ${status.runtime.updatedAt} (${formatAge(status.readiness.heartbeatAgeMs)} ago)`,
+    );
+  if (status.runtime.cachedPolicy !== null)
+    lines.push(
+      `Cached policy: ${humanizeLabel(status.runtime.cachedPolicy.machineStatus)} (${formatAge(status.runtime.cachedPolicyAgeMs)} old; not a live connection)`,
+    );
+  if (status.runtime.slots.length > 0)
+    lines.push(
+      `GPU slots: ${status.runtime.slots.map((slot) => `${slot.provider}:${slot.gpuId}`).join(", ")}`,
+    );
   for (const attempt of status.runtime.currentAttempts)
     lines.push(
       `Current job: ${attempt.jobId} (attempt ${attempt.attemptId}, worker ${attempt.workerId})`,
+      `  Stage: ${attempt.stage ?? "Unknown"} (${formatAge(attempt.stageElapsedMs)} elapsed; last progress ${formatAge(attempt.lastProgressAgeMs)} ago)`,
+      ...(attempt.work === undefined
+        ? []
+        : [
+            `  Observed work: ${attempt.work.completed}/${attempt.work.total} ${attempt.work.unit}`,
+          ]),
     );
+  if (status.readiness.progressStale)
+    lines.push("Warning: processing progress has not changed for five minutes");
   if (status.runtime.lastSuccessfulJob !== null)
     lines.push(
       `Last successful job: ${status.runtime.lastSuccessfulJob.jobId} at ${status.runtime.lastSuccessfulJob.at}`,
@@ -1236,6 +1717,13 @@ function formatStatus(
   return lines.join("\n");
 }
 
+function formatAge(milliseconds: number | null): string {
+  if (milliseconds === null) return "unknown";
+  if (milliseconds < 1_000) return `${milliseconds} ms`;
+  if (milliseconds < 60_000) return `${Math.floor(milliseconds / 1_000)} s`;
+  return `${Math.floor(milliseconds / 60_000)} min`;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
@@ -1245,19 +1733,28 @@ function formatBytes(bytes: number): string {
 function formatHealth(health: MacUserHealth, json: boolean): string {
   if (json) return formatJson(health);
   const passed = health.checks.filter((check) => check.ok).length;
-  const failed = health.checks.length - passed;
+  const failed = health.checks.filter(
+    (check) =>
+      !check.ok && check.status !== "not-run" && check.status !== "warning",
+  ).length;
+  const skipped = health.checks.filter(
+    (check) => check.status === "not-run",
+  ).length;
   const lines = [
     "MusicMute Worker Doctor",
     "",
     `Overall: ${health.healthy ? "Healthy" : "Problems found"}`,
-    `Checks: ${passed} passed, ${failed} failed`,
+    `Checks: ${passed} passed, ${failed} failed${skipped ? `, ${skipped} not run` : ""}`,
     "",
   ];
   for (const check of health.checks) {
     lines.push(
-      `[${check.ok ? "PASS" : "FAIL"}] ${humanizeLabel(check.name)}`,
+      `[${check.status === "not-run" ? "NOT RUN" : check.ok ? "PASS" : "FAIL"}] ${humanizeLabel(check.name)}`,
       `       ${check.path}`,
     );
+    if (check.code) lines.push(`       ${check.code}: ${check.evidence ?? ""}`);
+    if (!check.ok && check.nextAction)
+      lines.push(`       Next: ${check.nextAction}`);
   }
   return lines.join("\n");
 }
@@ -1278,7 +1775,12 @@ function formatActionResult(
   const lines = [`MusicMute Worker ${action}`, "", `Result: ${result}`];
   appendDetails(
     lines,
-    value,
+    {
+      ...value,
+      ...(typeof value.outcome === "string"
+        ? { outcome: humanizeLabel(value.outcome) }
+        : {}),
+    },
     0,
     new Set(["action", "schemaVersion", "status"]),
   );

@@ -26,7 +26,7 @@ class AudioDownloadPolicyTest {
 
     @Test
     fun selectsOnlyDirectAudioWithoutConversionOrVideoFallback() {
-        assertEquals("bestaudio[protocol=https]", AudioDownloadPolicy.options["-f"])
+        assertEquals("bestaudio[protocol=https][abr<=160]/bestaudio[protocol=https]", AudioDownloadPolicy.options["-f"])
         assertEquals("never", AudioDownloadPolicy.options["--fixup"])
         assertTrue(
             AudioDownloadPolicy.flags.containsAll(
@@ -58,9 +58,33 @@ class AudioDownloadPolicyTest {
         val result = DownloadedAudioReader.read(directory)
         assertEquals("Voice sample", result.title)
         assertEquals("opus", result.codec)
-        assertEquals(145, result.bitrateKbps)
+        assertEquals(146, result.bitrateKbps)
         assertEquals(42250L, result.durationMs)
         assertArrayEquals(bytes, audio.readBytes())
+    }
+
+    @Test
+    fun downloadedBitrateAvoidsTranscodeOnlyWhenExtractorHasNoRate() {
+        assertTrue(canReuseDownloadedAudio(false, 1, null, 145, "webm"))
+        assertTrue(canReuseDownloadedAudio(false, 1, 128_000, 0, "m4a"))
+        assertFalse(canReuseDownloadedAudio(false, 1, null, 0, "webm"))
+        assertFalse(canReuseDownloadedAudio(false, 1, null, 192, "webm"))
+        assertFalse(canReuseDownloadedAudio(false, 1, 192_000, 145, "webm"))
+        assertFalse(canReuseDownloadedAudio(true, 1, null, 145, "mp4"))
+        assertFalse(canReuseDownloadedAudio(false, 2, null, 145, "webm"))
+        assertFalse(canReuseDownloadedAudio(false, 1, null, 145, "wav"))
+    }
+
+    @Test
+    fun fractionalBitrateAboveTheCapIsRoundedUp() {
+        val directory = temporary.newFolder()
+        File(directory, "audio.webm").writeBytes(byteArrayOf(1))
+        File(directory, "audio.info.json").writeText(
+            """{"ext":"webm","vcodec":"none","acodec":"opus","abr":160.1,"duration":3}"""
+        )
+        val audio = DownloadedAudioReader.read(directory)
+        assertEquals(161, audio.bitrateKbps)
+        assertFalse(canReuseDownloadedAudio(false, 1, null, audio.bitrateKbps, audio.extension))
     }
 
     @Test

@@ -7,7 +7,7 @@ import android.media.MediaFormat
 /** The selected language/commentary must never change merely because a decoder is missing. */
 data class SourceAudioTrack(
     val id: Int, val isDefault: Boolean, val usable: Boolean, val durationSeconds: Double,
-    val mime: String, val channels: Int, val sampleRate: Int,
+    val mime: String, val channels: Int, val sampleRate: Int, val bitRate: Int? = null,
 )
 data class MediaSourceInspection(val audio: SourceAudioTrack, val hasVideo: Boolean, val audioTrackCount: Int)
 
@@ -33,14 +33,16 @@ fun inspectMediaSource(extractor: MediaExtractor): MediaSourceInspection {
         SourceAudioTrack(index, integer(MediaFormat.KEY_IS_DEFAULT) == 1,
             MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(format) != null,
             if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) / 1_000_000.0 else Double.NaN,
-            mime, integer(MediaFormat.KEY_CHANNEL_COUNT), integer(MediaFormat.KEY_SAMPLE_RATE))
+            mime, integer(MediaFormat.KEY_CHANNEL_COUNT), integer(MediaFormat.KEY_SAMPLE_RATE),
+            integer(MediaFormat.KEY_BIT_RATE).takeIf { it > 0 })
     }
     return MediaSourceInspection(selectDefaultAudioTrack(tracks), video, tracks.size)
 }
 
 enum class AudioPreparationRoute { COPY, REMUX, CONVERT }
-fun audioPreparationRoute(hasVideo: Boolean, compatible: Boolean, fitsBytes: Boolean, channels: Int): AudioPreparationRoute {
-    if (compatible && fitsBytes) return if (hasVideo) AudioPreparationRoute.REMUX else AudioPreparationRoute.COPY
+fun audioPreparationRoute(hasVideo: Boolean, compatible: Boolean, fitsBytes: Boolean, channels: Int, bitRate: Int?): AudioPreparationRoute {
+    if (compatible && fitsBytes && bitRate != null && bitRate <= 160_000)
+        return if (hasVideo) AudioPreparationRoute.REMUX else AudioPreparationRoute.COPY
     if (channels !in 1..2) throw InputPreparationException(InputPreparationError.UNSUPPORTED)
     return AudioPreparationRoute.CONVERT
 }

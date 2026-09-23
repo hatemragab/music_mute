@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest.mock import patch
 
 from musicmute_engine.limits import (
@@ -17,7 +18,10 @@ from musicmute_engine.media import (
     MediaProcessingError,
     _run,
     _run_ffmpeg,
+    encode_mp3,
+    output_bitrate_kbps,
     inspect_lossless_audio,
+    probe_audio,
     verify_input_identity,
 )
 
@@ -39,6 +43,53 @@ class OversizedSoundFile:
 
 
 class MediaLimitTests(unittest.TestCase):
+    def test_final_mp3_encoding_uses_the_catalog_bitrate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "vocals.wav"
+            source.write_bytes(b"fixture")
+            ffmpeg = root / "ffmpeg"
+            ffmpeg.write_bytes(b"tool")
+            ffmpeg.chmod(0o700)
+            destination = root / "output" / "vocals.mp3"
+            with patch("musicmute_engine.media._run_ffmpeg") as execute:
+                self.assertEqual(encode_mp3(source, destination, ffmpeg), destination)
+            arguments = execute.call_args.args[2]
+            self.assertEqual(arguments[arguments.index("-b:a") + 1], "160k")
+
+    def test_output_bitrate_never_raises_a_known_lower_input_rate(self) -> None:
+        self.assertEqual(output_bitrate_kbps(64_000), 64)
+        self.assertEqual(output_bitrate_kbps(138_347), 128)
+        self.assertEqual(output_bitrate_kbps(160_000), 160)
+        self.assertEqual(output_bitrate_kbps(256_000), 160)
+        self.assertEqual(output_bitrate_kbps(None), 160)
+        with self.assertRaisesRegex(MediaProcessingError, "below supported"):
+            output_bitrate_kbps(24_000)
+
+    def test_existing_audio_probe_reads_stream_bitrate_without_another_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "input.mp3"
+            source.write_bytes(b"fixture")
+            ffprobe = root / "ffprobe"
+            ffprobe.write_bytes(b"tool")
+            ffprobe.chmod(0o700)
+            response = CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=(
+                    '{"streams":[{"sample_rate":"44100","channels":2,'
+                    '"bit_rate":"128000"}],"format":{"duration":"180.0"}}'
+                ),
+                stderr="",
+            )
+            with patch("musicmute_engine.media._run", return_value=response) as execute:
+                info = probe_audio(source, ffprobe)
+            self.assertEqual(execute.call_count, 1)
+            self.assertIn("stream=sample_rate,channels,bit_rate:format=duration", execute.call_args.args[0])
+            self.assertEqual(info.bit_rate, 128_000)
+            self.assertEqual(output_bitrate_kbps(info.bit_rate), 128)
+
     def test_input_declaration_cannot_exceed_the_shared_gigabyte_limit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "input.wav"
@@ -80,6 +131,7 @@ class MediaLimitTests(unittest.TestCase):
 
         command = [
             sys.executable,
+            "-B",
             "-c",
             f"import sys; sys.stdout.write('x' * {MAX_TOOL_OUTPUT_BYTES + 1})",
         ]

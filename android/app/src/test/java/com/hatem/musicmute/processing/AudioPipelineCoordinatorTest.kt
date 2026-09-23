@@ -113,6 +113,20 @@ class AudioPipelineCoordinatorTest {
         assertEquals(listOf(id), fixture.uploads.enqueued)
     }
 
+    @Test fun downloadedAudioSkipsTheMobileFullDecodeButPickedAudioKeepsIt() = runTest {
+        var decoded = 0
+        val fixture = fixture(validateDecoded = { _, _ -> decoded++ })
+        val urlId = UUID.randomUUID().toString()
+        fixture.coordinator.acceptUrl(urlId, "https://youtu.be/abc12345678")
+        val downloaded = File(fixture.root, "download.mp3").apply { writeBytes(byteArrayOf(4, 5, 6)) }
+        fixture.coordinator.completeUrlDownload("owner", urlId, 7, "Original title", downloaded)
+        assertEquals(0, decoded)
+        fixture.coordinator.acceptImport(UUID.randomUUID().toString(), "picked.mp3") {
+            ByteArrayInputStream(byteArrayOf(1, 2, 3))
+        }
+        assertEquals(1, decoded)
+    }
+
     @Test fun lostSourceEnqueueIsPersistedAndRecoveredWithoutASecondIntent() = runTest {
         val fixture = fixture()
         val id = UUID.randomUUID().toString()
@@ -195,13 +209,13 @@ class AudioPipelineCoordinatorTest {
         val repository: ProcessingRepository,
     )
 
-    private fun fixture(): Fixture {
+    private fun fixture(validateDecoded: suspend (File, ProcessingMediaPolicy) -> Unit = { _, _ -> }): Fixture {
         val root = kotlin.io.path.createTempDirectory("audio-pipeline-").toFile()
         val store = ProcessingStore(File(root, "metadata"))
         val uploads = UploadScheduler()
         val repository = ProcessingRepository(store, File(root, "staging"), Api(),
             { ProcessingSession("owner", 7) }, uploads, FormUploader { _, _, _, _ -> Unit })
-        val preparer = AudioInputPreparer(File(root, "staging"), inspect = {
+        val preparer = AudioInputPreparer(File(root, "staging"), validateDecoded = validateDecoded, inspect = {
             AudioInspection(2.0, true, false, "audio/mpeg")
         })
         val sources = Sources()

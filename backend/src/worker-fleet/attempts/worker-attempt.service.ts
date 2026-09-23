@@ -28,6 +28,7 @@ import type {
   FailWorkerAttemptDto,
   WorkerAttemptOwnershipDto,
   WorkerOutputGrantDto,
+  UpdateWorkerAttemptProgressDto,
 } from './worker-attempt.dto.js';
 
 const ACTIVE_ATTEMPTS = ['claimed', 'running', 'uploading'] as const;
@@ -110,6 +111,71 @@ export class WorkerAttemptService {
       attemptId,
       object: current.job.inputObject,
       grant,
+    };
+  }
+
+  async progress(
+    principal: WorkerPrincipal,
+    attemptId: string,
+    dto: UpdateWorkerAttemptProgressDto,
+  ) {
+    if (dto.phase !== 'separating' && dto.phasePercent !== null)
+      throw workerError('WORKER_INVALID_REQUEST');
+    const current = await this.loadCurrent(principal, attemptId, dto);
+    if (!ACTIVE_JOB_STATUSES.some((status) => status === current.job.status))
+      throw workerError('WORKER_CONFLICT');
+    const existing = current.job.workerProgress;
+    if (existing?.attemptId === attemptId && existing.sequence >= dto.sequence)
+      return {
+        requestId: dto.requestId,
+        attemptId,
+        accepted: false,
+        sequence: existing.sequence,
+      };
+    const now = new Date();
+    const result = await this.jobs.updateOne(
+      {
+        ...this.jobOwnershipFilter(current.job, current.attempt, now, false),
+        $or: [
+          { workerProgress: null },
+          {
+            'workerProgress.attemptId': attemptId,
+            'workerProgress.sequence': trusted({ $lt: dto.sequence }),
+          },
+        ],
+      },
+      {
+        $set: {
+          workerProgress: {
+            attemptId,
+            sequence: dto.sequence,
+            phase: dto.phase,
+            phasePercent: dto.phasePercent,
+            observedAt: now,
+          },
+        },
+      },
+      { runValidators: true },
+    );
+    if (result.modifiedCount !== 1) {
+      const latest = await this.loadCurrent(principal, attemptId, dto);
+      if (
+        latest.job.workerProgress?.attemptId !== attemptId ||
+        latest.job.workerProgress.sequence < dto.sequence
+      )
+        throw workerError('WORKER_CONFLICT');
+      return {
+        requestId: dto.requestId,
+        attemptId,
+        accepted: false,
+        sequence: latest.job.workerProgress.sequence,
+      };
+    }
+    return {
+      requestId: dto.requestId,
+      attemptId,
+      accepted: true,
+      sequence: dto.sequence,
     };
   }
 
@@ -292,6 +358,7 @@ export class WorkerAttemptService {
                 retainedOutputAccountedAt: now,
                 retainedOutputReleasedAt: null,
                 currentExecution: null,
+                workerProgress: null,
                 finishedAt: now,
                 workerStageTimings: dto.stageTimings,
                 retryEligibility: {
@@ -403,6 +470,7 @@ export class WorkerAttemptService {
               $set: {
                 status: retry ? 'queued' : 'failed',
                 currentExecution: null,
+                workerProgress: null,
                 retryEligibility: {
                   eligible: retry,
                   attemptsRemaining: Math.max(
@@ -546,15 +614,20 @@ export class WorkerAttemptService {
       recipe.trimEnabled !== dto.trimEnabled ||
       recipe.denoiseEnabled !== dto.denoiseEnabled ||
       recipe.outputFormat !== dto.outputFormat ||
-      recipe.outputBitrateKbps !== dto.outputBitrateKbps
+      dto.outputBitrateKbps > recipe.outputBitrateKbps
     )
       throw workerError('WORKER_CONFLICT');
   }
 
-  private jobOwnershipFilter(job: Job, attempt: WorkerAttempt, now: Date) {
+  private jobOwnershipFilter(
+    job: Job,
+    attempt: WorkerAttempt,
+    now: Date,
+    withRevision = true,
+  ) {
     return {
       _id: job._id,
-      revision: job.revision,
+      ...(withRevision ? { revision: job.revision } : {}),
       status: trusted({ $in: ACTIVE_JOB_STATUSES }),
       deletedAt: null,
       'currentExecution.attemptId': attempt._id,

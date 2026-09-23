@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
@@ -17,6 +18,7 @@ import com.hatem.musicmute.R
 import com.hatem.musicmute.VocalApplication
 import com.hatem.musicmute.BuildConfig
 import com.hatem.musicmute.processing.AudioTaskNotificationTarget
+import com.hatem.musicmute.processing.AudioPreparationEngine
 import com.hatem.musicmute.processing.AudioTaskNotifications
 import com.hatem.musicmute.processing.AudioTaskNotificationThrottle
 import com.hatem.musicmute.processing.AudioTaskStage
@@ -25,6 +27,7 @@ import com.hatem.musicmute.processing.ClientErrorStage
 import com.hatem.musicmute.processing.InputPreparationException
 import com.hatem.musicmute.processing.InputPreparationError
 import com.hatem.musicmute.processing.ProcessingLocalProblem
+import com.hatem.musicmute.processing.ProcessingMediaPolicy
 import com.hatem.musicmute.processing.ProcessingPhase
 import com.hatem.musicmute.processing.ProcessingOperation
 import com.hatem.musicmute.processing.WorkManagerProcessingScheduler
@@ -118,7 +121,7 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
                 if (record.status == DownloadStatus.COMPLETE) {
                     val source = resolveAudioFile(repository.audioRoot, record.relativePath)
                         ?: throw java.io.IOException("Source file missing")
-                    handoff(record, source, record.title)
+                    handoff(record, source, record.title, record.bitrateKbps)
                     return@withPipelineSlot Result.success()
                 }
                 withContext(Dispatchers.IO) {
@@ -216,7 +219,7 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
                 }
                 // yt-dlp metadata can contain expiring URLs; keep only the fields persisted above.
                 withContext(Dispatchers.IO) { File(directory, "audio.info.json").delete() }
-                if (target != null) handoff(record, audio.file, audio.title)
+                if (target != null) handoff(record, audio.file, audio.title, audio.bitrateKbps)
                 Result.success()
             }
         } catch (error: CancellationException) {
@@ -332,7 +335,7 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
         return app.audioPipelineCoordinator.withLocalSlot(target.ownerUid, target.epoch, action)
     }
 
-    private suspend fun handoff(record: DownloadRecord, file: File, title: String) {
+    private suspend fun handoff(record: DownloadRecord, file: File, title: String, downloadedBitrateKbps: Int) {
         val target = pipelineTarget(record) ?: return
         checkPipeline(record)
         val operation = app.processingRepository.store.update(target.ownerUid, target.operationId) {
@@ -342,8 +345,29 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
         AudioTaskNotifications(applicationContext).updateIfVisible(target,
             audioTaskNotificationProjection(operation, target, stage = AudioTaskStage.PREPARING_INPUT))
         checkPipeline(record)
+        val engine = AudioPreparationEngine(applicationContext)
+        val preparedFile = File(file.parentFile, "upload.m4a")
+        if (preparedFile.exists() && preparedFile.length() !in 1L..ProcessingMediaPolicy.STANDARD.maxPreparedAudioBytes)
+            preparedFile.delete()
+        val source = if (preparedFile.isFile) {
+            try {
+                val inspected = engine.inspect(Uri.fromFile(preparedFile))
+                if (canReuseDownloadedAudio(inspected.hasVideo, inspected.audioTrackCount,
+                        inspected.audio.bitRate, 0, preparedFile.extension))
+                    preparedFile else { preparedFile.delete(); file }
+            } catch (_: InputPreparationException) {
+                preparedFile.delete()
+                file
+            }
+        } else file
+        val uploadFile = if (source == preparedFile) source else {
+            val inspection = engine.inspect(Uri.fromFile(file))
+            if (canReuseDownloadedAudio(inspection.hasVideo, inspection.audioTrackCount,
+                    inspection.audio.bitRate, downloadedBitrateKbps, file.extension)) file
+            else engine.prepare(Uri.fromFile(file), preparedFile, ProcessingMediaPolicy.STANDARD)
+        }
         app.audioPipelineCoordinator.completeUrlDownload(
-            target.ownerUid, target.operationId, target.epoch, title, file, id.toString()
+            target.ownerUid, target.operationId, target.epoch, title, uploadFile, id.toString()
         )
     }
 

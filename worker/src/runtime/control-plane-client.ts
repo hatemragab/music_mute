@@ -20,6 +20,7 @@ import {
   parseMacUpdateCandidate,
   type MacUpdateCandidate,
 } from "../platform/macos/update-metadata.js";
+import type { WorkerProgressPhase } from "../../protocol/v1/protocol.js";
 
 const RESPONSE_LIMIT_BYTES = 64 * 1024;
 const UUID_V4 =
@@ -265,6 +266,34 @@ export class WorkerControlPlaneClient {
     return response;
   }
 
+  async progress(
+    attemptId: string,
+    identity: WorkerIdentity,
+    progress: {
+      sequence: number;
+      phase: WorkerProgressPhase;
+      phasePercent: number | null;
+    },
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const requestId = randomUUID();
+    const response = asRecord(
+      await this.request(
+        `worker/v1/attempts/${attemptId}/progress`,
+        "POST",
+        { requestId, ...identity, ...progress },
+        signal,
+      ),
+    );
+    assertAttemptResponse(response, requestId, attemptId);
+    if (
+      typeof response.accepted !== "boolean" ||
+      !Number.isSafeInteger(response.sequence) ||
+      (response.sequence as number) < progress.sequence
+    )
+      throw new TypeError("Progress response is invalid");
+  }
+
   async complete(
     attemptId: string,
     identity: WorkerIdentity,
@@ -277,7 +306,7 @@ export class WorkerControlPlaneClient {
       trimEnabled: boolean;
       denoiseEnabled: boolean;
       outputFormat: "mp3";
-      outputBitrateKbps: 320;
+      outputBitrateKbps: number;
       stageTimings: Array<{ stage: string; durationMs: number }>;
     },
     signal?: AbortSignal,
@@ -546,11 +575,12 @@ function assertRequestId(value: unknown, requestId: string): void {
 }
 
 function assertAttemptResponse(
-  value: { requestId: string; attemptId: string },
+  value: unknown,
   requestId: string,
   attemptId: string,
 ): void {
-  if (value.requestId !== requestId || value.attemptId !== attemptId)
+  const response = asRecord(value);
+  if (response.requestId !== requestId || response.attemptId !== attemptId)
     throw new TypeError("Attempt response identity changed");
 }
 

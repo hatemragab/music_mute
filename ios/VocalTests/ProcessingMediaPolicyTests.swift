@@ -10,8 +10,8 @@ final class ProcessingMediaPolicyTests: XCTestCase {
      "maxLocalSourceBytes":200000000,"maxPreparationSeconds":120,
      "longJobThresholdSeconds":600,"maxSourceDownloadBytes":50000000,
      "maxSourceDownloadSeconds":120},
-     "preparationProfile":{"id":"preserve-or-aac-lc-256-v1","preserveCompatibleAudio":true,
-     "fallbackConversion":{"codec":"aac-lc","outputContentType":"audio/mp4","targetBitrate":256000}}}
+     "preparationProfile":{"id":"audio-cap-aac-lc-160-v1","preserveCompatibleAudio":true,
+     "fallbackConversion":{"codec":"aac-lc","outputContentType":"audio/mp4","targetBitrate":160000}}}
     """
 
   func testBackendPolicyValidatesWithoutExpandingOfflineCeilings() throws {
@@ -31,7 +31,7 @@ final class ProcessingMediaPolicyTests: XCTestCase {
 
   func testUnknownProfileAndVersionAreRejected() throws {
     let unknownProfile = responseJSON.replacingOccurrences(
-      of: "preserve-or-aac-lc-256-v1", with: "unknown-profile")
+      of: "audio-cap-aac-lc-160-v1", with: "unknown-profile")
     XCTAssertThrowsError(
       try JSONDecoder().decode(
         ProcessingPolicyResponse.self, from: Data(unknownProfile.utf8)

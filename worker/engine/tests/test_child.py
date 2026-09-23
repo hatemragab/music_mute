@@ -10,6 +10,35 @@ from musicmute_engine.child import parse_args, run
 
 
 class ChildArgumentsTests(unittest.TestCase):
+    def test_process_forwards_measured_window_progress(self) -> None:
+        frames: list[dict[str, object]] = []
+        request_id = "00000000-0000-4000-8000-000000000002"
+
+        class FakePipeline:
+            def process(self, _request, progress, window_progress):
+                progress("separation")
+                window_progress(2, 4)
+                return {"status": "ok"}
+
+        with (
+            patch("musicmute_engine.child.RuntimePipeline", return_value=FakePipeline()),
+            patch("musicmute_engine.child.ProcessRequest.from_payload", return_value=object()),
+            patch("musicmute_engine.child.sys.stdin", SimpleNamespace(buffer=BytesIO())),
+            patch("musicmute_engine.child.isolate_protocol_output", return_value=BytesIO()),
+            patch("musicmute_engine.child.write_frame", side_effect=lambda _out, frame: frames.append(frame)),
+            patch("musicmute_engine.child.read_frame", side_effect=[
+                {"requestId": request_id, "command": "process", "payload": {}},
+                None,
+            ]),
+        ):
+            self.assertEqual(run("00000000-0000-4000-8000-000000000001"), 0)
+
+        progress = [frame["payload"] for frame in frames if frame["type"] == "progress"]
+        self.assertEqual(progress, [
+            {"stage": "separation"},
+            {"stage": "separation", "unit": "windows", "completed": 2, "total": 4},
+        ])
+
     def test_preloads_before_announcing_ready(self) -> None:
         events: list[str] = []
 

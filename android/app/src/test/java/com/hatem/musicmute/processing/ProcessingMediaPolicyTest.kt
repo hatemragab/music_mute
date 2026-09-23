@@ -9,8 +9,8 @@ class ProcessingMediaPolicyTest {
       "limits":{"maxDurationSeconds":1200,"maxPreparedAudioBytes":50000000,"maxLocalSourceBytes":200000000,
       "maxPreparationSeconds":120,"maxSourceDownloadBytes":50000000,"maxSourceDownloadSeconds":120,
       "longJobThresholdSeconds":600},
-      "preparationProfile":{"id":"preserve-or-aac-lc-256-v1","preserveCompatibleAudio":true,
-      "compatibilityRevision":"unavailable","fallbackConversion":{"codec":"aac-lc","outputContentType":"audio/mp4","targetBitrate":256000}}
+      "preparationProfile":{"id":"audio-cap-aac-lc-160-v1","preserveCompatibleAudio":true,
+      "compatibilityRevision":"unavailable","fallbackConversion":{"codec":"aac-lc","outputContentType":"audio/mp4","targetBitrate":160000}}
     }"""
 
     @Test fun serverPolicyParsesAsTheOnlyStandardPolicy() {
@@ -24,7 +24,7 @@ class ProcessingMediaPolicyTest {
 
     @Test(expected = JobsFailure::class)
     fun unknownProfileRejected() {
-        ProcessingMediaPolicy.parse(fixture.replace("preserve-or-aac-lc-256-v1", "future-profile"))
+        ProcessingMediaPolicy.parse(fixture.replace("audio-cap-aac-lc-160-v1", "future-profile"))
     }
 
     @Test(expected = JobsFailure::class)

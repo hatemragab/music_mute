@@ -95,10 +95,17 @@ final class CoreTests: XCTestCase {
     let low = candidate(bitrate: 128_000)
     let video = candidate(bitrate: 2_000_000, hasVideo: true)
     let opus = candidate(bitrate: 200_000, codec: "Opus", ext: "webm")
-    let selected = try AudioPolicy.bestCompatibleAudio([low, video, opus, high])
+    let tooHigh = candidate(bitrate: 256_000)
+    let selected = try AudioPolicy.bestCompatibleAudio([low, video, opus, high, tooHigh])
     XCTAssertEqual(selected.bitrate, 160_000)
     XCTAssertEqual(selected.fileExtension, "m4a")
     XCTAssertEqual(selected.url, high.url)
+  }
+  func testSelectionUsesLowestHigherAudioWhenNoStreamFitsTheCap() throws {
+    let selected = try AudioPolicy.bestCompatibleAudio([
+      candidate(bitrate: 320_000), candidate(bitrate: 192_000), candidate(bitrate: 256_000),
+    ])
+    XCTAssertEqual(selected.bitrate, 192_000)
   }
   func testSelectionNeverFallsBackToVideoInsecureOrRemoteStreams() {
     for stream in [

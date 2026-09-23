@@ -3,7 +3,7 @@ import { CreateJobDto } from './create-job.dto.js';
 
 const payload = {
   policyVersion: 2,
-  preparationProfileId: 'preserve-or-aac-lc-256-v1',
+  preparationProfileId: 'audio-cap-aac-lc-160-v1',
   source: 'audio_file',
   requestId: '12345678-1234-4567-8123-123456789ABC',
   input: {

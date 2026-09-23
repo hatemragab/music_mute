@@ -16,6 +16,7 @@ from .media import (
     MediaProcessingError,
     denoise_audio,
     encode_mp3,
+    output_bitrate_kbps,
     inspect_lossless_audio,
     prepare_audio,
     probe_audio,
@@ -50,7 +51,12 @@ INPUT_KEYS = frozenset({"path", "bytes", "sha256"})
 
 
 class VocalSeparator(Protocol):
-    def separate(self, source: Path, output_directory: Path) -> Path: ...
+    def separate(
+        self,
+        source: Path,
+        output_directory: Path,
+        on_window_progress: Callable[[int, int], None] | None = None,
+    ) -> Path: ...
 
 
 class ProcessingFailure(RuntimeError):
@@ -58,6 +64,28 @@ class ProcessingFailure(RuntimeError):
         super().__init__(summary)
         self.code = code
         self.summary = summary
+
+
+def is_positive_gpu_oom(error: BaseException) -> bool:
+    """Classify only provider OOM evidence; a timeout alone is never OOM."""
+    current: BaseException | None = error
+    for _ in range(5):
+        if current is None:
+            break
+        message = str(current).lower()
+        if (
+            "mps backend out of memory" in message
+            or "mps out of memory" in message
+            or "dml out of memory" in message
+            or "directml out of memory" in message
+            or (
+                type(current).__name__ == "OutOfMemoryError"
+                and type(current).__module__.startswith("torch")
+            )
+        ):
+            return True
+        current = current.__cause__
+    return False
 
 
 @dataclass(frozen=True)
@@ -146,14 +174,19 @@ class ProcessRequest:
 
 
 SeparatorFactory = Callable[[Provider, Path, int], VocalSeparator]
-Progress = Callable[[str, float], None]
+Progress = Callable[[str], None]
+WindowProgress = Callable[[int, int], None]
 
 
 class RuntimePipeline:
     def __init__(self, separator_factory: SeparatorFactory | None = None) -> None:
+        self._startup_progress: Progress | None = None
         self._separator_factory = separator_factory or (
             lambda provider, model, device: KimSeparator(
-                provider, model, directml_device_id=device
+                provider,
+                model,
+                directml_device_id=device,
+                on_startup_stage=self._startup_progress,
             )
         )
         self._separator: VocalSeparator | None = None
@@ -164,8 +197,11 @@ class RuntimePipeline:
         model_cache_root: Path,
         provider: Provider,
         directml_device_id: int = 0,
+        progress: Progress | None = None,
     ) -> None:
         """Validate and load the stable model before this child accepts work."""
+        if progress is not None:
+            progress("loading")
         try:
             model = verified_cached_model(model_cache_root)
         except ModelArtifactError as error:
@@ -173,16 +209,22 @@ class RuntimePipeline:
                 "MODEL_INVALID", "Qualified model is unavailable"
             ) from error
         try:
+            self._startup_progress = progress
             self._get_separator(provider, model, directml_device_id)
         except SeparatorError as error:
             raise ProcessingFailure(
                 "SEPARATOR_FAILED", "Vocal separator could not be preloaded"
             ) from error
+        finally:
+            self._startup_progress = None
 
     def process(
-        self, request: ProcessRequest, progress: Progress | None = None
+        self,
+        request: ProcessRequest,
+        progress: Progress | None = None,
+        window_progress: WindowProgress | None = None,
     ) -> dict[str, Any]:
-        progress = progress or (lambda _stage, _fraction: None)
+        progress = progress or (lambda _stage: None)
         timings: dict[str, float] = {}
         try:
             model = self._timed(
@@ -199,7 +241,7 @@ class RuntimePipeline:
             request.attempt_directory, request.input_path
         )
         try:
-            progress("validating", 0.05)
+            progress("input-validation")
             try:
                 self._timed(
                     timings,
@@ -214,6 +256,7 @@ class RuntimePipeline:
                 raise ProcessingFailure(
                     "INPUT_CHECKSUM_MISMATCH", "Input identity does not match"
                 ) from error
+            progress("preparation")
             try:
                 source_info = self._timed(
                     timings,
@@ -233,7 +276,7 @@ class RuntimePipeline:
                     "INVALID_AUDIO", "Input audio is invalid"
                 ) from error
 
-            progress("separating", 0.25)
+            progress("model-load")
             try:
                 separator = self._timed(
                     timings,
@@ -242,20 +285,31 @@ class RuntimePipeline:
                         request.provider, model, request.directml_device_id
                     ),
                 )
+                progress("separation")
                 vocal = self._timed(
                     timings,
                     "separation",
-                    lambda: separator.separate(prepared, attempt / "separated"),
+                    lambda: separator.separate(
+                        prepared,
+                        attempt / "separated",
+                        on_window_progress=window_progress,
+                    ) if window_progress is not None else separator.separate(
+                        prepared, attempt / "separated"
+                    ),
                 )
                 vocal_info = inspect_lossless_audio(vocal)
             except (SeparatorError, MediaProcessingError) as error:
+                if is_positive_gpu_oom(error):
+                    raise ProcessingFailure(
+                        "GPU_OOM", "GPU provider reported out of memory"
+                    ) from error
                 raise ProcessingFailure(
                     "SEPARATOR_FAILED", "Vocal separation failed"
                 ) from error
 
             current = vocal
             if request.recipe["denoiseEnabled"]:
-                progress("denoising", 0.60)
+                progress("denoise")
                 try:
                     current = self._timed(
                         timings,
@@ -277,7 +331,7 @@ class RuntimePipeline:
             output_samples = vocal_info.samples
             retained = (EditRange(0, vocal_info.samples, 0, vocal_info.samples),)
             if request.recipe["trimEnabled"]:
-                progress("trimming", 0.72)
+                progress("trim")
                 try:
                     trimmed = self._timed(
                         timings,
@@ -301,15 +355,18 @@ class RuntimePipeline:
                     "EDIT_MAP_TOO_LARGE", "Vocal edit map exceeds the bounded limit"
                 )
 
-            progress("encoding", 0.85)
+            progress("encoding")
             try:
+                selected_bitrate_kbps = output_bitrate_kbps(source_info.bit_rate)
                 output = self._timed(
                     timings,
                     "encode",
                     lambda: encode_mp3(
-                        current, attempt / "output" / "vocals.mp3", request.ffmpeg
+                        current, attempt / "output" / "vocals.mp3", request.ffmpeg,
+                        selected_bitrate_kbps,
                     ),
                 )
+                progress("output-validation")
                 output_info, identity = self._timed(
                     timings,
                     "outputValidation",
@@ -320,7 +377,7 @@ class RuntimePipeline:
                     "OUTPUT_INVALID", "Output audio is invalid"
                 ) from error
 
-            progress("complete", 1.0)
+            progress("output-ready")
             return {
                 "attemptId": request.attempt_id,
                 "outputPath": str(output.resolve(strict=True)),
@@ -329,6 +386,7 @@ class RuntimePipeline:
                 "contentType": "audio/mpeg",
                 "sourceDurationSeconds": source_info.duration_seconds,
                 "measuredInputDurationSeconds": prepared_info.duration_seconds,
+                "measuredInputSamples": prepared_info.samples,
                 "measuredOutputDurationSeconds": output_info.duration_seconds,
                 "sourceSamples": vocal_info.samples,
                 "outputSamples": output_samples,
@@ -342,7 +400,7 @@ class RuntimePipeline:
                 "trimEnabled": request.recipe["trimEnabled"],
                 "denoiseEnabled": request.recipe["denoiseEnabled"],
                 "outputFormat": request.recipe["outputFormat"],
-                "outputBitrateKbps": request.recipe["outputBitrateKbps"],
+                "outputBitrateKbps": selected_bitrate_kbps,
                 "codecPaddingSeconds": max(
                     0.0,
                     output_info.duration_seconds - output_samples / SAMPLE_RATE,

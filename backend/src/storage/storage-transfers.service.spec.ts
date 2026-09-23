@@ -57,7 +57,7 @@ describe('StorageTransfersService', () => {
         policyVersion: 2,
         maxDurationSeconds: 1_200,
         maxInputBytes: 50_000_000,
-        preparationProfileId: 'preserve-or-aac-lc-256-v1',
+        preparationProfileId: 'audio-cap-aac-lc-160-v1',
         source: 'audio_file',
         settingsRevision: 1,
         maxWaitingJobs: 3,
@@ -122,6 +122,30 @@ describe('StorageTransfersService', () => {
     expect((send.mock.calls[1][0] as HeadObjectCommand).input.VersionId).toBe(
       'input-version',
     );
+    client.destroy();
+  });
+
+  it('rejects an input object larger than the reserved upload even when metadata matches', async () => {
+    const { service, client, send } = fixture();
+    const reservation = {
+      key: 'users/user-1/jobs/job-1/input/source.mp3',
+      extension: 'mp3' as const,
+      contentType: 'audio/mpeg',
+      bytes: 50_000_000,
+      durationSeconds: 1_200,
+      sha256: object.sha256,
+    };
+    send
+      .mockResolvedValueOnce({ VersionId: 'input-version' } as never)
+      .mockResolvedValueOnce({
+        VersionId: 'input-version',
+        ContentLength: 50_000_001,
+        ContentType: reservation.contentType,
+        ChecksumSHA256: reservation.sha256,
+      } as never);
+    await expect(
+      service.verifyInput({ inputReservation: reservation, inputObject: null }),
+    ).rejects.toMatchObject({ response: { code: 'UPLOAD_NOT_READY' } });
     client.destroy();
   });
   it('signs downloads for the exact pinned key and version', async () => {

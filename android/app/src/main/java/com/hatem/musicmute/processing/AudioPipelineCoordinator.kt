@@ -149,7 +149,10 @@ class AudioPipelineCoordinator(
         val policy = policyReader()
         if (!policy.acceptNewJobs || !policy.youtubePreparationReady)
             throw JobsFailure(JobsProblem.PROCESSING_CAPACITY_UNAVAILABLE)
-        val prepared = preparer.prepare(ownerUid, "$sourceTitle.$extension", operationId, policy, "youtube") {
+        // The downloaded source is app-owned and inspected here. The worker fully decodes
+        // and validates it before separation, so avoid a second full decode on the phone.
+        val prepared = preparer.prepare(ownerUid, "$sourceTitle.$extension", operationId, policy, "youtube",
+            validateFullDecode = false) {
             downloadedFile.inputStream()
         }
         checkSession(owner)

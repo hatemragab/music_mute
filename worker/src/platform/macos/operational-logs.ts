@@ -5,6 +5,7 @@ import {
   lstat,
   open,
   readdir,
+  readFile,
   rename,
   rm,
   truncate,
@@ -13,6 +14,10 @@ import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { sanitizeDiagnostic } from "../../agent/child-process.js";
+import {
+  clearDiagnosticHistory,
+  sanitizeDiagnosticEvent,
+} from "../../runtime/diagnostic-spool.js";
 import type { MacUserLayout } from "./user-paths.js";
 
 export const MAC_LOG_ROTATE_BYTES = 5 * 1024 * 1024;
@@ -30,6 +35,8 @@ export interface OperationalEvent {
 export interface OperationalLogFilter {
   lines: number;
   attemptId?: string;
+  jobId?: string;
+  code?: string;
   since?: number;
   level?: OperationalLogLevel;
   errorsOnly?: boolean;
@@ -41,6 +48,14 @@ export interface OperationalLogUsage {
   rotationLimitBytes: number;
   archivesPerStream: number;
   diagnosticSpoolBlocked: boolean;
+}
+
+export interface OperationalLogCursor {
+  readonly positions: Map<string, { offset: number; partial: Buffer }>;
+}
+
+export function createOperationalLogCursor(): OperationalLogCursor {
+  return { positions: new Map() };
 }
 
 export interface ClearedOperationalLogs {
@@ -71,11 +86,9 @@ export async function clearMacUserLogs(
     }
   }
   const spoolRoot = join(layout.workRoot, "..", "logs");
-  for (const name of ["events.jsonl", "stream-id", "spool-full.marker"]) {
-    const removed = await removePrivateLog(join(spoolRoot, name));
-    filesCleared += removed.files;
-    bytesCleared += removed.bytes;
-  }
+  const diagnostic = await clearDiagnosticHistory(spoolRoot);
+  filesCleared += diagnostic.filesCleared;
+  bytesCleared += diagnostic.bytesCleared;
   return { filesCleared, bytesCleared };
 }
 
@@ -109,40 +122,179 @@ export async function readOperationalEvents(
   layout: Pick<MacUserLayout, "workRoot">,
   filter: OperationalLogFilter,
 ): Promise<OperationalEvent[]> {
-  const path = join(layout.workRoot, "..", "logs", "events.jsonl");
-  const contents = await readTail(path, TAIL_BYTES);
+  if (
+    !Number.isSafeInteger(filter.lines) ||
+    filter.lines < 1 ||
+    filter.lines > 10_000
+  )
+    throw new TypeError("Operational event result limit is invalid");
+  const root = join(layout.workRoot, "..", "logs");
+  const names = (await readdir(root).catch(() => []))
+    .filter((name) => /^events-\d{12}\.jsonl$/u.test(name))
+    .sort();
+  names.push("events.jsonl");
   const events: OperationalEvent[] = [];
-  for (const line of contents.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const record = JSON.parse(line) as unknown;
-      if (!isRecord(record) || !isRecord(record.event)) continue;
-      if (
-        typeof record.recordedAt !== "string" ||
-        !Number.isFinite(Date.parse(record.recordedAt))
-      )
-        continue;
-      const event = sanitizeObject(record.event);
-      const level = eventLevel(event);
-      if (
-        filter.attemptId !== undefined &&
-        event.attemptId !== filter.attemptId
-      )
-        continue;
-      if (
-        filter.since !== undefined &&
-        Date.parse(record.recordedAt) < filter.since
-      )
-        continue;
-      if (filter.level !== undefined && level !== filter.level) continue;
-      if (filter.errorsOnly === true && level !== "error") continue;
-      events.push({ recordedAt: record.recordedAt, level, event });
-    } catch {
-      // A malformed final line is ignored in the operator view; Doctor reports
-      // the durable spool marker separately.
+  for (const name of names) {
+    const path = join(root, name);
+    const information = await lstat(path).catch(() => null);
+    if (!information) continue;
+    assertPrivateLog(information, "Diagnostic event file");
+    const contents = await readFile(path, "utf8");
+    for (const line of contents.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const record = JSON.parse(line) as unknown;
+        if (!isRecord(record) || !isRecord(record.event)) continue;
+        if (
+          typeof record.recordedAt !== "string" ||
+          !Number.isFinite(Date.parse(record.recordedAt))
+        )
+          continue;
+        const event = sanitizeDiagnosticEvent(record.event);
+        const level = eventLevel(event);
+        if (
+          filter.attemptId !== undefined &&
+          event.attemptId !== filter.attemptId
+        )
+          continue;
+        if (filter.jobId !== undefined && event.jobId !== filter.jobId)
+          continue;
+        if (filter.code !== undefined && event.code !== filter.code) continue;
+        if (
+          filter.since !== undefined &&
+          Date.parse(record.recordedAt) < filter.since
+        )
+          continue;
+        if (filter.level !== undefined && level !== filter.level) continue;
+        if (filter.errorsOnly === true && level !== "error") continue;
+        events.push({ recordedAt: record.recordedAt, level, event });
+        if (events.length > filter.lines) events.shift();
+      } catch {
+        // A malformed final line is ignored in the operator view; Doctor reports
+        // the durable spool marker separately.
+      }
     }
   }
-  return events.slice(-filter.lines);
+  return events;
+}
+
+export async function readNewOperationalEvents(
+  layout: Pick<MacUserLayout, "workRoot">,
+  filter: OperationalLogFilter,
+  cursor: OperationalLogCursor,
+): Promise<OperationalEvent[]> {
+  const root = join(layout.workRoot, "..", "logs");
+  const names = (await readdir(root).catch(() => []))
+    .filter((name) => /^events-\d{12}\.jsonl$/u.test(name))
+    .sort();
+  names.push("events.jsonl");
+  const seen = new Set<string>();
+  const events: OperationalEvent[] = [];
+  for (const name of names) {
+    const path = join(root, name);
+    const lines = await readNewLogLines(path, cursor, seen);
+    for (const line of lines) {
+      const parsed = parseOperationalEvent(line, filter);
+      if (!parsed) continue;
+      events.push(parsed);
+      if (events.length > filter.lines) events.shift();
+    }
+  }
+  for (const key of cursor.positions.keys())
+    if (!seen.has(key)) cursor.positions.delete(key);
+  return events;
+}
+
+export async function readNewTextLog(
+  path: string,
+  cursor: OperationalLogCursor,
+): Promise<string> {
+  const seen = new Set<string>();
+  const lines = await readNewLogLines(path, cursor, seen);
+  for (const key of cursor.positions.keys())
+    if (!seen.has(key)) cursor.positions.delete(key);
+  return sanitizeDiagnostic(lines.join("\n"));
+}
+
+async function readNewLogLines(
+  path: string,
+  cursor: OperationalLogCursor,
+  seen: Set<string>,
+): Promise<string[]> {
+  const information = await lstat(path).catch(() => null);
+  if (!information) return [];
+  assertPrivateLog(information, "Worker log file");
+  const key = `${information.dev}:${information.ino}`;
+  seen.add(key);
+  const previous = cursor.positions.get(key);
+  let offset = previous?.offset ?? 0;
+  let partial = previous?.partial ?? Buffer.alloc(0);
+  if (offset > information.size) {
+    offset = 0;
+    partial = Buffer.alloc(0);
+  }
+  const lines: string[] = [];
+  const handle = await open(path, "r");
+  try {
+    while (offset < information.size) {
+      const length = Math.min(64 * 1024, information.size - offset);
+      const chunk = Buffer.alloc(length);
+      const read = await handle.read(chunk, 0, length, offset);
+      if (read.bytesRead === 0) break;
+      offset += read.bytesRead;
+      const combined = Buffer.concat([
+        partial,
+        chunk.subarray(0, read.bytesRead),
+      ]);
+      const lastNewline = combined.lastIndexOf(10);
+      if (lastNewline < 0) {
+        partial = combined.length <= 8 * 1024 ? combined : Buffer.alloc(0);
+        continue;
+      }
+      const complete = combined.subarray(0, lastNewline).toString("utf8");
+      partial = Buffer.from(combined.subarray(lastNewline + 1));
+      for (const line of complete.split("\n")) {
+        lines.push(line);
+        if (lines.length > 1_000) lines.shift();
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+  cursor.positions.set(key, { offset, partial });
+  return lines;
+}
+
+function parseOperationalEvent(
+  line: string,
+  filter: OperationalLogFilter,
+): OperationalEvent | null {
+  if (!line.trim()) return null;
+  try {
+    const record = JSON.parse(line) as unknown;
+    if (!isRecord(record) || !isRecord(record.event)) return null;
+    if (
+      typeof record.recordedAt !== "string" ||
+      !Number.isFinite(Date.parse(record.recordedAt))
+    )
+      return null;
+    const event = sanitizeDiagnosticEvent(record.event);
+    const level = eventLevel(event);
+    if (filter.attemptId !== undefined && event.attemptId !== filter.attemptId)
+      return null;
+    if (filter.jobId !== undefined && event.jobId !== filter.jobId) return null;
+    if (filter.code !== undefined && event.code !== filter.code) return null;
+    if (
+      filter.since !== undefined &&
+      Date.parse(record.recordedAt) < filter.since
+    )
+      return null;
+    if (filter.level !== undefined && level !== filter.level) return null;
+    if (filter.errorsOnly === true && level !== "error") return null;
+    return { recordedAt: record.recordedAt, level, event };
+  } catch {
+    return null;
+  }
 }
 
 export async function inspectOperationalLogUsage(
@@ -313,15 +465,6 @@ function eventLevel(event: Record<string, unknown>): OperationalLogLevel {
     return "error";
   if (/stopped|recovered|drain|pause/u.test(kind)) return "warning";
   return "info";
-}
-
-function sanitizeObject(
-  value: Record<string, unknown>,
-): Record<string, unknown> {
-  return JSON.parse(sanitizeDiagnostic(JSON.stringify(value))) as Record<
-    string,
-    unknown
-  >;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

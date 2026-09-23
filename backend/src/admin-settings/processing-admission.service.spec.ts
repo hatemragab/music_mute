@@ -7,7 +7,7 @@ import { ProcessingAdmissionService } from './processing-admission.service.js';
 const session = { inTransaction: () => true };
 const metadata = {
   policyVersion: 2 as const,
-  preparationProfileId: 'preserve-or-aac-lc-256-v1',
+  preparationProfileId: 'audio-cap-aac-lc-160-v1',
   source: 'audio_file' as const,
 };
 

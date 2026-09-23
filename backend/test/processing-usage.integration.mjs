@@ -44,7 +44,7 @@ const createJob = (
       policyVersion: 2,
       maxDurationSeconds: 1_200,
       maxInputBytes: 50_000_000,
-      preparationProfileId: 'preserve-or-aac-lc-256-v1',
+      preparationProfileId: 'audio-cap-aac-lc-160-v1',
       source: 'audio_file',
       settingsRevision: 0,
       maxWaitingJobs: 3,
@@ -778,7 +778,7 @@ test('account admission atomically accepts only three waiting jobs', async (t) =
   const transactions = new ProcessingTransactions(connection);
   const metadata = {
     policyVersion: 2,
-    preparationProfileId: 'preserve-or-aac-lc-256-v1',
+    preparationProfileId: 'audio-cap-aac-lc-160-v1',
     source: 'audio_file',
   };
 

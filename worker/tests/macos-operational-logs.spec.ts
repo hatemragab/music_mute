@@ -1,9 +1,12 @@
+import { randomUUID } from "node:crypto";
 import {
+  appendFile,
   chmod,
   lstat,
   mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
   truncate,
   writeFile,
@@ -15,10 +18,12 @@ import {
   MAC_LOG_ARCHIVE_COUNT,
   MAC_LOG_ROTATE_BYTES,
   appendMacFatalError,
+  createOperationalLogCursor,
   clearMacUserLogs,
   maintainMacUserLogs,
   parseSince,
   readOperationalEvents,
+  readNewOperationalEvents,
 } from "../src/platform/macos/operational-logs.js";
 import {
   createMacUserDirectories,
@@ -99,6 +104,81 @@ describe("macOS operational logs", () => {
     expect(parseSince("2h", 10_000_000)).toBe(2_800_000);
   });
 
+  it("queries retained segments as well as the active event file", async () => {
+    const layout = await fixture();
+    const logRoot = join(layout.workRoot, "..", "logs");
+    await mkdir(logRoot, { recursive: true, mode: 0o700 });
+    const oldAttemptId = randomUUID();
+    const newAttemptId = randomUUID();
+    await writeFile(
+      join(logRoot, "events-000000000001.jsonl"),
+      `${JSON.stringify({
+        recordedAt: "2026-09-21T10:00:00.000Z",
+        event: { kind: "attempt-started", attemptId: oldAttemptId },
+      })}\n`,
+      { mode: 0o600 },
+    );
+    await writeFile(
+      join(logRoot, "events.jsonl"),
+      `${JSON.stringify({
+        recordedAt: "2026-09-21T11:00:00.000Z",
+        event: { kind: "attempt-succeeded", attemptId: newAttemptId },
+      })}\n`,
+      { mode: 0o600 },
+    );
+    const events = await readOperationalEvents(layout, { lines: 10 });
+    expect(events.map((item) => item.event.attemptId)).toEqual([
+      oldAttemptId,
+      newAttemptId,
+    ]);
+  });
+
+  it("follows new records once across partial writes and active-file rotation", async () => {
+    const layout = await fixture();
+    const logRoot = join(layout.workRoot, "..", "logs");
+    await mkdir(logRoot, { recursive: true, mode: 0o700 });
+    const active = join(logRoot, "events.jsonl");
+    const record = (sequence: number) =>
+      JSON.stringify({
+        sequence,
+        recordedAt: "2026-09-21T11:00:00.000Z",
+        event: {
+          kind: "attempt-progress",
+          stage: "separation",
+          code: `s${sequence}`,
+        },
+      });
+    await writeFile(active, `${record(1)}\n`, { mode: 0o600 });
+    const cursor = createOperationalLogCursor();
+    const filter = { lines: 10 };
+    expect(await readNewOperationalEvents(layout, filter, cursor)).toHaveLength(
+      1,
+    );
+    expect(await readNewOperationalEvents(layout, filter, cursor)).toEqual([]);
+
+    const second = record(2);
+    await appendFile(active, second.slice(0, 30));
+    expect(await readNewOperationalEvents(layout, filter, cursor)).toEqual([]);
+    await appendFile(active, `${second.slice(30)}\n`);
+    expect(await readNewOperationalEvents(layout, filter, cursor)).toHaveLength(
+      1,
+    );
+
+    await rename(active, join(logRoot, "events-000000000001.jsonl"));
+    await writeFile(active, `${record(3)}\n`, { mode: 0o600 });
+    const afterRotation = await readNewOperationalEvents(
+      layout,
+      filter,
+      cursor,
+    );
+    expect(afterRotation).toHaveLength(1);
+    expect(afterRotation[0]?.event).toMatchObject({
+      kind: "attempt-progress",
+      code: "s3",
+    });
+    expect(await readNewOperationalEvents(layout, filter, cursor)).toEqual([]);
+  });
+
   it("clears only owned streams, archives, and structured spool files", async () => {
     const layout = await fixture();
     const spoolRoot = join(layout.workRoot, "..", "logs");
@@ -108,24 +188,27 @@ describe("macOS operational logs", () => {
       writeFile(layout.stderrPath, "stderr", { mode: 0o600 }),
       writeFile(`${layout.stdoutPath}.1.gz`, "archive", { mode: 0o600 }),
       writeFile(join(spoolRoot, "events.jsonl"), "event", { mode: 0o600 }),
-      writeFile(join(spoolRoot, "stream-id"), "stream", { mode: 0o600 }),
+      writeFile(join(spoolRoot, "stream-id"), `${randomUUID()}\n`, {
+        mode: 0o600,
+      }),
       writeFile(join(spoolRoot, "spool-full.marker"), "blocked", {
         mode: 0o600,
       }),
       writeFile(join(spoolRoot, "unrelated.txt"), "preserve", { mode: 0o600 }),
     ]);
     await expect(clearMacUserLogs(layout)).resolves.toMatchObject({
-      filesCleared: 6,
-      bytesCleared: 37,
+      filesCleared: 4,
+      bytesCleared: 24,
     });
     expect((await lstat(layout.stdoutPath)).size).toBe(0);
     expect((await lstat(layout.stderrPath)).size).toBe(0);
     await expect(lstat(`${layout.stdoutPath}.1.gz`)).rejects.toMatchObject({
       code: "ENOENT",
     });
-    await expect(lstat(join(spoolRoot, "events.jsonl"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    expect((await lstat(join(spoolRoot, "events.jsonl"))).size).toBe(0);
+    expect(await readFile(join(spoolRoot, "spool-full.marker"), "utf8")).toBe(
+      "blocked",
+    );
     await expect(
       readFile(join(spoolRoot, "unrelated.txt"), "utf8"),
     ).resolves.toBe("preserve");

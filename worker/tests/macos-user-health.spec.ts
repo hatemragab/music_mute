@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { writeLocalRuntimeStatus } from "../src/runtime/local-runtime-status.js";
 import {
   inspectMacUserHealth,
   macUserPythonEnvironment,
@@ -27,6 +28,31 @@ afterEach(async () => {
 });
 
 describe("macOS user runtime health", () => {
+  it("quick doctor reads local state without verifying release or launching the runtime doctor", async () => {
+    const layout = await healthyFixture();
+    await writeLocalRuntimeStatus(layout.runtimeStatusPath, []);
+    const runtimeDoctor = vi.fn(async () => undefined);
+    const releaseVerifier = vi.fn(async () => undefined);
+    const result = await inspectMacUserHealth(
+      layout,
+      { status: async () => ({ loaded: true, running: true }) },
+      { depth: "quick", runtimeDoctor, releaseVerifier },
+    );
+    expect(runtimeDoctor).not.toHaveBeenCalled();
+    expect(releaseVerifier).not.toHaveBeenCalled();
+    expect(result.healthy).toBe(true);
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "runtime-snapshot", status: "passed" }),
+        expect.objectContaining({ name: "runtime-doctor", status: "not-run" }),
+        expect.objectContaining({
+          name: "release-manifest",
+          status: "not-run",
+        }),
+      ]),
+    );
+  });
+
   it("keeps doctor caches and executable discovery outside the immutable release", () => {
     const layout = createMacUserLayout("/Users/tester");
     expect(macUserPythonEnvironment(layout)).toMatchObject({

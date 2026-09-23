@@ -54,7 +54,7 @@ The service entry point reads a strict JSON config and a separate protected
 machine-credential file:
 
 ```bash
-musicmute-worker run --config /absolute/path/runtime.json
+mw run --config /absolute/path/runtime.json
 ```
 
 ```json
@@ -118,8 +118,11 @@ The public MVP entry point is a current-user install with no `sudo`:
 
 ```bash
 npm install -g @musicmute/worker
-musicmute-worker install --label "Studio Mac"
+mw install --label "Studio Mac"
 ```
+
+The package installs `mw` as the short CLI command. The original
+`musicmute-worker` command remains available for existing scripts.
 
 The command reads the one-use enrollment code from `/dev/tty` with echo
 disabled, uses `https://api.music-mute.com/api/v1`, downloads the service
@@ -129,12 +132,12 @@ LaunchAgent always runs MusicMute's immutable private Node/Python/FFmpeg
 runtime; it never mutates Homebrew, MacPorts, `/usr/local`, or the npm prefix.
 If installation is interrupted, rerunning the same command reuses the protected
 transaction credential instead of requesting another one-use code. After a
-conservative `uninstall`, running `musicmute-worker install` with no flags
+conservative `uninstall`, running `mw install` with no flags
 verifies and reactivates the preserved paired release without enrollment or a
 network download. A failed recovery removes the activation pointer again.
 
 If an old one-use code was already consumed by a different exchange, create a
-new code in the dashboard and run `musicmute-worker install --label "Studio Mac"
+new code in the dashboard and run `mw install --label "Studio Mac"
 --new-code`. The flag discards only a protected, pre-exchange local attempt and
 prompts for the new code; it refuses to replace an attempt that has already
 received an installation identity. A normal retry without this flag preserves
@@ -175,6 +178,16 @@ preserves state by default; `uninstall --purge` requires a backend-confirmed
 `unpair` receipt first. Missing or manually deleted credential/config files are
 not accepted as proof of unpairing.
 
+`status --local` reads the service and worker snapshot without contacting the
+backend. It reports observed loading, warm-up, processing, recovery, and pause
+states, current stage and window progress, heartbeat age, and explicit
+readiness blockers. Cached policy is labeled with its age and never shown as a
+live connection. `status --watch` refreshes every two seconds and ends on
+Ctrl-C without changing the service; add `--json` for newline-delimited JSON.
+`start --wait-ready` waits up to six minutes for the local model to become
+ready, prints phase changes, and then reports remote claim eligibility
+separately. It does not override local or backend pause and drain settings.
+
 Dashboard Doctor and Benchmark requests use the same running per-user worker
 and never invoke `sudo`, install system packages, or modify the LaunchAgent.
 Doctor runs only the requested bounded checks and reports sanitized metrics.
@@ -192,31 +205,76 @@ remains unchanged.
 The per-user service writes owner-only stdout/stderr logs under
 `~/Library/Application Support/MusicMuteWorker/logs/` and structured runtime
 events under `jobs/logs/`. Stdout and stderr rotate automatically at 5 MiB,
-keeping five gzip archives per stream. The structured diagnostic spool remains
-hard-capped at 8 MiB and stops new claims if durable diagnostics become unsafe.
+keeping five gzip archives per stream. Structured diagnostic history retains
+up to seven days under a 100 MiB aggregate budget. Old segments are evicted
+before normal quota pressure can stop new claims. Actual write failure or
+corruption still blocks admission until repaired.
 
 ```bash
-musicmute-worker logs
-musicmute-worker logs --events --since 2h
-musicmute-worker logs --errors --attempt-id <attempt-uuid>
-musicmute-worker logs --events --level error --follow
-musicmute-worker logs --clear
-musicmute-worker diagnostics
+mw logs
+mw logs --events --since 2h
+mw logs --errors --attempt-id <attempt-uuid>
+mw logs --events --level error --follow
+mw logs --events --follow --json
+mw job <job-id> --json
+mw errors --since 1d --limit 20
+mw explain GPU_OOM
+mw perf --last 20 --since 1d --json
+mw doctor
+mw doctor --full
+mw logs --clear
+mw diagnostics
+mw diagnostics --job <job-id> --since 1d
 ```
 
 `logs` shows readable stdout/stderr by default. Structured views accept
 `--attempt-id`, `--since` (`s`, `m`, `h`, or `d`, up to 30 days), and
-`--level info|warning|error`; scripts may add `--json` except while following.
+`--level info|warning|error`; `--follow --json` streams one JSON object per
+new event or text chunk.
 `status` includes the runtime heartbeat, child state, current and last jobs,
 spool state, and total log disk use.
 
-`logs --clear` is the explicit destructive maintenance command. If the
-LaunchAgent is loaded, it drains active work, stops the service, truncates the
-active stdout/stderr streams, removes their five known archive generations,
-resets the structured event spool, and starts the service again. It preserves
-configuration, credentials, models, job files, diagnostic ZIP exports, and
-unrecognized files. Use `--force` only to bypass a drain that cannot complete;
-add `--json` for automation.
+`job` reconstructs the attempts this worker retained for one backend job ID,
+including observed stage durations, retries, failure codes, and child restarts.
+It exits 2 when there is no local evidence; the job may have run elsewhere or
+aged out of history. `errors` groups recent local failures by code, component,
+and stage with affected-job counts and recovery evidence. `explain` shows a
+sanitized definition, observed examples, and read-only next steps. These
+commands do not contact the backend or retry work. JSON output includes a local
+history scope and an incomplete-history flag.
+
+`doctor` is a quick local check: files, config, LaunchAgent, and runtime status.
+`doctor --full` also verifies the active release and invokes the installed
+Python runtime integrity check, including model and GPU provider availability.
+Quick checks do not load another model. Installation and activation continue to
+require the full integrity check. Doctor JSON marks checks as passed, failed, or
+not run and includes safe reason codes and next actions.
+
+`perf` reports the last 1–100 locally observed attempts, with optional time and
+recipe filters. Successful samples include measured download, preparation,
+separation, encoding, upload, and completion acknowledgement durations, decoded
+input duration, output size, and separation real-time factor when available.
+It separates failed, stopped, active, and retried attempts. Medians and ranges
+are computed only within cohorts sharing provider, logical GPU slot, runtime
+incarnation, model/recipe digest, output bitrate, group size, warm-model state,
+and a five-second input-duration bucket. A long “Removing music” display stage
+alone does not prove separation is the bottleneck; the report explicitly lists
+unmeasured queue time and other missing coverage.
+
+`diagnostics --job <id>` creates a private ZIP with only that job's retained
+attempt timeline, performance samples, grouped errors, safe status and Doctor
+checks, and a manifest of missing sections. `--since` bounds the export (seven
+days by default). General diagnostics still works without a job ID. Bundles
+are capped at 8 MiB, reject an existing target, and contain no raw stderr,
+source media, file paths, tokens, signed URLs, or config values.
+
+`logs --clear` is the explicit destructive maintenance command. It truncates
+the active stdout/stderr streams, removes their known archives, and clears
+structured history under the writer lock. It keeps the running service and
+warm model in place. A diagnostic failure marker remains until the underlying
+write or corruption problem is repaired. Configuration, credentials, models,
+job files, diagnostic ZIP exports, and unrecognized files are preserved.
+Add `--json` for automation.
 
 `diagnostics` creates an owner-only ZIP in `~/Downloads`, or at an absolute
 path inside the current home supplied with `--output`. It contains sanitized
@@ -230,6 +288,13 @@ dashboard machine status, policy revision, last contact, active-attempt count,
 and effective claim permission. If the backend is offline, remote state is
 explicitly unavailable and the command returns an unhealthy exit instead of
 guessing that local `resume` overrides dashboard authority.
+
+`start` leaves an already-running service and its model process intact. A loaded
+but stopped service starts with a non-killing LaunchAgent kickstart. `resume`
+changes local claim intent without restarting the service; an already-running
+worker wakes when the lifecycle file changes, with its bounded idle poll as a
+fallback. `resume` does not start a stopped service or override backend policy.
+Use explicit `restart` when a fresh process is required.
 
 The service publishes only bounded active-attempt IDs to its protected local
 runtime-status file. Normal `drain`, `stop`, `restart`, and `update` therefore
@@ -255,7 +320,7 @@ credentials, models, or job data.
 
 ```bash
 pnpm run build
-musicmute-worker package-macos \
+mw package-macos \
   --worker-root /absolute/source/worker \
   --output /absolute/staging/musicmute-worker \
   --version 0.1.0 \
@@ -315,12 +380,61 @@ until the owner-authorized Windows host run.
 
 ### Offline song benchmark (macOS)
 
-With the worker already drained and stopped, benchmark the packaged UVR-compatible MPS engine directly. This command does not contact the backend, S3, or a database. Each invocation runs one selected Kim Vocal 2 recipe pass:
+With the worker already drained and stopped, benchmark the UVR-compatible MPS
+engine directly. This command does not contact the backend, S3, or a database.
+During local development, build this worktree and run its CLI directly so the
+new command is not confused with an older installed release. Use a full-length
+local song and keep its source unchanged across reports:
 
 ```sh
-musicmute-worker benchmark-file --input /absolute/path/song.mp3 --recipe kim-vocals-v2-trim --iterations 2 --json
+pnpm --dir /absolute/path/to/worktree/worker build
+node /absolute/path/to/worktree/worker/dist/src/cli/main.js benchmark-file \
+  --input /absolute/path/song.mp3 \
+  --recipe kim-vocals-v2-trim \
+  --candidate-engine /absolute/path/to/worktree/worker/engine \
+  --warmup-runs 1 --runs 3 --group-size 1 \
+  --report /absolute/path/to/new-report.json \
+  --save-audio-dir /absolute/path/to/new-audio-directory \
+  --json
 ```
 
-The command preloads the model once, then runs exactly one full song pass. The report separates model preload, one-pass latency and combined cold latency, with per-stage timings for preparation, separation, optional reference-compatible gap trimming, 320 kbps MP3 encoding and validation. Production children preload the verified model before announcing readiness and keep it resident between jobs; their bounded startup timeout covers the private Python import and PyTorch MPS initialization. Kim Vocal 2 uses UVR's `onnx2pytorch` MPS path, segment size 256, batch size 1, denoise disabled, and model-specific **Default** overlap. Use `--json` for machine-readable output.
+The runner preloads one model, records the first full pass as cold, performs
+zero to two extra warm-up passes, then measures three to ten warm passes in
+the same Python process. It reports every run, median and range, stage
+timings, decoded input metadata, code/model/recipe hashes, MPS provider proof,
+and boundary GPU allocation observations. The cold label includes preload
+and first-pass context; it does not claim an uncached OS or GPU driver. The
+memory readings are process allocations at run boundaries, not peak GPU
+occupancy. `--json` streams progress objects followed by a final report.
 
-The worker advertises `kim-vocals-v2` for an untrimmed vocal stem and `kim-vocals-v2-trim` for the default product behavior. The trimmed recipe preserves the reference `separate.py` algorithm: 10 ms louder-channel RMS windows, a strict -45 dBFS threshold, 0.8-second minimum gaps, 0.2-second retained padding, 5 ms boundary fades, and all-silent preservation. CoreML, denoise recipe variants, and multi-iteration file benchmarks remain outside this local-development contract.
+`--candidate-engine` imports the worktree engine through a private Python path
+while keeping the installed dependency runtime. The report records a digest
+of candidate source files separately from the installed release manifest
+digest. It does not alter installed site-packages or the signed release.
+`--save-audio-dir` is optional and must name a new private directory; it saves
+MP3 and lossless FLAC vocals for quality review. `--report` saves a new private
+JSON file. A failed run leaves a sanitized partial diagnostic report under the
+worker state directory. `--baseline-report` compares saved reports only when
+the source, model, recipe, audio settings, GPU model, OS, and dependency runtime
+match. Incompatible reports show reasons and no speedup. Group sizes 2 and 4
+are rejected until the real inference loop supports them. CPU inference and
+MPS fallback are disabled for this benchmark.
+
+Production children preload the verified model before announcing readiness
+and keep it resident between jobs; their bounded startup timeout covers the
+private Python import and PyTorch MPS initialization. Kim Vocal 2 uses UVR's
+`onnx2pytorch` MPS path, segment size 256, group size 1, denoise disabled,
+and model-specific **Default** overlap.
+
+The worker reads the compressed input audio bitrate during its existing bounded
+probe. It encodes the vocal MP3 at the highest supported rate no greater than
+160 kbps or a known lower input rate. Unknown input bitrate uses 160 kbps;
+very low known rates below the supported 44.1 kHz MP3 range fail explicitly.
+The recipe's 160 kbps value is the output ceiling; completion records the
+selected actual target. Backend validates upload size and does not transcode.
+
+The worker advertises `kim-vocals-v2` for an untrimmed vocal stem and
+`kim-vocals-v2-trim` for the default product behavior. The trimmed recipe
+preserves the reference `separate.py` algorithm: 10 ms louder-channel RMS
+windows, a strict -45 dBFS threshold, 0.8-second minimum gaps, 0.2-second
+retained padding, 5 ms boundary fades, and all-silent preservation.

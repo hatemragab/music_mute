@@ -1,6 +1,7 @@
 import type {
   WorkerRecipeId,
   WorkerRecipeStepId,
+  WorkerProgressPhase,
 } from '../worker-fleet/protocol/v1/protocol.js';
 import type { WorkerProcessingStageId } from '../worker-fleet/worker-fleet.types.js';
 
@@ -9,8 +10,16 @@ export interface WorkerProcessingStageTiming {
   durationMs: number;
 }
 
+export interface WorkerProgressSnapshot {
+  attemptId: string;
+  sequence: number;
+  phase: WorkerProgressPhase;
+  phasePercent: number | null;
+  observedAt: Date;
+}
+
 export type InputSource = 'audio_file' | 'video_file' | 'youtube';
-export const PREPARATION_PROFILE_ID = 'preserve-or-aac-lc-256-v1';
+export const PREPARATION_PROFILE_ID = 'audio-cap-aac-lc-160-v1';
 export const JOB_STATUSES = [
   'awaiting_upload',
   'queued',
@@ -108,7 +117,7 @@ export interface WorkerRecipeSnapshot {
   denoisePresetId: 'afftdn-conservative-v1' | null;
   trimProfileId: 'trim-vocal-gaps-v1' | null;
   outputFormat: 'mp3';
-  outputBitrateKbps: 320;
+  outputBitrateKbps: 160;
 }
 
 export interface WorkerRetryEligibility {

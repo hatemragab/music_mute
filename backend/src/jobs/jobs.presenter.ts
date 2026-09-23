@@ -3,6 +3,18 @@ import { presentJobTiming } from './job-timing.js';
 
 export function presentJob(job: Job) {
   const now = new Date();
+  const progress = job.workerProgress;
+  const processingProgress =
+    (job.status === 'processing' || job.status === 'uploading_result') &&
+    progress &&
+    progress.attemptId === job.currentExecution?.attemptId
+      ? {
+          phase: progress.phase,
+          phasePercent: progress.phasePercent,
+          observedAt: progress.observedAt.toISOString(),
+          stale: now.getTime() - progress.observedAt.getTime() > 30_000,
+        }
+      : null;
   return {
     id: job._id.toHexString(),
     requestId: job.requestId,
@@ -12,6 +24,7 @@ export function presentJob(job: Job) {
     status: job.status,
     serverTime: now.toISOString(),
     timing: presentJobTiming(job, now),
+    processingProgress,
     stages: {
       validatingAt: job.validatingAt?.toISOString() ?? null,
       processingStartedAt: job.processingStartedAt?.toISOString() ?? null,
