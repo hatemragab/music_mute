@@ -275,7 +275,7 @@ export class AccountPolicyService implements OnModuleInit {
         fallbackConversion: {
           outputContentType: 'audio/mp4' as const,
           codec: 'aac-lc' as const,
-          targetBitrate: 256000 as const,
+          targetBitrate: 160000 as const,
         },
         compatibilityRevision: 'unavailable',
       },

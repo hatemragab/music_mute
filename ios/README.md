@@ -304,8 +304,10 @@ are persisted with the immutable upload operation, including restoration.
 `MediaSourceInspector` honors the container's uniquely enabled default soundtrack. It
 accepts a single audio track and rejects ambiguous multiple defaults; it never guesses
 from track order or language. `AudioPreparationEngine` copies compatible audio, tries
-an audio-only passthrough composition for video, and otherwise uses AVAssetReader/
-AVAssetWriter AAC-LC at 256 kbps, 48 kHz stereo. Final audio is re-inspected and hashed;
+an audio-only passthrough composition for video when the known audio bitrate is
+at or below 160 kbps, and otherwise uses AVAssetReader/AVAssetWriter AAC-LC at no
+more than 160 kbps, 48 kHz stereo. Unknown bitrate also triggers one encode.
+Final audio is re-inspected and hashed;
 source size, available space, export time, and output size are bounded. The source's image
 track is never decoded for audio extraction. Supported formats depend on AVFoundation;
 no blanket support claim is made for every container or codec.

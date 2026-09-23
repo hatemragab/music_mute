@@ -3,7 +3,7 @@ import { createInstallationReleaseArchive } from "../../enrollment/release-archi
 import { buildMacRelease } from "./release-builder.js";
 
 export const MAC_PACKAGE_USAGE = `Usage:
-  musicmute-worker package-macos --worker-root <path> --output <path> --version <version> --node-root <path> --python-root <path> --media-root <path> [--archive <path.tar.gz>]`;
+  mw package-macos --worker-root <path> --output <path> --version <version> --node-root <path> --python-root <path> --media-root <path> [--archive <path.tar.gz>]`;
 
 const REQUIRED_FLAGS = [
   "worker-root",

@@ -16,13 +16,13 @@ MODEL_SOURCE = (
 )
 PREPARATION_PROFILE_ID = "pcm16-stereo-44100-v1"
 OUTPUT_FORMAT = "mp3"
-OUTPUT_BITRATE_KBPS = 320
+OUTPUT_BITRATE_KBPS = 160
 
 BASE_STEPS = (
     "prepare-pcm16-stereo-44100-v1",
     "separate-kim-vocal-2-v1",
 )
-FINAL_STEPS = ("encode-mp3-320k-v1", "validate-audio-v1")
+FINAL_STEPS = ("encode-mp3-up-to-160k-v1", "validate-audio-v1")
 TRIM_STEP = "trim-vocal-gaps-v1"
 
 
@@ -56,7 +56,7 @@ class RecipeDefinition:
         steps.extend(FINAL_STEPS)
         snapshot: dict[str, Any] = {
             "recipeId": self.recipe_id,
-            "recipeRevision": 1,
+            "recipeRevision": 3,
             "protocolVersion": 1,
             "modelFilename": MODEL_FILENAME,
             "modelDigest": MODEL_SHA256,

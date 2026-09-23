@@ -111,6 +111,17 @@ class UploadRecoveryTest {
         assertTrue(api.requests.isEmpty())
         assertEquals(ProcessingLocalProblem.INPUT_CHANGED,store.get("owner",operation.operationId)!!.localProblem)
     }
+
+    @Test fun changedBytesBeforeSubmissionAreStillRejectedBeforeReservation() = runTest {
+        val root=kotlin.io.path.createTempDirectory("upload-before-submit-").toFile(); val store=ProcessingStore(root,backgroundScope)
+        val api=Api(); val repository=ProcessingRepository(store,root,api,{ProcessingSession("owner",1)},Scheduler(),FormUploader { _,_,_,_ -> error("must not upload") })
+        val input=prepared(root)
+        input.file.writeBytes(byteArrayOf(3,2,1))
+        val operation=repository.submit(input)
+        assertEquals(ProcessingRunResult.PAUSED,repository.runUpload("owner",operation.operationId,1))
+        assertTrue(api.requests.isEmpty())
+        assertEquals(ProcessingLocalProblem.INPUT_CHANGED,store.get("owner",operation.operationId)!!.localProblem)
+    }
     @Test fun expiredUploadGrantRenewsOnlyAfterUncertainConfirmation() = runTest {
         val root=kotlin.io.path.createTempDirectory("upload-expired-").toFile(); val store=ProcessingStore(root,backgroundScope)
         val api=Api(); var uploads=0

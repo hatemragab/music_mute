@@ -1,6 +1,6 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source: backend/src/worker-fleet/protocol/v1/protocol.ts
-// Source SHA-256: 6f8f38206380aaaa529c6b7fffe8fbd7534075ab6e2502b1d806417bb3c4d4a8
+// Source SHA-256: 818a981a3aa79209d173c2bca7886e65b5c1724c5e246551ceedfdedabd6554a
 
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 export const WORKER_PROTOCOL_MAX_BYTES = 64 * 1024;
@@ -24,10 +24,17 @@ export const WORKER_RECIPE_STEP_IDS = [
   'prepare-pcm16-stereo-44100-v1',
   'separate-kim-vocal-2-v1',
   'trim-vocal-gaps-v1',
-  'encode-mp3-320k-v1',
+  'encode-mp3-up-to-160k-v1',
   'validate-audio-v1',
 ] as const;
 export type WorkerRecipeStepId = (typeof WORKER_RECIPE_STEP_IDS)[number];
+
+export const WORKER_PROGRESS_PHASES = [
+  'preparing',
+  'separating',
+  'saving-result',
+] as const;
+export type WorkerProgressPhase = (typeof WORKER_PROGRESS_PHASES)[number];
 
 export const WORKER_PROTOCOL_OPERATIONS = [
   'installation.exchange',

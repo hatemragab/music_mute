@@ -31,10 +31,15 @@ export class MachineSupervisor {
     }
   }
 
-  async start(): Promise<void> {
+  async start(
+    onStage?: (workerId: string, stage: "loading" | "warming") => void,
+  ): Promise<void> {
     try {
       for (const slot of this.slots) {
-        const child = new WorkerChildProcess(slot.child);
+        const child = new WorkerChildProcess({
+          ...slot.child,
+          onStartupStage: (stage) => onStage?.(slot.workerId, stage),
+        });
         this.children.set(slot.workerId, child);
         await child.start();
       }
@@ -50,7 +55,10 @@ export class MachineSupervisor {
     return child;
   }
 
-  async restart(workerId: string): Promise<WorkerChildProcess> {
+  async restart(
+    workerId: string,
+    onStage?: (workerId: string, stage: "loading" | "warming") => void,
+  ): Promise<WorkerChildProcess> {
     const slot = this.slots.find(
       (candidate) => candidate.workerId === workerId,
     );
@@ -64,7 +72,10 @@ export class MachineSupervisor {
     // that wrapper races with the exit handler and can leave the slot
     // permanently unavailable. A restart is a new process incarnation, so it
     // must also use a fresh lifecycle wrapper.
-    const replacement = new WorkerChildProcess(slot.child);
+    const replacement = new WorkerChildProcess({
+      ...slot.child,
+      onStartupStage: (stage) => onStage?.(workerId, stage),
+    });
     this.children.set(workerId, replacement);
     try {
       await replacement.start();

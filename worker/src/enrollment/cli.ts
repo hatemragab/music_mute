@@ -41,9 +41,9 @@ const ARTIFACTS_FILE = "installation-artifacts.json";
 const RUNTIME_CONFIG_FILE = "runtime.json";
 
 export const ENROLLMENT_USAGE = `Usage:
-  musicmute-worker prepare-installation --backend-url <api-base-url> --enrollment-file <absolute-path> --platform <darwin-arm64|windows-amd64> --output <existing-protected-directory> [--allow-insecure-loopback <true|false>]
-  musicmute-worker enroll --backend-url <api-base-url> --enrollment-file <absolute-path> --report <absolute-path> --output <existing-protected-directory> [--allow-insecure-loopback <true|false>]
-  musicmute-worker enroll --backend-url <api-base-url> --enrollment-file <absolute-path> --release <absolute-path> [--diagnostics <absolute-path>] --qualification <absolute-path> --label <name> [--group-id <id>] [--service-root <absolute-path>] --output <existing-protected-directory> [--allow-insecure-loopback <true|false>]`;
+  mw prepare-installation --backend-url <api-base-url> --enrollment-file <absolute-path> --platform <darwin-arm64|windows-amd64> --output <existing-protected-directory> [--allow-insecure-loopback <true|false>]
+  mw enroll --backend-url <api-base-url> --enrollment-file <absolute-path> --report <absolute-path> --output <existing-protected-directory> [--allow-insecure-loopback <true|false>]
+  mw enroll --backend-url <api-base-url> --enrollment-file <absolute-path> --release <absolute-path> [--diagnostics <absolute-path>] --qualification <absolute-path> --label <name> [--group-id <id>] [--service-root <absolute-path>] --output <existing-protected-directory> [--allow-insecure-loopback <true|false>]`;
 
 export interface InstallationPreparationReuse {
   reusableModelPath?: string;

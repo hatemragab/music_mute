@@ -72,13 +72,13 @@ function fixture() {
     uploadingResultAt: null,
     recipeSnapshot: {
       recipeId: 'kim-vocals-v2',
-      recipeRevision: 1,
+      recipeRevision: 3,
       recipeDigest: 'b'.repeat(64),
       modelDigest: 'a'.repeat(64),
       trimEnabled: true,
       denoiseEnabled: false,
       outputFormat: 'mp3',
-      outputBitrateKbps: 320,
+      outputBitrateKbps: 160,
     },
   };
   const transaction = {
@@ -195,13 +195,13 @@ const completion = {
   ...ownership,
   versionId: 'output-v1',
   recipeId: 'kim-vocals-v2' as const,
-  recipeRevision: 1,
+  recipeRevision: 3,
   recipeDigest: 'b'.repeat(64),
   modelDigest: 'a'.repeat(64),
   trimEnabled: true,
   denoiseEnabled: false,
   outputFormat: 'mp3' as const,
-  outputBitrateKbps: 320 as const,
+  outputBitrateKbps: 160 as const,
   stageTimings: [
     { stage: 'modelLoad' as const, durationMs: 125 },
     { stage: 'separation' as const, durationMs: 1_500 },
@@ -209,6 +209,48 @@ const completion = {
 };
 
 describe('worker attempt transfers and finalization', () => {
+  it('accepts only current-attempt monotonic progress', async () => {
+    const f = fixture();
+    const update = {
+      ...ownership,
+      sequence: 1,
+      phase: 'separating' as const,
+      phasePercent: 25,
+    };
+    await expect(
+      f.service.progress(principal, attemptId, update),
+    ).resolves.toMatchObject({
+      accepted: true,
+      sequence: 1,
+    });
+    expect(f.job.workerProgress).toMatchObject({
+      attemptId,
+      sequence: 1,
+      phase: 'separating',
+      phasePercent: 25,
+    });
+    await expect(
+      f.service.progress(principal, attemptId, update),
+    ).resolves.toMatchObject({
+      accepted: false,
+      sequence: 1,
+    });
+    expect(f.jobs.updateOne).toHaveBeenCalledTimes(1);
+    await expect(
+      f.service.progress({ ...principal, subjectId: workerId }, attemptId, {
+        ...update,
+        sequence: 2,
+      }),
+    ).rejects.toMatchObject({ response: { code: 'WORKER_CONFLICT' } });
+    await expect(
+      f.service.progress(principal, attemptId, {
+        ...update,
+        sequence: 2,
+        phase: 'saving-result',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'WORKER_INVALID_REQUEST' } });
+  });
+
   it('charges an idempotent worker input grant only to service outbound usage', async () => {
     const f = fixture();
 
@@ -296,10 +338,11 @@ describe('worker attempt transfers and finalization', () => {
 
   it('publishes one verified immutable version and replays identical completion', async () => {
     const f = fixture();
+    const lowerBitrateCompletion = { ...completion, outputBitrateKbps: 128 };
     await f.service.outputGrant(principal, attemptId, output);
     const object = {
       key: f.attempt.outputReservation.key,
-      versionId: completion.versionId,
+      versionId: lowerBitrateCompletion.versionId,
       bytes: output.bytes,
       sha256: output.sha256,
       contentType: output.contentType,
@@ -307,10 +350,10 @@ describe('worker attempt transfers and finalization', () => {
     f.storage.verifyUploadedVersion.mockResolvedValue(object);
 
     await expect(
-      f.service.complete(principal, attemptId, completion),
+      f.service.complete(principal, attemptId, lowerBitrateCompletion),
     ).resolves.toMatchObject({ status: 'ready', replayed: false });
     await expect(
-      f.service.complete(principal, attemptId, completion),
+      f.service.complete(principal, attemptId, lowerBitrateCompletion),
     ).resolves.toMatchObject({ status: 'ready', replayed: true });
 
     expect(f.storage.verifyUploadedVersion).toHaveBeenCalledOnce();

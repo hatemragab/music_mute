@@ -10,7 +10,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /** Audio-only HTTPS source; no video fallback, transcoder, remux, or fix-up step. */
 object AudioDownloadPolicy {
-    const val FORMAT = "bestaudio[protocol=https]"
+    const val FORMAT = "bestaudio[protocol=https][abr<=160]/bestaudio[protocol=https]"
     val flags =
         listOf(
             "--ignore-config",
@@ -69,11 +69,23 @@ object DownloadedAudioReader {
             file,
             codec.take(80),
             extension,
-            number("abr").toInt(),
+            kotlin.math.ceil(number("abr")).toInt(),
             (number("duration") * 1000).toLong(),
         )
     }
 }
+
+/** Prefer the extractor's bitrate; yt-dlp's selected-format bitrate fills only a missing value. */
+fun canReuseDownloadedAudio(
+    hasVideo: Boolean,
+    audioTrackCount: Int,
+    inspectedBitRate: Int?,
+    downloadedBitrateKbps: Int,
+    extension: String,
+): Boolean =
+    !hasVideo && audioTrackCount == 1 &&
+        com.hatem.musicmute.processing.processingContentType(extension.lowercase()) != null &&
+        (inspectedBitRate?.let { it in 1..160_000 } ?: (downloadedBitrateKbps in 1..160))
 
 /** Resolve only this app's downloaded files, never arbitrary paths supplied by metadata. */
 fun resolveAudioFile(root: File, relativePath: String): File? {

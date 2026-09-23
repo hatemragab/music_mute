@@ -47,6 +47,10 @@ const macUserCommands = new Set([
   "stop",
   "restart",
   "logs",
+  "job",
+  "errors",
+  "explain",
+  "perf",
   "diagnostics",
   "doctor",
   "pause",
@@ -132,7 +136,7 @@ if (command === "--help" || command === "help") {
   const configPath =
     configIndex < 0 ? undefined : process.argv[configIndex + 1];
   if (!configPath || process.argv.length !== 5) {
-    console.error("Usage: musicmute-worker run --config <absolute-path>");
+    console.error("Usage: mw run --config <absolute-path>");
     process.exitCode = 2;
   } else {
     const logLayout =
@@ -248,7 +252,7 @@ if (command === "--help" || command === "help") {
   }
 } else {
   console.error(
-    `Usage: musicmute-worker <install | status | start | stop | restart | logs | diagnostics | doctor | benchmark | pause | drain | resume | update | unpair | uninstall | protocol-doctor | prepare-installation ... | enroll ... | run --config <absolute-path> | macos ... | windows ...>`,
+    `Usage: mw <install | status | start | stop | restart | logs | job | errors | explain | perf | diagnostics | doctor | benchmark | benchmark-file | pause | drain | resume | update | unpair | uninstall | protocol-doctor | prepare-installation ... | enroll ... | run --config <absolute-path> | macos ... | windows ...>`,
   );
   process.exitCode = 2;
 }

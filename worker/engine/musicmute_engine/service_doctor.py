@@ -207,8 +207,18 @@ def main() -> int:
             ffprobe=arguments.ffprobe,
             provider=arguments.provider,
         )
-    except (ServiceDoctorError, OSError, RuntimeError):
-        print("MusicMute service runtime: FAILED", file=sys.stderr)
+    except ServiceDoctorError as error:
+        reason = str(error)
+        code = "RUNTIME_" + "_".join(
+            word.upper() for word in reason.split() if word.isalnum()
+        )[:48]
+        print(json.dumps({"code": code, "reason": reason}), file=sys.stderr)
+        return 1
+    except (OSError, RuntimeError):
+        print(
+            json.dumps({"code": "RUNTIME_UNEXPECTED_FAILURE", "reason": "Runtime integrity check failed"}),
+            file=sys.stderr,
+        )
         return 1
     print(json.dumps(diagnostics, sort_keys=True, separators=(",", ":")))
     return 0

@@ -18,11 +18,11 @@ import {
 } from "./service-definition.js";
 
 export const WINDOWS_USAGE = `Usage:
-  musicmute-worker windows package --worker-root <path> --output <path> --version <version> --node-root <path> --python-root <path> --media-root <path> --service-root <path> [--archive <path.zip>]
-  musicmute-worker windows bootstrap --backend-url <api-base-url> --enrollment-file <path> --output <protected-path> --label <name> [--group-id <id>] [--allow-insecure-loopback <true|false>] [--root <path>]
-  musicmute-worker windows verify --release <path>
-  musicmute-worker windows service-config --root <path> --version <version> --output <path> [--qualification-fixture <path> --qualification-fixture-sha256 <hex> --qualification-report <path>]
-  musicmute-worker windows qualification-check --report <path> --fixture-sha256 <hex>`;
+  mw windows package --worker-root <path> --output <path> --version <version> --node-root <path> --python-root <path> --media-root <path> --service-root <path> [--archive <path.zip>]
+  mw windows bootstrap --backend-url <api-base-url> --enrollment-file <path> --output <protected-path> --label <name> [--group-id <id>] [--allow-insecure-loopback <true|false>] [--root <path>]
+  mw windows verify --release <path>
+  mw windows service-config --root <path> --version <version> --output <path> [--qualification-fixture <path> --qualification-fixture-sha256 <hex> --qualification-report <path>]
+  mw windows qualification-check --report <path> --fixture-sha256 <hex>`;
 
 type InstallationReceipt = Awaited<
   ReturnType<typeof readInstallationArtifactsReceipt>

@@ -5,6 +5,7 @@ struct MediaSourceInspection {
   let track: AVAssetTrack
   let duration: Double
   let hasVideo: Bool
+  let audioBitRate: Int?
 }
 
 enum MediaSourceInspector {
@@ -45,6 +46,7 @@ enum MediaSourceInspector {
       throw AudioInputPreparationError.unsupportedFormat
     }
     let range = try await track.load(.timeRange)
+    let estimatedBitRate = try? await track.load(.estimatedDataRate)
     let hasVideo = !(try await asset.loadTracks(withMediaType: .video)).isEmpty
     let duration: Double
     if !hasVideo, tracks.count == 1, let audioFile = try? AVAudioFile(forReading: url) {
@@ -58,6 +60,7 @@ enum MediaSourceInspector {
     }
     return MediaSourceInspection(
       asset: asset, track: track, duration: duration,
-      hasVideo: hasVideo)
+      hasVideo: hasVideo,
+      audioBitRate: estimatedBitRate.flatMap { $0.isFinite && $0 > 0 ? Int($0) : nil })
   }
 }

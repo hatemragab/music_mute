@@ -8,8 +8,35 @@ export interface LocalRuntimeStatus {
     workerId: string;
     attemptId: string;
     jobId: string;
+    provider?: "mps" | "directml";
+    modelDigest?: string;
+    startedAt?: string;
+    stage?: string;
+    stageStartedAt?: string;
+    lastProgressAt?: string;
+    work?: { unit: "windows"; completed: number; total: number };
   }>;
-  childState?: "ready" | "unavailable" | "stopped";
+  childState?: "loading" | "warming" | "ready" | "unavailable" | "stopped";
+  sessionId?: string;
+  incarnation?: string;
+  processId?: number;
+  slots?: Array<{
+    workerId: string;
+    gpuId: string;
+    provider: "mps" | "directml";
+  }>;
+  cachedPolicy?: {
+    machineStatus: "pending" | "active" | "paused" | "draining" | "revoked";
+    claimAllowed: boolean;
+    revision: number;
+    observedAt: string;
+  };
+  diagnostics?: {
+    blockedReason: string | null;
+    earliestAvailableAt: string | null;
+    incompleteHistory: boolean;
+    retainedBytes: number;
+  };
   lastSuccessfulJob?: RuntimeJobSummary;
   lastFailedJob?: RuntimeJobSummary & { code: string };
   updatedAt: string;
@@ -24,6 +51,12 @@ export interface RuntimeJobSummary {
 export interface LocalRuntimeStatusDetails {
   currentAttempts?: LocalRuntimeStatus["currentAttempts"];
   childState?: LocalRuntimeStatus["childState"];
+  sessionId?: string;
+  incarnation?: string;
+  processId?: number;
+  slots?: LocalRuntimeStatus["slots"];
+  cachedPolicy?: LocalRuntimeStatus["cachedPolicy"];
+  diagnostics?: LocalRuntimeStatus["diagnostics"];
   lastSuccessfulJob?: RuntimeJobSummary;
   lastFailedJob?: RuntimeJobSummary & { code: string };
 }
@@ -33,6 +66,8 @@ const ATTEMPT_ID =
 const JOB_ID = /^[0-9a-f]{24}$/iu;
 const WORKER_ID = ATTEMPT_ID;
 const SAFE_CODE = /^[A-Z0-9_-]{1,64}$/u;
+const SAFE_STAGE = /^[a-z][a-z-]{0,63}$/u;
+const MODEL_DIGEST = /^[0-9a-f]{64}$/iu;
 
 export async function writeLocalRuntimeStatus(
   path: string,
@@ -59,6 +94,22 @@ export async function writeLocalRuntimeStatus(
     ...(details.childState === undefined
       ? {}
       : { childState: details.childState }),
+    ...(details.sessionId === undefined
+      ? {}
+      : { sessionId: details.sessionId }),
+    ...(details.incarnation === undefined
+      ? {}
+      : { incarnation: details.incarnation }),
+    ...(details.processId === undefined
+      ? {}
+      : { processId: details.processId }),
+    ...(details.slots === undefined ? {} : { slots: details.slots }),
+    ...(details.cachedPolicy === undefined
+      ? {}
+      : { cachedPolicy: details.cachedPolicy }),
+    ...(details.diagnostics === undefined
+      ? {}
+      : { diagnostics: details.diagnostics }),
     ...(details.lastSuccessfulJob === undefined
       ? {}
       : { lastSuccessfulJob: details.lastSuccessfulJob }),
@@ -104,6 +155,12 @@ export async function loadLocalRuntimeStatus(
           "activeAttemptIds",
           "currentAttempts",
           "childState",
+          "sessionId",
+          "incarnation",
+          "processId",
+          "slots",
+          "cachedPolicy",
+          "diagnostics",
           "lastSuccessfulJob",
           "lastFailedJob",
           "updatedAt",
@@ -127,6 +184,22 @@ export async function loadLocalRuntimeStatus(
     ...(record.childState === undefined
       ? {}
       : { childState: record.childState as never }),
+    ...(record.sessionId === undefined
+      ? {}
+      : { sessionId: record.sessionId as never }),
+    ...(record.incarnation === undefined
+      ? {}
+      : { incarnation: record.incarnation as never }),
+    ...(record.processId === undefined
+      ? {}
+      : { processId: record.processId as never }),
+    ...(record.slots === undefined ? {} : { slots: record.slots as never }),
+    ...(record.cachedPolicy === undefined
+      ? {}
+      : { cachedPolicy: record.cachedPolicy as never }),
+    ...(record.diagnostics === undefined
+      ? {}
+      : { diagnostics: record.diagnostics as never }),
     ...(record.lastSuccessfulJob === undefined
       ? {}
       : { lastSuccessfulJob: record.lastSuccessfulJob as never }),
@@ -144,6 +217,22 @@ export async function loadLocalRuntimeStatus(
     ...(details.childState === undefined
       ? {}
       : { childState: details.childState }),
+    ...(details.sessionId === undefined
+      ? {}
+      : { sessionId: details.sessionId }),
+    ...(details.incarnation === undefined
+      ? {}
+      : { incarnation: details.incarnation }),
+    ...(details.processId === undefined
+      ? {}
+      : { processId: details.processId }),
+    ...(details.slots === undefined ? {} : { slots: details.slots }),
+    ...(details.cachedPolicy === undefined
+      ? {}
+      : { cachedPolicy: details.cachedPolicy }),
+    ...(details.diagnostics === undefined
+      ? {}
+      : { diagnostics: details.diagnostics }),
     ...(details.lastSuccessfulJob === undefined
       ? {}
       : { lastSuccessfulJob: details.lastSuccessfulJob }),
@@ -160,9 +249,19 @@ function validateDetails(
 ): void {
   if (
     details.childState !== undefined &&
-    !["ready", "unavailable", "stopped"].includes(details.childState)
+    !["loading", "warming", "ready", "unavailable", "stopped"].includes(
+      details.childState,
+    )
   )
     throw new TypeError("Local runtime child state is invalid");
+  if (
+    (details.sessionId !== undefined && !ATTEMPT_ID.test(details.sessionId)) ||
+    (details.incarnation !== undefined &&
+      !ATTEMPT_ID.test(details.incarnation)) ||
+    (details.processId !== undefined &&
+      (!Number.isSafeInteger(details.processId) || details.processId <= 0))
+  )
+    throw new TypeError("Local runtime identity is invalid");
   if (details.currentAttempts !== undefined) {
     if (
       !Array.isArray(details.currentAttempts) ||
@@ -174,12 +273,71 @@ function validateDetails(
           !WORKER_ID.test(attempt.workerId) ||
           !ATTEMPT_ID.test(attempt.attemptId) ||
           !JOB_ID.test(attempt.jobId) ||
-          !activeAttemptIds.includes(attempt.attemptId),
+          !activeAttemptIds.includes(attempt.attemptId) ||
+          (attempt.provider !== undefined &&
+            !["mps", "directml"].includes(attempt.provider)) ||
+          (attempt.modelDigest !== undefined &&
+            !MODEL_DIGEST.test(attempt.modelDigest)) ||
+          (attempt.startedAt !== undefined &&
+            !Number.isFinite(Date.parse(attempt.startedAt))) ||
+          (attempt.stage !== undefined && !SAFE_STAGE.test(attempt.stage)) ||
+          (attempt.stageStartedAt !== undefined &&
+            !Number.isFinite(Date.parse(attempt.stageStartedAt))) ||
+          (attempt.lastProgressAt !== undefined &&
+            !Number.isFinite(Date.parse(attempt.lastProgressAt))) ||
+          (attempt.work !== undefined &&
+            (attempt.work.unit !== "windows" ||
+              !Number.isSafeInteger(attempt.work.completed) ||
+              !Number.isSafeInteger(attempt.work.total) ||
+              attempt.work.completed < 0 ||
+              attempt.work.total < 1 ||
+              attempt.work.completed > attempt.work.total ||
+              attempt.work.total > 1_000_000)),
       ) ||
       new Set(details.currentAttempts.map((attempt) => attempt.workerId))
         .size !== details.currentAttempts.length
     )
       throw new TypeError("Local runtime current attempts are invalid");
+  }
+  if (
+    details.slots !== undefined &&
+    (!Array.isArray(details.slots) ||
+      details.slots.length > 16 ||
+      details.slots.some(
+        (slot) =>
+          !WORKER_ID.test(slot.workerId) ||
+          !/^[A-Za-z0-9._:-]{1,100}$/u.test(slot.gpuId) ||
+          !["mps", "directml"].includes(slot.provider),
+      ) ||
+      new Set(details.slots.map((slot) => slot.workerId)).size !==
+        details.slots.length)
+  )
+    throw new TypeError("Local runtime slots are invalid");
+  if (details.cachedPolicy !== undefined) {
+    const policy = details.cachedPolicy;
+    if (
+      !["pending", "active", "paused", "draining", "revoked"].includes(
+        policy.machineStatus,
+      ) ||
+      typeof policy.claimAllowed !== "boolean" ||
+      !Number.isSafeInteger(policy.revision) ||
+      policy.revision < 0 ||
+      !Number.isFinite(Date.parse(policy.observedAt))
+    )
+      throw new TypeError("Local runtime cached policy is invalid");
+  }
+  if (details.diagnostics !== undefined) {
+    const diagnostic = details.diagnostics;
+    if (
+      (diagnostic.blockedReason !== null &&
+        !SAFE_STAGE.test(diagnostic.blockedReason)) ||
+      (diagnostic.earliestAvailableAt !== null &&
+        !Number.isFinite(Date.parse(diagnostic.earliestAvailableAt))) ||
+      typeof diagnostic.incompleteHistory !== "boolean" ||
+      !Number.isSafeInteger(diagnostic.retainedBytes) ||
+      diagnostic.retainedBytes < 0
+    )
+      throw new TypeError("Local runtime diagnostics are invalid");
   }
   validateJob(details.lastSuccessfulJob, false);
   validateJob(details.lastFailedJob, true);

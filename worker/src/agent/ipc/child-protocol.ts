@@ -15,6 +15,7 @@ export const CHILD_REQUEST_COMMANDS = [
 export type ChildRequestCommand = (typeof CHILD_REQUEST_COMMANDS)[number];
 
 export const CHILD_RESPONSE_TYPES = [
+  "startup-progress",
   "ready",
   "accepted",
   "progress",

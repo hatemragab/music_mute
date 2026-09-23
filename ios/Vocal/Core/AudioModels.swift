@@ -63,16 +63,20 @@ struct SavedAudio: Sendable {
 }
 
 enum AudioPolicy {
-  // Keep the original AAC stream. Never fall back to combined video or transcode Opus.
+  // Keep the best eligible AAC audio stream; a higher stream needs mobile preparation.
   static func bestCompatibleAudio(_ candidates: [AudioCandidate]) throws -> AudioCandidate {
-    guard
-      let selected = candidates.filter({ candidate in
-        !candidate.hasVideo && candidate.isPlayable && candidate.codec == "AAC"
-          && candidate.fileExtension == "m4a" && candidate.url.scheme == "https"
-          && candidate.url.user == nil && candidate.url.password == nil
-          && candidate.url.host?.lowercased().hasSuffix(".googlevideo.com") == true
-      }).max(by: { $0.bitrate < $1.bitrate })
-    else { throw AudioFailure.unavailable }
+    let compatible = candidates.filter { candidate in
+      !candidate.hasVideo && candidate.isPlayable && candidate.codec == "AAC"
+        && candidate.fileExtension == "m4a" && candidate.url.scheme == "https"
+        && candidate.url.user == nil && candidate.url.password == nil
+        && candidate.url.host?.lowercased().hasSuffix(".googlevideo.com") == true
+    }
+    let withinCap = compatible.filter { $0.bitrate > 0 && $0.bitrate <= 160_000 }
+    let selected =
+      withinCap.max(by: { $0.bitrate < $1.bitrate })
+      ?? compatible.filter { $0.bitrate > 160_000 }.min(by: { $0.bitrate < $1.bitrate })
+      ?? compatible.first
+    guard let selected else { throw AudioFailure.unavailable }
     return selected
   }
 

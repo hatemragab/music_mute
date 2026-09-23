@@ -3,7 +3,7 @@ import { normalizeJobMetadata } from './job-metadata.js';
 
 const standard = {
   policyVersion: 2 as const,
-  preparationProfileId: 'preserve-or-aac-lc-256-v1',
+  preparationProfileId: 'audio-cap-aac-lc-160-v1',
   source: 'audio_file' as const,
 };
 
@@ -46,7 +46,7 @@ describe('versioned preparation metadata', () => {
   it('preserves an explicit supported profile and source in the idempotency identity', () => {
     const metadata = {
       policyVersion: 2,
-      preparationProfileId: 'preserve-or-aac-lc-256-v1',
+      preparationProfileId: 'audio-cap-aac-lc-160-v1',
       source: 'video_file',
     };
     expect(normalizeJobMetadata(metadata as never)).toEqual(metadata);

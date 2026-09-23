@@ -137,7 +137,32 @@ def selected_recipe_ids(arguments: argparse.Namespace) -> list[str]:
     return list(RECIPE_DEFINITIONS)
 
 
+def mps_memory_snapshot() -> dict[str, int] | None:
+    """Boundary allocation, not peak GPU occupancy or total system memory."""
+    try:
+        import torch
+
+        return {
+            "tensorAllocatedBytes": int(torch.mps.current_allocated_memory()),
+            "driverAllocatedBytes": int(torch.mps.driver_allocated_memory()),
+        }
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return None
+
+
 def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
+    progress = getattr(arguments, "progress", None)
+
+    def emit(kind: str, **fields: object) -> None:
+        if callable(progress):
+            progress({"type": kind, **fields})
+
+    benchmark_mode = getattr(arguments, "benchmark_mode", False) is True
+    save_audio_dir: Path | None = getattr(arguments, "save_audio_dir", None)
+    if save_audio_dir is not None:
+        if not save_audio_dir.is_absolute() or save_audio_dir.exists():
+            raise QualificationError("Benchmark audio directory must be a new absolute path")
+        save_audio_dir.mkdir(mode=0o700)
     system = platform.system()
     identity = service_identity()
     expected_identity = QUALIFIED_IDENTITIES.get(system)
@@ -197,27 +222,44 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
             model,
             directml_device_id=device_id,
             profile_directory=profile_root,
+            group_size=getattr(arguments, "group_size", 1) if benchmark_mode else 1,
         )
         captured.append(separator)
         return separator
 
     pipeline = RuntimePipeline(separator_factory)
     results: list[dict[str, object]] = []
+    saved_audio_artifacts: list[dict[str, object]] = []
     upload_candidate: dict[str, object] | None = None
     started = time.monotonic()
     preload_started = time.monotonic()
+    emit("preload-start")
     pipeline.preload(
         arguments.model_cache.resolve(strict=True),
         arguments.provider,
         arguments.directml_device_id,
+        progress=lambda stage: emit("startup-stage", stage=stage),
     )
+    if benchmark_mode and arguments.provider == "mps":
+        import torch
+
+        torch.mps.synchronize()
     preload_seconds = time.monotonic() - preload_started
+    emit("preload-complete", seconds=preload_seconds)
     if not math.isfinite(preload_seconds) or preload_seconds <= 0:
         raise QualificationError("Qualification preload timing is invalid")
     profile_paths: tuple[Path, ...] = ()
     try:
         selected_recipe = getattr(arguments, "recipe_id", None)
-        for recipe_id in selected_recipe_ids(arguments):
+        for index, recipe_id in enumerate(selected_recipe_ids(arguments)):
+            role = (
+                "cold"
+                if index == 0
+                else "warmup"
+                if index <= getattr(arguments, "warmup_runs", 0)
+                else "measured"
+            )
+            emit("run-start", index=index + 1, role=role, recipeId=recipe_id)
             attempt_id = str(uuid.uuid4())
             attempt = qualification_root / attempt_id
             attempt.mkdir(mode=0o700)
@@ -241,7 +283,24 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
                     "recipe": recipe_snapshot(recipe_id),
                 }
             )
-            result = pipeline.process(request)
+            memory_before = mps_memory_snapshot() if benchmark_mode else None
+            result = pipeline.process(request, lambda stage: emit("run-stage", index=index + 1, stage=stage))
+            grouping = None
+            if benchmark_mode:
+                selected_group = getattr(arguments, "group_size", 1)
+                grouping = captured[0].grouping_evidence()
+                if (
+                    grouping["selectedSize"] != selected_group
+                    or grouping["processedWindows"] < 1
+                    or grouping["modelCalls"] < 1
+                    or grouping["largestBatch"] < 1
+                    or grouping["largestBatch"] > selected_group
+                    or grouping["modelCalls"] != math.ceil(grouping["processedWindows"] / selected_group)
+                ):
+                    raise QualificationError("Benchmark window grouping evidence is invalid")
+            if benchmark_mode and arguments.provider == "mps":
+                torch.mps.synchronize()
+            memory_after = mps_memory_snapshot() if benchmark_mode else None
             output = Path(result["outputPath"]).resolve(strict=True)
             if not output.is_relative_to(qualification_root):
                 raise QualificationError("Qualification result path is unsafe")
@@ -260,8 +319,38 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
                     "outputDurationSeconds": result["measuredOutputDurationSeconds"],
                     "endToEndSeconds": elapsed,
                     "stageTimings": result["stageTimings"],
+                    **({
+                        "role": role,
+                        "iteration": index + 1,
+                        "measuredInputDurationSeconds": result["measuredInputDurationSeconds"],
+                        "measuredInputSamples": result["measuredInputSamples"],
+                        "gpuMemoryBefore": memory_before,
+                        "gpuMemoryAfter": memory_after,
+                        "grouping": grouping,
+                    } if benchmark_mode else {}),
                 }
             )
+            if save_audio_dir is not None:
+                mp3 = save_audio_dir / f"{index + 1:02d}-{role}-vocals.mp3"
+                flac = attempt / "separated" / "vocals.flac"
+                if not flac.is_file() or flac.is_symlink():
+                    raise QualificationError("Benchmark lossless vocal is unavailable")
+                shutil.copyfile(output, mp3)
+                shutil.copyfile(flac, save_audio_dir / f"{index + 1:02d}-{role}-vocals.flac")
+                if system != "Windows":
+                    mp3.chmod(0o600)
+                    (save_audio_dir / f"{index + 1:02d}-{role}-vocals.flac").chmod(0o600)
+                saved_flac = save_audio_dir / f"{index + 1:02d}-{role}-vocals.flac"
+                for artifact in (mp3, saved_flac):
+                    saved_audio_artifacts.append({
+                        "iteration": index + 1,
+                        "role": role,
+                        "format": artifact.suffix.removeprefix("."),
+                        "fileName": artifact.name,
+                        "sha256": sha256_hex(artifact),
+                        "bytes": artifact.stat().st_size,
+                    })
+            emit("run-complete", index=index + 1, role=role, seconds=elapsed)
             if upload_candidate is None and (
                 selected_recipe is not None or recipe_id == DEFAULT_RECIPE_ID
             ):
@@ -307,6 +396,7 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
         "uploadCandidate": upload_candidate,
         "preloadSeconds": preload_seconds,
         "totalSeconds": total_seconds,
+        **({"savedAudioArtifacts": saved_audio_artifacts} if benchmark_mode else {}),
     }
 
 

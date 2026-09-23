@@ -20,7 +20,7 @@ const admissionSnapshot = {
   policyVersion: 2 as const,
   maxDurationSeconds: 1_200,
   maxInputBytes: 50_000_000,
-  preparationProfileId: 'preserve-or-aac-lc-256-v1',
+  preparationProfileId: 'audio-cap-aac-lc-160-v1',
   source: 'audio_file' as const,
   settingsRevision: 1,
   maxWaitingJobs: 3,
@@ -120,7 +120,7 @@ describe('public job admission', () => {
       f.service.create(ownerId.toHexString(), input, requestId, {
         source: 'audio_file',
         policyVersion: 2,
-        preparationProfileId: 'preserve-or-aac-lc-256-v1',
+        preparationProfileId: 'audio-cap-aac-lc-160-v1',
       }),
     ).resolves.toMatchObject({
       requestId,
@@ -138,7 +138,7 @@ describe('public job admission', () => {
     const f = fixture();
     const recipeSnapshot = {
       recipeId: 'kim-vocals-v2',
-      recipeRevision: 1,
+      recipeRevision: 3,
     };
     const job = {
       _id: jobId,

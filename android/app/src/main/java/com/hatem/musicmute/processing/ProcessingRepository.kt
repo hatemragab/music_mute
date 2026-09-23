@@ -123,7 +123,9 @@ class ProcessingRepository(
             awaitingCloudConsent = requireCloudConsent,
             localProblem = null,
         )
-        verifyInput(candidate)
+        // The preparer has just hashed these exact staged bytes. Check the path and
+        // size now; the upload worker rechecks the full hash before reserving a job.
+        verifyInput(candidate, checkHash = false)
         checkSession(owner)
         val operation = if (existing == null) {
             store.put(owner.uid, candidate)
@@ -555,7 +557,7 @@ class ProcessingRepository(
         return if (retry) ProcessingRunResult.RETRY else ProcessingRunResult.PAUSED
     }
 
-    private suspend fun verifyInput(operation: ProcessingOperation): File = withContext(Dispatchers.IO) {
+    private suspend fun verifyInput(operation: ProcessingOperation, checkHash: Boolean = true): File = withContext(Dispatchers.IO) {
         val input = operation.input ?: throw ProcessingTransferException(ProcessingLocalProblem.INPUT_CHANGED)
         val relative = operation.stagedRelativePath ?: throw ProcessingTransferException(ProcessingLocalProblem.INPUT_CHANGED)
         val file = File(stagingRoot, relative).canonicalFile
@@ -564,6 +566,7 @@ class ProcessingRepository(
             file.length() != input.bytes || !operation.mediaPolicy.acceptsPrepared(input.bytes, input.durationSeconds)
         ) throw ProcessingTransferException(ProcessingLocalProblem.INPUT_CHANGED)
         if (availableSpace() < 1_048_576) throw ProcessingTransferException(ProcessingLocalProblem.STORAGE)
+        if (!checkHash) return@withContext file
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { stream ->
             val buffer = ByteArray(64 * 1024)

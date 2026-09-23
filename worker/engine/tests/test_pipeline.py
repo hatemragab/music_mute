@@ -11,7 +11,12 @@ import numpy as np
 import soundfile as sf
 
 from musicmute_engine.media import sha256_base64
-from musicmute_engine.pipeline import ProcessRequest, ProcessingFailure, RuntimePipeline
+from musicmute_engine.pipeline import (
+    ProcessRequest,
+    ProcessingFailure,
+    RuntimePipeline,
+    is_positive_gpu_oom,
+)
 from musicmute_engine.recipes import RECIPE_DEFINITIONS, recipe_snapshot
 
 RATE = 44_100
@@ -31,6 +36,16 @@ class FakeSeparator:
 
 
 class PipelineTests(unittest.TestCase):
+    def test_gpu_oom_requires_provider_evidence(self) -> None:
+        try:
+            raise RuntimeError("MPS backend out of memory")
+        except RuntimeError as cause:
+            wrapper = RuntimeError("Kim separation failed")
+            wrapper.__cause__ = cause
+        self.assertTrue(is_positive_gpu_oom(wrapper))
+        self.assertFalse(is_positive_gpu_oom(TimeoutError("request timed out")))
+        self.assertFalse(is_positive_gpu_oom(RuntimeError("out of memory")))
+
     def setUp(self) -> None:
         ffmpeg = shutil.which("ffmpeg")
         ffprobe = shutil.which("ffprobe")
@@ -65,7 +80,16 @@ class PipelineTests(unittest.TestCase):
                     "musicmute_engine.pipeline.verified_cached_model",
                     return_value=model,
                 ):
-                    result = pipeline.process(request)
+                    stages: list[str] = []
+                    result = pipeline.process(request, stages.append)
+                self.assertEqual(stages[:4], [
+                    "input-validation", "preparation", "model-load", "separation"
+                ])
+                self.assertEqual(stages[-3:], [
+                    "encoding", "output-validation", "output-ready"
+                ])
+                self.assertEqual("denoise" in stages, definition.denoise_enabled)
+                self.assertEqual("trim" in stages, definition.trim_enabled)
                 timings = result["stageTimings"]
                 self.assertEqual("denoise" in timings, definition.denoise_enabled)
                 self.assertEqual("trim" in timings, definition.trim_enabled)
@@ -93,7 +117,7 @@ class PipelineTests(unittest.TestCase):
             payload = self.payload(
                 attempt_id, attempt, source, cache, "kim-vocals-v2"
             )
-            payload["recipe"] = {**payload["recipe"], "outputBitrateKbps": 192}
+            payload["recipe"] = {**payload["recipe"], "outputBitrateKbps": 320}
             with self.assertRaises(ProcessingFailure):
                 ProcessRequest.from_payload(payload)
             payload = self.payload(
@@ -102,6 +126,34 @@ class PipelineTests(unittest.TestCase):
             payload["attemptDirectory"] = str(root / "wrong-name")
             with self.assertRaises(ProcessingFailure):
                 ProcessRequest.from_payload(payload)
+
+    def test_failed_input_reports_only_the_observed_stage(self) -> None:
+        pipeline = RuntimePipeline(lambda _provider, _model, _device: FakeSeparator())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            attempt_id = str(uuid.uuid4())
+            attempt = root / attempt_id
+            attempt.mkdir()
+            source = attempt / "input.wav"
+            source.write_bytes(b"invalid-audio")
+            cache = root / "models"
+            cache.mkdir()
+            model = root / "qualified.onnx"
+            model.write_bytes(b"test-only-model-sentinel")
+            payload = self.payload(attempt_id, attempt, source, cache, "kim-vocals-v2")
+            payload["input"] = {
+                **payload["input"],  # type: ignore[dict-item]
+                "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            }
+            request = ProcessRequest.from_payload(payload)
+            stages: list[str] = []
+            with patch(
+                "musicmute_engine.pipeline.verified_cached_model",
+                return_value=model,
+            ), self.assertRaises(ProcessingFailure) as failure:
+                pipeline.process(request, stages.append)
+            self.assertEqual(failure.exception.code, "INPUT_CHECKSUM_MISMATCH")
+            self.assertEqual(stages, ["input-validation"])
 
     def test_preload_reuses_the_same_separator_for_processing(self) -> None:
         fake = FakeSeparator()
@@ -112,6 +164,7 @@ class PipelineTests(unittest.TestCase):
             return fake
 
         pipeline = RuntimePipeline(factory)  # type: ignore[arg-type]
+        stages: list[str] = []
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             cache = root / "models"
@@ -122,10 +175,11 @@ class PipelineTests(unittest.TestCase):
                 "musicmute_engine.pipeline.verified_cached_model",
                 return_value=model,
             ):
-                pipeline.preload(cache, "mps")
+                pipeline.preload(cache, "mps", progress=stages.append)
                 pipeline.preload(cache, "mps")
 
         self.assertEqual(factory_calls, [("mps", model, 0)])
+        self.assertEqual(stages, ["loading"])
 
     def payload(
         self,

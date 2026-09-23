@@ -21,6 +21,8 @@ internal fun decodedAudioSampleRate(sourceChannels: Int, channels: Int, sampleRa
     return sampleRate
 }
 
+internal fun selectedAudioSampleAvailable(sampleTimeUs: Long): Boolean = sampleTimeUs != -1L
+
 /** Direct provider access: never makes a private copy of the original video. */
 class AudioPreparationEngine(private val context: Context) {
     suspend fun inspect(uri: Uri): MediaSourceInspection = withContext(Dispatchers.IO) {
@@ -57,12 +59,15 @@ class AudioPreparationEngine(private val context: Context) {
                 val inspection = inspectMediaSource(source)
                 if (!policy.acceptsDuration(inspection.audio.durationSeconds)) throw InputPreparationException(InputPreparationError.TOO_LONG)
                 source.selectTrack(inspection.audio.id)
-                if (source.sampleTime < 0) throw InputPreparationException(InputPreparationError.DEFAULT_TRACK_UNAVAILABLE)
+                // AAC priming can give the first valid sample a negative timestamp.
+                // MediaExtractor uses exactly -1 for end of stream.
+                if (!selectedAudioSampleAvailable(source.sampleTime))
+                    throw InputPreparationException(InputPreparationError.DEFAULT_TRACK_UNAVAILABLE)
                 val compatible = inspection.audio.mime == "audio/mp4a-latm"
                 // A selected track may be much smaller than the source video. Try lossless
                 // extraction first; only a bounded failed-size attempt triggers encoding.
                 val route = audioPreparationRoute(inspection.hasVideo || inspection.audioTrackCount > 1,
-                    compatible, true, inspection.audio.channels)
+                    compatible, true, inspection.audio.channels, inspection.audio.bitRate)
                 try {
                     if (route == AudioPreparationRoute.CONVERT) transcode(source, inspection, output, ::checkBounds)
                     else remux(source, inspection, output, ::checkBounds)
@@ -166,7 +171,7 @@ class AudioPreparationEngine(private val context: Context) {
                             outputSampleRate = sampleRate
                             val encodeFormat = MediaFormat.createAudioFormat("audio/mp4a-latm", outputSampleRate, selected.channels).apply {
                                 setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-                                setInteger(MediaFormat.KEY_BIT_RATE, 256000)
+                                setInteger(MediaFormat.KEY_BIT_RATE, minOf(selected.bitRate ?: 160_000, 160_000))
                                 setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
                             }
                             encoder.configure(encodeFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)

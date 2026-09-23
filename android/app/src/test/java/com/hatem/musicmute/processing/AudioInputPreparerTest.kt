@@ -13,6 +13,42 @@ import org.junit.rules.TemporaryFolder
 class AudioInputPreparerTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun fullDecodeIsSkippedOnlyWhenExplicitlyRequested() = runBlocking {
+        var decoded = 0
+        val preparer = AudioInputPreparer(temporary.root,
+            validateDecoded = { _, _ -> decoded++ },
+            inspect = { AudioInspection(1.0, true, false, "audio/mpeg") })
+        preparer.prepare("owner", "picked.mp3") { ByteArrayInputStream(byteArrayOf(1)) }
+        assertEquals(1, decoded)
+        preparer.prepare("owner", "downloaded.mp3", validateFullDecode = false) {
+            ByteArrayInputStream(byteArrayOf(2))
+        }
+        assertEquals(1, decoded)
+    }
+
+    @Test fun generatedAudioWithoutSecondDecodeStillRequiresValidInspectionAndChecksum() = runBlocking {
+        var hasVideo = false
+        val preparer = AudioInputPreparer(temporary.root,
+            validateDecoded = { _, _ -> fail("Generated audio must not be decoded twice") },
+            inspect = { AudioInspection(12.0, true, hasVideo, "audio/mp4") })
+        val bytes = byteArrayOf(1, 2, 3, 4)
+        val prepared = preparer.prepare("owner", "extracted.m4a", validateFullDecode = false) {
+            ByteArrayInputStream(bytes)
+        }
+        assertArrayEquals(bytes, prepared.file.readBytes())
+        assertEquals(Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(bytes)),
+            prepared.declaration.sha256)
+        hasVideo = true
+        try {
+            preparer.prepare("owner", "video.m4a", validateFullDecode = false) {
+                ByteArrayInputStream(bytes)
+            }
+            fail("A video track must still be rejected")
+        } catch (error: InputPreparationException) {
+            assertEquals(InputPreparationError.INVALID_AUDIO, error.reason)
+        }
+    }
+
     @Test fun expandedInputIsInclusiveAndRecoveryPreservesMetadataWithoutProviderGrant() = runBlocking {
         val id = java.util.UUID.randomUUID().toString()
         val preparer = AudioInputPreparer(temporary.root) { AudioInspection(1200.0, true, false, "audio/mp4") }

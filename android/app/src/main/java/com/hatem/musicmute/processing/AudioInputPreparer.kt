@@ -71,6 +71,7 @@ class AudioInputPreparer(
         operationId: String = UUID.randomUUID().toString(),
         policy: ProcessingMediaPolicy = ProcessingMediaPolicy.STANDARD,
         mediaSource: String = "audio_file",
+        validateFullDecode: Boolean = true,
         open: () -> InputStream,
     ): PreparedInput =
         withContext(Dispatchers.IO) {
@@ -134,7 +135,7 @@ class AudioInputPreparer(
                         !media.durationSeconds.isFinite() || media.durationSeconds <= 0
                     ) throw InputPreparationException(InputPreparationError.INVALID_AUDIO)
                     if (!policy.acceptsDuration(media.durationSeconds)) throw InputPreparationException(InputPreparationError.TOO_LONG)
-                    validateDecoded(pending, policy)
+                    if (validateFullDecode) validateDecoded(pending, policy)
                     currentCoroutineContext().ensureActive()
                     val declaration = InputDeclaration(extension, contentType, bytes, media.durationSeconds,
                         Base64.getEncoder().encodeToString(digest.digest()))

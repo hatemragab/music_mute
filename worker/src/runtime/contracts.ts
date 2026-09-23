@@ -36,7 +36,7 @@ export interface WorkerRecipeSnapshot {
   denoisePresetId: "afftdn-conservative-v1" | null;
   trimProfileId: "trim-vocal-gaps-v1" | null;
   outputFormat: "mp3";
-  outputBitrateKbps: 320;
+  outputBitrateKbps: 160;
 }
 
 export interface SessionResponse {
@@ -166,6 +166,7 @@ export interface ChildProcessResult {
   bytes: number;
   sha256: string;
   contentType: "audio/mpeg";
+  measuredInputDurationSeconds: number;
   measuredOutputDurationSeconds: number;
   recipeId: WorkerRecipeId;
   recipeRevision: number;
@@ -174,7 +175,7 @@ export interface ChildProcessResult {
   trimEnabled: boolean;
   denoiseEnabled: boolean;
   outputFormat: "mp3";
-  outputBitrateKbps: 320;
+  outputBitrateKbps: number;
   stageTimings: WorkerProcessingStageTiming[];
 }
 
@@ -352,9 +353,9 @@ function recipe(value: unknown): WorkerRecipeSnapshot {
     outputBitrateKbps: integer(
       item.outputBitrateKbps,
       "recipe.outputBitrateKbps",
-      320,
-      320,
-    ) as 320,
+      160,
+      160,
+    ) as 160,
   };
 }
 
@@ -650,6 +651,12 @@ export function parseChildProcessResult(value: unknown): ChildProcessResult {
       ["audio/mpeg"] as const,
       "contentType",
     ),
+    measuredInputDurationSeconds: numberValue(
+      item.measuredInputDurationSeconds,
+      "measuredInputDurationSeconds",
+      0.001,
+      1800,
+    ),
     measuredOutputDurationSeconds: numberValue(
       item.measuredOutputDurationSeconds,
       "measuredOutputDurationSeconds",
@@ -666,9 +673,9 @@ export function parseChildProcessResult(value: unknown): ChildProcessResult {
     outputBitrateKbps: integer(
       item.outputBitrateKbps,
       "outputBitrateKbps",
-      320,
-      320,
-    ) as 320,
+      32,
+      160,
+    ),
     stageTimings: WORKER_PROCESSING_STAGE_IDS.flatMap((stage) => {
       const seconds = rawStageTimings[stage];
       if (seconds === undefined) return [];

@@ -60,10 +60,22 @@ def run(
     protocol_output = isolate_protocol_output()
     try:
         if model_cache_root is not None and provider is not None:
+            def startup_progress(stage: str) -> None:
+                write_frame(
+                    protocol_output,
+                    response(
+                        "startup-progress",
+                        str(uuid.uuid4()),
+                        incarnation,
+                        {"stage": stage},
+                    ),
+                )
+
             pipeline.preload(
                 model_cache_root,
                 provider,
                 directml_device_id,
+                startup_progress,
             )
         write_frame(
             protocol_output,
@@ -96,18 +108,36 @@ def run(
                 try:
                     process_request = ProcessRequest.from_payload(message["payload"])
 
-                    def progress(stage: str, fraction: float) -> None:
+                    def progress(stage: str) -> None:
                         write_frame(
                             protocol_output,
                             response(
                                 "progress",
                                 request_id,
                                 incarnation,
-                                {"stage": stage, "fraction": fraction},
+                                {"stage": stage},
                             ),
                         )
 
-                    result = pipeline.process(process_request, progress)
+                    def window_progress(completed: int, total: int) -> None:
+                        write_frame(
+                            protocol_output,
+                            response(
+                                "progress",
+                                request_id,
+                                incarnation,
+                                {
+                                    "stage": "separation",
+                                    "unit": "windows",
+                                    "completed": completed,
+                                    "total": total,
+                                },
+                            ),
+                        )
+
+                    result = pipeline.process(
+                        process_request, progress, window_progress
+                    )
                     write_frame(
                         protocol_output,
                         response("result", request_id, incarnation, result),

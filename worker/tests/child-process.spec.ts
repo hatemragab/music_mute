@@ -11,6 +11,10 @@ import { WORKER_RECIPE_IDS } from "../protocol/v1/protocol.js";
 const workerRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const engineRoot = resolve(workerRoot, "engine");
 const hangingFixture = resolve(workerRoot, "tests/fixtures/hanging-child.mjs");
+const progressFixture = resolve(
+  workerRoot,
+  "tests/fixtures/progress-child.mjs",
+);
 const closedStdinFixture = resolve(
   workerRoot,
   "tests/fixtures/closed-stdin-child.mjs",
@@ -23,6 +27,39 @@ afterEach(async () => {
 });
 
 describe("worker child lifecycle", () => {
+  it("accepts observed progress for the current request and ignores fabricated or stale frames", async () => {
+    const startupStages: string[] = [];
+    child = new WorkerChildProcess({
+      command: process.execPath,
+      args: [progressFixture],
+      cwd: workerRoot,
+      startTimeoutMs: 2_000,
+      requestTimeoutMs: 2_000,
+      stopTimeoutMs: 2_000,
+      onStartupStage: (stage) => startupStages.push(stage),
+    });
+    await child.start();
+    expect(startupStages).toEqual(["loading", "warming"]);
+    const progress: Array<{ stage: string; work?: unknown }> = [];
+    const result = await child.request("process", {}, 2_000, (event) =>
+      progress.push(event),
+    );
+    expect(result.type).toBe("result");
+    expect(progress).toEqual([
+      { stage: "input-validation" },
+      { stage: "separation" },
+      {
+        stage: "separation",
+        work: { unit: "windows", completed: 1, total: 4 },
+      },
+      {
+        stage: "separation",
+        work: { unit: "windows", completed: 4, total: 4 },
+      },
+      { stage: "output-ready" },
+    ]);
+  });
+
   it("starts the real Python child, pings it and shuts down cleanly", async () => {
     child = new WorkerChildProcess({
       command: process.platform === "win32" ? "python" : "python3",

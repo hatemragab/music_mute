@@ -13,6 +13,7 @@ import soundfile as sf
 from musicmute_engine.separator import (
     KIM_VOCAL_2_OVERLAP,
     KimSeparator,
+    _grouped_demix,
     _uvr_mps_model,
 )
 
@@ -34,6 +35,10 @@ class FakeAudioSeparator:
     def separate(
         self, _source: str, *, custom_output_names: dict[str, str]
     ) -> list[str]:
+        callback = getattr(self.model_instance, "on_window_progress", None)
+        if callback is not None:
+            callback(1, 2)
+            callback(2, 2)
         output = Path(self.output_dir) / f"{custom_output_names['Vocals']}.flac"
         audio = np.zeros((441, 2), dtype=np.float32)
         sf.write(output, audio, 44_100, format="FLAC", subtype="PCM_16")
@@ -67,6 +72,52 @@ class FakeWarmupModel:
 
 
 class SeparatorIsolationTests(unittest.TestCase):
+    def test_grouped_demix_preserves_order_overlap_and_partial_batch(self) -> None:
+        class FakeTensor:
+            def __init__(self, data: np.ndarray) -> None:
+                self.data = data
+
+            def to(self, _device: str) -> "FakeTensor":
+                return self
+
+        fake_torch = ModuleType("torch")
+        fake_torch.float32 = np.float32  # type: ignore[attr-defined]
+        fake_torch.tensor = lambda data, **_kwargs: FakeTensor(data)  # type: ignore[attr-defined]
+        fake_torch.no_grad = nullcontext  # type: ignore[attr-defined]
+
+        class FakeGroupedModel:
+            overlap = 0.25
+            torch_device = "mps"
+
+            def __init__(self) -> None:
+                self.batch_shapes: list[tuple[int, ...]] = []
+
+            def initialize_model_settings(self) -> None:
+                self.chunk_size = 16
+                self.trim = 2
+
+            def run_model(self, batch: FakeTensor) -> np.ndarray:
+                self.batch_shapes.append(batch.data.shape)
+                return batch.data.copy()
+
+        song = np.stack(
+            (np.arange(53, dtype=np.float32) / 100,
+             np.arange(53, dtype=np.float32)[::-1] / 100)
+        )
+        with patch.dict("sys.modules", {"torch": fake_torch}):
+            reference = FakeGroupedModel()
+            expected = _grouped_demix(reference, song, 1)
+            self.assertEqual(expected.shape, (2, 53))
+            for size, calls in ((2, 3), (4, 2)):
+                candidate = FakeGroupedModel()
+                actual = _grouped_demix(candidate, song, size)
+                np.testing.assert_array_equal(actual, expected)
+                self.assertEqual(candidate.grouped_windows, 6)
+                self.assertEqual(candidate.grouped_model_calls, calls)
+                self.assertEqual(candidate.grouped_max_batch, size)
+                self.assertEqual(candidate.batch_shapes[-1][0], 6 % size or size)
+                self.assertTrue(np.isfinite(actual).all())
+
     def test_uvr_mps_model_converts_once_and_restores_upstream_class(self) -> None:
         architecture = ModuleType("audio_separator.separator.architectures")
         mdx_module = ModuleType(
@@ -118,6 +169,11 @@ class SeparatorIsolationTests(unittest.TestCase):
         audio_separator = ModuleType("audio_separator")
         separator_module = ModuleType("audio_separator.separator")
         separator_module.Separator = FakeLoadedAudioSeparator  # type: ignore[attr-defined]
+        torch = ModuleType("torch")
+        torch.float32 = np.float32  # type: ignore[attr-defined]
+        torch.zeros = lambda shape, **_kwargs: np.zeros(shape, dtype=np.float32)  # type: ignore[attr-defined]
+        torch.no_grad = nullcontext  # type: ignore[attr-defined]
+        stages: list[str] = []
         with (
             tempfile.TemporaryDirectory() as directory,
             patch.dict(
@@ -125,6 +181,7 @@ class SeparatorIsolationTests(unittest.TestCase):
                 {
                     "audio_separator": audio_separator,
                     "audio_separator.separator": separator_module,
+                    "torch": torch,
                 },
             ),
             patch(
@@ -141,7 +198,7 @@ class SeparatorIsolationTests(unittest.TestCase):
             ),
         ):
             separator = KimSeparator(
-                "mps", Path(directory) / "Kim_Vocal_2.onnx"
+                "mps", Path(directory) / "Kim_Vocal_2.onnx", on_startup_stage=stages.append
             )
 
         self.assertEqual(
@@ -156,6 +213,7 @@ class SeparatorIsolationTests(unittest.TestCase):
         )
         self.assertAlmostEqual(KIM_VOCAL_2_OVERLAP, 0.029411764705882353)
         self.assertEqual(separator._separator.model_instance.run_calls, 1)
+        self.assertEqual(stages, ["warming"])
 
     def test_warm_model_resets_file_state_and_keeps_outputs_attempt_local(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -170,10 +228,15 @@ class SeparatorIsolationTests(unittest.TestCase):
             backend = FakeAudioSeparator()
             separator = KimSeparator.__new__(KimSeparator)
             separator._separator = backend
-            first_output = separator.separate(source, first)
+            progress: list[tuple[int, int]] = []
+            first_output = separator.separate(
+                source, first, lambda completed, total: progress.append((completed, total))
+            )
             second_output = separator.separate(source, second)
 
             self.assertEqual(backend.model_instance.reset_calls, 2)
+            self.assertEqual(progress, [(1, 2), (2, 2)])
+            self.assertIsNone(backend.model_instance.on_window_progress)
             self.assertEqual(first_output, (first / "vocals.flac").resolve())
             self.assertEqual(second_output, (second / "vocals.flac").resolve())
             self.assertTrue(first_output.is_file())
