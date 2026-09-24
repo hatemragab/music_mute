@@ -13,6 +13,9 @@ packages:
   YouTubeKit:
     url: https://github.com/alexeichhorn/YouTubeKit.git
     exactVersion: 0.4.9
+  Sentry:
+    url: https://github.com/getsentry/sentry-cocoa.git
+    exactVersion: 9.29.1
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -24,11 +27,14 @@ settings:
     VOCAL_LIVE_TEST: "0"
     MUSICMUTE_PRIVACY_URL: ""
     MUSICMUTE_ACCOUNT_DELETION_URL: ""
+    MUSICMUTE_SENTRY_DSN: "https://9a0d643da9fac62aac592340e994a85d@o4506288965943296.ingest.us.sentry.io/4512142567800832"
   configs:
     Debug:
+      MUSICMUTE_SENTRY_ENABLED: "NO"
       APS_ENVIRONMENT: development
       MUSICMUTE_API_BASE_URL: "http://127.0.0.1:3000"
     Release:
+      MUSICMUTE_SENTRY_ENABLED: "YES"
       APS_ENVIRONMENT: production
       MUSICMUTE_API_BASE_URL: ""
 targets:
@@ -37,6 +43,8 @@ targets:
     platform: iOS
     sources: [Vocal]
     dependencies:
+      - package: Sentry
+        product: Sentry
       - package: YouTubeKit
       - package: Firebase
         product: FirebaseCore

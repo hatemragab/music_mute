@@ -413,7 +413,14 @@ function childEnvironment(
       ? `${trustedExecutableDirectory}${delimiter}${env.PATH}`
       : trustedExecutableDirectory;
   }
-  const allowed = new Set(["MUSICMUTE_LOG_LEVEL", "MUSICMUTE_PROVIDER"]);
+  const allowed = new Set([
+    "MUSICMUTE_LOG_LEVEL",
+    "MUSICMUTE_PROVIDER",
+    "MUSICMUTE_SENTRY_ENGINE_ENABLED",
+    "MUSICMUTE_SENTRY_ENGINE_DSN",
+    "MUSICMUTE_SENTRY_ENVIRONMENT",
+    "MUSICMUTE_SENTRY_RELEASE",
+  ]);
   for (const [name, value] of Object.entries(extra ?? {})) {
     if (!allowed.has(name))
       throw new TypeError("Worker child environment key is not allowlisted");

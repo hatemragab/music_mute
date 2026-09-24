@@ -14,6 +14,7 @@ from .ipc import ProtocolFailure, UUID_V4, read_frame, write_frame
 from .pipeline import ProcessRequest, ProcessingFailure, RuntimePipeline
 from .provider_adapter import Provider
 from .recipes import RECIPE_DEFINITIONS
+from .sentry_monitoring import capture_unexpected, initialize as initialize_sentry
 
 
 def now() -> str:
@@ -193,6 +194,7 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
 
 def main() -> int:
     arguments = parse_args()
+    initialize_sentry()
     try:
         if not UUID_V4.fullmatch(arguments.incarnation):
             raise ValueError("invalid incarnation")
@@ -202,8 +204,14 @@ def main() -> int:
             provider=arguments.provider,
             directml_device_id=arguments.directml_device_id,
         )
-    except (OSError, ProcessingFailure, ProtocolFailure, ValueError):
+    except (OSError, ProcessingFailure, ProtocolFailure, ValueError) as error:
+        if not isinstance(error, ProcessingFailure):
+            capture_unexpected(error)
         print("MusicMute child protocol failure", file=sys.stderr)
+        return 2
+    except Exception as error:
+        capture_unexpected(error)
+        print("MusicMute child unexpected failure", file=sys.stderr)
         return 2
 
 

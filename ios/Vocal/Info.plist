@@ -13,6 +13,8 @@
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleLocalizations</key><array><string>en</string><string>ar</string></array>
   <key>MusicMuteAPIBaseURL</key><string>$(MUSICMUTE_API_BASE_URL)</string>
+  <key>MusicMuteSentryDSN</key><string>$(MUSICMUTE_SENTRY_DSN)</string>
+  <key>MusicMuteSentryEnabled</key><string>$(MUSICMUTE_SENTRY_ENABLED)</string>
   <key>LSRequiresIPhoneOS</key><true/>
   <key>UIFileSharingEnabled</key><true/>
   <key>LSSupportsOpeningDocumentsInPlace</key><true/>

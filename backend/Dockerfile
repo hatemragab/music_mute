@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.10
 FROM node:24.21.0-bookworm-slim AS build
 
 WORKDIR /app
@@ -9,7 +10,17 @@ RUN corepack enable \
 
 COPY backend/nest-cli.json backend/tsconfig*.json ./
 COPY backend/src ./src
-RUN pnpm run build
+ARG SENTRY_RELEASE
+RUN --mount=type=secret,id=sentry_auth_token,env=SENTRY_AUTH_TOKEN \
+    pnpm run build \
+    && if [ -n "${SENTRY_AUTH_TOKEN:-}" ]; then \
+      test -n "$SENTRY_RELEASE"; \
+      pnpm exec sentry-cli sourcemaps inject dist; \
+      pnpm exec sentry-cli sourcemaps upload \
+        --org vchat-9f --project musicmute-backend \
+        --release "$SENTRY_RELEASE" --validate --wait dist; \
+      find dist -name '*.map' -delete; \
+    fi
 
 FROM node:24.21.0-bookworm-slim AS apk-verifier
 
@@ -29,6 +40,8 @@ RUN sh /tmp/install-apk-verifier.sh \
 
 FROM node:24.21.0-bookworm-slim AS production
 
+ARG SENTRY_RELEASE
+
 ENV APP_ENV=production \
     NODE_ENV=production \
     HOST=0.0.0.0 \
@@ -37,6 +50,7 @@ ENV APP_ENV=production \
     APK_AAPT2_PATH=/opt/android-sdk/build-tools/35.0.0/aapt2 \
     APK_APKSIGNER_PATH=/opt/android-sdk/build-tools/35.0.0/apksigner \
     APK_MAX_MIN_SDK=26
+ENV SENTRY_RELEASE=${SENTRY_RELEASE}
 
 WORKDIR /app
 

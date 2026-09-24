@@ -234,6 +234,7 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
 
     override fun onCreate() {
         super.onCreate()
+        SentryMonitoring.initialize(this)
         com.hatem.musicmute.download.ExtractorMaintenanceWorker.schedule(this)
         val connectivity = getSystemService(ConnectivityManager::class.java)
         val updateNetworkAvailable = AtomicBoolean(updatesOnline())

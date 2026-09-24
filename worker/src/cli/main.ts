@@ -38,8 +38,14 @@ import {
   appendMacFatalError,
   maintainMacUserLogs,
 } from "../platform/macos/operational-logs.js";
+import {
+  captureWorkerFailure,
+  engineTelemetryEnvironment,
+  initializeWorkerSentry,
+} from "../observability/sentry.js";
 
 const command = process.argv[2];
+if (command === "run") initializeWorkerSentry();
 const macUserCommands = new Set([
   "install",
   "status",
@@ -166,7 +172,10 @@ if (command === "--help" || command === "help") {
               String(slot.directmlDeviceId ?? 0),
             ],
             cwd: config.engineRoot,
-            env: { MUSICMUTE_PROVIDER: slot.provider },
+            env: {
+              MUSICMUTE_PROVIDER: slot.provider,
+              ...engineTelemetryEnvironment(),
+            },
             trustedExecutableDirectory: dirname(config.ffmpegPath),
             requestTimeoutMs: 7_200_000,
           },
@@ -233,6 +242,7 @@ if (command === "--help" || command === "help") {
       await runtime.run(stopping.signal);
     } catch (error) {
       if (!stopping.signal.aborted) {
+        await captureWorkerFailure(error);
         if (logLayout !== null)
           await appendMacFatalError(
             logLayout.stderrPath,

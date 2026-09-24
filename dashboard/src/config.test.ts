@@ -16,6 +16,7 @@ describe("public runtime configuration", () => {
         projectId: "musicmute",
         appId: "1:123:web:456",
       },
+      sentry: { enabled: false, dsn: "" },
     };
 
     const { publicConfig } = await import("./config");
@@ -24,6 +25,7 @@ describe("public runtime configuration", () => {
       apiOrigin: "https://api.musicmute.example",
       basePath: "/operations/",
       firebase: window.__MUSICMUTE_RUNTIME_CONFIG__.firebase,
+      sentry: { enabled: false, dsn: "" },
     });
   });
 
@@ -32,6 +34,7 @@ describe("public runtime configuration", () => {
       apiOrigin: "https://api.musicmute.example",
       basePath: "https://attacker.example/",
       firebase: null,
+      sentry: { enabled: false, dsn: "" },
     };
 
     await expect(import("./config")).rejects.toThrow(

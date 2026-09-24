@@ -19,6 +19,7 @@ credentials = "1.6.0"
 googleid = "1.2.0"
 azhon-appupdate = "4.3.6"
 play-appupdate = "2.1.0"
+sentry-android = "8.58.0"
 
 [libraries]
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebase-bom" }
@@ -52,6 +53,7 @@ work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work"
 media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
 media3-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
 youtubedl = { module = "io.github.junkfood02.youtubedl-android:library", version.ref = "youtubedl" }
+sentry-android = { module = "io.sentry:sentry-android", version.ref = "sentry-android" }
 
 [plugins]
 google-services = { id = "com.google.gms.google-services", version.ref = "google-services" }

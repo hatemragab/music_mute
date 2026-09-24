@@ -23,7 +23,7 @@
 		274C13639D53CD838EF88E59 /* AccountDeletionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338642359BC137704D29D7D7 /* AccountDeletionStore.swift */; };
 		285AB584E3E816B35E743464 /* NotificationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C35DCC712695C754017068BD /* NotificationDelegate.swift */; };
 		29784F07324C38BEC94EFB4F /* video-default-second.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 81459EB77B2C3053E4A1124A /* video-default-second.mp4 */; };
-		2CD482465DEF4E70210CD1F7 /* YouTubeKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6765669812F3A0845906D4A0 /* YouTubeKit */; };
+		2CD482465DEF4E70210CD1F7 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 2DEA9B59826DA7540502864B /* Sentry */; };
 		30E618B394992ED5D5D26414 /* AudioTaskPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D3B92B4629A86C8986E7D34 /* AudioTaskPresentationTests.swift */; };
 		34573EFAD5D1A1153C8BEF3E /* AuthAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C8B7242BD7B24BB55ED579 /* AuthAPIClient.swift */; };
 		348439B221D0710BA7EBAC53 /* CoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34F6702F528D11A1DC3F44F8 /* CoreTests.swift */; };
@@ -35,12 +35,14 @@
 		452B6629B884CB1569ED1A2A /* UnavailableJobsAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76376826C31F15253D9E8C69 /* UnavailableJobsAPI.swift */; };
 		51EFF7EE83C23DC1FEBA49DE /* MediaPreparationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24A8869DBB0C7758EE765073 /* MediaPreparationCoordinator.swift */; };
 		58696552B87E210C46905E87 /* JobsAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C980C7A93C7540A94BFD96F0 /* JobsAPIClientTests.swift */; };
+		5956C64FB3CDC293DB71C0E3 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 31C78A77C5C83F416D4BE1B8 /* FirebaseMessaging */; };
 		5ACED8F52E24922235AD549B /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E2D4DD79571B4E4F2C9DFA /* AuthView.swift */; };
-		5AFF7BE4188AE12697D2F6E2 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 31C78A77C5C83F416D4BE1B8 /* FirebaseMessaging */; };
+		5AFF7BE4188AE12697D2F6E2 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A66AF9F84988186228BB4AFF /* FirebaseAuth */; };
 		5E3A872860C6FEDF1ED57DB8 /* AudioPipelineRestorationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E58260A399AEC4582C7D6113 /* AudioPipelineRestorationTests.swift */; };
 		5EDBEDB487B17AFEC1249A54 /* PushRegistrationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A092C9DF86849A843297BED /* PushRegistrationCoordinator.swift */; };
-		5F041C56FF06E0B0F21086BF /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8582DEF2DE554DF342D78C20 /* FirebaseCore */; };
+		5F041C56FF06E0B0F21086BF /* YouTubeKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6765669812F3A0845906D4A0 /* YouTubeKit */; };
 		650EF9DA8DE6EDE58BD9AEE7 /* AudioStepTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3537EE14A480B17D9A14F6B /* AudioStepTimeline.swift */; };
+		6612F3C0B340A9A03674832B /* SentryMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C45962C19561B2BDFF4DAAA /* SentryMonitoring.swift */; };
 		683BFF56CD5D355AD2424717 /* AudioInputPreparerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31F5E38EC5FE5AC9FAC3ECF2 /* AudioInputPreparerTests.swift */; };
 		6B05E6473EF1FA607E9673F0 /* PushRegistrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8E0316BB30B676B6B9863EB /* PushRegistrationTests.swift */; };
 		6ECF35AE8B34433D254BCD97 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570C88482CBC22BA1CBCF0A2 /* SettingsView.swift */; };
@@ -104,7 +106,7 @@
 		F402CC1EE12F857C40D99EBF /* ProcessingMediaPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0507B818F5E35B2AE9780409 /* ProcessingMediaPolicyTests.swift */; };
 		F476FAAF706ED7DFD535BFE5 /* ProcessingStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234253D2BF54690E24EB9F62 /* ProcessingStoreTests.swift */; };
 		F4F21F435BAEA7CD4EF15FB7 /* ProcessingHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA110C830CEB54B7ED80050 /* ProcessingHistoryTests.swift */; };
-		F5A8E4F3416721A80A5E33B9 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A66AF9F84988186228BB4AFF /* FirebaseAuth */; };
+		F5A8E4F3416721A80A5E33B9 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8582DEF2DE554DF342D78C20 /* FirebaseCore */; };
 		FAEAE8CA381FF35631B6A41A /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 092C3D6D4464FA4AE53CF5B3 /* ThirdPartyNotices.txt */; };
 		FC7C0D2D2B94ECD576D2FFF8 /* AudioTaskPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E75D11882FD72544A5DB293 /* AudioTaskPresentation.swift */; };
 		FD29A044C971F769EAAFA9AE /* ProcessingUITestHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1662A8163614331AA561E8C9 /* ProcessingUITestHarness.swift */; };
@@ -189,6 +191,7 @@
 		82B22739128A06255DBF5437 /* YouTubePreflight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubePreflight.swift; sourceTree = "<group>"; };
 		8AA110C830CEB54B7ED80050 /* ProcessingHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingHistoryTests.swift; sourceTree = "<group>"; };
 		8B81AB703DDF99EDEE557757 /* JobArtifactTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobArtifactTests.swift; sourceTree = "<group>"; };
+		8C45962C19561B2BDFF4DAAA /* SentryMonitoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentryMonitoring.swift; sourceTree = "<group>"; };
 		93035634DAB8A8315FD9C73F /* PushRegistrationAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistrationAPIClientTests.swift; sourceTree = "<group>"; };
 		94B3A5AF9D67799A1735839F /* JobModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobModels.swift; sourceTree = "<group>"; };
 		9A092C9DF86849A843297BED /* PushRegistrationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistrationCoordinator.swift; sourceTree = "<group>"; };
@@ -238,10 +241,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				2CD482465DEF4E70210CD1F7 /* YouTubeKit in Frameworks */,
-				5F041C56FF06E0B0F21086BF /* FirebaseCore in Frameworks */,
-				F5A8E4F3416721A80A5E33B9 /* FirebaseAuth in Frameworks */,
-				5AFF7BE4188AE12697D2F6E2 /* FirebaseMessaging in Frameworks */,
+				2CD482465DEF4E70210CD1F7 /* Sentry in Frameworks */,
+				5F041C56FF06E0B0F21086BF /* YouTubeKit in Frameworks */,
+				F5A8E4F3416721A80A5E33B9 /* FirebaseCore in Frameworks */,
+				5AFF7BE4188AE12697D2F6E2 /* FirebaseAuth in Frameworks */,
+				5956C64FB3CDC293DB71C0E3 /* FirebaseMessaging in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -324,6 +328,7 @@
 			children = (
 				23FA53994AE59BE9C2307305 /* GoogleService-Info.plist */,
 				68AAAA6193E31D32189D0E3F /* Info.plist */,
+				8C45962C19561B2BDFF4DAAA /* SentryMonitoring.swift */,
 				5A45D3D33E71AE46C4E4C7D1 /* Vocal.entitlements */,
 				D63078CD230292193F890DCD /* VocalApp.swift */,
 				ECDFFE6BBDA5663DB492228B /* Auth */,
@@ -485,6 +490,7 @@
 			);
 			name = MusicMute;
 			packageProductDependencies = (
+				2DEA9B59826DA7540502864B /* Sentry */,
 				6765669812F3A0845906D4A0 /* YouTubeKit */,
 				8582DEF2DE554DF342D78C20 /* FirebaseCore */,
 				A66AF9F84988186228BB4AFF /* FirebaseAuth */,
@@ -564,6 +570,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				D0F59215FBD0E11156C3F7F7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				B0A0DC5D8C218D7D8145FC76 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				0298020805395E9EBC74D812 /* XCRemoteSwiftPackageReference "YouTubeKit" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -697,6 +704,7 @@
 				DF2612B7FF5D7B68FB37B43A /* ProcessingUsageView.swift in Sources */,
 				5EDBEDB487B17AFEC1249A54 /* PushRegistrationCoordinator.swift in Sources */,
 				EA831F744456BD4B61F3F511 /* S3MultipartFile.swift in Sources */,
+				6612F3C0B340A9A03674832B /* SentryMonitoring.swift in Sources */,
 				6ECF35AE8B34433D254BCD97 /* SettingsView.swift in Sources */,
 				452B6629B884CB1569ED1A2A /* UnavailableJobsAPI.swift in Sources */,
 				E10F2D2654E89156064DA38E /* VocalApp.swift in Sources */,
@@ -818,6 +826,8 @@
 				MUSICMUTE_ACCOUNT_DELETION_URL = "";
 				MUSICMUTE_API_BASE_URL = "";
 				MUSICMUTE_PRIVACY_URL = "";
+				MUSICMUTE_SENTRY_DSN = "https://9a0d643da9fac62aac592340e994a85d@o4506288965943296.ingest.us.sentry.io/4512142567800832";
+				MUSICMUTE_SENTRY_ENABLED = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -960,6 +970,8 @@
 				MUSICMUTE_ACCOUNT_DELETION_URL = "";
 				MUSICMUTE_API_BASE_URL = "http://127.0.0.1:3000";
 				MUSICMUTE_PRIVACY_URL = "";
+				MUSICMUTE_SENTRY_DSN = "https://9a0d643da9fac62aac592340e994a85d@o4506288965943296.ingest.us.sentry.io/4512142567800832";
+				MUSICMUTE_SENTRY_ENABLED = NO;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1037,6 +1049,14 @@
 				version = 0.4.9;
 			};
 		};
+		B0A0DC5D8C218D7D8145FC76 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";
+			requirement = {
+				kind = exactVersion;
+				version = 9.29.1;
+			};
+		};
 		D0F59215FBD0E11156C3F7F7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
@@ -1048,6 +1068,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		2DEA9B59826DA7540502864B /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B0A0DC5D8C218D7D8145FC76 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
+		};
 		31C78A77C5C83F416D4BE1B8 /* FirebaseMessaging */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D0F59215FBD0E11156C3F7F7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

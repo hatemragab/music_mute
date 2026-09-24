@@ -33,6 +33,10 @@ describe("CapRover runtime server configuration", () => {
           projectId: "musicmute",
           appId: "1:123:web:456",
         },
+        sentry: {
+          enabled: true,
+          dsn: "https://7fa29162fbc4e73a5b1a9b01cc91c29b@o4506288965943296.ingest.us.sentry.io/4512142569111552",
+        },
       },
     );
   });

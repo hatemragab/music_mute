@@ -7,6 +7,7 @@ export interface PublicConfig {
     projectId: string;
     appId: string;
   } | null;
+  sentry: { enabled: boolean; dsn: string };
 }
 
 export type RuntimePublicConfig = PublicConfig;
@@ -55,4 +56,8 @@ export const publicConfig: PublicConfig = {
     runtimeConfig?.basePath ?? import.meta.env.VITE_APP_BASE_PATH,
   ),
   firebase: buildFirebaseConfig(),
+  sentry: runtimeConfig?.sentry ?? {
+    enabled: import.meta.env.VITE_SENTRY_ENABLED === "true",
+    dsn: import.meta.env.VITE_SENTRY_DSN || "",
+  },
 };
