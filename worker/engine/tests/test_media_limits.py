@@ -63,10 +63,10 @@ class MediaLimitTests(unittest.TestCase):
                 self.assertLess(time.monotonic() - started, 5)
 
     def test_tool_timeout_and_normal_output_are_preserved(self) -> None:
-        result = _run([sys.executable, "-c", "print('ok')"], 5, "failed")
+        result = _run([sys.executable, "-B", "-c", "print('ok')"], 5, "failed")
         self.assertEqual(result.stdout, "ok\n")
         with self.assertRaisesRegex(MediaProcessingError, "timed out"):
-            _run([sys.executable, "-c", "import time; time.sleep(30)"], 0.1, "timed out")
+            _run([sys.executable, "-B", "-c", "import time; time.sleep(30)"], 0.1, "timed out")
 
     def test_pcm16_validation_skips_sample_scan_but_rejects_truncation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
