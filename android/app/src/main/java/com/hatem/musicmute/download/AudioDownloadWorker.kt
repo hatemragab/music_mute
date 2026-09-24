@@ -96,25 +96,22 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
         val repository = app.downloadRepository
         val record = repository.store.get(recordId) ?: return Result.failure()
         if (record.status == DownloadStatus.CANCELLED) return Result.failure()
-        val target = pipelineTarget(record)
-        if ((record.ownerUid != null || record.operationId != null || record.sessionEpoch != null) && target == null) return Result.failure()
-        if (target != null && !target.matches(app.processingSession())) return Result.failure()
-        if (record.status == DownloadStatus.COMPLETE && target == null) return Result.success()
+        val target = pipelineTarget(record) ?: return Result.failure()
+        if (!target.matches(app.processingSession())) return Result.failure()
         // A replacement epoch/work request must never share native process or
         // partial-file ownership with a worker that is still stopping.
         val nativeId = id.toString()
         val directory = File(repository.audioRoot, "$recordId/$nativeId")
         return try {
-            if (target != null) {
-                val pending = app.processingRepository.store.get(target.ownerUid, target.operationId)
-                    ?: return Result.failure()
-                // This wait owns neither a foreground service nor a local slot.
-                // WorkManager's own backoff survives process death; the saved
-                // deadline also covers restoration into a replacement request.
-                val waitMillis = (pending.retryNotBeforeMillis - System.currentTimeMillis()).coerceAtLeast(0)
-                if (waitMillis > 300_000) return Result.retry()
-                if (waitMillis > 0) delay(waitMillis)
-            }
+            val pending = app.processingRepository.store.get(target.ownerUid, target.operationId)
+                ?: return Result.failure()
+            // This wait owns neither a foreground service nor a local slot.
+            // WorkManager's own backoff survives process death; the saved
+            // deadline also covers restoration into a replacement request.
+            val waitMillis = maxOf((pending.retryNotBeforeMillis - System.currentTimeMillis()).coerceAtLeast(0),
+                SourceRequestPacing(applicationContext).remainingMillis())
+            if (waitMillis > 300_000) return Result.retry()
+            if (waitMillis > 0) delay(waitMillis)
             withPipelineSlot(record) {
                 checkPipeline(record)
                 setForeground(getForegroundInfo())
@@ -140,7 +137,7 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
                             error = DownloadError.NONE,
                         )
                 }
-                if (target != null) app.processingRepository.store.update(target.ownerUid, target.operationId) {
+                app.processingRepository.store.update(target.ownerUid, target.operationId) {
                     if (!canUpdateSource(target, it)) it
                     else it.copy(phase = ProcessingPhase.DOWNLOADING_SOURCE,
                         sourceDownloadedBytes = 0, sourceTotalBytes = null, retryNotBeforeMillis = 0)
@@ -167,25 +164,21 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
                                         )
                                     else current
                                 }
-                                if (target != null) {
-                                    app.processingRepository.store.update(target.ownerUid, target.operationId) {
-                                        if (!canUpdateSource(target, it)) it
-                                        else it.copy(
-                                            phase = ProcessingPhase.DOWNLOADING_SOURCE,
-                                            sourceDownloadedBytes = value.downloadedBytes,
-                                            sourceTotalBytes = value.totalBytes,
-                                        )
-                                    }
+                                app.processingRepository.store.update(target.ownerUid, target.operationId) {
+                                    if (!canUpdateSource(target, it)) it
+                                    else it.copy(
+                                        phase = ProcessingPhase.DOWNLOADING_SOURCE,
+                                        sourceDownloadedBytes = value.downloadedBytes,
+                                        sourceTotalBytes = value.totalBytes,
+                                    )
                                 }
-                                if (target != null) {
-                                    app.processingRepository.store.get(target.ownerUid, target.operationId)?.let { operation ->
-                                        if (!canUpdateSource(target, operation)) return@let
-                                        val projection = audioTaskNotificationProjection(operation, target,
-                                            stage = AudioTaskStage.DOWNLOADING_SOURCE,
-                                            transferredBytes = value.downloadedBytes, totalBytes = value.totalBytes)
-                                        if (throttle.shouldUpdate(projection, SystemClock.elapsedRealtime()))
-                                            notifications.updateIfVisible(target, projection)
-                                    }
+                                app.processingRepository.store.get(target.ownerUid, target.operationId)?.let { operation ->
+                                    if (!canUpdateSource(target, operation)) return@let
+                                    val projection = audioTaskNotificationProjection(operation, target,
+                                        stage = AudioTaskStage.DOWNLOADING_SOURCE,
+                                        transferredBytes = value.downloadedBytes, totalBytes = value.totalBytes)
+                                    if (throttle.shouldUpdate(projection, SystemClock.elapsedRealtime()))
+                                        notifications.updateIfVisible(target, projection)
                                 }
                                 lastProgress = value
                             }
@@ -219,7 +212,7 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
                 }
                 // yt-dlp metadata can contain expiring URLs; keep only the fields persisted above.
                 withContext(Dispatchers.IO) { File(directory, "audio.info.json").delete() }
-                if (target != null) handoff(record, audio.file, audio.title, audio.bitrateKbps)
+                handoff(record, audio.file, audio.title, audio.bitrateKbps)
                 Result.success()
             }
         } catch (error: CancellationException) {
@@ -232,7 +225,7 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
             }
             throw error
         } catch (error: Exception) {
-            if (target != null && target.matches(app.processingSession())) {
+            if (target.matches(app.processingSession())) {
                 if (isStopped || repository.store.get(recordId)?.workRequestId != nativeId) return Result.failure()
                 val current = app.processingRepository.store.get(target.ownerUid, target.operationId) ?: return Result.failure()
                 if (!canUpdateSource(target, current)) return Result.failure()
@@ -241,9 +234,14 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
                     else if (repository.store.get(recordId)?.status == DownloadStatus.COMPLETE) ClientErrorStage.PREPARING_INPUT
                     else ClientErrorStage.DOWNLOADING_SOURCE
                 val safeProblem = (error as? com.hatem.musicmute.processing.JobsFailure)?.problem
-                val transient = safeProblem == null && (reason == DownloadError.NETWORK || reason == DownloadError.ENGINE)
+                val refusal = (error as? YoutubeSourceFailure)?.refusal ?: sourceRefusal(error.message.orEmpty())
+                val hint = (error as? YoutubeSourceFailure)?.hint ?: SourceHint.NONE
+                val transient = safeProblem == null && refusal == SourceRefusal.NONE && hint == SourceHint.NONE &&
+                    (reason == DownloadError.NETWORK || reason == DownloadError.ENGINE)
                 val retries = current.transientRetryCount
-                val retry = sourceRetryPlan(reason, retries, connected(), System.currentTimeMillis(), Math.random())
+                val retry = if (refusal != SourceRefusal.NONE || hint != SourceHint.NONE)
+                    SourceRetryPlan(false, retries, 0)
+                else sourceRetryPlan(reason, retries, connected(), System.currentTimeMillis(), Math.random())
                 if (safeProblem == null && retry.shouldRetry) {
                     app.processingRepository.store.update(target.ownerUid, target.operationId) {
                         if (!canUpdateSource(target, it)) it
@@ -315,7 +313,7 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
     }
 
     private suspend fun checkPipeline(record: DownloadRecord) {
-        val target = pipelineTarget(record) ?: return
+        val target = pipelineTarget(record) ?: throw CancellationException("Source task unavailable")
         if (app.updateAdmission.isBlocked()) throw CancellationException("App update required")
         if (!target.matches(app.processingSession()) || isStopped) throw CancellationException("Source task stopped")
         if (app.downloadRepository.store.get(record.id)?.workRequestId != id.toString())
@@ -331,12 +329,12 @@ class AudioDownloadWorker(context: Context, parameters: WorkerParameters) :
         canUpdateAudioSource(operation, target, app.processingSession())
 
     private suspend fun <T> withPipelineSlot(record: DownloadRecord, action: suspend () -> T): T {
-        val target = pipelineTarget(record) ?: return action()
+        val target = pipelineTarget(record) ?: throw CancellationException("Source task unavailable")
         return app.audioPipelineCoordinator.withLocalSlot(target.ownerUid, target.epoch, action)
     }
 
     private suspend fun handoff(record: DownloadRecord, file: File, title: String, downloadedBitrateKbps: Int) {
-        val target = pipelineTarget(record) ?: return
+        val target = pipelineTarget(record) ?: throw CancellationException("Source task unavailable")
         checkPipeline(record)
         val operation = app.processingRepository.store.update(target.ownerUid, target.operationId) {
             if (!canUpdateSource(target, it) || it.input != null) it
@@ -413,8 +411,7 @@ fun classifyDownloadError(error: Exception): DownloadError {
     return when {
         "no space left" in message || "disk full" in message || "permission denied" in message ->
             DownloadError.STORAGE
-        "429" in message || "too many requests" in message ||
-            "try again later" in message || "403" in message -> DownloadError.NETWORK
+        sourceRefusal(message) != SourceRefusal.NONE -> DownloadError.UNAVAILABLE
         "requested format" in message || "signature extraction" in message ||
             "nsig extraction" in message -> DownloadError.ENGINE
         "sign in" in message ||

@@ -31,7 +31,7 @@ No account, cookies, proxy, or client secret is configured.
 
 Vocal filters for audio-only, natively playable **M4A/AAC** streams, then selects
 the highest available bitrate. It downloads the selected HTTPS Googlevideo stream
-with URLSession. The legacy YouTube flow never downloads a combined video stream or re-encodes a
+with URLSession. The YouTube download flow never downloads a combined video stream or re-encodes a
 file for saving. Local Files/Photos video preparation is a separate path described below.
 
 This differs from Android's best-audio selection, which may choose WebM/Opus.
@@ -146,7 +146,7 @@ Accepted cleanup fences session callbacks, stops private transfers/playback, rem
 processing inputs/results/history/diagnostics/source copies and matching job notifications, then
 clears the successful local cleanup marker. Unknown responses retain a minimal recovery marker;
 stale authentication preserves the request for reauthentication. Original imported Files and
-exported copies are preserved. Legacy downloads without account ownership are preserved.
+exported copies are preserved.
 Offline devices cannot be remotely wiped; private data clears when an invalid session is validated.
 
 Set `MUSICMUTE_PRIVACY_URL` and `MUSICMUTE_ACCOUNT_DELETION_URL` to verified public HTTPS URLs

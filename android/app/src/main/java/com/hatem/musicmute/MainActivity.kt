@@ -20,7 +20,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hatem.musicmute.data.LanguageChoice
-import com.hatem.musicmute.state.DownloadsViewModel
 import com.hatem.musicmute.state.VocalViewModel
 import com.hatem.musicmute.state.ProcessingViewModel
 import com.hatem.musicmute.processing.processingNotificationData
@@ -109,18 +108,6 @@ class MainActivity : AppCompatActivity() {
             }
             val requestedHistory by openHistory.collectAsStateWithLifecycle()
             val requestedOperation by processingOperation.collectAsStateWithLifecycle()
-            val downloads: DownloadsViewModel =
-                viewModel(
-                    factory =
-                        viewModelFactory {
-                            initializer {
-                                DownloadsViewModel(
-                                    app.downloadRepository,
-                                    app.audioPlayback,
-                                )
-                            }
-                        }
-                )
             LaunchedEffect(Unit) {
                 val style = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
                 enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
@@ -167,8 +154,8 @@ class MainActivity : AppCompatActivity() {
                             )
                         },
                     ) { onAccount ->
-                        VocalApp(state, model, downloads, processing, processingSession, artifacts,
-                            app.downloadRepository.audioRoot, requestedHistory,
+                        VocalApp(state, model, processing, processingSession, artifacts,
+                            requestedHistory,
                             openProcessing = requestedProcessing, openProcessingJob = requestedJob,
                             openProcessingOperation = requestedOperation,
                             onProcessingOpened = { openProcessing.value = false; processingJob.value = null; processingOperation.value = null; intent.removeExtra(OPEN_PROCESSING) },

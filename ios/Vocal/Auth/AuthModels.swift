@@ -78,8 +78,6 @@ struct DevicePage: Codable, Equatable, Sendable {
 
 struct PlatformPolicy: Codable, Equatable, Sendable {
   let minimumBuild: Int?
-  let latestBuild: Int?
-  let downloadUrl: URL?
 }
 
 struct PolicyPlatforms: Codable, Equatable, Sendable {
@@ -97,7 +95,6 @@ struct AppPolicy: Codable, Equatable, Sendable {
 struct ProcessingAccess: Codable, Equatable, Sendable {
   let allowed: Bool
   let reason: String?
-  let downloadUrl: URL?
 }
 
 struct SessionResponse: Codable, Equatable, Sendable {

@@ -153,18 +153,15 @@ describe('account deletion cleanup', () => {
     expect(f.auth.deleteUser).not.toHaveBeenCalled();
   });
 
-  it('backfills the exact fifteen-day deadline and waits before purging', async () => {
+  it('does not purge an account without a stored deadline', async () => {
     const f = fixture({ status: 'deleting', phase: 'grace_fence' });
     f.user.deletionRequestedAt = new Date('2026-01-31T12:00:00.000Z');
     f.user.deletionRecoverUntil = null as never;
 
-    await f.service.advanceDeletion(new Date('2026-02-01T00:00:00.000Z'));
-
+    await expect(
+      f.service.advanceDeletion(new Date('2026-02-01T00:00:00.000Z')),
+    ).rejects.toThrow('Deletion deadline is missing');
     expect(f.user.status).toBe('deleting');
-    expect(f.user.deletionRecoverUntil).toEqual(
-      new Date('2026-02-15T12:00:00.000Z'),
-    );
-    expect(f.user.deletionNextAt).toEqual(new Date('2026-02-15T12:00:00.000Z'));
     expect(f.auth.revokeRefreshTokens).not.toHaveBeenCalled();
   });
 

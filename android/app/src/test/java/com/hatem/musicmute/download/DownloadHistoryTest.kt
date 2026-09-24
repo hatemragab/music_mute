@@ -2,7 +2,6 @@ package com.hatem.musicmute.download
 
 import androidx.datastore.core.CorruptionException
 import androidx.datastore.core.DataStoreFactory
-import androidx.work.WorkInfo
 import java.io.ByteArrayInputStream
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -81,31 +80,4 @@ class DownloadHistoryTest {
         }
     }
 
-    @Test
-    fun workReconciliationPreservesCompletedAudioAndExposesInterruptedJobs() {
-        val record = DownloadRecord("id", "url", 0L, status = DownloadStatus.DOWNLOADING)
-        assertEquals(
-            DownloadStatus.CANCELLED,
-            DownloadRepository.reconcile(record, WorkInfo.State.CANCELLED, 20_000).status,
-        )
-        assertEquals(
-            DownloadStatus.QUEUED,
-            DownloadRepository.reconcile(record, WorkInfo.State.ENQUEUED, 20_000).status,
-        )
-        assertEquals(
-            DownloadError.INTERRUPTED,
-            DownloadRepository.reconcile(record, null, 20_000).error,
-        )
-        assertEquals(
-            record,
-            DownloadRepository.reconcile(record, null, 100)
-                .copy(status = DownloadStatus.DOWNLOADING),
-        )
-        val completed =
-            record.copy(status = DownloadStatus.COMPLETE, relativePath = "id/audio.webm")
-        assertEquals(
-            completed,
-            DownloadRepository.reconcile(completed, WorkInfo.State.CANCELLED, 20_000),
-        )
-    }
 }

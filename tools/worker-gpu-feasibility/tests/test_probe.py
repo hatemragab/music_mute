@@ -49,7 +49,7 @@ class FixtureTests(unittest.TestCase):
 class ProfileTests(unittest.TestCase):
     def test_profile_summary_groups_provider_dispatch(self) -> None:
         events = [
-            {"dur": 30, "args": {"provider": "CoreMLExecutionProvider", "op_name": "CoreML"}},
+            {"dur": 30, "args": {"provider": "DmlExecutionProvider", "op_name": "DirectML"}},
             {"dur": 7, "args": {"provider": "CPUExecutionProvider", "op_name": "Shape"}},
             {"dur": 1, "args": {}},
         ]
@@ -60,9 +60,9 @@ class ProfileTests(unittest.TestCase):
 
             self.assertEqual(
                 summary["provider_node_events"],
-                {"CPUExecutionProvider": 1, "CoreMLExecutionProvider": 1},
+                {"CPUExecutionProvider": 1, "DmlExecutionProvider": 1},
             )
-            self.assertEqual(summary["provider_duration_microseconds"]["CoreMLExecutionProvider"], 30)
+            self.assertEqual(summary["provider_duration_microseconds"]["DmlExecutionProvider"], 30)
             self.assertEqual(summary["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
 
 

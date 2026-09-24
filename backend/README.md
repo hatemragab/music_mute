@@ -134,11 +134,6 @@ liveness stays available. Configure persistence and `noeviction` on the external
 service to preserve security counters across API restarts. Use separate databases
 or instances for environments, monitor capacity and test backups/restores.
 
-Migration: replace `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` and `REDIS_TLS`
-with `REDIS_URL` in your environment. `QUEUE_PREFIX` and BullMQ are removed.
-Existing dotenv files and deployed services are not changed by this
-update. Keep any existing Redis data/volumes when switching deployment config.
-
 ## HTTP security
 
 Helmet, a 64 KiB JSON limit, request/header timeouts, strict DTO validation,

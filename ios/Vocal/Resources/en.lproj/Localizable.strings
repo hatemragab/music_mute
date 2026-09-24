@@ -141,7 +141,6 @@
 "auth_access_device_required" = "This installation must synchronize before future online processing.";
 "auth_access_restricted" = "Future online processing is restricted by server policy.";
 "auth_access_local_audio" = "This status does not block audio already stored or downloaded locally.";
-"auth_update_app" = "Open update page";
 "auth_security" = "Security";
 "auth_linked_methods" = "Sign-in methods";
 "auth_devices" = "Registered installations";

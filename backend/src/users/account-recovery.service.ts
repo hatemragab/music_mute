@@ -6,7 +6,6 @@ import { isDuplicateKey, objectId } from '../jobs/job-request.js';
 import { AccountRecoveryRequest } from './account-recovery-request.schema.js';
 import type { AccountRecoveryRequestDto } from './dto/account-recovery.dto.js';
 import { User } from './user.schema.js';
-import { accountRecoveryDeadline } from './account-recovery-policy.js';
 
 export function presentAccountRecoveryRequest(
   request: AccountRecoveryRequest,
@@ -46,11 +45,7 @@ export class AccountRecoveryService implements OnModuleInit {
       .findOne({ userId: user._id })
       .sort({ createdAt: -1, _id: -1 })
       .lean();
-    const recoverUntil =
-      user.deletionRecoverUntil ??
-      (user.status === 'deleting' && user.deletionRequestId
-        ? accountRecoveryDeadline(user.deletionRequestedAt ?? now)
-        : request?.recoverUntil);
+    const recoverUntil = user.deletionRecoverUntil ?? request?.recoverUntil;
     return {
       accountStatus: user.status,
       deletion: user.deletionRequestId
@@ -86,10 +81,10 @@ export class AccountRecoveryService implements OnModuleInit {
           user.deletionLeaseToken
         )
           throw authError('ACCOUNT_RECOVERY_EXPIRED');
-        const deletionRequestedAt = user.deletionRequestedAt ?? now;
-        const recoverUntil =
-          user.deletionRecoverUntil ??
-          accountRecoveryDeadline(deletionRequestedAt);
+        const deletionRequestedAt = user.deletionRequestedAt;
+        const recoverUntil = user.deletionRecoverUntil;
+        if (!deletionRequestedAt || !recoverUntil)
+          throw authError('SERVICE_UNAVAILABLE');
         if (recoverUntil.getTime() <= now.getTime())
           throw authError('ACCOUNT_RECOVERY_EXPIRED');
         const key = {

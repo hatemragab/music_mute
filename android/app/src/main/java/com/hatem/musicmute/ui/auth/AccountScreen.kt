@@ -21,7 +21,6 @@ import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.BuildConfig
 import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
-import java.net.URI
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -120,32 +119,6 @@ internal fun AccountScreen(
                     Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.auth_refresh_account), style = MaterialTheme.typography.labelMedium)
-                }
-            }
-            state.policy?.let { policy ->
-                val platform = policy.platforms.android
-                if (platform.minimumBuild != null && BuildConfig.VERSION_CODE < platform.minimumBuild) {
-                    val update =
-                        platform.downloadUrl?.takeIf { value ->
-                            runCatching {
-                                    URI(value).let {
-                                        it.scheme == "https" &&
-                                            !it.host.isNullOrBlank() &&
-                                            it.rawUserInfo == null
-                                    }
-                                }
-                                .getOrDefault(false)
-                        }
-                    if (update != null)
-                        TextButton(
-                            onClick = {
-                                runCatching {
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update)))
-                                }
-                            }
-                        ) {
-                            Text(stringResource(R.string.auth_open_update))
-                        }
                 }
             }
         }

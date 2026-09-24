@@ -44,7 +44,7 @@ method usable on Android. Account deletion requires provider reauthentication an
 installation metadata. `ui/auth/` owns the sign-in gate and account screens.
 Firebase owns tokens; installation metadata and a same-UID bootstrap record live
 in no-backup storage. A previously bootstrapped user may enter local features
-offline; a new sign-in must complete backend registration. Legacy unowned audio history remains local. Account processing inputs, results, pending reviews, and source downloads are UID scoped.
+offline; a new sign-in must complete backend registration. Account processing inputs, results, pending reviews, and source downloads are UID scoped.
 
 Debug and Release use `https://api.music-mute.com` by default. Override the public
 API **origin** (without `/api/v1`) with `-PauthApiUrl=https://your-api.example`.
@@ -178,7 +178,7 @@ audio is inspected and hashed during staging without another full mobile decode;
 the worker validates and decodes the complete input before separation. Picked
 phone media retains full mobile decode validation. See the upstream
 [yt-dlp format selection documentation](https://github.com/yt-dlp/yt-dlp#format-selection).
-If a direct audio-only format is unavailable, the app reports a retryable failure.
+If a direct audio-only format is unavailable, the app reports a failure without an automatic extraction retry.
 
 ## App behavior
 
@@ -237,7 +237,41 @@ ABIs are packaged; the universal debug APK is about 85 MB. ARM64 executable ELF
 segments were inspected for 16 KB alignment; this is packaging evidence, not a run
 on every Android version or page-size configuration.
 
-Downloads use the bundled yt-dlp extractor; an in-operation updater is not run.
+Downloads start with the installed yt-dlp extractor. A unique daily WorkManager
+job checks GitHub only on unmetered networking with adequate battery and storage.
+Network fetch and SHA-256 verification happen outside the downloader mutex;
+activation and the local version probe are serialized with downloads and retain
+rollback/recovery. No GitHub request runs in the user download path. Update checks
+back off persistently (24 hours after success, 6 hours after failure).
+
+Metadata extraction writes a bounded, private info JSON, validates duration/live
+and long-job policy, and reuses that metadata for transfer. The source webpage URL
+is removed before `--load-info-json` to prevent yt-dlp's automatic re-extraction
+fallback. Temporary signed stream links are never logged and are removed with the
+attempt metadata. A private yt-dlp cache reuses player/signature work. QuickJS is
+configured by the native package; no cookies, forced client identities, proxy
+rotation, or remote challenge-script fetching is added.
+
+Downloads remain serialized with a persistent 5-second gap. HTTP 429, session-limit
+messages, HTTP 403, and sign-in refusals stop automatic retries and set a device-wide
+15-minute cooldown (an application policy, not a YouTube guarantee). Native retries
+are zero; ordinary transient transport errors retain the bounded worker backoff.
+A new queued request waits before taking a foreground service or local pipeline slot.
+
+For debug runs, filter logcat with `adb -s <serial> logcat -s YoutubeSource:I`.
+The last 100 allowlisted events also live in the debug app's no-backup
+`youtube-diagnostics.log`, readable with `adb -s <serial> exec-out run-as
+com.hatem.musicmute cat no_backup/youtube-diagnostics.log`. Events include stage,
+outcome, elapsed milliseconds, extractor version, bytes, refusal category, and
+recognized JS/PO-token/format hints. They contain no URLs, titles, account IDs,
+native stderr, or stack traces. A 403 alone does not establish an IP ban.
+Unit tests and offline fixture transfers do not prove live YouTube availability.
+A separate connected CPH2573 debug check on 2026-09-24 observed the verified
+background upgrade from 2025.11.12 to 2026.08.19 and a successful 4,405,162-byte
+YouTube source download: 7.1 seconds for metadata and 4.9 seconds for transfer
+(12.1 seconds total). No refusal or JS/PO-token hint was recorded for that attempt.
+This is one successful sample, not a before/after speed benchmark or a guarantee
+against future YouTube refusals.
 Review upstream native packaging, extractor changes, and GPL-3.0 obligations
 before distributing the app. No release/publication has been performed.
 
@@ -353,9 +387,9 @@ M4A; higher or unknown rates use MediaCodec AAC-LC at no more than 160 kbps.
 Multichannel conversion and known spatial codecs are rejected rather than downmixed.
 The first AAC packet may have a negative presentation time for encoder priming;
 only MediaExtractor's `-1` sentinel means no selected sample is available. Directly
-copied local audio is decoded under a deadline. Locally generated M4A is inspected
-and checksummed without a second complete decode; the worker validates the uploaded
-audio before separation. Final prepared output must pass the same inclusive
+copied local audio and locally generated M4A are inspected and checksummed without
+an additional complete decode on the phone. The worker decodes the uploaded audio
+during processing. Final prepared output must pass the same inclusive
 duration/size policy; codec padding handling is not a license for truncation. A
 Xiaomi 23043RP34G hardware probe passed MP3 copy, 192 kbps M4A conversion, and
 128/192 kbps MP4 soundtrack preparation on 2026-09-23. Other devices and media
@@ -388,14 +422,13 @@ files remain intact. No video is uploaded or reconstructed; output remains clean
 audio retrieved on demand.
 
 YouTube URLs with playlist context, live/upcoming metadata, or unknown duration are
-rejected before downloading audio. The bundled extractor performs a minimal bounded
-metadata projection. Downloaded bytes are guarded by yt-dlp max-filesize, a fixed
+rejected before downloading audio. The installed extractor performs a minimal bounded
+metadata projection alongside temporary private metadata for the transfer. Downloaded bytes are guarded by yt-dlp max-filesize, a fixed
 64 KiB buffer, actual progress/disk observation, and a hard process watchdog; absent
-content length does not remove the cap. Legacy downloads additionally use a
-conservative 120-second operation deadline, not a measured capability claim.
-Extractor/fragment retry counts remain bounded and partial attempt files are
-removed. Automatic in-operation extractor updates were removed so an update cannot
-escape the source-operation deadline. Live YouTube availability was not tested.
+content length does not remove the cap.
+Native extractor/fragment retries are disabled and partial attempt files are
+removed. Background extractor maintenance is independent of the source-operation
+deadline. Live YouTube availability requires a separate device check.
 
 Owner-only usage is refreshed before intake and periodically on the home screen.
 It separates used, reserved, refunded, and remaining audio minutes for the current
@@ -407,3 +440,14 @@ expired entitlement. Capacity/allowance errors are localized in English and Arab
 without raw diagnostics or automatic queue-full retries. No
 queue-position or completion-time promise is shown when estimates are unavailable.
 See `../docs/tasks/media-input-and-queue/evidence/android.md` for current validation.
+
+### Fast bounded processing uploads
+
+Picked audio that is already compressed at or below 160 kbps is staged without
+transcoding. When bitrate metadata is absent, a known complete file size and
+valid duration may prove its average container bitrate is at most 160 kbps;
+this avoids re-encoding compact MP3/M4A/Opus files unnecessarily. Video and
+multiple audio tracks still require selected-track extraction. WAV/lossless,
+oversized, high-rate or unbounded inputs use the existing bounded native AAC/M4A
+preparation path, subject to decoder support. No raw WAV is uploaded. Prepared
+uploads retain the policy size cap (at most 50 MB), duration checks and checksum.

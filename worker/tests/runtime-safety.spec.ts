@@ -114,6 +114,18 @@ describe("runtime local safety", () => {
     expect(created.input).toBe(join(created.root, "input.bin"));
     expect(created.output).toBe(join(created.root, "output", "vocals.mp3"));
     await workspace.cleanup(created);
+    const aac = await workspace.create(
+      "a8408af4-1c13-4498-80d6-00ad041db86b",
+      "audio/aac",
+    );
+    expect(aac.input).toBe(join(aac.root, "input.aac"));
+    await workspace.cleanup(aac);
+    const webm = await workspace.create(
+      "3c63801e-e899-4e58-945f-8997d9d68da2",
+      "audio/webm",
+    );
+    expect(webm.input).toBe(join(webm.root, "input.webm"));
+    await workspace.cleanup(webm);
   });
 
   it("requires the exact provider and device boundary of the host adapter", async () => {

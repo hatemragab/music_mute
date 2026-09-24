@@ -51,28 +51,6 @@ export function validBuild(build: unknown): build is number {
     build <= 2147483647
   );
 }
-export function releaseLandingUrl(
-  base: string | undefined,
-  id: string,
-): string {
-  if (!base || !/^[a-f0-9]{24}$/.test(id))
-    throw adminError('DEPENDENCY_UNAVAILABLE');
-  let url: URL;
-  try {
-    url = new URL(base);
-  } catch {
-    throw adminError('DEPENDENCY_UNAVAILABLE');
-  }
-  if (
-    url.protocol !== 'https:' ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash
-  )
-    throw adminError('DEPENDENCY_UNAVAILABLE');
-  return `${url.toString().replace(/\/$/, '')}/app-updates/releases/${id}`;
-}
 export function validDistribution(
   platform: unknown,
   distribution: unknown,

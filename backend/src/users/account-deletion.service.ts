@@ -52,15 +52,15 @@ export class AccountDeletionService {
       expectedFirebaseUid !== existing.firebaseUid
     )
       throw authError('INVALID_INPUT');
-    if (existing.status === 'deleting' && existing.deletionRequestId)
+    if (existing.status === 'deleting' && existing.deletionRequestId) {
+      if (!existing.deletionRecoverUntil)
+        throw authError('SERVICE_UNAVAILABLE');
       return {
         requestId: existing.deletionRequestId,
         status: 'accepted' as const,
-        recoverUntil: (
-          existing.deletionRecoverUntil ??
-          accountRecoveryDeadline(existing.deletionRequestedAt ?? now)
-        ).toISOString(),
+        recoverUntil: existing.deletionRecoverUntil.toISOString(),
       };
+    }
     if (
       existing.status !== 'active' &&
       !(allowDisabled && existing.status === 'disabled')
@@ -107,13 +107,11 @@ export class AccountDeletionService {
     if (!user) throw authError('UNAUTHENTICATED');
     if (user.status !== 'deleting' || !user.deletionRequestId)
       throw authError('ACCOUNT_DISABLED');
-    const recoverUntil =
-      user.deletionRecoverUntil ??
-      accountRecoveryDeadline(user.deletionRequestedAt ?? now);
+    if (!user.deletionRecoverUntil) throw authError('SERVICE_UNAVAILABLE');
     return {
       requestId: user.deletionRequestId,
       status: 'accepted' as const,
-      recoverUntil: recoverUntil.toISOString(),
+      recoverUntil: user.deletionRecoverUntil.toISOString(),
     };
   }
 }

@@ -31,10 +31,9 @@ describe('push registration input boundary', () => {
   });
 
   it.each([
-    {},
     { expectedBindingRevision: 1 },
     { expectedBindingRevision: Number.MAX_SAFE_INTEGER },
-  ])('accepts a legacy body or a positive safe revision %j', async (body) => {
+  ])('accepts a positive safe revision %j', async (body) => {
     expect(
       await validate(plainToInstance(PushDeactivationDto, body), {
         whitelist: true,
@@ -44,6 +43,7 @@ describe('push registration input boundary', () => {
   });
 
   it.each([
+    {},
     { expectedBindingRevision: null },
     { expectedBindingRevision: 0 },
     { expectedBindingRevision: -1 },

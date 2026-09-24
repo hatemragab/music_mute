@@ -1,6 +1,6 @@
 {
   "name": "@musicmute/worker",
-  "version": "0.1.0-mvp.34",
+  "version": "0.1.0-mvp.36",
   "private": true,
   "description": "MusicMute machine supervisor and native processing child",
   "license": "Apache-2.0",
@@ -23,7 +23,6 @@
   },
   "packageManager": "pnpm@10.14.0",
   "bin": {
-    "musicmute-worker": "./dist/src/cli/main.js",
     "mw": "./dist/src/cli/main.js"
   },
   "scripts": {

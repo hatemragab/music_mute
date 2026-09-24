@@ -41,6 +41,22 @@ describe("qualified enrollment report", () => {
     );
   });
 
+  it("accepts the engine's qualified 160 kbps output evidence", () => {
+    const evidence = qualification("darwin-arm64", "c".repeat(64));
+    const measured = {
+      ...evidence,
+      recipes: evidence.recipes.map((recipe) => ({
+        ...recipe,
+        outputBitrateKbps: 160,
+      })),
+    };
+    expect(() => parseQualificationEvidence(measured)).not.toThrow();
+    measured.recipes[0]!.outputBitrateKbps = 320;
+    expect(() => parseQualificationEvidence(measured)).toThrow(
+      "qualification output bitrate",
+    );
+  });
+
   it("derives the Mac report from a verified release, doctor and host GPU", async () => {
     const root = await temporaryRoot();
     const release = join(root, "release");
@@ -397,8 +413,8 @@ function qualification(
         platform === "darwin-arm64"
           ? "/Library/Application Support/MusicMute/attempts/qualification.mp3"
           : "C:\\ProgramData\\MusicMute\\attempts\\qualification.mp3",
-      resultDigest: "5".repeat(64),
-      resultBytes: 10_001,
+      resultDigest: "4".repeat(64),
+      resultBytes: 10_000,
       contentType: "audio/mpeg",
     },
     totalSeconds: 20,

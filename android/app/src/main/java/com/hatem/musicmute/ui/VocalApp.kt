@@ -1,7 +1,6 @@
 package com.hatem.musicmute.ui
 
 import android.Manifest
-import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -40,9 +39,6 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.hatem.musicmute.R
 import com.hatem.musicmute.data.*
-import com.hatem.musicmute.download.audioExportName
-import com.hatem.musicmute.download.audioMimeType
-import com.hatem.musicmute.download.resolveAudioFile
 import com.hatem.musicmute.processing.*
 import java.io.File
 import androidx.lifecycle.Lifecycle
@@ -75,7 +71,6 @@ private enum class Destination(val label: Int, val icon: ImageVector) {
     Settings(R.string.settings, Icons.Outlined.Tune),
 }
 
-private const val TrackDetailRoute = "track_detail/{jobId}"
 private const val JobDetailRoute = "processing_detail/{jobId}?operationId={operationId}"
 private const val SourceDetailRoute = "source_detail/{operationId}"
 
@@ -90,11 +85,9 @@ private fun taskDetailRoute(operationId: String?, jobId: String?): String = when
 fun VocalApp(
     state: VocalUiState,
     model: VocalViewModel,
-    downloadModel: DownloadsViewModel,
     processingModel: ProcessingViewModel,
     processingSession: ProcessingSession?,
     artifactProgress: Map<String, ArtifactProgress>,
-    originalRoot: File,
     openHistory: Boolean = false,
     openProcessing: Boolean = false,
     openProcessingJob: String? = null,
@@ -123,7 +116,7 @@ fun VocalApp(
     val libraryTitles = remember(libraryEntries) { libraryEntries.associate { it.key to it.title } }
     LaunchedEffect(libraryTitles) { app.audioPlayback.updateLibraryTitles(libraryTitles) }
     val selectedLibraryId = when (route) {
-        TrackDetailRoute, JobDetailRoute -> entry?.arguments?.getString("jobId")
+        JobDetailRoute -> entry?.arguments?.getString("jobId")
         else -> null
     }
     var showPlaybackQueue by rememberSaveable(processingSession) { mutableStateOf(false) }
@@ -131,7 +124,7 @@ fun VocalApp(
     val jobs by processingModel.history.state.collectAsStateWithLifecycle()
     LaunchedEffect(entry?.id, processingSession) {
         val operationId = entry?.arguments?.getString("operationId")
-        if (route in setOf(TrackDetailRoute, JobDetailRoute, SourceDetailRoute) &&
+        if (route in setOf(JobDetailRoute, SourceDetailRoute) &&
             (jobs.selectedId != selectedLibraryId || processing.selectedOperationId != operationId)) {
             processingModel.clearMessage()
             processingModel.selectTask(operationId, selectedLibraryId)
@@ -180,7 +173,7 @@ fun VocalApp(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(route, lifecycleOwner, processingSession) {
         fun update() { processingModel.history.setVisible(
-            (route == Destination.Home.name || route == Destination.Library.name || detail || route == TrackDetailRoute) && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+            (route == Destination.Home.name || route == Destination.Library.name || detail) && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
         val observer = LifecycleEventObserver { _, _ -> update() }
         lifecycleOwner.lifecycle.addObserver(observer)
         update()
@@ -234,17 +227,6 @@ fun VocalApp(
         }
     }
     val noClipboardText = stringResource(R.string.clipboard_empty)
-    val downloads by downloadModel.state.collectAsStateWithLifecycle()
-    var pendingSaveId by rememberSaveable { mutableStateOf<String?>(null) }
-    val saveAudio =
-        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result
-            ->
-            val id = pendingSaveId
-            pendingSaveId = null
-            if (result.resultCode == Activity.RESULT_OK && id != null) {
-                result.data?.data?.let { downloadModel.saveToDevice(id, it) }
-            }
-        }
     var confirmYoutube by remember { mutableStateOf(false) }
     val start: () -> Unit = {
         if (model.validateYoutubeUrl()) { confirmYoutube = true }
@@ -393,35 +375,6 @@ fun VocalApp(
                             },
                         )
                     }
-                    composable("legacy_library") {
-                        val playback by downloadModel.playback.state.collectAsStateWithLifecycle()
-                        DownloadHistoryScreen(
-                            downloads,
-                            playback,
-                            onStart = { navigate(Destination.Home) },
-                            onPlay = downloadModel::play,
-                            onSeek = downloadModel.playback::seek,
-                            onCancel = downloadModel::cancel,
-                            onRetry = downloadModel::retry,
-                            onReload = downloadModel::reload,
-                            canSave = pendingSaveId == null && downloads.savingId == null,
-                            onRemoveMusic = { record ->
-                                resolveAudioFile(originalRoot, record.relativePath)?.let { file ->
-                                    processingModel.removeMusic(record, file)
-                                    nav.navigate(Destination.Home.name) { launchSingleTop = true }
-                                }
-                            },
-                            onSave = { record ->
-                                pendingSaveId = record.id
-                                saveAudio.launch(
-                                    Intent(Intent.ACTION_CREATE_DOCUMENT)
-                                        .addCategory(Intent.CATEGORY_OPENABLE)
-                                        .setType(audioMimeType(record.extension))
-                                        .putExtra(Intent.EXTRA_TITLE, audioExportName(record))
-                                )
-                            },
-                        )
-                    }
                     composable(Destination.Settings.name) {
                         val account by app.authSession.state.collectAsStateWithLifecycle()
                         CreativeSettingsScreen(
@@ -483,16 +436,6 @@ fun VocalApp(
                             queue = { showPlaybackQueue = true },
                             info = { currentTrackKey?.let(openAudioDetails) },
                             star = { currentTrackKey?.let(libraryModel::toggleStar) }))
-                    }
-                    composable(TrackDetailRoute) { trackBackStack ->
-                        // Migrate a restored back stack from builds with a separate track page.
-                        LaunchedEffect(trackBackStack.id) {
-                            val trackId = trackBackStack.arguments?.getString("jobId")
-                            nav.navigate(taskDetailRoute(null, trackId)) {
-                                popUpTo(TrackDetailRoute) { inclusive = true }
-                                launchSingleTop = true
-                            }
-                        }
                     }
                     composable(JobDetailRoute, arguments = listOf(navArgument("operationId") { nullable = true; defaultValue = null })) { jobBackStack ->
                         val jobId = jobBackStack.arguments?.getString("jobId")

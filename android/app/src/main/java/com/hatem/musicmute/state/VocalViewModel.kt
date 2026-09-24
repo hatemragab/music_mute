@@ -7,7 +7,6 @@ import com.hatem.musicmute.data.AppPreferences
 import com.hatem.musicmute.data.AudioSource
 import com.hatem.musicmute.data.LanguageChoice
 import com.hatem.musicmute.data.PreferencesRepository
-import com.hatem.musicmute.data.ThemeChoice
 import com.hatem.musicmute.data.WorkflowEvent
 import com.hatem.musicmute.data.WorkflowRepository
 import com.hatem.musicmute.data.WorkflowRequest
@@ -172,8 +171,6 @@ class VocalViewModel(
     fun openSession(session: DemoSession) {
         mutableState.update { it.copy(workflow = WorkflowState.Complete(session)) }
     }
-
-    fun setTheme(theme: ThemeChoice) = savePreference { preferencesRepository.setTheme(theme) }
 
     fun setAccent(argb: Int) = savePreference { preferencesRepository.setAccent(argb) }
 

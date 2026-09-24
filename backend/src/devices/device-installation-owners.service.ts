@@ -148,7 +148,6 @@ export class DeviceInstallationOwnersService {
       .select('_id')
       .lean()
       .exec();
-    // Missing legacy ownership records are unknown, not proof of sign-out.
     return new Set(owners.map((owner) => owner._id));
   }
 

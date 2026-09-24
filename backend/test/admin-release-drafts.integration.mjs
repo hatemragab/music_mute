@@ -157,8 +157,6 @@ test(
               storeReleaseId: draft.id,
             },
             'platforms.android.minimumBuild': 10,
-            'platforms.android.latestBuild': 12,
-            'platforms.android.downloadUrl': request.storeUrl,
           },
         },
       );

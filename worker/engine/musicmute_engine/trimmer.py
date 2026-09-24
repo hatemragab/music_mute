@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from .limits import MAX_LOSSLESS_SAMPLES
+from .limits import CHANNELS, MAX_LOSSLESS_SAMPLES, SAMPLE_RATE
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,7 @@ class EditRange:
 
 @dataclass(frozen=True)
 class TrimResult:
+    audio_path: Path
     source_samples: int
     output_samples: int
     sample_rate: int
@@ -33,18 +34,25 @@ class TrimResult:
 def trim_vocal_gaps(
     source: Path,
     destination: Path,
-    threshold_db: float = -45,
-    min_silence: float = 0.8,
+    threshold_db: float = -32,
+    min_silence: float = 0.6,
     padding: float = 0.2,
+    *,
+    reuse_unchanged: bool = False,
 ) -> TrimResult:
-    """Port the preserved 10 ms RMS trimmer without changing its PCM behavior."""
+    """Trim quiet gaps using 10 ms RMS windows and retained vocal padding."""
     _validate_parameters(threshold_db, min_silence, padding)
     import numpy as np
     import soundfile as sf
 
     with sf.SoundFile(source) as stream:
         rate, channels, samples = stream.samplerate, stream.channels, len(stream)
-        if samples <= 0 or samples > MAX_LOSSLESS_SAMPLES:
+        if (
+            rate != SAMPLE_RATE
+            or channels != CHANNELS
+            or samples <= 0
+            or samples > MAX_LOSSLESS_SAMPLES
+        ):
             raise ValueError("Vocal input sample count is outside worker limits")
         frame = max(1, round(rate * 0.01))
         count = (samples + frame - 1) // frame
@@ -53,6 +61,8 @@ def trim_vocal_gaps(
         cursor = 0
         while cursor < count:
             audio = stream.read(frame * 1024, dtype="float32", always_2d=True)
+            if stream.subtype != "PCM_16" and not np.isfinite(audio).all():
+                raise ValueError("Vocal input contains non-finite samples")
             complete = len(audio) // frame
             if complete:
                 groups = audio[: complete * frame].reshape(complete, frame, channels)
@@ -91,6 +101,16 @@ def trim_vocal_gaps(
             keep.append((cursor, samples))
         if not keep:
             keep = [(0, samples)]
+
+        if reuse_unchanged and keep == [(0, samples)]:
+            return TrimResult(
+                audio_path=source,
+                source_samples=samples,
+                output_samples=samples,
+                sample_rate=rate,
+                channels=channels,
+                retained_ranges=(EditRange(0, samples, 0, samples),),
+            )
 
         destination.parent.mkdir(parents=True, exist_ok=True)
         written = 0
@@ -136,6 +156,7 @@ def trim_vocal_gaps(
                 edit_map.append(EditRange(start, end, output_start, written))
 
     return TrimResult(
+        audio_path=destination,
         source_samples=samples,
         output_samples=written,
         sample_rate=rate,

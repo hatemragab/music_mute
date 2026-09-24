@@ -164,9 +164,7 @@ class ProcessingUsageRepository(private val api: JobsApi, private val session: (
         mutable.value = null
         val result = try { api.processingUsage() } catch (error: CancellationException) { throw error }
             catch (error: JobsFailure) {
-                // Legacy servers and disconnected clients keep their safe local flow;
-                // actual admission still authoritatively enforces access and capacity.
-                if (error.problem in setOf(JobsProblem.JOB_NOT_FOUND, JobsProblem.OFFLINE)) null else throw error
+                if (error.problem == JobsProblem.OFFLINE) null else throw error
             }
         if (session() != owner) throw CancellationException("Processing session changed")
         mutable.value = result

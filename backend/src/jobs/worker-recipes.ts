@@ -5,7 +5,7 @@ import type { WorkerRecipeSnapshot } from './job.types.js';
 export const QUALIFIED_MODEL_DIGEST =
   'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b';
 export const QUALIFIED_MODEL_BYTES = 66_759_214;
-export const DEFAULT_WORKER_RECIPE_ID = 'kim-vocals-v2-trim' as const;
+export const DEFAULT_WORKER_RECIPE_ID = 'kim-vocals-v2' as const;
 
 function canonical(value: unknown): string {
   if (
@@ -29,29 +29,27 @@ function canonical(value: unknown): string {
 
 function createRecipe(
   recipeId: WorkerRecipeId,
-  options: { trimEnabled?: boolean } = {},
 ): Readonly<WorkerRecipeSnapshot> {
-  const trimEnabled = options.trimEnabled === true;
+  const trimEnabled = true;
   const stepIds: WorkerRecipeSnapshot['stepIds'] = [
-    'prepare-pcm16-stereo-44100-v1',
-    'separate-kim-vocal-2-v1',
-    ...(trimEnabled ? (['trim-vocal-gaps-v1'] as const) : []),
+    'separate-kim-vocal-2-wav-v1',
+    'trim-vocal-wav-v1',
     'encode-mp3-up-to-160k-v1',
     'validate-audio-v1',
   ];
   const material: Omit<WorkerRecipeSnapshot, 'recipeDigest'> = {
     recipeId,
-    recipeRevision: 3,
+    recipeRevision: 5,
     protocolVersion: 1,
     modelFilename: 'Kim_Vocal_2.onnx',
     modelDigest: QUALIFIED_MODEL_DIGEST,
     modelBytes: QUALIFIED_MODEL_BYTES,
-    preparationProfileId: 'pcm16-stereo-44100-v1',
+    inputProfileId: 'direct-input-v1',
     stepIds,
     trimEnabled,
     denoiseEnabled: false,
     denoisePresetId: null,
-    trimProfileId: trimEnabled ? 'trim-vocal-gaps-v1' : null,
+    trimProfileId: 'trim-vocal-wav-v1',
     outputFormat: 'mp3',
     outputBitrateKbps: 160,
   };
@@ -70,9 +68,7 @@ export const WORKER_RECIPES: Readonly<
   Record<WorkerRecipeId, Readonly<WorkerRecipeSnapshot>>
 > = Object.freeze({
   'kim-vocals-v2': createRecipe('kim-vocals-v2'),
-  'kim-vocals-v2-trim': createRecipe('kim-vocals-v2-trim', {
-    trimEnabled: true,
-  }),
+  'kim-vocals-v2-trim': createRecipe('kim-vocals-v2-trim'),
 });
 
 export function workerRecipeSnapshot(

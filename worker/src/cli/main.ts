@@ -252,7 +252,7 @@ if (command === "--help" || command === "help") {
   }
 } else {
   console.error(
-    `Usage: mw <install | status | start | stop | restart | logs | job | errors | explain | perf | diagnostics | doctor | benchmark | benchmark-file | pause | drain | resume | update | unpair | uninstall | protocol-doctor | prepare-installation ... | enroll ... | run --config <absolute-path> | macos ... | windows ...>`,
+    `Usage: mw <install | status | start | stop | restart | logs | job | errors | explain | perf | diagnostics | doctor | benchmark | benchmark-file | pause | drain | resume | update | unpair | uninstall | protocol-doctor | prepare-installation ... | enroll ... | run --config <absolute-path> | package-macos ... | windows ...>`,
   );
   process.exitCode = 2;
 }

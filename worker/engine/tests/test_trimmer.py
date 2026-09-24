@@ -29,10 +29,35 @@ class TrimmerParityTests(unittest.TestCase):
             root = Path(directory)
             source, output = root / "source.wav", root / "output.wav"
             sf.write(source, audio, RATE, subtype="PCM_16")
-            result = trim_vocal_gaps(source, output)
+            result = trim_vocal_gaps(source, output, threshold_db=-45, min_silence=0.8)
             self.assertEqual(result.source_samples, len(audio), name)
             self.assertEqual(result.output_samples, expected, name)
             self.assertEqual(len(sf.read(output, dtype="int16")[0]), expected, name)
+
+    def test_trial_defaults_detect_quiet_residue_and_shorter_gaps(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.wav"
+            for gap_seconds, level, removed_seconds in ((0.7, 0.011, 0.3), (0.7, 0.007, 0.3), (0.6, 0.007, 0.2), (0.59, 0.007, 0), (0.7, 0.02, 0.3), (0.7, 0.03, 0)):
+                gap = np.full((round(RATE * gap_seconds), 2), level, dtype=np.float32)
+                sf.write(source, np.concatenate((tone(RATE), gap, tone(RATE))), RATE, subtype="PCM_16")
+                result = trim_vocal_gaps(source, root / "trial.wav")
+                legacy = trim_vocal_gaps(source, root / "legacy.wav", threshold_db=-45, min_silence=0.8)
+                self.assertEqual(result.removed_samples, round(RATE * removed_seconds))
+                self.assertEqual(legacy.removed_samples, 0)
+                if level == 0.02:
+                    previous = trim_vocal_gaps(source, root / "previous.wav", threshold_db=-38, min_silence=0.6)
+                    self.assertEqual(previous.removed_samples, 0)
+
+    def test_unchanged_audio_reuses_wav_without_another_write(self) -> None:
+        for audio in (tone(RATE), silence(RATE)):
+            with tempfile.TemporaryDirectory() as directory:
+                source, output = Path(directory) / "source.wav", Path(directory) / "trimmed.wav"
+                sf.write(source, audio, RATE, subtype="PCM_16")
+                result = trim_vocal_gaps(source, output, reuse_unchanged=True)
+                self.assertEqual(result.audio_path, source)
+                self.assertEqual(result.removed_samples, 0)
+                self.assertFalse(output.exists())
 
     def test_reference_vectors(self) -> None:
         self.run_case(

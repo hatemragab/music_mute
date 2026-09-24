@@ -22,7 +22,6 @@ EXPECTED_ONNXRUNTIME = {
     "directml": "1.24.4",
 }
 EXPECTED_TORCH = "2.14.0"
-EXPECTED_ONNX2PYTORCH = "0.5.1"
 EXPECTED_AUDIO_SEPARATOR = "0.47.0"
 EXPECTED_FFMPEG = "8.0.3"
 OUTPUT_LIMIT = 16 * 1024
@@ -57,13 +56,12 @@ def collect_diagnostics(
     if provider == "mps":
         try:
             torch_version = importlib.metadata.version("torch")
-            converter_version = importlib.metadata.version("onnx2pytorch")
             import torch
+            import onnx2torch  # noqa: F401
         except (ImportError, importlib.metadata.PackageNotFoundError) as error:
             raise ServiceDoctorError("UVR MPS runtime is incomplete") from error
         if (
             torch_version != EXPECTED_TORCH
-            or converter_version != EXPECTED_ONNX2PYTORCH
             or not torch.backends.mps.is_built()
             or not torch.backends.mps.is_available()
         ):

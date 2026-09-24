@@ -77,12 +77,19 @@ class MediaPreparationWorker(context: Context, parameters: WorkerParameters) : C
                     policy.requireLongJobAvailable(inspection.audio.durationSeconds)
                     val sourceKind = if (inspection.hasVideo) "video_file" else "audio_file"
                     repository.store.update(owner, operationId) { it.copy(mediaSource = sourceKind, phase = ProcessingPhase.PREPARING_INPUT) }
-                    val canCopy = !inspection.hasVideo && inspection.audioTrackCount == 1 &&
-                        inspection.audio.bitRate != null && inspection.audio.bitRate <= 160_000 &&
-                        processingContentType(name.substringAfterLast('.', "").lowercase()) != null
+                    val sourceBytes = if (inspection.audio.bitRate == null && !inspection.hasVideo && inspection.audioTrackCount == 1) {
+                        applicationContext.contentResolver.openAssetFileDescriptor(uri, "r")?.use {
+                            (it.length.takeIf { size -> size >= 0 } ?: it.parcelFileDescriptor.statSize).takeIf { size -> size > 0 }
+                        }
+                    } else null
+                    val canCopy = canCopyProcessingAudio(inspection,
+                        name.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT), sourceBytes, policy)
                     try {
                         if (!canCopy) throw InputPreparationException(InputPreparationError.UNSUPPORTED)
-                        app.audioInputPreparer.prepare(owner, name, operationId, policy, sourceKind) {
+                        // The server worker fully decodes the submitted audio. Keep the phone's
+                        // preflight to container, duration, size and checksum inspection.
+                        app.audioInputPreparer.prepare(owner, name, operationId, policy, sourceKind,
+                            validateFullDecode = false) {
                             applicationContext.contentResolver.openInputStream(uri) ?: throw InputPreparationException(InputPreparationError.STORAGE)
                         }
                     } catch (error: InputPreparationException) {

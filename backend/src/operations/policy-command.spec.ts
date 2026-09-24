@@ -1,17 +1,16 @@
 import { HttpException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import type { AppPolicyService } from '../app-policy/app-policy.service.js';
 import { defaultPolicy } from '../app-policy/access-policy.js';
 import { PolicyCommand } from './policy-command.js';
 
 describe('PolicyCommand', () => {
-  it('prevents release-policy bypass while retaining email policy changes', async () => {
+  it('rejects release policy changes and accepts email policy changes', async () => {
     const current = vi.fn().mockResolvedValue(defaultPolicy());
     const replace = vi.fn().mockImplementation(async (policy) => policy);
-    const service = new PolicyCommand(
-      { current, replace } as unknown as AppPolicyService,
-      new ConfigService({ APP_UPDATES_ENABLED: true }),
-    );
+    const service = new PolicyCommand({
+      current,
+      replace,
+    } as unknown as AppPolicyService);
     await expect(
       service.setPolicy(
         { platforms: { android: { minimumBuild: null } } },
@@ -56,21 +55,16 @@ describe('PolicyCommand', () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
-  it('deep-merges platform patches before full validation and apply', async () => {
+  it('applies the email-verification patch', async () => {
     const { service, replace } = fixture();
-    const patch = {
-      platforms: {
-        ios: {
-          minimumBuild: 10,
-          latestBuild: 12,
-          downloadUrl: 'https://apps.example.test/musicmute',
-        },
-      },
-    };
-
-    const result = await service.setPolicy(patch, 0, true);
+    const result = await service.setPolicy(
+      { requireVerifiedEmail: true },
+      0,
+      true,
+    );
 
     expect(result.applied).toBe(true);
+    expect(result.next.requireVerifiedEmail).toBe(true);
     expect(result.next.platforms.android.minimumBuild).toBeNull();
     expect(replace).toHaveBeenCalledOnce();
   });

@@ -85,7 +85,7 @@ local-engine-only`. They include fixture/model/recipe digests, GPU model when
 reported by `system_profiler`, OS/runtime versions, audio settings, every
 sample, MPS evidence, and timing/memory scope. `--report` and
 `--save-audio-dir` require new paths inside the current user's home, with
-owner-only files. MP3 and lossless FLAC vocals are saved only when requested.
+owner-only files. Final MP3 vocals are saved only when requested.
 Each saved file is represented by an opaque relative name, byte count, and
 SHA-256 in the report, so the later listening and PCM comparison can verify
 that it is reviewing the retained run's audio.

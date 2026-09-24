@@ -17,9 +17,10 @@ export const WORKER_RECIPE_IDS = [
 export type WorkerRecipeId = (typeof WORKER_RECIPE_IDS)[number];
 
 export const WORKER_RECIPE_STEP_IDS = [
-  'prepare-pcm16-stereo-44100-v1',
-  'separate-kim-vocal-2-v1',
-  'trim-vocal-gaps-v1',
+  'separate-kim-vocal-2-wav-v1',
+  'trim-vocal-wav-v1',
+  'separate-kim-vocal-2-direct-mp3-v1',
+  'trim-vocal-mp3-v1',
   'encode-mp3-up-to-160k-v1',
   'validate-audio-v1',
 ] as const;

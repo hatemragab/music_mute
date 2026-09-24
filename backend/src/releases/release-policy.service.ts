@@ -5,11 +5,7 @@ import type { Model } from 'mongoose';
 import { AppPolicyService } from '../app-policy/app-policy.service.js';
 import { adminError } from '../admin/admin-errors.js';
 import { Release } from './release.schema.js';
-import {
-  decideUpdate,
-  parseDistribution,
-  releaseLandingUrl,
-} from './release-policy.js';
+import { decideUpdate, parseDistribution } from './release-policy.js';
 import type { UpdatePolicySnapshot } from './release.types.js';
 
 @Injectable()
@@ -32,18 +28,10 @@ export class ReleasePolicyService {
     const policy = await this.policies.current();
     const channel = policy.platforms[platform],
       selection = channel.releaseSelection;
-    if (
-      !selection &&
-      (channel.minimumBuild !== null ||
-        channel.latestBuild !== null ||
-        channel.downloadUrl !== null)
-    )
-      throw adminError('DEPENDENCY_UNAVAILABLE');
-    const id = selection
-      ? distribution === 'direct' && selection.source === 'direct_apk'
+    const id =
+      distribution === 'direct' && selection.source === 'direct_apk'
         ? selection.directReleaseId
-        : selection.storeReleaseId
-      : null;
+        : selection.storeReleaseId;
     const snapshot: UpdatePolicySnapshot = {
       schemaVersion: 1,
       revision: policy.revision,
@@ -82,26 +70,6 @@ export class ReleasePolicyService {
               }
             : null,
       };
-    }
-    // Legacy Android fields project the configured source, not the independently selected Play target.
-    if (
-      platform === 'ios' ||
-      distribution === 'direct' ||
-      selection?.source === 'google_play'
-    ) {
-      const expectedUrl = snapshot.target
-        ? snapshot.target.source === 'direct_apk'
-          ? releaseLandingUrl(
-              this.config.get<string>('RELEASE_LANDING_BASE_URL'),
-              snapshot.target.id,
-            )
-          : snapshot.target.storeUrl
-        : null;
-      if (
-        channel.latestBuild !== (snapshot.target?.buildNumber ?? null) ||
-        channel.downloadUrl !== expectedUrl
-      )
-        throw adminError('DEPENDENCY_UNAVAILABLE');
     }
     try {
       decideUpdate(1, snapshot);

@@ -142,8 +142,11 @@ describe('Firebase account API composition', () => {
       .expect(200);
     f.state.policy.platforms.android = {
       minimumBuild: 2,
-      latestBuild: 2,
-      downloadUrl: 'https://example.invalid/app',
+      releaseSelection: {
+        source: 'direct_apk',
+        directReleaseId: 'a'.repeat(24),
+        storeReleaseId: null,
+      },
     };
     const outdated = await request(f.app.getHttpServer())
       .get('/api/v1/processing-probe')

@@ -138,7 +138,7 @@ describe('public job admission', () => {
     const f = fixture();
     const recipeSnapshot = {
       recipeId: 'kim-vocals-v2',
-      recipeRevision: 3,
+      recipeRevision: 4,
     };
     const job = {
       _id: jobId,

@@ -98,6 +98,9 @@ export class WorkerChildProcess {
       cwd: this.options.cwd,
       env,
       windowsHide: true,
+      // Give the POSIX worker its own process group so cancellation also
+      // terminates media decoders, not just the Python parent.
+      detached: process.platform !== "win32",
     };
     const child = spawn(
       this.options.command,
@@ -180,7 +183,7 @@ export class WorkerChildProcess {
           ),
         ]);
     } catch {
-      child.kill("SIGKILL");
+      killProcessingTree(child);
       if (child.exitCode === null && child.signalCode === null) {
         await Promise.race([
           once(child, "exit"),
@@ -231,7 +234,7 @@ export class WorkerChildProcess {
         () => {
           this.pending.delete(requestId);
           reject(new Error(`Worker child ${command} timed out`));
-          child.kill("SIGKILL");
+          killProcessingTree(child);
         },
         boundedTimeout(
           timeoutMs,
@@ -350,8 +353,20 @@ export class WorkerChildProcess {
       pending.reject(error);
     }
     this.pending.clear();
-    child?.kill("SIGKILL");
+    if (child) killProcessingTree(child);
   }
+}
+
+function killProcessingTree(child: ChildProcessWithoutNullStreams): void {
+  if (process.platform !== "win32" && child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
+    }
+  }
+  child.kill("SIGKILL");
 }
 
 function boundedTimeout(value: number | undefined, fallback: number): number {

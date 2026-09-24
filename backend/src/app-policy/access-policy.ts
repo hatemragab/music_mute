@@ -7,8 +7,22 @@ export function defaultPolicy(): AppPolicy {
     _id: 'global',
     requireVerifiedEmail: false,
     platforms: {
-      android: { minimumBuild: null, latestBuild: null, downloadUrl: null },
-      ios: { minimumBuild: null, latestBuild: null, downloadUrl: null },
+      android: {
+        minimumBuild: null,
+        releaseSelection: {
+          source: 'direct_apk',
+          directReleaseId: null,
+          storeReleaseId: null,
+        },
+      },
+      ios: {
+        minimumBuild: null,
+        releaseSelection: {
+          source: 'app_store',
+          directReleaseId: null,
+          storeReleaseId: null,
+        },
+      },
     },
     revision: 0,
     updatedAt: new Date(0),
@@ -51,62 +65,38 @@ export function validatePolicy(value: unknown): asserts value is AppPolicy {
   exact(platforms, ['android', 'ios']);
   for (const name of ['android', 'ios']) {
     const platform = object(platforms[name]);
-    exact(platform, [
-      'minimumBuild',
-      'latestBuild',
-      'downloadUrl',
-      ...(platform.releaseSelection !== undefined ? ['releaseSelection'] : []),
-    ]);
-    if (platform.releaseSelection !== undefined) {
-      const selection = object(platform.releaseSelection);
-      exact(selection, ['source', 'directReleaseId', 'storeReleaseId']);
-      if (
-        !(
-          name === 'android' ? ['direct_apk', 'google_play'] : ['app_store']
-        ).includes(selection.source as string)
-      )
-        fail();
-      for (const field of ['directReleaseId', 'storeReleaseId']) {
-        if (
-          selection[field] !== null &&
-          (typeof selection[field] !== 'string' ||
-            !/^[a-f0-9]{24}$/.test(selection[field] as string))
-        )
-          fail();
-      }
-      if (name === 'ios' && selection.directReleaseId !== null) fail();
-    }
-    for (const field of ['minimumBuild', 'latestBuild']) {
-      const build = platform[field];
-      if (
-        build !== null &&
-        (typeof build !== 'number' ||
-          !Number.isInteger(build) ||
-          build < 1 ||
-          build > 2147483647)
-      )
-        fail();
-    }
-    if (platform.downloadUrl !== null) {
-      if (
-        typeof platform.downloadUrl !== 'string' ||
-        platform.downloadUrl.length > 2048
-      )
-        fail();
-      try {
-        const url = new URL(platform.downloadUrl as string);
-        if (url.protocol !== 'https:' || url.username || url.password) fail();
-      } catch {
-        fail();
-      }
-    }
+    exact(platform, ['minimumBuild', 'releaseSelection']);
+    const selection = object(platform.releaseSelection);
+    exact(selection, ['source', 'directReleaseId', 'storeReleaseId']);
     if (
-      platform.minimumBuild !== null &&
-      (platform.latestBuild === null ||
-        (platform.latestBuild as number) < (platform.minimumBuild as number) ||
-        platform.downloadUrl === null)
+      !(
+        name === 'android' ? ['direct_apk', 'google_play'] : ['app_store']
+      ).includes(selection.source as string)
     )
       fail();
+    for (const field of ['directReleaseId', 'storeReleaseId']) {
+      if (
+        selection[field] !== null &&
+        (typeof selection[field] !== 'string' ||
+          !/^[a-f0-9]{24}$/.test(selection[field] as string))
+      )
+        fail();
+    }
+    if (name === 'ios' && selection.directReleaseId !== null) fail();
+    const build = platform.minimumBuild;
+    if (
+      build !== null &&
+      (typeof build !== 'number' ||
+        !Number.isInteger(build) ||
+        build < 1 ||
+        build > 2147483647)
+    )
+      fail();
+    const selectedId =
+      selection.source === 'direct_apk'
+        ? selection.directReleaseId
+        : selection.storeReleaseId;
+    if (build !== null && selectedId === null) fail();
   }
 }
 
@@ -126,7 +116,6 @@ export function evaluateProcessingAccess(
     return {
       allowed: false,
       reason: 'APP_UPDATE_REQUIRED',
-      ...(platform.downloadUrl ? { downloadUrl: platform.downloadUrl } : {}),
     };
   return { allowed: true };
 }

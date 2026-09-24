@@ -12,9 +12,24 @@ administrator dashboard.
 
 The Node supervisor owns machine authentication, backend reconciliation, job
 authority, leases, transfers, child lifecycle and sanitized diagnostics. The
-Python child owns local media preparation, inference and result metadata. Audio
+Python child owns direct-input inference and result metadata. Audio
 bytes never travel through the child control pipe, and the child never receives
 backend or S3 credentials.
+
+## Public-upload security boundary
+
+The macOS LaunchAgent and Python child run as the logged-in user. A separate
+process, private attempt directory and filtered environment are not an OS
+sandbox: a native decoder exploit could access files allowed to that user.
+Do not treat this deployment as containment for hostile public uploads on a
+personal workstation. See [the public-upload review](../docs/worker-rebuild/validation/PUBLIC-UPLOAD-SECURITY.md).
+
+Media subprocess output is bounded while being read; exceeding the limit kills
+the tool. On POSIX, each processing child owns a process group so forced
+termination, request timeout and parent exit also terminate decoder descendants.
+Windows currently retains direct-child termination and needs a Job Object for
+an equivalent process-tree guarantee. These controls do not provide a hard
+CPU, GPU or resident-memory quota.
 
 ## Development
 
@@ -23,8 +38,6 @@ corepack enable
 pnpm install --frozen-lockfile
 uv venv .venv --python 3.13
 uv pip sync --python .venv/bin/python ../tools/worker-gpu-feasibility/requirements-mps-base.lock.txt
-uv pip install --python .venv/bin/python --no-deps \
-  -r ../tools/worker-gpu-feasibility/requirements-mps-overlay.lock.txt
 pnpm run verify
 ```
 
@@ -33,10 +46,8 @@ On Windows, create the venv with the accepted Python 3.12 runtime and sync
 runner at an already-qualified interpreter. Do not mix ONNX Runtime
 distributions or install these locks globally.
 
-The separate MPS overlay intentionally uses `--no-deps`: the MPS base lock
-already supplies the `onnx` module through `onnx-weekly`, while upstream
-`onnx2pytorch` declares the stable `onnx` distribution. Installing both would
-make the packaged module namespace order-dependent.
+The MPS base lock includes `onnx2torch-py313`; the worker imports its
+`onnx2torch` module for the direct PyTorch MPS path.
 
 The generated TypeScript protocol under `protocol/v1/` is copied from the
 backend's canonical pure-data protocol. Run `pnpm protocol:sync` after an
@@ -121,8 +132,7 @@ npm install -g @musicmute/worker
 mw install --label "Studio Mac"
 ```
 
-The package installs `mw` as the short CLI command. The original
-`musicmute-worker` command remains available for existing scripts.
+The package installs `mw` as its CLI command.
 
 The command reads the one-use enrollment code from `/dev/tty` with echo
 disabled, uses `https://api.music-mute.com/api/v1`, downloads the service
@@ -251,8 +261,9 @@ require the full integrity check. Doctor JSON marks checks as passed, failed, or
 not run and includes safe reason codes and next actions.
 
 `perf` reports the last 1–100 locally observed attempts, with optional time and
-recipe filters. Successful samples include measured download, preparation,
-separation, encoding, upload, and completion acknowledgement durations, decoded
+recipe filters. Successful samples include measured download, separation,
+upload, and completion acknowledgement durations. Revision 5 records mandatory
+trimming and the single final encode for both recipe names. The report includes decoded
 input duration, output size, and separation real-time factor when available.
 It separates failed, stopped, active, and retried attempts. Medians and ranges
 are computed only within cohorts sharing provider, logical GPU slot, runtime
@@ -406,35 +417,94 @@ and boundary GPU allocation observations. The cold label includes preload
 and first-pass context; it does not claim an uncached OS or GPU driver. The
 memory readings are process allocations at run boundaries, not peak GPU
 occupancy. `--json` streams progress objects followed by a final report.
+The CLI passes MP3 and WAV directly to the separator. It decodes every other
+accepted format to a temporary WAV, records that time as `preparation`, and
+removes the WAV after separation or failure. The benchmark workspace is also
+removed when the CLI command finishes.
 
 `--candidate-engine` imports the worktree engine through a private Python path
 while keeping the installed dependency runtime. The report records a digest
 of candidate source files separately from the installed release manifest
 digest. It does not alter installed site-packages or the signed release.
 `--save-audio-dir` is optional and must name a new private directory; it saves
-MP3 and lossless FLAC vocals for quality review. `--report` saves a new private
+the final MP3 vocals for quality review. `--report` saves a new private
 JSON file. A failed run leaves a sanitized partial diagnostic report under the
 worker state directory. `--baseline-report` compares saved reports only when
 the source, model, recipe, audio settings, GPU model, OS, and dependency runtime
 match. Incompatible reports show reasons and no speedup. Group sizes 2 and 4
-are rejected until the real inference loop supports them. CPU inference and
-MPS fallback are disabled for this benchmark.
+remain available for comparison. Production uses group size 2 on MPS and 1 on
+DirectML; on the tested M4 Pro, group 2 outperformed groups 1 and 4 with PCM
+differences within the baseline repeat-run variation. CPU inference and MPS fallback are disabled
+for this benchmark.
 
-Production children preload the verified model before announcing readiness
-and keep it resident between jobs; their bounded startup timeout covers the
-private Python import and PyTorch MPS initialization. Kim Vocal 2 uses UVR's
-`onnx2pytorch` MPS path, segment size 256, group size 1, denoise disabled,
-and model-specific **Default** overlap.
+Warm jobs reuse the loaded model's verified identity rather than rehashing its
+on-disk artifact. Every new child verifies before loading; a warm child rejects
+cache/provider/model identity changes. Disk corruption is detected on the next
+load, while existing children continue using their verified in-memory graph.
+Prepared PCM16 WAVs receive bounded metadata and final-frame checks instead of a
+full finite-sample scan; floating-point audio retains the scan. Input checksums
+and final-output checksums remain enforced.
 
-The worker reads the compressed input audio bitrate during its existing bounded
-probe. It encodes the vocal MP3 at the highest supported rate no greater than
-160 kbps or a known lower input rate. Unknown input bitrate uses 160 kbps;
-very low known rates below the supported 44.1 kHz MP3 range fail explicitly.
-The recipe's 160 kbps value is the output ceiling; completion records the
-selected actual target. Backend validates upload size and does not transcode.
+Production children preload the verified model before announcing readiness and
+keep it resident between jobs. Kim Vocal 2 converts the verified ONNX model with
+`onnx2torch`, runs on MPS with segment size 256 and UVR Default overlap
+(`7680 / 261120`), and writes a private PCM16 vocal WAV directly through
+soundfile. MP3 and WAV inputs go directly to the separator; other accepted
+formats are decoded to a bounded local WAV first.
 
-The worker advertises `kim-vocals-v2` for an untrimmed vocal stem and
-`kim-vocals-v2-trim` for the default product behavior. The trimmed recipe
-preserves the reference `separate.py` algorithm: 10 ms louder-channel RMS
-windows, a strict -45 dBFS threshold, 0.8-second minimum gaps, 0.2-second
-retained padding, 5 ms boundary fades, and all-silent preservation.
+For primary-vocal output, the worker skips the unused secondary-stem and
+`match_mix` passes. Local success diagnostics include `separationMixPreparation`,
+`separationPrimaryDemix`, `separationMatchMix` (zero when skipped),
+`separationWavWrite`, and `separationCleanup`. These are subdivisions of the
+existing separation stage, not additional work or backend processing stages.
+
+Both `kim-vocals-v2` and the compatibility name `kim-vocals-v2-trim` now use
+recipe revision 5: separate to WAV, trim WAV, encode one final 160 kbps MP3,
+then validate it. Trimming is mandatory. The reference algorithm remains:
+10 ms louder-channel RMS windows, a strict -32 dBFS threshold, 0.6-second minimum
+gaps, 0.2-second retained padding, 5 ms boundary fades, and all-silent
+preservation. If no samples are removed, encoding reads the existing separated
+WAV instead of writing another copy. All generated WAVs are removed on success
+and failure; the final MP3 alone is published.
+
+Final MP3 encoding uses LAME `compression_level=7`, trading encoding analysis
+quality for speed while retaining 160 kbps, stereo, and 44.1 kHz. Three-run
+local benchmarks on two vocal WAVs measured 48–51% less encoding time than
+the default setting; this is not an end-to-end production speed guarantee.
+
+The uploader starts a streaming PUT after receiving the checksum-bound backend
+grant. It hashes bounded chunks while uploading and withholds the final chunk
+until size and checksum match. There is no full-file buffer or extra pre-upload
+hash pass. S3's signed checksum, immutable version, retries and completion
+checks remain required. The final checksum and upload grant must exist before
+upload starts; network latency cannot be eliminated by local processing.
+
+Rollout requires the matching backend recipe catalog and worker together.
+Drain old-revision queued/in-flight jobs with the old worker before switching;
+revision 4 snapshots are not silently reinterpreted as revision 5. Historical
+records retain their original step IDs. No database migration or deployment is
+performed by these source changes.
+
+Local validation on 2026-09-24: 62 Python engine tests and 267 TypeScript worker
+tests passed (2 platform-specific tests skipped). Backend verification passed
+807 unit tests and 140 HTTP tests; the isolated compiled backend/worker job-flow
+test also passed with fixture storage. A real local MPS smoke run using a
+six-second synthetic fixture produced and decoded the final MP3, ran mandatory
+trimming, and left no generated WAVs. Its measured stages were 1.186 seconds
+separation, 0.002 seconds trimming, and 0.141 seconds encoding. This is a
+functional smoke test, not a comparative benchmark or live-S3/deployment proof.
+Android DirectDebug unit tests, lint and APK assembly passed; no device/UI or
+listening acceptance was performed.
+
+Historical measurements below predate revision 5 and are not its benchmark:
+
+On 2026-09-23, the worktree Python engine ran the verified model on an M4 Pro
+with a 162.3-second MP3 using the setup note's Python 3.12.13 environment,
+`audio-separator` 0.47.0, and MPS fallback disabled. In the first session, the
+plain job took 14.08 seconds and a trimmed job took 11.63 seconds, including
+9.88 seconds of separation, 0.21
+seconds of trimming, and 1.42 seconds of re-encoding. Model preload and warm-up
+were separate from those job times (24.65 seconds in the first session). In a
+second session, two plain jobs took 10.24 and 9.99 seconds. These
+are local candidate-engine measurements, not a packaged CLI or full backend
+job benchmark. Listening review of the output remains pending.

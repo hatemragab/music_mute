@@ -76,7 +76,7 @@ final class ProcessingStoreTests: XCTestCase {
     } catch { XCTAssertEqual(error as? ProcessingStoreFailure, .invalidPath) }
   }
 
-  func testOlderSnapshotWithoutActionFieldsDecodesAndPreservesNewCancellationIntent() async throws {
+  func testUnsupportedSnapshotVersionIsRejected() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let staging = root.appendingPathComponent("staging")
@@ -84,11 +84,10 @@ final class ProcessingStoreTests: XCTestCase {
     let prepared = try processingPrepared(root: staging)
     let store = ProcessingStore(root: storeRoot, stagingRoot: staging)
     let operation = try await store.createOperation(prepared: prepared)
-    var legacy = try XCTUnwrap(
-      JSONSerialization.jsonObject(with: JSONEncoder().encode(operation)) as? [String: Any])
-    legacy.removeValue(forKey: "cancellationRequested")
     let snapshot: [String: Any] = [
-      "version": 1, "ownerUid": prepared.ownerUid, "operations": [legacy], "jobs": [],
+      "version": 1, "ownerUid": prepared.ownerUid,
+      "operations": [try JSONSerialization.jsonObject(with: JSONEncoder().encode(operation))],
+      "jobs": [],
     ]
     let file = storeRoot.appendingPathComponent(
       ProcessingStore.ownerDirectoryName(prepared.ownerUid)
@@ -96,17 +95,12 @@ final class ProcessingStoreTests: XCTestCase {
     .appendingPathComponent("processing.json")
     try JSONSerialization.data(withJSONObject: snapshot).write(to: file, options: .atomic)
     let restored = ProcessingStore(root: storeRoot, stagingRoot: staging)
-    let legacyOperations = try await restored.operations(ownerUid: prepared.ownerUid)
-    let legacyRetries = try await restored.retries(ownerUid: prepared.ownerUid)
-    XCTAssertEqual(legacyOperations.first?.cancellationRequested, false)
-    XCTAssertTrue(legacyRetries.isEmpty)
-    try await restored.update(id: operation.operationId, ownerUid: prepared.ownerUid) {
-      $0.cancellationRequested = true
+    do {
+      _ = try await restored.operations(ownerUid: prepared.ownerUid)
+      XCTFail("Expected unsupported snapshot version to be rejected")
+    } catch {
+      XCTAssertEqual(error as? ProcessingStoreFailure, .corruptStore)
     }
-    let again = ProcessingStore(root: storeRoot, stagingRoot: staging)
-    let saved = try await again.operations(ownerUid: prepared.ownerUid)
-    XCTAssertEqual(saved.first?.cancellationRequested, true)
-    XCTAssertEqual(saved.first?.requestId, operation.requestId)
   }
 
   func testCorruptStoreIsReportedWithoutOverwritingIt() async throws {

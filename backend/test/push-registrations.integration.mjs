@@ -275,16 +275,16 @@ test('push bindings survive rotation, account switches, logout and opt-out witho
     .lean();
   assert.equal(currentOptOut.active, false);
   assert.equal(currentOptOut.bindingRevision, reactivated.bindingRevision + 1);
-  const legacyBinding = await service.register(
+  const binding = await service.register(
     other,
     installB,
-    'fixture-token-legacy',
+    'fixture-token-current',
     104,
   );
-  const beforeOptOut = legacyBinding.bindingRevision;
+  const beforeOptOut = binding.bindingRevision;
 
-  await service.deactivate(other._id.toHexString(), installB);
-  await service.deactivate(other._id.toHexString(), installB);
+  await service.deactivate(other._id.toHexString(), installB, beforeOptOut);
+  await service.deactivate(other._id.toHexString(), installB, beforeOptOut);
   const optedOut = await registrations
     .findOne({ installationId: installB })
     .select('+token +tokenHash')

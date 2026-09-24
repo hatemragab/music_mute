@@ -27,46 +27,72 @@ internal class ExtractorMaintenance(
     private val pending = File(installed.parentFile, "yt-dlp.pending")
     private val nextCheck = File(installed.parentFile, "next-check")
 
-    fun refresh(probe: () -> String): ExtractorUpdate {
-        // An interrupted installation is restored before the engine is used again.
+    data class Candidate(val release: ExtractorRelease, val bytes: ByteArray)
+
+    /** Offline recovery only. Caller holds the engine lock. */
+    fun recover() {
         if (pending.exists()) {
             check(previous.isFile) { "Extractor recovery copy missing" }
             atomicWrite(installed, previous.readBytes())
             check(pending.delete())
         }
-        if (nextCheck.readTextOrNull()?.toLongOrNull()?.let { it - now() in 1..86_400_000L } == true) return ExtractorUpdate.DEFERRED
-        // Persist before network access, including failed checks and process termination.
+    }
+
+    fun isDeferred(): Boolean =
+        nextCheck.readTextOrNull()?.toLongOrNull()?.let { it - now() in 1..86_400_000L } == true
+
+    /** Network work is deliberately outside the engine lock and download path. */
+    fun prepare(currentVersion: String): Candidate? {
+        if (isDeferred()) return null
         atomicWrite(nextCheck, (now() + 6 * 60 * 60 * 1000L).toString().toByteArray())
+        val release = latest()
+        require(release.version.matches(Regex("[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}")))
+        require(release.sha256.matches(Regex("[a-f0-9]{64}")))
+        if (currentVersion == release.version) {
+            checkedSuccessfully()
+            return null
+        }
+        val bytes = fetch(release.url)
+        require(bytes.isNotEmpty() && bytes.size <= 16 * 1024 * 1024)
+        require(sha256(bytes) == release.sha256) { "Extractor checksum mismatch" }
+        return Candidate(release, bytes)
+    }
+
+    /** Only activation/probing takes the engine lock; no network access here. */
+    fun activate(candidate: Candidate, probe: () -> String) {
+        require(sha256(candidate.bytes) == candidate.release.sha256)
+        atomicWrite(previous, installed.readBytes())
+        atomicWrite(pending, byteArrayOf(1))
+        try {
+            atomicWrite(installed, candidate.bytes)
+            check(probe().trim() == candidate.release.version) { "Extractor runtime incompatible" }
+            check(pending.delete())
+            checkedSuccessfully()
+        } catch (error: Exception) {
+            recover()
+            throw error
+        }
+    }
+
+    private fun checkedSuccessfully() {
+        atomicWrite(nextCheck, (now() + 24 * 60 * 60 * 1000L).toString().toByteArray())
+    }
+
+    // Combined entry point for offline updater contract tests. Downloads never call this.
+    fun refresh(probe: () -> String): ExtractorUpdate {
+        recover()
+        if (isDeferred()) return ExtractorUpdate.DEFERRED
         return try {
-            val release = latest()
-            require(release.version.matches(Regex("[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}")))
-            require(release.sha256.matches(Regex("[a-f0-9]{64}")))
-            val current = try {
-                probe().trim()
-            } catch (error: Exception) {
+            val current = try { probe().trim() } catch (error: Exception) {
                 if (error is InterruptedException || Thread.currentThread().isInterrupted) throw error
-                null // A damaged installed extractor should still be repairable.
+                "unknown"
             }
-            if (current == release.version) {
-                atomicWrite(nextCheck, (now() + 24 * 60 * 60 * 1000L).toString().toByteArray())
-                ExtractorUpdate.CURRENT
-            } else {
-                val bytes = fetch(release.url)
-                require(bytes.isNotEmpty() && bytes.size <= 16 * 1024 * 1024)
-                require(sha256(bytes) == release.sha256) { "Extractor checksum mismatch" }
-                atomicWrite(previous, installed.readBytes())
-                atomicWrite(pending, byteArrayOf(1))
-                atomicWrite(installed, bytes)
-                check(probe().trim() == release.version) { "Extractor runtime incompatible" }
-                check(pending.delete())
-                atomicWrite(nextCheck, (now() + 24 * 60 * 60 * 1000L).toString().toByteArray())
+            val candidate = prepare(current)
+            if (candidate == null) ExtractorUpdate.CURRENT else {
+                activate(candidate, probe)
                 ExtractorUpdate.UPDATED
             }
         } catch (error: Exception) {
-            if (pending.exists()) {
-                atomicWrite(installed, previous.readBytes())
-                check(pending.delete())
-            }
             if (error is InterruptedException || Thread.currentThread().isInterrupted) throw error
             ExtractorUpdate.FAILED
         }

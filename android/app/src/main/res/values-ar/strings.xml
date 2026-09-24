@@ -190,7 +190,6 @@
     <string name="auth_processing_allowed">يستوفي حسابك المتطلبات الحالية للمعالجة على الخادم.</string>
     <string name="auth_processing_device">حدّث حسابك لإكمال تسجيل هذا الجهاز للمعالجة على الخادم.</string>
     <string name="auth_processing_unavailable">المعالجة على الخادم غير متاحة لهذا الحساب. حدّث للتحقق مجدداً.</string>
-    <string name="auth_open_update">فتح رابط التحديث</string>
     <string name="auth_confirm">تأكيد</string>
     <string name="auth_cancel">إلغاء</string>
     <string name="auth_dismiss">إغلاق</string>

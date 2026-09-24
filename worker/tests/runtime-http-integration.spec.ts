@@ -27,19 +27,14 @@ const servers: ReturnType<typeof createServer>[] = [];
 
 const recipe: WorkerRecipeSnapshot = {
   recipeId: "kim-vocals-v2",
-  recipeRevision: 3,
+  recipeRevision: 4,
   protocolVersion: 1,
   recipeDigest: "a".repeat(64),
   modelFilename: "Kim_Vocal_2.onnx",
   modelDigest: "b".repeat(64),
   modelBytes: 66_759_214,
-  preparationProfileId: "pcm16-stereo-44100-v1",
-  stepIds: [
-    "prepare-pcm16-stereo-44100-v1",
-    "separate-kim-vocal-2-v1",
-    "encode-mp3-up-to-160k-v1",
-    "validate-audio-v1",
-  ],
+  inputProfileId: "direct-input-v1",
+  stepIds: ["separate-kim-vocal-2-direct-mp3-v1", "validate-audio-v1"],
   trimEnabled: false,
   denoiseEnabled: false,
   denoisePresetId: null,

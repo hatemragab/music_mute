@@ -1,4 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+
+const descendant = process.argv.includes("--spawn-descendant")
+  ? spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
+    })
+  : undefined;
 
 const index = process.argv.indexOf("--incarnation");
 const incarnation = process.argv[index + 1];
@@ -9,7 +16,11 @@ const body = Buffer.from(
     requestId: randomUUID(),
     incarnation,
     sentAt: new Date().toISOString(),
-    payload: { processCapacity: 1, path: process.env.PATH },
+    payload: {
+      processCapacity: 1,
+      path: process.env.PATH,
+      descendantPid: descendant?.pid,
+    },
   }),
 );
 const frame = Buffer.alloc(4 + body.length);

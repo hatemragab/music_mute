@@ -37,5 +37,4 @@ export type ProcessingDecision =
         | 'EMAIL_VERIFICATION_REQUIRED'
         | 'APP_UPDATE_REQUIRED'
         | 'DEVICE_SYNC_REQUIRED';
-      downloadUrl?: string;
     };

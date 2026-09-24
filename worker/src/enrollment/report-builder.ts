@@ -320,6 +320,7 @@ export function parseQualificationEvidence(
         "sourceDurationSeconds",
         "outputDurationSeconds",
         "endToEndSeconds",
+        "outputBitrateKbps",
         "stageTimings",
       ]),
       "Qualification recipe result",
@@ -349,6 +350,13 @@ export function parseQualificationEvidence(
       "qualification output duration",
     );
     positiveFinite(recipe.endToEndSeconds, "qualification recipe duration");
+    if (recipe.outputBitrateKbps !== undefined)
+      boundedInteger(
+        recipe.outputBitrateKbps,
+        160,
+        160,
+        "qualification output bitrate",
+      );
     if (recipe.stageTimings !== undefined) {
       const timings = strictRecord(
         recipe.stageTimings,

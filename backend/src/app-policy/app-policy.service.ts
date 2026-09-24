@@ -1,11 +1,9 @@
 import { HttpException, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { ConfigService } from '@nestjs/config';
 import type { Model } from 'mongoose';
 import { authError } from '../auth/auth.errors.js';
 import type { Platform } from '../auth/auth.types.js';
 import { Release } from '../releases/release.schema.js';
-import { releaseLandingUrl } from '../releases/release-policy.js';
 import { AppPolicy } from './app-policy.schema.js';
 import { defaultPolicy, validatePolicy } from './access-policy.js';
 
@@ -16,7 +14,6 @@ export class AppPolicyService {
     @Optional()
     @InjectModel(Release.name)
     private readonly releases?: Model<Release>,
-    @Optional() private readonly config?: ConfigService,
   ) {}
 
   async current(): Promise<AppPolicy> {
@@ -36,18 +33,12 @@ export class AppPolicyService {
   ): Promise<void> {
     const channel = policy.platforms[platform];
     const selection = channel.releaseSelection;
-    if (!selection) return;
     const id =
       platform === 'android' && selection.source === 'direct_apk'
         ? selection.directReleaseId
         : selection.storeReleaseId;
     if (!id) {
-      if (
-        channel.minimumBuild !== null ||
-        channel.latestBuild !== null ||
-        channel.downloadUrl !== null
-      )
-        throw authError('SERVICE_UNAVAILABLE');
+      if (channel.minimumBuild !== null) throw authError('SERVICE_UNAVAILABLE');
       return;
     }
     if (!this.releases) throw authError('SERVICE_UNAVAILABLE');
@@ -59,20 +50,13 @@ export class AppPolicyService {
           : selection.source === 'direct_apk'
             ? 'direct_apk'
             : 'google_play';
-      const expectedDownloadUrl =
-        release?.source === 'direct_apk'
-          ? releaseLandingUrl(
-              this.config?.get<string>('RELEASE_LANDING_BASE_URL'),
-              id,
-            )
-          : release?.storeUrl;
       if (
         !release ||
         release.state !== 'published' ||
         release.platform !== platform ||
         release.source !== expectedSource ||
-        release.buildNumber !== channel.latestBuild ||
-        expectedDownloadUrl !== channel.downloadUrl ||
+        (channel.minimumBuild !== null &&
+          release.buildNumber < channel.minimumBuild) ||
         (release.source === 'direct_apk' &&
           (release.artifactState !== 'verified' || !release.artifact))
       )

@@ -115,4 +115,26 @@ class AudioDownloadPolicyTest {
         File(root, "audio.webm").writeText("audio")
         assertNotNull(resolveAudioFile(root, "audio.webm"))
     }
+
+    @Test fun cachedDownloadCannotFallBackToYouTubeExtraction() {
+        val directory = temporary.newFolder()
+        val file = File(directory, "audio.info.json")
+        file.writeText("""{"webpage_url":"https://youtube.com/watch?v=private","original_url":"https://youtu.be/private","url":"https://stream.example/audio","ext":"webm"}""")
+        prepareCachedSource(directory)
+        assertFalse(file.readText().contains("youtube.com"))
+        assertFalse(file.readText().contains("youtu.be"))
+        assertTrue(file.readText().contains("https://stream.example/audio"))
+        val command = createCachedAudioRequest(directory).buildCommand()
+        assertTrue(command.contains("--load-info-json"))
+        assertFalse(command.any { it.startsWith("https://") })
+        for (flag in listOf("--retries", "--fragment-retries", "--extractor-retries"))
+            assertEquals("0", command[command.indexOf(flag) + 1])
+    }
+
+    @Test fun cachedMetadataRejectsPlaylistsAndMissingFiles() {
+        val directory = temporary.newFolder()
+        assertThrows(IllegalArgumentException::class.java) { prepareCachedSource(directory) }
+        File(directory, "audio.info.json").writeText("""{"entries":[]}""")
+        assertThrows(IllegalArgumentException::class.java) { prepareCachedSource(directory) }
+    }
 }

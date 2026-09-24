@@ -101,7 +101,27 @@ it("reports measured stages, RTF, median, retries, and comparable cohorts", () =
     report.samples.find((sample) => sample.outputBitrateKbps === 320)
       ?.dominantMeasuredStage,
   ).toBe("separation");
+  expect(report.samples[0]?.missingStages).not.toContain("preparation");
+  expect(report.samples[0]?.missingStages).not.toContain("encode");
   expect(report.missingCoverage).toContain("backend queue");
+});
+
+it("expects the post-MP3 trim and encode stages only for trimmed jobs", () => {
+  const id = "d2117901-803e-41be-b5e2-c4d3a0472b69";
+  const jobId = "507461bf507461bf507461b1";
+  const report = buildPerformanceReport(
+    [
+      entry(1, "attempt-started", id, jobId, {
+        recipeId: "kim-vocals-v2-trim",
+      }),
+      entry(2, "attempt-succeeded", id, jobId, {
+        stageTimings: [{ stage: "separation", durationMs: 10_000 }],
+      }),
+    ],
+    { last: 1, incompleteHistory: false, truncatedByQueryLimit: false },
+  );
+  expect(report.samples[0]?.missingStages).toContain("trim");
+  expect(report.samples[0]?.missingStages).toContain("encode");
 });
 
 it("marks missing timings and does not group incomplete observations", () => {

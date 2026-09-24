@@ -92,12 +92,11 @@ export class PushRegistrationsService {
   async deactivate(
     userId: string,
     installationId: string,
-    expectedBindingRevision?: number,
+    expectedBindingRevision: number,
   ): Promise<void> {
     if (
-      expectedBindingRevision !== undefined &&
-      (!Number.isSafeInteger(expectedBindingRevision) ||
-        expectedBindingRevision < 1)
+      !Number.isSafeInteger(expectedBindingRevision) ||
+      expectedBindingRevision < 1
     )
       throw authError('INVALID_INPUT');
     const ownerId = this.objectId(userId);
@@ -111,9 +110,7 @@ export class PushRegistrationsService {
           userId: ownerId,
           installationId,
           active: true,
-          ...(expectedBindingRevision !== undefined
-            ? { bindingRevision: expectedBindingRevision }
-            : {}),
+          bindingRevision: expectedBindingRevision,
         })
         .setOptions({ sanitizeFilter: false })
         .select('_id bindingRevision')

@@ -18,13 +18,11 @@ class StoredReleaseSelection {
 @Schema({ _id: false, strict: 'throw' })
 export class PlatformPolicy {
   @Prop({ type: Number, default: null }) minimumBuild!: number | null;
-  @Prop({ type: Number, default: null }) latestBuild!: number | null;
-  @Prop({ type: String, default: null }) downloadUrl!: string | null;
   @Prop({
     type: SchemaFactory.createForClass(StoredReleaseSelection),
-    default: undefined,
+    required: true,
   })
-  releaseSelection?: ReleaseSelection;
+  releaseSelection!: ReleaseSelection;
 }
 const PlatformPolicySchema = SchemaFactory.createForClass(PlatformPolicy);
 

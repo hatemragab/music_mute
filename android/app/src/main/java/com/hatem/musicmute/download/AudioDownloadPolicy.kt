@@ -28,9 +28,9 @@ object AudioDownloadPolicy {
             "--fixup" to "never",
             "--socket-timeout" to "30",
             "--buffer-size" to "65536",
-            "--extractor-retries" to "1",
-            "--retries" to "3",
-            "--fragment-retries" to "3",
+            "--extractor-retries" to "0",
+            "--retries" to "0",
+            "--fragment-retries" to "0",
             "--progress-template" to
                 "download:[download] %(progress._percent_str)s VOCAL:%(progress.downloaded_bytes)s:%(progress.total_bytes)s",
         )

@@ -18,12 +18,32 @@ class AudioInputPreparerTest {
         val preparer = AudioInputPreparer(temporary.root,
             validateDecoded = { _, _ -> decoded++ },
             inspect = { AudioInspection(1.0, true, false, "audio/mpeg") })
-        preparer.prepare("owner", "picked.mp3") { ByteArrayInputStream(byteArrayOf(1)) }
+        preparer.prepare("owner", "default.mp3") { ByteArrayInputStream(byteArrayOf(1)) }
         assertEquals(1, decoded)
         preparer.prepare("owner", "downloaded.mp3", validateFullDecode = false) {
             ByteArrayInputStream(byteArrayOf(2))
         }
         assertEquals(1, decoded)
+    }
+
+    @Test fun copiedPhoneAudioSkipsDecodeButStillChecksMetadataAndChecksum() = runBlocking {
+        var inspected = 0
+        val bytes = byteArrayOf(1, 2, 3, 4)
+        val preparer = AudioInputPreparer(temporary.root,
+            validateDecoded = { _, _ -> fail("Picked audio must not be fully decoded on the phone") },
+            inspect = {
+                inspected++
+                AudioInspection(12.0, true, false, "audio/mpeg")
+            })
+        val prepared = preparer.prepare("owner", "picked.mp3", validateFullDecode = false) {
+            ByteArrayInputStream(bytes)
+        }
+        assertEquals(1, inspected)
+        assertArrayEquals(bytes, prepared.file.readBytes())
+        assertEquals(bytes.size.toLong(), prepared.declaration.bytes)
+        assertEquals(12.0, prepared.declaration.durationSeconds, 0.0)
+        assertEquals(Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(bytes)),
+            prepared.declaration.sha256)
     }
 
     @Test fun generatedAudioWithoutSecondDecodeStillRequiresValidInspectionAndChecksum() = runBlocking {

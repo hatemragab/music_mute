@@ -40,8 +40,7 @@ private fun creativeColors(accentArgb: Int): androidx.compose.material3.ColorSch
 }
 
 @Composable
-@Suppress("UNUSED_PARAMETER") // Retain source compatibility with existing preview call sites.
-fun VocalTheme(dark: Boolean = true, accentArgb: Int = AccentPalette.DEFAULT, content: @Composable () -> Unit) {
+fun VocalTheme(accentArgb: Int = AccentPalette.DEFAULT, content: @Composable () -> Unit) {
     val colors = remember(accentArgb) { creativeColors(accentArgb) }
     MaterialTheme(
         colorScheme = colors,

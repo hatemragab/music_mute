@@ -47,8 +47,8 @@ The current runtime branch can emit the catalog artifact directly while it
 builds the verified release directory:
 
 ```text
-musicmute-worker macos package ... --output <release-directory> --archive <protected-output.tar.gz>
-musicmute-worker windows package ... --output <release-directory> --archive <protected-output.zip>
+mw package-macos ... --output <release-directory> --archive <protected-output.tar.gz>
+mw windows package ... --output <release-directory> --archive <protected-output.zip>
 ```
 
 The package command refuses to replace an existing archive. Its JSON result

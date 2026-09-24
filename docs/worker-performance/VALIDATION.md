@@ -45,8 +45,9 @@ CPU inference as an alternative. Mocks validate logic but cannot establish speed
 
 ## Audio quality
 
-For grouping/buffer experiments keep all audio settings constant. Compare decoded
-PCM or a lossless intermediate before MP3 when possible, align samples, check
+For grouping/buffer experiments keep all audio settings constant. The direct
+MP3 path does not retain a lossless intermediate; decode both final MP3 files
+to PCM for comparison, align samples, check
 duration/sample count, channels, finite values, clipping, gain, and boundary
 discontinuities. Define numerical tolerances from the measured one-window
 repeatability; do not loosen them merely to accept a candidate.
