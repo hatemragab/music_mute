@@ -15,6 +15,7 @@ const UPLOAD_HEADER_NAMES = new Set([
   "x-amz-storage-class",
 ]);
 const DEFAULT_TRANSFER_TIMEOUT_MS = 2 * 60 * 60_000;
+const DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
 
 export class TransferError extends Error {
   constructor(
@@ -35,18 +36,23 @@ export interface TransferClientOptions {
   fetch?: typeof fetch;
   allowInsecureLoopback?: boolean;
   timeoutMs?: number;
+  downloadIdleTimeoutMs?: number;
 }
 
 export class WorkerTransferClient {
   private readonly fetchImplementation: typeof fetch;
   private readonly allowInsecureLoopback: boolean;
   private readonly timeoutMs: number;
+  private readonly downloadIdleTimeoutMs: number;
 
   constructor(options: TransferClientOptions = {}) {
     this.fetchImplementation = options.fetch ?? fetch;
     this.allowInsecureLoopback = options.allowInsecureLoopback === true;
     this.timeoutMs = boundedTimeout(
       options.timeoutMs ?? DEFAULT_TRANSFER_TIMEOUT_MS,
+    );
+    this.downloadIdleTimeoutMs = boundedTimeout(
+      options.downloadIdleTimeoutMs ?? DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
     );
   }
 
@@ -67,8 +73,21 @@ export class WorkerTransferClient {
     )
       throw new TransferError("DOWNLOAD_FAILED", false);
     const timeout = AbortSignal.timeout(this.timeoutMs);
-    const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    const idle = new AbortController();
+    let idleTimer: ReturnType<typeof setTimeout>;
+    const resetIdleTimer = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => idle.abort(), this.downloadIdleTimeoutMs);
+      idleTimer.unref();
+    };
+    resetIdleTimer();
+    const requestSignal = AbortSignal.any([
+      timeout,
+      idle.signal,
+      ...(signal ? [signal] : []),
+    ]);
     let handle: Awaited<ReturnType<typeof open>> | undefined;
+    let created = false;
     try {
       const response = await this.fetchImplementation(grant.url, {
         method: "GET",
@@ -82,6 +101,7 @@ export class WorkerTransferClient {
           response.status === 408 ||
             response.status === 429 ||
             response.status >= 500,
+          `download-http-${response.status}`,
         );
       const encoding = response.headers.get("content-encoding");
       if (encoding && encoding.toLowerCase() !== "identity")
@@ -93,12 +113,14 @@ export class WorkerTransferClient {
       if (declared && Number(declared) !== expected.bytes)
         throw new TransferError("DOWNLOAD_FAILED", false);
       handle = await open(target, "wx", 0o600);
+      created = true;
       const digest = createHash("sha256");
       const reader = response.body.getReader();
       let bytes = 0;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (value.byteLength > 0) resetIdleTimer();
         bytes += value.byteLength;
         if (bytes > expected.bytes) {
           await reader.cancel();
@@ -130,10 +152,22 @@ export class WorkerTransferClient {
         throw new TransferError("DOWNLOAD_FAILED", false);
     } catch (error) {
       await handle?.close().catch(() => undefined);
-      await unlink(target).catch(() => undefined);
+      if (created) await unlink(target).catch(() => undefined);
       if (signal?.aborted) throw signal.reason;
       if (error instanceof TransferError) throw error;
-      throw new TransferError("DOWNLOAD_FAILED", true);
+      throw new TransferError(
+        "DOWNLOAD_FAILED",
+        true,
+        idle.signal.aborted
+          ? "download-idle-timeout"
+          : timeout.aborted
+            ? "download-total-timeout"
+            : `download-transport-${transferErrorName(error)}`,
+      );
+    } finally {
+      clearTimeout(idleTimer!);
+      // Release the HTTP connection on validation failures as well.
+      idle.abort();
     }
   }
 
