@@ -44,30 +44,25 @@ describe('worker fleet persistence contract', () => {
   it('pins identity, claim, lease, lifecycle and expiry indexes', () => {
     expect(indexNames(WorkerEnrollmentInvitationSchema)).toEqual([
       'worker_invitation_digest_unique',
-      'worker_invitation_lifecycle',
     ]);
     expect(indexNames(WorkerInstallationSessionSchema)).toEqual([
       'worker_installation_credential_unique',
       'worker_installation_invitation_unique',
-      'worker_installation_lifecycle',
+      'worker_installation_machine',
     ]);
     expect(indexNames(WorkerMachineSchema)).toEqual([
       'worker_machine_credential_unique',
-      'worker_machine_group_status',
-      'worker_machine_platform_seen',
-      'worker_machine_release_seen',
-      'worker_machine_status_seen',
+      'worker_machine_seen',
     ]);
     expect(indexNames(WorkerSlotSchema)).toEqual([
       'worker_slot_current_attempt_unique',
       'worker_slot_identity_unique',
-      'worker_slot_machine_state',
     ]);
     expect(indexNames(WorkerAttemptSchema)).toEqual([
       'worker_attempt_claim_request_unique',
       'worker_attempt_job_number_unique',
       'worker_attempt_lease_recovery',
-      'worker_attempt_slot_history',
+      'worker_attempt_machine_history',
     ]);
     expect(indexNames(WorkerDiagnosticSchema)).toEqual([
       'worker_diagnostic_expiry',
@@ -86,7 +81,6 @@ describe('worker fleet persistence contract', () => {
     expect(indexNames(JobSchema)).toEqual(
       expect.arrayContaining([
         'jobs_worker_claim_eligibility',
-        'jobs_worker_lease_expiry',
         'jobs_worker_attempt_unique',
       ]),
     );

@@ -503,15 +503,6 @@ JobSchema.index(
   { name: 'jobs_worker_claim_eligibility' },
 );
 JobSchema.index(
-  { 'currentExecution.leaseExpiresAt': 1, _id: 1 },
-  {
-    name: 'jobs_worker_lease_expiry',
-    partialFilterExpression: {
-      'currentExecution.leaseExpiresAt': { $type: 'date' },
-    },
-  },
-);
-JobSchema.index(
   { 'currentExecution.attemptId': 1 },
   {
     unique: true,

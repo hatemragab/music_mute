@@ -32,7 +32,3 @@ JobErrorSchema.index(
   { jobId: 1, eventId: 1 },
   { unique: true, name: 'job_error_event_unique' },
 );
-JobErrorSchema.index(
-  { jobId: 1, createdAt: -1 },
-  { name: 'job_error_history' },
-);

@@ -59,7 +59,3 @@ AccountRestrictionSchema.index(
   { accountId: 1 },
   { unique: true, name: 'account_restriction_lookup' },
 );
-AccountRestrictionSchema.index(
-  { status: 1, updatedAt: -1, _id: -1 },
-  { name: 'account_restriction_admin_page' },
-);

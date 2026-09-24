@@ -116,10 +116,6 @@ WorkerEnrollmentInvitationSchema.index(
   { codeDigest: 1 },
   { unique: true, name: 'worker_invitation_digest_unique' },
 );
-WorkerEnrollmentInvitationSchema.index(
-  { state: 1, expiresAt: 1 },
-  { name: 'worker_invitation_lifecycle' },
-);
 
 @Schema({
   collection: 'worker_installation_sessions',
@@ -205,6 +201,6 @@ WorkerInstallationSessionSchema.index(
   { unique: true, name: 'worker_installation_credential_unique' },
 );
 WorkerInstallationSessionSchema.index(
-  { phase: 1, expiresAt: 1 },
-  { name: 'worker_installation_lifecycle' },
+  { machineId: 1 },
+  { name: 'worker_installation_machine' },
 );

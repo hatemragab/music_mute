@@ -84,14 +84,7 @@ AbuseEventBucketSchema.index(
   { lastOccurredAt: -1, _id: -1 },
   { name: 'abuse_event_recent_page' },
 );
-AbuseEventBucketSchema.index(
-  { type: 1, severity: 1, lastOccurredAt: -1, _id: -1 },
-  { name: 'abuse_event_admin_filter' },
-);
-AbuseEventBucketSchema.index(
-  { severity: 1, lastOccurredAt: -1, _id: -1 },
-  { name: 'abuse_event_severity_filter' },
-);
+
 AbuseEventBucketSchema.index(
   { expiresAt: 1 },
   { expireAfterSeconds: 0, name: 'abuse_event_expiry' },

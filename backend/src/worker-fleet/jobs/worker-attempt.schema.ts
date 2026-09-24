@@ -183,6 +183,6 @@ WorkerAttemptSchema.index(
   { name: 'worker_attempt_lease_recovery' },
 );
 WorkerAttemptSchema.index(
-  { machineId: 1, workerId: 1, createdAt: -1 },
-  { name: 'worker_attempt_slot_history' },
+  { machineId: 1, createdAt: -1 },
+  { name: 'worker_attempt_machine_history' },
 );
