@@ -73,7 +73,3 @@ WorkerSlotSchema.index(
     partialFilterExpression: { currentAttemptId: { $type: 'string' } },
   },
 );
-WorkerSlotSchema.index(
-  { machineId: 1, state: 1, _id: 1 },
-  { name: 'worker_slot_machine_state' },
-);

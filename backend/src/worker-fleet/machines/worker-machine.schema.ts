@@ -220,19 +220,9 @@ WorkerMachineSchema.index(
   { credentialDigest: 1 },
   { unique: true, name: 'worker_machine_credential_unique' },
 );
+
+// One ordered scan serves all optional dashboard filters.
 WorkerMachineSchema.index(
-  { status: 1, lastSeenAt: -1, _id: 1 },
-  { name: 'worker_machine_status_seen' },
-);
-WorkerMachineSchema.index(
-  { groupId: 1, status: 1, _id: 1 },
-  { name: 'worker_machine_group_status' },
-);
-WorkerMachineSchema.index(
-  { 'approvedCapabilities.platform': 1, lastSeenAt: -1, _id: 1 },
-  { name: 'worker_machine_platform_seen' },
-);
-WorkerMachineSchema.index(
-  { 'runtimeIdentity.workerVersion': 1, lastSeenAt: -1, _id: 1 },
-  { name: 'worker_machine_release_seen' },
+  { lastSeenAt: -1, _id: 1 },
+  { name: 'worker_machine_seen' },
 );

@@ -42,11 +42,3 @@ export class AdminAuditEvent {
 export const AdminAuditEventSchema =
   SchemaFactory.createForClass(AdminAuditEvent);
 AdminAuditEventSchema.index({ at: -1, _id: -1 }, { name: 'admin_audit_time' });
-AdminAuditEventSchema.index(
-  { actorUid: 1, at: -1, _id: -1 },
-  { name: 'admin_audit_actor' },
-);
-AdminAuditEventSchema.index(
-  { resourceType: 1, resourceId: 1, at: -1, _id: -1 },
-  { name: 'admin_audit_resource' },
-);

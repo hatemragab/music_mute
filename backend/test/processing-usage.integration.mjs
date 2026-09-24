@@ -166,6 +166,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   const octoberUsage = await usage.readUsage(owner, undefined, uploadOctober);
   assert.equal(octoberUsage.uploads.dailyGrants, 1);
   assert.equal(octoberUsage.uploads.monthlyGrants, 1);
+  assert.equal(octoberUsage.uploads.dailyResetAt, '2026-10-02T00:00:00.000Z');
 
   const sameLogicalAudio = await createJob(
     jobs,
@@ -634,6 +635,15 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     (await servicePeriods.findById('2026-10')).estimatedOutboundBytes,
     3,
   );
+
+  for (const model of [dailyPeriods, periods, servicePeriods]) {
+    const rows = await model.collection.find({}).toArray();
+    assert.ok(rows.length > 0);
+    for (const row of rows) {
+      for (const field of ['dayStart', 'dayEnd', 'periodStart', 'periodEnd'])
+        assert.equal(Object.hasOwn(row, field), false);
+    }
+  }
 
   const raceAccount = new Types.ObjectId();
   await users.create({
