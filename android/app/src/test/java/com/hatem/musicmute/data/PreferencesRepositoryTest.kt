@@ -30,20 +30,6 @@ class PreferencesRepositoryTest {
     }
 
     @Test
-    fun legacyLightPreferenceRestoresAsDarkWithoutLosingLanguage() = runTest {
-        val store = PreferenceDataStoreFactory.create(scope = backgroundScope) {
-            File(temporaryFolder.root, "legacy.preferences_pb")
-        }
-        store.edit {
-            it[stringPreferencesKey("theme")] = "LIGHT"
-            it[stringPreferencesKey("language")] = "ARABIC"
-        }
-        val preferences = DataStorePreferencesRepository(store).preferences.first()
-        assertEquals(ThemeChoice.DARK, preferences.theme)
-        assertEquals(LanguageChoice.ARABIC, preferences.language)
-    }
-
-    @Test
     fun defaultsAndStoredPreferencesRoundTrip() = runTest {
         val store =
             PreferenceDataStoreFactory.create(scope = backgroundScope) {
@@ -51,17 +37,14 @@ class PreferencesRepositoryTest {
             }
         val repository = DataStorePreferencesRepository(store)
         assertEquals(AppPreferences(), repository.preferences.first())
-        repository.setTheme(ThemeChoice.DARK)
         repository.setLanguage(LanguageChoice.ARABIC)
         assertEquals(
-            AppPreferences(ThemeChoice.DARK, LanguageChoice.ARABIC),
+            AppPreferences(LanguageChoice.ARABIC),
             repository.preferences.first(),
         )
-        repository.setTheme(ThemeChoice.LIGHT)
-        assertEquals(LanguageChoice.ARABIC, repository.preferences.first().language)
         repository.setLanguage(LanguageChoice.SYSTEM)
         assertEquals(
-            AppPreferences(ThemeChoice.DARK, LanguageChoice.SYSTEM),
+            AppPreferences(LanguageChoice.SYSTEM),
             repository.preferences.first(),
         )
     }
@@ -73,7 +56,6 @@ class PreferencesRepositoryTest {
         val firstStore = PreferenceDataStoreFactory.create(scope = firstScope) { file }
         try {
             val repository = DataStorePreferencesRepository(firstStore)
-            repository.setTheme(ThemeChoice.DARK)
             repository.setLanguage(LanguageChoice.ARABIC)
         } finally {
             firstScope.cancel()
@@ -81,7 +63,7 @@ class PreferencesRepositoryTest {
         }
         val reopenedStore = PreferenceDataStoreFactory.create(scope = backgroundScope) { file }
         assertEquals(
-            AppPreferences(ThemeChoice.DARK, LanguageChoice.ARABIC),
+            AppPreferences(LanguageChoice.ARABIC),
             DataStorePreferencesRepository(reopenedStore).preferences.first(),
         )
     }
@@ -93,7 +75,6 @@ class PreferencesRepositoryTest {
                 File(temporaryFolder.root, "unknown.preferences_pb")
             }
         store.edit {
-            it[stringPreferencesKey("theme")] = "removed-theme"
             it[stringPreferencesKey("language")] = "unsupported"
         }
         assertEquals(AppPreferences(), DataStorePreferencesRepository(store).preferences.first())

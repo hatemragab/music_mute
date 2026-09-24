@@ -9,6 +9,7 @@ import type { Response } from 'express';
 import type { Request } from 'express';
 import { AuthRateLimitException } from '../auth/rate-limit.exception.js';
 import { adminError, adminRequestId } from '../admin/admin-errors.js';
+import { captureBackendFailure } from '../observability/sentry.js';
 
 @Catch()
 export class PublicExceptionFilter implements ExceptionFilter {
@@ -36,6 +37,7 @@ export class PublicExceptionFilter implements ExceptionFilter {
           : undefined;
       const status =
         exception instanceof HttpException ? exception.getStatus() : 500;
+      if (status === 500 && !parserStatus) captureBackendFailure(exception);
       const body =
         exception instanceof HttpException ? exception.getResponse() : null;
       const existing =
@@ -118,7 +120,10 @@ export class PublicExceptionFilter implements ExceptionFilter {
     }
     if (status >= 500) {
       // Do not log exception messages: SDK/database errors can include credentials.
-      if (status === 500) this.logger.error('Unhandled request failure');
+      if (status === 500) {
+        this.logger.error('Unhandled request failure');
+        captureBackendFailure(exception);
+      }
       response.status(status).json({
         statusCode: status,
         ...(status === 503 ? { code: 'SERVICE_UNAVAILABLE' } : {}),

@@ -61,15 +61,8 @@ class AudioPlaybackService : MediaSessionService() {
             }
         }
         val sources = ResolvingDataSource.Factory(DefaultDataSource.Factory(this)) { spec ->
-            if (spec.uri.scheme != "musicmute") {
-                // Legacy downloads may still supply a private local file during migration.
-                val local = spec.uri.path?.let(::File)?.canonicalFile
-                val roots = listOf(filesDir.canonicalFile, noBackupFilesDir.canonicalFile)
-                if (spec.uri.scheme != "file" || local == null || !local.isFile ||
-                    roots.none { local.path.startsWith(it.path + File.separator) })
-                    throw IOException("Only private local audio is supported")
-                spec
-            } else {
+            if (spec.uri.scheme != "musicmute") throw IOException("Unsupported audio source")
+            run {
                 val expected = owner ?: throw IOException("Playback account unavailable")
                 val deps = dependencies ?: throw IOException("Playback unavailable")
                 val parts = spec.uri.pathSegments

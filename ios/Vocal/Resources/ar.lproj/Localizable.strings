@@ -141,7 +141,6 @@
 "auth_access_device_required" = "تجب مزامنة هذا التثبيت قبل المعالجة عبر الإنترنت لاحقًا.";
 "auth_access_restricted" = "المعالجة عبر الإنترنت لاحقًا مقيّدة بسياسة الخادم.";
 "auth_access_local_audio" = "لا تمنع هذه الحالة الصوت المحفوظ أو المنزّل محليًا.";
-"auth_update_app" = "فتح صفحة التحديث";
 "auth_security" = "الأمان";
 "auth_linked_methods" = "طرق تسجيل الدخول";
 "auth_devices" = "عمليات التثبيت المسجّلة";

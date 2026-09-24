@@ -35,7 +35,6 @@ MODEL_SOURCE = (
     "https://github.com/TRvlvr/model_repo/releases/download/"
     "all_public_uvr_models/Kim_Vocal_2.onnx"
 )
-COREML_PROVIDER = "CoreMLExecutionProvider"
 DIRECTML_PROVIDER = "DmlExecutionProvider"
 CPU_PROVIDER = "CPUExecutionProvider"
 
@@ -68,18 +67,11 @@ def validate_environment(provider: str) -> None:
     if len(installed) != 1:
         raise RuntimeError(f"exactly one ONNX Runtime distribution is required, found {sorted(installed)}")
 
-    if provider == "coreml":
-        if system != "Darwin" or machine != "arm64":
-            raise RuntimeError("CoreML proof requires native Darwin arm64; Rosetta/x86 is rejected")
-        if set(installed) != {"onnxruntime"}:
-            raise RuntimeError("CoreML proof requires the official macOS onnxruntime distribution")
-        required_provider = COREML_PROVIDER
-    else:
-        if system != "Windows" or machine not in {"amd64", "x86_64"}:
-            raise RuntimeError("DirectML proof requires native 64-bit Windows")
-        if set(installed) != {"onnxruntime-directml"}:
-            raise RuntimeError("DirectML proof requires only the onnxruntime-directml distribution")
-        required_provider = DIRECTML_PROVIDER
+    if provider != "directml" or system != "Windows" or machine not in {"amd64", "x86_64"}:
+        raise RuntimeError("DirectML proof requires native 64-bit Windows")
+    if set(installed) != {"onnxruntime-directml"}:
+        raise RuntimeError("DirectML proof requires only the onnxruntime-directml distribution")
+    required_provider = DIRECTML_PROVIDER
 
     available = ort.get_available_providers()
     if required_provider not in available:
@@ -202,23 +194,9 @@ def configure_instrumentation(
         options.enable_profiling = True
         options.profile_file_prefix = str(output_dir / f"ort-{provider}")
 
-        if provider == "coreml":
-            selected: list[object] = [
-                (
-                    COREML_PROVIDER,
-                    {
-                        "MLComputeUnits": "CPUAndGPU",
-                        "ModelFormat": "MLProgram",
-                        "RequireStaticInputShapes": "0",
-                        "EnableOnSubgraphs": "0",
-                    },
-                ),
-                CPU_PROVIDER,
-            ]
-        else:
-            options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-            options.enable_mem_pattern = False
-            selected = [(DIRECTML_PROVIDER, {"device_id": str(directml_device_id)}), CPU_PROVIDER]
+        options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        options.enable_mem_pattern = False
+        selected = [(DIRECTML_PROVIDER, {"device_id": str(directml_device_id)}), CPU_PROVIDER]
 
         inner = original(path_or_bytes, sess_options=options, providers=selected, **kwargs)
         wrapped = InstrumentedSession(inner)
@@ -377,7 +355,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             profiles.append(summarize_profile(profile_path))
             profile_path.unlink()
 
-        expected_provider = COREML_PROVIDER if args.provider == "coreml" else DIRECTML_PROVIDER
+        expected_provider = DIRECTML_PROVIDER
         accelerated_events = sum(
             profile["provider_node_events"].get(expected_provider, 0) for profile in profiles
         )
@@ -413,17 +391,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             },
             "available_providers": ort.get_available_providers(),
             "active_session_providers": active_providers,
-            "coreml_options": (
-                {
-                    "MLComputeUnits": "CPUAndGPU",
-                    "ModelFormat": "MLProgram",
-                    "RequireStaticInputShapes": "0",
-                    "EnableOnSubgraphs": "0",
-                }
-                if args.provider == "coreml"
-                else None
-            ),
-            "directml_device_id": args.directml_device_id if args.provider == "directml" else None,
+            "directml_device_id": args.directml_device_id,
             "model": {
                 "filename": MODEL_FILENAME,
                 "source": MODEL_SOURCE,
@@ -459,7 +427,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--provider", choices=("coreml", "directml"), required=True)
+    parser.add_argument("--provider", choices=("directml",), required=True)
     parser.add_argument("--model-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--fixture", type=Path)

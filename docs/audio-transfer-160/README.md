@@ -49,7 +49,7 @@ quality. Listening validation remains necessary.
 | Known rate above 160 kbps or decodable WAV/lossless | Encode once to AAC/M4A targeting 160 kbps | 160 kbps maximum |
 | Missing or unreliable rate | Encode once to AAC/M4A targeting 160 kbps | Use the probed rate if available; otherwise 160 kbps |
 | Known rate below 32 kbps at worker intake | Mobile preserves supported stream | Reject because the current 44.1 kHz MP3 output profile cannot preserve that ceiling |
-| Malformed media, ambiguous default audio track, or prepared upload above 50,000,000 bytes | Check container/tracks/duration/size before upload; fully decode picked media | Worker independently validates and decodes downloaded media before separation |
+| Malformed media, ambiguous default audio track, or prepared upload above 50,000,000 bytes | Check container/tracks/duration/size before upload; checksum the prepared bytes | Worker independently validates and decodes downloaded media during processing |
 
 The new preparation profile is `audio-cap-aac-lc-160-v1`. The worker recipe uses
 revision 3 and step `encode-mp3-up-to-160k-v1`. The final MP3 bitrate is a
@@ -94,8 +94,8 @@ approval. Keep the candidate local until those checks and deployment are approve
   kbps upward so a rate just over 160 is not treated as within the cap. The
   source is inspected and hashed before upload; its complete decode check occurs
   on the worker. A truncated source may therefore fail after upload rather than
-  during phone preparation. Picked phone media still receives full local decode
-  validation.
+  during phone preparation. Picked phone audio now follows the same bounded
+  inspection and checksum path without a second complete decode on the phone.
 - MP3 supports particular bitrate/sample-rate combinations. Propose the nearest
   supported rate at or below the requested rate; document very-low-rate sources
   that cannot meet this without changing output sample rate. Do not silently

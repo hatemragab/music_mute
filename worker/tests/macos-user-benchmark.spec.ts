@@ -141,7 +141,37 @@ describe("macOS local benchmark admission", () => {
     ).toEqual(baseline.measuredSummary);
   });
 
-  it("requires identities for every retained MP3 and lossless vocal", () => {
+  it("requires identities for every retained MP3 vocal", () => {
+    const raw = repeatedReport([120, 115, 100, 90, 110]);
+    raw.savedAudio = true;
+    raw.savedAudioArtifacts = raw.runs.map((run) => ({
+      iteration: run.iteration,
+      role: run.role,
+      format: "mp3",
+      fileName: `${String(run.iteration).padStart(2, "0")}-${run.role}-vocals.mp3`,
+      sha256: "0".repeat(64),
+      bytes: 1024,
+    }));
+    const report = summarizeRepeatedBenchmarkReport(raw, {
+      processWallSeconds: 500,
+      warmupRuns: 1,
+      measuredRuns: 3,
+    });
+    expect(report.savedAudioArtifacts).toHaveLength(5);
+    expect(
+      parseStoredRepeatedBenchmarkReport(JSON.parse(JSON.stringify(report))),
+    ).toMatchObject({ savedAudioArtifacts: report.savedAudioArtifacts });
+    raw.savedAudioArtifacts[0]!.fileName = "different.flac";
+    expect(() =>
+      summarizeRepeatedBenchmarkReport(raw, {
+        processWallSeconds: 500,
+        warmupRuns: 1,
+        measuredRuns: 3,
+      }),
+    ).toThrow("saved audio identity");
+  });
+
+  it("continues to parse earlier reports containing MP3 and FLAC vocals", () => {
     const raw = repeatedReport([120, 115, 100, 90, 110]);
     raw.savedAudio = true;
     raw.savedAudioArtifacts = raw.runs.flatMap((run) =>
@@ -160,17 +190,6 @@ describe("macOS local benchmark admission", () => {
       measuredRuns: 3,
     });
     expect(report.savedAudioArtifacts).toHaveLength(10);
-    expect(
-      parseStoredRepeatedBenchmarkReport(JSON.parse(JSON.stringify(report))),
-    ).toMatchObject({ savedAudioArtifacts: report.savedAudioArtifacts });
-    raw.savedAudioArtifacts[0]!.fileName = "different.flac";
-    expect(() =>
-      summarizeRepeatedBenchmarkReport(raw, {
-        processWallSeconds: 500,
-        warmupRuns: 1,
-        measuredRuns: 3,
-      }),
-    ).toThrow("saved audio identity");
   });
 
   it("rejects an unsupported or unproven repeated GPU report", () => {

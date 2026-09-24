@@ -1,5 +1,6 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 
@@ -13,11 +14,17 @@ const publicEnvironmentKeys = [
   "VITE_FIREBASE_AUTH_DOMAIN",
   "VITE_FIREBASE_PROJECT_ID",
   "VITE_FIREBASE_APP_ID",
+  "VITE_SENTRY_ENABLED",
+  "VITE_SENTRY_DSN",
+  "VITE_SENTRY_RELEASE",
 ] as const;
 
 // https://vite.dev/config/
 export default defineConfig(({ command, mode }) => {
   const environment = loadDashboardEnvironment(process.env, root);
+  const release = environment.SENTRY_RELEASE?.trim();
+  const uploadSourceMaps =
+    command === "build" && !!release && !!environment.SENTRY_AUTH_TOKEN;
   const applicationSource = fileURLToPath(new URL("./src", import.meta.url));
   const authAdapter = fileURLToPath(
     new URL(
@@ -33,10 +40,30 @@ export default defineConfig(({ command, mode }) => {
     define: Object.fromEntries(
       publicEnvironmentKeys.map((key) => [
         `import.meta.env.${key}`,
-        JSON.stringify(environment[key] ?? ""),
+        JSON.stringify(
+          key === "VITE_SENTRY_RELEASE"
+            ? (release ?? "")
+            : (environment[key] ?? ""),
+        ),
       ]),
     ),
-    plugins: [react(), tailwindcss()],
+    build: { sourcemap: uploadSourceMaps ? "hidden" : false },
+    plugins: [
+      react(),
+      tailwindcss(),
+      ...(uploadSourceMaps
+        ? [
+            sentryVitePlugin({
+              org: "vchat-9f",
+              project: "musicmute-dashboard",
+              authToken: environment.SENTRY_AUTH_TOKEN,
+              release: { name: release },
+              sourcemaps: { filesToDeleteAfterUpload: "./dist/**/*.map" },
+              telemetry: false,
+            }),
+          ]
+        : []),
+    ],
     resolve: {
       alias: [
         { find: "@/auth/firebase-adapter", replacement: authAdapter },

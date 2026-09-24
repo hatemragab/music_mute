@@ -6,64 +6,23 @@ evidence. Models, fixture WAVs, output stems and raw ONNX profiles stay outside 
 
 ## macOS UVR-compatible MPS worker setup
 
-The current worker uses native ARM64 Python 3.13, PyTorch MPS, and
-`onnx2pytorch`, matching UVR5's Apple GPU path. Install the frozen base and then
-the converter without dependency resolution so `onnx-weekly` remains the only
-provider of the `onnx` module:
+The current worker uses native ARM64 Python 3.13, PyTorch MPS, and the
+`onnx2torch` module from the frozen `onnx2torch-py313` package. The direct
+MP3-in/MP3-out path matches the setup in
+[`kim-vocal-2-m4-fast-setup.md`](../../kim-vocal-2-m4-fast-setup.md). Install the
+frozen base:
 
 ```bash
 python3.13 -m venv /tmp/musicmute-mps-py313
 /tmp/musicmute-mps-py313/bin/python -m pip install --upgrade pip
 /tmp/musicmute-mps-py313/bin/python -m pip install \
   -r tools/worker-gpu-feasibility/requirements-mps-base.lock.txt
-/tmp/musicmute-mps-py313/bin/python -m pip install --no-deps \
-  -r tools/worker-gpu-feasibility/requirements-mps-overlay.lock.txt
 ```
-
-## Historical CoreML feasibility probe
-
-The following probe is retained only as historical feasibility evidence. It is
-not an accepted current macOS worker provider.
-
-Use native ARM64 Python 3.13. CoreML and DirectML must use separate environments;
-never install competing ONNX Runtime distributions together.
-
-```bash
-python3.13 -m venv /tmp/musicmute-gpu-feasibility-py313
-/tmp/musicmute-gpu-feasibility-py313/bin/python -m pip install --upgrade pip
-/tmp/musicmute-gpu-feasibility-py313/bin/python -m pip install \
-  -r tools/worker-gpu-feasibility/requirements-coreml.lock.txt
-/tmp/musicmute-gpu-feasibility-py313/bin/python -m pip install --no-deps \
-  -r tools/worker-gpu-feasibility/requirements-mps-overlay.lock.txt
-
-mkdir -p /tmp/musicmute-kim-model-cache
-curl --fail --location \
-  --output /tmp/musicmute-kim-model-cache/Kim_Vocal_2.onnx \
-  https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Vocal_2.onnx
-echo 'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b  /tmp/musicmute-kim-model-cache/Kim_Vocal_2.onnx' \
-  | shasum -a 256 --check
-
-/tmp/musicmute-gpu-feasibility-py313/bin/python \
-  tools/worker-gpu-feasibility/probe.py \
-  --provider coreml \
-  --model-dir /tmp/musicmute-kim-model-cache \
-  --output-dir /tmp/musicmute-coreml-probe \
-  --report /tmp/musicmute-coreml-probe/report.json
-```
-
-The probe rejects Rosetta/x86, requires the official macOS `onnxruntime` wheel,
-sets CoreML to `CPUAndGPU`, records cold and warm runs, validates the WAV output,
-and reports provider node events from the ONNX Runtime profile. Provider presence
-alone cannot produce `PASS`.
-
-`requirements-coreml.txt` documents the direct dependencies. The lock file is
-the complete environment captured from the passing B2 run.
 
 ## Windows/DirectML setup
 
-Use native 64-bit Python 3.12. The passing Z440 environment is frozen separately
-from CoreML and must contain only `onnxruntime-directml` as its ONNX Runtime
-distribution.
+Use native 64-bit Python 3.12. The passing Z440 environment must contain only
+`onnxruntime-directml` as its ONNX Runtime distribution.
 
 ```powershell
 $root = "$env:TEMP\musicmute-gpu-feasibility"
@@ -98,6 +57,6 @@ direct dependencies; the lock captures the complete passing B3 environment.
 ## Tests
 
 ```bash
-/tmp/musicmute-gpu-feasibility-py313/bin/python -m unittest discover \
+python -m unittest discover \
   -s tools/worker-gpu-feasibility/tests -p 'test_*.py' -v
 ```

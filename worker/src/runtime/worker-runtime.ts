@@ -119,7 +119,7 @@ type RuntimeEventInput =
       recipeDigest: string;
       modelDigest: string;
       outputBitrateKbps: number;
-      groupSize: 1;
+      groupSize: 1 | 2;
       modelLoadState: "preloaded";
       childIncarnation: string;
     } & AttemptEventIdentity)
@@ -645,7 +645,7 @@ export class WorkerRuntime {
       recipeDigest: claim.recipe.recipeDigest,
       modelDigest: claim.recipe.modelDigest,
       outputBitrateKbps: claim.recipe.outputBitrateKbps,
-      groupSize: 1,
+      groupSize: slot.provider === "mps" ? 2 : 1,
       modelLoadState: "preloaded",
       childIncarnation: child.incarnation,
     });
@@ -846,6 +846,7 @@ export class WorkerRuntime {
         attemptId: claim.attemptId,
         stageTimings: [
           ...result.stageTimings,
+          ...(result.separationTimings ?? []),
           ...(downloadMs === null
             ? []
             : [{ stage: "download", durationMs: downloadMs }]),

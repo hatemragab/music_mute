@@ -176,7 +176,7 @@ describe("macOS public user commands", () => {
     expect(benchmarkFile).toHaveBeenCalledWith(
       expect.objectContaining({
         inputPath: "/Users/test/song.mp3",
-        recipeId: "kim-vocals-v2-trim",
+        recipeId: "kim-vocals-v2",
         warmupRuns: 1,
         measuredRuns: 3,
         groupSize: 1,

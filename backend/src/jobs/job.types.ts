@@ -110,12 +110,12 @@ export interface WorkerRecipeSnapshot {
   modelFilename: 'Kim_Vocal_2.onnx';
   modelDigest: string;
   modelBytes: number;
-  preparationProfileId: 'pcm16-stereo-44100-v1';
+  inputProfileId: 'direct-input-v1';
   stepIds: WorkerRecipeStepId[];
   trimEnabled: boolean;
   denoiseEnabled: boolean;
   denoisePresetId: 'afftdn-conservative-v1' | null;
-  trimProfileId: 'trim-vocal-gaps-v1' | null;
+  trimProfileId: 'trim-vocal-mp3-v1' | 'trim-vocal-wav-v1' | null;
   outputFormat: 'mp3';
   outputBitrateKbps: 160;
 }

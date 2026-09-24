@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import tempfile
 import unittest
 import uuid
@@ -18,6 +19,7 @@ from musicmute_engine.pipeline import (
     is_positive_gpu_oom,
 )
 from musicmute_engine.recipes import RECIPE_DEFINITIONS, recipe_snapshot
+from musicmute_engine.separator import SeparatorError
 
 RATE = 44_100
 
@@ -25,13 +27,36 @@ RATE = 44_100
 class FakeSeparator:
     def __init__(self) -> None:
         self.calls = 0
+        self.sources: list[Path] = []
 
-    def separate(self, source: Path, output_directory: Path) -> Path:
+    def separate(self, source: Path, output_directory: Path, on_window_progress=None) -> Path:
         self.calls += 1
+        self.sources.append(source)
         output_directory.mkdir(parents=True, exist_ok=True)
-        audio, rate = sf.read(source, dtype="float32", always_2d=True)
-        output = output_directory / "vocals.flac"
-        sf.write(output, audio, rate, format="FLAC", subtype="PCM_16")
+        output = output_directory / "vocals.wav"
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            raise RuntimeError("ffmpeg is required to write the test vocal")
+        completed = subprocess.run(
+            [
+                ffmpeg,
+                "-y",
+                "-i",
+                str(source),
+                "-vn",
+                "-c:a",
+                "pcm_s16le",
+                "-ar",
+                "44100",
+                "-ac",
+                "2",
+                str(output),
+            ],
+            check=False,
+            capture_output=True,
+        )
+        if completed.returncode != 0 or not output.is_file():
+            raise RuntimeError("test vocal mp3 was not written")
         return output
 
 
@@ -60,6 +85,7 @@ class PipelineTests(unittest.TestCase):
         tone = np.column_stack((wave, wave))
         audio = np.concatenate((tone, np.zeros_like(tone), tone))
         fake = FakeSeparator()
+        fake.last_separation_timings = {"separationMatchMix": 0.0}
         pipeline = RuntimePipeline(lambda _provider, _model, _device: fake)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -67,42 +93,170 @@ class PipelineTests(unittest.TestCase):
             cache.mkdir()
             model = root / "qualified.onnx"
             model.write_bytes(b"test-only-model-sentinel")
+            uncompressed = root / "source.wav"
+            sf.write(uncompressed, audio, RATE, subtype="PCM_16")
             for recipe_id, definition in RECIPE_DEFINITIONS.items():
                 attempt_id = str(uuid.uuid4())
                 attempt = root / attempt_id
                 attempt.mkdir()
-                source = attempt / "input.wav"
-                sf.write(source, audio, RATE, subtype="PCM_16")
+                source = attempt / "input.mp3"
+                subprocess.run(
+                    [self.ffmpeg, "-y", "-loglevel", "error", "-i", str(uncompressed),
+                     "-c:a", "libmp3lame", "-b:a", "160k", str(source)],
+                    check=True,
+                )
                 request = ProcessRequest.from_payload(
                     self.payload(attempt_id, attempt, source, cache, recipe_id)
                 )
                 with patch(
                     "musicmute_engine.pipeline.verified_cached_model",
                     return_value=model,
-                ):
+                ) as verify:
                     stages: list[str] = []
                     result = pipeline.process(request, stages.append)
-                self.assertEqual(stages[:4], [
-                    "input-validation", "preparation", "model-load", "separation"
-                ])
-                self.assertEqual(stages[-3:], [
-                    "encoding", "output-validation", "output-ready"
-                ])
-                self.assertEqual("denoise" in stages, definition.denoise_enabled)
-                self.assertEqual("trim" in stages, definition.trim_enabled)
+                    self.assertEqual(verify.call_count, 1 if fake.calls == 1 else 0)
+                expected_stages = ["input-validation", "model-load", "separation"]
+                if definition.trim_enabled:
+                    expected_stages.extend(("trim", "encoding"))
+                expected_stages.extend(("output-validation", "output-ready"))
+                self.assertEqual(stages, expected_stages)
+                self.assertNotIn("preparation", stages)
+                self.assertNotIn("denoise", stages)
+                self.assertEqual(result["separationTimings"], {"separationMatchMix": 0.0})
                 timings = result["stageTimings"]
-                self.assertEqual("denoise" in timings, definition.denoise_enabled)
+                self.assertNotIn("denoise", timings)
+                self.assertNotIn("preparation", timings)
                 self.assertEqual("trim" in timings, definition.trim_enabled)
+                self.assertEqual("encode" in timings, definition.trim_enabled)
+                self.assertIn("separation", timings)
                 self.assertEqual(result["trimEnabled"], definition.trim_enabled)
                 self.assertEqual(result["denoiseEnabled"], definition.denoise_enabled)
                 self.assertEqual(result["contentType"], "audio/mpeg")
-                self.assertTrue(Path(result["outputPath"]).is_file())
+                self.assertEqual(result["outputBitrateKbps"], 160)
                 if definition.trim_enabled:
                     self.assertGreater(result["removedSamples"], 0)
+                    self.assertGreater(result["editMap"]["rangeCount"], 1)
                 else:
                     self.assertEqual(result["removedSamples"], 0)
                     self.assertEqual(result["editMap"]["rangeCount"], 1)
+                self.assertTrue(Path(result["outputPath"]).is_file())
+                self.assertEqual(list(attempt.rglob("*.wav")), [])
+                self.assertEqual(Path(result["outputPath"]).suffix, ".mp3")
             self.assertEqual(fake.calls, len(RECIPE_DEFINITIONS))
+            self.assertTrue(all(source.suffix == ".mp3" for source in fake.sources))
+
+    def test_non_mp3_inputs_are_decoded_before_separation(self) -> None:
+        audio = np.zeros((RATE, 2), dtype=np.float32)
+        fake = FakeSeparator()
+        pipeline = RuntimePipeline(lambda _provider, _model, _device: fake)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "models"
+            cache.mkdir()
+            model = root / "qualified.onnx"
+            model.write_bytes(b"test-only-model-sentinel")
+            source_wav = root / "source.wav"
+            sf.write(source_wav, audio, RATE, subtype="PCM_16")
+            for extension, format_args in (
+                ("m4a", []),
+                ("bin", ["-f", "adts"]),
+            ):
+                with self.subTest(extension=extension):
+                    attempt_id = str(uuid.uuid4())
+                    attempt = root / attempt_id
+                    attempt.mkdir()
+                    source = attempt / f"input.{extension}"
+                    subprocess.run(
+                        [
+                            self.ffmpeg, "-y", "-loglevel", "error", "-i",
+                            str(source_wav), "-c:a", "aac", *format_args,
+                            str(source),
+                        ],
+                        check=True,
+                    )
+                    request = ProcessRequest.from_payload(
+                        self.payload(attempt_id, attempt, source, cache, "kim-vocals-v2")
+                    )
+                    stages: list[str] = []
+                    with patch(
+                        "musicmute_engine.pipeline.verified_cached_model",
+                        return_value=model,
+                    ):
+                        result = pipeline.process(request, stages.append)
+                    self.assertEqual(
+                        stages,
+                        ["input-validation", "preparation", "model-load",
+                         "separation", "trim", "encoding", "output-validation", "output-ready"],
+                    )
+                    self.assertEqual(
+                        fake.sources[-1], (attempt / "prepared.wav").resolve()
+                    )
+                    self.assertIn("preparation", result["stageTimings"])
+                    self.assertTrue(Path(result["outputPath"]).is_file())
+                    self.assertFalse((attempt / "prepared.wav").exists())
+
+    def test_prepared_wav_is_removed_when_separation_fails(self) -> None:
+        fake = FakeSeparator()
+        pipeline = RuntimePipeline(lambda _provider, _model, _device: fake)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "models"
+            cache.mkdir()
+            model = root / "qualified.onnx"
+            model.write_bytes(b"test-only-model-sentinel")
+            attempt_id = str(uuid.uuid4())
+            attempt = root / attempt_id
+            attempt.mkdir()
+            source = attempt / "input.m4a"
+            subprocess.run(
+                [
+                    self.ffmpeg, "-y", "-loglevel", "error", "-f", "lavfi",
+                    "-i", "anullsrc=r=44100:cl=stereo", "-t", "1", "-c:a", "aac",
+                    str(source),
+                ],
+                check=True,
+            )
+            request = ProcessRequest.from_payload(
+                self.payload(attempt_id, attempt, source, cache, "kim-vocals-v2")
+            )
+
+            def fail_separation(prepared: Path, _output: Path) -> Path:
+                self.assertTrue(prepared.is_file())
+                raise SeparatorError("test failure")
+
+            with (
+                patch("musicmute_engine.pipeline.verified_cached_model", return_value=model),
+                patch.object(fake, "separate", side_effect=fail_separation),
+            ):
+                with self.assertRaises(ProcessingFailure) as failure:
+                    pipeline.process(request)
+            self.assertEqual(failure.exception.code, "SEPARATOR_FAILED")
+            self.assertTrue(source.is_file())
+            self.assertFalse((attempt / "prepared.wav").exists())
+
+    def test_temporary_wavs_are_cleaned_after_trim_or_encode_failure(self) -> None:
+        from musicmute_engine.media import MediaProcessingError
+        for operation, error in (("trim_vocal_gaps", ValueError("trim")),
+                                 ("encode_mp3", MediaProcessingError("encode"))):
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                attempt_id = str(uuid.uuid4())
+                attempt = root / attempt_id
+                attempt.mkdir()
+                source = attempt / "input.wav"
+                sf.write(source, np.zeros((RATE, 2)), RATE, subtype="PCM_16")
+                pipeline = RuntimePipeline(lambda *_args: FakeSeparator())
+                request = ProcessRequest.from_payload(self.payload(attempt_id, attempt, source, root / "models", "kim-vocals-v2"))
+                def fail(*_args, **_kwargs):
+                    (attempt / "trimmed.wav").write_bytes(b"partial")
+                    raise error
+                with patch("musicmute_engine.pipeline.verified_cached_model", return_value=root / "model"), patch(
+                    "musicmute_engine.pipeline." + operation, side_effect=fail
+                ), self.assertRaises(ProcessingFailure):
+                    pipeline.process(request)
+                self.assertTrue(source.is_file())
+                self.assertFalse((attempt / "separated").exists())
+                self.assertFalse((attempt / "trimmed.wav").exists())
 
     def test_request_rejects_recipe_tampering_and_untrusted_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -180,6 +334,39 @@ class PipelineTests(unittest.TestCase):
 
         self.assertEqual(factory_calls, [("mps", model, 0)])
         self.assertEqual(stages, ["loading"])
+
+    def test_warm_model_verification_is_bound_to_child_and_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "models"
+            model = cache / "model.onnx"
+            pipeline = RuntimePipeline(lambda *_args: FakeSeparator())
+            with patch(
+                "musicmute_engine.pipeline.verified_cached_model", return_value=model
+            ) as verify:
+                pipeline.preload(cache, "mps")
+                pipeline.preload(cache, "mps")
+                self.assertEqual(pipeline._verified_model(cache), model)
+                verify.assert_called_once_with(cache)
+                with self.assertRaises(ProcessingFailure) as changed:
+                    pipeline.preload(Path(directory) / "other", "mps")
+                self.assertEqual(changed.exception.code, "RUNTIME_CONFIG_CHANGED")
+                with self.assertRaises(ProcessingFailure):
+                    pipeline.preload(cache, "directml")
+                fresh = RuntimePipeline(lambda *_args: FakeSeparator())
+                fresh.preload(cache, "mps")
+                self.assertEqual(verify.call_count, 2)
+
+    def test_failed_model_load_does_not_cache_verification(self) -> None:
+        pipeline = RuntimePipeline(lambda *_args: None)
+        with patch(
+            "musicmute_engine.pipeline.verified_cached_model", return_value=Path("/model")
+        ) as verify, patch.object(
+            pipeline, "_separator_factory", side_effect=SeparatorError("failed load")
+        ):
+            for _ in range(2):
+                with self.assertRaises(ProcessingFailure):
+                    pipeline.preload(Path("/cache"), "mps")
+            self.assertEqual(verify.call_count, 2)
 
     def payload(
         self,

@@ -412,7 +412,7 @@ actor ProcessingStore {
     }
     do {
       var snapshot = try JSONDecoder().decode(Snapshot.self, from: Data(contentsOf: file))
-      guard [1, 2].contains(snapshot.version), snapshot.ownerUid == owner,
+      guard snapshot.version == 2, snapshot.ownerUid == owner,
         snapshot.operations.allSatisfy({ $0.ownerUid == owner }),
         (snapshot.retryIntents ?? []).allSatisfy({ $0.ownerUid == owner }),
         (snapshot.pipelines ?? []).allSatisfy({ $0.ownerUid == owner }),

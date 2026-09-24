@@ -190,7 +190,6 @@
     <string name="auth_processing_allowed">Your account meets the current requirements for server processing.</string>
     <string name="auth_processing_device">Refresh your account to finish registering this device for server processing.</string>
     <string name="auth_processing_unavailable">Server processing is unavailable for this account. Refresh to check again.</string>
-    <string name="auth_open_update">Open update link</string>
     <string name="auth_confirm">Confirm</string>
     <string name="auth_cancel">Cancel</string>
     <string name="auth_dismiss">Dismiss</string>

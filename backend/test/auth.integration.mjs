@@ -268,24 +268,6 @@ test(
         token: refreshed.idToken,
         headers: installationHeader,
       });
-      await runPolicy(
-        {
-          platforms: {
-            android: {
-              minimumBuild: 3,
-              latestBuild: 3,
-              downloadUrl: 'https://example.invalid/download',
-            },
-          },
-        },
-        1,
-      );
-      const updateRequired = await call(probe, '/integration-processing', {
-        token: refreshed.idToken,
-        headers: installationHeader,
-        expected: 403,
-      });
-      assert.equal(updateRequired.code, 'APP_UPDATE_REQUIRED');
       await call(apiOne, `/users/me/devices/${installationId}`, {
         token: refreshed.idToken,
         method: 'PUT',

@@ -1,17 +1,11 @@
-import { HttpException, Injectable, Optional } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { HttpException, Injectable } from '@nestjs/common';
 import { AppPolicyService } from '../app-policy/app-policy.service.js';
 import { validatePolicy } from '../app-policy/access-policy.js';
-import type {
-  AppPolicy,
-  PlatformPolicy,
-} from '../app-policy/app-policy.schema.js';
+import type { AppPolicy } from '../app-policy/app-policy.schema.js';
 import { authError } from '../auth/auth.errors.js';
 
-type PlatformPolicyPatch = Partial<PlatformPolicy>;
 export interface PolicyPatch {
-  requireVerifiedEmail?: boolean;
-  platforms?: Partial<Record<'android' | 'ios', PlatformPolicyPatch>>;
+  requireVerifiedEmail: boolean;
 }
 
 export interface PolicyCommandResult {
@@ -45,29 +39,15 @@ function exactKeys(value: Record<string, unknown>, allowed: string[]): void {
 
 function validatePatch(input: unknown): PolicyPatch {
   const patch = object(input);
-  exactKeys(patch, ['requireVerifiedEmail', 'platforms']);
-  if (
-    'requireVerifiedEmail' in patch &&
-    typeof patch.requireVerifiedEmail !== 'boolean'
-  )
+  exactKeys(patch, ['requireVerifiedEmail']);
+  if (typeof patch.requireVerifiedEmail !== 'boolean')
     throw authError('INVALID_INPUT');
-  if ('platforms' in patch) {
-    const platforms = object(patch.platforms);
-    exactKeys(platforms, ['android', 'ios']);
-    for (const platformName of Object.keys(platforms)) {
-      const platform = object(platforms[platformName]);
-      exactKeys(platform, ['minimumBuild', 'latestBuild', 'downloadUrl']);
-    }
-  }
-  return patch as PolicyPatch;
+  return { requireVerifiedEmail: patch.requireVerifiedEmail } as PolicyPatch;
 }
 
 @Injectable()
 export class PolicyCommand {
-  constructor(
-    private readonly policies: AppPolicyService,
-    @Optional() private readonly config?: ConfigService,
-  ) {}
+  constructor(private readonly policies: AppPolicyService) {}
 
   async setPolicy(
     input: unknown,
@@ -82,29 +62,10 @@ export class PolicyCommand {
       throw authError('INVALID_INPUT');
     const patch = validatePatch(input);
     const current = await this.policies.current();
-    if (
-      patch.platforms &&
-      (this.config?.get<boolean>('APP_UPDATES_ENABLED') ||
-        current.platforms.android.releaseSelection ||
-        current.platforms.ios.releaseSelection)
-    )
-      throw authError('INVALID_INPUT');
     if (current.revision !== expectedRevision) throw conflict();
     const next: AppPolicy = {
       ...current,
-      ...('requireVerifiedEmail' in patch
-        ? { requireVerifiedEmail: patch.requireVerifiedEmail! }
-        : {}),
-      platforms: {
-        android: {
-          ...current.platforms.android,
-          ...patch.platforms?.android,
-        },
-        ios: {
-          ...current.platforms.ios,
-          ...patch.platforms?.ios,
-        },
-      },
+      requireVerifiedEmail: patch.requireVerifiedEmail,
       revision: expectedRevision,
       updatedAt: current.updatedAt,
     };

@@ -133,7 +133,7 @@ describe('account recovery requests', () => {
     expect(f.requests.create).not.toHaveBeenCalled();
   });
 
-  it('backfills and exposes the grace deadline for a legacy deleting account', async () => {
+  it('rejects a deletion request without a stored recovery deadline', async () => {
     const f = fixture(null);
     const userId = new Types.ObjectId().toHexString();
     const beforeRequest = await f.service.status(
@@ -141,28 +141,18 @@ describe('account recovery requests', () => {
       new Date('2026-09-12T00:00:00.000Z'),
     );
     expect(beforeRequest.deletion).toMatchObject({
-      recoverUntil: '2026-09-26T00:00:00.000Z',
-      recoveryAvailable: true,
+      recoverUntil: null,
+      recoveryAvailable: false,
     });
 
-    await f.service.request(
-      userId,
-      { reason: 'Restore this legacy request' },
-      new Date('2026-09-12T00:00:00.000Z'),
-    );
-    expect(f.users.updateOne).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: 'deleting',
-        deletionLeaseToken: null,
-      }),
-      expect.objectContaining({
-        $set: {
-          deletionRecoverUntil: new Date('2026-09-26T00:00:00.000Z'),
-          deletionNextAt: new Date('2026-09-26T00:00:00.000Z'),
-        },
-      }),
-      { session: f.session },
-    );
+    await expect(
+      f.service.request(
+        userId,
+        { reason: 'Restore access' },
+        new Date('2026-09-12T00:00:00.000Z'),
+      ),
+    ).rejects.toMatchObject({ response: { code: 'SERVICE_UNAVAILABLE' } });
+    expect(f.users.updateOne).not.toHaveBeenCalled();
   });
 
   it('presents an overdue pending request as expired', async () => {

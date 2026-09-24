@@ -9,7 +9,6 @@ import { JobActionsService } from '../jobs/job-actions.service.js';
 import { JobDeletionService } from '../jobs/job-deletion.service.js';
 import { Job } from '../jobs/job.schema.js';
 import { StorageCleanupService } from '../storage/storage-cleanup.service.js';
-import { accountRecoveryDeadline } from './account-recovery-policy.js';
 import { UserIdentityFenceService } from './user-identity-fence.service.js';
 import { User } from './user.schema.js';
 
@@ -89,11 +88,7 @@ export class AccountDeletionCleanupService {
           status: trusted({ $in: ['deleting', 'purging'] }),
           $and: [
             {
-              $or: [
-                { deletionNextAt: trusted({ $lte: now, $ne: null }) },
-                { status: 'deleting', deletionRecoverUntil: null },
-                { status: 'deleting', deletionNextAt: null },
-              ],
+              $or: [{ deletionNextAt: trusted({ $lte: now, $ne: null }) }],
             },
             {
               $or: [
@@ -115,9 +110,8 @@ export class AccountDeletionCleanupService {
     if (!user) return false;
 
     if (user.status === 'deleting') {
-      const recoverUntil =
-        user.deletionRecoverUntil ??
-        accountRecoveryDeadline(user.deletionRequestedAt ?? now);
+      const recoverUntil = user.deletionRecoverUntil;
+      if (!recoverUntil) throw new Error('Deletion deadline is missing');
       if (recoverUntil.getTime() > now.getTime()) {
         await this.fenceGraceWork(user, token, recoverUntil, now);
         return true;

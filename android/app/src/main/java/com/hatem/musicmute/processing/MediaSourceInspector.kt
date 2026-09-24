@@ -46,3 +46,23 @@ fun audioPreparationRoute(hasVideo: Boolean, compatible: Boolean, fitsBytes: Boo
     if (channels !in 1..2) throw InputPreparationException(InputPreparationError.UNSUPPORTED)
     return AudioPreparationRoute.CONVERT
 }
+
+/** Keep already compact compressed audio intact, including files missing bitrate metadata. */
+internal fun canCopyProcessingAudio(
+    inspection: MediaSourceInspection,
+    extension: String,
+    sourceBytes: Long?,
+    policy: ProcessingMediaPolicy,
+): Boolean {
+    if (inspection.hasVideo || inspection.audioTrackCount != 1 ||
+        processingContentType(extension) == null) return false
+    val audio = inspection.audio
+    if (!policy.acceptsDuration(audio.durationSeconds)) return false
+    if (sourceBytes != null && !policy.acceptsPrepared(sourceBytes, audio.durationSeconds)) return false
+    val bitrate = audio.bitRate
+    if (bitrate != null) return bitrate in 1..160_000
+    // The complete container is an upper bound on compressed audio bytes.
+    // Unknown length stays on the bounded conversion path; WAV is never allowed.
+    return sourceBytes != null && sourceBytes > 0 &&
+        sourceBytes.toDouble() * 8 / audio.durationSeconds <= 160_000
+}

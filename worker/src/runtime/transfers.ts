@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { lstat, open, readFile, unlink } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import type {
   ObjectIdentity,
@@ -150,11 +151,29 @@ export class WorkerTransferClient {
     validateUploadHeaders(grant, expected);
     if (Date.parse(grant.expiresAt) <= Date.now())
       throw new TransferError("OUTPUT_UPLOAD_FAILED", true, "grant-expired");
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    let body:
+      | ReturnType<Awaited<ReturnType<typeof open>>["createReadStream"]>
+      | undefined;
+    let validationError: TransferError | undefined;
+    let verified = false;
     try {
-      const sourceStat = await lstat(source);
+      const pathStat = await lstat(source);
+      if (!pathStat.isFile() || pathStat.isSymbolicLink())
+        throw new TransferError(
+          "OUTPUT_UPLOAD_FAILED",
+          false,
+          "output-identity-mismatch",
+        );
+      handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const sourceStat = await handle.stat();
       if (
         !sourceStat.isFile() ||
-        sourceStat.isSymbolicLink() ||
+        sourceStat.dev !== pathStat.dev ||
+        sourceStat.ino !== pathStat.ino ||
+        !Number.isSafeInteger(expected.bytes) ||
+        expected.bytes <= 0 ||
+        expected.bytes > 30_000_000 ||
         sourceStat.size !== expected.bytes
       )
         throw new TransferError(
@@ -162,29 +181,62 @@ export class WorkerTransferClient {
           false,
           "output-identity-mismatch",
         );
-      const body = await readFile(source);
-      const digest = createHash("sha256").update(body).digest();
-      const expectedDigest = Buffer.from(expected.sha256, "base64");
-      if (
-        digest.length !== expectedDigest.length ||
-        !timingSafeEqual(digest, expectedDigest)
-      )
-        throw new TransferError(
-          "OUTPUT_UPLOAD_FAILED",
-          false,
-          "output-checksum-mismatch",
-        );
+      body = handle.createReadStream({
+        autoClose: false,
+        highWaterMark: 64 * 1024,
+      });
+      const sourceStream = body;
+      async function* verifiedBody() {
+        const digest = createHash("sha256");
+        let bytes = 0;
+        // Hold the final chunk until verification so corrupt content cannot
+        // finish a PUT. Earlier chunks upload while subsequent chunks are read.
+        let pending: Buffer | undefined;
+        for await (const chunk of sourceStream) {
+          const data = chunk as Buffer;
+          bytes += data.length;
+          if (bytes > expected.bytes) {
+            validationError = new TransferError(
+              "OUTPUT_UPLOAD_FAILED",
+              false,
+              "output-identity-mismatch",
+            );
+            throw validationError;
+          }
+          digest.update(data);
+          if (pending) yield pending;
+          pending = data;
+        }
+        const actual = digest.digest();
+        const expectedDigest = Buffer.from(expected.sha256, "base64");
+        if (
+          bytes !== expected.bytes ||
+          actual.length !== expectedDigest.length ||
+          !timingSafeEqual(actual, expectedDigest)
+        ) {
+          validationError = new TransferError(
+            "OUTPUT_UPLOAD_FAILED",
+            false,
+            "output-checksum-mismatch",
+          );
+          throw validationError;
+        }
+        verified = true;
+        if (pending) yield pending;
+      }
       const timeout = AbortSignal.timeout(this.timeoutMs);
       const requestSignal = signal
         ? AbortSignal.any([signal, timeout])
         : timeout;
-      const response = await this.fetchImplementation(grant.url, {
+      const request: RequestInit & { duplex: "half" } = {
         method: "PUT",
         redirect: "error",
         signal: requestSignal,
-        headers: grant.headers,
-        body,
-      });
+        headers: { ...grant.headers, "Content-Length": String(expected.bytes) },
+        body: verifiedBody(),
+        duplex: "half",
+      };
+      const response = await this.fetchImplementation(grant.url, request);
       if (!response.ok)
         throw new TransferError(
           "OUTPUT_UPLOAD_FAILED",
@@ -194,6 +246,12 @@ export class WorkerTransferClient {
             response.status === 429 ||
             response.status >= 500,
           `upload-http-${response.status}`,
+        );
+      if (!verified)
+        throw new TransferError(
+          "OUTPUT_UPLOAD_FAILED",
+          false,
+          "output-not-consumed",
         );
       const versionId = response.headers.get("x-amz-version-id");
       if (!versionId || versionId === "null" || versionId.length > 1024)
@@ -205,12 +263,16 @@ export class WorkerTransferClient {
       return versionId;
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
+      if (validationError) throw validationError;
       if (error instanceof TransferError) throw error;
       throw new TransferError(
         "OUTPUT_UPLOAD_FAILED",
         true,
         `upload-transport-${transferErrorName(error)}`,
       );
+    } finally {
+      body?.destroy();
+      await handle?.close();
     }
   }
 }

@@ -19,6 +19,17 @@ val uploadSigningProperties =
 
 // Public endpoint configuration only. Credentials belong to Firebase's SDK, never BuildConfig.
 val authApiUrl = providers.gradleProperty("authApiUrl").orElse("")
+val sentryDsn = providers.gradleProperty("sentryDsn").orElse(
+    "https://7d5590c16d82bd80ec386e86a78acd37@o4506288965943296.ingest.us.sentry.io/4512142565638144"
+)
+val sentryEnabled = providers.gradleProperty("sentryEnabled").orElse("true")
+require(sentryEnabled.get() in setOf("true", "false")) { "sentryEnabled must be true or false" }
+require(runCatching {
+    URI(sentryDsn.get()).let {
+        it.scheme == "https" && !it.host.isNullOrBlank() && !it.rawUserInfo.isNullOrBlank() &&
+            it.rawQuery == null && it.rawFragment == null
+    }
+}.getOrDefault(false)) { "sentryDsn must be a public HTTPS Sentry DSN" }
 
 fun buildConfigString(value: String) =
     "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
@@ -60,6 +71,8 @@ android {
     }
     buildTypes {
         getByName("debug") {
+            buildConfigField("boolean", "SENTRY_ENABLED", "false")
+            buildConfigField("String", "SENTRY_DSN", buildConfigString(sentryDsn.get()))
             buildConfigField(
                 "String",
                 "AUTH_API_URL",
@@ -77,6 +90,8 @@ android {
             )
         }
         getByName("release") {
+            buildConfigField("boolean", "SENTRY_ENABLED", sentryEnabled.get())
+            buildConfigField("String", "SENTRY_DSN", buildConfigString(sentryDsn.get()))
             signingConfig = signingConfigs.getByName("upload")
             buildConfigField("String", "AUTH_API_URL", buildConfigString(authApiUrl.get()))
             buildConfigField("String", "AUTH_EMULATOR_HOST", "\"\"")
@@ -84,6 +99,7 @@ android {
         }
         create("authE2e") {
             initWith(getByName("debug"))
+            buildConfigField("boolean", "SENTRY_ENABLED", "false")
             applicationIdSuffix = ".authtest"
             matchingFallbacks += "debug"
             buildConfigField("String", "AUTH_API_URL", "\"http://127.0.0.1:48080\"")
@@ -146,6 +162,7 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
     implementation(libs.youtubedl)
+    implementation(libs.sentry.android)
     "directImplementation"(libs.azhon.appupdate)
     "playImplementation"(libs.play.appupdate)
     "playImplementation"(libs.play.appupdate.ktx)

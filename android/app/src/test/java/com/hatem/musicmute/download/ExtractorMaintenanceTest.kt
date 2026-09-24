@@ -87,4 +87,17 @@ class ExtractorMaintenanceTest {
             assertFalse(File(file.parentFile, "yt-dlp.pending").exists())
         }
     }
+
+    @Test fun networkPreparationNeverMutatesTheActiveExtractor() {
+        val file = installed()
+        val updater = ExtractorMaintenance(file, { release }, {
+            assertEquals("old extractor", file.readText())
+            candidate
+        }, { 1_000 })
+        val prepared = requireNotNull(updater.prepare("2025.11.12"))
+        assertEquals("old extractor", file.readText())
+        assertFalse(File(file.parentFile, "yt-dlp.pending").exists())
+        updater.activate(prepared) { release.version }
+        assertArrayEquals(candidate, file.readBytes())
+    }
 }

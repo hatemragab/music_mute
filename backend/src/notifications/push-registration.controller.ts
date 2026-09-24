@@ -58,7 +58,7 @@ export class PushRegistrationController {
     await this.registrations.deactivate(
       req.user!._id.toHexString(),
       installationId.toLowerCase(),
-      dto?.expectedBindingRevision,
+      dto.expectedBindingRevision,
     );
   }
 

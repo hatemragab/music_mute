@@ -14,6 +14,7 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const staging = mkdtempSync(join(tmpdir(), "musicmute-dashboard-caprover-"));
 const files = [
   "dashboard/Dockerfile",
+  "dashboard/server-sentry.mjs",
   "dashboard/package.json",
   "dashboard/package-lock.json",
   "dashboard/index.html",

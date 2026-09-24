@@ -336,7 +336,7 @@ export function summarizeRepeatedBenchmarkReport(
     ![1, 2, 4].includes(audioSettings.groupSize as number) ||
     (context.groupSize !== undefined &&
       audioSettings.groupSize !== context.groupSize) ||
-    ![192, 320].includes(audioSettings.bitrateKbps as number) ||
+    ![160, 192, 320].includes(audioSettings.bitrateKbps as number) ||
     audioSettings.format !== "mp3" ||
     !Number.isSafeInteger(audioSettings.hopLength) ||
     (audioSettings.hopLength as number) < 1 ||
@@ -444,15 +444,22 @@ export function summarizeRepeatedBenchmarkReport(
   const savedAudio = report.savedAudio === true;
   if (!Array.isArray(report.savedAudioArtifacts))
     throw new TypeError("Benchmark saved audio evidence is missing");
-  const expectedAudioCount = savedAudio ? runs.length * 2 : 0;
-  if (report.savedAudioArtifacts.length !== expectedAudioCount)
+  const artifactFormats: ("mp3" | "flac")[] = !savedAudio
+    ? []
+    : report.savedAudioArtifacts.length === runs.length
+      ? ["mp3"]
+      : ["mp3", "flac"];
+  if (
+    report.savedAudioArtifacts.length !==
+    runs.length * artifactFormats.length
+  )
     throw new TypeError("Benchmark saved audio count is invalid");
   const savedAudioArtifacts: SavedBenchmarkAudioArtifact[] =
     report.savedAudioArtifacts.map((candidate, index) => {
       const artifact = record(candidate, "Benchmark saved audio artifact");
-      const run = runs[Math.floor(index / 2)];
+      const run = runs[Math.floor(index / artifactFormats.length)];
       if (!run) throw new TypeError("Benchmark saved audio run is missing");
-      const format = index % 2 === 0 ? "mp3" : "flac";
+      const format = artifactFormats[index % artifactFormats.length]!;
       const fileName = `${String(run.iteration).padStart(2, "0")}-${run.role}-vocals.${format}`;
       if (
         artifact.iteration !== run.iteration ||

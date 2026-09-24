@@ -29,12 +29,12 @@ export interface WorkerRecipeSnapshot {
   modelFilename: "Kim_Vocal_2.onnx";
   modelDigest: string;
   modelBytes: number;
-  preparationProfileId: "pcm16-stereo-44100-v1";
+  inputProfileId: "direct-input-v1";
   stepIds: WorkerRecipeStepId[];
   trimEnabled: boolean;
   denoiseEnabled: boolean;
   denoisePresetId: "afftdn-conservative-v1" | null;
-  trimProfileId: "trim-vocal-gaps-v1" | null;
+  trimProfileId: "trim-vocal-mp3-v1" | "trim-vocal-wav-v1" | null;
   outputFormat: "mp3";
   outputBitrateKbps: 160;
 }
@@ -177,6 +177,7 @@ export interface ChildProcessResult {
   outputFormat: "mp3";
   outputBitrateKbps: number;
   stageTimings: WorkerProcessingStageTiming[];
+  separationTimings?: Array<{ stage: string; durationMs: number }>;
 }
 
 export const WORKER_PROCESSING_STAGE_IDS = [
@@ -310,7 +311,7 @@ function recipe(value: unknown): WorkerRecipeSnapshot {
       ? null
       : oneOf(
           item.trimProfileId,
-          ["trim-vocal-gaps-v1"] as const,
+          ["trim-vocal-mp3-v1", "trim-vocal-wav-v1"] as const,
           "recipe.trimProfileId",
         );
   return {
@@ -335,10 +336,10 @@ function recipe(value: unknown): WorkerRecipeSnapshot {
     ),
     modelDigest: text(item.modelDigest, "recipe.modelDigest", SHA256_HEX, 64),
     modelBytes: integer(item.modelBytes, "recipe.modelBytes", 1),
-    preparationProfileId: oneOf(
-      item.preparationProfileId,
-      ["pcm16-stereo-44100-v1"] as const,
-      "recipe.preparationProfileId",
+    inputProfileId: oneOf(
+      item.inputProfileId,
+      ["direct-input-v1"] as const,
+      "recipe.inputProfileId",
     ),
     stepIds,
     trimEnabled: booleanValue(item.trimEnabled, "recipe.trimEnabled"),
@@ -676,6 +677,28 @@ export function parseChildProcessResult(value: unknown): ChildProcessResult {
       32,
       160,
     ),
+    separationTimings: Object.entries(
+      item.separationTimings === undefined
+        ? {}
+        : record(item.separationTimings, "separationTimings"),
+    ).map(([stage, seconds]) => {
+      if (
+        ![
+          "separationMixPreparation",
+          "separationPrimaryDemix",
+          "separationMatchMix",
+          "separationWavWrite",
+          "separationCleanup",
+        ].includes(stage)
+      )
+        throw new TypeError("Unknown separation timing");
+      return {
+        stage,
+        durationMs: Math.round(
+          numberValue(seconds, `separationTimings.${stage}`, 0, 7_200) * 1_000,
+        ),
+      };
+    }),
     stageTimings: WORKER_PROCESSING_STAGE_IDS.flatMap((stage) => {
       const seconds = rawStageTimings[stage];
       if (seconds === undefined) return [];

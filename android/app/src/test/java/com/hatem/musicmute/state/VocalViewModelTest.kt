@@ -110,11 +110,10 @@ class VocalViewModelTest {
             assertTrue(model.state.value.preferencesLoading)
             runCurrent()
             assertFalse(model.state.value.preferencesLoading)
-            model.setTheme(ThemeChoice.DARK)
             model.setLanguage(LanguageChoice.ARABIC)
             runCurrent()
             assertEquals(
-                AppPreferences(ThemeChoice.DARK, LanguageChoice.ARABIC),
+                AppPreferences(LanguageChoice.ARABIC),
                 model.state.value.preferences,
             )
         }
@@ -126,15 +125,15 @@ class VocalViewModelTest {
             val model = model(preferences = preferences)
             runCurrent()
             preferences.failWrites = true
-            model.setTheme(ThemeChoice.DARK)
+            model.setLanguage(LanguageChoice.ARABIC)
             runCurrent()
             assertTrue(model.state.value.preferencesError)
-            assertEquals(ThemeChoice.DARK, model.state.value.preferences.theme)
+            assertEquals(LanguageChoice.SYSTEM, model.state.value.preferences.language)
             preferences.failWrites = false
-            model.setTheme(ThemeChoice.DARK)
+            model.setLanguage(LanguageChoice.ARABIC)
             runCurrent()
             assertFalse(model.state.value.preferencesError)
-            assertEquals(ThemeChoice.DARK, model.state.value.preferences.theme)
+            assertEquals(LanguageChoice.ARABIC, model.state.value.preferences.language)
         }
 
     @Test
@@ -145,10 +144,8 @@ class VocalViewModelTest {
                 object : PreferencesRepository {
                     override val preferences = flow {
                         if (fail) throw IOException("test failure")
-                        emit(AppPreferences(ThemeChoice.DARK, LanguageChoice.ARABIC))
+                        emit(AppPreferences(LanguageChoice.ARABIC))
                     }
-
-                    override suspend fun setTheme(theme: ThemeChoice) = Unit
 
                     override suspend fun setLanguage(language: LanguageChoice) = Unit
 
@@ -163,7 +160,7 @@ class VocalViewModelTest {
             runCurrent()
             assertFalse(model.state.value.preferencesError)
             assertEquals(
-                AppPreferences(ThemeChoice.DARK, LanguageChoice.ARABIC),
+                AppPreferences(LanguageChoice.ARABIC),
                 model.state.value.preferences,
             )
         }
@@ -190,11 +187,6 @@ class VocalViewModelTest {
     private class FakePreferences : PreferencesRepository {
         override val preferences = MutableStateFlow(AppPreferences())
         var failWrites = false
-
-        override suspend fun setTheme(theme: ThemeChoice) {
-            if (failWrites) throw IOException("test failure")
-            preferences.value = preferences.value.copy(theme = theme)
-        }
 
         override suspend fun setLanguage(language: LanguageChoice) {
             if (failWrites) throw IOException("test failure")

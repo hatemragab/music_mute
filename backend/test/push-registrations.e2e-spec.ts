@@ -170,22 +170,18 @@ describe('push registration HTTP boundary', () => {
       .expect(400);
   });
 
-  it('preserves legacy empty-body deactivation', async () => {
+  it('rejects deactivation without a binding revision', async () => {
     await request(app.getHttpServer())
       .post(`/api/v1/devices/${installationId}/push/deactivate`)
       .set('Authorization', `Bearer ${bearer}`)
       .send({})
-      .expect(204);
+      .expect(400);
     await request(app.getHttpServer())
       .post(`/api/v1/devices/${installationId}/push/deactivate`)
       .set('Authorization', `Bearer ${bearer}`)
       .send({ active: false })
       .expect(400);
-    expect(registrations.deactivate).toHaveBeenCalledWith(
-      expect.any(String),
-      installationId,
-      undefined,
-    );
+    expect(registrations.deactivate).not.toHaveBeenCalled();
   });
 
   it('passes an expected revision to the owned deactivation operation', async () => {

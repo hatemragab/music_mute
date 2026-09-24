@@ -8,6 +8,8 @@ import json
 import math
 import os
 import subprocess
+import threading
+import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,7 +29,6 @@ from .recipes import OUTPUT_BITRATE_KBPS
 
 FFMPEG_TIMEOUT_SECONDS = 7_200
 PROBE_TIMEOUT_SECONDS = 60
-DENOISE_FILTER = "afftdn=nr=6:nf=-50:tn=0:gs=3"
 LOCAL_MEDIA_FORMATS = "aac,flac,matroska,webm,mov,mp3,ogg,wav"
 
 
@@ -151,32 +152,6 @@ def prepare_audio(source: Path, destination: Path, ffmpeg: Path) -> Path:
     return destination
 
 
-def denoise_audio(source: Path, destination: Path, ffmpeg: Path) -> Path:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    _run_ffmpeg(
-        ffmpeg,
-        source,
-        [
-            "-map",
-            "0:a:0",
-            "-vn",
-            "-af",
-            DENOISE_FILTER,
-            "-c:a",
-            "pcm_f32le",
-            "-ar",
-            str(SAMPLE_RATE),
-            "-ac",
-            str(CHANNELS),
-        ],
-        destination,
-        MAX_FLOAT_BYTES,
-        "Audio denoise failed",
-    )
-    inspect_lossless_audio(destination)
-    return destination
-
-
 MP3_BITRATES_KBPS = (32, 40, 48, 56, 64, 80, 96, 112, 128, 160)
 
 
@@ -203,6 +178,9 @@ def encode_mp3(source: Path, destination: Path, ffmpeg: Path, bitrate_kbps: int 
             "-vn",
             "-c:a",
             "libmp3lame",
+            # Faster LAME analysis; retain the recipe's CBR bitrate and stereo.
+            "-compression_level",
+            "7",
             "-b:a",
             f"{bitrate_kbps}k",
             "-ar",
@@ -217,14 +195,41 @@ def encode_mp3(source: Path, destination: Path, ffmpeg: Path, bitrate_kbps: int 
     return destination
 
 
-def validate_mp3(path: Path, ffprobe: Path) -> tuple[AudioInfo, MediaIdentity]:
+def validate_mp3_metadata(path: Path, ffprobe: Path) -> AudioInfo:
     info = probe_audio(path, ffprobe)
     if info.sample_rate != SAMPLE_RATE or info.channels != CHANNELS:
         raise MediaProcessingError("Output audio format is invalid")
     size = path.stat().st_size
     if size <= 0 or size > MAX_OUTPUT_BYTES:
         raise MediaProcessingError("Output size is outside worker limits")
-    return info, MediaIdentity(size, sha256_base64(path))
+    return info
+
+
+def validate_mp3(path: Path, ffprobe: Path) -> tuple[AudioInfo, MediaIdentity]:
+    info = validate_mp3_metadata(path, ffprobe)
+    return info, MediaIdentity(path.stat().st_size, sha256_base64(path))
+
+
+def decoded_audio_samples(path: Path) -> int:
+    """Read an MP3's decoded frame count without loading its PCM into memory."""
+    import soundfile as sf
+
+    _assert_local_file(path)
+    try:
+        with sf.SoundFile(path) as stream:
+            samples = len(stream)
+            if (
+                stream.samplerate != SAMPLE_RATE
+                or stream.channels != CHANNELS
+                or samples <= 0
+                or samples > MAX_LOSSLESS_SAMPLES
+            ):
+                raise MediaProcessingError("Decoded audio is outside worker limits")
+            return samples
+    except MediaProcessingError:
+        raise
+    except (OSError, RuntimeError) as error:
+        raise MediaProcessingError("Output audio could not be decoded") from error
 
 
 def inspect_lossless_audio(
@@ -249,11 +254,21 @@ def inspect_lossless_audio(
                 raise MediaProcessingError("Lossless audio format is invalid")
             if len(stream) > MAX_LOSSLESS_SAMPLES or size > MAX_FLOAT_BYTES:
                 raise MediaProcessingError("Lossless audio exceeds worker limits")
-            for block in stream.blocks(
-                blocksize=65_536, dtype="float32", always_2d=True
-            ):
-                if not np.isfinite(block).all():
-                    raise MediaProcessingError("Audio contains non-finite samples")
+            if require_pcm16:
+                # Integer PCM cannot contain NaN/Inf. Check the declared data
+                # extent and last frame instead of decoding the entire WAV.
+                with wave.open(str(path), "rb") as pcm:
+                    if pcm.getnframes() != len(stream):
+                        raise MediaProcessingError("PCM audio is truncated")
+                    pcm.setpos(pcm.getnframes() - 1)
+                    if len(pcm.readframes(1)) != CHANNELS * 2:
+                        raise MediaProcessingError("PCM audio is truncated")
+            else:
+                for block in stream.blocks(
+                    blocksize=65_536, dtype="float32", always_2d=True
+                ):
+                    if not np.isfinite(block).all():
+                        raise MediaProcessingError("Audio contains non-finite samples")
             return LosslessAudioInfo(
                 len(stream) / stream.samplerate,
                 stream.samplerate,
@@ -262,7 +277,7 @@ def inspect_lossless_audio(
             )
     except MediaProcessingError:
         raise
-    except (OSError, RuntimeError) as error:
+    except (OSError, RuntimeError, EOFError, wave.Error) as error:
         raise MediaProcessingError("Lossless audio could not be decoded") from error
 
 
@@ -310,26 +325,50 @@ def _run(
     capture_output: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             arguments,
-            check=False,
             stdout=subprocess.PIPE if capture_output else subprocess.DEVNULL,
             stderr=subprocess.PIPE if capture_output else subprocess.DEVNULL,
-            timeout=timeout,
             shell=False,
             env=_subprocess_environment(),
         )
-        captured_stdout = completed.stdout or b""
-        captured_stderr = completed.stderr or b""
+        captured = [bytearray(), bytearray()]
+        overflow = threading.Event()
+
+        def collect(stream, destination: bytearray) -> None:
+            try:
+                while chunk := stream.read(8192):
+                    if len(destination) + len(chunk) > MAX_TOOL_OUTPUT_BYTES:
+                        overflow.set()
+                        process.kill()
+                        return
+                    destination.extend(chunk)
+            finally:
+                stream.close()
+
+        readers = []
+        if capture_output:
+            for stream, destination in zip((process.stdout, process.stderr), captured):
+                reader = threading.Thread(target=collect, args=(stream, destination))
+                reader.start()
+                readers.append(reader)
+        try:
+            process.wait(timeout=timeout)
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+            for reader in readers:
+                reader.join()
+        captured_stdout, captured_stderr = captured
         if (
-            completed.returncode != 0
-            or len(captured_stdout) > MAX_TOOL_OUTPUT_BYTES
-            or len(captured_stderr) > MAX_TOOL_OUTPUT_BYTES
+            process.returncode != 0
+            or overflow.is_set()
         ):
             raise MediaProcessingError(summary)
         return subprocess.CompletedProcess(
             arguments,
-            completed.returncode,
+            process.returncode,
             captured_stdout.decode("utf-8", errors="replace"),
             captured_stderr.decode("utf-8", errors="replace"),
         )

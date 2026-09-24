@@ -4,12 +4,14 @@ import { basename, isAbsolute, join, resolve, sep } from "node:path";
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const EXTENSIONS: Record<string, string> = {
+  "audio/aac": ".aac",
   "audio/flac": ".flac",
   "audio/m4a": ".m4a",
   "audio/mp4": ".m4a",
   "audio/mpeg": ".mp3",
   "audio/ogg": ".ogg",
   "audio/wav": ".wav",
+  "audio/webm": ".webm",
   "audio/x-m4a": ".m4a",
   "audio/x-wav": ".wav",
   "video/mp4": ".mp4",

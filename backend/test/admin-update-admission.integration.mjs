@@ -67,15 +67,20 @@ test(
         platforms: {
           android: {
             minimumBuild: 10,
-            latestBuild: 10,
-            downloadUrl: release.storeUrl,
             releaseSelection: {
               source: 'google_play',
               directReleaseId: null,
               storeReleaseId: release._id.toHexString(),
             },
           },
-          ios: { minimumBuild: null, latestBuild: null, downloadUrl: null },
+          ios: {
+            minimumBuild: null,
+            releaseSelection: {
+              source: 'app_store',
+              directReleaseId: null,
+              storeReleaseId: null,
+            },
+          },
         },
         revision: 1,
         updatedAt: new Date(),

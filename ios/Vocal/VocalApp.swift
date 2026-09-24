@@ -8,6 +8,7 @@ import UserNotifications
 
 @main struct VocalApp: App {
   @UIApplicationDelegateAdaptor(ProcessingAppDelegate.self) private var appDelegate
+  init() { SentryMonitoring.start() }
   var body: some Scene {
     WindowGroup {
       #if DEBUG

@@ -2,12 +2,9 @@ package com.hatem.musicmute.playback
 
 import android.content.ComponentName
 import android.content.Context
-import android.net.Uri
 import android.os.Bundle
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
@@ -15,8 +12,6 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.media3.session.SessionCommand
 import com.hatem.musicmute.library.LibraryKey
-import com.hatem.musicmute.download.DownloadRecord
-import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -56,7 +51,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
             )
             .buildAsync()
     private var controller: MediaController? = null
-    private var pending: Pair<DownloadRecord, File>? = null
     private var pendingQueue: Pair<List<QueueTrack>, LibraryKey>? = null
     private var released = false
     private var clearPrivateOnConnect = false
@@ -88,13 +82,8 @@ class AudioPlaybackController(context: Context) : QueueCommands {
                         controller = future.get().also { it.addListener(listener) }
                         if (clearPrivateOnConnect) stopPrivateOutput()
                         refresh()
-                        pending?.let { (record, file) ->
-                            pending = null
-                            toggle(record, file)
-                        }
                         pendingQueue?.let { (tracks, key) -> pendingQueue = null; playQueue(tracks, key) }
                     } catch (_: Exception) {
-                        pending = null
                         mutableState.update {
                             it.copy(failed = true, playing = false, buffering = false)
                         }
@@ -112,7 +101,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
     }
 
     fun closePlayback() {
-        pending = null
         pendingQueue = null
         controller?.let { player ->
             player.stop()
@@ -125,7 +113,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
     fun stopPrivateOutput() {
         clearPrivateOnConnect = true
         pendingQueue = null
-        if (pending?.first?.id?.startsWith("processing:") == true) pending = null
         controller?.let { player ->
             if (player.currentMediaItem?.mediaId?.startsWith("processing:") == true) {
                 player.stop()
@@ -143,7 +130,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         }
         val player = controller
         if (player == null) { pendingQueue = queue to startKey; return }
-        pending = null
         player.setMediaItems(queue.map { it.mediaItem() }, queue.indexOfFirst { it.key == startKey }, 0)
         player.prepare(); player.play()
         mutableState.update { it.copy(failed = false) }
@@ -221,37 +207,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
                     .setMediaMetadata(item.mediaMetadata.buildUpon().setTitle(title).build()).build())
             }
         }
-    }
-
-    fun toggle(record: DownloadRecord, file: File) {
-        val player = controller
-        if (player == null) {
-            if (future.isDone) {
-                mutableState.update { it.copy(failed = true, buffering = false) }
-                return
-            }
-            pending = record to file
-            mutableState.update { it.copy(buffering = true, trackId = record.id) }
-            return
-        }
-        mutableState.update { it.copy(failed = false) }
-        if (player.currentMediaItem?.mediaId != record.id || player.playerError != null) {
-            player.setMediaItem(
-                MediaItem.Builder()
-                    .setMediaId(record.id)
-                    .setUri(Uri.fromFile(file))
-                    .setMediaMetadata(MediaMetadata.Builder().setTitle(record.title).build())
-                    .build()
-            )
-            player.prepare()
-            player.play()
-        } else if (player.playWhenReady && player.playbackState != Player.STATE_ENDED)
-            player.pause()
-        else {
-            if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
-            player.play()
-        }
-        refresh()
     }
 
     fun seek(positionMs: Long) {

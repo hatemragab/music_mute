@@ -193,9 +193,9 @@ def _package_version(name: str) -> str | None:
 def _discover_mps(
     adapter: ProviderAdapter, system: str, machine: str, device_id: int
 ) -> ProviderDiscovery:
-    if any(
+    if _package_version("torch") is None or all(
         _package_version(name) is None
-        for name in ("torch", "onnx2pytorch")
+        for name in ("onnx2torch", "onnx2torch-py313")
     ):
         raise ProviderAdapterError("Qualified MPS runtime packages are unavailable")
     try:

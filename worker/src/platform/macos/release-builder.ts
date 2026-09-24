@@ -16,6 +16,11 @@ import {
 } from "./release-manifest.js";
 import { auditMacRuntimeBinary } from "./macho-audit.js";
 import { shouldCopyReleaseTreeEntry } from "../release-tree-filter.js";
+import {
+  assertPythonSentrySdk,
+  installProductionDependencies,
+  uploadWorkerSourceMaps,
+} from "../production-dependencies.js";
 
 export interface MacReleaseBuildOptions {
   workerRoot: string;
@@ -72,6 +77,7 @@ export async function buildMacRelease(
   );
   await assertExecutable(ffmpeg, "ffmpeg");
   await assertExecutable(ffprobe, "ffprobe");
+  await assertPythonSentrySdk(workerRoot, join(pythonRoot, "bin", "python3"));
   const audit = options.binaryAudit ?? auditMacRuntimeBinary;
   await audit(join(nodeRoot, "bin", "node"));
   await audit(join(pythonRoot, "bin", "python3"));
@@ -94,6 +100,12 @@ export async function buildMacRelease(
     await copyFile(
       join(workerRoot, "package.json"),
       join(temporary, "app", "package.json"),
+    );
+    await installProductionDependencies(workerRoot, join(temporary, "app"));
+    await uploadWorkerSourceMaps(
+      workerRoot,
+      join(temporary, "app"),
+      options.releaseVersion,
     );
     await copyFile(
       join(nodeRoot, "bin", "node"),

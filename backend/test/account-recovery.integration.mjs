@@ -22,12 +22,10 @@ test(
       { User, UserSchema },
       { AccountRecoveryRequest, AccountRecoveryRequestSchema },
       { AccountRecoveryService },
-      { AccountDeletionCleanupService },
     ] = await Promise.all([
       import('../dist/users/user.schema.js'),
       import('../dist/users/account-recovery-request.schema.js'),
       import('../dist/users/account-recovery.service.js'),
-      import('../dist/users/account-deletion-cleanup.service.js'),
     ]);
     const users = connection.model(User.name, UserSchema);
     const requests = connection.model(
@@ -93,46 +91,5 @@ test(
       (error) => error?.getResponse?.().code === 'ACCOUNT_RECOVERY_EXPIRED',
     );
     assert.equal(await requests.countDocuments({ userId: leasedUserId }), 0);
-
-    const legacyUserId = new Types.ObjectId();
-    await users.create({
-      _id: legacyUserId,
-      firebaseUid: 'legacy-deleting-user',
-      displayName: 'Legacy user',
-      nameSource: 'numeric_alias',
-      status: 'deleting',
-      deletionRequestId: randomUUID(),
-      deletionRequestedAt: new Date('2026-01-31T12:00:00.000Z'),
-      deletionRecoverUntil: null,
-      deletionNextAt: new Date(0),
-      sessionsRevokedAfterSec: 0,
-      profileSyncedAt: now,
-      lastSeenAt: now,
-    });
-    const cleanup = new AccountDeletionCleanupService(
-      users,
-      {
-        find: () => ({
-          sort: () => ({ limit: () => ({ lean: async () => [] }) }),
-        }),
-      },
-      connection,
-      {},
-      {},
-      {},
-      {},
-    );
-    await cleanup.advanceDeletion(new Date('2026-02-01T00:00:00.000Z'));
-    const normalized = await users.findById(legacyUserId).lean();
-    assert.equal(normalized.status, 'deleting');
-    assert.equal(
-      normalized.deletionRecoverUntil.toISOString(),
-      '2026-02-15T12:00:00.000Z',
-    );
-    assert.equal(
-      normalized.deletionNextAt.toISOString(),
-      '2026-02-15T12:00:00.000Z',
-    );
-    assert.equal(normalized.deletionLeaseToken, null);
   },
 );

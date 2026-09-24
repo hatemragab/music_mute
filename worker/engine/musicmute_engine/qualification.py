@@ -222,7 +222,7 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
             model,
             directml_device_id=device_id,
             profile_directory=profile_root,
-            group_size=getattr(arguments, "group_size", 1) if benchmark_mode else 1,
+            group_size=getattr(arguments, "group_size", 1) if benchmark_mode else None,
         )
         captured.append(separator)
         return separator
@@ -318,6 +318,7 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
                     "sourceDurationSeconds": result["sourceDurationSeconds"],
                     "outputDurationSeconds": result["measuredOutputDurationSeconds"],
                     "endToEndSeconds": elapsed,
+                    "outputBitrateKbps": result["outputBitrateKbps"],
                     "stageTimings": result["stageTimings"],
                     **({
                         "role": role,
@@ -332,16 +333,10 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
             )
             if save_audio_dir is not None:
                 mp3 = save_audio_dir / f"{index + 1:02d}-{role}-vocals.mp3"
-                flac = attempt / "separated" / "vocals.flac"
-                if not flac.is_file() or flac.is_symlink():
-                    raise QualificationError("Benchmark lossless vocal is unavailable")
                 shutil.copyfile(output, mp3)
-                shutil.copyfile(flac, save_audio_dir / f"{index + 1:02d}-{role}-vocals.flac")
                 if system != "Windows":
                     mp3.chmod(0o600)
-                    (save_audio_dir / f"{index + 1:02d}-{role}-vocals.flac").chmod(0o600)
-                saved_flac = save_audio_dir / f"{index + 1:02d}-{role}-vocals.flac"
-                for artifact in (mp3, saved_flac):
+                for artifact in (mp3,):
                     saved_audio_artifacts.append({
                         "iteration": index + 1,
                         "role": role,

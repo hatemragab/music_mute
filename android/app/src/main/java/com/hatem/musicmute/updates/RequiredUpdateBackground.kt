@@ -69,17 +69,17 @@ internal fun RequiredUpdateBackground() {
 @Preview(name = "Required update · light", showBackground = true)
 @Composable
 private fun RequiredUpdateBackgroundLightPreview() {
-    VocalTheme(dark = false) { RequiredUpdateBackground() }
+    VocalTheme { RequiredUpdateBackground() }
 }
 
 @Preview(name = "Required update · dark", showBackground = true)
 @Composable
 private fun RequiredUpdateBackgroundDarkPreview() {
-    VocalTheme(dark = true) { RequiredUpdateBackground() }
+    VocalTheme { RequiredUpdateBackground() }
 }
 
 @Preview(name = "Required update · Arabic large text", locale = "ar", fontScale = 1.5f)
 @Composable
 private fun RequiredUpdateBackgroundArabicPreview() {
-    VocalTheme(dark = true) { RequiredUpdateBackground() }
+    VocalTheme { RequiredUpdateBackground() }
 }

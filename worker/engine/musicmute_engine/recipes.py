@@ -14,16 +14,14 @@ MODEL_SOURCE = (
     "https://github.com/TRvlvr/model_repo/releases/download/"
     "all_public_uvr_models/Kim_Vocal_2.onnx"
 )
-PREPARATION_PROFILE_ID = "pcm16-stereo-44100-v1"
+INPUT_PROFILE_ID = "direct-input-v1"
 OUTPUT_FORMAT = "mp3"
 OUTPUT_BITRATE_KBPS = 160
 
-BASE_STEPS = (
-    "prepare-pcm16-stereo-44100-v1",
-    "separate-kim-vocal-2-v1",
-)
-FINAL_STEPS = ("encode-mp3-up-to-160k-v1", "validate-audio-v1")
-TRIM_STEP = "trim-vocal-gaps-v1"
+BASE_STEPS = ("separate-kim-vocal-2-wav-v1",)
+FINAL_STEPS = ("validate-audio-v1",)
+TRIM_STEP = "trim-vocal-wav-v1"
+TRIM_ENCODE_STEP = "encode-mp3-up-to-160k-v1"
 
 
 class RecipeValidationError(ValueError):
@@ -46,22 +44,22 @@ def recipe_digest(snapshot_without_digest: Mapping[str, Any]) -> str:
 @dataclass(frozen=True)
 class RecipeDefinition:
     recipe_id: str
-    trim_enabled: bool = False
+    trim_enabled: bool = True
     denoise_enabled: bool = False
 
     def snapshot(self) -> dict[str, Any]:
         steps = [*BASE_STEPS]
         if self.trim_enabled:
-            steps.append(TRIM_STEP)
+            steps.extend((TRIM_STEP, TRIM_ENCODE_STEP))
         steps.extend(FINAL_STEPS)
         snapshot: dict[str, Any] = {
             "recipeId": self.recipe_id,
-            "recipeRevision": 3,
+            "recipeRevision": 5,
             "protocolVersion": 1,
             "modelFilename": MODEL_FILENAME,
             "modelDigest": MODEL_SHA256,
             "modelBytes": MODEL_BYTES,
-            "preparationProfileId": PREPARATION_PROFILE_ID,
+            "inputProfileId": INPUT_PROFILE_ID,
             "stepIds": steps,
             "trimEnabled": self.trim_enabled,
             "denoiseEnabled": self.denoise_enabled,
@@ -80,7 +78,7 @@ RECIPE_DEFINITIONS = {
         "kim-vocals-v2-trim", trim_enabled=True
     ),
 }
-DEFAULT_RECIPE_ID = "kim-vocals-v2-trim"
+DEFAULT_RECIPE_ID = "kim-vocals-v2"
 SNAPSHOT_KEYS = frozenset((*next(iter(RECIPE_DEFINITIONS.values())).snapshot().keys(),))
 
 

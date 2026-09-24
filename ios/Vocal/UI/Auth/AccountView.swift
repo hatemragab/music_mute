@@ -47,9 +47,6 @@ struct AccountView: View {
               VocalStyle.teal)
           } else {
             Label(accessMessage, systemImage: "info.circle").foregroundStyle(.orange)
-            if let updateURL = validatedUpdateURL {
-              Link("auth_update_app", destination: updateURL)
-            }
           }
         } else {
           Label("auth_access_unknown", systemImage: "questionmark.circle").foregroundStyle(
@@ -126,11 +123,4 @@ struct AccountView: View {
     }
   }
 
-  private var validatedUpdateURL: URL? {
-    let url = model.access?.downloadUrl ?? model.policy?.platforms.ios.downloadUrl
-    guard url?.scheme?.lowercased() == "https", url?.user == nil, url?.password == nil else {
-      return nil
-    }
-    return url
-  }
 }

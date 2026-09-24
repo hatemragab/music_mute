@@ -187,17 +187,17 @@ const workerRecipeSnapshot = new MongoSchema<WorkerRecipeSnapshot>(
       min: 1,
       validate: Number.isSafeInteger,
     },
-    preparationProfileId: {
+    inputProfileId: {
       type: String,
       required: true,
-      enum: ['pcm16-stereo-44100-v1'],
+      enum: ['direct-input-v1'],
     },
     stepIds: {
       type: [{ type: String, enum: WORKER_RECIPE_STEP_IDS }],
       required: true,
       validate: (value: string[]) =>
         Array.isArray(value) &&
-        value.length >= 4 &&
+        value.length >= 2 &&
         value.length <= 6 &&
         new Set(value).size === value.length,
     },
@@ -210,7 +210,7 @@ const workerRecipeSnapshot = new MongoSchema<WorkerRecipeSnapshot>(
     },
     trimProfileId: {
       type: String,
-      enum: ['trim-vocal-gaps-v1', null],
+      enum: ['trim-vocal-mp3-v1', 'trim-vocal-wav-v1', null],
       default: null,
     },
     outputFormat: { type: String, required: true, enum: ['mp3'] },

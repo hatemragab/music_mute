@@ -9,12 +9,6 @@ import com.hatem.musicmute.ui.design.AccentPalette
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-enum class ThemeChoice {
-    SYSTEM,
-    LIGHT,
-    DARK,
-}
-
 enum class LanguageChoice(val tag: String) {
     SYSTEM(""),
     ENGLISH("en"),
@@ -22,15 +16,12 @@ enum class LanguageChoice(val tag: String) {
 }
 
 data class AppPreferences(
-    val theme: ThemeChoice = ThemeChoice.DARK,
     val language: LanguageChoice = LanguageChoice.SYSTEM,
     val accentArgb: Int = AccentPalette.DEFAULT,
 )
 
 interface PreferencesRepository {
     val preferences: Flow<AppPreferences>
-
-    suspend fun setTheme(theme: ThemeChoice)
 
     suspend fun setLanguage(language: LanguageChoice)
 
@@ -42,18 +33,12 @@ class DataStorePreferencesRepository(private val store: DataStore<Preferences>) 
     override val preferences =
         store.data.map { values ->
             AppPreferences(
-                // Legacy light/system values remain readable without resetting other preferences.
-                theme = ThemeChoice.DARK,
                 language =
                     LanguageChoice.entries.firstOrNull { it.name == values[LANGUAGE] }
                         ?: LanguageChoice.SYSTEM,
                 accentArgb = AccentPalette.opaque(values[ACCENT] ?: AccentPalette.DEFAULT),
             )
         }
-
-    override suspend fun setTheme(theme: ThemeChoice) {
-        store.edit { it[THEME] = ThemeChoice.DARK.name }
-    }
 
     override suspend fun setLanguage(language: LanguageChoice) {
         store.edit { it[LANGUAGE] = language.name }
@@ -64,7 +49,6 @@ class DataStorePreferencesRepository(private val store: DataStore<Preferences>) 
     }
 
     private companion object {
-        val THEME = stringPreferencesKey("theme")
         val LANGUAGE = stringPreferencesKey("language")
         val ACCENT = intPreferencesKey("accent_argb")
     }

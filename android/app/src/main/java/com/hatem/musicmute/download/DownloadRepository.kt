@@ -1,12 +1,10 @@
 package com.hatem.musicmute.download
 
 import android.content.Context
-import android.net.Uri
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.hatem.musicmute.data.YouTubeUrl
@@ -15,10 +13,7 @@ import com.hatem.musicmute.processing.ProcessingStore
 import com.hatem.musicmute.processing.WorkManagerProcessingScheduler
 import com.hatem.musicmute.processing.processingOwnerDirectory
 import java.io.File
-import java.util.UUID
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -29,43 +24,8 @@ class DownloadRepository(
     val audioRoot: File,
     private val processingStore: ProcessingStore? = null,
 ) : PipelineSourceScheduler {
-    private val resolver = context.contentResolver
     private val workManager = WorkManager.getInstance(context)
     private val enqueueLock = Mutex()
-    val records =
-        combine(store.history, workManager.getWorkInfosByTagFlow(TAG)) { history, work ->
-            history.records.map { record ->
-                val job = if (record.workRequestId != null) {
-                    work.firstOrNull { it.id.toString() == record.workRequestId }
-                } else {
-                    work.firstOrNull { sourceWorkTag(record.id, record.sessionEpoch) in it.tags }
-                }
-                val reconciled = reconcile(record, job?.state, System.currentTimeMillis())
-                if (reconciled != record)
-                    store.update(record.id) { current ->
-                        // A progress/completion/cancel write may have overtaken this snapshot.
-                        if (current == record) reconciled else current
-                    }
-                reconciled
-            }
-        }
-
-    suspend fun enqueue(url: String): String =
-        enqueueLock.withLock {
-            require(YouTubeUrl.isSupported(url))
-            val normalized = url.trim()
-            val duplicate =
-                store.history.first().records.firstOrNull {
-                    it.url == normalized &&
-                        (it.status in setOf(DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING) ||
-                            (it.status == DownloadStatus.COMPLETE &&
-                                resolveAudioFile(audioRoot, it.relativePath) != null))
-                }
-            if (duplicate != null) return@withLock duplicate.id
-            val id = UUID.randomUUID().toString()
-            schedule(DownloadRecord(id, normalized, System.currentTimeMillis()))
-            id
-        }
 
     override suspend fun enqueue(ownerUid: String, operationId: String, url: String, epoch: Long) =
         enqueueLock.withLock {
@@ -91,13 +51,6 @@ class DownloadRepository(
                 sessionEpoch = epoch,
             ))
         }
-
-    suspend fun retry(id: String) {
-        val record = store.get(id) ?: return
-        if (record.status == DownloadStatus.COMPLETE) return
-        // Each retry owns a fresh directory and work ID; a stopping attempt cannot erase its files.
-        enqueue(record.url)
-    }
 
     private suspend fun schedule(record: DownloadRecord) {
         val uniqueName = "vocal-${record.id}-${record.sessionEpoch ?: 0}"
@@ -190,14 +143,6 @@ class DownloadRepository(
         }
     }
 
-    suspend fun cancel(id: String) {
-        store.update(id) {
-            if (it.status == DownloadStatus.COMPLETE) it
-            else it.copy(status = DownloadStatus.CANCELLED)
-        }
-        withContext(Dispatchers.IO) { workManager.cancelAllWorkByTag(recordTag(id)).result.get() }
-    }
-
     override suspend fun cancel(ownerUid: String, operationId: String) {
         val record = store.get(operationId) ?: return
         if (record.ownerUid != ownerUid) return
@@ -253,18 +198,6 @@ class DownloadRepository(
         store.removeOwner(uid)
     }
 
-    suspend fun saveToDevice(id: String, destination: Uri) =
-        withContext(Dispatchers.IO) {
-            val record = store.get(id) ?: error("Download is missing")
-            require(record.status == DownloadStatus.COMPLETE)
-            val source =
-                resolveAudioFile(audioRoot, record.relativePath) ?: error("Audio file is missing")
-            val output =
-                resolver.openOutputStream(destination, "w") ?: error("Destination cannot be opened")
-            output.use { copyOriginalAudio(source, it) }
-            Unit
-        }
-
     companion object {
         const val TAG = "vocal-audio-download"
         const val KEY_ID = "download_id"
@@ -275,27 +208,5 @@ class DownloadRepository(
         private fun sourceOperationTag(uid: String, operationId: String) =
             "${ownerTag(uid)}-operation-$operationId"
 
-        fun reconcile(
-            record: DownloadRecord,
-            workState: WorkInfo.State?,
-            now: Long,
-        ): DownloadRecord {
-            if (
-                record.status in
-                    setOf(DownloadStatus.COMPLETE, DownloadStatus.FAILED, DownloadStatus.CANCELLED)
-            )
-                return record
-            return when {
-                workState == WorkInfo.State.CANCELLED ->
-                    record.copy(status = DownloadStatus.CANCELLED)
-                workState == WorkInfo.State.FAILED ||
-                    workState == WorkInfo.State.SUCCEEDED ||
-                    (workState == null && now - record.createdAt > 10_000) ->
-                    record.copy(status = DownloadStatus.FAILED, error = DownloadError.INTERRUPTED)
-                workState == WorkInfo.State.ENQUEUED || workState == WorkInfo.State.BLOCKED ->
-                    record.copy(status = DownloadStatus.QUEUED)
-                else -> record
-            }
-        }
     }
 }

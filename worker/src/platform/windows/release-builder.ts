@@ -7,6 +7,11 @@ import {
   writeWindowsReleaseManifest,
 } from "./release-manifest.js";
 import { shouldCopyReleaseTreeEntry } from "../release-tree-filter.js";
+import {
+  assertPythonSentrySdk,
+  installProductionDependencies,
+  uploadWorkerSourceMaps,
+} from "../production-dependencies.js";
 
 export interface WindowsReleaseBuildOptions {
   workerRoot: string;
@@ -55,6 +60,7 @@ export async function buildWindowsRelease(
     join(serviceRoot, "WinSW.exe"),
   ];
   for (const path of binaries) await assertRegularFile(path, "runtime binary");
+  await assertPythonSentrySdk(workerRoot, join(pythonRoot, "python.exe"));
   const provenance = [
     join(mediaRoot, "SOURCE-MANIFEST.json"),
     join(mediaRoot, "licenses", "ffmpeg", "COPYING.LGPLv2.1"),
@@ -82,6 +88,12 @@ export async function buildWindowsRelease(
     await copyFile(
       join(workerRoot, "package.json"),
       join(temporary, "app", "package.json"),
+    );
+    await installProductionDependencies(workerRoot, join(temporary, "app"));
+    await uploadWorkerSourceMaps(
+      workerRoot,
+      join(temporary, "app"),
+      options.releaseVersion,
     );
     await copyFile(
       join(workerRoot, "scripts", "manage-windows-service.ps1"),

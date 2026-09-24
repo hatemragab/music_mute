@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import logging
 import shutil
+import time
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
+from types import MethodType
 from typing import Any, Callable, Iterator
 
 
 from .artifacts import verify_model
-from .media import MediaProcessingError, inspect_lossless_audio
 from .provider_adapter import (
     Provider,
     provider_session,
@@ -29,6 +30,69 @@ class SeparatorError(RuntimeError):
     """Raised when the qualified separation adapter cannot safely run."""
 
 
+def _write_vocal_wav(model: Any, stem_path: str, audio: Any) -> None:
+    import soundfile as sf
+    from audio_separator.separator.uvr_lib_v5 import spec_utils
+    from .limits import CHANNELS, MAX_LOSSLESS_SAMPLES, SAMPLE_RATE
+
+    target = Path(model.output_dir) / stem_path
+    if (
+        target.parent.resolve() != Path(model.output_dir).resolve()
+        or target.suffix != ".wav"
+    ):
+        raise SeparatorError("Vocal WAV path is invalid")
+    if (
+        audio.ndim != 2
+        or audio.shape[1] != CHANNELS
+        or not 0 < len(audio) <= MAX_LOSSLESS_SAMPLES
+    ):
+        raise SeparatorError("Vocal WAV shape is invalid")
+    if model.sample_rate != SAMPLE_RATE:
+        raise SeparatorError("Vocal WAV sample rate is invalid")
+    # Preserve upstream output normalization before quantizing to PCM16.
+    # This also rejects non-finite predictions before any file is written.
+    audio = spec_utils.normalize(
+        wave=audio,
+        max_peak=model.normalization_threshold,
+        min_peak=model.amplification_threshold,
+    )
+    with sf.SoundFile(
+        target, "w", samplerate=SAMPLE_RATE, channels=CHANNELS,
+        format="WAV", subtype="PCM_16",
+    ) as output:
+        for start in range(0, len(audio), 65536):
+            block = audio[start : start + 65536]
+            output.write(block)
+
+
+def _separate_primary_vocals(model: Any, audio_file_path: str, custom_output_names: Any = None) -> list[str]:
+    """Primary-only MDX path; retain upstream normalization and vocal math."""
+    import numpy as np
+    from audio_separator.separator.uvr_lib_v5 import spec_utils
+
+    if model.primary_stem_name != "Vocals" or model.output_single_stem != "Vocals":
+        raise SeparatorError("Primary-only separation requires the vocal target")
+    model.audio_file_path = audio_file_path
+    model.audio_file_base = Path(audio_file_path).stem
+    started = time.perf_counter()
+    mix = model.prepare_mix(audio_file_path)
+    peak = np.abs(mix).max()
+    mix = spec_utils.normalize(
+        wave=mix, max_peak=model.normalization_threshold,
+        min_peak=model.amplification_threshold,
+    )
+    model.separation_timings["separationMixPreparation"] = time.perf_counter() - started
+    started = time.perf_counter()
+    model.primary_source = (model.demix(mix) * peak).T
+    model.separation_timings["separationPrimaryDemix"] = time.perf_counter() - started
+    model.separation_timings["separationMatchMix"] = 0.0
+    model.primary_stem_output_path = model.get_stem_output_path("Vocals", custom_output_names)
+    started = time.perf_counter()
+    model.final_process(model.primary_stem_output_path, model.primary_source, "Vocals")
+    model.separation_timings["separationWavWrite"] = time.perf_counter() - started
+    return [model.primary_stem_output_path]
+
+
 class KimSeparator:
     def __init__(
         self,
@@ -38,8 +102,10 @@ class KimSeparator:
         directml_device_id: int = 0,
         profile_directory: Path | None = None,
         on_startup_stage: Callable[[str], None] | None = None,
-        group_size: int = 1,
+        group_size: int | None = None,
     ) -> None:
+        if group_size is None:
+            group_size = 2 if provider == "mps" else 1
         if group_size not in (1, 2, 4) or (group_size > 1 and provider != "mps"):
             raise SeparatorError("Kim window group is unsupported")
         self.provider = provider
@@ -71,7 +137,8 @@ class KimSeparator:
                     log_level=logging.WARNING,
                     model_file_dir=str(self.model_path.parent),
                     output_dir=str(self.model_path.parent),
-                    output_format="FLAC",
+                    output_format="WAV",
+                    output_bitrate="160k",
                     output_single_stem="Vocals",
                     use_soundfile=True,
                     use_directml=self.provider == "directml",
@@ -84,6 +151,14 @@ class KimSeparator:
                     },
                 )
                 separator.load_model(model_filename=MODEL_FILENAME)
+                # Pin PCM WAV output: upstream otherwise inherits MPEG subtypes
+                # from MP3 input, which soundfile cannot use for WAV output.
+                separator.model_instance.write_audio = MethodType(
+                    _write_vocal_wav, separator.model_instance
+                )
+                model = separator.model_instance
+                if getattr(model, "primary_stem_name", None) == "Vocals" and getattr(model, "output_single_stem", None) == "Vocals":
+                    model.separate = MethodType(_separate_primary_vocals, model)
                 self._profile_sessions.extend(sessions)
             return separator
         except Exception as error:  # third-party errors are sanitized at this boundary
@@ -107,6 +182,17 @@ class KimSeparator:
             reset = getattr(model, "clear_file_specific_paths", None)
             if reset is not None:
                 reset()
+            model.separation_timings = {}
+            self.last_separation_timings = {}
+            original_cleanup = getattr(model, "clear_gpu_cache", None)
+            if original_cleanup is not None:
+                def timed_cleanup() -> None:
+                    started = time.perf_counter()
+                    try:
+                        original_cleanup()
+                    finally:
+                        model.separation_timings["separationCleanup"] = time.perf_counter() - started
+                model.clear_gpu_cache = timed_cleanup
             model.on_window_progress = on_window_progress
             try:
                 filenames = self._separator.separate(
@@ -114,18 +200,22 @@ class KimSeparator:
                 )
             finally:
                 model.on_window_progress = None
+                if original_cleanup is not None:
+                    model.clear_gpu_cache = original_cleanup
+                self.last_separation_timings = dict(model.separation_timings)
             if not isinstance(filenames, list) or len(filenames) != 1:
                 raise SeparatorError("Kim separator did not return one vocal stem")
             vocal = (output_directory / filenames[0]).resolve(strict=True)
             if (
                 not vocal.is_relative_to(output_directory.resolve(strict=True))
                 or vocal.is_symlink()
+                or vocal.suffix.lower() != ".wav"
                 or not vocal.is_file()
+                or vocal.stat().st_size <= 0
             ):
                 raise SeparatorError("Kim separator output path is invalid")
-            inspect_lossless_audio(vocal)
             return vocal
-        except (MediaProcessingError, OSError, RuntimeError) as error:
+        except (OSError, RuntimeError) as error:
             if isinstance(error, SeparatorError):
                 raise
             raise SeparatorError("Kim separation failed") from error
@@ -144,13 +234,13 @@ class KimSeparator:
             ):
                 raise SeparatorError("Kim model window is invalid")
             window = torch.zeros(
-                (1, 2, model.chunk_size),
+                (self.group_size, 2, model.chunk_size),
                 dtype=torch.float32,
                 device=model.torch_device,
             )
             with torch.no_grad():
                 output = model.run_model(window)
-            if tuple(getattr(output, "shape", ())) != (1, 2, model.chunk_size):
+            if tuple(getattr(output, "shape", ())) != (self.group_size, 2, model.chunk_size):
                 raise SeparatorError("Kim model warm-up output is invalid")
             self._warmed_up = True
         except Exception as error:  # third-party errors are sanitized at this boundary
@@ -284,9 +374,8 @@ def _grouped_demix(model: Any, mix: np.ndarray, group_size: int) -> np.ndarray:
 def _uvr_mps_model(group_size: int = 1) -> Iterator[None]:
     """Use UVR5's ONNX-to-PyTorch MPS path for one model construction."""
     try:
-        import onnx
+        import onnx2torch
         from audio_separator.separator.architectures import mdx_separator
-        from onnx2pytorch import ConvertModel
     except ImportError as error:
         raise SeparatorError("UVR MPS runtime is unavailable") from error
 
@@ -294,9 +383,9 @@ def _uvr_mps_model(group_size: int = 1) -> Iterator[None]:
 
     class UVRMpsMDXSeparator(original):  # type: ignore[misc, valid-type]
         def load_model(self) -> None:
-            graph = onnx.load(self.model_path)
-            model = ConvertModel(graph, experimental=True) if group_size > 1 else ConvertModel(graph)
-            self.model_run = model.to(self.torch_device).eval()
+            self.model_run = (
+                onnx2torch.convert(self.model_path).to(self.torch_device).eval()
+            )
             self.uses_pytorch_inference = True
 
         def demix(self, mix: np.ndarray, is_match_mix: bool = False) -> np.ndarray:
@@ -318,7 +407,21 @@ def _uvr_mps_model(group_size: int = 1) -> Iterator[None]:
             return _grouped_demix(self, mix, group_size)
 
         def run_model(self, mix: Any, is_match_mix: bool = False) -> np.ndarray:
-            output = super().run_model(mix, is_match_mix=is_match_mix)
+            import torch
+
+            spek = self.stft(mix.to(self.torch_device))
+            spek[:, :, :3, :] *= 0
+            if is_match_mix:
+                spec_pred = spek
+            elif self.enable_denoise:
+                spec_pred = (self.model_run(-spek) * -0.5) + (
+                    self.model_run(spek) * 0.5
+                )
+            else:
+                spec_pred = self.model_run(spek)
+            if not isinstance(spec_pred, torch.Tensor):
+                spec_pred = torch.as_tensor(spec_pred, device=self.torch_device)
+            output = self.stft.inverse(spec_pred).cpu().detach().numpy()
             if not is_match_mix and getattr(self, "on_window_progress", None) is not None:
                 self._window_completed += mix.shape[0]
                 self.on_window_progress(self._window_completed, self._window_total)

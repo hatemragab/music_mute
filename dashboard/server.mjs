@@ -2,6 +2,10 @@ import { createReadStream, readFileSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  captureServerFailure,
+  initializeServerSentry,
+} from "./server-sentry.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const dist = join(root, "dist");
@@ -75,6 +79,12 @@ export const buildRuntimeConfig = (environment) => {
       authDomain: required(environment, "VITE_FIREBASE_AUTH_DOMAIN"),
       projectId: required(environment, "VITE_FIREBASE_PROJECT_ID"),
       appId: required(environment, "VITE_FIREBASE_APP_ID"),
+    },
+    sentry: {
+      enabled: environment.SENTRY_ENABLED !== "false",
+      dsn:
+        environment.SENTRY_DSN ||
+        "https://7fa29162fbc4e73a5b1a9b01cc91c29b@o4506288965943296.ingest.us.sentry.io/4512142569111552",
     },
   };
 };
@@ -208,6 +218,10 @@ const isMain =
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
 
 if (isMain) {
+  initializeServerSentry(process.env);
+  process.on("uncaughtExceptionMonitor", (error) => {
+    void captureServerFailure(error);
+  });
   const config = buildRuntimeConfig(process.env);
   const host = process.env.HOST?.trim() || "0.0.0.0";
   const port = Number(process.env.PORT || 80);

@@ -8,12 +8,16 @@ import type { MacUserLayout } from "./user-paths.js";
 const MAX_EVENTS = 10_000;
 const REPORTED_STAGES = [
   "download",
-  "preparation",
   "separation",
-  "encode",
   "upload",
   "completionAck",
 ] as const;
+
+function expectedStages(recipeId: string | null): string[] {
+  return recipeId === "kim-vocals-v2-trim"
+    ? [...REPORTED_STAGES, "trim", "encode"]
+    : [...REPORTED_STAGES];
+}
 
 export interface PerformanceSample {
   jobId: string;
@@ -186,6 +190,7 @@ export function buildPerformanceReport(
       sample.gpuId = stringOrNull(event.gpuId);
       sample.runtimeIncarnation = stringOrNull(event.incarnation);
       sample.recipeId = stringOrNull(event.recipeId);
+      sample.missingStages = expectedStages(sample.recipeId);
       sample.recipeDigest = stringOrNull(event.recipeDigest);
       sample.modelDigest = stringOrNull(event.modelDigest);
       sample.outputBitrateKbps = numberOrNull(event.outputBitrateKbps);
@@ -231,7 +236,7 @@ export function buildPerformanceReport(
               sample.stageMs[timing.stage] = timing.durationMs;
           }
         }
-      sample.missingStages = REPORTED_STAGES.filter(
+      sample.missingStages = expectedStages(sample.recipeId).filter(
         (stage) => sample.stageMs[stage] === undefined,
       );
       const measured = Object.entries(sample.stageMs).filter(([, duration]) =>
@@ -355,7 +360,11 @@ function buildCohort(
   const first = samples[0]!;
   const duration = samples.map((sample) => sample.decodedInputDurationSeconds!);
   const stageMs: PerformanceCohort["stageMs"] = {};
-  for (const stage of REPORTED_STAGES) {
+  const stages = new Set([
+    ...expectedStages(first.recipeId),
+    ...samples.flatMap((sample) => Object.keys(sample.stageMs)),
+  ]);
+  for (const stage of stages) {
     const values = samples.flatMap((sample) =>
       sample.stageMs[stage] === undefined ? [] : [sample.stageMs[stage]!],
     );

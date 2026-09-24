@@ -5,6 +5,7 @@ import { defaultPolicy } from '../app-policy/access-policy.js';
 import type { AppPolicyService } from '../app-policy/app-policy.service.js';
 import { ReleasePolicyService } from './release-policy.service.js';
 import type { Release } from './release.schema.js';
+
 describe('public update snapshots', () => {
   function setup(policy = defaultPolicy(), release?: object) {
     const records = {
@@ -15,14 +16,12 @@ describe('public update snapshots', () => {
     const service = new ReleasePolicyService(
       { current: async () => policy } as AppPolicyService,
       records as unknown as Model<Release>,
-      new ConfigService({
-        APP_UPDATES_ENABLED: true,
-        RELEASE_LANDING_BASE_URL: 'https://example.invalid/api/v1',
-      }),
+      new ConfigService({ APP_UPDATES_ENABLED: true }),
     );
     return { service, records };
   }
-  it('returns an empty valid snapshot without existing restrictions', async () => {
+
+  it('returns an empty valid snapshot without a selected release', async () => {
     const { service } = setup();
     expect(await service.snapshot('android', 'direct')).toMatchObject({
       schemaVersion: 1,
@@ -30,26 +29,18 @@ describe('public update snapshots', () => {
       target: null,
     });
   });
-  it('fails closed for legacy restrictions requiring explicit conversion', async () => {
+
+  it('fails closed when a minimum build has no selected target', async () => {
     const policy = defaultPolicy();
-    policy.platforms.android = {
-      minimumBuild: 10,
-      latestBuild: 12,
-      downloadUrl: 'https://example.invalid/update',
-    };
+    policy.platforms.android.minimumBuild = 10;
     await expect(
       setup(policy).service.snapshot('android', 'direct'),
     ).rejects.toThrow();
   });
+
   it('does not leak draft releases or storage identities', async () => {
     const policy = defaultPolicy();
-    policy.platforms.android.releaseSelection = {
-      source: 'direct_apk',
-      directReleaseId: 'a'.repeat(24),
-      storeReleaseId: null,
-    };
-    policy.platforms.android.latestBuild = 12;
-    policy.platforms.android.downloadUrl = `https://example.invalid/api/v1/app-updates/releases/${'a'.repeat(24)}`;
+    policy.platforms.android.releaseSelection.directReleaseId = 'a'.repeat(24);
     await expect(
       setup(policy, { state: 'draft' }).service.snapshot('android', 'direct'),
     ).rejects.toThrow();
@@ -78,23 +69,12 @@ describe('public update snapshots', () => {
     expect(snapshot.target?.artifact?.bytes).toBe(1);
     expect(JSON.stringify(snapshot)).not.toContain('private');
   });
-  it('rejects a missing selected target or drift from its legacy projection', async () => {
+
+  it('rejects a selected target below the minimum build', async () => {
     const policy = defaultPolicy();
-    policy.platforms.android = {
-      minimumBuild: null,
-      latestBuild: 12,
-      downloadUrl:
-        'https://play.google.com/store/apps/details?id=com.example.fixture',
-      releaseSelection: {
-        source: 'google_play',
-        directReleaseId: null,
-        storeReleaseId: null,
-      },
-    };
-    await expect(
-      setup(policy).service.snapshot('android', 'direct'),
-    ).rejects.toThrow();
-    policy.platforms.android.releaseSelection!.storeReleaseId = 'a'.repeat(24);
+    policy.platforms.android.minimumBuild = 14;
+    policy.platforms.android.releaseSelection.source = 'google_play';
+    policy.platforms.android.releaseSelection.storeReleaseId = 'a'.repeat(24);
     const release = {
       _id: 'a'.repeat(24),
       platform: 'android',
@@ -103,29 +83,24 @@ describe('public update snapshots', () => {
       versionName: '1',
       buildNumber: 13,
       changelogEn: 'Notes',
-      storeUrl: policy.platforms.android.downloadUrl,
+      storeUrl:
+        'https://play.google.com/store/apps/details?id=com.example.fixture',
     };
     await expect(
-      setup(policy, release).service.snapshot('android', 'direct'),
+      setup(policy, release).service.snapshot('android', 'play'),
     ).rejects.toThrow();
-    policy.platforms.android.latestBuild = 13;
+    policy.platforms.android.minimumBuild = 13;
     expect(
-      (await setup(policy, release).service.snapshot('android', 'direct'))
-        .target?.buildNumber,
+      (await setup(policy, release).service.snapshot('android', 'play')).target
+        ?.buildNumber,
     ).toBe(13);
   });
-  it('allows a distinct Play latest when direct APK is the configured source', async () => {
+
+  it('allows a distinct Play target when direct APK is selected', async () => {
     const policy = defaultPolicy();
-    policy.platforms.android = {
-      minimumBuild: 10,
-      latestBuild: 12,
-      downloadUrl: 'https://example.invalid/fixture',
-      releaseSelection: {
-        source: 'direct_apk',
-        directReleaseId: 'a'.repeat(24),
-        storeReleaseId: 'b'.repeat(24),
-      },
-    };
+    policy.platforms.android.minimumBuild = 10;
+    policy.platforms.android.releaseSelection.directReleaseId = 'a'.repeat(24);
+    policy.platforms.android.releaseSelection.storeReleaseId = 'b'.repeat(24);
     const release = {
       _id: 'b'.repeat(24),
       platform: 'android',

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 import unittest
+
+import numpy as np
+import soundfile as sf
 from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
@@ -23,6 +27,9 @@ from musicmute_engine.media import (
     inspect_lossless_audio,
     probe_audio,
     verify_input_identity,
+    validate_mp3,
+    validate_mp3_metadata,
+    AudioInfo,
 )
 
 
@@ -43,6 +50,58 @@ class OversizedSoundFile:
 
 
 class MediaLimitTests(unittest.TestCase):
+    def test_noisy_tool_is_killed_before_its_timeout(self) -> None:
+        for stream in ("stdout", "stderr"):
+            with self.subTest(stream=stream):
+                started = time.monotonic()
+                with self.assertRaisesRegex(MediaProcessingError, "noisy tool"):
+                    _run([
+                        sys.executable, "-B", "-c",
+                        f"import sys,time; sys.{stream}.write('x'*131072); "
+                        f"sys.{stream}.flush(); time.sleep(30)",
+                    ], 10, "noisy tool")
+                self.assertLess(time.monotonic() - started, 5)
+
+    def test_tool_timeout_and_normal_output_are_preserved(self) -> None:
+        result = _run([sys.executable, "-c", "print('ok')"], 5, "failed")
+        self.assertEqual(result.stdout, "ok\n")
+        with self.assertRaisesRegex(MediaProcessingError, "timed out"):
+            _run([sys.executable, "-c", "import time; time.sleep(30)"], 0.1, "timed out")
+
+    def test_pcm16_validation_skips_sample_scan_but_rejects_truncation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "prepared.wav"
+            sf.write(source, np.zeros((4410, 2)), 44100, subtype="PCM_16")
+            with patch.object(sf.SoundFile, "blocks", side_effect=AssertionError("scan")):
+                info = inspect_lossless_audio(source, require_pcm16=True)
+                self.assertEqual(info.samples, 4410)
+                source.write_bytes(source.read_bytes()[:-16])
+                with self.assertRaises(MediaProcessingError):
+                    inspect_lossless_audio(source, require_pcm16=True)
+
+    def test_float_audio_still_rejects_non_finite_samples(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "float.wav"
+            sf.write(source, np.full((100, 2), np.nan), 44100, subtype="FLOAT")
+            with self.assertRaisesRegex(MediaProcessingError, "non-finite"):
+                inspect_lossless_audio(source)
+            with self.assertRaisesRegex(MediaProcessingError, "format"):
+                inspect_lossless_audio(source, require_pcm16=True)
+
+    def test_intermediate_metadata_skips_hash_but_final_output_keeps_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "output.mp3"
+            source.write_bytes(b"fixture")
+            info = AudioInfo(1, 44100, 2)
+            with patch("musicmute_engine.media.probe_audio", return_value=info), patch(
+                "musicmute_engine.media.sha256_base64", return_value="digest"
+            ) as digest:
+                self.assertEqual(validate_mp3_metadata(source, Path("/ffprobe")), info)
+                digest.assert_not_called()
+                _, identity = validate_mp3(source, Path("/ffprobe"))
+                self.assertEqual(identity.sha256, "digest")
+                digest.assert_called_once_with(source)
+
     def test_final_mp3_encoding_uses_the_catalog_bitrate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -56,6 +115,9 @@ class MediaLimitTests(unittest.TestCase):
                 self.assertEqual(encode_mp3(source, destination, ffmpeg), destination)
             arguments = execute.call_args.args[2]
             self.assertEqual(arguments[arguments.index("-b:a") + 1], "160k")
+            self.assertEqual(arguments[arguments.index("-compression_level") + 1], "7")
+            self.assertEqual(arguments[arguments.index("-ar") + 1], "44100")
+            self.assertEqual(arguments[arguments.index("-ac") + 1], "2")
 
     def test_output_bitrate_never_raises_a_known_lower_input_rate(self) -> None:
         self.assertEqual(output_bitrate_kbps(64_000), 64)

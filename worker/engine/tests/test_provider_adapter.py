@@ -54,7 +54,7 @@ class ProviderAdapterTests(unittest.TestCase):
             patch(
                 "musicmute_engine.provider_adapter._package_version",
                 side_effect=lambda name: "test"
-                if name in {"torch", "onnx2pytorch"}
+                if name in {"torch", "onnx2torch"}
                 else None,
             ),
             patch.dict("sys.modules", {"torch": torch}),

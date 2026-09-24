@@ -13,7 +13,6 @@ import { releaseId } from './release-drafts.service.js';
 import { presentRelease } from './release-presenter.js';
 import {
   decideUpdate,
-  releaseLandingUrl,
   validBuild,
   validateReleaseDraft,
 } from './release-policy.js';
@@ -200,24 +199,9 @@ export class ReleasePublicationService {
     };
     minimumValid(selection.android.minimumBuild, [android, direct, play]);
     minimumValid(selection.ios.minimumBuild, [ios]);
-    const projection = (
-      target: Release | null,
-      minimumBuild: number | null,
-    ) => ({
-      minimumBuild,
-      latestBuild: target?.buildNumber ?? null,
-      downloadUrl: target
-        ? target.source === 'direct_apk'
-          ? releaseLandingUrl(
-              this.config.get<string>('RELEASE_LANDING_BASE_URL'),
-              target._id.toString(),
-            )
-          : target.storeUrl
-        : null,
-    });
     const platforms: AppPolicy['platforms'] = {
       android: {
-        ...projection(android, selection.android.minimumBuild),
+        minimumBuild: selection.android.minimumBuild,
         releaseSelection: {
           source: selection.android.source,
           directReleaseId: selection.android.directReleaseId,
@@ -225,7 +209,7 @@ export class ReleasePublicationService {
         },
       },
       ios: {
-        ...projection(ios, selection.ios.minimumBuild),
+        minimumBuild: selection.ios.minimumBuild,
         releaseSelection: {
           source: 'app_store',
           directReleaseId: null,

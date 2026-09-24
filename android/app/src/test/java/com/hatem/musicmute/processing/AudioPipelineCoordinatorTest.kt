@@ -176,18 +176,18 @@ class AudioPipelineCoordinatorTest {
         assertEquals("https://www.youtube.com/watch?v=abc12345678", retained.sourceUrl)
     }
 
-    @Test fun legacyPreparedReviewResumesWithoutAnotherSheet() = runTest {
+    @Test fun pendingReviewIsNotAutomaticallyApprovedOnResume() = runTest {
         val fixture = fixture()
         val id = UUID.randomUUID().toString()
         fixture.coordinator.acceptImport(id, "meeting.mp3") { ByteArrayInputStream(byteArrayOf(1, 2, 3)) }
         fixture.store.update("owner", id) { it.copy(awaitingCloudConsent = true, phase = ProcessingPhase.PAUSED) }
         fixture.uploads.enqueued.clear()
         fixture.repository.resumePending()
-        assertFalse(fixture.store.get("owner", id)!!.awaitingCloudConsent)
-        assertEquals(listOf(id), fixture.uploads.enqueued)
+        assertTrue(fixture.store.get("owner", id)!!.awaitingCloudConsent)
+        assertTrue(fixture.uploads.enqueued.isEmpty())
     }
 
-    @Test fun cancellingLegacyReviewRemovesPrivateStagingWithoutResumingUpload() = runTest {
+    @Test fun cancellingPendingReviewRemovesPrivateStagingWithoutResumingUpload() = runTest {
         val fixture = fixture()
         val id = UUID.randomUUID().toString()
         fixture.coordinator.acceptImport(id, "meeting.mp3") { ByteArrayInputStream(byteArrayOf(1, 2, 3)) }

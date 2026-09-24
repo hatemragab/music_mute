@@ -1,5 +1,12 @@
 # Worker performance and CLI investigation task package
 
+> **Direct MP3 worker path (2026-09-23):** Recipe revision 4 sends MP3 input
+> directly to Kim Vocal 2 and uses `audio-separator`'s MP3 output. Other
+> accepted formats need local WAV decoding before separation. The optional
+> trim runs after the vocal MP3. See [the worker guide](../../worker/README.md) and
+> [the M4 setup note](../../kim-vocal-2-m4-fast-setup.md). Earlier task 08–15
+> measurements used a different pipeline and are historical baselines.
+
 > **New follow-up plan (2026-09-23):** [160 kbps mobile upload and worker output](../audio-transfer-160/README.md)
 > covers Android, iOS, backend size protection and variable worker MP3 output up
 > to 160 kbps. It supersedes this package's 192 kbps/source-preservation decision

@@ -72,7 +72,7 @@ function fixture() {
     uploadingResultAt: null,
     recipeSnapshot: {
       recipeId: 'kim-vocals-v2',
-      recipeRevision: 3,
+      recipeRevision: 4,
       recipeDigest: 'b'.repeat(64),
       modelDigest: 'a'.repeat(64),
       trimEnabled: true,
@@ -195,7 +195,7 @@ const completion = {
   ...ownership,
   versionId: 'output-v1',
   recipeId: 'kim-vocals-v2' as const,
-  recipeRevision: 3,
+  recipeRevision: 4,
   recipeDigest: 'b'.repeat(64),
   modelDigest: 'a'.repeat(64),
   trimEnabled: true,

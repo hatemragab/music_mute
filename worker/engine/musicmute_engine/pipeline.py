@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,16 +15,13 @@ from .media import (
     CHANNELS,
     SAMPLE_RATE,
     MediaProcessingError,
-    denoise_audio,
     encode_mp3,
-    output_bitrate_kbps,
-    inspect_lossless_audio,
     prepare_audio,
     probe_audio,
     validate_mp3,
     verify_input_identity,
 )
-from .recipes import RecipeValidationError, validate_recipe_snapshot
+from .recipes import OUTPUT_BITRATE_KBPS, RecipeValidationError, validate_recipe_snapshot
 from .separator import KimSeparator, Provider, SeparatorError
 from .trimmer import EditRange, trim_vocal_gaps
 
@@ -34,6 +32,7 @@ UUID_V4 = re.compile(
 SHA256_BASE64 = re.compile(r"^[A-Za-z0-9+/]{43}=$")
 MAX_EDIT_RANGES = 256
 EDIT_CHUNK_SIZE = 64
+DIRECT_INPUT_SUFFIXES = frozenset({".mp3", ".wav"})
 REQUEST_KEYS = frozenset(
     {
         "attemptId",
@@ -191,6 +190,7 @@ class RuntimePipeline:
         )
         self._separator: VocalSeparator | None = None
         self._separator_key: tuple[Provider, Path, int] | None = None
+        self._model_cache_root: Path | None = None
 
     def preload(
         self,
@@ -203,7 +203,7 @@ class RuntimePipeline:
         if progress is not None:
             progress("loading")
         try:
-            model = verified_cached_model(model_cache_root)
+            model = self._verified_model(model_cache_root)
         except ModelArtifactError as error:
             raise ProcessingFailure(
                 "MODEL_INVALID", "Qualified model is unavailable"
@@ -230,7 +230,7 @@ class RuntimePipeline:
             model = self._timed(
                 timings,
                 "modelValidation",
-                lambda: verified_cached_model(request.model_cache_root),
+                lambda: self._verified_model(request.model_cache_root),
             )
         except ModelArtifactError as error:
             raise ProcessingFailure(
@@ -256,117 +256,104 @@ class RuntimePipeline:
                 raise ProcessingFailure(
                     "INPUT_CHECKSUM_MISMATCH", "Input identity does not match"
                 ) from error
-            progress("preparation")
             try:
                 source_info = self._timed(
                     timings,
                     "mediaValidation",
                     lambda: probe_audio(request.input_path, request.ffprobe),
                 )
-                prepared = self._timed(
-                    timings,
-                    "preparation",
-                    lambda: prepare_audio(
-                        request.input_path, attempt / "prepared.wav", request.ffmpeg
-                    ),
-                )
-                prepared_info = inspect_lossless_audio(prepared, require_pcm16=True)
             except MediaProcessingError as error:
                 raise ProcessingFailure(
                     "INVALID_AUDIO", "Input audio is invalid"
                 ) from error
-
-            progress("model-load")
+            separation_input = request.input_path
+            prepared_path = (
+                attempt / "prepared.wav"
+                if separation_input.suffix.lower() not in DIRECT_INPUT_SUFFIXES
+                else None
+            )
             try:
-                separator = self._timed(
-                    timings,
-                    "modelLoad",
-                    lambda: self._get_separator(
-                        request.provider, model, request.directml_device_id
-                    ),
-                )
-                progress("separation")
-                vocal = self._timed(
-                    timings,
-                    "separation",
-                    lambda: separator.separate(
-                        prepared,
-                        attempt / "separated",
-                        on_window_progress=window_progress,
-                    ) if window_progress is not None else separator.separate(
-                        prepared, attempt / "separated"
-                    ),
-                )
-                vocal_info = inspect_lossless_audio(vocal)
-            except (SeparatorError, MediaProcessingError) as error:
-                if is_positive_gpu_oom(error):
-                    raise ProcessingFailure(
-                        "GPU_OOM", "GPU provider reported out of memory"
-                    ) from error
-                raise ProcessingFailure(
-                    "SEPARATOR_FAILED", "Vocal separation failed"
-                ) from error
-
-            current = vocal
-            if request.recipe["denoiseEnabled"]:
-                progress("denoise")
+                if prepared_path is not None:
+                    progress("preparation")
+                    try:
+                        separation_input = self._timed(
+                            timings,
+                            "preparation",
+                            lambda: prepare_audio(
+                                request.input_path, prepared_path, request.ffmpeg
+                            ),
+                        )
+                    except MediaProcessingError as error:
+                        raise ProcessingFailure(
+                            "SEPARATOR_FAILED", "Audio preparation failed"
+                        ) from error
+                progress("model-load")
                 try:
-                    current = self._timed(
+                    separator = self._timed(
                         timings,
-                        "denoise",
-                        lambda: denoise_audio(
-                            current, attempt / "denoised.wav", request.ffmpeg
+                        "modelLoad",
+                        lambda: self._get_separator(
+                            request.provider, model, request.directml_device_id
                         ),
                     )
-                    if inspect_lossless_audio(current).samples != vocal_info.samples:
-                        raise MediaProcessingError(
-                            "Denoise changed the audio sample count"
-                        )
-                except MediaProcessingError as error:
-                    raise ProcessingFailure(
-                        "DENOISE_FAILED", "Vocal denoise failed"
-                    ) from error
-
-            removed_samples = 0
-            output_samples = vocal_info.samples
-            retained = (EditRange(0, vocal_info.samples, 0, vocal_info.samples),)
-            if request.recipe["trimEnabled"]:
-                progress("trim")
-                try:
-                    trimmed = self._timed(
+                    progress("separation")
+                    produced = self._timed(
                         timings,
-                        "trim",
-                        lambda: trim_vocal_gaps(current, attempt / "trimmed.wav"),
+                        "separation",
+                        lambda: separator.separate(
+                            separation_input,
+                            attempt / "separated",
+                            on_window_progress=window_progress,
+                        ) if window_progress is not None else separator.separate(
+                            separation_input, attempt / "separated"
+                        ),
                     )
-                except (OSError, RuntimeError, ValueError) as error:
+                except (SeparatorError, MediaProcessingError) as error:
+                    if is_positive_gpu_oom(error):
+                        raise ProcessingFailure(
+                            "GPU_OOM", "GPU provider reported out of memory"
+                        ) from error
                     raise ProcessingFailure(
-                        "TRIM_FAILED", "Vocal trim failed"
+                        "SEPARATOR_FAILED", "Vocal separation failed"
                     ) from error
-                if trimmed.source_samples != vocal_info.samples:
-                    raise ProcessingFailure(
-                        "TRIM_FAILED", "Vocal trim changed the source sample basis"
-                    )
-                current = attempt / "trimmed.wav"
-                removed_samples = trimmed.removed_samples
-                output_samples = trimmed.output_samples
-                retained = trimmed.retained_ranges
+            finally:
+                if prepared_path is not None:
+                    prepared_path.unlink(missing_ok=True)
+
+            output = attempt / "output" / "vocals.mp3"
+            output.parent.mkdir(parents=True, exist_ok=True)
+            progress("trim")
+            try:
+                trimmed = self._timed(
+                    timings,
+                    "trim",
+                    lambda: trim_vocal_gaps(
+                        produced, attempt / "trimmed.wav", reuse_unchanged=True
+                    ),
+                )
+            except (OSError, RuntimeError, ValueError) as error:
+                raise ProcessingFailure("TRIM_FAILED", "Vocal trim failed") from error
+            source_samples = trimmed.source_samples
+            output_samples = trimmed.output_samples
+            removed_samples = trimmed.removed_samples
+            retained = trimmed.retained_ranges
             if len(retained) > MAX_EDIT_RANGES:
                 raise ProcessingFailure(
                     "EDIT_MAP_TOO_LARGE", "Vocal edit map exceeds the bounded limit"
                 )
-
             progress("encoding")
             try:
-                selected_bitrate_kbps = output_bitrate_kbps(source_info.bit_rate)
-                output = self._timed(
+                self._timed(
                     timings,
                     "encode",
-                    lambda: encode_mp3(
-                        current, attempt / "output" / "vocals.mp3", request.ffmpeg,
-                        selected_bitrate_kbps,
-                    ),
+                    lambda: encode_mp3(trimmed.audio_path, output, request.ffmpeg),
                 )
-                progress("output-validation")
+            except MediaProcessingError as error:
+                raise ProcessingFailure(
+                    "OUTPUT_INVALID", "Trimmed MP3 encoding failed"
+                ) from error
+            progress("output-validation")
+            try:
                 output_info, identity = self._timed(
                     timings,
                     "outputValidation",
@@ -376,6 +363,7 @@ class RuntimePipeline:
                 raise ProcessingFailure(
                     "OUTPUT_INVALID", "Output audio is invalid"
                 ) from error
+            input_samples = max(1, round(source_info.duration_seconds * SAMPLE_RATE))
 
             progress("output-ready")
             return {
@@ -385,10 +373,10 @@ class RuntimePipeline:
                 "sha256": identity.sha256,
                 "contentType": "audio/mpeg",
                 "sourceDurationSeconds": source_info.duration_seconds,
-                "measuredInputDurationSeconds": prepared_info.duration_seconds,
-                "measuredInputSamples": prepared_info.samples,
+                "measuredInputDurationSeconds": source_info.duration_seconds,
+                "measuredInputSamples": input_samples,
                 "measuredOutputDurationSeconds": output_info.duration_seconds,
-                "sourceSamples": vocal_info.samples,
+                "sourceSamples": source_samples,
                 "outputSamples": output_samples,
                 "removedSamples": removed_samples,
                 "sampleRate": SAMPLE_RATE,
@@ -400,18 +388,40 @@ class RuntimePipeline:
                 "trimEnabled": request.recipe["trimEnabled"],
                 "denoiseEnabled": request.recipe["denoiseEnabled"],
                 "outputFormat": request.recipe["outputFormat"],
-                "outputBitrateKbps": selected_bitrate_kbps,
+                "outputBitrateKbps": OUTPUT_BITRATE_KBPS,
                 "codecPaddingSeconds": max(
                     0.0,
                     output_info.duration_seconds - output_samples / SAMPLE_RATE,
                 ),
                 "stageTimings": timings,
+                "separationTimings": getattr(separator, "last_separation_timings", {}),
                 "editMap": _chunk_edit_map(retained),
             }
         except ProcessingFailure:
             raise
         except Exception as error:
             raise ProcessingFailure("PROCESSING_FAILED", "Processing failed") from error
+        finally:
+            # These paths are owned exclusively by this validated attempt.
+            # Keep the final MP3 for upload; never retain temporary PCM on failure.
+            (attempt / "prepared.wav").unlink(missing_ok=True)
+            (attempt / "trimmed.wav").unlink(missing_ok=True)
+            separated = attempt / "separated"
+            if separated.is_dir():
+                shutil.rmtree(separated)
+
+    def _verified_model(self, cache_root: Path) -> Path:
+        # A warm child uses the verified in-memory graph, not the on-disk file.
+        # New children and failed loads must still verify the artifact in full.
+        if self._separator is not None and self._separator_key is not None:
+            if cache_root != self._model_cache_root:
+                raise ProcessingFailure(
+                    "RUNTIME_CONFIG_CHANGED", "A warm child cannot change model cache"
+                )
+            return self._separator_key[1]
+        model = verified_cached_model(cache_root)
+        self._model_cache_root = cache_root
+        return model
 
     def _get_separator(
         self, provider: Provider, model: Path, directml_device_id: int
@@ -431,7 +441,12 @@ class RuntimePipeline:
 
     @staticmethod
     def _prepare_attempt_directory(path: Path, input_path: Path) -> Path:
-        if not path.is_absolute() or path.is_symlink() or input_path.is_symlink():
+        if (
+            not path.is_absolute()
+            or path.is_symlink()
+            or input_path.is_symlink()
+            or input_path.name in {"prepared.wav", "trimmed.wav"}
+        ):
             raise ProcessingFailure(
                 "INVALID_REQUEST", "Attempt directory is not a safe absolute path"
             )

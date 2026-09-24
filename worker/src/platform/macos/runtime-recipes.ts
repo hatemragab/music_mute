@@ -7,4 +7,4 @@ export const MAC_RECIPE_IDS = [
 
 export type MacRecipeId = (typeof MAC_RECIPE_IDS)[number];
 
-export const DEFAULT_MAC_RECIPE_ID: MacRecipeId = "kim-vocals-v2-trim";
+export const DEFAULT_MAC_RECIPE_ID: MacRecipeId = "kim-vocals-v2";

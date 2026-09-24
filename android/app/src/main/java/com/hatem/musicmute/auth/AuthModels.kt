@@ -75,8 +75,6 @@ data class DevicePage(val items: List<RegisteredDevice>, val nextCursor: String?
 @Serializable
 data class PlatformPolicy(
     val minimumBuild: Int? = null,
-    val latestBuild: Int? = null,
-    val downloadUrl: String? = null,
 )
 
 @Serializable data class PolicyPlatforms(val android: PlatformPolicy, val ios: PlatformPolicy)
@@ -93,7 +91,6 @@ data class AppPolicy(
 data class ProcessingAccess(
     val allowed: Boolean,
     val reason: String? = null,
-    val downloadUrl: String? = null,
 )
 
 @Serializable

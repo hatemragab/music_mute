@@ -27,6 +27,56 @@ afterEach(async () => {
 });
 
 describe("worker child lifecycle", () => {
+  it.skipIf(process.platform === "win32")(
+    "kills decoder descendants on timeout and forced termination",
+    async () => {
+      for (const action of ["timeout", "terminate"] as const) {
+        child = new WorkerChildProcess({
+          command: process.execPath,
+          args: [hangingFixture, "--spawn-descendant"],
+          cwd: workerRoot,
+          startTimeoutMs: 2_000,
+          requestTimeoutMs: 100,
+          stopTimeoutMs: 100,
+        });
+        const ready = await child.start();
+        const pid = ready.payload.descendantPid as number;
+        expect(Number.isSafeInteger(pid)).toBe(true);
+        try {
+          process.kill(pid, 0);
+          if (action === "timeout") {
+            await expect(child.request("ping", {})).rejects.toThrow(
+              "timed out",
+            );
+          } else {
+            child.terminateActive();
+          }
+          await expect
+            .poll(
+              () => {
+                try {
+                  process.kill(pid, 0);
+                  return false;
+                } catch (error) {
+                  return (error as NodeJS.ErrnoException).code === "ESRCH";
+                }
+              },
+              { timeout: 2_000 },
+            )
+            .toBe(true);
+        } finally {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            /* Already reaped. */
+          }
+          await child.stop();
+          child = null;
+        }
+      }
+    },
+  );
+
   it("accepts observed progress for the current request and ignores fabricated or stale frames", async () => {
     const startupStages: string[] = [];
     child = new WorkerChildProcess({

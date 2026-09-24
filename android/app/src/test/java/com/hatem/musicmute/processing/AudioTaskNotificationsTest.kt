@@ -92,6 +92,8 @@ class AudioTaskNotificationsTest {
         val record = DownloadRecord(operation.operationId, "https://youtu.be/jNQXAC9IVRw", 0,
             ownerUid = "owner-a", operationId = operation.operationId, sessionEpoch = 7, workRequestId = "work-1")
         assertNotNull(sourceTaskNotificationTarget(record, "owner-a", operation.operationId, 7, "work-1"))
+        assertNull(sourceTaskNotificationTarget(record.copy(ownerUid = null, operationId = null, sessionEpoch = null),
+            "owner-a", operation.operationId, 7, "work-1"))
         assertNull(sourceTaskNotificationTarget(record.copy(sessionEpoch = 8), "owner-a", operation.operationId, 7, "work-1"))
         assertNull(sourceTaskNotificationTarget(record, "owner-b", operation.operationId, 7, "work-1"))
         assertNull(sourceTaskNotificationTarget(record, "owner-a", "another", 7, "work-1"))

@@ -43,7 +43,7 @@ describe('push registration service input defense', () => {
   it('rejects invalid opt-out and paging selectors before database access', async () => {
     const f = setup();
     await expect(
-      f.service.deactivate('not-an-object-id', 'not-a-uuid'),
+      f.service.deactivate('not-an-object-id', 'not-a-uuid', 1),
     ).rejects.toMatchObject({ status: 400 });
     await expect(
       f.service.eligiblePage(f.user._id.toHexString(), {
