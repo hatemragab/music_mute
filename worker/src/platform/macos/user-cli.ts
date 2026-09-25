@@ -1333,7 +1333,7 @@ async function readRemoteStatus(
       timer = setTimeout(() => {
         controller.abort();
         reject(new Error("Backend status timed out"));
-      }, 2_500);
+      }, 15_000);
     });
     const state = await Promise.race([request, timeout]);
     return {

@@ -537,6 +537,37 @@ describe("macOS public user commands", () => {
     });
   });
 
+  it("accepts a backend status response after the release check takes several seconds", async () => {
+    const f = await fixture(true);
+    await runMacUserCommand("status", ["--json"], {
+      host: {
+        platform: "darwin",
+        arch: "arm64",
+        uid: process.getuid!(),
+        home: f.layout.homeRoot,
+      },
+      layout: f.layout,
+      launchAgent: f.launchAgent,
+      stdout: (value) => f.output.push(value),
+      remoteStatus: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+        return {
+          machineId: "32410a14-e85a-4a1d-bb99-61fa54b07eaa",
+          status: "active" as const,
+          groupId: null,
+          policyRevision: 4,
+          revision: 7,
+          lastSeenAt: null,
+          activeAttempts: 0,
+          claimsAllowed: true,
+        };
+      },
+    });
+    expect(JSON.parse(f.output.pop()!)).toMatchObject({
+      remote: { available: true, state: { status: "active" } },
+    });
+  });
+
   it("reports local readiness without contacting the backend", async () => {
     const f = await fixture(true);
     const remoteStatus = vi.fn(async () => {
