@@ -69,6 +69,14 @@ fun HomeScreen(
     actionBusy: Boolean = false,
 ) {
     var pendingDelete by remember { mutableStateOf<AudioTaskPresentation?>(null) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val importBusy = busy || actionBusy || urlImportBusy
+    val startUrlImport = {
+        if (!importBusy && urlImportText.isNotBlank()) {
+            keyboard?.hide()
+            onUrlImport()
+        }
+    }
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         LazyColumn(
             Modifier.weight(1f).widthIn(max = CreativeTokens.ContentWidth).fillMaxWidth(),
@@ -96,6 +104,23 @@ fun HomeScreen(
                         Text(stringResource(R.string.url_import_supported),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            CompactUrlImportField(
+                                value = urlImportText, onValueChange = onUrlImportText,
+                                enabled = !importBusy, isError = urlImportError != null,
+                                onPaste = onUrlImportPaste, onDone = startUrlImport,
+                            )
+                        }
+                        urlImportError?.let { code ->
+                            CreativeFeedback(stringResource(urlImportMessage(code)), error = true)
+                        }
+                        if (urlImportText.isNotBlank()) {
+                            TextButton(onClick = startUrlImport, enabled = !importBusy,
+                                modifier = Modifier.align(Alignment.End)) {
+                                Text(stringResource(R.string.url_import_action))
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedButton(onClick = onImport, enabled = !busy,
                                 modifier = Modifier.weight(1f).heightIn(min = CreativeTokens.TouchTarget), shape = RoundedCornerShape(10.dp),
@@ -161,6 +186,76 @@ fun HomeScreen(
         onDismiss = { pendingDelete = null },
         onDelete = { onDelete(deleting) { pendingDelete = null } },
         message = message,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CompactUrlImportField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    enabled: Boolean,
+    isError: Boolean,
+    onPaste: () -> Unit,
+    onDone: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val errorMessage = stringResource(R.string.url_import_invalid)
+    val textColor = MaterialTheme.colorScheme.onSurface.copy(
+        alpha = if (enabled) 1f else CreativeTokens.DisabledAlpha,
+    )
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth().heightIn(min = CreativeTokens.TouchTarget)
+            .semantics { if (isError) error(errorMessage) },
+        enabled = enabled,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = textColor),
+        cursorBrush = SolidColor(if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary),
+        interactionSource = interactionSource,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        decorationBox = { innerTextField ->
+            OutlinedTextFieldDefaults.DecorationBox(
+                value = value,
+                innerTextField = innerTextField,
+                enabled = enabled,
+                singleLine = true,
+                visualTransformation = VisualTransformation.None,
+                interactionSource = interactionSource,
+                isError = isError,
+                placeholder = {
+                    Text(stringResource(R.string.url_import_hint),
+                        style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
+                leadingIcon = {
+                    Icon(Icons.Outlined.Link, null, Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else CreativeTokens.DisabledAlpha))
+                },
+                trailingIcon = {
+                    Button(
+                        onClick = onPaste,
+                        enabled = enabled,
+                        modifier = Modifier.padding(end = 4.dp).heightIn(min = CreativeTokens.TouchTarget),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    ) { Text(stringResource(R.string.paste), style = MaterialTheme.typography.labelMedium) }
+                },
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                container = {
+                    OutlinedTextFieldDefaults.Container(
+                        enabled = enabled,
+                        isError = isError,
+                        interactionSource = interactionSource,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        ),
+                    )
+                },
+            )
+        },
     )
 }
 
