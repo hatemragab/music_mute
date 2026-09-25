@@ -233,9 +233,8 @@ class JobsApiClientTest {
         })
         val metadata = CreateJobMetadata(
             "Interview",
-            SourceKind.URL,
+            SourceKind.FILE,
             Instant.parse("2026-09-10T12:00:00.123456789Z"),
-            sourceUrl = "https://www.youtube.com/watch?v=jNQXAC9IVRw",
         )
         val created = api.createWithMetadata(requestId, input, metadata)
         assertEquals(requestId, created.requestId)
@@ -252,7 +251,7 @@ class JobsApiClientTest {
         assertEquals("bba62714-ab09-4c79-9453-ccae688c092c", accepted.eventId)
         assertEquals(listOf("POST", "PATCH", "DELETE", "POST"), requests.map { it[1] })
         assertEquals(listOf("/jobs", "/jobs/$id", "/jobs/$id", "/client-errors"), requests.map { it[0] })
-        assertEquals(Json.parseToJsonElement("""{"request_id":"$requestId","source_title":"Interview","source_kind":"url","source_url":"https://www.youtube.com/watch?v=jNQXAC9IVRw","client_started_at":"2026-09-10T12:00:00.123Z","input":{"extension":"mp3","content_type":"audio/mpeg","bytes":42,"duration_seconds":1.5,"sha256":"${input.sha256}"}}"""), Json.parseToJsonElement(requests[0][3] as String))
+        assertEquals(Json.parseToJsonElement("""{"request_id":"$requestId","source_title":"Interview","source_kind":"file","client_started_at":"2026-09-10T12:00:00.123Z","input":{"extension":"mp3","content_type":"audio/mpeg","bytes":42,"duration_seconds":1.5,"sha256":"${input.sha256}"}}"""), Json.parseToJsonElement(requests[0][3] as String))
         assertEquals("""{"display_name":"My interview"}""", requests[1][3])
         assertNull((requests[2][2] as Map<*, *>)["X-Installation-Id"])
         val diagnostic = Json.parseToJsonElement(requests[3][3] as String).jsonObject

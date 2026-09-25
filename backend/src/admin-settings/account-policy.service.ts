@@ -265,9 +265,7 @@ export class AccountPolicyService implements OnModuleInit {
         maxProcessingJobs: policy.maxProcessingJobs,
         maxLocalSourceBytes: 200_000_000,
         longJobThresholdSeconds: Math.min(600, policy.maxDurationSeconds),
-        maxSourceDownloadBytes: policy.maxPreparedAudioBytes,
         maxPreparationSeconds: 120,
-        maxSourceDownloadSeconds: 120,
       },
       preparationProfile: {
         id: PREPARATION_PROFILE_ID,

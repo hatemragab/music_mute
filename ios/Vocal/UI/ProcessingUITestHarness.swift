@@ -22,8 +22,8 @@
 
     var body: some View {
       VocalRootView(
-        preferences: preferences, downloads: graph.downloads, player: graph.player,
-        files: graph.files, auth: graph.auth, processing: graph.processing,
+        preferences: preferences, player: graph.player,
+        auth: graph.auth, processing: graph.processing,
         artifacts: graph.artifacts, push: graph.push, requestNotifications: {}
       )
       .environment(\.locale, preferences.locale)
@@ -37,8 +37,6 @@
         .opacity(0.01)
       }
       .task {
-        await graph.seedOriginal()
-        await graph.downloads.load()
         await graph.processing.bindOwner("processing-ui-fixture")
       }
     }
@@ -53,11 +51,8 @@
 
   @MainActor private final class ProcessingFixtureGraph: ObservableObject {
     let preferences: AppPreferences
-    let downloads: DownloadModel
     let player = AudioPlayer()
-    let files: AudioFiles
     let importDirectory: URL
-    let historyStore: HistoryStore
     let auth: AuthSessionModel
     let processing: ProcessingModel
     let artifacts: JobArtifactRepository
@@ -84,19 +79,7 @@
       let defaults = UserDefaults(suiteName: "VocalProcessingUITests." + id.uuidString)!
       defaults.set(value("-language") ?? "en", forKey: "language")
       defaults.set(value("-appearance") ?? "light", forKey: "appearance")
-      defaults.set("", forKey: "sourceURL")
-      if args.contains("--processing-fixture-paste-url") {
-        UIPasteboard.general.string =
-          value("--processing-fixture-paste-url") ?? "https://youtu.be/jNQXAC9IVRw"
-      }
       preferences = AppPreferences(defaults: defaults)
-      files = AudioFiles(root: root.appendingPathComponent("Audio"))
-      historyStore = HistoryStore(file: root.appendingPathComponent("history.json"))
-      let fixtureAudio = ProcessingFixtureAudio(root: root)
-      downloads = DownloadModel(
-        service: fixtureAudio,
-        history: historyStore,
-        defaults: defaults)
       auth = AuthSessionModel(
         firebase: ProcessingFixtureAuth(), apple: AppleCredentialProvider(),
         installationStore: InstallationStore(file: root.appendingPathComponent("auth.json")),
@@ -111,13 +94,7 @@
         transfers: ProcessingFixtureTransfers())
       let preparer = AudioInputPreparer(root: inputRoot)
       let pipeline = AudioPipelineCoordinator(
-        store: repository.store, repository: repository, preparer: preparer,
-        download: { videoID, operationID, _, stage, progress in
-          let saved = try await fixtureAudio.download(
-            videoID: videoID, id: operationID, stage: stage, progress: progress)
-          return PipelineSourceFile(
-            url: root.appendingPathComponent(saved.relativePath), title: saved.title)
-        })
+        store: repository.store, repository: repository, preparer: preparer)
       let artifactRepository = JobArtifactRepository(
         api: api, root: root.appendingPathComponent("Outputs"),
         sessionProvider: { repository.session },
@@ -133,25 +110,6 @@
         sessionDidChange: { artifactRepository.onSessionChanged() })
     }
 
-    func seedOriginal() async {
-      do {
-        let payload = processingFixtureMP3()
-        guard try await historyStore.load().isEmpty else { return }
-        try FileManager.default.createDirectory(at: files.root, withIntermediateDirectories: true)
-        try payload.write(to: files.root.appendingPathComponent("original.mp3"), options: .atomic)
-        var record = AudioRecord(
-          id: UUID(uuidString: "00000000-0000-4000-8000-000000000001")!,
-          videoID: "fixture-original", createdAt: Date())
-        record.status = .complete
-        record.title = "Synthetic original audio"
-        record.relativePath = "original.mp3"
-        record.fileExtension = "mp3"
-        record.codec = "mp3"
-        record.byteCount = Int64(payload.count)
-        record.duration = 20
-        try await historyStore.save([record], revision: 0)
-      } catch { assertionFailure("Isolated processing fixture media setup failed") }
-    }
   }
 
   @MainActor private final class ProcessingFixtureJobs: ObservableObject, JobsAPI {
@@ -308,30 +266,6 @@
       throw JobsFailure.serviceUnavailable
     }
     func deactivate(installationID: String, expectedBindingRevision: Int64) async throws {}
-  }
-  private struct ProcessingFixtureAudio: AudioDownloading {
-    let root: URL
-    func download(
-      videoID: String, id: UUID, stage: @escaping @Sendable (DownloadStatus) -> Void,
-      progress: @escaping @Sendable (DownloadProgress) -> Void
-    ) async throws -> SavedAudio {
-      stage(.resolving)
-      try await Task.sleep(for: .milliseconds(50))
-      try Task.checkCancellation()
-      stage(.downloading)
-      let payload = processingFixtureMP3()
-      progress(
-        DownloadProgress(downloadedBytes: Int64(payload.count), totalBytes: Int64(payload.count)))
-      let relative = "FixtureSources/\(id.uuidString).mp3"
-      let file = root.appendingPathComponent(relative)
-      try FileManager.default.createDirectory(
-        at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-      try payload.write(to: file, options: .atomic)
-      stage(.checking)
-      return SavedAudio(
-        title: "Fixture audio \(videoID)", relativePath: relative, codec: "mp3",
-        fileExtension: "mp3", bitrate: 128_000, byteCount: Int64(payload.count), duration: 4)
-    }
   }
   @MainActor private final class ProcessingFixtureAuth: FirebaseAuthenticating {
     var identity: IdentitySnapshot? { nil }

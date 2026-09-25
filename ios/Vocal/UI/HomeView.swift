@@ -2,8 +2,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct HomeView: View {
-  @ObservedObject var model: DownloadModel
-  var acceptURL: (String) async -> Bool = { _ in false }
   var beginImport: () -> Void = {}
   var importAudio: (URL) -> Void = { _ in }
   var photoSourceLimit = ProcessingMediaPolicy.standard.maxSourceBytes!
@@ -11,11 +9,8 @@ struct HomeView: View {
   var reportImportFailure: (Error) -> Void = { _ in }
   var showProcessing: () -> Void = {}
   var showHistory: () -> Void
-  @State private var emptyClipboard = false
   @State private var importing = false
   @State private var importingPhoto = false
-  @State private var youtubeExpanded = false
-  @FocusState private var editing: Bool
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 24) {
@@ -55,40 +50,6 @@ struct HomeView: View {
           }
           .accessibilityIdentifier("homeImportVideo")
           Text("owned_audio_guidance").foregroundStyle(.secondary)
-          DisclosureGroup("youtube_secondary", isExpanded: $youtubeExpanded) {
-            Text("source_title").font(.title3.bold())
-            Text("source_body").font(.subheadline).foregroundStyle(.secondary)
-            TextField("video_link", text: $model.urlText, axis: .vertical)
-              .textInputAutocapitalization(.never).autocorrectionDisabled()
-              .keyboardType(.URL).focused($editing).lineLimit(1...3)
-              .environment(\.layoutDirection, .leftToRight)
-              .padding(14).background(
-                .quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12)
-              )
-              .accessibilityIdentifier("youtubeURL")
-            HStack {
-              Text("supported_links").font(.caption).foregroundStyle(.secondary)
-              Spacer()
-              Button {
-                if let value = UIPasteboard.general.string, !value.isEmpty {
-                  model.urlText = value
-                } else {
-                  emptyClipboard = true
-                }
-              } label: {
-                Label("paste", systemImage: "document.on.clipboard")
-              }
-              .frame(minHeight: 48).accessibilityIdentifier("pasteURL")
-            }
-            if model.invalidURL {
-              Text("invalid_url").font(.footnote).foregroundStyle(.red).accessibilityIdentifier(
-                "invalidURL")
-            }
-            if model.storageError { Text("history_error").foregroundStyle(.red).font(.footnote) }
-            Text("youtube_permission_guidance").font(.caption)
-            Button("download_audio") { commit(model.urlText) }
-              .accessibilityIdentifier("downloadAudio")
-          }
           Text("quality_notice").font(.caption).foregroundStyle(.secondary)
         }
         VocalCard {
@@ -129,21 +90,6 @@ struct HomeView: View {
           }
         }
       }
-      .alert("clipboard_empty", isPresented: $emptyClipboard) { Button("ok", role: .cancel) {} }
   }
 
-  private func commit(_ value: String) {
-    editing = false
-    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return }
-    guard YouTubeURL.videoID(from: trimmed) != nil else {
-      model.invalidURL = true
-      return
-    }
-    model.urlText = ""
-    editing = false
-    Task {
-      if await acceptURL(trimmed) { showProcessing() } else { model.invalidURL = true }
-    }
-  }
 }

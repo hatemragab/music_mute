@@ -1,7 +1,7 @@
 # MusicMute
 
-Native Kotlin Android app that turns a complete pasted YouTube URL or selected
-local audio/video file into a durable local review before cloud processing. Source audio stays private and
+Native Kotlin Android app with local audio/video uploads and server-side URL imports.
+Local files enter a durable review before cloud processing. Source audio stays private and
 the processed library retrieves voice-only MP3 results only when requested.
 
 Application ID and namespace: `com.hatem.musicmute`. Minimum SDK 26; compile/target
@@ -123,7 +123,7 @@ simulator or device for runtime proof.
 ## App updates
 
 Android has separate `direct` and `play` distribution variants with the same
-production application ID and signing configuration. Version `0.1.3` is build 4.
+production application ID and signing configuration. Version `0.1.9` is build 10.
 The direct variant uses the built-in version dialog, download service, progress
 callbacks, FileProvider and installer-intent helper from
 [azhon/AppUpdate 4.3.6](https://github.com/azhon/AppUpdate) (Apache-2.0).
@@ -160,41 +160,27 @@ retrofitted with the dialog. Build 4 is the reviewed bootstrap distributed
 through the existing update page; subsequent higher builds can then use the
 in-app prompt and verified download flow.
 
-## Download quality
+## Link acquisition
 
-The app uses [youtubedl-android 0.18.1](https://github.com/yausername/youtubedl-android)
-to execute yt-dlp **on Android**. The supplied Fiftee branch URL returned 404
-publicly; it is not a downloader dependency. This implementation follows the
-previously agreed youtubedl-android integration.
-
-The selection is `bestaudio[protocol=https][abr<=160]/bestaudio[protocol=https]`:
-the best available audio-only stream at or below 160 kbps when yt-dlp reports one,
-with an audio-only fallback
-delivered directly over HTTPS. There is no combined video fallback and no HLS
-conversion path. `--no-playlist` limits each request to one video, and
-`--fixup never` disables automatic repairs. No `-x`, audio-format, audio-quality,
-recode, or remux operation is requested. FFmpeg is not included.
-
-The downloaded library copy retains its original container and codec, commonly
-WebM/Opus or M4A/AAC. For cloud processing, the app first uses Android's track
-bitrate and falls back to yt-dlp's selected-format bitrate when Android does not
-report one. Audio over 160 kbps or with unknown bitrate is encoded once to AAC/M4A
-at 160 kbps before upload. It is not converted to MP3 on the phone. Downloaded
-audio is inspected and hashed during staging without another full mobile decode;
-the worker validates and decodes the complete input before separation. Picked
-phone media retains full mobile decode validation. See the upstream
-[yt-dlp format selection documentation](https://github.com/yt-dlp/yt-dlp#format-selection).
-If a direct audio-only format is unavailable, the app reports a failure without an automatic extraction retry.
+URL imports use `POST /media-imports`. Acquisition, audio-only validation, temporary
+file cleanup and S3 upload run on the server. Android contains no extractor,
+Python runtime, JavaScript challenge engine or downloader update worker.
 
 ## App behavior
 
+- **Server URL imports:** Home accepts one public media link from YouTube, Facebook or another supported site,
+  including a pasted or Android-shared text link. After rights confirmation the app
+  sends only the canonical URL and a durable request ID to `POST /media-imports`.
+  It never downloads or reuploads that source. Per-account import state survives
+  process recreation; uncertain submissions reuse their request ID. The app polls
+  import progress, then opens the existing job and result experience after
+  `submitted`. Failed imports and account/provider limits are shown separately.
+  The backend uses yt-dlp to determine site support and requires an audio-only
+  source. Unsupported, private, live and playlist sources are rejected by the server.
 - **Home:** Import audio is primary. Selecting a supported file creates a local,
   validated review showing filename, size and duration. A rights checkbox and
   explicit Remove music action are required before cloud processing. Cancelling
   the review deletes its staged private copy without creating a cloud job.
-- **YouTube:** A visible secondary option requires explicit download confirmation
-  with rights guidance. Pasting, keyboard Done and focus changes never start a
-  download. Finished downloads enter a separate cloud-processing review.
 - **Processed audio:** one persistent list merges local transfer state and backend
   jobs. Cards show the preserved name, actual stage, elapsed time, and measured
   byte progress. Ready voice output supports Play, Download, Save, Share, Rename,
@@ -203,16 +189,14 @@ If a direct audio-only format is unavailable, the app reports a failure without 
   location. It copies the original bytes to that destination. Cancelling the
   picker leaves the history file unchanged. Save failures are shown explicitly;
   an interrupted provider write may leave an incomplete destination copy.
-- **Cancellation/retry:** cancellation stops the native process and removes only
-  that attempt's partial files. Retry creates a fresh work ID and directory, so
-  a stopping attempt cannot erase a retry. Exact repeated URLs reuse active jobs
-  or existing complete files. Different URL spellings can produce separate entries.
+- **Cancellation/retry:** local preparation/upload and cloud jobs retain their existing
+  cancellation and retry behavior. Server imports expose bounded retryable failures.
 - **Settings:** persistent system/light/dark theme and system/English/Arabic
   language. Arabic layouts use RTL; URL fields stay LTR.
 - **Multiple tasks:** one local pipeline runs at a time; additional
   accepted tasks wait durably and remain independently cancellable.
 
-WorkManager queues source and upload transfers when offline and runs real local
+WorkManager queues local preparation and upload transfers when offline and runs real local
 transfers with silent foreground progress notifications when allowed. Notification
 permission is optional on Android 13+. Android may reschedule work after constraints
 change or the process stops; retryable interrupted state is reconciled with history.
@@ -221,85 +205,14 @@ force-stop behavior still apply; uninterrupted completion is not guaranteed.
 
 ## Storage and integration boundaries
 
-- `download/AudioDownloader` isolates the native download engine.
-  `AudioDownloadPolicy` owns the original-audio selection.
-- `DownloadRepository`, `AudioDownloadWorker`, and `HistoryStore` own scheduling,
-  cancellation, durable metadata, and app-private audio files under
-  `files/audio_downloads/<work-id>/`. No broad storage permission is requested.
-- Metadata retains only needed fields; yt-dlp's temporary info JSON is removed
-  after completion because it can contain expiring stream URLs.
-- `AudioExport` and the document picker copy completed files to user-selected
-  storage. App-private files are removed by Android on uninstall/clear-data;
-  independently saved copies remain at their chosen destination.
-- `playback/` uses Media3 ExoPlayer and a private MediaSessionService.
-- `processing/` owns typed job contracts, immutable input validation, durable
-  WorkManager uploads, UID-scoped metadata/results, cancel/retry reconciliation,
-  and optional notification registration. `ProcessingViewModel` connects these
-  components to the Processing history and detail screens.
+`processing/` owns local preparation, signed S3 uploads, durable account-scoped
+jobs, server import polling, and result caches. `playback/` uses Media3 and a
+private MediaSessionService. Local source files and user-exported copies remain
+under user control. Playback/export downloads only completed server results.
 
-The native package includes Python and QuickJS for extraction and YouTube JavaScript
-handling. Legacy JNI packaging enables extraction of executables. All four upstream
-ABIs are packaged; the universal debug APK is about 85 MB. ARM64 executable ELF
-segments were inspected for 16 KB alignment; this is packaging evidence, not a run
-on every Android version or page-size configuration.
-
-Downloads start with the installed yt-dlp extractor. A unique daily WorkManager
-job checks GitHub only on unmetered networking with adequate battery and storage.
-Network fetch and SHA-256 verification happen outside the downloader mutex;
-activation and the local version probe are serialized with downloads and retain
-rollback/recovery. No GitHub request runs in the user download path. Update checks
-back off persistently (24 hours after success, 6 hours after failure).
-
-Metadata extraction writes a bounded, private info JSON, validates duration/live
-and long-job policy, and reuses that metadata for transfer. The source webpage URL
-is removed before `--load-info-json` to prevent yt-dlp's automatic re-extraction
-fallback. Temporary signed stream links are never logged and are removed with the
-attempt metadata. A private yt-dlp cache reuses player/signature work. QuickJS is
-configured by the native package; no cookies, forced client identities, proxy
-rotation, or remote challenge-script fetching is added.
-
-Downloads remain serialized with a persistent 5-second gap. HTTP 429, session-limit
-messages, HTTP 403, and sign-in refusals stop automatic retries and set a device-wide
-15-minute cooldown (an application policy, not a YouTube guarantee). Native retries
-are zero; ordinary transient transport errors retain the bounded worker backoff.
-A new queued request waits before taking a foreground service or local pipeline slot.
-
-For debug runs, filter logcat with `adb -s <serial> logcat -s YoutubeSource:I`.
-The last 100 allowlisted events also live in the debug app's no-backup
-`youtube-diagnostics.log`, readable with `adb -s <serial> exec-out run-as
-com.hatem.musicmute cat no_backup/youtube-diagnostics.log`. Events include stage,
-outcome, elapsed milliseconds, extractor version, bytes, refusal category, and
-recognized JS/PO-token/format hints. They contain no URLs, titles, account IDs,
-native stderr, or stack traces. A 403 alone does not establish an IP ban.
-Unit tests and offline fixture transfers do not prove live YouTube availability.
-A separate connected CPH2573 debug check on 2026-09-24 observed the verified
-background upgrade from 2025.11.12 to 2026.08.19 and a successful 4,405,162-byte
-YouTube source download: 7.1 seconds for metadata and 4.9 seconds for transfer
-(12.1 seconds total). No refusal or JS/PO-token hint was recorded for that attempt.
-This is one successful sample, not a before/after speed benchmark or a guarantee
-against future YouTube refusals.
-Review upstream native packaging, extractor changes, and GPL-3.0 obligations
-before distributing the app. No release/publication has been performed.
-
-Processing flow:
-
-1. Import an owned/licensed local audio file, or explicitly confirm a secondary YouTube download.
-2. Prepare and validate local immutable bytes; retain the review across process recreation.
-3. Confirm rights and select Remove music to upload to private signed S3 storage and track the backend job.
-4. Explicitly Play, Download, Save, or Share the ready voice-only MP3. Output is cached privately per account.
-
-Prepared input must be nonempty and is accepted up to the inclusive backend-owned
-limits of 50,000,000 bytes and 1,200 seconds.
-Cancellation waits for backend acknowledgement; worker interruption remains visible
-until recovery. Failed-job retry creates a new queue entry. Signing out stops private
-playback and fences stale work; ordinary sign-out retains input/output files. Accepted account deletion purges UID-scoped private data and cancels work. Original provider files and user-exported copies are preserved.
-Push permission is optional and notification taps re-fetch authenticated job detail.
-See the [processing task record](../docs/tasks/mobile-audio-processing.md) for validation
-and the separate live backend/S3/Z440/push proof requirements.
-
-No YouTube URL is sent to a backend for server-side downloading. Client-side
-downloading changes the originating IP; it cannot guarantee YouTube availability,
-account eligibility, or bypass unavailable/private videos.
+Release builds enable R8 code optimization and resource shrinking. All existing
+ABIs remain supported. Device URL acquisition and its bundled runtime are removed.
+Use the server import form for URLs. User audio files are not deleted.
 
 ## Validation
 
@@ -427,15 +340,6 @@ states delete that temporary input. Original media and independently saved libra
 files remain intact. No video is uploaded or reconstructed; output remains cleaned
 audio retrieved on demand.
 
-YouTube URLs with playlist context, live/upcoming metadata, or unknown duration are
-rejected before downloading audio. The installed extractor performs a minimal bounded
-metadata projection alongside temporary private metadata for the transfer. Downloaded bytes are guarded by yt-dlp max-filesize, a fixed
-64 KiB buffer, actual progress/disk observation, and a hard process watchdog; absent
-content length does not remove the cap.
-Native extractor/fragment retries are disabled and partial attempt files are
-removed. Background extractor maintenance is independent of the source-operation
-deadline. Live YouTube availability requires a separate device check.
-
 Owner-only usage is refreshed before intake and periodically on the home screen.
 It separates used, reserved, refunded, and remaining audio minutes for the current
 UTC calendar month and validates upload grants/bytes, result grants/estimated bytes,
@@ -457,3 +361,11 @@ multiple audio tracks still require selected-track extraction. WAV/lossless,
 oversized, high-rate or unbounded inputs use the existing bounded native AAC/M4A
 preparation path, subject to decoder support. No raw WAV is uploaded. Prepared
 uploads retain the policy size cap (at most 50 MB), duration checks and checksum.
+
+## Server link import (2026-09-25)
+
+The Import link/share flow accepts public YouTube, Facebook and other provider
+URLs. Site support and audio-only availability are determined by the backend;
+Android sends only the URL and polls the durable import before opening its job.
+Device-side URL acquisition has been removed. Build
+with `-PauthApiUrl=https://api.music-mute.com` for production backend testing.

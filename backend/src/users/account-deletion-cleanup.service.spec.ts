@@ -263,6 +263,7 @@ describe('account deletion cleanup', () => {
         'abuse_event_buckets',
         'abuse_monthly_summaries',
         'account_restrictions',
+        'media_imports',
       ]),
     );
     expect(f.user.deletionPhase).toBe('provider');

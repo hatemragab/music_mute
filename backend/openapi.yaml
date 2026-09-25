@@ -23,6 +23,108 @@ tags:
   - name: admin
   - name: worker
 paths:
+  /media-imports:
+    post:
+      tags: [jobs]
+      operationId: ImportsController.create
+      summary: Import one supported native audio source
+      description: Asynchronous native-audio acquisition through the private yt-dlp service into existing S3 processing. Requires existing processing access. Public single-item links from supported sites are evaluated without a fixed provider allowlist. Only separate audio streams are downloaded; no video acquisition, playlists, live streams, private-network access, or account cookies. A repeated request_id with the same canonical URL returns the same import; different input returns 409. Queue capacity includes active and waiting imports. Independently measured audio must satisfy account limits.
+      security:
+        - FirebaseBearer: []
+      x-source: src/url-imports/imports.controller.ts
+      x-auth-policy: U + processing access
+      x-rate-policy: G overall + Ux processing-create
+      parameters:
+        - in: header
+          name: X-Installation-Id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [url, request_id]
+              properties:
+                url: { type: string, format: uri, maxLength: 2048 }
+                request_id: { type: string, format: uuid }
+                trim_enabled:
+                  {
+                    type: boolean,
+                    default: true,
+                    description: Disable to retain the complete audio timeline.,
+                  }
+      responses:
+        '202':
+          description: Import admitted or previous admission returned. Processing completion is tracked through the existing job API after submission.
+          headers:
+            Location:
+              schema: { type: string }
+              description: Owner-scoped import status resource.
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MediaImportView' }
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          description: Invalid single-item source or unsupported provider/audio path.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          description: Import disabled, processing unavailable, or bounded import queue full. Queue-full code is IMPORT_QUEUE_FULL; retry later using the same request_id.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /media-imports/{id}:
+    get:
+      tags: [jobs]
+      operationId: ImportsController.get
+      summary: Read an owned URL import
+      description: Status is retained for seven days after completion/failure. Responses are not cacheable. Unknown and foreign imports return 404. Post-admission errors are sanitized in the error field; submitted does not mean separation completed.
+      security:
+        - FirebaseBearer: []
+      x-source: src/url-imports/imports.controller.ts
+      x-auth-policy: U
+      x-rate-policy: G overall + Ux processing-read
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[a-fA-F0-9]{24}$' }
+      responses:
+        '200':
+          description: Current acquisition state.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MediaImportView' }
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
   /admin/abuse-events:
     get:
       tags:
@@ -7236,6 +7338,26 @@ components:
       scheme: bearer
       description: Worker invitation, installation, or machine credential as specified per operation by x-worker-principal.
   schemas:
+    MediaImportView:
+      type: object
+      required: [import_id, status, job_id, error, created_at, updated_at]
+      properties:
+        import_id: { type: string, pattern: '^[a-f0-9]{24}$' }
+        source_title:
+          type: [string, 'null']
+          maxLength: 200
+          description: Original media title when available; also saved on the resulting job.
+        status:
+          type: string
+          enum: [queued, downloading, validating, uploading, submitted, failed]
+        job_id: { type: [string, 'null'] }
+        error:
+          type: [object, 'null']
+          properties:
+            code: { type: string }
+            message: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     ApiError:
       type: object
       required:
@@ -7753,9 +7875,14 @@ components:
         - operation_id
         - reason
     CreateJobDto:
+      description: Local-file upload only. Import URLs through POST /media-imports.
       type: object
       additionalProperties: false
       properties:
+        trim_enabled:
+          type: boolean
+          default: true
+          description: Disable silence trimming to preserve the complete audio timeline.
         policy_version:
           type: integer
           const: 2
@@ -7767,7 +7894,6 @@ components:
           enum:
             - audio_file
             - video_file
-            - youtube
         request_id:
           type: string
           format: uuid
@@ -7782,12 +7908,7 @@ components:
         source_kind:
           type: string
           enum:
-            - url
             - file
-        source_url:
-          type: string
-          maxLength: 64
-          pattern: ^https://www\.youtube\.com/watch\?v=[A-Za-z0-9_-]{11}$
         client_started_at:
           type: string
           format: date-time
@@ -9594,13 +9715,7 @@ components:
               type: integer
               minimum: 1
               maximum: 600
-            max_source_download_bytes:
-              type: integer
-              minimum: 1
             max_preparation_seconds:
-              type: integer
-              const: 120
-            max_source_download_seconds:
               type: integer
               const: 120
           required:
@@ -9609,9 +9724,7 @@ components:
             - max_processing_jobs
             - max_local_source_bytes
             - long_job_threshold_seconds
-            - max_source_download_bytes
             - max_preparation_seconds
-            - max_source_download_seconds
         preparation_profile:
           type: object
           additionalProperties: true

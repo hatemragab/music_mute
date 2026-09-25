@@ -54,8 +54,8 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "com.hatem.musicmute.processing.MediaPreparationTestRunner"
-        versionCode = 9
-        versionName = "0.1.8"
+        versionCode = 10
+        versionName = "0.1.9"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
     }
 
@@ -90,6 +90,9 @@ android {
             )
         }
         getByName("release") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             buildConfigField("boolean", "SENTRY_ENABLED", sentryEnabled.get())
             buildConfigField("String", "SENTRY_DSN", buildConfigString(sentryDsn.get()))
             signingConfig = signingConfigs.getByName("upload")
@@ -129,8 +132,6 @@ android {
     }
     packaging {
         jniLibs.useLegacyPackaging = true
-        // Upstream stores the Python archive under a .so name; it is a ZIP, not an ELF library.
-        jniLibs.keepDebugSymbols += "**/libpython.zip.so"
     }
 }
 
@@ -161,7 +162,6 @@ dependencies {
     implementation(libs.work.runtime)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
-    implementation(libs.youtubedl)
     implementation(libs.sentry.android)
     "directImplementation"(libs.azhon.appupdate)
     "playImplementation"(libs.play.appupdate)

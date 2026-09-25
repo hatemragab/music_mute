@@ -8,7 +8,7 @@ class ProcessingMediaPolicyTest {
     private val fixture = """{
       "schema_version":2,"revision":1,"accept_new_jobs":true,"accept_long_jobs":true,
       "limits":{"max_duration_seconds":1200,"max_prepared_audio_bytes":50000000,"max_local_source_bytes":200000000,
-      "max_preparation_seconds":120,"max_source_download_bytes":50000000,"max_source_download_seconds":120,
+      "max_preparation_seconds":120,
       "long_job_threshold_seconds":600},
       "preparation_profile":{"id":"audio-cap-aac-lc-160-v1","preserve_compatible_audio":true,
       "compatibility_revision":"unavailable","fallback_conversion":{"codec":"aac-lc","output_content_type":"audio/mp4","target_bitrate":160000}}
@@ -19,7 +19,6 @@ class ProcessingMediaPolicyTest {
         assertEquals(2, policy.version)
         assertTrue(policy.acceptsPrepared(50_000_000, 1_200.0))
         assertTrue(policy.localPreparationReady)
-        assertTrue(policy.youtubePreparationReady)
         assertTrue(policy.acceptNewJobs)
     }
 
@@ -58,16 +57,12 @@ class ProcessingMediaPolicyTest {
         val policy = ProcessingMediaPolicy.STANDARD
         assertEquals(200_000_000L, policy.maxLocalSourceBytes)
         assertEquals(120L, policy.maxPreparationSeconds)
-        assertEquals(50_000_000L, policy.maxSourceDownloadBytes)
-        assertEquals(120L, policy.maxSourceDownloadSeconds)
         assertTrue(policy.localPreparationReady)
-        assertTrue(policy.youtubePreparationReady)
     }
 
     @Test fun readinessRequiresEveryBound() {
         assertFalse(standardMediaPolicy().copy(maxLocalSourceBytes = null).localPreparationReady)
         assertFalse(standardMediaPolicy().copy(maxPreparationSeconds = 0).localPreparationReady)
-        assertFalse(standardMediaPolicy().copy(maxSourceDownloadBytes = null).youtubePreparationReady)
     }
 }
 

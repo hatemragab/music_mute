@@ -36,7 +36,6 @@ struct SettingsView: View {
           value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
             ?? "0.1.0")
         Text("about_body").font(.subheadline).foregroundStyle(.secondary)
-        Label("private_download", systemImage: "iphone.and.arrow.forward").font(.subheadline)
       }
       Section("future_flow") {
         Text("future_flow_body").font(.subheadline).foregroundStyle(.secondary)

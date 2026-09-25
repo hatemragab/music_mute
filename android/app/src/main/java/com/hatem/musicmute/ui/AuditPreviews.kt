@@ -83,7 +83,7 @@ private fun QueueAudit() = VocalTheme {
 @Composable
 private fun OfflineHomeAudit() = VocalTheme {
     Surface {
-        HomeScreen(emptyList(), JobHistoryState(failure = JobsProblem.OFFLINE), false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> })
+        HomeScreen(emptyList(), JobHistoryState(failure = JobsProblem.OFFLINE), false, {}, {}, {}, {}, {}, {}, { _, _ -> })
     }
 }
 

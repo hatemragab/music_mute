@@ -31,77 +31,8 @@ class VocalViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun model(
-        workflow: WorkflowRepository = DemoWorkflowRepository(),
-        preferences: PreferencesRepository = FakePreferences(),
-        handle: SavedStateHandle = SavedStateHandle(),
-    ) = VocalViewModel(workflow, preferences, handle).also { models += it }
-
-    @Test
-    fun invalidLinkDoesNotStartAndInputIsRetained() =
-        runTest(dispatcher) {
-            val handle = SavedStateHandle()
-            val model = model(handle = handle)
-            model.updateUrl("invalid")
-            assertFalse(model.startPreview())
-            assertTrue(model.state.value.invalidUrl)
-            assertEquals(WorkflowState.Idle, model.state.value.workflow)
-            assertEquals("invalid", handle.get<String>("url"))
-            model.selectSource(AudioSource.SAMPLE)
-            assertEquals(AudioSource.SAMPLE, model(handle = handle).state.value.source)
-            assertFalse(model.state.value.invalidUrl)
-        }
-
-    @Test
-    fun completionAddsOnlyOneDemoAndDuplicateStartIsIgnored() =
-        runTest(dispatcher) {
-            val model = model()
-            model.selectSource(AudioSource.SAMPLE)
-            assertTrue(model.startPreview())
-            assertFalse(model.startPreview())
-            advanceUntilIdle()
-            assertTrue(model.state.value.workflow is WorkflowState.Complete)
-            assertEquals(1, model.state.value.sessions.size)
-        }
-
-    @Test
-    fun cancellationDoesNotAddResultAndCanRetry() =
-        runTest(dispatcher) {
-            val model = model()
-            model.selectSource(AudioSource.SAMPLE)
-            model.startPreview()
-            advanceTimeBy(500)
-            model.cancelPreview()
-            advanceUntilIdle()
-            assertEquals(WorkflowState.Cancelled, model.state.value.workflow)
-            assertTrue(model.state.value.sessions.isEmpty())
-            model.startPreview()
-            advanceUntilIdle()
-            assertEquals(1, model.state.value.sessions.size)
-        }
-
-    @Test
-    fun repositoryFailureCanBeRetried() =
-        runTest(dispatcher) {
-            var fail = true
-            val workflow =
-                object : WorkflowRepository {
-                    override fun preview(request: WorkflowRequest) = flow {
-                        if (fail) throw IOException("test failure")
-                        emit(WorkflowEvent.Complete)
-                    }
-                }
-            val model = model(workflow)
-            model.selectSource(AudioSource.SAMPLE)
-            model.startPreview()
-            advanceUntilIdle()
-            assertEquals(WorkflowState.Failed, model.state.value.workflow)
-            assertTrue(model.state.value.sessions.isEmpty())
-            fail = false
-            model.startPreview()
-            advanceUntilIdle()
-            assertEquals(1, model.state.value.sessions.size)
-        }
+    private fun model(preferences: PreferencesRepository = FakePreferences()) =
+        VocalViewModel(preferences).also { models += it }
 
     @Test
     fun loadingAndPreferenceChangesAreExposed() =
@@ -163,25 +94,6 @@ class VocalViewModelTest {
                 AppPreferences(LanguageChoice.ARABIC),
                 model.state.value.preferences,
             )
-        }
-
-    @Test
-    fun incompleteWorkflowIsAFailureInsteadOfAnEndlessSpinner() =
-        runTest(dispatcher) {
-            val model =
-                model(
-                    workflow =
-                        object : WorkflowRepository {
-                            override fun preview(request: WorkflowRequest) = flow {
-                                emit(WorkflowEvent.Progress(WorkflowStage.PREPARING, .2f))
-                            }
-                        }
-                )
-            model.selectSource(AudioSource.SAMPLE)
-            model.startPreview()
-            advanceUntilIdle()
-            assertEquals(WorkflowState.Failed, model.state.value.workflow)
-            assertTrue(model.state.value.sessions.isEmpty())
         }
 
     private class FakePreferences : PreferencesRepository {

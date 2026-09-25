@@ -47,14 +47,16 @@ class RecipeDefinition:
     trim_enabled: bool = True
     denoise_enabled: bool = False
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, revision: int = 6) -> dict[str, Any]:
         steps = [*BASE_STEPS]
         if self.trim_enabled:
-            steps.extend((TRIM_STEP, TRIM_ENCODE_STEP))
+            steps.append(TRIM_STEP)
+        if self.trim_enabled or revision >= 6:
+            steps.append(TRIM_ENCODE_STEP)
         steps.extend(FINAL_STEPS)
         snapshot: dict[str, Any] = {
             "recipeId": self.recipe_id,
-            "recipeRevision": 5,
+            "recipeRevision": revision,
             "protocolVersion": 1,
             "modelFilename": MODEL_FILENAME,
             "modelDigest": MODEL_SHA256,
@@ -82,9 +84,10 @@ DEFAULT_RECIPE_ID = "kim-vocals-v2"
 SNAPSHOT_KEYS = frozenset((*next(iter(RECIPE_DEFINITIONS.values())).snapshot().keys(),))
 
 
-def recipe_snapshot(recipe_id: str) -> dict[str, Any]:
+def recipe_snapshot(recipe_id: str, trim_enabled: bool = True, revision: int = 6) -> dict[str, Any]:
     try:
-        return RECIPE_DEFINITIONS[recipe_id].snapshot()
+        RECIPE_DEFINITIONS[recipe_id]
+        return RecipeDefinition(recipe_id, trim_enabled=trim_enabled).snapshot(revision)
     except KeyError as error:
         raise RecipeValidationError("Unknown worker recipe") from error
 
@@ -95,7 +98,13 @@ def validate_recipe_snapshot(value: object) -> dict[str, Any]:
     recipe_id = value.get("recipeId")
     if not isinstance(recipe_id, str):
         raise RecipeValidationError("Recipe ID is invalid")
-    expected = recipe_snapshot(recipe_id)
+    revision = value.get("recipeRevision")
+    trim_enabled = value.get("trimEnabled")
+    if type(revision) is not int or revision not in (5, 6) or type(trim_enabled) is not bool:
+        raise RecipeValidationError("Recipe revision or trim flag is invalid")
+    if revision == 5 and not trim_enabled:
+        raise RecipeValidationError("Legacy recipes require trimming")
+    expected = recipe_snapshot(recipe_id, trim_enabled, revision)
     if value != expected:
         raise RecipeValidationError("Recipe snapshot does not match the catalog")
     return dict(expected)

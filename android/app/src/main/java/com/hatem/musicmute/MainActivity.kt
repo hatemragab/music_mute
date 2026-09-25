@@ -40,12 +40,14 @@ class MainActivity : AppCompatActivity() {
     private val processingJob = MutableStateFlow<String?>(null)
     private val processingOperation = MutableStateFlow<String?>(null)
     private val audioTaskIntent = MutableStateFlow<Intent?>(null)
+    private val sharedUrlText = MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         openHistory.value = intent.getBooleanExtra(OPEN_HISTORY, false)
         openProcessing.value = intent.getBooleanExtra(OPEN_PROCESSING, false)
         audioTaskIntent.value = intent
+        if (savedInstanceState == null) sharedUrlText.value = sharedText(intent)
         (application as VocalApplication).processingPush.rememberTap(processingNotificationData(intent))
         enableEdgeToEdge()
         setContent {
@@ -62,9 +64,7 @@ class MainActivity : AppCompatActivity() {
                         viewModelFactory {
                             initializer {
                                 VocalViewModel(
-                                    app.workflowRepository,
                                     app.preferencesRepository,
-                                    createSavedStateHandle(),
                                 )
                             }
                         }
@@ -108,6 +108,7 @@ class MainActivity : AppCompatActivity() {
             }
             val requestedHistory by openHistory.collectAsStateWithLifecycle()
             val requestedOperation by processingOperation.collectAsStateWithLifecycle()
+            val sharedText by sharedUrlText.collectAsStateWithLifecycle()
             LaunchedEffect(Unit) {
                 val style = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
                 enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
@@ -156,6 +157,8 @@ class MainActivity : AppCompatActivity() {
                     ) { onAccount ->
                         VocalApp(state, model, processing, processingSession, artifacts,
                             requestedHistory,
+                            sharedUrlText = sharedText,
+                            onSharedUrlConsumed = { sharedUrlText.value = null },
                             openProcessing = requestedProcessing, openProcessingJob = requestedJob,
                             openProcessingOperation = requestedOperation,
                             onProcessingOpened = { openProcessing.value = false; processingJob.value = null; processingOperation.value = null; intent.removeExtra(OPEN_PROCESSING) },
@@ -176,6 +179,7 @@ class MainActivity : AppCompatActivity() {
         openHistory.value = intent.getBooleanExtra(OPEN_HISTORY, false)
         openProcessing.value = intent.getBooleanExtra(OPEN_PROCESSING, false)
         audioTaskIntent.value = intent
+        sharedUrlText.value = sharedText(intent)
         (application as VocalApplication).processingPush.rememberTap(processingNotificationData(intent))
     }
 
@@ -199,6 +203,10 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val OPEN_HISTORY = "open_download_history"
         private const val OPEN_PROCESSING = "open_processing"
+
+        internal fun sharedText(intent: Intent?): String? =
+            if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain")
+                intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() else null
 
         fun processingPendingIntent(context: Context): PendingIntent = PendingIntent.getActivity(
             context, 1, Intent(context, MainActivity::class.java).putExtra(OPEN_PROCESSING, true)

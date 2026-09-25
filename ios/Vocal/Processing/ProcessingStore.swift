@@ -7,11 +7,17 @@ enum UploadPhase: String, Codable, Sendable {
 
 enum AudioPipelinePhase: String, Codable, Sendable {
   case inspectingSource
-  case resolvingSource, downloadingSource, preparingInput, reservingJob, uploadingInput
+  case preparingInput, reservingJob, uploadingInput
   case confirmingUpload, waitingProcessing, ready, awaitingAppResume, cancelling
   case failed, cancelled, deleted, awaitingConfirmation
 
   var isTerminal: Bool { [.ready, .failed, .cancelled, .deleted].contains(self) }
+
+  init(from decoder: Decoder) throws {
+    let value = try decoder.singleValueContainer().decode(String.self)
+    self = Self(rawValue: value) ?? .failed
+  }
+
 }
 
 struct AudioPipelineIntent: Codable, Equatable, Identifiable, Sendable {
@@ -19,7 +25,6 @@ struct AudioPipelineIntent: Codable, Equatable, Identifiable, Sendable {
   var id: UUID { operationId }
   let ownerUid: String
   let sourceKind: JobSourceKind
-  let sourceVideoID: String?
   var sourceTitle: String?
   var displayName: String?
   let clientStartedAt: Date
@@ -37,7 +42,7 @@ struct AudioPipelineIntent: Codable, Equatable, Identifiable, Sendable {
   var cloudConsent: Bool?
 
   enum CodingKeys: String, CodingKey {
-    case operationId, ownerUid, sourceKind, sourceVideoID, sourceTitle, displayName
+    case operationId, ownerUid, sourceKind, sourceTitle, displayName
     case clientStartedAt, updatedAt, completedAt, phase, jobId, jobStatus, retryAttempt
     case nextRetryAt, lastFailureCode, cancellationRequested, activeRunToken, reviewInput,
       cloudConsent
@@ -45,7 +50,7 @@ struct AudioPipelineIntent: Codable, Equatable, Identifiable, Sendable {
 
   init(
     operationId: UUID, ownerUid: String, sourceKind: JobSourceKind,
-    sourceVideoID: String? = nil, sourceTitle: String? = nil, displayName: String? = nil,
+    sourceTitle: String? = nil, displayName: String? = nil,
     clientStartedAt: Date, updatedAt: Date, completedAt: Date? = nil,
     phase: AudioPipelinePhase, jobId: String? = nil, jobStatus: String? = nil,
     retryAttempt: Int = 0, nextRetryAt: Date? = nil, lastFailureCode: String? = nil,
@@ -54,7 +59,6 @@ struct AudioPipelineIntent: Codable, Equatable, Identifiable, Sendable {
     self.operationId = operationId
     self.ownerUid = ownerUid
     self.sourceKind = sourceKind
-    self.sourceVideoID = sourceVideoID
     self.sourceTitle = sourceTitle
     self.displayName = displayName
     self.clientStartedAt = clientStartedAt
@@ -196,23 +200,23 @@ actor ProcessingStore {
 
   func createPipeline(
     operationId: UUID, ownerUid: String, sourceKind: JobSourceKind,
-    sourceVideoID: String? = nil, sourceTitle: String? = nil, clientStartedAt: Date = Date()
+    sourceTitle: String? = nil, clientStartedAt: Date = Date()
   ) throws -> AudioPipelineIntent {
-    guard !ownerUid.isEmpty, sourceKind == .file || sourceVideoID != nil else {
+    guard !ownerUid.isEmpty, sourceKind == .file else {
       throw ProcessingStoreFailure.invalidPath
     }
     var snapshot = try load(ownerUid)
     if let existing = snapshot.pipelines?.first(where: { $0.operationId == operationId }) {
-      guard existing.sourceKind == sourceKind, existing.sourceVideoID == sourceVideoID,
+      guard existing.sourceKind == sourceKind,
         existing.sourceTitle == sourceTitle, existing.clientStartedAt == clientStartedAt
       else { throw ProcessingStoreFailure.conflictingIntent }
       return existing
     }
     let intent = AudioPipelineIntent(
       operationId: operationId, ownerUid: ownerUid, sourceKind: sourceKind,
-      sourceVideoID: sourceVideoID, sourceTitle: sourceTitle, displayName: sourceTitle,
+      sourceTitle: sourceTitle, displayName: sourceTitle,
       clientStartedAt: clientStartedAt, updatedAt: clientStartedAt,
-      phase: sourceKind == .url ? .resolvingSource : .preparingInput)
+      phase: .preparingInput)
     if snapshot.pipelines == nil { snapshot.pipelines = [] }
     snapshot.pipelines?.append(intent)
     snapshot.version = 2

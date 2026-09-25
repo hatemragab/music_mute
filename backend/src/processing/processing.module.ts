@@ -1,5 +1,20 @@
 import { ProcessingUsageController } from '../processing-usage/processing-usage.controller.js';
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
+import { MongooseModule } from '@nestjs/mongoose';
+import {
+  MediaImport,
+  MediaImportSchema,
+} from '../url-imports/media-import.schema.js';
+import { ImportsController } from '../url-imports/imports.controller.js';
+import {
+  IMPORT_QUEUE,
+  ImportsService,
+} from '../url-imports/imports.service.js';
+import { YtdlpClient } from '../url-imports/ytdlp-client.js';
+import { ImportProcessor } from '../url-imports/import-processor.js';
+import { ImportRuntime } from '../url-imports/import-runtime.js';
 import { FirebaseModule } from '../auth/firebase.module.js';
 import { UsersModule } from '../users/users.module.js';
 import { DevicesModule } from '../devices/devices.module.js';
@@ -27,6 +42,29 @@ import { AccountDeletionMaintenanceService } from '../users/account-deletion-mai
 
 @Module({
   imports: [
+    MongooseModule.forFeature([
+      { name: MediaImport.name, schema: MediaImportSchema },
+    ]),
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const redis = new URL(config.getOrThrow<string>('REDIS_URL'));
+        return {
+          prefix: 'musicmute-import',
+          connection: {
+            host: redis.hostname,
+            port: Number(redis.port || 6379),
+            username: decodeURIComponent(redis.username) || undefined,
+            password: decodeURIComponent(redis.password) || undefined,
+            db: Number(redis.pathname.slice(1) || 0),
+            ...(redis.protocol === 'rediss:' ? { tls: {} } : {}),
+            maxRetriesPerRequest: null,
+            connectTimeout: 5000,
+          },
+        };
+      },
+    }),
+    BullModule.registerQueue({ name: IMPORT_QUEUE }),
     ProcessingPersistenceModule,
     StorageTransfersModule,
     FirebaseModule,
@@ -35,12 +73,17 @@ import { AccountDeletionMaintenanceService } from '../users/account-deletion-mai
     AdminSettingsModule,
   ],
   controllers: [
+    ImportsController,
     ProcessingUsageController,
     JobsController,
     PushRegistrationController,
     ClientErrorsController,
   ],
   providers: [
+    ImportsService,
+    YtdlpClient,
+    ImportProcessor,
+    ImportRuntime,
     AccountDeletionCleanupService,
     AccountDeletionMaintenanceService,
     ProcessingStartupService,

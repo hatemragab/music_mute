@@ -9,9 +9,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hatem.musicmute.R
 import com.hatem.musicmute.BuildConfig
-import com.hatem.musicmute.download.DownloadRecord
-import com.hatem.musicmute.download.DownloadStatus
-import com.hatem.musicmute.download.processedAudioExportName
+import com.hatem.musicmute.processing.processedAudioExportName
 import com.hatem.musicmute.playback.AudioPlaybackController
 import com.hatem.musicmute.processing.*
 import java.io.File
@@ -100,28 +98,6 @@ class ProcessingViewModel(
         try { resolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         catch (_: SecurityException) { /* A provider may give only a temporary grant; lost grants require reselection. */ }
         coordinator.acceptDocument(operationId, name, uri.toString())
-        checkSession(ticket)
-        history.refreshAfterChange()
-        }
-    }
-
-    fun submitUrl(url: String, onAccepted: () -> Unit = {}) {
-        val operationId = UUID.randomUUID().toString()
-        performIntake(operationId) { ticket ->
-            coordinator.acceptUrl(operationId, url)
-            checkSession(ticket)
-            onAccepted()
-            history.refreshAfterChange()
-        }
-    }
-
-    fun removeMusic(record: DownloadRecord, file: File) {
-        val operationId = UUID.randomUUID().toString()
-        performIntake(operationId) { ticket ->
-        coordinator.acceptImport(
-            operationId,
-            "${record.title.ifBlank { "Audio" }}.${record.extension}",
-        ) { file.inputStream() }
         checkSession(ticket)
         history.refreshAfterChange()
         }

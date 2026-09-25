@@ -10,9 +10,6 @@ packages:
   Firebase:
     url: https://github.com/firebase/firebase-ios-sdk.git
     exactVersion: 12.18.0
-  YouTubeKit:
-    url: https://github.com/alexeichhorn/YouTubeKit.git
-    exactVersion: 0.4.9
   Sentry:
     url: https://github.com/getsentry/sentry-cocoa.git
     exactVersion: 9.29.1
@@ -45,7 +42,6 @@ targets:
     dependencies:
       - package: Sentry
         product: Sentry
-      - package: YouTubeKit
       - package: Firebase
         product: FirebaseCore
       - package: Firebase

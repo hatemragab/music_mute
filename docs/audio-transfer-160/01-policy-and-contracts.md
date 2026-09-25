@@ -10,7 +10,6 @@ before changing runtime behavior. Read these existing paths first:
 
 - `backend/src/admin-settings/account-policy.service.ts`
 - `android/app/src/main/java/com/hatem/musicmute/processing/ProcessingMediaPolicy.kt`
-- `android/app/src/main/java/com/hatem/musicmute/download/AudioDownloadPolicy.kt`
 - `ios/Vocal/Processing/ProcessingMediaPolicy.swift`
 - `backend/src/jobs/worker-recipes.ts`
 - `backend/src/worker-fleet/protocol/v1/protocol.ts`
@@ -28,7 +27,7 @@ before changing runtime behavior. Read these existing paths first:
 3. Decide which already-supported compressed containers can pass through on both
    mobile and worker. If a codec is incompatible, remux where possible before
    considering an encode. Do not promise support for every possible audio codec.
-4. Identify metadata already carried by the source inspector, download result,
+4. Identify metadata already carried by the local source inspector, server import result,
    prepared-input result, API and worker probe. Reuse it; add only fields needed
    for policy and diagnostics. Treat client rate declarations as hints, not proof.
    Do not add database persistence merely to carry an encode decision locally.

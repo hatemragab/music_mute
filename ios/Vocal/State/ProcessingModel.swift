@@ -160,24 +160,6 @@ import Foundation
     }
   }
 
-  func acceptURL(_ value: String) async -> Bool {
-    guard let captured = repository.session, captured.uid == ownerUid else { return false }
-    let ticket = epoch
-    let operationID = UUID()
-    do {
-      _ = try await pipeline.acceptURL(value, eventID: operationID)
-      return true
-    } catch AudioPipelineFailure.invalidURL {
-      return false
-    } catch {
-      guard ticket == epoch, repository.session == captured else { return false }
-      messageKey = processingErrorKey(error)
-      await reportDiagnostic(
-        error, stage: .sourceIntake, operationID: operationID, fence: captured)
-      return false
-    }
-  }
-
   func submitImported() {
     guard let input = prepared else { return }
     perform(
@@ -285,13 +267,8 @@ import Foundation
     perform(stage: .playback, operationID: selectedOperationID, jobID: job.id) { uid, ticket in
       let file = try await self.outputFile(job.id, job.preferredName)
       try self.check(uid, ticket)
-      var record = AudioRecord(id: id, videoID: "", createdAt: job.createdAt)
-      record.status = .complete
-      record.title = job.preferredName
-      record.fileExtension = "mp3"
-      record.duration = job.input.durationSeconds
       self.privatePlaybackID = id
-      self.player.toggle(record, file: file)
+      self.player.toggle(id: id, title: job.preferredName, file: file)
     }
   }
 

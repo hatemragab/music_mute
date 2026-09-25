@@ -128,12 +128,13 @@ export class JobsController {
   @RequireProcessingAccess()
   @Header('Cache-Control', 'no-store')
   create(@Req() req: AuthRequest, @Body() dto: CreateJobDto) {
-    const { input, requestId, ...metadata } = dto;
+    const { input, requestId, trimEnabled, ...metadata } = dto;
     return this.jobs.create(
       req.user!._id.toHexString(),
       input,
       requestId,
       metadata,
+      trimEnabled,
     );
   }
 

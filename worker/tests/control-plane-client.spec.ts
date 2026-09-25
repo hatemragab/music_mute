@@ -126,48 +126,51 @@ describe("worker control-plane client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("retries a lost claim response with the same request identity", async () => {
-    const requestBodies: string[] = [];
-    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
-      requestBodies.push(String(init?.body));
-      if (requestBodies.length === 1)
-        return problem("WORKER_DEPENDENCY_UNAVAILABLE", 503);
-      return json({ claim: null, serverTime: "2026-01-01T00:00:00.000Z" });
-    });
-    const client = new WorkerControlPlaneClient({
-      baseUrl: "http://127.0.0.1",
-      credential: "x".repeat(43),
-      allowInsecureLoopback: true,
-      fetch: fetchMock as unknown as typeof fetch,
-      maxAttempts: 2,
-    });
-    const requestId = "74fcfb85-8cc8-49cb-b8c2-5db33a9896ea";
-    const controller = new AbortController();
+  it.each([500, 502, 503, 504])(
+    "retries HTTP %i with the same claim request identity",
+    async (status) => {
+      const requestBodies: string[] = [];
+      const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+        requestBodies.push(String(init?.body));
+        if (requestBodies.length === 1)
+          return problem("WORKER_DEPENDENCY_UNAVAILABLE", status);
+        return json({ claim: null, serverTime: "2026-01-01T00:00:00.000Z" });
+      });
+      const client = new WorkerControlPlaneClient({
+        baseUrl: "http://127.0.0.1",
+        credential: "x".repeat(43),
+        allowInsecureLoopback: true,
+        fetch: fetchMock as unknown as typeof fetch,
+        maxAttempts: 2,
+      });
+      const requestId = "74fcfb85-8cc8-49cb-b8c2-5db33a9896ea";
+      const controller = new AbortController();
 
-    await expect(
-      client.claim(
-        { workerId, sessionId, incarnation },
-        "gpu-0",
-        0,
-        1,
-        requestId,
-        controller.signal,
-      ),
-    ).resolves.toEqual({
-      claim: null,
-      serverTime: "2026-01-01T00:00:00.000Z",
-    });
-    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
-    expect(requestBodies).toHaveLength(2);
-    expect(requestBodies[0]).toBe(requestBodies[1]);
-    expect(JSON.parse(requestBodies[0]!) as unknown).toMatchObject({
-      request_id: requestId,
-      applied_policy_revision: 1,
-    });
-    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
-      Authorization: `Bearer ${"x".repeat(43)}`,
-    });
-  });
+      await expect(
+        client.claim(
+          { workerId, sessionId, incarnation },
+          "gpu-0",
+          0,
+          1,
+          requestId,
+          controller.signal,
+        ),
+      ).resolves.toEqual({
+        claim: null,
+        serverTime: "2026-01-01T00:00:00.000Z",
+      });
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      expect(requestBodies).toHaveLength(2);
+      expect(requestBodies[0]).toBe(requestBodies[1]);
+      expect(JSON.parse(requestBodies[0]!) as unknown).toMatchObject({
+        request_id: requestId,
+        applied_policy_revision: 1,
+      });
+      expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+        Authorization: `Bearer ${"x".repeat(43)}`,
+      });
+    },
+  );
 
   it("validates the machine identity returned when a session opens", async () => {
     const client = new WorkerControlPlaneClient({

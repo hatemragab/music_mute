@@ -164,8 +164,8 @@ export class PublicPagesController {
 <p>Import audio you own or have permission to process. The app prepares a private local copy and shows a review before you confirm cloud processing. Selecting a file alone does not authorize upload.</p>
 <p>New cloud-processing submissions are temporarily unavailable while the processing architecture is redesigned. Existing vocals-only results, source metadata, filenames, duration, size, and processing status continue to support your account history and downloads.</p>
 <p>The app caches private input/result files locally and lets you explicitly play, save, or share results. Original imported files and copies exported to your chosen storage remain under your control.</p></section>
-<section aria-labelledby="youtube"><h2 id="youtube">Secondary YouTube option</h2>
-<p>MusicMute also offers a visible secondary YouTube link flow. Source downloading happens on the client after an explicit action and permission guidance. A separate review and cloud-processing confirmation is required before uploading downloaded audio. Your client communicates with YouTube and related source services to retrieve the selected audio; their data practices apply to those interactions.</p>
+<section aria-labelledby="links"><h2 id="links">Import from a link</h2>
+<p>After you confirm an import, MusicMute's server retrieves an available audio-only stream from the public link and submits it for processing. The mobile app does not download source media from the linked site. Source metadata and the resulting audio remain associated with your account.</p>
 <p>Rights confirmation is a statement by the user. MusicMute does not verify copyright ownership or grant permission to download or process third-party material.</p></section>
 <section aria-labelledby="operations"><h2 id="operations">Operations and security</h2>
 <p>Operational logs, bounded error reports and request/security metadata support service reliability, abuse prevention, and recovery. Infrastructure services may process network and request metadata. Firebase/Google supports identity and messaging; MongoDB holds account/job records; S3 holds private media.</p>

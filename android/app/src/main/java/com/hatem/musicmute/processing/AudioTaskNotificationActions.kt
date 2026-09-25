@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import com.hatem.musicmute.VocalApplication
-import com.hatem.musicmute.download.DownloadRecord
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,25 +34,6 @@ data class AudioTaskNotificationTarget(
     fun matches(session: ProcessingSession?): Boolean =
         session != null && ownerUid == session.uid && epoch == session.epoch
 }
-
-fun sourceTaskNotificationTarget(
-    record: DownloadRecord,
-    expectedOwnerUid: String?,
-    expectedOperationId: String?,
-    expectedEpoch: Long,
-    expectedWorkRequestId: String,
-): AudioTaskNotificationTarget? {
-    if (expectedOwnerUid.isNullOrBlank() || expectedOperationId == null || expectedEpoch == Long.MIN_VALUE ||
-        expectedOwnerUid != record.ownerUid || expectedOperationId != record.operationId ||
-        expectedOperationId != record.id || expectedEpoch != record.sessionEpoch ||
-        record.workRequestId != expectedWorkRequestId) return null
-    return AudioTaskNotificationTarget(expectedOwnerUid, expectedOperationId, expectedEpoch,
-        transferKind = AudioTaskTransferKind.SOURCE, workRequestId = expectedWorkRequestId)
-}
-
-fun canUpdateAudioSource(operation: ProcessingOperation, target: AudioTaskNotificationTarget, session: ProcessingSession?): Boolean =
-    target.matches(session) && target.workRequestId != null && operation.sourceWorkRequestId == target.workRequestId &&
-        !operation.cancellationRequested && !operation.pendingDelete && operation.phase != ProcessingPhase.COMPLETE
 
 internal fun putAudioTaskNotificationTarget(intent: Intent, target: AudioTaskNotificationTarget) {
     intent.putExtra(OWNER, target.ownerUid).putExtra(OPERATION, target.operationId)

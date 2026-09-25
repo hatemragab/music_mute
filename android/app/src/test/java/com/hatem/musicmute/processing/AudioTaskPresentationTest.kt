@@ -5,6 +5,44 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AudioTaskPresentationTest {
+    @Test fun importBecomesOneNamedJobAndDoesNotReappearAfterDeletion() {
+        val record = UrlImportRecord("owner", "https://example.com/media", "import-request",
+            status = "downloading", sourceTitle = "عنوان 🎵", createdAtMillis = 100)
+        val importing = audioTaskPresentations(emptyList(), emptyList(), 200, listOf(record)).single()
+        assertEquals(AudioTaskStage.DOWNLOADING_SOURCE, importing.stage)
+        assertEquals("عنوان 🎵", importing.displayName)
+        assertFalse(importing.canCancel)
+        assertNull(importing.jobId)
+        val ready = job("ready").copy(sourceTitle = record.sourceTitle, displayName = record.sourceTitle)
+        val uploading = record.copy(status = "uploading", jobId = ready.id)
+        val uploadTask = audioTaskPresentations(emptyList(), listOf(ready.copy(status = "awaiting_upload")),
+            300, listOf(uploading)).single()
+        assertEquals(AudioTaskStage.UPLOADING_INPUT, uploadTask.stage)
+        assertTrue(uploadTask.importOnly)
+        assertFalse(uploadTask.canCancel)
+        val submitted = record.copy(status = "submitted", jobId = ready.id)
+        val merged = audioTaskPresentations(emptyList(), listOf(ready), 300, listOf(submitted)).single()
+        assertEquals(AudioTaskStage.READY, merged.stage)
+        assertEquals(record.requestId, merged.importRequestId)
+        assertEquals(record.sourceTitle, merged.displayName)
+        assertTrue(audioTaskPresentations(emptyList(), emptyList(), 300,
+            listOf(submitted.copy(jobObserved = true))).isEmpty())
+        assertTrue(audioTaskPresentations(emptyList(), emptyList(), 300,
+            listOf(submitted.copy(createdAtMillis = 0))).isEmpty())
+        assertEquals(AudioTaskStage.QUEUED, audioTaskPresentations(emptyList(), emptyList(), 300,
+            listOf(submitted)).single().stage)
+    }
+
+    @Test fun importFailuresStayRetryableWithoutJobActions() {
+        val record = UrlImportRecord("owner", "https://example.com/media", "request",
+            status = "failed", errorCode = "IMPORT_UPSTREAM_REFUSED")
+        val task = audioTaskPresentations(emptyList(), emptyList(), 0, listOf(record)).single()
+        assertFalse(task.active)
+        assertTrue(task.canRetry)
+        assertFalse(task.canDelete)
+        assertEquals(record.errorCode, task.errorCode)
+    }
+
     @Test fun audioDurationUsesSecondsFromMediaAndIsIndependentOfProcessingTime() {
         val ready = job("ready").copy(input = JobInput("mp3", 1000, 125.75),
             timing = JobTiming(totalElapsedMs = 9_000))
@@ -180,9 +218,6 @@ class AudioTaskPresentationTest {
             phase = ProcessingPhase.UPLOADING,
             input = InputDeclaration("mp3", "audio/mpeg", 1000, 30.0, "hash"))
         assertEquals(0f, audioTaskPresentations(listOf(operation), emptyList(), 0).single().progressFraction)
-        assertEquals(0f, audioTaskPresentations(listOf(operation.copy(
-            phase = ProcessingPhase.DOWNLOADING_SOURCE, sourceTotalBytes = 1000)), emptyList(), 0)
-            .single().progressFraction)
     }
 
     @Test fun authoritativeRecoveryAndTerminalStatesOverridePersistedSubmission() {

@@ -1,0 +1,63 @@
+openapi: 3.1.0
+info:
+  title: MusicMute private audio acquisition
+  version: 1.0.0
+  description: Private single-item native-audio transfer for the MusicMute backend. No public ingress.
+security:
+  - service_key: []
+paths:
+  /health:
+    get:
+      security: []
+      description: Private liveness only; no claim of upstream provider availability.
+      responses:
+        '200':
+          description: Listener ready
+  /audio-imports:
+    post:
+      description: Resolve a public single-item URL, download a separate audio stream, validate and transfer it, converting only incompatible audio containers to AAC. No stored resource or reusable download URL. No automatic retries. Responses use Cache-Control no-store. Disconnects cancel acquisition and remove temporary media.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [url, max_bytes, max_duration_seconds]
+              properties:
+                url: {type: string, format: uri, maxLength: 2048}
+                max_bytes: {type: integer, format: int64, minimum: 1, maximum: 50000000}
+                max_duration_seconds: {type: number, format: double, exclusiveMinimum: 0, maximum: 1200}
+      responses:
+        '200':
+          description: Complete validated audio; Content-Length gives exact byte count. Caller must independently measure and validate media.
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        '400':
+          description: Invalid URL, JSON, body length or limits
+        '401':
+          description: Missing or invalid bearer service key
+        '422':
+          description: Unsupported site or native audio, playlist, unsafe network target, invalid audio, size or duration limit
+        '502':
+          description: Upstream access refusal or rate limit; stop retries
+        '503':
+          description: Downloader busy, insufficient scratch space or dependency failure; Retry-After is 10 seconds
+        default:
+          description: Sanitized failure; X-Import-Error mirrors the safe code for bounded client handling
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                required: [type, title, status, code]
+                properties:
+                  type: {type: string, format: uri-reference}
+                  title: {type: string}
+                  status: {type: integer, format: int32}
+                  code: {type: string}
+components:
+  securitySchemes:
+    service_key:
+      type: http
+      scheme: bearer

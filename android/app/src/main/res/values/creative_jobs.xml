@@ -1,6 +1,4 @@
 <resources>
-    <string name="creative_home_youtube_title">Start with a YouTube link</string>
-    <string name="creative_home_youtube_hint">YouTube video link</string>
     <string name="creative_home_files">Audio / video file</string>
     <string name="creative_home_photos">Video file</string>
     <string name="creative_jobs_details_unavailable">Task details aren’t available yet. Refresh or return to Home.</string>
@@ -11,7 +9,6 @@
     <string name="creative_jobs_load_more">Load more</string>
     <string name="creative_jobs_open_result">Open</string>
     <string name="creative_jobs_bring_audio">Bring your audio.</string>
-    <string name="creative_jobs_youtube_subtitle">Add a YouTube link to download source audio for your project.</string>
     <string name="creative_jobs_continue">Continue</string>
     <string name="creative_jobs_result">Voice ready</string>
     <string name="creative_jobs_ready_badge">Ready</string>
@@ -23,5 +20,4 @@
     <string name="creative_jobs_source_notice">Cloud processing has not started. Review the downloaded audio before uploading.</string>
     <string name="creative_jobs_review">Review audio</string>
     <string name="creative_jobs_wait_output">The job is complete. Its voice result is not yet available to download.</string>
-    <string name="creative_jobs_downloads">Source downloads</string>
 </resources>

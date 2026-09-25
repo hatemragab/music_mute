@@ -29,7 +29,7 @@ fun JobCard(task: AudioTaskPresentation, busy: Boolean, onOpen: () -> Unit, onCa
             Box(Modifier.align(Alignment.CenterStart).fillMaxHeight().width(3.dp)
                 .background(accent, RoundedCornerShape(3.dp)))
         }
-        BoxWithConstraints(Modifier.fillMaxWidth().clickable(onClick = onOpen)
+        BoxWithConstraints(Modifier.fillMaxWidth().clickable(enabled = !task.importOnly && (task.jobId != null || task.operationId != null), onClick = onOpen)
             .heightIn(min = 84.dp).padding(start = 17.dp, end = 14.dp, top = 16.dp, bottom = 16.dp),
             contentAlignment = Alignment.CenterStart) {
             val showAction = task.stage != AudioTaskStage.READY
@@ -38,7 +38,7 @@ fun JobCard(task: AudioTaskPresentation, busy: Boolean, onOpen: () -> Unit, onCa
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(task.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 1,
+                        Text(task.displayName.ifBlank { stringResource(R.string.url_import_title) }, style = MaterialTheme.typography.titleMedium, maxLines = 1,
                             overflow = TextOverflow.Ellipsis)
                         if (task.stage == AudioTaskStage.READY) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -56,6 +56,18 @@ fun JobCard(task: AudioTaskPresentation, busy: Boolean, onOpen: () -> Unit, onCa
                             Text(stringResource(audioTaskStageLabel(task.stage)), style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        if (task.importRequestId != null && task.active) {
+                            val steps = com.hatem.musicmute.processing.audioTaskTimeline(task)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                steps.forEach { step ->
+                                    val complete = step.state == com.hatem.musicmute.processing.AudioStepState.COMPLETE
+                                    val current = step.state == com.hatem.musicmute.processing.AudioStepState.CURRENT
+                                    Box(Modifier.weight(1f).height(3.dp).background(
+                                        if (complete || current) accent else MaterialTheme.colorScheme.outlineVariant,
+                                        RoundedCornerShape(2.dp)))
+                                }
+                            }
+                        }
                         if (task.active) {
                             val progress = task.progressFraction
                             if (progress != null) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
@@ -71,7 +83,10 @@ fun JobCard(task: AudioTaskPresentation, busy: Boolean, onOpen: () -> Unit, onCa
                         color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                     if (showAction && inlineAction) JobAction(task, busy, onOpen, onCancel, onRetry)
                 }
-                audioTaskFailureLabel(task)?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
+                if (task.importOnly) task.errorCode?.let {
+                    Text(stringResource(urlImportMessage(it)), color = MaterialTheme.colorScheme.error)
+                }
+                else audioTaskFailureLabel(task)?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
                 if (task.active && task.workerAvailable == false) Text(stringResource(R.string.processing_worker_offline))
                 if (showAction && !inlineAction) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     if (task.stage == AudioTaskStage.FAILED && task.canDelete) {
@@ -94,7 +109,7 @@ private fun JobAction(task: AudioTaskPresentation, busy: Boolean, onOpen: () -> 
             TextButton(onClick = onCancel, enabled = !busy) { Text(stringResource(R.string.auth_cancel)) }
         task.canRetry ->
             TextButton(onClick = onRetry, enabled = !busy) { Text(stringResource(R.string.retry)) }
-        else -> TextButton(onClick = onOpen) {
+        !task.importOnly && (task.jobId != null || task.operationId != null) -> TextButton(onClick = onOpen) {
             Text(stringResource(R.string.processing_details))
         }
     }

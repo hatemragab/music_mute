@@ -62,7 +62,6 @@
     <string name="creative_library_view_job">عرض المهمة</string>
     <string name="creative_library_save_copy">حفظ نسخة</string>
     <string name="creative_library_share">مشاركة</string>
-    <string name="creative_library_job_unavailable">معلومات المهمة غير متاحة. يبقى الصوت المنزّل قابلاً للاستخدام.</string>
     <string name="creative_library_cached_job">معلومات المهمة محفوظة. حدّث عند الاتصال لعرض أحدث حالة.</string>
     <string name="creative_library_availability">التوفر دون اتصال</string>
     <string name="creative_library_remove_queue">إزالة من قائمة التشغيل</string>

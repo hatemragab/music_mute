@@ -1,35 +1,9 @@
 package com.hatem.musicmute.processing
 
-import com.hatem.musicmute.download.DownloadError
-import com.hatem.musicmute.download.DownloadRecord
-import com.hatem.musicmute.download.classifyDownloadError
-import com.hatem.musicmute.download.sourceRetryPlan
 import org.junit.Assert.*
 import org.junit.Test
 
 class AudioTaskNotificationsTest {
-    @Test fun invalidPreparedSourceIsNotClassifiedAsTransientEngineFailure() {
-        assertEquals(DownloadError.INVALID_AUDIO, classifyDownloadError(InputPreparationException(InputPreparationError.TOO_LONG)))
-        assertEquals(DownloadError.INVALID_AUDIO, classifyDownloadError(InputPreparationException(InputPreparationError.UNSUPPORTED)))
-        assertEquals(DownloadError.STORAGE, classifyDownloadError(InputPreparationException(InputPreparationError.STORAGE)))
-    }
-
-    @Test fun sourceRetriesPersistBoundedJitteredDeadlinesWithoutChargingOfflineWaits() {
-        val first = sourceRetryPlan(DownloadError.NETWORK, 0, true, 1_000, 0.0)
-        assertTrue(first.shouldRetry)
-        assertEquals(1, first.nextRetryCount)
-        assertEquals(31_000L, first.retryNotBeforeMillis)
-        val last = sourceRetryPlan(DownloadError.ENGINE, 2, true, 1_000, 1.0)
-        assertEquals(3, last.nextRetryCount)
-        assertEquals(181_000L, last.retryNotBeforeMillis)
-        assertFalse(sourceRetryPlan(DownloadError.NETWORK, 3, true, 1_000, 0.0).shouldRetry)
-        val offline = sourceRetryPlan(DownloadError.NETWORK, 3, false, 1_000, 0.0)
-        assertTrue(offline.shouldRetry)
-        assertEquals(3, offline.nextRetryCount)
-        assertEquals(0L, offline.retryNotBeforeMillis)
-        assertFalse(sourceRetryPlan(DownloadError.INVALID_AUDIO, 0, true, 1_000, 0.0).shouldRetry)
-    }
-
     private val operation = ProcessingOperation(
         operationId = "c21a2eaa-7e73-4f08-89da-6ac35baa83e1",
         requestId = "c21a2eaa-7e73-4f08-89da-6ac35baa83e1",
@@ -86,32 +60,6 @@ class AudioTaskNotificationsTest {
         assertFalse(target.matches(ProcessingSession("owner-a", 8)))
         assertFalse(target.matches(ProcessingSession("owner-b", 7)))
         assertFalse(target.matches(null))
-    }
-
-    @Test fun sourceWorkerCannotAdoptAReboundRecordsNewEpoch() {
-        val record = DownloadRecord(operation.operationId, "https://youtu.be/jNQXAC9IVRw", 0,
-            ownerUid = "owner-a", operationId = operation.operationId, sessionEpoch = 7, workRequestId = "work-1")
-        assertNotNull(sourceTaskNotificationTarget(record, "owner-a", operation.operationId, 7, "work-1"))
-        assertNull(sourceTaskNotificationTarget(record.copy(ownerUid = null, operationId = null, sessionEpoch = null),
-            "owner-a", operation.operationId, 7, "work-1"))
-        assertNull(sourceTaskNotificationTarget(record.copy(sessionEpoch = 8), "owner-a", operation.operationId, 7, "work-1"))
-        assertNull(sourceTaskNotificationTarget(record, "owner-b", operation.operationId, 7, "work-1"))
-        assertNull(sourceTaskNotificationTarget(record, "owner-a", "another", 7, "work-1"))
-        assertNull(sourceTaskNotificationTarget(record, null, null, Long.MIN_VALUE, "work-1"))
-        assertNull(sourceTaskNotificationTarget(record.copy(workRequestId = "work-2"), "owner-a", operation.operationId, 7, "work-1"))
-    }
-
-    @Test fun staleFailureCannotChangeAReplacementOrCancelledOperation() {
-        val target = AudioTaskNotificationTarget("owner-a", operation.operationId, 7,
-            transferKind = AudioTaskTransferKind.SOURCE, workRequestId = "work-1")
-        val current = operation.copy(sourceWorkRequestId = "work-1")
-        val session = ProcessingSession("owner-a", 7)
-        assertTrue(canUpdateAudioSource(current, target, session))
-        assertFalse(canUpdateAudioSource(current.copy(sourceWorkRequestId = "work-2"), target, session))
-        assertFalse(canUpdateAudioSource(current.copy(cancellationRequested = true), target, session))
-        assertFalse(canUpdateAudioSource(current.copy(pendingDelete = true), target, session))
-        assertFalse(canUpdateAudioSource(current.copy(phase = ProcessingPhase.COMPLETE), target, session))
-        assertFalse(canUpdateAudioSource(current, target, ProcessingSession("owner-a", 8)))
     }
 
     @Test fun updatesThrottleBytesButImmediatelyShowPhaseChanges() {

@@ -29,19 +29,24 @@ describe('create-job HTTP declaration', () => {
       await transform({
         ...payload,
         sourceTitle: '  لقاء صوتي  ',
-        sourceKind: 'url',
-        sourceUrl: '  https://www.youtube.com/watch?v=jNQXAC9IVRw  ',
+        sourceKind: 'file',
         clientStartedAt: '2026-09-10T10:00:00.000Z',
       }),
     ).toMatchObject({
       sourceTitle: 'لقاء صوتي',
-      sourceKind: 'url',
-      sourceUrl: 'https://www.youtube.com/watch?v=jNQXAC9IVRw',
+      sourceKind: 'file',
       clientStartedAt: '2026-09-10T10:00:00.000Z',
     });
   });
-  it('rejects non-canonical YouTube source URLs', async () => {
+  it('rejects client URL uploads; server imports use the dedicated endpoint', async () => {
+    await expect(
+      transform({ ...payload, source: 'youtube' }),
+    ).rejects.toThrow();
+    await expect(
+      transform({ ...payload, sourceKind: 'url' }),
+    ).rejects.toThrow();
     for (const sourceUrl of [
+      'https://www.youtube.com/watch?v=jNQXAC9IVRw',
       'https://youtu.be/jNQXAC9IVRw',
       'https://www.youtube.com/watch?v=jNQXAC9IVRw&t=5',
       'https://example.test/watch?v=jNQXAC9IVRw',

@@ -10,6 +10,7 @@ is redesigned.
 
 - [API client contract](../docs/api/client-contract.md)
 - [OpenAPI HTTP contract](openapi.yaml)
+- [URL imports: private downloader, configuration, cleanup, and verification](../ytdlp_test/README.md)
 - [Administrator dashboard setup](../dashboard/README.md)
 - [Zalando guideline index](../docs/backend-security/zalando-guidelines-index.md)
 - [Exhaustive route and security matrix](../docs/backend-security/route-matrix.md)
@@ -233,3 +234,33 @@ whose major is 12 explicitly support NestJS 11; pnpm resolves without peer bypas
 - [Nest rate limiting](https://docs.nestjs.com/security/rate-limiting)
 - [AWS SDK credential chain](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-credentials-node.html)
 - [Caddy reverse proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
+
+## Optional silence trimming (2026-09-26)
+
+`POST /jobs` and `POST /media-imports` accept the optional JSON boolean
+`trim_enabled` (default `true`). Set it to `false` to keep quiet sections and the
+full separated-audio timeline for future video synchronization. This still removes
+music and encodes MP3; encoder delay/padding must be handled by the future muxer.
+The choice is immutable per job and is preserved by retries. Changing it with an
+existing `request_id` conflicts; omitted and explicit `true` are equivalent.
+Strings and null are rejected. Audio acquisition remains audio-only.
+
+Recipe revision 6 trims at -40 dBFS, with the existing 0.6-second minimum gap,
+0.2-second padding and 5 ms fades. Revision 5 queued/retry snapshots retain -32
+dBFS. Deploy upgraded workers before the backend creates revision 6 jobs: older
+workers reject unknown recipe snapshots. No mobile switch is added in this change.
+
+API preflight: https://opensource.zalando.com/restful-api-guidelines/ read on
+2026-09-26; rules 101 (OpenAPI), 104 (security), 106 (compatibility), 118
+(snake_case), and 176 (problem responses). Existing auth and errors are preserved.
+
+## Mobile intake after downloader removal
+
+`POST /jobs` accepts prepared local files (`audio_file` or `video_file`,
+`source_kind: file`). It rejects the removed device URL-upload flow and
+`source_url` request fields. All link acquisition uses `POST /media-imports`.
+The public media policy no longer publishes device source-download bounds.
+Server imports still save original titles and URL attribution. This is a breaking
+retirement of old clients, with no compatibility route. See the
+[client contract](../docs/api/client-contract.md) and
+[validation record](../docs/mobile-url-acquisition-removal.md).

@@ -5,54 +5,34 @@
 "hero_title" = "Remove music.\nKeep the voice.";
 "hero_body" = "Create vocals-only audio from files you own or have permission to use. Review your file before uploading it for cloud processing.";
 "source_title" = "Start with your audio";
-"source_body" = "Paste a YouTube link to save its audio on this iPhone.";
-"video_link" = "YouTube video link";
 "supported_links" = "Videos, Shorts, and youtu.be links.";
 "paste" = "Paste";
-"invalid_url" = "Enter a valid YouTube video or Shorts link.";
-"download_audio" = "Download audio";
 "quality_notice" = "Highest available compatible M4A/AAC audio. Original bytes, with no video download or re-encoding.";
 "coming_next" = "Remove music. Keep the voice.";
 "separation_body" = "A clearer voice is the next step. Explore the planned workflow.";
-"preview_demo" = "Preview voice workflow";
-"demo_source" = "Local example · UI demo only. No audio file is imported or processed.";
 "clipboard_empty" = "There is no text to paste.";
 "ok" = "OK";
 "home_tab" = "Home";
-"history_tab" = "History";
 "settings_tab" = "Settings";
 "history_title" = "Your audio";
-"history_body" = "Saved here. Ready when you are.";
-"keep_open" = "Keep MusicMute open while downloading. If iOS stops a download in the background, you can retry it here.";
 "loading" = "Loading";
-"history_error" = "History could not be saved or loaded. Your existing files have been kept. Try again before starting another download.";
 "retry" = "Try again";
 "empty_title" = "Your listening starts here";
-"empty_body" = "Downloaded audio will appear here with playback and Save to Files controls.";
-"youtube_audio" = "YouTube audio";
 "bitrate %lld" = "%lld kbps";
 "saved_original" = "Original audio · saved on this device";
 "play" = "Play";
 "pause" = "Pause";
 "playback_position" = "Playback position";
-"playback_error" = "This audio could not be played. Try again or download another copy.";
 "save_to_files" = "Save to Files";
 "saving" = "Preparing…";
 "save_success" = "Audio saved to your chosen location in its original format.";
 "save_error" = "The audio could not be prepared for saving. Check free space and try again.";
-"cancel_download" = "Cancel download";
 "status_queued" = "Queued";
 "status_resolving" = "Finding original audio…";
-"status_downloading" = "Downloading audio…";
 "status_checking" = "Checking the saved audio…";
 "status_complete" = "Saved";
-"status_failed" = "Download failed";
-"status_cancelled" = "Download cancelled. Incomplete audio will not be played.";
-"error_unavailable" = "YouTube could not provide a compatible audio stream. The video may be restricted, or the extractor may need an update. Try again later.";
 "error_network" = "The connection failed or timed out. Check your internet connection and try again.";
 "error_storage" = "The audio could not be saved. Check free space and try again.";
-"error_interrupted" = "iOS interrupted this download. Keep MusicMute open and try again.";
-"error_invalidAudio" = "The downloaded file was not valid playable audio. Please try again.";
 "appearance" = "Appearance";
 "follow_system" = "Follow system";
 "light" = "Light";
@@ -61,8 +41,7 @@
 "english" = "English";
 "arabic" = "العربية";
 "about" = "About MusicMute";
-"about_body" = "Import audio you own or have permission to process and create vocals-only MP3 audio using cloud processing. YouTube is a secondary download option with local extraction on your iPhone; source quality varies.";
-"private_download" = "Your audio stays on this device";
+"about_body" = "Import audio or video you own or have permission to process and create vocals-only MP3 audio using cloud processing.";
 "future_flow" = "The next step";
 "future_flow_body" = "Later: download audio on iPhone → upload the audio file to a separation service → retrieve voice output. No upload or music removal is active today.";
 "settings_title" = "Settings";
@@ -78,8 +57,6 @@
 "done" = "Done";
 "close" = "Close";
 "cancel_demo" = "Cancel demo";
-"download_bytes %@ %@" = "%1$@ of %2$@ downloaded";
-"download_received %@" = "%@ downloaded · total size unknown";
 "auth_restoring" = "Restoring your session…";
 "auth_setting_up" = "Setting up your account…";
 "auth_setup_failed_title" = "We could not finish setup";
@@ -259,9 +236,7 @@
 
 "owned_audio_guidance" = "Choose one audio or video file you own or have permission to process.";
 
-"youtube_secondary" = "YouTube (secondary option)";
 
-"youtube_permission_guidance" = "Download only audio you are permitted to download and process. Downloading does not start cloud processing.";
 
 "import_review_title" = "Review audio";
 
@@ -301,17 +276,11 @@
 "media_media_default_track_unavailable" = "A default soundtrack could not be identified. Export one audio track and try again.";
 "media_media_unsupported" = "This media format cannot be prepared on this device.";
 "media_media_duration_unknown" = "The audio duration could not be verified.";
-"media_youtube_playlist_unsupported" = "Paste the individual video link without playlist parameters.";
-"media_youtube_live_unsupported" = "Live and upcoming videos cannot be processed.";
-"media_youtube_metadata_unavailable" = "This YouTube video cannot be checked safely. Import a permitted audio file instead.";
 "media_processing_allowance_exhausted" = "Your monthly processing allowance is used or reserved. Check the next reset time.";
 "media_upload_grant_limit_reached" = "Your upload limit is reached. Check the next reset time.";
 "media_upload_byte_limit_reached" = "Your upload data limit is reached. Check the next reset time.";
 "media_upload_attempt_limit_reached" = "This audio has used all upload attempts. Choose it again to start a new request.";
 "media_retained_storage_limit_reached" = "Delete a saved result before processing another audio file.";
-"media_download_reservation_expired" = "The result link expired. Try the download again.";
-"media_download_grant_limit_reached" = "Your result access limit is reached. Check the next reset time.";
-"media_download_byte_limit_reached" = "Your estimated result data limit is reached. Check the next reset time.";
 "media_service_bandwidth_limit_reached" = "New transfers are temporarily paused. Try again later.";
 "media_processing_limit_reached" = "An unfinished job already exists for this account.";
 "media_processing_queue_full" = "The processing queue is full. Try again later.";

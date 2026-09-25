@@ -74,22 +74,22 @@ import MediaPlayer
       ))
   }
 
-  func toggle(_ record: AudioRecord, file: URL?) {
+  func toggle(id: UUID, title: String, file: URL?) {
     guard let file else {
       failed = true
       return
     }
     failed = false
-    if currentID != record.id || player == nil {
+    if currentID != id || player == nil {
       pause()
       loading = true
       do {
         let audio = try AVAudioPlayer(contentsOf: file)
         audio.delegate = self
-        guard audio.prepareToPlay() else { throw AudioFailure.invalidAudio }
+        guard audio.prepareToPlay() else { throw CocoaError(.fileReadCorruptFile) }
         player = audio
-        currentID = record.id
-        title = record.title
+        currentID = id
+        self.title = title
         duration = audio.duration
         position = 0
         loading = false

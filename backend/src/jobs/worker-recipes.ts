@@ -29,17 +29,17 @@ function canonical(value: unknown): string {
 
 function createRecipe(
   recipeId: WorkerRecipeId,
+  trimEnabled = true,
 ): Readonly<WorkerRecipeSnapshot> {
-  const trimEnabled = true;
   const stepIds: WorkerRecipeSnapshot['stepIds'] = [
     'separate-kim-vocal-2-wav-v1',
-    'trim-vocal-wav-v1',
+    ...(trimEnabled ? ['trim-vocal-wav-v1' as const] : []),
     'encode-mp3-up-to-160k-v1',
     'validate-audio-v1',
   ];
   const material: Omit<WorkerRecipeSnapshot, 'recipeDigest'> = {
     recipeId,
-    recipeRevision: 5,
+    recipeRevision: 6,
     protocolVersion: 1,
     modelFilename: 'Kim_Vocal_2.onnx',
     modelDigest: QUALIFIED_MODEL_DIGEST,
@@ -49,7 +49,7 @@ function createRecipe(
     trimEnabled,
     denoiseEnabled: false,
     denoisePresetId: null,
-    trimProfileId: 'trim-vocal-wav-v1',
+    trimProfileId: trimEnabled ? 'trim-vocal-wav-v1' : null,
     outputFormat: 'mp3',
     outputBitrateKbps: 160,
   };
@@ -73,7 +73,10 @@ export const WORKER_RECIPES: Readonly<
 
 export function workerRecipeSnapshot(
   recipeId: WorkerRecipeId,
+  trimEnabled = true,
 ): WorkerRecipeSnapshot {
-  const recipe = WORKER_RECIPES[recipeId];
+  const recipe = trimEnabled
+    ? WORKER_RECIPES[recipeId]
+    : createRecipe(recipeId, false);
   return { ...recipe, stepIds: [...recipe.stepIds] };
 }

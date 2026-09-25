@@ -62,7 +62,6 @@
     <string name="creative_library_view_job">View job</string>
     <string name="creative_library_save_copy">Save a copy</string>
     <string name="creative_library_share">Share</string>
-    <string name="creative_library_job_unavailable">Job information is unavailable. Your downloaded audio remains usable.</string>
     <string name="creative_library_cached_job">Saved job information. Refresh when connected for the latest status.</string>
     <string name="creative_library_availability">Offline availability</string>
     <string name="creative_library_remove_queue">Remove from queue</string>

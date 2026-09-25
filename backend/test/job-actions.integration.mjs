@@ -96,4 +96,26 @@ test('job cancellation preserves owner and state boundaries', async (t) => {
     actions.cancel(otherId.toHexString(), ownerOnly._id.toHexString()),
     hasCode('JOB_NOT_FOUND'),
   );
+  const pendingImport = await createJob();
+  await actions.cancelPendingUpload(
+    otherId.toHexString(),
+    pendingImport.requestId,
+  );
+  assert.equal(
+    (await jobs.findById(pendingImport._id)).status,
+    'awaiting_upload',
+  );
+  await actions.cancelPendingUpload(
+    ownerId.toHexString(),
+    pendingImport.requestId,
+  );
+  await actions.cancelPendingUpload(
+    ownerId.toHexString(),
+    pendingImport.requestId,
+  );
+  const released = await jobs.findById(pendingImport._id);
+  assert.equal(released.status, 'cancelled');
+  assert.equal(released.revision, 1);
+  await actions.cancelPendingUpload(ownerId.toHexString(), ownerOnly.requestId);
+  assert.equal((await jobs.findById(ownerOnly._id)).status, 'queued');
 });

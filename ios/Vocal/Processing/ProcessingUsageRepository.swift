@@ -180,9 +180,6 @@ enum ProcessingMediaMessage {
     case .invalidSize: return "media_media_too_large"
     case .unsupportedFormat: return "media_media_unsupported"
     case .policyUnavailable: return "media_processing_policy_incompatible"
-    case .youtubeLive: return "media_youtube_live_unsupported"
-    case .youtubePlaylist: return "media_youtube_playlist_unsupported"
-    case .youtubeMetadataUnavailable: return "media_youtube_metadata_unavailable"
     case .interrupted: return "media_interrupted"
     default: return nil
     }

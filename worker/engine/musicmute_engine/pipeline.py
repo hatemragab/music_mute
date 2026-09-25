@@ -23,7 +23,7 @@ from .media import (
 )
 from .recipes import OUTPUT_BITRATE_KBPS, RecipeValidationError, validate_recipe_snapshot
 from .separator import KimSeparator, Provider, SeparatorError
-from .trimmer import EditRange, trim_vocal_gaps
+from .trimmer import EditRange, TrimResult, trim_vocal_gaps
 
 UUID_V4 = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -322,17 +322,31 @@ class RuntimePipeline:
 
             output = attempt / "output" / "vocals.mp3"
             output.parent.mkdir(parents=True, exist_ok=True)
-            progress("trim")
-            try:
-                trimmed = self._timed(
-                    timings,
-                    "trim",
-                    lambda: trim_vocal_gaps(
-                        produced, attempt / "trimmed.wav", reuse_unchanged=True
-                    ),
+            if request.recipe["trimEnabled"]:
+                progress("trim")
+                try:
+                    trimmed = self._timed(
+                        timings,
+                        "trim",
+                        lambda: trim_vocal_gaps(
+                            produced,
+                            attempt / "trimmed.wav",
+                            threshold_db=-32 if request.recipe["recipeRevision"] == 5 else -40,
+                            reuse_unchanged=True
+                        ),
+                    )
+                except (OSError, RuntimeError, ValueError) as error:
+                    raise ProcessingFailure("TRIM_FAILED", "Vocal trim failed") from error
+            else:
+                import soundfile as sf
+
+                info = sf.info(produced)
+                if info.samplerate != SAMPLE_RATE or info.channels != CHANNELS or info.frames <= 0:
+                    raise ProcessingFailure("OUTPUT_INVALID", "Separated audio shape is invalid")
+                trimmed = TrimResult(
+                    produced, info.frames, info.frames, info.samplerate,
+                    info.channels, (EditRange(0, info.frames, 0, info.frames),),
                 )
-            except (OSError, RuntimeError, ValueError) as error:
-                raise ProcessingFailure("TRIM_FAILED", "Vocal trim failed") from error
             source_samples = trimmed.source_samples
             output_samples = trimmed.output_samples
             removed_samples = trimmed.removed_samples

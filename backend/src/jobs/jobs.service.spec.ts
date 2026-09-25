@@ -92,47 +92,72 @@ function fixture() {
 }
 
 describe('public job admission', () => {
-  it('stores a frozen qualified recipe before issuing an immutable upload grant', async () => {
-    const f = fixture();
-    f.jobs.findOne
-      .mockReturnValueOnce(directLean(null))
-      .mockReturnValueOnce(sessionLean(null));
-    f.jobs.create.mockImplementation(async ([value]) => {
-      const created = {
-        ...value,
-        _id: jobId,
-        status: 'awaiting_upload',
-        deletedAt: null,
-        toObject: () => ({
+  it.each([undefined, true, false])(
+    'stores the selected trim recipe (%s) before issuing a grant',
+    async (trimEnabled) => {
+      const f = fixture();
+      f.jobs.findOne
+        .mockReturnValueOnce(directLean(null))
+        .mockReturnValueOnce(sessionLean(null));
+      f.jobs.create.mockImplementation(async ([value]) => {
+        const created = {
           ...value,
           _id: jobId,
           status: 'awaiting_upload',
           deletedAt: null,
-        }),
-      };
-      f.jobs.findOne
-        .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(created) })
-        .mockReturnValueOnce(directLean(created.toObject()));
-      return [created];
-    });
+          toObject: () => ({
+            ...value,
+            _id: jobId,
+            status: 'awaiting_upload',
+            deletedAt: null,
+          }),
+        };
+        f.jobs.findOne
+          .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(created) })
+          .mockReturnValueOnce(directLean(created.toObject()));
+        return [created];
+      });
 
-    await expect(
-      f.service.create(ownerId.toHexString(), input, requestId, {
-        source: 'audio_file',
-        policyVersion: 2,
-        preparationProfileId: 'audio-cap-aac-lc-160-v1',
-      }),
-    ).resolves.toMatchObject({
-      requestId,
-      status: 'awaiting_upload',
-      upload: { method: 'PUT' },
-    });
-    const created = f.jobs.create.mock.calls[0]?.[0][0];
-    expect(created.recipeSnapshot).toEqual(
-      workerRecipeSnapshot(DEFAULT_WORKER_RECIPE_ID),
-    );
-    expect(f.storage.createInputGrant).toHaveBeenCalledOnce();
-  });
+      await expect(
+        f.service.create(
+          ownerId.toHexString(),
+          input,
+          requestId,
+          {
+            source: 'audio_file',
+            policyVersion: 2,
+            preparationProfileId: 'audio-cap-aac-lc-160-v1',
+          },
+          trimEnabled,
+        ),
+      ).resolves.toMatchObject({
+        requestId,
+        status: 'awaiting_upload',
+        upload: { method: 'PUT' },
+      });
+      const created = f.jobs.create.mock.calls[0]?.[0][0];
+      expect(created.recipeSnapshot).toEqual(
+        workerRecipeSnapshot(DEFAULT_WORKER_RECIPE_ID, trimEnabled),
+      );
+      expect(f.storage.createInputGrant).toHaveBeenCalledOnce();
+      f.jobs.findOne.mockReturnValue(
+        directLean({ ...created, status: 'awaiting_upload', deletedAt: null }),
+      );
+      await expect(
+        f.service.create(
+          ownerId.toHexString(),
+          input,
+          requestId,
+          {
+            source: 'audio_file',
+            policyVersion: 2,
+            preparationProfileId: 'audio-cap-aac-lc-160-v1',
+          },
+          !(trimEnabled ?? true),
+        ),
+      ).rejects.toMatchObject({ response: { code: 'IDEMPOTENCY_CONFLICT' } });
+    },
+  );
 
   it('queues only the exact verified object and preserves the frozen recipe', async () => {
     const f = fixture();

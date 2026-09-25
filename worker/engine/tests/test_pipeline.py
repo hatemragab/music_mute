@@ -95,7 +95,7 @@ class PipelineTests(unittest.TestCase):
             model.write_bytes(b"test-only-model-sentinel")
             uncompressed = root / "source.wav"
             sf.write(uncompressed, audio, RATE, subtype="PCM_16")
-            for recipe_id, definition in RECIPE_DEFINITIONS.items():
+            for recipe_id, trim_enabled in [(name, enabled) for name in RECIPE_DEFINITIONS for enabled in (True, False)]:
                 attempt_id = str(uuid.uuid4())
                 attempt = root / attempt_id
                 attempt.mkdir()
@@ -106,7 +106,8 @@ class PipelineTests(unittest.TestCase):
                     check=True,
                 )
                 request = ProcessRequest.from_payload(
-                    self.payload(attempt_id, attempt, source, cache, recipe_id)
+                    {**self.payload(attempt_id, attempt, source, cache, recipe_id),
+                     "recipe": recipe_snapshot(recipe_id, trim_enabled)}
                 )
                 with patch(
                     "musicmute_engine.pipeline.verified_cached_model",
@@ -116,8 +117,9 @@ class PipelineTests(unittest.TestCase):
                     result = pipeline.process(request, stages.append)
                     self.assertEqual(verify.call_count, 1 if fake.calls == 1 else 0)
                 expected_stages = ["input-validation", "model-load", "separation"]
-                if definition.trim_enabled:
-                    expected_stages.extend(("trim", "encoding"))
+                if trim_enabled:
+                    expected_stages.append("trim")
+                expected_stages.append("encoding")
                 expected_stages.extend(("output-validation", "output-ready"))
                 self.assertEqual(stages, expected_stages)
                 self.assertNotIn("preparation", stages)
@@ -126,23 +128,24 @@ class PipelineTests(unittest.TestCase):
                 timings = result["stageTimings"]
                 self.assertNotIn("denoise", timings)
                 self.assertNotIn("preparation", timings)
-                self.assertEqual("trim" in timings, definition.trim_enabled)
-                self.assertEqual("encode" in timings, definition.trim_enabled)
+                self.assertEqual("trim" in timings, trim_enabled)
+                self.assertIn("encode", timings)
                 self.assertIn("separation", timings)
-                self.assertEqual(result["trimEnabled"], definition.trim_enabled)
-                self.assertEqual(result["denoiseEnabled"], definition.denoise_enabled)
+                self.assertEqual(result["trimEnabled"], trim_enabled)
+                self.assertEqual(result["denoiseEnabled"], False)
                 self.assertEqual(result["contentType"], "audio/mpeg")
                 self.assertEqual(result["outputBitrateKbps"], 160)
-                if definition.trim_enabled:
+                if trim_enabled:
                     self.assertGreater(result["removedSamples"], 0)
                     self.assertGreater(result["editMap"]["rangeCount"], 1)
                 else:
                     self.assertEqual(result["removedSamples"], 0)
+                    self.assertEqual(result["sourceSamples"], result["outputSamples"])
                     self.assertEqual(result["editMap"]["rangeCount"], 1)
                 self.assertTrue(Path(result["outputPath"]).is_file())
                 self.assertEqual(list(attempt.rglob("*.wav")), [])
                 self.assertEqual(Path(result["outputPath"]).suffix, ".mp3")
-            self.assertEqual(fake.calls, len(RECIPE_DEFINITIONS))
+            self.assertEqual(fake.calls, 2 * len(RECIPE_DEFINITIONS))
             self.assertTrue(all(source.suffix == ".mp3" for source in fake.sources))
 
     def test_non_mp3_inputs_are_decoded_before_separation(self) -> None:

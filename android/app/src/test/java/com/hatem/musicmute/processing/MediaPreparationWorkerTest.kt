@@ -8,11 +8,10 @@ import org.junit.Test
 
 /** JVM proof of durable dispatch and cancellation, not Android WorkManager runtime proof. */
 class MediaPreparationWorkerTest {
-    private class Scheduler : ProcessingScheduler, MediaPreparationScheduler, PipelineSourceScheduler {
+    private class Scheduler : ProcessingScheduler, MediaPreparationScheduler {
         val scheduled = mutableListOf<String>()
         val cancelled = mutableListOf<String>()
         override suspend fun enqueue(ownerUid: String, operationId: String, epoch: Long) { scheduled += operationId }
-        override suspend fun enqueue(ownerUid: String, operationId: String, url: String, epoch: Long) = error("Unexpected URL")
         override suspend fun cancel(ownerUid: String, operationId: String) { cancelled += operationId }
         override suspend fun cancelOwner(ownerUid: String) { cancelled += ownerUid }
     }
@@ -33,7 +32,7 @@ class MediaPreparationWorkerTest {
         val owner = { ProcessingSession("owner", 1) }
         val repository = ProcessingRepository(store, File(root, "staging"), Api(), owner, scheduler)
         val preparer = AudioInputPreparer(File(root, "staging")) { error("Dispatch must not inspect on UI coroutine") }
-        fun coordinator() = AudioPipelineCoordinator(repository, preparer, owner, scheduler, preparationScheduler = scheduler)
+        fun coordinator() = AudioPipelineCoordinator(repository, preparer, owner, preparationScheduler = scheduler)
         val id = UUID.randomUUID().toString()
         val first = coordinator().acceptDocument(id, "meeting.mp4", "content://provider/document/1")
         val duplicate = coordinator().acceptDocument(UUID.randomUUID().toString(), "meeting.mp4", "content://provider/document/1")

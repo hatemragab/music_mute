@@ -61,12 +61,13 @@ class JobsApiClient(
         input: InputDeclaration,
         metadata: CreateJobMetadata,
     ): CreateReservation {
+        if (metadata.sourceKind == SourceKind.URL || metadata.sourceUrl != null || metadata.source == "youtube")
+            throw JobsFailure(JobsProblem.INVALID_INPUT)
         uuid(requestId)
         val body = buildJsonObject {
             put("requestId", requestId)
             metadata.sourceTitle?.let { put("sourceTitle", validatedName(it)) }
             metadata.sourceKind?.let { put("sourceKind", it.wireValue) }
-            metadata.sourceUrl?.let { put("sourceUrl", it) }
             metadata.clientStartedAt?.let { put("clientStartedAt", wireInstant(it)) }
             metadata.policyVersion?.let { put("policyVersion", it) }
             metadata.preparationProfileId?.let { put("preparationProfileId", it) }

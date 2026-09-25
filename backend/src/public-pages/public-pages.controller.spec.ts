@@ -103,7 +103,7 @@ describe('Public account deletion and privacy pages', () => {
     await request(app.getHttpServer()).delete('/delete-account').expect(404);
   });
 
-  it('discloses cloud, authentication, temporary processing availability and retained YouTube behavior', async () => {
+  it('discloses cloud, authentication, temporary processing availability and server-side link imports', async () => {
     const response = await request(app.getHttpServer())
       .get('/privacy')
       .expect(200);
@@ -113,7 +113,7 @@ describe('Public account deletion and privacy pages', () => {
       'S3',
       'temporarily unavailable',
       '24 hours',
-      'YouTube',
+      'audio-only stream',
       'vocals-only',
       'logs',
     ]) {
