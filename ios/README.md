@@ -125,6 +125,11 @@ origins for isolated fixtures. The checked-in Release setting is empty because t
 does not establish an authorized deployed origin; an unconfigured Release build shows a setup
 error and does not bypass the auth gate.
 
+The app uses root-mounted routes such as `POST /auth/sessions` and `GET /jobs`.
+The Swift transport converts between idiomatic model names and snake_case API
+JSON/query names. See the [API client contract](../docs/api/client-contract.md)
+for authentication, pagination, errors, and the breaking deployment cutover.
+
 `FirebaseAuth` uses the existing exact Firebase SPM pin (`12.18.0`). Sign in with Apple uses the
 checked-in entitlement plus `AuthenticationServices` and a fresh SHA-256 nonce for every prompt.
 Compilation does not prove that the Apple capability, Firebase provider, distribution profile, or
@@ -286,7 +291,6 @@ plus actual Files selection through rights confirmation and explicit cloud proce
 using synthetic fixture audio. Scoped Swift lint and both localization resources
 passed. These fixture checks do not prove real Firebase/Apple revocation or deployed
 backend/S3/worker account erasure. Public privacy/deletion URLs remain unconfigured.
-
 
 ## Versioned media preparation and account allowance (2026-09-13)
 

@@ -54,6 +54,12 @@ and forward the port from the connected device with
 and the Android emulator host. Release rejects an absent or unsafe origin and has
 no emulator auth.
 
+The app uses root-mounted API routes such as `POST /auth/sessions` and
+`GET /jobs`, without a version prefix. Request and response JSON and query
+names are snake_case on the wire; the Kotlin models remain idiomatic through
+the HTTP adapter. See the [API client contract](../docs/api/client-contract.md)
+for authentication, pagination, errors, and the breaking deployment cutover.
+
 The Firebase client configuration includes a web OAuth client ID. The Debug
 certificate from this development machine was registered in Firebase on
 2026-09-09 for real Google sign-in. This is separate from the upload certificate

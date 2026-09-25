@@ -1,6 +1,14 @@
 # Domain model, job ownership and worker protocol
 
-**Protocol family:** `musicmute-worker/v1`. All fields below are implementation contracts; routes are new proposals relative to the application's actual existing API prefix. Read the global HTTP setup before mounting them. Keep existing public `/jobs` requests compatible.
+> **Historical design proposal.** The route table below predates the merged
+> API migration and is not the current endpoint contract. Use the
+> [API client contract](../../api/client-contract.md) and
+> [OpenAPI](../../../backend/openapi.yaml) for current `/worker/...` paths and
+> snake_case wire names.
+
+**Original protocol family:** `musicmute-worker/v1`. The fields and routes below
+record the design proposal at that time. They do not override the current
+root-mounted HTTP and WebSocket contract.
 
 ## 1. Durable entities
 

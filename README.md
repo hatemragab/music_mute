@@ -67,6 +67,11 @@ Start with the component guides for exact environment variables and verification
 commands. Local builds and fixture tests do not establish that production
 authentication, storage, or notifications are configured.
 
+The [current API client contract](docs/api/client-contract.md) covers the
+root-mounted routes, snake_case wire format, authentication, pagination, and
+error handling shared by all clients. The backend migration is in source; verify
+the deployed API before releasing a client that requires the new routes.
+
 ## Processing and account behavior
 
 Both apps make local audio import the primary flow. Selected audio is reviewed with
@@ -98,7 +103,7 @@ administration API. It is an operations console, not a public demo.
 Its CapRover package reads public browser configuration from environment variables
 at container startup and excludes `.env` files. Production setup requires the
 dashboard domain in Firebase Authentication, its origin in the API CORS allowlist,
-and an API version exposing the administration routes. See the
+and a deployed API exposing the current administration routes. See the
 [dashboard task package](docs/tasks/full-dashboard/dashboard/README.md) and
 [validation record](docs/validation/full-dashboard-local.md) for recorded evidence
 and remaining integration requirements.
@@ -186,8 +191,8 @@ integration tests also require local MongoDB, Redis, and Google Chrome.
 | Guide                                                              | Contents                                                  |
 | ------------------------------------------------------------------ | --------------------------------------------------------- |
 | [Backend](backend/README.md)                                       | Local environments, API verification, and VPS preparation |
-| [Audio API](backend/docs/api/audio-processing.md)                  | Mobile history and unavailable-boundary contracts         |
-| [Audio operations](backend/docs/operations/audio-processing.md)    | Storage and retained-job operations                       |
+| [API client contract](docs/api/client-contract.md)                 | Routes, credentials, wire format, errors, and API rules   |
+| [OpenAPI](backend/openapi.yaml)                                    | Current HTTP operations and schemas                       |
 | [Dashboard](dashboard/README.md)                                   | Administrator setup, checks, and packaging                |
 | [Account deletion](docs/account-deletion.md)                       | Identity and storage cleanup operations                   |
 | [Mobile processing tracker](docs/tasks/mobile-audio-processing.md) | Implementation status and validation boundaries           |

@@ -50,6 +50,14 @@ this worker version; an unavailable route defers delivery. Surviving pending
 batches replay unchanged, and replacement local spools retain the remote cursor.
 This recovers sequence continuity, not diagnostic bytes lost with deleted state.
 
+Worker HTTP calls use root-mounted `/worker/...` routes and snake_case JSON and
+query names. The authenticated cursor call sends `session_id` and
+`incarnation` and reads `acknowledged_sequence`; it requires a backend with
+this route deployed before diagnostic delivery can resume. See the
+[API client contract](../docs/api/client-contract.md) and
+[OpenAPI](../backend/openapi.yaml) for the credential scopes, error behavior,
+and complete current route schemas.
+
 macOS CLI and lifecycle mutations use persistent advisory-lock guard files.
 The OS releases ownership when a command exits or is killed; guard files must not
 be deleted during operation. Complete dead-owner records can be recovered under

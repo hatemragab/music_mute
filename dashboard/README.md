@@ -28,6 +28,12 @@ Configure these public values through the local environment while running Vite:
 
 The Firebase values are browser client configuration. Never place Admin SDK credentials or service-account files in this app. The API origin must list the dashboard origin in its `CORS_ORIGINS` setting.
 
+Dashboard calls use root-mounted `/admin/...` resource routes and snake_case
+JSON/query names on the wire. The API also checks the authenticated
+administrator's current role and each operation's permission. See the
+[API client contract](../docs/api/client-contract.md) for error, retry, and
+pagination rules, and [OpenAPI](../backend/openapi.yaml) for exact operations.
+
 The Playwright command selects a separate test-only auth adapter with Vite's `e2e` mode. That adapter is excluded from production builds.
 
 ## Validation

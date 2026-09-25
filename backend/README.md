@@ -8,11 +8,9 @@ completed-result access, cancellation, deletion, and notifications remain suppor
 New audio processing is temporarily unavailable while the processing architecture
 is redesigned.
 
-- [Audio user API](docs/api/audio-processing.md)
-- [Audio operations](docs/operations/audio-processing.md)
-- [Dashboard API](docs/dashboard-api.md)
-- [Dashboard permission matrix](docs/dashboard-permissions.md)
-- [Dashboard local validation](docs/dashboard-local-validation.md)
+- [API client contract](../docs/api/client-contract.md)
+- [OpenAPI HTTP contract](openapi.yaml)
+- [Administrator dashboard setup](../dashboard/README.md)
 - [Zalando guideline index](../docs/backend-security/zalando-guidelines-index.md)
 - [Exhaustive route and security matrix](../docs/backend-security/route-matrix.md)
 
@@ -202,13 +200,10 @@ and owned child processes are cleaned up afterward.
 
 See [VPS operations](docs/vps.md).
 
-The implemented feature follows the
-[auth/users/devices specification](docs/superpowers/specs/2026-09-08-auth-users-devices.md),
-[implementation plan](docs/superpowers/plans/2026-09-08-auth-users-devices.md), and
-[task tracker](docs/tasks/auth-users-devices.md).
+The [API client contract](../docs/api/client-contract.md) and
+[OpenAPI](openapi.yaml) define the current authentication, account, and device
+routes and wire schemas.
 
-See the [auth API](docs/auth-api.md) for client contracts and
-[auth operations](docs/auth-operations.md) for index/policy management.
 Configure `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY` and a stable random
 `RATE_LIMIT_HASH_SECRET` of at least 32 UTF-8 bytes. On CapRover, provide Firebase
 Admin credentials through `FIREBASE_SERVICE_ACCOUNT_BASE64`, or use Application
