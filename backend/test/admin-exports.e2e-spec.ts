@@ -69,14 +69,17 @@ describe('CSV export HTTP boundary', () => {
       .expect(422);
     expect(tooLarge.body.code).toBe('EXPORT_TOO_LARGE');
     expect(tooLarge.headers['content-disposition']).toBeUndefined();
-    expect(tooLarge.headers['content-type']).toContain('application/json');
+    expect(tooLarge.headers['content-type']).toContain(
+      'application/problem+json',
+    );
     exports.export.mockRejectedValueOnce(
       new Error('private audit unavailable'),
     );
     const failure = await harness
       .request('get', '/admin/exports/jobs.csv', undefined, token)
-      .expect(503);
+      .expect(500);
     expect(failure.headers['content-disposition']).toBeUndefined();
+    expect(failure.body.code).toBe('INTERNAL_ERROR');
     expect(JSON.stringify(failure.body)).not.toContain('private audit');
     harness.identities.get(token)!.revoked = true;
     await harness
@@ -114,7 +117,7 @@ describe('CSV export HTTP boundary', () => {
     const request = get({
       host: '127.0.0.1',
       port,
-      path: '/api/v1/admin/exports/jobs.csv',
+      path: '/admin/exports/jobs.csv',
       headers: { Authorization: `Bearer ${harness.signInAs('support')}` },
     });
     request.on('error', () => undefined);

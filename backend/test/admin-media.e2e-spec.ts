@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   createAdminHarness,
   type AdminHarness,
+  wireJson,
 } from './helpers/admin-harness.js';
 import { AdminMediaController } from '../src/admin-jobs/admin-media.controller.js';
 import { AdminMediaService } from '../src/admin-jobs/admin-media.service.js';
@@ -34,11 +35,11 @@ describe('admin media HTTP admission', () => {
     };
     for (const role of ['viewer', 'release_manager'] as const)
       await harness
-        .request('post', path, body, harness.signInAs(role))
+        .request('post', path, wireJson(body), harness.signInAs(role))
         .expect(403);
     for (const role of ['owner', 'support'] as const) {
       const response = await harness
-        .request('post', path, body, harness.signInAs(role))
+        .request('post', path, wireJson(body), harness.signInAs(role))
         .expect(201);
       expect(response.headers['cache-control']).toBe('no-store');
     }
@@ -51,7 +52,7 @@ describe('admin media HTTP admission', () => {
       { reason: '' },
     ])
       await harness
-        .request('post', path, { ...body, ...added }, token)
+        .request('post', path, wireJson({ ...body, ...added }), token)
         .expect(400);
     expect(media.grant).toHaveBeenCalledTimes(2);
     harness.identities.get(token)!.authTimeSec =
@@ -60,7 +61,7 @@ describe('admin media HTTP admission', () => {
     harness.identities.get(token)!.authTimeSec = Math.floor(Date.now() / 1000);
     media.grant.mockRejectedValueOnce(adminError('MEDIA_UNAVAILABLE'));
     const missing = await harness
-      .request('post', path, body, token)
+      .request('post', path, wireJson(body), token)
       .expect(410);
     expect(missing.body.code).toBe('MEDIA_UNAVAILABLE');
   });

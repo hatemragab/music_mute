@@ -25,7 +25,7 @@ const errors = {
   UPLOAD_NOT_READY: [409, 'The uploaded file is not ready or does not match'],
   UPLOAD_RESERVATION_EXPIRED: [409, 'The upload reservation expired'],
   UPLOAD_GRANT_LIMIT_REACHED: [
-    429,
+    409,
     'The account upload grant limit was reached',
   ],
   UPLOAD_BYTE_LIMIT_REACHED: [
@@ -42,7 +42,7 @@ const errors = {
   ],
   DOWNLOAD_RESERVATION_EXPIRED: [409, 'The download grant request expired'],
   DOWNLOAD_GRANT_LIMIT_REACHED: [
-    429,
+    409,
     'The monthly result access limit was reached',
   ],
   DOWNLOAD_BYTE_LIMIT_REACHED: [

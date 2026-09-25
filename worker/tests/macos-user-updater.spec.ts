@@ -296,7 +296,7 @@ async function updateFixture() {
   });
   const generatedRuntimeConfig = buildMacUserRuntimeConfig(
     layout,
-    "https://api.music-mute.com/api/v1",
+    "https://api.music-mute.com",
     false,
     {
       machineId,

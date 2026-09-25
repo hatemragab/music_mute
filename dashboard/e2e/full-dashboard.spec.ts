@@ -4,6 +4,7 @@ import {
   createDashboardFixture,
   FIXTURE_IDS,
 } from "../src/test/dashboard-fixtures";
+import { fromWireCase, toWireCase } from "../src/api/wire-case";
 import { installDashboardFixture, setDashboardRole } from "./helpers/session";
 
 test("owner can open every dashboard area without runtime errors", async ({
@@ -137,7 +138,7 @@ test("jobs pagination follows opaque cursors and returns to the first page", asy
   await setDashboardRole(page, "owner");
   const fixture = await installDashboardFixture(page);
   const secondJobId = "000000000000000000000003";
-  await page.route(/\/api\/v1\/admin\/jobs(?:\?.*)?$/, async (route) => {
+  await page.route(/\/admin\/jobs(?:\?.*)?$/, async (route) => {
     if (route.request().method() === "OPTIONS") {
       await route.fallback();
       return;
@@ -149,15 +150,17 @@ test("jobs pagination follows opaque cursors and returns to the first page", asy
         "access-control-allow-origin": "http://127.0.0.1:4173",
         "content-type": "application/json",
       },
-      body: JSON.stringify({
-        items: [
-          cursor
-            ? { ...fixture.job, id: secondJobId, queuePosition: 2 }
-            : fixture.job,
-        ],
-        nextCursor: cursor ? null : "fixture-next-page",
-        asOf: "2026-09-11T00:00:00.000Z",
-      }),
+      body: JSON.stringify(
+        toWireCase({
+          items: [
+            cursor
+              ? { ...fixture.job, id: secondJobId, queuePosition: 2 }
+              : fixture.job,
+          ],
+          nextCursor: cursor ? null : "fixture-next-page",
+          asOf: "2026-09-11T00:00:00.000Z",
+        }),
+      ),
     });
   });
 
@@ -467,13 +470,15 @@ test("a lost settings response is reconciled through the operation receipt", asy
   const fixture = await installDashboardFixture(page);
   let committedOperationId: string | null = null;
   await page.route(
-    "**/api/v1/admin/settings/account-policy",
+    "**/admin/settings/account-policy",
     async (route, request) => {
       if (request.method() !== "PUT" || committedOperationId) {
         await route.fallback();
         return;
       }
-      const body = request.postDataJSON() as { operationId: string };
+      const body = fromWireCase(request.postDataJSON()) as {
+        operationId: string;
+      };
       committedOperationId = body.operationId;
       await fixture.handle({
         method: request.method(),
@@ -484,17 +489,19 @@ test("a lost settings response is reconciled through the operation receipt", asy
       await route.abort("connectionreset");
     },
   );
-  await page.route("**/api/v1/admin/operations/*", async (route) => {
+  await page.route("**/admin/operations/*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        operationId: committedOperationId,
-        status: "succeeded",
-        resourceId: "processing",
-        revision: fixture.settings.revision,
-        code: null,
-      }),
+      body: JSON.stringify(
+        toWireCase({
+          operationId: committedOperationId,
+          status: "succeeded",
+          resourceId: "processing",
+          revision: fixture.settings.revision,
+          code: null,
+        }),
+      ),
     });
   });
 

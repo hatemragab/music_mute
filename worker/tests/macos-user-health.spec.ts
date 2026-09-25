@@ -146,7 +146,7 @@ async function healthyFixture() {
     layout.configPath,
     `${JSON.stringify({
       schemaVersion: 1,
-      backendBaseUrl: "https://api.music-mute.com/api/v1/",
+      backendBaseUrl: "https://api.music-mute.com/",
       machineId: "32410a14-e85a-4a1d-bb99-61fa54b07eaa",
       credentialFile: layout.credentialPath,
       localLifecyclePath: layout.lifecyclePath,

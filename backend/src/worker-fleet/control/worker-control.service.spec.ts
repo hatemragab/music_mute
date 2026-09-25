@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import type { AdminActor } from '../../admin/admin.types.js';
 import { WorkerControlService } from './worker-control.service.js';
 
@@ -303,6 +304,73 @@ describe('worker control plane', () => {
       installation: null,
     });
     expect(result.asOf).toBeInstanceOf(Date);
+  });
+
+  it('pages invitation history past the first 100 without losing older rows', async () => {
+    const f = fixture();
+    const invitations = Array.from({ length: 101 }, (_, index) => ({
+      _id: randomUUID(),
+      state: 'active',
+      createdAt: new Date(Date.UTC(2026, 8, 25, 0, 0, 101 - index)),
+      createdByUid: actor.uid,
+      initialPolicyId: null,
+      expiresAt: new Date('2027-09-25T00:00:00.000Z'),
+      consumedAt: null,
+      revokedAt: null,
+      installationSessionId: null,
+      revision: 0,
+    }));
+    f.invitations.find
+      .mockReturnValueOnce(query(invitations))
+      .mockReturnValueOnce(query(invitations.slice(100)));
+
+    const first = await f.service.listInvitations(actor, { limit: 100 });
+    expect(first.items).toHaveLength(100);
+    expect(first.nextCursor).toEqual(expect.any(String));
+    const second = await f.service.listInvitations(actor, {
+      limit: 100,
+      cursor: first.nextCursor!,
+    });
+    expect(second.items).toHaveLength(1);
+    expect(second.items[0].invitationId).toBe(invitations[100]._id);
+    expect(second.nextCursor).toBeNull();
+    expect(f.invitations.find.mock.calls[1][0]).toHaveProperty('$or');
+  });
+
+  it('pages machine diagnostics with a machine-scoped cursor', async () => {
+    const f = fixture();
+    f.machines.exists.mockResolvedValue(true);
+    const diagnostics = Array.from({ length: 101 }, (_, index) => ({
+      _id: randomUUID(),
+      kind: 'runtime',
+      sequenceStart: index,
+      sequenceEnd: index,
+      lines: [],
+      metrics: [],
+      createdAt: new Date(Date.UTC(2026, 8, 25, 0, 0, 101 - index)),
+    }));
+    f.diagnostics.find
+      .mockReturnValueOnce(query(diagnostics))
+      .mockReturnValueOnce(query(diagnostics.slice(100)));
+
+    const first = await f.service.machineDiagnostics(actor, machineId, {
+      limit: 100,
+    });
+    expect(first.items).toHaveLength(100);
+    expect(first.nextCursor).toEqual(expect.any(String));
+    const second = await f.service.machineDiagnostics(actor, machineId, {
+      limit: 100,
+      cursor: first.nextCursor!,
+    });
+    expect(second.items[0].id).toBe(diagnostics[100]._id);
+    expect(second.nextCursor).toBeNull();
+    expect(f.diagnostics.find.mock.calls[1][0]).toHaveProperty('$and');
+    await expect(
+      f.service.machineDiagnostics(actor, randomUUID(), {
+        limit: 100,
+        cursor: first.nextCursor!,
+      }),
+    ).rejects.toThrow('Invalid cursor');
   });
 
   it('returns a safe not-found error for an unknown machine', async () => {

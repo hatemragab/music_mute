@@ -256,6 +256,13 @@ class PublicationUncertainError extends Error {
   }
 }
 
+class AttemptDeferredError extends Error {
+  constructor(readonly code: string) {
+    super(`Attempt deferred (${code})`);
+    this.name = "AttemptDeferredError";
+  }
+}
+
 export class WorkerRuntime {
   readonly sessionId = randomUUID();
   readonly incarnation = randomUUID();
@@ -304,6 +311,7 @@ export class WorkerRuntime {
   private wakeResolver: (() => void) | null = null;
   private wakeGeneration = 0;
   private eventSequence = 0;
+  private reconcileNotBefore = 0;
 
   constructor(
     private readonly options: WorkerRuntimeOptions,
@@ -343,22 +351,26 @@ export class WorkerRuntime {
       throw error;
     }
     try {
-      const session = await this.control.openSession(
-        this.sessionId,
-        this.incarnation,
-        this.stopping.signal,
+      const session = await this.retryStartupControlRequest(() =>
+        this.control.openSession(
+          this.sessionId,
+          this.incarnation,
+          this.stopping.signal,
+        ),
       );
       if (session.machineId !== this.options.machineId)
         throw new Error("Machine credential resolved to an unexpected machine");
       this.machineId = session.machineId;
-      await this.synchronizeConfig();
+      await this.retryStartupControlRequest(() => this.synchronizeConfig());
       for (const slot of this.options.slots) {
-        await this.control.registerSlot(
-          this.identity(slot),
-          slot.gpuId,
-          slot.slotIndex,
-          slot.recipeIds,
-          this.stopping.signal,
+        await this.retryStartupControlRequest(() =>
+          this.control.registerSlot(
+            this.identity(slot),
+            slot.gpuId,
+            slot.slotIndex,
+            slot.recipeIds,
+            this.stopping.signal,
+          ),
         );
       }
       this.started = true;
@@ -400,11 +412,17 @@ export class WorkerRuntime {
         const wakeGeneration = this.wakeGeneration;
         await this.reconcileOnce();
         if (this.stopping.signal.aborted) break;
-        await this.waitForWake(
-          randomPollDelay(this.options),
-          wakeGeneration,
-          this.stopping.signal,
-        );
+        const deferredMs = this.reconcileNotBefore - Date.now();
+        if (deferredMs > 0)
+          await abortableDelay(deferredMs, this.stopping.signal).catch(
+            () => undefined,
+          );
+        else
+          await this.waitForWake(
+            randomPollDelay(this.options),
+            wakeGeneration,
+            this.stopping.signal,
+          );
       }
     } finally {
       lifecycleWatcher?.close();
@@ -416,7 +434,14 @@ export class WorkerRuntime {
   async reconcileOnce(): Promise<number> {
     this.assertStarted();
     if (this.stopping.signal.aborted) return 0;
-    const config = await this.synchronizeConfig();
+    if (Date.now() < this.reconcileNotBefore) return 0;
+    let config: ConfigResponse;
+    try {
+      config = await this.synchronizeConfig();
+    } catch (error) {
+      if (this.deferReconciliation(error)) return 0;
+      throw error;
+    }
     await this.publishLocalStatus();
     await this.processRemoteCommands(config);
     await this.recoverChildren();
@@ -438,14 +463,20 @@ export class WorkerRuntime {
     for (const slot of idle) {
       const requestId = this.pendingClaims.get(slot.workerId) ?? randomUUID();
       this.pendingClaims.set(slot.workerId, requestId);
-      const response = await this.control.claim(
-        this.identity(slot),
-        slot.gpuId,
-        slot.slotIndex,
-        config.appliedRevision,
-        requestId,
-        this.stopping.signal,
-      );
+      let response: Awaited<ReturnType<RuntimeControlPlane["claim"]>>;
+      try {
+        response = await this.control.claim(
+          this.identity(slot),
+          slot.gpuId,
+          slot.slotIndex,
+          config.appliedRevision,
+          requestId,
+          this.stopping.signal,
+        );
+      } catch (error) {
+        if (this.deferReconciliation(error)) return claimed;
+        throw error;
+      }
       this.pendingClaims.delete(slot.workerId);
       if (!response.claim) continue;
       claimed += 1;
@@ -479,6 +510,35 @@ export class WorkerRuntime {
       await this.publishLocalStatus();
     }
     return claimed;
+  }
+
+  private deferReconciliation(error: unknown): boolean {
+    if (!(error instanceof ControlPlaneError) || !error.retryable) return false;
+    const delayMs = Math.min(
+      60_000,
+      Math.max(200, error.retryAfterMs ?? 1_000),
+    );
+    this.reconcileNotBefore = Date.now() + delayMs;
+    return true;
+  }
+
+  private async retryStartupControlRequest<T>(
+    request: () => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 0; !this.stopping.signal.aborted; attempt += 1) {
+      try {
+        return await request();
+      } catch (error) {
+        if (!(error instanceof ControlPlaneError) || !error.retryable)
+          throw error;
+        const delayMs = Math.min(
+          60_000,
+          Math.max(200, error.retryAfterMs ?? 500 * 2 ** Math.min(attempt, 6)),
+        );
+        await abortableDelay(delayMs, this.stopping.signal);
+      }
+    }
+    throw this.stopping.signal.reason;
   }
 
   hintAvailableWork(): void {
@@ -720,9 +780,10 @@ export class WorkerRuntime {
         claim.attemptId,
         claim.input.contentType,
       );
-      const input = await this.control.inputGrant(
-        claim.attemptId,
-        identity,
+      const input = await this.retryAttemptControlRequest(
+        () =>
+          this.control.inputGrant(claim.attemptId, identity, controller.signal),
+        authority,
         controller.signal,
       );
       if (!sameObject(input.object, claim.input))
@@ -875,6 +936,7 @@ export class WorkerRuntime {
       if (
         error instanceof OwnershipLostError ||
         error instanceof PublicationUncertainError ||
+        error instanceof AttemptDeferredError ||
         isOwnershipRejection(error) ||
         controller.signal.aborted ||
         this.stopping.signal.aborted
@@ -885,11 +947,14 @@ export class WorkerRuntime {
           jobId: claim.jobId,
           attemptId: claim.attemptId,
           code:
-            error instanceof PublicationUncertainError
-              ? "completion-uncertain"
-              : isOwnershipRejection(error)
-                ? "ownership-rejected"
-                : ownershipCode(error, controller.signal.reason),
+            error instanceof AttemptDeferredError
+              ? error.code
+              : error instanceof PublicationUncertainError
+                ? "completion-uncertain"
+                : error instanceof ControlPlaneError &&
+                    isOwnershipRejection(error)
+                  ? "ownership-rejected"
+                  : ownershipCode(error, controller.signal.reason),
           stage: currentStage,
         });
       } else {
@@ -972,6 +1037,37 @@ export class WorkerRuntime {
     }
   }
 
+  private async retryAttemptControlRequest<T>(
+    request: () => Promise<T>,
+    authority: LeaseAuthority,
+    signal: AbortSignal,
+  ): Promise<T> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      authority.assertCurrent();
+      try {
+        const result = await request();
+        authority.assertCurrent();
+        return result;
+      } catch (error) {
+        if (!(error instanceof ControlPlaneError) || !error.retryable)
+          throw error;
+        const code =
+          error.status === 429
+            ? "control-plane-rate-limited"
+            : "control-plane-unavailable";
+        if (attempt === 2) throw new AttemptDeferredError(code);
+        const delayMs =
+          error.status === 429 && error.retryAfterMs !== undefined
+            ? error.retryAfterMs
+            : Math.min(2_000, 500 * 2 ** attempt);
+        if (delayMs >= Math.min(60_000, authority.deadlineRemainingMs()))
+          throw new AttemptDeferredError(code);
+        await abortableDelay(delayMs, signal);
+      }
+    }
+    throw new AttemptDeferredError("control-plane-unavailable");
+  }
+
   private async publishOutput(
     identity: WorkerIdentity,
     claim: Claim,
@@ -983,15 +1079,20 @@ export class WorkerRuntime {
     let lastError: unknown;
     for (let attempt = 0; attempt < maximum; attempt += 1) {
       authority.assertCurrent();
-      const response = await this.control.outputGrant(
-        claim.attemptId,
-        identity,
-        {
-          bytes: output.bytes,
-          sha256: output.sha256,
-          contentType: output.contentType,
-          measuredDurationSeconds: output.measuredOutputDurationSeconds,
-        },
+      const response = await this.retryAttemptControlRequest(
+        () =>
+          this.control.outputGrant(
+            claim.attemptId,
+            identity,
+            {
+              bytes: output.bytes,
+              sha256: output.sha256,
+              contentType: output.contentType,
+              measuredDurationSeconds: output.measuredOutputDurationSeconds,
+            },
+            signal,
+          ),
+        authority,
         signal,
       );
       assertReservation(response, output);

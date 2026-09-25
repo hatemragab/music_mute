@@ -91,7 +91,7 @@ extension JobsAPI {
   }
 
   func processingPolicy() async throws -> ProcessingPolicyResponse {
-    try await send("GET", "/processing-policy?schemaVersion=2")
+    try await send("GET", "/processing-policy?schema_version=2")
   }
   func processingUsage() async throws -> ProcessingUsage {
     try await send("GET", "/processing-usage")
@@ -131,7 +131,7 @@ extension JobsAPI {
   func renewUpload(id: String, requestId: UUID) async throws -> UploadGrant {
     struct Body: Encodable { let requestId: String }
     return try await send(
-      "POST", route(id, "upload-url"),
+      "POST", route(id, "upload-grants"),
       body: encoder.encode(Body(requestId: try requestUUID(requestId))), installation: true)
   }
   func renewUpload(id: String) async throws -> UploadGrant {
@@ -139,7 +139,7 @@ extension JobsAPI {
   }
   func confirmUpload(id: String) async throws -> JobMutation {
     try await send(
-      "POST", route(id, "upload-complete"), body: encoder.encode(Empty()), installation: true)
+      "POST", route(id, "upload-completions"), body: encoder.encode(Empty()), installation: true)
   }
   func list(cursor: String? = nil, status: String? = nil) async throws -> JobPage {
     guard cursor == nil || cursor!.count <= 512 else { throw JobsFailure.invalidInput }
@@ -153,12 +153,12 @@ extension JobsAPI {
   }
   func detail(id: String) async throws -> Job { try await send("GET", route(id)) }
   func cancel(id: String) async throws -> JobMutation {
-    try await send("POST", route(id, "cancel"), body: encoder.encode(Empty()))
+    try await send("POST", route(id, "cancellations"), body: encoder.encode(Empty()))
   }
   func retry(id: String, requestId: UUID) async throws -> JobMutation {
     struct Body: Encodable { let requestId: String }
     return try await send(
-      "POST", route(id, "retry"), body: encoder.encode(Body(requestId: try requestUUID(requestId))),
+      "POST", route(id, "retry-attempts"), body: encoder.encode(Body(requestId: try requestUUID(requestId))),
       installation: true)
   }
   func download(id: String, artifact: String) async throws -> DownloadGrant {
@@ -171,7 +171,7 @@ extension JobsAPI {
       let requestId: String
     }
     return try await send(
-      "POST", route(id, "download-url"),
+      "POST", route(id, "download-grants"),
       body: encoder.encode(Body(artifact: artifact, requestId: try requestUUID(requestId))))
   }
   func rename(id: String, displayName: String) async throws -> Job {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClient, ApiError, submitWithReceiptReadBack } from "./api-client";
+import { toWireCase } from "./wire-case";
 
 const response = (status: number, body: unknown, headers?: HeadersInit) =>
   new Response(JSON.stringify(body), {
@@ -8,13 +9,32 @@ const response = (status: number, body: unknown, headers?: HeadersInit) =>
     headers: { "content-type": "application/json", ...headers },
   });
 
+const problem = (
+  status: number,
+  code: string,
+  detail: string,
+  headers?: HeadersInit,
+) =>
+  response(
+    status,
+    {
+      type: "about:blank",
+      title: status === 429 ? "Too Many Requests" : "Forbidden",
+      status,
+      detail,
+      code,
+      request_id: "request-1",
+    },
+    { "content-type": "application/problem+json; charset=utf-8", ...headers },
+  );
+
 describe("ApiClient", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("refreshes once and retries a safe read after a 401", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(response(401, { code: "UNAUTHENTICATED" }))
+      .mockResolvedValueOnce(problem(401, "UNAUTHENTICATED", "Sign in again"))
       .mockResolvedValueOnce(response(200, { ok: true }));
     vi.stubGlobal("fetch", fetchMock);
     const getToken = vi
@@ -75,7 +95,7 @@ describe("ApiClient", () => {
   it("never replays a mutation after an authentication failure", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(response(401, { code: "UNAUTHENTICATED" }));
+      .mockResolvedValue(problem(401, "UNAUTHENTICATED", "Sign in again"));
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient({
@@ -84,24 +104,51 @@ describe("ApiClient", () => {
     });
 
     await expect(
-      client.post("/admin/releases/release-1/publish", { operationId: "op" }),
+      client.post("/admin/releases/release-1/publications", {
+        operationId: "op",
+      }),
     ).rejects.toMatchObject({ status: 401, code: "UNAUTHENTICATED" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("returns the safe error envelope and Retry-After duration", async () => {
+  it("rejects redirects for authenticated JSON and CSV requests", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response(200, { ok: true }))
+      .mockResolvedValueOnce(
+        new Response("id\n1", {
+          status: 200,
+          headers: { "content-type": "text/csv" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient({
+      origin: "https://api.example.test",
+      getToken: vi.fn().mockResolvedValue("token"),
+    });
+
+    await client.get("/admin/session", { redirect: "follow" });
+    await client.download("/admin/exports/jobs.csv");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://api.example.test/admin/session",
+      expect.objectContaining({ redirect: "error" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.example.test/admin/exports/jobs.csv",
+      expect.objectContaining({ redirect: "error" }),
+    );
+  });
+
+  it("decodes problem JSON and preserves Retry-After", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>().mockResolvedValue(
-        response(
-          429,
-          {
-            code: "RATE_LIMITED",
-            message: "Try again later",
-            requestId: "request-1",
-          },
-          { "retry-after": "12" },
-        ),
+        problem(429, "RATE_LIMITED", "Try again later", {
+          "retry-after": "12",
+        }),
       ),
     );
     const client = new ApiClient({
@@ -114,9 +161,86 @@ describe("ApiClient", () => {
     expect(error).toMatchObject({
       status: 429,
       code: "RATE_LIMITED",
+      message: "Try again later",
       requestId: "request-1",
       retryAfterSeconds: 12,
     });
+  });
+
+  it("does not accept legacy JSON error fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        response(403, {
+          code: "FORBIDDEN",
+          message: "Legacy detail",
+          requestId: "legacy-request",
+        }),
+      ),
+    );
+    const client = new ApiClient({
+      origin: "https://api.example.test",
+      getToken: vi.fn().mockResolvedValue("token"),
+    });
+
+    await expect(client.get("/admin/session")).rejects.toMatchObject({
+      status: 403,
+      code: "REQUEST_FAILED",
+      message: "The request could not be completed.",
+      requestId: undefined,
+    });
+  });
+
+  it("rejects stale camelCase success responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(response(200, { policyRevision: 3 })),
+    );
+    const client = new ApiClient({
+      origin: "https://api.example.test",
+      getToken: vi.fn().mockResolvedValue("token"),
+    });
+
+    await expect(client.get("/admin/worker-fleet/policy")).rejects.toThrow(
+      "non-wire key",
+    );
+  });
+
+  it("uses snake_case JSON and query keys while preserving upload headers", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      response(200, {
+        _id: "record-1",
+        policy_revision: 3,
+        grant: { headers: { "Content-Type": "audio/mpeg" } },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient({
+      origin: "https://api.example.test",
+      getToken: vi.fn().mockResolvedValue("token"),
+    });
+
+    await expect(
+      client.post("/admin/worker-fleet/policy?groupId=studio", {
+        operationId: "op-1",
+        recipes: [{ maxSlotsPerMachine: 2 }],
+      }),
+    ).resolves.toEqual({
+      _id: "record-1",
+      policyRevision: 3,
+      grant: { headers: { "Content-Type": "audio/mpeg" } },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/admin/worker-fleet/policy?group_id=studio",
+      expect.objectContaining({
+        body: JSON.stringify({
+          operation_id: "op-1",
+          recipes: [{ max_slots_per_machine: 2 }],
+        }),
+      }),
+    );
   });
 
   it("rejects insecure non-local API origins", () => {
@@ -133,7 +257,7 @@ describe("ApiClient", () => {
     expect(
       () =>
         new ApiClient({
-          origin: "https://api.example.test/api/v1",
+          origin: "https://api.example.test/admin",
           getToken: vi.fn().mockResolvedValue("token"),
         }),
     ).toThrow("origin");
@@ -148,7 +272,7 @@ describe("ApiClient", () => {
     };
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(response(200, receipt));
+      .mockResolvedValue(response(200, toWireCase(receipt)));
     vi.stubGlobal("fetch", fetchMock);
     const client = new ApiClient({
       origin: "https://api.example.test",

@@ -4,6 +4,7 @@ import { AdminAbuseProtectionService } from '../src/abuse-protection/admin-abuse
 import {
   createAdminHarness,
   type AdminHarness,
+  wireJson,
 } from './helpers/admin-harness.js';
 
 describe('admin abuse protection HTTP boundary', () => {
@@ -85,7 +86,7 @@ describe('admin abuse protection HTTP boundary', () => {
       )
       .expect(400);
     await harness
-      .request('put', path, body, harness.signInAs('support'))
+      .request('put', path, wireJson(body), harness.signInAs('support'))
       .expect(200);
     expect(abuse.putRestriction).toHaveBeenCalledOnce();
   });
@@ -109,11 +110,11 @@ describe('admin abuse protection HTTP boundary', () => {
       .request(
         'delete',
         path,
-        {
+        wireJson({
           expectedRevision: 1,
           operationId: '14b2d476-e40e-4aeb-a8dd-24db12337695',
           reason: 'Review complete',
-        },
+        }),
         harness.signInAs('support'),
       )
       .expect(200);

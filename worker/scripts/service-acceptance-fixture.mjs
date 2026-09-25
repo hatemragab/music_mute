@@ -51,8 +51,40 @@ const recipe = {
 };
 
 function send(response, status, value) {
-  response.writeHead(status, { "Content-Type": "application/json" });
-  response.end(JSON.stringify(value));
+  const problem = status >= 400;
+  response.writeHead(status, {
+    "Content-Type": problem ? "application/problem+json" : "application/json",
+  });
+  response.end(
+    JSON.stringify(
+      problem
+        ? {
+            type: "about:blank",
+            title: "Request failed",
+            status,
+            detail: "The fixture request could not be completed.",
+            code: value.code,
+            request_id: "acceptance-fixture",
+          }
+        : convertKeys(value, (key) =>
+            key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+          ),
+    ),
+  );
+}
+
+function convertKeys(value, keyCase, parentKey) {
+  if (Array.isArray(value))
+    return value.map((item) => convertKeys(item, keyCase, parentKey));
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      keyCase(key),
+      key === "headers" || (parentKey === "signed" && key === "metadata")
+        ? item
+        : convertKeys(item, keyCase, key),
+    ]),
+  );
 }
 
 async function readBody(request, limit = 64 * 1024) {
@@ -76,10 +108,7 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? "/", "http://127.0.0.1:3100");
     const method = request.method ?? "GET";
-    if (
-      url.pathname.startsWith("/worker/") ||
-      url.pathname.startsWith("/api/")
-    ) {
+    if (url.pathname.startsWith("/worker/")) {
       if (request.headers.authorization !== `Bearer ${credential}`)
         return send(response, 401, { code: "WORKER_UNAUTHENTICATED" });
     }
@@ -89,18 +118,22 @@ const server = createServer(async (request, response) => {
         : Buffer.alloc(0);
     const body =
       method === "POST" && rawBody.length > 0
-        ? JSON.parse(rawBody.toString("utf8"))
+        ? convertKeys(JSON.parse(rawBody.toString("utf8")), (key) =>
+            key.replace(/_([a-z0-9])/g, (_match, letter) =>
+              letter.toUpperCase(),
+            ),
+          )
         : {};
     const now = new Date().toISOString();
     record(method, url.pathname);
 
-    if (url.pathname.endsWith("/worker/v1/session"))
+    if (url.pathname.endsWith("/worker/sessions"))
       return send(response, 200, {
         machineId: config.machineId,
         policyRevision: 1,
         serverTime: now,
       });
-    if (url.pathname.endsWith("/worker/v1/config"))
+    if (url.pathname.endsWith("/worker/config"))
       return send(response, 200, {
         machineId: config.machineId,
         machineStatus: "active",
@@ -125,14 +158,14 @@ const server = createServer(async (request, response) => {
         commands: [],
         serverTime: now,
       });
-    if (url.pathname.endsWith("/worker/v1/slots"))
+    if (url.pathname.endsWith("/worker/slots"))
       return send(response, 200, {
         workerId: body.workerId,
         state: "idle",
         revision: 0,
         serverTime: now,
       });
-    if (url.pathname.endsWith("/worker/v1/claims")) {
+    if (url.pathname.endsWith("/worker/claims")) {
       if (claimed) return send(response, 200, { claim: null, serverTime: now });
       claimed = true;
       return send(response, 200, {
@@ -155,7 +188,7 @@ const server = createServer(async (request, response) => {
         serverTime: now,
       });
     }
-    if (url.pathname.endsWith("/worker/v1/leases/renew"))
+    if (url.pathname.endsWith("/worker/leases/renewals"))
       return send(response, 200, {
         requestId: body.requestId,
         serverTime: now,
@@ -166,7 +199,7 @@ const server = createServer(async (request, response) => {
           leaseExpiresAt: new Date(Date.now() + 90_000).toISOString(),
         })),
       });
-    if (url.pathname.endsWith(`/${attemptId}/input-grant`))
+    if (url.pathname.endsWith(`/${attemptId}/input-grants`))
       return send(response, 200, {
         requestId: body.requestId,
         attemptId,
@@ -189,7 +222,7 @@ const server = createServer(async (request, response) => {
       });
       return response.end(input);
     }
-    if (url.pathname.endsWith(`/${attemptId}/output-grant`))
+    if (url.pathname.endsWith(`/${attemptId}/output-grants`))
       return send(response, 200, {
         requestId: body.requestId,
         attemptId,
@@ -225,7 +258,7 @@ const server = createServer(async (request, response) => {
       response.writeHead(200, { "x-amz-version-id": "acceptance-output-v1" });
       return response.end();
     }
-    if (url.pathname.endsWith(`/${attemptId}/complete`)) {
+    if (url.pathname.endsWith(`/${attemptId}/completions`)) {
       completed = true;
       console.log("COMPLETE");
       return send(response, 200, {
@@ -235,7 +268,7 @@ const server = createServer(async (request, response) => {
         replayed: false,
       });
     }
-    if (url.pathname.endsWith(`/${attemptId}/fail`)) {
+    if (url.pathname.endsWith(`/${attemptId}/failures`)) {
       console.log(`FAILED ${String(body.code ?? "unknown")}`);
       return send(response, 200, { attemptId, jobId, status: "failed" });
     }

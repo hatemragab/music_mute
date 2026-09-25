@@ -6,7 +6,7 @@
       "path": "/admin/session",
       "response": {
         "uid": "owner-fixture",
-        "verifiedEmail": "owner-fixture@example.invalid",
+        "verified_email": "owner-fixture@example.invalid",
         "role": "owner",
         "permissions": [
           "overview.read",
@@ -32,9 +32,9 @@
           "workers.logs.read",
           "admin.access.manage"
         ],
-        "accessRevision": 0,
-        "authTimeSec": 1789079284,
-        "serverTime": "2026-01-01T00:00:00.000Z"
+        "access_revision": 0,
+        "auth_time_sec": 1789079284,
+        "server_time": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -42,12 +42,12 @@
       "path": "/admin/access",
       "response": {
         "uid": "support-fixture",
-        "verifiedEmail": "support-fixture@example.invalid",
+        "verified_email": "support-fixture@example.invalid",
         "role": "support",
         "active": true,
         "revision": 0,
-        "createdAt": "2026-01-01T00:00:00.000Z",
-        "updatedAt": "2026-01-01T00:00:00.000Z"
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -55,7 +55,7 @@
       "path": "/admin/session",
       "response": {
         "uid": "support-fixture",
-        "verifiedEmail": "support-fixture@example.invalid",
+        "verified_email": "support-fixture@example.invalid",
         "role": "support",
         "permissions": [
           "overview.read",
@@ -72,9 +72,9 @@
           "workers.read",
           "workers.logs.read"
         ],
-        "accessRevision": 0,
-        "authTimeSec": 1789079284,
-        "serverTime": "2026-01-01T00:00:00.000Z"
+        "access_revision": 0,
+        "auth_time_sec": 1789079284,
+        "server_time": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -82,15 +82,15 @@
       "path": "/admin/users/000000000000000000000001/restriction",
       "response": {
         "id": "000000000000000000000060",
-        "accountId": "000000000000000000000001",
+        "account_id": "000000000000000000000001",
         "status": "active",
-        "reasonCode": "manual_review",
+        "reason_code": "manual_review",
         "note": "Owned dashboard integration fixture",
-        "startsAt": "2026-01-01T00:00:00.000Z",
-        "expiresAt": null,
-        "createdBy": "support-fixture",
-        "updatedBy": "support-fixture",
-        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "starts_at": "2026-01-01T00:00:00.000Z",
+        "expires_at": null,
+        "created_by": "support-fixture",
+        "updated_by": "support-fixture",
+        "updated_at": "2026-01-01T00:00:00.000Z",
         "revision": 1
       }
     },
@@ -99,15 +99,15 @@
       "path": "/admin/users/000000000000000000000001/restriction",
       "response": {
         "id": "000000000000000000000060",
-        "accountId": "000000000000000000000001",
+        "account_id": "000000000000000000000001",
         "status": "active",
-        "reasonCode": "manual_review",
+        "reason_code": "manual_review",
         "note": "Owned dashboard integration fixture",
-        "startsAt": "2026-01-01T00:00:00.000Z",
-        "expiresAt": null,
-        "createdBy": "support-fixture",
-        "updatedBy": "support-fixture",
-        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "starts_at": "2026-01-01T00:00:00.000Z",
+        "expires_at": null,
+        "created_by": "support-fixture",
+        "updated_by": "support-fixture",
+        "updated_at": "2026-01-01T00:00:00.000Z",
         "revision": 1
       }
     },
@@ -116,8 +116,8 @@
       "path": "/admin/abuse-events",
       "response": {
         "items": [],
-        "nextCursor": null,
-        "asOf": "2026-01-01T00:00:00.000Z"
+        "next_cursor": null,
+        "as_of": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -125,9 +125,9 @@
       "path": "/admin/jobs/000000000000000000000001/media-grants",
       "response": {
         "url": "https://example.invalid/fixture-signed-grant",
-        "expiresAt": "2026-01-01T00:00:00.000Z",
+        "expires_at": "2026-01-01T00:00:00.000Z",
         "bytes": 42,
-        "contentType": "audio/mpeg",
+        "content_type": "audio/mpeg",
         "filename": "input-000000000000000000000001.mp3"
       }
     },
@@ -136,58 +136,58 @@
       "path": "/admin/jobs/000000000000000000000001",
       "response": {
         "id": "000000000000000000000001",
-        "userId": "000000000000000000000001",
+        "user_id": "000000000000000000000001",
         "status": "queued",
-        "createdAt": "2026-01-01T00:00:00.000Z",
-        "queuedAt": "2026-01-01T00:00:00.000Z",
-        "startedAt": "2026-01-01T00:00:00.000Z",
-        "finishedAt": null,
-        "elapsedSeconds": 0,
-        "queuePosition": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "queued_at": "2026-01-01T00:00:00.000Z",
+        "started_at": "2026-01-01T00:00:00.000Z",
+        "finished_at": null,
+        "elapsed_seconds": 0,
+        "queue_position": 1,
         "revision": 3,
-        "lastError": null,
-        "displayName": null,
-        "retryOfJobId": null,
-        "stageTimings": [
+        "last_error": null,
+        "display_name": null,
+        "retry_of_job_id": null,
+        "stage_timings": [
           {
             "stage": "upload",
-            "startedAt": "2026-01-01T00:00:00.000Z",
-            "finishedAt": null,
-            "durationSeconds": null
+            "started_at": "2026-01-01T00:00:00.000Z",
+            "finished_at": null,
+            "duration_seconds": null
           },
           {
             "stage": "queued",
-            "startedAt": "2026-01-01T00:00:00.000Z",
-            "finishedAt": "2026-01-01T00:00:00.000Z",
-            "durationSeconds": 0.012
+            "started_at": "2026-01-01T00:00:00.000Z",
+            "finished_at": "2026-01-01T00:00:00.000Z",
+            "duration_seconds": 0.012
           },
           {
             "stage": "validating",
-            "startedAt": "2026-01-01T00:00:00.000Z",
-            "finishedAt": null,
-            "durationSeconds": null
+            "started_at": "2026-01-01T00:00:00.000Z",
+            "finished_at": null,
+            "duration_seconds": null
           },
           {
             "stage": "processing",
-            "startedAt": null,
-            "finishedAt": null,
-            "durationSeconds": 0
+            "started_at": null,
+            "finished_at": null,
+            "duration_seconds": 0
           },
           {
             "stage": "uploading_result",
-            "startedAt": null,
-            "finishedAt": null,
-            "durationSeconds": null
+            "started_at": null,
+            "finished_at": null,
+            "duration_seconds": null
           }
         ],
-        "declaredDurationSeconds": 1,
-        "measuredDurationSeconds": null,
+        "declared_duration_seconds": 1,
+        "measured_duration_seconds": null,
         "media": {
-          "inputAvailable": true,
-          "resultAvailable": false
+          "input_available": true,
+          "result_available": false
         },
-        "userEmail": "user@example.invalid",
-        "userDisplayName": "Fixture user"
+        "user_email": "user@example.invalid",
+        "user_display_name": "Fixture user"
       }
     },
     {
@@ -197,47 +197,47 @@
         "id": "000000000000000000000001",
         "platform": "android",
         "source": "direct_apk",
-        "versionName": "1.0.0",
-        "buildNumber": 1,
-        "changelogEn": "Fixture release notes",
-        "storeUrl": null,
+        "version_name": "1.0.0",
+        "build_number": 1,
+        "changelog_en": "Fixture release notes",
+        "store_url": null,
         "state": "draft",
-        "artifactState": null,
+        "artifact_state": null,
         "revision": 0,
-        "createdAt": "2026-01-01T00:00:00.000Z",
-        "publishedAt": null,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "published_at": null,
         "bytes": null,
-        "sha256Hex": null,
-        "signerSha256Hex": null,
-        "rejectionCode": null,
-        "publishedBy": null
+        "sha256_hex": null,
+        "signer_sha256_hex": null,
+        "rejection_code": null,
+        "published_by": null
       }
     },
     {
       "method": "POST",
       "path": "/admin/releases/000000000000000000000001/uploads",
       "response": {
-        "uploadId": "000000000000000000000001",
+        "upload_id": "000000000000000000000001",
         "grant": {
           "method": "PUT",
           "url": "https://example.invalid/fixture-signed-grant",
-          "expiresAt": "2026-01-01T00:00:00.000Z",
+          "expires_at": "2026-01-01T00:00:00.000Z",
           "headers": {
             "Content-Type": "application/vnd.android.package-archive",
             "x-amz-checksum-sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             "If-None-Match": "*"
           }
         },
-        "expectedBytes": 32,
-        "expectedSha256": "000000000000000000000001000000000000000000000001aaaaaaaaaaaaaaaa"
+        "expected_bytes": 32,
+        "expected_sha256": "000000000000000000000001000000000000000000000001aaaaaaaaaaaaaaaa"
       }
     },
     {
       "method": "POST",
-      "path": "/admin/releases/000000000000000000000001/uploads/000000000000000000000001/complete",
+      "path": "/admin/releases/000000000000000000000001/uploads/000000000000000000000001/completions",
       "response": {
-        "artifactState": "verified",
-        "checkedAt": "2026-01-01T00:00:00.000Z"
+        "artifact_state": "verified",
+        "checked_at": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -247,20 +247,20 @@
         "id": "000000000000000000000001",
         "platform": "android",
         "source": "direct_apk",
-        "versionName": "1.0.0",
-        "buildNumber": 1,
-        "changelogEn": "Fixture release notes",
-        "storeUrl": null,
+        "version_name": "1.0.0",
+        "build_number": 1,
+        "changelog_en": "Fixture release notes",
+        "store_url": null,
         "state": "draft",
-        "artifactState": "verified",
+        "artifact_state": "verified",
         "revision": 3,
-        "createdAt": "2026-01-01T00:00:00.000Z",
-        "publishedAt": null,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "published_at": null,
         "bytes": 32,
-        "sha256Hex": "000000000000000000000001000000000000000000000001aaaaaaaaaaaaaaaa",
-        "signerSha256Hex": "000000000000000000000001000000000000000000000001bbbbbbbbbbbbbbbb",
-        "rejectionCode": null,
-        "publishedBy": null
+        "sha256_hex": "000000000000000000000001000000000000000000000001aaaaaaaaaaaaaaaa",
+        "signer_sha256_hex": "000000000000000000000001000000000000000000000001bbbbbbbbbbbbbbbb",
+        "rejection_code": null,
+        "published_by": null
       }
     },
     {
@@ -269,81 +269,81 @@
       "response": {
         "revision": 0,
         "android": {
-          "minimumBuild": null,
+          "minimum_build": null,
           "source": "direct_apk",
-          "directReleaseId": null,
-          "storeReleaseId": null
+          "direct_release_id": null,
+          "store_release_id": null
         },
         "ios": {
-          "minimumBuild": null,
-          "storeReleaseId": null
+          "minimum_build": null,
+          "store_release_id": null
         }
       }
     },
     {
       "method": "POST",
-      "path": "/admin/releases/000000000000000000000001/publish",
+      "path": "/admin/releases/000000000000000000000001/publications",
       "response": {
         "release": {
           "id": "000000000000000000000001",
           "platform": "android",
           "source": "direct_apk",
-          "versionName": "1.0.0",
-          "buildNumber": 1,
-          "changelogEn": "Fixture release notes",
-          "storeUrl": null,
+          "version_name": "1.0.0",
+          "build_number": 1,
+          "changelog_en": "Fixture release notes",
+          "store_url": null,
           "state": "published",
-          "artifactState": "verified",
+          "artifact_state": "verified",
           "revision": 4,
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "publishedAt": "2026-01-01T00:00:00.000Z",
+          "created_at": "2026-01-01T00:00:00.000Z",
+          "published_at": "2026-01-01T00:00:00.000Z",
           "bytes": 32,
-          "sha256Hex": "000000000000000000000001000000000000000000000001aaaaaaaaaaaaaaaa",
-          "signerSha256Hex": "000000000000000000000001000000000000000000000001bbbbbbbbbbbbbbbb",
-          "rejectionCode": null,
-          "publishedBy": "owner-fixture"
+          "sha256_hex": "000000000000000000000001000000000000000000000001aaaaaaaaaaaaaaaa",
+          "signer_sha256_hex": "000000000000000000000001000000000000000000000001bbbbbbbbbbbbbbbb",
+          "rejection_code": null,
+          "published_by": "owner-fixture"
         },
-        "policyRevision": 1,
-        "operationId": "00000000-0000-4000-8000-000000000001"
+        "policy_revision": 1,
+        "operation_id": "00000000-0000-4000-8000-000000000001"
       }
     },
     {
       "method": "POST",
-      "path": "/admin/releases/000000000000000000000001/withdraw",
+      "path": "/admin/releases/000000000000000000000001/withdrawals",
       "response": {
         "release": {
           "id": "000000000000000000000001",
           "platform": "android",
           "source": "direct_apk",
-          "versionName": "1.0.0",
-          "buildNumber": 1,
-          "changelogEn": "Fixture release notes",
-          "storeUrl": null,
+          "version_name": "1.0.0",
+          "build_number": 1,
+          "changelog_en": "Fixture release notes",
+          "store_url": null,
           "state": "withdrawn",
-          "artifactState": "verified",
+          "artifact_state": "verified",
           "revision": 5,
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "publishedAt": "2026-01-01T00:00:00.000Z",
+          "created_at": "2026-01-01T00:00:00.000Z",
+          "published_at": "2026-01-01T00:00:00.000Z",
           "bytes": 32,
-          "sha256Hex": "000000000000000000000001000000000000000000000001aaaaaaaaaaaaaaaa",
-          "signerSha256Hex": "000000000000000000000001000000000000000000000001bbbbbbbbbbbbbbbb",
-          "rejectionCode": null,
-          "publishedBy": "owner-fixture"
+          "sha256_hex": "000000000000000000000001000000000000000000000001aaaaaaaaaaaaaaaa",
+          "signer_sha256_hex": "000000000000000000000001000000000000000000000001bbbbbbbbbbbbbbbb",
+          "rejection_code": null,
+          "published_by": "owner-fixture"
         },
-        "policyRevision": 2,
-        "operationId": "00000000-0000-4000-8000-000000000001"
+        "policy_revision": 2,
+        "operation_id": "00000000-0000-4000-8000-000000000001"
       }
     },
     {
       "method": "GET",
       "path": "/admin/overview",
       "response": {
-        "asOf": "2026-01-01T00:00:00.000Z",
+        "as_of": "2026-01-01T00:00:00.000Z",
         "from": "2026-01-01T00:00:00.000Z",
         "to": "2026-01-01T00:00:00.000Z",
         "counts": {
           "submitted": 1,
-          "processingActiveUsers": 1,
+          "processing_active_users": 1,
           "completed": 0,
           "failed": 0,
           "cancelled": 0
@@ -351,13 +351,13 @@
         "queue": {
           "waiting": 1,
           "processing": 0,
-          "oldestWaitSeconds": 0.23
+          "oldest_wait_seconds": 0.23
         },
         "timings": {
-          "meanQueueWaitSeconds": 0.012,
-          "meanProcessingSeconds": null,
-          "sampleCount": {
-            "queueWait": 1,
+          "mean_queue_wait_seconds": 0.012,
+          "mean_processing_seconds": null,
+          "sample_count": {
+            "queue_wait": 1,
             "processing": 0
           }
         },
@@ -377,11 +377,11 @@
             "cancelled": 0
           }
         ],
-        "releaseSummary": {
+        "release_summary": {
           "draft": 0,
           "published": 0,
           "withdrawn": 1,
-          "rejectedArtifacts": 0
+          "rejected_artifacts": 0
         }
       }
     },
@@ -392,25 +392,25 @@
         "items": [
           {
             "uid": "owner-fixture",
-            "verifiedEmail": "owner-fixture@example.invalid",
+            "verified_email": "owner-fixture@example.invalid",
             "role": "owner",
             "active": true,
             "revision": 0,
-            "createdAt": "2026-01-01T00:00:00.000Z",
-            "updatedAt": "2026-01-01T00:00:00.000Z"
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z"
           },
           {
             "uid": "support-fixture",
-            "verifiedEmail": "support-fixture@example.invalid",
+            "verified_email": "support-fixture@example.invalid",
             "role": "support",
             "active": true,
             "revision": 0,
-            "createdAt": "2026-01-01T00:00:00.000Z",
-            "updatedAt": "2026-01-01T00:00:00.000Z"
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z"
           }
         ],
-        "nextCursor": null,
-        "asOf": "2026-01-01T00:00:00.000Z"
+        "next_cursor": null,
+        "as_of": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -420,23 +420,23 @@
         "items": [
           {
             "id": "000000000000000000000001",
-            "userId": "000000000000000000000001",
+            "user_id": "000000000000000000000001",
             "status": "queued",
-            "createdAt": "2026-01-01T00:00:00.000Z",
-            "queuedAt": "2026-01-01T00:00:00.000Z",
-            "startedAt": "2026-01-01T00:00:00.000Z",
-            "finishedAt": null,
-            "elapsedSeconds": 0,
-            "queuePosition": 1,
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "queued_at": "2026-01-01T00:00:00.000Z",
+            "started_at": "2026-01-01T00:00:00.000Z",
+            "finished_at": null,
+            "elapsed_seconds": 0,
+            "queue_position": 1,
             "revision": 3,
-            "lastError": null,
-            "displayName": null,
-            "userEmail": "user@example.invalid",
-            "userDisplayName": "Fixture user"
+            "last_error": null,
+            "display_name": null,
+            "user_email": "user@example.invalid",
+            "user_display_name": "Fixture user"
           }
         ],
-        "nextCursor": null,
-        "asOf": "2026-01-01T00:00:00.000Z"
+        "next_cursor": null,
+        "as_of": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -447,15 +447,15 @@
           {
             "id": "000000000000000000000001",
             "email": "user@example.invalid",
-            "displayName": "Fixture user",
+            "display_name": "Fixture user",
             "status": "active",
-            "createdAt": "2026-01-01T00:00:00.000Z",
-            "updatedAt": "2026-01-01T00:00:00.000Z",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
             "revision": 1
           }
         ],
-        "nextCursor": null,
-        "asOf": "2026-01-01T00:00:00.000Z"
+        "next_cursor": null,
+        "as_of": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -467,19 +467,19 @@
             "id": "000000000000000000000001",
             "platform": "android",
             "source": "direct_apk",
-            "versionName": "1.0.0",
-            "buildNumber": 1,
-            "changelogEn": "Fixture release notes",
-            "storeUrl": null,
+            "version_name": "1.0.0",
+            "build_number": 1,
+            "changelog_en": "Fixture release notes",
+            "store_url": null,
             "state": "withdrawn",
-            "artifactState": "verified",
+            "artifact_state": "verified",
             "revision": 5,
-            "createdAt": "2026-01-01T00:00:00.000Z",
-            "publishedAt": "2026-01-01T00:00:00.000Z"
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "published_at": "2026-01-01T00:00:00.000Z"
           }
         ],
-        "nextCursor": null,
-        "asOf": "2026-01-01T00:00:00.000Z"
+        "next_cursor": null,
+        "as_of": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -488,28 +488,28 @@
       "response": {
         "plan": "standard",
         "revision": 0,
-        "acceptNewJobs": true,
-        "maintenanceMessageEn": "",
-        "maintenanceMessageAr": null,
+        "accept_new_jobs": true,
+        "maintenance_message_en": "",
+        "maintenance_message_ar": null,
         "values": {
-          "monthlyProcessingSeconds": 7200,
-          "maxDurationSeconds": 1200,
-          "maxPreparedAudioBytes": 50000000,
-          "dailyUploadGrants": 30,
-          "monthlyUploadGrants": 200,
-          "monthlyConfirmedUploadBytes": 1000000000,
-          "maxWaitingJobs": 3,
-          "maxProcessingJobs": 1,
-          "maxInfrastructureAttempts": 3,
-          "maxClientInputAttempts": 5,
-          "monthlyDownloadGrants": 150,
-          "monthlyEstimatedDownloadBytes": 10000000000,
-          "maxRetainedOutputBytes": 1000000000,
-          "signedUrlTtlSeconds": 600,
-          "monthlyServiceOutboundBytes": 80000000000,
-          "deletionGraceHours": 360
+          "monthly_processing_seconds": 7200,
+          "max_duration_seconds": 1200,
+          "max_prepared_audio_bytes": 50000000,
+          "daily_upload_grants": 30,
+          "monthly_upload_grants": 200,
+          "monthly_confirmed_upload_bytes": 1000000000,
+          "max_waiting_jobs": 3,
+          "max_processing_jobs": 1,
+          "max_infrastructure_attempts": 3,
+          "max_client_input_attempts": 5,
+          "monthly_download_grants": 150,
+          "monthly_estimated_download_bytes": 10000000000,
+          "max_retained_output_bytes": 1000000000,
+          "signed_url_ttl_seconds": 600,
+          "monthly_service_outbound_bytes": 80000000000,
+          "deletion_grace_hours": 360
         },
-        "enforcedFeatures": [
+        "enforced_features": [
           "processing_minutes",
           "media_limits",
           "upload_limits",
@@ -517,8 +517,8 @@
           "retained_storage",
           "service_outbound"
         ],
-        "updatedBy": "system",
-        "updatedAt": "2026-01-01T00:00:00.000Z"
+        "updated_by": "system",
+        "updated_at": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -526,34 +526,34 @@
       "path": "/admin/health",
       "response": {
         "status": "healthy",
-        "asOf": "2026-01-01T00:00:00.000Z",
+        "as_of": "2026-01-01T00:00:00.000Z",
         "components": [
           {
             "name": "api",
             "status": "healthy",
-            "checkedAt": "2026-01-01T00:00:00.000Z",
+            "checked_at": "2026-01-01T00:00:00.000Z",
             "code": null
           },
           {
             "name": "mongodb",
             "status": "healthy",
-            "checkedAt": "2026-01-01T00:00:00.000Z",
+            "checked_at": "2026-01-01T00:00:00.000Z",
             "code": null
           },
           {
             "name": "redis",
             "status": "healthy",
-            "checkedAt": "2026-01-01T00:00:00.000Z",
+            "checked_at": "2026-01-01T00:00:00.000Z",
             "code": null
           },
           {
             "name": "storage",
             "status": "healthy",
-            "checkedAt": "2026-01-01T00:00:00.000Z",
+            "checked_at": "2026-01-01T00:00:00.000Z",
             "code": null
           }
         ],
-        "activeAlertCount": 0
+        "active_alert_count": 0
       }
     },
     {
@@ -561,8 +561,8 @@
       "path": "/admin/alerts",
       "response": {
         "items": [],
-        "nextCursor": null,
-        "asOf": "2026-01-01T00:00:00.000Z"
+        "next_cursor": null,
+        "as_of": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -571,15 +571,15 @@
       "response": {
         "id": "000000000000000000000001",
         "email": "user@example.invalid",
-        "displayName": "Fixture user",
+        "display_name": "Fixture user",
         "status": "active",
-        "createdAt": "2026-01-01T00:00:00.000Z",
-        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
         "revision": 1,
-        "processingCounts": {
+        "processing_counts": {
           "queued": 1
         },
-        "recentJobIds": ["000000000000000000000001"],
+        "recent_job_ids": ["000000000000000000000001"],
         "deletion": null
       }
     },
@@ -587,9 +587,9 @@
       "method": "GET",
       "path": "/admin/operations/00000000-0000-4000-8000-000000000001",
       "response": {
-        "operationId": "00000000-0000-4000-8000-000000000001",
+        "operation_id": "00000000-0000-4000-8000-000000000001",
         "status": "succeeded",
-        "resourceId": "support-fixture",
+        "resource_id": "support-fixture",
         "revision": 0
       }
     },
@@ -600,143 +600,143 @@
         "items": [
           {
             "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
+            "actor_uid": "owner-fixture",
             "action": "exports.jobs",
-            "resourceType": "export",
-            "resourceId": "00000000-0000-4000-8000-000000000001",
-            "operationId": "00000000-0000-4000-8000-000000000001",
+            "resource_type": "export",
+            "resource_id": "00000000-0000-4000-8000-000000000001",
+            "operation_id": "00000000-0000-4000-8000-000000000001",
             "reason": null,
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": null,
-            "nextRevision": null,
+            "previous_revision": null,
+            "next_revision": null,
             "outcome": "succeeded",
-            "exportMetadata": {
+            "export_metadata": {
               "dataset": "jobs",
               "from": "2026-01-01T00:00:00.000Z",
               "to": "2026-01-01T00:00:00.000Z",
-              "rowCount": 1
+              "row_count": 1
             }
           },
           {
             "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
+            "actor_uid": "owner-fixture",
             "action": "releases.withdraw",
-            "resourceType": "release",
-            "resourceId": "000000000000000000000001",
-            "operationId": "00000000-0000-4000-8000-000000000001",
+            "resource_type": "release",
+            "resource_id": "000000000000000000000001",
+            "operation_id": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": 1,
-            "nextRevision": 2,
+            "previous_revision": 1,
+            "next_revision": 2,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
+            "actor_uid": "owner-fixture",
             "action": "releases.publish",
-            "resourceType": "release",
-            "resourceId": "000000000000000000000001",
-            "operationId": "00000000-0000-4000-8000-000000000001",
+            "resource_type": "release",
+            "resource_id": "000000000000000000000001",
+            "operation_id": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": 0,
-            "nextRevision": 1,
+            "previous_revision": 0,
+            "next_revision": 1,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
+            "actor_uid": "owner-fixture",
             "action": "releases.upload.verified",
-            "resourceType": "release_upload",
-            "resourceId": "000000000000000000000001",
-            "operationId": "00000000-0000-4000-8000-000000000001",
+            "resource_type": "release_upload",
+            "resource_id": "000000000000000000000001",
+            "operation_id": "00000000-0000-4000-8000-000000000001",
             "reason": null,
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": 2,
-            "nextRevision": 3,
+            "previous_revision": 2,
+            "next_revision": 3,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
+            "actor_uid": "owner-fixture",
             "action": "releases.upload.complete",
-            "resourceType": "release_upload",
-            "resourceId": "000000000000000000000001",
-            "operationId": "00000000-0000-4000-8000-000000000001",
+            "resource_type": "release_upload",
+            "resource_id": "000000000000000000000001",
+            "operation_id": "00000000-0000-4000-8000-000000000001",
             "reason": null,
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": 1,
-            "nextRevision": 2,
+            "previous_revision": 1,
+            "next_revision": 2,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
+            "actor_uid": "owner-fixture",
             "action": "releases.upload.reserve",
-            "resourceType": "release_upload",
-            "resourceId": "000000000000000000000001",
-            "operationId": "00000000-0000-4000-8000-000000000001",
+            "resource_type": "release_upload",
+            "resource_id": "000000000000000000000001",
+            "operation_id": "00000000-0000-4000-8000-000000000001",
             "reason": null,
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": 0,
-            "nextRevision": 1,
+            "previous_revision": 0,
+            "next_revision": 1,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
+            "actor_uid": "owner-fixture",
             "action": "releases.create",
-            "resourceType": "release",
-            "resourceId": "000000000000000000000001",
-            "operationId": "00000000-0000-4000-8000-000000000001",
+            "resource_type": "release",
+            "resource_id": "000000000000000000000001",
+            "operation_id": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": null,
-            "nextRevision": 0,
+            "previous_revision": null,
+            "next_revision": 0,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actorUid": "support-fixture",
+            "actor_uid": "support-fixture",
             "action": "media.input.play.grant",
-            "resourceType": "job",
-            "resourceId": "000000000000000000000001",
-            "operationId": "00000000-0000-4000-8000-000000000001",
+            "resource_type": "job",
+            "resource_id": "000000000000000000000001",
+            "operation_id": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": null,
-            "nextRevision": null,
+            "previous_revision": null,
+            "next_revision": null,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actorUid": "support-fixture",
+            "actor_uid": "support-fixture",
             "action": "users.processing.suspend",
-            "resourceType": "user",
-            "resourceId": "000000000000000000000001",
-            "operationId": "00000000-0000-4000-8000-000000000001",
+            "resource_type": "user",
+            "resource_id": "000000000000000000000001",
+            "operation_id": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": 0,
-            "nextRevision": 1,
+            "previous_revision": 0,
+            "next_revision": 1,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actorUid": "owner-fixture",
+            "actor_uid": "owner-fixture",
             "action": "admin.access.create",
-            "resourceType": "admin_access",
-            "resourceId": "support-fixture",
-            "operationId": "00000000-0000-4000-8000-000000000001",
+            "resource_type": "admin_access",
+            "resource_id": "support-fixture",
+            "operation_id": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previousRevision": null,
-            "nextRevision": 0,
+            "previous_revision": null,
+            "next_revision": 0,
             "outcome": "succeeded"
           }
         ],
-        "nextCursor": null,
-        "asOf": "2026-01-01T00:00:00.000Z"
+        "next_cursor": null,
+        "as_of": "2026-01-01T00:00:00.000Z"
       }
     }
   ]

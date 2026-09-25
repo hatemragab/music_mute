@@ -8,6 +8,23 @@ test("compiled backend accepts the standard account policy", async ({
   await setDashboardRole(page, "owner");
   await page.goto("/overview");
   const result = await page.evaluate(async (root) => {
+    const wireCase = <T>(value: T, fromWire = false): T => {
+      if (Array.isArray(value))
+        return value.map((item) => wireCase(item, fromWire)) as T;
+      if (value === null || typeof value !== "object") return value;
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [
+          fromWire
+            ? key.replace(
+                /_([a-z0-9])/g,
+                (match, letter: string, offset: number) =>
+                  offset === 0 ? match : letter.toUpperCase(),
+              )
+            : key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+          wireCase(item, fromWire),
+        ]),
+      ) as T;
+    };
     const request = async (method: string, path: string, body?: unknown) => {
       const response = await fetch(root + path, {
         method,
@@ -15,11 +32,11 @@ test("compiled backend accepts the standard account policy", async ({
           authorization: "Bearer owner-fixture",
           "content-type": "application/json",
         },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined ? undefined : JSON.stringify(wireCase(body)),
       });
       return {
         status: response.status,
-        value: await response.json().catch(() => null),
+        value: wireCase(await response.json().catch(() => null), true),
       };
     };
     const before = await request("GET", "/admin/settings/account-policy");

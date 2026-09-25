@@ -22,14 +22,21 @@ test("Google admission requires a backend-approved administrator session", async
 test("backend denial never renders privileged navigation", async ({ page }) => {
   await setDashboardRole(page, "owner");
   await installDashboardFixture(page);
-  await page.route("**/api/v1/admin/session", async (route) => {
+  await page.route("**/admin/session", async (route) => {
     await route.fulfill({
       status: 403,
       headers: {
-        "content-type": "application/json",
+        "content-type": "application/problem+json",
         "access-control-allow-origin": "http://127.0.0.1:4173",
       },
-      body: JSON.stringify({ code: "FORBIDDEN", message: "Denied by fixture" }),
+      body: JSON.stringify({
+        type: "about:blank",
+        title: "Forbidden",
+        status: 403,
+        detail: "Denied by fixture",
+        code: "FORBIDDEN",
+        request_id: "fixture-request",
+      }),
     });
   });
   await page.goto("/");

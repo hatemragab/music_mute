@@ -14,6 +14,7 @@ import { Link, useParams } from "react-router";
 import { createOperationId } from "@/api/api-client";
 import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
+import { CursorPagination } from "@/components/cursor-pagination";
 import {
   ErrorState,
   LoadingState,
@@ -102,14 +103,21 @@ export function WorkerMachinePage() {
   const [pendingAction, setPendingAction] = useState<MachineAction | null>(
     null,
   );
+  const [diagnosticPage, setDiagnosticPage] = useState<{
+    machineId: string;
+    cursor: string | null;
+  }>({ machineId: id, cursor: null });
+  const diagnosticCursor =
+    diagnosticPage.machineId === id ? diagnosticPage.cursor : null;
   const machine = useQuery({
     queryKey: ["worker-machine", id],
     queryFn: () => getWorkerMachine(client, id),
     enabled: Boolean(id),
   });
   const diagnostics = useQuery({
-    queryKey: ["worker-diagnostics", id],
-    queryFn: () => getWorkerDiagnostics(client, id),
+    queryKey: ["worker-diagnostics", id, diagnosticCursor],
+    queryFn: () =>
+      getWorkerDiagnostics(client, id, { cursor: diagnosticCursor, limit: 10 }),
     enabled: Boolean(id) && can("workers.logs.read"),
   });
   useVisibleInterval(() => {
@@ -151,8 +159,12 @@ export function WorkerMachinePage() {
       return changeWorkerMachineState(client, id, action, command);
     },
     onSuccess: async () => {
+      setDiagnosticPage({ machineId: id, cursor: null });
       await queryClient.invalidateQueries({ queryKey: ["worker-machine", id] });
       await queryClient.invalidateQueries({ queryKey: ["worker-machines"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["worker-diagnostics", id],
+      });
       setPendingAction(null);
     },
   });
@@ -370,6 +382,17 @@ export function WorkerMachinePage() {
             ) : (
               <DiagnosticList data={diagnostics.data?.items ?? []} />
             )}
+            {can("workers.logs.read") ? (
+              <CursorPagination
+                key={id}
+                cursor={diagnosticCursor}
+                nextCursor={diagnostics.data?.nextCursor ?? null}
+                pending={diagnostics.isFetching}
+                onCursorChange={(cursor) =>
+                  setDiagnosticPage({ machineId: id, cursor })
+                }
+              />
+            ) : null}
             <CommandHistory commands={data.commands} />
           </PageSection>
         </CardContent>

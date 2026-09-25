@@ -450,8 +450,31 @@ try {
     throw new Error('Invalid worker integration port');
   await app.listen(listenPort, externalService ? '0.0.0.0' : '127.0.0.1');
   const baseUrl = externalService
-    ? `http://127.0.0.1:${listenPort}/api/v1`
-    : `${await app.getUrl()}/api/v1`;
+    ? `http://127.0.0.1:${listenPort}`
+    : await app.getUrl();
+  const convertWireKeys = (value, keyTransform, parentKey) => {
+    if (Array.isArray(value))
+      return value.map((entry) =>
+        convertWireKeys(entry, keyTransform, parentKey),
+      );
+    if (value === null || typeof value !== 'object') return value;
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        keyTransform(key),
+        key === 'headers' || (parentKey === 'signed' && key === 'metadata')
+          ? entry
+          : convertWireKeys(entry, keyTransform, key),
+      ]),
+    );
+  };
+  const toWire = (value) =>
+    convertWireKeys(value, (key) =>
+      key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+    );
+  const fromWire = (value) =>
+    convertWireKeys(value, (key) =>
+      key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()),
+    );
   const api = async (method, route, body, { worker, expected = 200 } = {}) => {
     const response = await fetch(`${baseUrl}${route}`, {
       method,
@@ -460,12 +483,12 @@ try {
         ...(worker ? {} : { 'X-Installation-Id': installationId }),
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(body === undefined ? {} : { body: JSON.stringify(toWire(body)) }),
       signal: AbortSignal.timeout(transferTimeoutMs),
     });
     const text = await response.text();
     assert.equal(response.status, expected, `${method} ${route}: ${text}`);
-    return text ? JSON.parse(text) : null;
+    return text ? fromWire(JSON.parse(text)) : null;
   };
 
   const device = {
@@ -477,7 +500,7 @@ try {
     osVersion: '16',
     deviceModel: 'Worker integration fixture',
   };
-  await api('POST', '/auth/session', device);
+  await api('POST', '/auth/sessions', device);
 
   const created = await api(
     'POST',
@@ -508,7 +531,11 @@ try {
   });
   assert.equal(uploaded.status, 200);
   assert.ok(uploaded.headers.get('x-amz-version-id'));
-  const queued = await api('POST', `/jobs/${created.id}/upload-complete`, {});
+  const queued = await api(
+    'POST',
+    `/jobs/${created.id}/upload-completions`,
+    {},
+  );
   assert.equal(queued.status, 'queued');
 
   const machines = app.get(getModelToken('WorkerMachine'));
@@ -720,7 +747,7 @@ try {
 
   const completed = await api('GET', `/jobs/${created.id}`);
   assert.equal(completed.status, 'ready');
-  const download = await api('POST', `/jobs/${created.id}/download-url`, {
+  const download = await api('POST', `/jobs/${created.id}/download-grants`, {
     artifact: 'output',
     requestId: randomUUID(),
   });
@@ -814,7 +841,7 @@ try {
       assert.equal(put.status, 200);
       const queuedJob = await api(
         'POST',
-        `/jobs/${job.id}/upload-complete`,
+        `/jobs/${job.id}/upload-completions`,
         {},
       );
       assert.equal(queuedJob.status, 'queued');
@@ -878,13 +905,13 @@ try {
       const incarnation = randomUUID();
       await api(
         'POST',
-        '/worker/v1/session',
+        '/worker/sessions',
         { sessionId, incarnation },
         { worker: credential, expected: 201 },
       );
       await api(
         'POST',
-        '/worker/v1/slots',
+        '/worker/slots',
         {
           workerId: slotId,
           sessionId,
@@ -919,11 +946,11 @@ try {
     const claimA = claimBody(machineA);
     const claimB = claimBody(machineB);
     const raced = await Promise.all([
-      api('POST', '/worker/v1/claims', claimA, {
+      api('POST', '/worker/claims', claimA, {
         worker: machineA.credential,
         expected: 201,
       }),
-      api('POST', '/worker/v1/claims', claimB, {
+      api('POST', '/worker/claims', claimB, {
         worker: machineB.credential,
         expected: 201,
       }),
@@ -935,14 +962,14 @@ try {
     const loser = winnerIndex === 0 ? machineB : machineA;
     const winnerClaimBody = winnerIndex === 0 ? claimA : claimB;
     const winnerClaim = raced[winnerIndex].claim;
-    const replay = await api('POST', '/worker/v1/claims', winnerClaimBody, {
+    const replay = await api('POST', '/worker/claims', winnerClaimBody, {
       worker: winner.credential,
       expected: 201,
     });
     assert.equal(replay.claim.attemptId, winnerClaim.attemptId);
     assert.equal(replay.claim.replayed, true);
 
-    const progressPath = `/worker/v1/attempts/${winnerClaim.attemptId}/progress`;
+    const progressPath = `/worker/attempts/${winnerClaim.attemptId}/progress-events`;
     const firstProgress = {
       ...ownership(winner),
       sequence: 1,
@@ -984,18 +1011,22 @@ try {
 
     const forged = await api(
       'POST',
-      `/worker/v1/attempts/${winnerClaim.attemptId}/input-grant`,
+      `/worker/attempts/${winnerClaim.attemptId}/input-grants`,
       ownership(loser),
       { worker: loser.credential, expected: 409 },
     );
     assert.equal(forged.code, 'WORKER_CONFLICT');
-    const cancelled = await api('POST', `/jobs/${racedJob.id}/cancel`, {});
+    const cancelled = await api(
+      'POST',
+      `/jobs/${racedJob.id}/cancellations`,
+      {},
+    );
     assert.equal(cancelled.status, 'cancelled');
     const cancelledDetail = await api('GET', `/jobs/${racedJob.id}`);
     assert.equal(cancelledDetail.processingProgress, null);
     const staleAfterCancel = await api(
       'POST',
-      `/worker/v1/attempts/${winnerClaim.attemptId}/input-grant`,
+      `/worker/attempts/${winnerClaim.attemptId}/input-grants`,
       ownership(winner),
       { worker: winner.credential, expected: 409 },
     );
@@ -1012,7 +1043,7 @@ try {
     const recoveryClaimBody = claimBody(winner);
     const recoveryClaimResponse = await api(
       'POST',
-      '/worker/v1/claims',
+      '/worker/claims',
       recoveryClaimBody,
       { worker: winner.credential, expected: 201 },
     );
@@ -1049,7 +1080,7 @@ try {
     );
     const staleAfterRecovery = await api(
       'POST',
-      `/worker/v1/attempts/${recoveryClaim.attemptId}/input-grant`,
+      `/worker/attempts/${recoveryClaim.attemptId}/input-grants`,
       ownership(winner),
       { worker: winner.credential, expected: 409 },
     );
@@ -1061,7 +1092,7 @@ try {
     );
     const revoked = await api(
       'POST',
-      '/worker/v1/session',
+      '/worker/sessions',
       { sessionId: randomUUID(), incarnation: randomUUID() },
       { worker: loser.credential, expected: 401 },
     );

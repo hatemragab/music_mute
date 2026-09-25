@@ -71,7 +71,7 @@ progress failures do not block audio processing. Separation percentage is capped
 at 99 until the backend has durably completed the result. Stages without a safe
 denominator are indeterminate (`phasePercent: null`).
 
-The backend `POST /worker/v1/attempts/:id/progress` checks the machine
+The backend `POST /worker/attempts/:id/progress-events` checks the machine
 credential, worker, session, incarnation, lease and current attempt. It accepts
 monotonically increasing sequence numbers and rejects another worker. The public
 job detail exposes only `processingProgress` with phase, optional percentage,

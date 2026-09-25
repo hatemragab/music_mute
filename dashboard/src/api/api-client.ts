@@ -1,17 +1,19 @@
 import type { OperationReceipt } from "./contracts";
+import { fromWireCase, toWireCase, toWireUrl } from "./wire-case";
 
 export interface ApiErrorBody {
+  type: string;
+  title: string;
+  status: number;
+  detail: string;
   code?: string;
-  message?: string;
-  requestId?: string;
-  details?: unknown;
+  request_id?: string;
 }
 
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly requestId?: string;
-  readonly details?: unknown;
   readonly retryAfterSeconds?: number;
 
   constructor(options: {
@@ -19,7 +21,6 @@ export class ApiError extends Error {
     code?: string;
     message?: string;
     requestId?: string;
-    details?: unknown;
     retryAfterSeconds?: number;
   }) {
     super(options.message || "The request could not be completed.");
@@ -27,7 +28,6 @@ export class ApiError extends Error {
     this.status = options.status;
     this.code = options.code || "REQUEST_FAILED";
     this.requestId = options.requestId;
-    this.details = options.details;
     this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
@@ -45,7 +45,6 @@ export class OperationOutcomeUnknownError extends Error {
 export interface ApiClientOptions {
   origin: string;
   getToken: (forceRefresh?: boolean) => Promise<string>;
-  basePath?: string;
 }
 
 export interface RequestOptions extends Omit<RequestInit, "body" | "method"> {
@@ -90,12 +89,10 @@ const validateOrigin = (value: string) => {
 export class ApiClient {
   private readonly origin: string;
   private readonly getToken: ApiClientOptions["getToken"];
-  private readonly basePath: string;
 
   constructor(options: ApiClientOptions) {
     this.origin = validateOrigin(options.origin);
     this.getToken = options.getToken;
-    this.basePath = options.basePath ?? "/api/v1";
   }
 
   get<T>(path: string, options?: Omit<RequestOptions, "body">) {
@@ -127,11 +124,12 @@ export class ApiClient {
       throw new Error("API paths must be root-relative.");
     }
     const token = await this.getToken(didRefresh);
-    const response = await fetch(`${this.origin}${this.basePath}${path}`, {
+    const response = await fetch(toWireUrl(`${this.origin}${path}`), {
       method: "GET",
       headers: { accept: "text/csv", authorization: `Bearer ${token}` },
       cache: "no-store",
       credentials: "omit",
+      redirect: "error",
       signal,
     });
     if (response.status === 401 && !didRefresh) {
@@ -168,14 +166,17 @@ export class ApiClient {
     if (options.body !== undefined)
       headers.set("content-type", "application/json");
 
-    const response = await fetch(`${this.origin}${this.basePath}${path}`, {
+    const response = await fetch(toWireUrl(`${this.origin}${path}`), {
       ...options,
       method,
       body:
-        options.body === undefined ? undefined : JSON.stringify(options.body),
+        options.body === undefined
+          ? undefined
+          : JSON.stringify(toWireCase(options.body)),
       headers,
       cache: "no-store",
       credentials: "omit",
+      redirect: "error",
     });
 
     if (response.status === 401 && safeMethods.has(method) && !didRefresh) {
@@ -189,22 +190,43 @@ export class ApiClient {
     if (response.status === 204) return undefined as T;
     const text = await response.text();
     if (!text.trim()) return null as T;
-    return JSON.parse(text) as T;
+    return fromWireCase(JSON.parse(text)) as T;
   }
 
   private async throwApiError(response: Response): Promise<never> {
-    let body: ApiErrorBody;
+    let body: ApiErrorBody | null = null;
     try {
-      body = (await response.json()) as ApiErrorBody;
+      if (
+        response.headers
+          .get("content-type")
+          ?.split(";", 1)[0]
+          ?.trim()
+          .toLowerCase() === "application/problem+json"
+      ) {
+        const parsed: unknown = await response.json();
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          !Array.isArray(parsed) &&
+          (parsed as ApiErrorBody).type === "about:blank" &&
+          (parsed as ApiErrorBody).status === response.status
+        ) {
+          body = parsed as ApiErrorBody;
+        }
+      }
     } catch {
-      body = {};
+      // The HTTP status and Retry-After remain usable if the body is invalid.
     }
     throw new ApiError({
       status: response.status,
-      code: body.code,
-      message: body.message,
-      requestId: body.requestId,
-      details: body.details,
+      code:
+        typeof body?.code === "string" &&
+        /^[A-Z][A-Z0-9_]{1,79}$/.test(body.code)
+          ? body.code
+          : undefined,
+      message: typeof body?.detail === "string" ? body.detail : undefined,
+      requestId:
+        typeof body?.request_id === "string" ? body.request_id : undefined,
       retryAfterSeconds: parseRetryAfter(response.headers.get("retry-after")),
     });
   }

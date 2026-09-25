@@ -4,6 +4,7 @@ import { AdminUsersService } from '../src/admin-users/admin-users.service.js';
 import {
   createAdminHarness,
   type AdminHarness,
+  wireJson,
 } from './helpers/admin-harness.js';
 
 describe('admin users HTTP boundary', () => {
@@ -66,12 +67,12 @@ describe('admin users HTTP boundary', () => {
       reason: 'Reviewed customer exception',
     };
     await harness
-      .request('put', path, body, harness.signInAs('viewer'))
+      .request('put', path, wireJson(body), harness.signInAs('viewer'))
       .expect(403);
     const staleToken = harness.signInAs('support');
     harness.identities.get(staleToken)!.authTimeSec =
       Math.floor(Date.now() / 1000) - 301;
-    await harness.request('put', path, body, staleToken).expect(403);
+    await harness.request('put', path, wireJson(body), staleToken).expect(403);
     harness.identities.get(staleToken)!.authTimeSec = Math.floor(
       Date.now() / 1000,
     );
@@ -79,12 +80,12 @@ describe('admin users HTTP boundary', () => {
       .request(
         'put',
         path,
-        { ...body, values: {} },
+        wireJson({ ...body, values: {} }),
         harness.signInAs('support'),
       )
       .expect(400);
     await harness
-      .request('put', path, body, harness.signInAs('support'))
+      .request('put', path, wireJson(body), harness.signInAs('support'))
       .expect(200);
     expect(users.putPolicyOverride).toHaveBeenCalledOnce();
   });
@@ -97,11 +98,11 @@ describe('admin users HTTP boundary', () => {
       .request(
         'delete',
         path,
-        {
+        wireJson({
           expectedRevision: 0,
           operationId: 'b93d8904-dd3a-4fe8-a59b-5d9e079d358b',
           reason: 'Invalid absent revision',
-        },
+        }),
         harness.signInAs('support'),
       )
       .expect(400);
@@ -109,11 +110,11 @@ describe('admin users HTTP boundary', () => {
       .request(
         'delete',
         path,
-        {
+        wireJson({
           expectedRevision: 2,
           operationId: 'b93d8904-dd3a-4fe8-a59b-5d9e079d358b',
           reason: 'Return to standard policy',
-        },
+        }),
         harness.signInAs('support'),
       )
       .expect(200);

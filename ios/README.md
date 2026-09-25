@@ -118,7 +118,7 @@ in the application at build time, so restrict the key to the registered iOS bund
 ID instead of treating the plist as an Admin SDK secret.
 
 The app requires a backend bootstrap after Firebase sign-in. Supply the public API **origin** as
-the `MUSICMUTE_API_BASE_URL` Xcode build setting; the client appends `/api/v1`. The value must not
+the `MUSICMUTE_API_BASE_URL` Xcode build setting; the client uses root-mounted resource paths. The value must not
 contain a path, query, credentials, or fragment. Release builds accept HTTPS only. Debug builds
 default to `http://127.0.0.1:3000` for local development and also accept explicit HTTP loopback
 origins for isolated fixtures. The checked-in Release setting is empty because this repository
@@ -136,7 +136,7 @@ to accounts. A matching Firebase user with a previous successful bootstrap may r
 when validation fails specifically because the device is offline. A new or changed identity must
 bootstrap online. Account deletion is available in Account, including when processing is restricted. The coordinator
 reauthenticates the current identity; Apple accounts obtain a fresh authorization code and revoke
-the Apple token using Firebase before requesting backend deletion. `DELETE /api/v1/users/me`
+the Apple token using Firebase before requesting backend deletion. `DELETE /users/me`
 uses a fresh bearer token and an empty body. Only a validated HTTP 202 acceptance receipt is
 shown as accepted. The receipt and backup-excluded journal preserve the exact backend-provided
 15-day recovery deadline; acceptance does not claim cloud cleanup has completed.
@@ -295,7 +295,7 @@ without full-library authorization. Provider materialization has a 60-second can
 deadline and a bounded streaming copy. Photos copies are private and discarded after use;
 original Files/Photos assets are never deleted. Lost provider access requires reselection.
 
-`ProcessingMediaPolicy` reads `/processing-policy?schemaVersion=2`. A validated,
+`ProcessingMediaPolicy` reads `/processing-policy?schema_version=2`. A validated,
 accepting response may lower the local ceiling but never raise the single inclusive
 1,200-second/50,000,000-byte prepared-audio policy. The same safe ceiling is retained
 when policy refresh is unavailable. Policy version, profile ID, and source category

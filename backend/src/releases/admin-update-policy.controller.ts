@@ -8,7 +8,7 @@ export class AdminUpdatePolicyController {
   @Get() current() {
     return this.publication.current();
   }
-  @Post('preview') preview(@Body() body: unknown) {
+  @Post('previews') preview(@Body() body: unknown) {
     return this.publication.preview(body);
   }
 }

@@ -13,6 +13,8 @@ is redesigned.
 - [Dashboard API](docs/dashboard-api.md)
 - [Dashboard permission matrix](docs/dashboard-permissions.md)
 - [Dashboard local validation](docs/dashboard-local-validation.md)
+- [Zalando guideline index](../docs/backend-security/zalando-guidelines-index.md)
+- [Exhaustive route and security matrix](../docs/backend-security/route-matrix.md)
 
 ## Requirements and local run
 
@@ -32,8 +34,8 @@ pnpm run start:dev
 The API connects to existing MongoDB and Redis services; it does not start either
 server. Production Compose also runs only the API.
 
-- Liveness: `GET http://127.0.0.1:3000/api/v1/health/live`.
-- Readiness: `GET http://127.0.0.1:3000/api/v1/health/ready` (MongoDB and Redis).
+- Liveness: `GET http://127.0.0.1:3000/health/live`.
+- Readiness: `GET http://127.0.0.1:3000/health/ready` (MongoDB and Redis).
 - Health endpoints do not claim AWS connectivity. Enabled audio processing
   separately checks S3 privacy, versioning and retention prerequisites at startup.
 - Readiness also does not validate Firebase credentials or provider settings.
@@ -97,13 +99,13 @@ Native apps -> TLS reverse proxy -> API (main.ts)
 
 ## Media usage and transfer contract
 
-Authenticated clients read `GET /api/v1/processing-usage`. Schema version 2 reports
+Authenticated clients read `GET /processing-usage`. Schema version 2 reports
 the UTC period, processing use/reservations/refunds, upload grant and confirmed-byte
 counters, result-grant and estimated-byte counters, retained-result bytes, effective
 media/transfer limits, reset times, and the safe admission reason. These counters
 belong to the account, not an installation.
 
-`POST /api/v1/jobs/:id/download-url` requires `artifact` plus a UUID-v4 `requestId`.
+`POST /jobs/:id/download-grants` requires `artifact` plus a UUID-v4 `request_id`.
 Replaying the same still-valid request for the same immutable object does not charge
 again. A known-expired entitlement requires a new request ID. User result grants are
 charged to the account and service estimate; worker input grants affect only the
@@ -141,6 +143,24 @@ generic errors and shared 60 requests/IP/minute are configured centrally. Redis
 counters persist across API processes and restarts. Liveness is exempt; readiness
 is throttled. Protected routes and mail fail closed when security storage is
 unavailable. Firebase and edge abuse protections still matter.
+
+Worker HTTP routes retain the 600/IP/minute global ceiling and use an additional
+Redis reservation **before** any credential lookup: 300/IP and 3,000/service
+per minute by default. Authenticated worker budgets then apply by machine,
+installation or enrollment identity, operation class, endpoint and service.
+Limits are atomic across API instances, return 429 with `Retry-After`, and fail
+closed with 503 if Redis is unavailable. Tune `WORKER_*_PER_MINUTE` only with
+worker traffic evidence. The worker hint socket accepts a single-use ticket in
+the `Sec-WebSocket-Protocol` header, rejects browser origins and URL query
+tickets, and independently limits upgrades by IP, machine and service. Its
+one-hop proxy IP behavior follows `TRUST_PROXY`. The socket accepts no client
+messages and is capped at two connections per machine per API instance and one
+hour per connection.
+
+Public APK grants retain a 10/IP/minute route limit and have an atomic
+`PUBLIC_RELEASE_GRANTS_PER_MINUTE` service ceiling (default 300). A signed S3
+URL can be fetched repeatedly until expiry; API issuance limits cannot cap
+those bytes, so production edge/storage egress controls need separate review.
 
 Browser cross-origin access is denied unless `CORS_ORIGINS` lists exact origins;
 production origins require HTTPS. Native apps do not need CORS. CORS does not

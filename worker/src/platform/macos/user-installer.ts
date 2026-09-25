@@ -40,7 +40,7 @@ import { createMacUserDirectories, type MacUserLayout } from "./user-paths.js";
 import { inspectMacUserHealth } from "./user-health.js";
 import { MAC_RECIPE_IDS } from "./runtime-recipes.js";
 
-export const PRODUCTION_BACKEND_BASE_URL = "https://api.music-mute.com/api/v1";
+export const PRODUCTION_BACKEND_BASE_URL = "https://api.music-mute.com";
 
 const CREDENTIAL = /^[A-Za-z0-9_-]{43}$/u;
 const UUID_V4 =
@@ -444,10 +444,11 @@ export function buildMacUserRuntimeConfig(
     url.username !== "" ||
     url.password !== "" ||
     url.hash !== "" ||
+    url.search !== "" ||
+    url.pathname !== "/" ||
     (url.protocol !== "https:" && !(allowInsecureLoopback && loopback))
   )
     throw new TypeError("Worker backend URL is unsafe");
-  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
   return {
     schemaVersion: 1,
     backendBaseUrl: url.toString(),

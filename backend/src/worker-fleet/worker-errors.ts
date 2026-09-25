@@ -7,6 +7,7 @@ export type WorkerErrorCode =
   | 'WORKER_NOT_FOUND'
   | 'WORKER_CONFLICT'
   | 'WORKER_EXPIRED'
+  | 'WORKER_RATE_LIMITED'
   | 'WORKER_DEPENDENCY_UNAVAILABLE';
 
 const status: Record<WorkerErrorCode, number> = {
@@ -16,6 +17,7 @@ const status: Record<WorkerErrorCode, number> = {
   WORKER_NOT_FOUND: 404,
   WORKER_CONFLICT: 409,
   WORKER_EXPIRED: 410,
+  WORKER_RATE_LIMITED: 429,
   WORKER_DEPENDENCY_UNAVAILABLE: 503,
 };
 
@@ -26,6 +28,7 @@ const message: Record<WorkerErrorCode, string> = {
   WORKER_NOT_FOUND: 'Worker resource was not found',
   WORKER_CONFLICT: 'Worker resource changed',
   WORKER_EXPIRED: 'Worker credential has expired',
+  WORKER_RATE_LIMITED: 'Worker request limit exceeded',
   WORKER_DEPENDENCY_UNAVAILABLE: 'Worker dependency is unavailable',
 };
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   ADMIN_FRESH_AUTH,
   ADMIN_RATE_CLASS,
@@ -24,4 +24,42 @@ describe('release controller security metadata', () => {
       expect(Reflect.getMetadata('THROTTLER:TTLdefault', handler)).toBe(60_000);
     },
   );
+
+  it('rejects public APK grants at the shared service ceiling before storage access', async () => {
+    const grant = vi.fn();
+    const reserve = vi.fn(async () => ({
+      allowed: false,
+      retryAfterSeconds: 23,
+    }));
+    const controller = new AppUpdatesController(
+      {} as never,
+      { grant } as never,
+      { reserve } as never,
+      { bucket: (scope: string, id: string) => `${scope}:${id}` } as never,
+      { get: (_key: string, fallback: number) => fallback } as never,
+    );
+    const response = { setHeader: vi.fn() };
+    await expect(
+      controller.download(
+        { ip: '192.0.2.4' } as never,
+        response as never,
+        'release-id',
+        {},
+      ),
+    ).rejects.toMatchObject({ status: 429 });
+    expect(reserve).toHaveBeenCalledWith([
+      {
+        key: 'public-release-grant-ip:192.0.2.4',
+        limit: 10,
+        windowMs: 60_000,
+      },
+      {
+        key: 'public-release-grant-service:global',
+        limit: 300,
+        windowMs: 60_000,
+      },
+    ]);
+    expect(response.setHeader).toHaveBeenCalledWith('Retry-After', 23);
+    expect(grant).not.toHaveBeenCalled();
+  });
 });

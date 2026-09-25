@@ -59,12 +59,12 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
   }
 
   func bootstrap(_ report: InstallationReport) async throws -> SessionResponse {
-    try await send("POST", "/auth/session", body: encoder.encode(report), authenticated: true)
+    try await send("POST", "/auth/sessions", body: encoder.encode(report), authenticated: true)
   }
 
   func profileSync() async throws -> ProfileSyncResponse {
     try await send(
-      "POST", "/auth/profile-sync", body: encoder.encode(EmptyBody()), authenticated: true)
+      "POST", "/auth/profile-synchronizations", body: encoder.encode(EmptyBody()), authenticated: true)
   }
 
   func deleteAccount() async throws -> AccountDeletionReceipt {
@@ -149,7 +149,7 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
 
   func requestVerification() async throws -> MailOutcome {
     let response: MailResponse = try await send(
-      "POST", "/auth/verification-email", body: encoder.encode(EmptyBody()), authenticated: true,
+      "POST", "/auth/verification-emails", body: encoder.encode(EmptyBody()), authenticated: true,
       replayOnUnauthorized: false)
     return response.status
   }
@@ -157,14 +157,14 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
   func requestPasswordReset(email: String) async throws -> MailOutcome {
     struct Body: Encodable { let email: String }
     let response: MailResponse = try await send(
-      "POST", "/auth/password-reset", body: encoder.encode(Body(email: email)),
+      "POST", "/auth/password-reset-requests", body: encoder.encode(Body(email: email)),
       authenticated: false, replayOnUnauthorized: false)
     return response.status
   }
 
   func logoutAll() async throws {
     let _: EmptyResponse = try await send(
-      "POST", "/auth/logout-all", body: encoder.encode(EmptyBody()), authenticated: true,
+      "POST", "/auth/session-revocations", body: encoder.encode(EmptyBody()), authenticated: true,
       replayOnUnauthorized: false)
   }
 
@@ -235,6 +235,56 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
 }
 
 /// Bounded JSON transport shared by account and job APIs; never used for storage transfers.
+private enum ApiWireJSON {
+  private static let snakeCase = try! NSRegularExpression(
+    pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+
+  static func request(_ data: Data?) throws -> Data? {
+    guard let data else { return nil }
+    return try rewrite(data, incoming: false)
+  }
+
+  static func response(_ data: Data) throws -> Data {
+    guard !data.isEmpty else { return data }
+    return try rewrite(data, incoming: true)
+  }
+
+  private static func rewrite(_ data: Data, incoming: Bool) throws -> Data {
+    let value = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+    return try JSONSerialization.data(
+      withJSONObject: convert(value, incoming: incoming), options: [.fragmentsAllowed])
+  }
+
+  private static func convert(_ value: Any, incoming: Bool, opaque: Bool = false) throws -> Any {
+    if let values = value as? [Any] {
+      return try values.map { try convert($0, incoming: incoming, opaque: opaque) }
+    }
+    guard let values = value as? [String: Any] else { return value }
+    var result: [String: Any] = [:]
+    for (key, item) in values {
+      let wireKey: String
+      if opaque {
+        wireKey = key
+      } else if incoming {
+        let range = NSRange(key.startIndex..<key.endIndex, in: key)
+        guard snakeCase.firstMatch(in: key, range: range) != nil else {
+          throw AuthFailure.malformedResponse
+        }
+        let parts = key.split(separator: "_")
+        wireKey = String(parts[0]) + parts.dropFirst().map { $0.capitalized }.joined()
+      } else {
+        wireKey = key.reduce(into: "") { output, character in
+          if character.isUppercase { output += "_" + character.lowercased() }
+          else { output.append(character) }
+        }
+      }
+      result[wireKey] = try convert(
+        item, incoming: incoming, opaque: opaque || key == "headers")
+    }
+    return result
+  }
+}
+
 @MainActor final class AuthHTTPTransport {
   private let configuration: AuthConfiguration
   private let session: URLSession
@@ -277,7 +327,7 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
     }
     var request = URLRequest(url: url, timeoutInterval: 15)
     request.httpMethod = method
-    request.httpBody = body
+    request.httpBody = try ApiWireJSON.request(body)
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
     if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
@@ -299,7 +349,9 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
         http.url?.host == configuration.apiOrigin.host,
         http.url?.port == configuration.apiOrigin.port
       else { throw AuthFailure.configuration }
-      return (data, http)
+      let wireData = (200...299).contains(http.statusCode)
+        ? try ApiWireJSON.response(data) : data
+      return (wireData, http)
     } catch is CancellationError {
       throw CancellationError()
     } catch let failure as AuthFailure {

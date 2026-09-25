@@ -1,5 +1,5 @@
 import { Body, Controller, Param, Post, Req } from '@nestjs/common';
-import { WorkerRoute } from '../auth/worker-auth.decorators.js';
+import { LimitWorker, WorkerRoute } from '../auth/worker-auth.decorators.js';
 import type { WorkerRequest } from '../auth/worker-auth.types.js';
 import {
   ActivateWorkerInstallationDto,
@@ -15,7 +15,7 @@ import { WorkerInstallationQualificationService } from './worker-installation-qu
 import { AppendInstallationLogsDto } from '../telemetry/worker-diagnostic.dto.js';
 import { WorkerDiagnosticsService } from '../telemetry/worker-diagnostics.service.js';
 
-@Controller('worker/v1/installations')
+@Controller('worker/installations')
 export class WorkerEnrollmentController {
   constructor(
     private readonly enrollment: WorkerEnrollmentService,
@@ -33,8 +33,9 @@ export class WorkerEnrollmentController {
     return this.enrollment.exchange(request.workerPrincipal!, dto);
   }
 
-  @Post(':id/qualification-output/grant')
+  @Post(':id/qualification-output-grants')
   @WorkerRoute('installation')
+  @LimitWorker('transfer')
   qualificationOutputGrant(
     @Req() request: WorkerRequest,
     @Param('id') id: string,
@@ -47,7 +48,7 @@ export class WorkerEnrollmentController {
     );
   }
 
-  @Post(':id/qualification-output/confirm')
+  @Post(':id/qualification-output-confirmations')
   @WorkerRoute('installation')
   confirmQualificationOutput(
     @Req() request: WorkerRequest,
@@ -59,6 +60,7 @@ export class WorkerEnrollmentController {
 
   @Post(':id/artifacts')
   @WorkerRoute('installation')
+  @LimitWorker('transfer')
   installationArtifacts(
     @Req() request: WorkerRequest,
     @Param('id') id: string,
@@ -71,7 +73,7 @@ export class WorkerEnrollmentController {
     );
   }
 
-  @Post(':id/report')
+  @Post(':id/reports')
   @WorkerRoute('installation')
   report(
     @Req() request: WorkerRequest,
@@ -83,6 +85,7 @@ export class WorkerEnrollmentController {
 
   @Post(':id/logs')
   @WorkerRoute('installation')
+  @LimitWorker('telemetry')
   logs(
     @Req() request: WorkerRequest,
     @Param('id') id: string,
@@ -95,7 +98,7 @@ export class WorkerEnrollmentController {
     );
   }
 
-  @Post(':id/activate')
+  @Post(':id/activations')
   @WorkerRoute('installation')
   activate(
     @Req() request: WorkerRequest,

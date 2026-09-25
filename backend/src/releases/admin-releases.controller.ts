@@ -28,7 +28,7 @@ export class AdminReleasesController {
     private readonly publication: ReleasePublicationService,
   ) {}
 
-  @Post(':id/publish')
+  @Post(':id/publications')
   @RequireAdminPermission('releases.manage')
   @RequireFreshAdminAuth()
   publish(
@@ -38,7 +38,7 @@ export class AdminReleasesController {
   ) {
     return this.publication.mutate(request.adminActor!, id, 'publish', body);
   }
-  @Post(':id/withdraw')
+  @Post(':id/withdrawals')
   @RequireAdminPermission('releases.manage')
   @RequireFreshAdminAuth()
   withdraw(

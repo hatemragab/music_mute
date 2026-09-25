@@ -7,6 +7,7 @@ import {
 } from '../admin/admin.decorators.js';
 import { UpdateAccountPolicyDto } from './dto/account-policy.dto.js';
 import { AccountPolicyService } from './account-policy.service.js';
+import { jobError } from '../jobs/job-errors.js';
 
 @Controller('admin/settings')
 export class AdminSettingsController {
@@ -33,7 +34,14 @@ export class ProcessingPolicyController {
   @Get()
   @Public()
   @Header('Cache-Control', 'no-store')
-  current(@Query('schemaVersion') schemaVersion?: string) {
-    return this.policies.publicPolicy(schemaVersion);
+  current(@Query() query: Record<string, unknown>) {
+    if (
+      Object.keys(query).some((key) => key !== 'schemaVersion') ||
+      (query.schemaVersion !== undefined &&
+        typeof query.schemaVersion !== 'string')
+    ) {
+      throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
+    }
+    return this.policies.publicPolicy(query.schemaVersion);
   }
 }

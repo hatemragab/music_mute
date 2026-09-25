@@ -149,9 +149,8 @@ function validatedBackendBaseUrl(
     (url.protocol !== "https:" && !(allowInsecureLoopback && loopback))
   )
     throw new TypeError("Service backend URL is unsafe");
-  if (!url.pathname.startsWith("/") || url.pathname.includes("//"))
-    throw new TypeError("Service backend URL path is invalid");
-  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
+  if (url.pathname !== "/" || url.search !== "")
+    throw new TypeError("Service backend URL must be an API origin");
   return url.toString();
 }
 

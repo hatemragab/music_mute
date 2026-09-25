@@ -6,16 +6,24 @@ import {
 } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage, Server } from 'node:http';
+import { isIP } from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { Redis } from 'ioredis';
 import { WebSocket, WebSocketServer } from 'ws';
+import { ConfigService } from '@nestjs/config';
 import { SECURITY_REDIS } from '../rate-limits/security-redis.provider.js';
+import { RateBudgetService } from '../rate-limits/rate-budget.service.js';
+import { RateLimitKeys } from '../rate-limits/rate-limit-keys.js';
 
-const SOCKET_PATH = '/api/v1/worker/v1/hints/socket';
+const SOCKET_PATH = '/worker/hints/socket';
 const CHANNEL = 'musicmute:worker-hints:v1';
 const TICKET_PREFIX = 'musicmute:worker-hint-ticket:v1:';
 const TICKET_TTL_SECONDS = 30;
 const MAX_MESSAGE_BYTES = 1024;
+const MAX_SOCKETS_PER_MACHINE = 2;
+const MAX_SOCKET_AGE_MS = 60 * 60 * 1000;
+const HEARTBEAT_MS = 30_000;
+const SOCKET_PROTOCOL = 'musicmute.worker-hint.v1';
 
 export const WORKER_HINT_TYPES = [
   'work_available',
@@ -43,7 +51,12 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
   private revision = 0;
   private attached = false;
 
-  constructor(@Inject(SECURITY_REDIS) private readonly redis: Redis) {}
+  constructor(
+    @Inject(SECURITY_REDIS) private readonly redis: Redis,
+    private readonly budgets: RateBudgetService,
+    private readonly keys: RateLimitKeys,
+    private readonly config: ConfigService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     if (typeof this.redis.duplicate !== 'function') return;
@@ -116,24 +129,54 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
     socket: Duplex,
     head: Buffer,
   ): Promise<void> {
-    let url: URL;
-    try {
-      url = new URL(
-        request.url ?? '',
-        `http://${request.headers.host ?? 'localhost'}`,
-      );
-    } catch {
+    if ((request.url ?? '').split('?', 1)[0] !== SOCKET_PATH) {
+      rejectUpgrade(socket, 404);
       return;
     }
-    if (url.pathname !== SOCKET_PATH) return;
-    const ticket = url.searchParams.get('ticket');
+    const protocolHeaders = (request.rawHeaders ?? []).filter(
+      (value, index) =>
+        index % 2 === 0 && value.toLowerCase() === 'sec-websocket-protocol',
+    ).length;
+    const protocol = request.headers['sec-websocket-protocol'];
+    const ticket =
+      protocolHeaders === 1 && typeof protocol === 'string'
+        ? new RegExp(
+            `^${SOCKET_PROTOCOL},\\s*ticket\\.([A-Za-z0-9_-]{43})$`,
+            'u',
+          ).exec(protocol)?.[1]
+        : undefined;
     if (
+      request.url !== SOCKET_PATH ||
+      request.headers.origin !== undefined ||
       !ticket ||
-      !/^[A-Za-z0-9_-]{43}$/u.test(ticket) ||
-      [...url.searchParams.keys()].some((key) => key !== 'ticket') ||
-      url.searchParams.getAll('ticket').length !== 1
+      request.method !== 'GET'
     ) {
       rejectUpgrade(socket);
+      return;
+    }
+    const ip = workerSocketClientIp(
+      request,
+      this.config.get('TRUST_PROXY') === '1',
+    );
+    try {
+      const decision = await this.budgets.reserve([
+        {
+          key: this.keys.bucket('worker-socket-ip', ip),
+          limit: 120,
+          windowMs: 60_000,
+        },
+        {
+          key: this.keys.bucket('worker-socket-service', 'global'),
+          limit: 3_000,
+          windowMs: 60_000,
+        },
+      ]);
+      if (!decision.allowed) {
+        rejectUpgrade(socket, 429, decision.retryAfterSeconds);
+        return;
+      }
+    } catch {
+      rejectUpgrade(socket, 503);
       return;
     }
     const digest = createHash('sha256').update(ticket).digest('hex');
@@ -141,11 +184,31 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
     try {
       machineId = await this.redis.getdel(`${TICKET_PREFIX}${digest}`);
     } catch {
-      rejectUpgrade(socket);
+      rejectUpgrade(socket, 503);
       return;
     }
     if (!machineId) {
       rejectUpgrade(socket);
+      return;
+    }
+    try {
+      const decision = await this.budgets.reserve([
+        {
+          key: this.keys.bucket('worker-socket-machine', machineId),
+          limit: 20,
+          windowMs: 60_000,
+        },
+      ]);
+      if (!decision.allowed) {
+        rejectUpgrade(socket, 429, decision.retryAfterSeconds);
+        return;
+      }
+    } catch {
+      rejectUpgrade(socket, 503);
+      return;
+    }
+    if ((this.sockets.get(machineId)?.size ?? 0) >= MAX_SOCKETS_PER_MACHINE) {
+      rejectUpgrade(socket, 429, 30);
       return;
     }
     this.server.handleUpgrade(request, socket, head, (webSocket) =>
@@ -157,9 +220,27 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
     const clients = this.sockets.get(machineId) ?? new Set<WebSocket>();
     clients.add(socket);
     this.sockets.set(machineId, clients);
+    let alive = true;
+    const heartbeat = setInterval(() => {
+      if (!alive) {
+        socket.terminate();
+        return;
+      }
+      alive = false;
+      socket.ping();
+    }, HEARTBEAT_MS);
+    const expiry = setTimeout(
+      () => socket.close(1000, 'ticket expired'),
+      MAX_SOCKET_AGE_MS,
+    );
+    socket.on('pong', () => {
+      alive = true;
+    });
     socket.on('message', () => socket.close(1008, 'receive only'));
     socket.on('error', () => undefined);
     socket.on('close', () => {
+      clearInterval(heartbeat);
+      clearTimeout(expiry);
       clients.delete(socket);
       if (clients.size === 0) this.sockets.delete(machineId);
     });
@@ -179,6 +260,20 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
+export function workerSocketClientIp(
+  request: IncomingMessage,
+  trustProxy: boolean,
+): string {
+  const direct = request.socket.remoteAddress ?? 'unknown';
+  if (!trustProxy) return direct;
+  // Express `trust proxy = 1` uses the rightmost forwarded address: the peer
+  // immediately before our one trusted reverse proxy, including Docker peers.
+  const forwarded = request.headers['x-forwarded-for'];
+  if (typeof forwarded !== 'string') return direct;
+  const last = forwarded.split(',').at(-1)?.trim() ?? '';
+  return isIP(last) ? last : direct;
+}
+
 function parsePublishedHint(value: string): PublishedHint | null {
   try {
     const parsed = JSON.parse(value) as Partial<PublishedHint>;
@@ -196,6 +291,24 @@ function parsePublishedHint(value: string): PublishedHint | null {
   }
 }
 
-function rejectUpgrade(socket: Duplex): void {
-  socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+function rejectUpgrade(
+  socket: Duplex,
+  status = 401,
+  retryAfter?: number,
+): void {
+  const reason =
+    status === 429
+      ? 'Too Many Requests'
+      : status === 503
+        ? 'Service Unavailable'
+        : status === 404
+          ? 'Not Found'
+          : 'Unauthorized';
+  const retry =
+    status === 429 && retryAfter !== undefined
+      ? `Retry-After: ${retryAfter}\r\n`
+      : '';
+  socket.end(
+    `HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\n${retry}\r\n`,
+  );
 }

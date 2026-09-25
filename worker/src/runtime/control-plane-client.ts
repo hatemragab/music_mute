@@ -21,6 +21,8 @@ import {
   type MacUpdateCandidate,
 } from "../platform/macos/update-metadata.js";
 import type { WorkerProgressPhase } from "../../protocol/v1/protocol.js";
+import { MAX_RETRY_DELAY_MS, retryAfterMilliseconds } from "./retry-after.js";
+import { fromWireCase, toWireCase } from "./wire-case.js";
 
 const RESPONSE_LIMIT_BYTES = 64 * 1024;
 const UUID_V4 =
@@ -33,6 +35,7 @@ const WORKER_ERROR_CODES = new Set([
   "WORKER_NOT_FOUND",
   "WORKER_CONFLICT",
   "WORKER_EXPIRED",
+  "WORKER_RATE_LIMITED",
   "WORKER_DEPENDENCY_UNAVAILABLE",
 ]);
 
@@ -67,6 +70,7 @@ export class ControlPlaneError extends Error {
     readonly code: string,
     readonly status: number,
     readonly retryable: boolean,
+    readonly retryAfterMs?: number,
   ) {
     super(`Worker control-plane request failed (${code})`);
     this.name = "ControlPlaneError";
@@ -108,7 +112,7 @@ export class WorkerControlPlaneClient {
   ): Promise<SessionResponse> {
     return parseSessionResponse(
       await this.request(
-        "worker/v1/session",
+        "worker/sessions",
         "POST",
         {
           sessionId,
@@ -124,10 +128,10 @@ export class WorkerControlPlaneClient {
     incarnation: string,
     signal?: AbortSignal,
   ): Promise<ConfigResponse> {
-    const query = new URLSearchParams({ sessionId, incarnation });
+    const query = new URLSearchParams({ session_id: sessionId, incarnation });
     return parseConfigResponse(
       await this.request(
-        `worker/v1/config?${query.toString()}`,
+        `worker/config?${query.toString()}`,
         "GET",
         null,
         signal,
@@ -137,14 +141,17 @@ export class WorkerControlPlaneClient {
 
   async hintTicket(
     signal?: AbortSignal,
-  ): Promise<{ socketUrl: string; expiresAt: string }> {
+  ): Promise<{ socketUrl: string; ticket: string; expiresAt: string }> {
     const ticket = parseWorkerHintTicket(
-      await this.request("worker/v1/hints/ticket", "POST", {}, signal),
+      await this.request("worker/hints/tickets", "POST", {}, signal),
     );
     const socketUrl = new URL(ticket.path, this.baseUrl);
     socketUrl.protocol = socketUrl.protocol === "https:" ? "wss:" : "ws:";
-    socketUrl.searchParams.set("ticket", ticket.ticket);
-    return { socketUrl: socketUrl.toString(), expiresAt: ticket.expiresAt };
+    return {
+      socketUrl: socketUrl.toString(),
+      ticket: ticket.ticket,
+      expiresAt: ticket.expiresAt,
+    };
   }
 
   async applyConfig(
@@ -155,7 +162,7 @@ export class WorkerControlPlaneClient {
   ): Promise<void> {
     const requestId = randomUUID();
     const response = await this.request(
-      "worker/v1/config/applied",
+      "worker/config/applications",
       "POST",
       { requestId, sessionId, incarnation, revision },
       signal,
@@ -172,7 +179,7 @@ export class WorkerControlPlaneClient {
   ): Promise<void> {
     const response = asRecord(
       await this.request(
-        "worker/v1/slots",
+        "worker/slots",
         "POST",
         { ...identity, gpuId, slotIndex, recipeIds },
         signal,
@@ -191,7 +198,7 @@ export class WorkerControlPlaneClient {
     signal?: AbortSignal,
   ): Promise<ClaimResponse> {
     return this.request(
-      "worker/v1/claims",
+      "worker/claims",
       "POST",
       {
         requestId,
@@ -213,7 +220,7 @@ export class WorkerControlPlaneClient {
     const requestId = randomUUID();
     const response = parseLeaseResponse(
       await this.request(
-        "worker/v1/leases/renew",
+        "worker/leases/renewals",
         "POST",
         { requestId, sessionId, incarnation, leases },
         signal,
@@ -232,7 +239,7 @@ export class WorkerControlPlaneClient {
     const requestId = randomUUID();
     const response = parseInputGrantResponse(
       await this.request(
-        `worker/v1/attempts/${attemptId}/input-grant`,
+        `worker/attempts/${attemptId}/input-grants`,
         "POST",
         { requestId, ...identity },
         signal,
@@ -256,7 +263,7 @@ export class WorkerControlPlaneClient {
     const requestId = randomUUID();
     const response = parseOutputGrantResponse(
       await this.request(
-        `worker/v1/attempts/${attemptId}/output-grant`,
+        `worker/attempts/${attemptId}/output-grants`,
         "POST",
         { requestId, ...identity, ...output },
         signal,
@@ -279,7 +286,7 @@ export class WorkerControlPlaneClient {
     const requestId = randomUUID();
     const response = asRecord(
       await this.request(
-        `worker/v1/attempts/${attemptId}/progress`,
+        `worker/attempts/${attemptId}/progress-events`,
         "POST",
         { requestId, ...identity, ...progress },
         signal,
@@ -313,7 +320,7 @@ export class WorkerControlPlaneClient {
   ): Promise<void> {
     const response = asRecord(
       await this.request(
-        `worker/v1/attempts/${attemptId}/complete`,
+        `worker/attempts/${attemptId}/completions`,
         "POST",
         { requestId: randomUUID(), ...identity, ...completion },
         signal,
@@ -331,7 +338,7 @@ export class WorkerControlPlaneClient {
   ): Promise<void> {
     const response = asRecord(
       await this.request(
-        `worker/v1/attempts/${attemptId}/fail`,
+        `worker/attempts/${attemptId}/failures`,
         "POST",
         { requestId: randomUUID(), ...identity, ...failure },
         signal,
@@ -353,7 +360,7 @@ export class WorkerControlPlaneClient {
       throw new TypeError("Worker command identity is invalid");
     const response = asRecord(
       await this.request(
-        `worker/v1/commands/${commandId}/result`,
+        `worker/commands/${commandId}/results`,
         "POST",
         { requestId, sessionId, incarnation, ...result },
         signal,
@@ -377,7 +384,7 @@ export class WorkerControlPlaneClient {
     revision: number;
   }> {
     const response = asRecord(
-      await this.request("worker/v1/unpair", "POST", { force }, signal),
+      await this.request("worker/unpairings", "POST", { force }, signal),
     );
     if (
       typeof response.machineId !== "string" ||
@@ -398,20 +405,9 @@ export class WorkerControlPlaneClient {
 
   async machineStatus(signal?: AbortSignal): Promise<WorkerMachineStatus> {
     const response = asRecord(
-      await this.request("worker/v1/status", "GET", null, signal),
+      await this.request("worker/status", "GET", null, signal),
     );
-    const allowed = new Set([
-      "machineId",
-      "status",
-      "groupId",
-      "policyRevision",
-      "revision",
-      "lastSeenAt",
-      "activeAttempts",
-      "claimsAllowed",
-    ]);
     if (
-      Object.keys(response).some((key) => !allowed.has(key)) ||
       typeof response.machineId !== "string" ||
       !UUID_V4.test(response.machineId) ||
       !["pending", "active", "paused", "draining"].includes(
@@ -436,7 +432,7 @@ export class WorkerControlPlaneClient {
   ): Promise<MacUpdateCandidate> {
     return parseMacUpdateCandidate(
       await this.request(
-        "worker/v1/update",
+        "worker/updates",
         "POST",
         { platform: "darwin-arm64", download },
         signal,
@@ -455,7 +451,8 @@ export class WorkerControlPlaneClient {
       throw new TypeError(
         "Control-plane request escaped the configured origin",
       );
-    const serialized = body === null ? undefined : JSON.stringify(body);
+    const serialized =
+      body === null ? undefined : JSON.stringify(toWireCase(body));
     let lastError: unknown;
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       if (signal?.aborted) throw signal.reason;
@@ -477,7 +474,7 @@ export class WorkerControlPlaneClient {
           },
           ...(serialized === undefined ? {} : { body: serialized }),
         });
-        if (response.ok) return await readJson(response);
+        if (response.ok) return fromWireCase(await readJson(response));
         const error = await responseError(response);
         if (!error.retryable || attempt === this.maxAttempts) throw error;
         lastError = error;
@@ -487,7 +484,17 @@ export class WorkerControlPlaneClient {
         lastError = error;
         if (attempt === this.maxAttempts) break;
       }
-      await abortableDelay(Math.min(2_000, 200 * 2 ** (attempt - 1)), signal);
+      if (lastError instanceof ControlPlaneError && lastError.status === 429) {
+        if (lastError.retryAfterMs !== undefined) {
+          if (lastError.retryAfterMs > MAX_RETRY_DELAY_MS) throw lastError;
+          await abortableDelay(lastError.retryAfterMs, signal);
+          continue;
+        }
+      }
+      await abortableDelay(
+        Math.min(MAX_RETRY_DELAY_MS, 200 * 2 ** (attempt - 1)),
+        signal,
+      );
     }
     if (lastError instanceof ControlPlaneError) throw lastError;
     throw new ControlPlaneError("NETWORK_UNAVAILABLE", 0, true);
@@ -507,16 +514,24 @@ function validatedBaseUrl(value: string, allowInsecureLoopback: boolean): URL {
   const url = new URL(value);
   if (url.username || url.password || url.search || url.hash)
     throw new TypeError("Control-plane URL contains forbidden components");
+  if (url.pathname !== "/")
+    throw new TypeError("Control-plane URL must be an API origin");
   const loopback = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
   if (url.protocol !== "https:" && !(allowInsecureLoopback && loopback))
     throw new TypeError("Control-plane URL must use HTTPS");
-  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
   return url;
 }
 
-async function readJson(response: Response): Promise<unknown> {
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.toLowerCase().includes("application/json"))
+async function readJson(
+  response: Response,
+  mediaType = "application/json",
+): Promise<unknown> {
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+  if (contentType !== mediaType)
     throw new ControlPlaneError("RESPONSE_INVALID", response.status, false);
   const contentLength = Number(response.headers.get("content-length") ?? "0");
   if (contentLength > RESPONSE_LIMIT_BYTES)
@@ -550,8 +565,13 @@ function boundedStatusInteger(value: unknown): value is number {
 async function responseError(response: Response): Promise<ControlPlaneError> {
   let code = `HTTP_${response.status}`;
   try {
-    const body = asRecord(await readJson(response));
-    if (typeof body.code === "string" && WORKER_ERROR_CODES.has(body.code))
+    const body = asRecord(await readJson(response, "application/problem+json"));
+    if (
+      body.type === "about:blank" &&
+      body.status === response.status &&
+      typeof body.code === "string" &&
+      WORKER_ERROR_CODES.has(body.code)
+    )
       code = body.code;
   } catch {
     // The bounded status code is sufficient when an upstream omitted JSON.
@@ -560,6 +580,9 @@ async function responseError(response: Response): Promise<ControlPlaneError> {
     code,
     response.status,
     RETRYABLE_STATUS.has(response.status),
+    response.status === 429
+      ? retryAfterMilliseconds(response.headers.get("retry-after"))
+      : undefined,
   );
 }
 

@@ -34,6 +34,10 @@ import { AdminRateLimitService } from '../../src/admin/admin-rate-limit.service.
 import { AdminSessionController } from '../../src/admin/admin-session.controller.js';
 import type { AdminRole } from '../../src/admin/admin.types.js';
 import { PublicExceptionFilter } from '../../src/http/public-exception.filter.js';
+import {
+  SnakeCaseRequestPipe,
+  SnakeCaseResponseInterceptor,
+} from '../../src/http/snake-case-wire.js';
 import { AccountRestrictionsService } from '../../src/abuse-protection/account-restrictions.service.js';
 
 interface IdentityState {
@@ -84,6 +88,23 @@ export interface AdminHarness {
     token?: string,
   ): request.Test;
   close(): Promise<void>;
+}
+
+/** Build an explicit snake_case HTTP fixture from an internal test value. */
+export function wireJson(
+  value: Record<string, unknown>,
+): Record<string, unknown>;
+export function wireJson(value: unknown): unknown;
+export function wireJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(wireJson);
+  if (value === null || typeof value !== 'object' || value instanceof Date)
+    return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+      wireJson(entry),
+    ]),
+  );
 }
 
 export async function createAdminHarness(
@@ -218,9 +239,10 @@ export async function createAdminHarness(
     imports: [HarnessModule],
   }).compile();
   const app = moduleRef.createNestApplication({ logger: false });
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix('');
   app.useGlobalFilters(new PublicExceptionFilter());
   app.useGlobalPipes(
+    new SnakeCaseRequestPipe(),
     new ValidationPipe({
       transform: true,
       whitelist: true,
@@ -228,6 +250,7 @@ export async function createAdminHarness(
       exceptionFactory: () => authError('INVALID_INPUT'),
     }),
   );
+  app.useGlobalInterceptors(new SnakeCaseResponseInterceptor());
   await app.listen(0, '127.0.0.1');
 
   const seedAdmin = (role: AdminRole = 'owner') => {
@@ -250,7 +273,7 @@ export async function createAdminHarness(
       return 'google-owner-token';
     },
     request(method, path, body, token) {
-      let operation = request(app.getHttpServer())[method](`/api/v1${path}`);
+      let operation = request(app.getHttpServer())[method](path);
       if (token) operation = operation.set('Authorization', `Bearer ${token}`);
       if (body !== undefined && body !== null) operation = operation.send(body);
       return operation;

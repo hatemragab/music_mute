@@ -47,7 +47,7 @@ in no-backup storage. A previously bootstrapped user may enter local features
 offline; a new sign-in must complete backend registration. Account processing inputs, results, pending reviews, and source downloads are UID scoped.
 
 Debug and Release use `https://api.music-mute.com` by default. Override the public
-API **origin** (without `/api/v1`) with `-PauthApiUrl=https://your-api.example`.
+API **origin** with `-PauthApiUrl=https://your-api.example`.
 For local Debug development, override with `-PauthApiUrl=http://127.0.0.1:3000`
 and forward the port from the connected device with
 `adb -s <serial> reverse tcp:3000 tcp:3000`. Debug cleartext is limited to loopback
@@ -330,7 +330,7 @@ No commit, push, publishing, deployment, or restoration was performed.
 
 ## Account deletion and release configuration
 
-`DELETE /api/v1/users/me` uses a freshly reauthenticated bearer and no body.
+`DELETE /users/me` uses a freshly reauthenticated bearer and no body.
 Only HTTP 202 with a nonempty request ID and `status: accepted` is treated as
 acceptance. `REAUTHENTICATION_REQUIRED` remains recoverable without automatic
 sign-out. A minimal no-backup journal records a requested or accepted deletion;

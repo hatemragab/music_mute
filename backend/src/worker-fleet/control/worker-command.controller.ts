@@ -4,12 +4,12 @@ import type { WorkerRequest } from '../auth/worker-auth.types.js';
 import { CompleteWorkerCommandDto } from './worker-control.dto.js';
 import { WorkerControlService } from './worker-control.service.js';
 
-@Controller('worker/v1/commands')
+@Controller('worker/commands')
 @WorkerRoute('machine')
 export class WorkerCommandController {
   constructor(private readonly control: WorkerControlService) {}
 
-  @Post(':id/result')
+  @Post(':id/results')
   result(
     @Req() request: WorkerRequest,
     @Param('id') id: string,

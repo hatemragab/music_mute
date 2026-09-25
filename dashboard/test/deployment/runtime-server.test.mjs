@@ -68,7 +68,7 @@ describe("CapRover runtime server configuration", () => {
       () =>
         buildRuntimeConfig({
           ...productionEnvironment,
-          VITE_API_ORIGIN: "https://api.musicmute.example/api/v1",
+          VITE_API_ORIGIN: "https://api.musicmute.example/admin",
         }),
       /HTTPS origin/,
     );

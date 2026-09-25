@@ -77,10 +77,10 @@ test("direct route and forged API request remain forbidden to support", async ({
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        verifiedEmail: "forged@example.invalid",
+        verified_email: "forged@example.invalid",
         role: "owner",
         reason: "Forged UI request",
-        operationId: crypto.randomUUID(),
+        operation_id: crypto.randomUUID(),
       }),
     });
     return response.status;

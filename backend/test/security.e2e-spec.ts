@@ -85,119 +85,136 @@ describe('HTTP security defaults', () => {
   });
   it('sets security headers and removes framework disclosure', async () => {
     const response = await request(app.getHttpServer())
-      .get('/api/v1/probe')
+      .get('/probe')
       .expect(200);
     expect(response.headers['x-content-type-options']).toBe('nosniff');
     expect(response.headers['content-security-policy']).toBeDefined();
     expect(response.headers['x-powered-by']).toBeUndefined();
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['x-request-id']).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f-]{27}$/,
+    );
   });
   it('allows only configured browser origins', async () => {
     const allowed = await request(app.getHttpServer())
-      .get('/api/v1/probe')
+      .get('/probe')
       .set('Origin', 'https://allowed.test');
     expect(allowed.headers['access-control-allow-origin']).toBe(
       'https://allowed.test',
     );
     const blocked = await request(app.getHttpServer())
-      .get('/api/v1/probe')
+      .get('/probe')
       .set('Origin', 'https://evil.test');
     expect(blocked.headers['access-control-allow-origin']).toBeUndefined();
   });
   it('enforces rate limits despite forged forwarded IPs', async () => {
     for (const [index, route] of [
-      '/api/v1/probe',
-      '/api/v1/probe/alternate',
-      '/api/v1/probe',
+      '/probe',
+      '/probe/alternate',
+      '/probe',
     ].entries())
       await request(app.getHttpServer())
         .get(route)
         .set('X-Forwarded-For', `192.0.2.${index}`)
         .expect(200);
     const response = await request(app.getHttpServer())
-      .get('/api/v1/probe/alternate')
+      .get('/probe/alternate')
       .set('X-Forwarded-For', '192.0.2.99')
       .expect(429);
     expect(response.headers['retry-after']).toBeDefined();
+    expect(response.headers['content-type']).toMatch(
+      /application\/problem\+json/,
+    );
+    expect(response.headers['x-request-id']).toBe(response.body.request_id);
     expect(response.body).toEqual({
-      statusCode: 429,
+      type: 'about:blank',
+      title: 'Too Many Requests',
+      status: 429,
       code: 'RATE_LIMITED',
-      message: 'Too many requests',
+      detail: 'Too many requests',
+      request_id: expect.any(String),
     });
   });
   it('preserves explicit liveness throttle exemptions', async () => {
     for (let index = 0; index < 5; index++)
-      await request(app.getHttpServer()).get('/api/v1/probe/live').expect(200);
+      await request(app.getHttpServer()).get('/probe/live').expect(200);
   });
   it('keeps job reads outside the ordinary IP bucket but inside the overall ceiling', async () => {
     for (let index = 0; index < 6; index++)
-      await request(app.getHttpServer())
-        .get('/api/v1/probe/job-read')
-        .expect(200);
-    await request(app.getHttpServer()).get('/api/v1/probe').expect(200);
-    await request(app.getHttpServer())
-      .get('/api/v1/probe/job-read')
-      .expect(200);
+      await request(app.getHttpServer()).get('/probe/job-read').expect(200);
+    await request(app.getHttpServer()).get('/probe').expect(200);
+    await request(app.getHttpServer()).get('/probe/job-read').expect(200);
     const blocked = await request(app.getHttpServer())
-      .get('/api/v1/probe/job-read')
+      .get('/probe/job-read')
       .expect(429);
     expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
-    await request(app.getHttpServer()).get('/api/v1/probe/live').expect(200);
+    await request(app.getHttpServer()).get('/probe/live').expect(200);
   });
   it('fails closed without exposing Redis errors', async () => {
     redis.available = false;
     const response = await request(app.getHttpServer())
-      .get('/api/v1/probe')
+      .get('/probe')
       .expect(503);
     expect(response.body).toEqual({
-      statusCode: 503,
+      type: 'about:blank',
+      title: 'Service Unavailable',
+      status: 503,
       code: 'SERVICE_UNAVAILABLE',
-      message: 'Service unavailable',
+      detail: 'Service unavailable',
+      request_id: expect.any(String),
     });
     expect(response.text).not.toContain('private-redis-endpoint');
   });
   it('validates DTOs and rejects unknown properties', async () => {
     await request(app.getHttpServer())
-      .post('/api/v1/probe')
+      .post('/probe')
       .send({ value: 'ok' })
       .expect(201, { value: 'ok' });
     await request(app.getHttpServer())
-      .post('/api/v1/probe')
+      .post('/probe')
       .send({ value: 42 })
       .expect(400);
     await request(app.getHttpServer())
-      .post('/api/v1/probe')
+      .post('/probe')
       .send({ value: 'ok', admin: true })
       .expect(400);
   });
   it('bounds JSON bodies and rejects malformed JSON', async () => {
     await request(app.getHttpServer())
-      .post('/api/v1/probe')
+      .post('/probe')
       .send({ value: 'a'.repeat(2000) })
       .expect(413);
     const malformed = await request(app.getHttpServer())
-      .post('/api/v1/probe')
+      .post('/probe')
       .set('Content-Type', 'application/json')
       .send('{')
       .expect(400);
     expect(malformed.body).toEqual({
-      statusCode: 400,
+      type: 'about:blank',
+      title: 'Bad Request',
+      status: 400,
       code: 'INVALID_INPUT',
-      message: 'Invalid input',
+      detail: 'Bad Request',
+      request_id: expect.any(String),
     });
   });
   it('does not disclose internal exceptions', async () => {
     const response = await request(app.getHttpServer())
-      .get('/api/v1/probe/failure')
+      .get('/probe/failure')
       .expect(500);
     expect(response.body).toEqual({
-      statusCode: 500,
-      message: 'Service unavailable',
+      type: 'about:blank',
+      title: 'Internal Server Error',
+      status: 500,
+      code: 'INTERNAL_ERROR',
+      detail: 'Service unavailable',
+      request_id: expect.any(String),
     });
     expect(response.text).not.toContain('private-sdk-credential');
   });
   it('rejects unsupported request encodings', async () => {
     await request(app.getHttpServer())
-      .post('/api/v1/probe')
+      .post('/probe')
       .set('Content-Type', 'application/json; charset=iso-8859-1')
       .send('{"value":"ok"}')
       .expect(415);

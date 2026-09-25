@@ -25,7 +25,7 @@ describe("runtime local safety", () => {
       configFile,
       JSON.stringify({
         schemaVersion: 1,
-        backendBaseUrl: "https://api.example.invalid/api/v1",
+        backendBaseUrl: "https://api.example.invalid",
         machineId: "cb56441d-f2df-4b44-a320-6f37dfa81f7f",
         credentialFile,
         localLifecyclePath,
@@ -67,7 +67,7 @@ describe("runtime local safety", () => {
       configFile,
       JSON.stringify({
         schemaVersion: 1,
-        backendBaseUrl: "https://api.example.invalid/api/v1",
+        backendBaseUrl: "https://api.example.invalid",
         machineId: "cb56441d-f2df-4b44-a320-6f37dfa81f7f",
         credentialFile,
         workRoot: join(root, "work"),
@@ -136,7 +136,7 @@ describe("runtime local safety", () => {
     await writeFile(credentialFile, `${"x".repeat(43)}\n`, { mode: 0o600 });
     const config = {
       schemaVersion: 1,
-      backendBaseUrl: "https://api.example.invalid/api/v1",
+      backendBaseUrl: "https://api.example.invalid",
       machineId: "cb56441d-f2df-4b44-a320-6f37dfa81f7f",
       credentialFile,
       workRoot: join(root, "work"),

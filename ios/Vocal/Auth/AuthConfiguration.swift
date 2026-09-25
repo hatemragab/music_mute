@@ -34,7 +34,7 @@ struct AuthConfiguration: Sendable {
 
   func endpoint(_ path: String) throws -> URL {
     guard path.hasPrefix("/"),
-      let url = URL(string: "/api/v1" + path, relativeTo: apiOrigin)?.absoluteURL,
+      let url = URL(string: path, relativeTo: apiOrigin)?.absoluteURL,
       url.scheme == apiOrigin.scheme, url.host == apiOrigin.host, url.port == apiOrigin.port
     else { throw AuthFailure.configuration }
     return url

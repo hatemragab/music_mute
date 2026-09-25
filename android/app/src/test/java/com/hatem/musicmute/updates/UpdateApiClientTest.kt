@@ -30,7 +30,7 @@ class UpdateApiClientTest {
                         assertNull(body)
                         AuthHttpResponse(200, POLICY)
                     } else {
-                        assertTrue(url.endsWith("/app-updates/releases/6aa46ad418983c1bd08b5749/download"))
+                        assertTrue(url.endsWith("/app-updates/releases/6aa46ad418983c1bd08b5749/download-grants"))
                         assertEquals("POST", method)
                         assertEquals("{}", body)
                         AuthHttpResponse(200, GRANT)
@@ -75,8 +75,8 @@ class UpdateApiClientTest {
 
     private companion object {
         val POLICY =
-            """{"schemaVersion":1,"revision":1,"platform":"android","distribution":"direct","minimumBuild":2,"target":{"id":"6aa46ad418983c1bd08b5749","versionName":"0.1.1","buildNumber":2,"changelogEn":"test","source":"direct_apk","storeUrl":null,"artifact":{"bytes":80000000,"sha256Hex":"${"a".repeat(64)}","signerSha256Hex":"${"b".repeat(64)}"}},"checkedAt":"2026-09-12T00:00:00.000Z"}"""
+            """{"schema_version":1,"revision":1,"platform":"android","distribution":"direct","minimum_build":2,"target":{"id":"6aa46ad418983c1bd08b5749","version_name":"0.1.1","build_number":2,"changelog_en":"test","source":"direct_apk","store_url":null,"artifact":{"bytes":80000000,"sha256_hex":"${"a".repeat(64)}","signer_sha256_hex":"${"b".repeat(64)}"}},"checked_at":"2026-09-12T00:00:00.000Z"}"""
         val GRANT =
-            """{"releaseId":"6aa46ad418983c1bd08b5749","url":"https://signed.example.test/release.apk?token=redacted","expiresAt":"2026-09-12T00:15:00.000Z","bytes":80000000,"sha256Hex":"${"a".repeat(64)}","signerSha256Hex":"${"b".repeat(64)}"}"""
+            """{"release_id":"6aa46ad418983c1bd08b5749","url":"https://signed.example.test/release.apk?token=redacted","expires_at":"2026-09-12T00:15:00.000Z","bytes":80000000,"sha256_hex":"${"a".repeat(64)}","signer_sha256_hex":"${"b".repeat(64)}"}"""
     }
 }

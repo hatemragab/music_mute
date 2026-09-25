@@ -16,6 +16,7 @@ import {
 import type { AuthRequest } from '../../auth/auth-request.js';
 import {
   AdminWorkerListQueryDto,
+  AdminWorkerPageQueryDto,
   RequestWorkerBenchmarkDto,
   RequestWorkerDoctorDto,
   UpdateWorkerFleetPolicyDto,
@@ -43,7 +44,7 @@ export class AdminWorkerControlController {
     return this.control.machineDetail(request.adminActor!, id);
   }
 
-  @Post('machines/:id/doctor')
+  @Post('machines/:id/diagnostic-runs')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -55,7 +56,7 @@ export class AdminWorkerControlController {
     return this.control.requestDoctor(request.adminActor!, id, dto);
   }
 
-  @Post('machines/:id/benchmark')
+  @Post('machines/:id/benchmark-runs')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -70,15 +71,22 @@ export class AdminWorkerControlController {
   @Get('machines/:id/diagnostics')
   @RequireAdminPermission('workers.logs.read')
   @LimitAdmin('read')
-  diagnostics(@Req() request: AuthRequest, @Param('id') id: string) {
-    return this.control.machineDiagnostics(request.adminActor!, id);
+  diagnostics(
+    @Req() request: AuthRequest,
+    @Param('id') id: string,
+    @Query() query: AdminWorkerPageQueryDto,
+  ) {
+    return this.control.machineDiagnostics(request.adminActor!, id, query);
   }
 
   @Get('invitations')
   @RequireAdminPermission('workers.enroll')
   @LimitAdmin('read')
-  invitations(@Req() request: AuthRequest) {
-    return this.control.listInvitations(request.adminActor!);
+  invitations(
+    @Req() request: AuthRequest,
+    @Query() query: AdminWorkerPageQueryDto,
+  ) {
+    return this.control.listInvitations(request.adminActor!, query);
   }
 
   @Get('policy')

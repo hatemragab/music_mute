@@ -64,7 +64,7 @@ class AuthPushRegistrationApi(private val auth: AuthApiClient) : PushRegistratio
     override suspend fun deactivate(installationId: String, expectedBindingRevision: Long) {
         validateInstallation(installationId)
         require(expectedBindingRevision in 1..9_007_199_254_740_991L)
-        auth.request("POST", "/devices/$installationId/push/deactivate",
+        auth.request("POST", "/devices/$installationId/push-deactivations",
             buildJsonObject { put("expectedBindingRevision", expectedBindingRevision) }.toString(),
             replaySafe = false, expectedStatus = 204)
     }

@@ -39,6 +39,16 @@ describe("signed macOS update metadata", () => {
     });
     expect(
       parseMacUpdateCandidate({
+        ...candidate,
+        future_field: "new server field",
+        grant: { ...candidate.grant, future_field: true },
+      }),
+    ).toEqual({
+      signed: candidate.signed,
+      grant: candidate.grant,
+    });
+    expect(
+      parseMacUpdateCandidate({
         schemaVersion: 1,
         platform: "darwin-arm64",
         signed: { opaque: true },

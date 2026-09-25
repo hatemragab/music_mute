@@ -71,7 +71,7 @@ mw run --config /absolute/path/runtime.json
 ```json
 {
   "schemaVersion": 1,
-  "backendBaseUrl": "https://api.example.invalid/api/v1",
+  "backendBaseUrl": "https://api.example.invalid",
   "machineId": "00000000-0000-4000-8000-000000000000",
   "credentialFile": "/absolute/protected/machine.credential",
   "workRoot": "/absolute/private/attempts",
@@ -135,7 +135,7 @@ mw install --label "Studio Mac"
 The package installs `mw` as its CLI command.
 
 The command reads the one-use enrollment code from `/dev/tty` with echo
-disabled, uses `https://api.music-mute.com/api/v1`, downloads the service
+disabled, uses `https://api.music-mute.com`, downloads the service
 runtime beside any active release, verifies it, runs MPS qualification, and
 then installs `~/Library/LaunchAgents/com.musicmute.worker.plist`. The
 LaunchAgent always runs MusicMute's immutable private Node/Python/FFmpeg
@@ -294,7 +294,7 @@ only. It never includes credentials, configuration values, media, models,
 signed URLs, or unredacted user paths. These commands never request `sudo`.
 
 `status` combines protected local lifecycle/runtime state with the read-only
-machine-authenticated `GET /api/v1/worker/v1/status` response. It reports the
+machine-authenticated `GET /worker/status` response. It reports the
 dashboard machine status, policy revision, last contact, active-attempt count,
 and effective claim permission. If the backend is offline, remote state is
 explicitly unavailable and the command returns an unhealthy exit instead of

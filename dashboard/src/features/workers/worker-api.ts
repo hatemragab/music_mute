@@ -32,13 +32,25 @@ export const getWorkerMachine = (client: ApiClient, machineId: string) =>
     `/admin/worker-fleet/machines/${encodeURIComponent(machineId)}`,
   );
 
-export const getWorkerDiagnostics = (client: ApiClient, machineId: string) =>
+export const getWorkerDiagnostics = (
+  client: ApiClient,
+  machineId: string,
+  options: { cursor?: string | null; limit?: number } = {},
+) =>
   client.get<WorkerDiagnosticPage>(
-    `/admin/worker-fleet/machines/${encodeURIComponent(machineId)}/diagnostics`,
+    withQuery(
+      `/admin/worker-fleet/machines/${encodeURIComponent(machineId)}/diagnostics`,
+      options,
+    ),
   );
 
-export const listWorkerInvitations = (client: ApiClient) =>
-  client.get<WorkerInvitationPage>("/admin/worker-fleet/invitations");
+export const listWorkerInvitations = (
+  client: ApiClient,
+  options: { cursor?: string | null; limit?: number } = {},
+) =>
+  client.get<WorkerInvitationPage>(
+    withQuery("/admin/worker-fleet/invitations", options),
+  );
 
 export const createWorkerInvitation = (
   client: ApiClient,
@@ -57,7 +69,7 @@ export const revokeWorkerInvitation = (
   input: RevisionCommand,
 ) =>
   client.post<{ invitationId: string; revision: number; replayed: boolean }>(
-    `/admin/workers/invitations/${encodeURIComponent(invitationId)}/revoke`,
+    `/admin/workers/invitations/${encodeURIComponent(invitationId)}/revocations`,
     input,
   );
 
@@ -73,7 +85,14 @@ export const changeWorkerMachineState = (
     status: WorkerMachineStatus;
     replayed: boolean;
   }>(
-    `/admin/workers/machines/${encodeURIComponent(machineId)}/${action}`,
+    `/admin/workers/machines/${encodeURIComponent(machineId)}/${
+      {
+        pause: "pauses",
+        drain: "drains",
+        resume: "resumptions",
+        revoke: "revocations",
+      }[action]
+    }`,
     input,
   );
 
@@ -83,7 +102,7 @@ export const requestWorkerDoctor = (
   input: RevisionCommand & { checks: string[] },
 ) =>
   client.post<{ commandId: string; deferred: boolean; replayed: boolean }>(
-    `/admin/worker-fleet/machines/${encodeURIComponent(machineId)}/doctor`,
+    `/admin/worker-fleet/machines/${encodeURIComponent(machineId)}/diagnostic-runs`,
     input,
   );
 
@@ -93,7 +112,7 @@ export const requestWorkerBenchmark = (
   input: RevisionCommand & { recipeId: string; iterations: number },
 ) =>
   client.post<{ commandId: string; deferred: boolean; replayed: boolean }>(
-    `/admin/worker-fleet/machines/${encodeURIComponent(machineId)}/benchmark`,
+    `/admin/worker-fleet/machines/${encodeURIComponent(machineId)}/benchmark-runs`,
     input,
   );
 

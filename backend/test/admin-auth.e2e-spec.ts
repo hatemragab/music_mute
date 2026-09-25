@@ -20,12 +20,12 @@ describe('administrator HTTP admission', () => {
       .expect(200);
     expect(response.body).toMatchObject({
       uid: 'owner-uid',
-      verifiedEmail: 'owner@example.com',
+      verified_email: 'owner@example.com',
       role: 'owner',
-      accessRevision: 0,
+      access_revision: 0,
     });
     expect(response.body.permissions).toContain('admin.access.manage');
-    expect(response.body.serverTime).toMatch(/Z$/);
+    expect(response.body.server_time).toMatch(/Z$/);
     expect(response.headers['cache-control']).toBe('no-store');
   });
 
@@ -55,9 +55,12 @@ describe('administrator HTTP admission', () => {
       .set('X-Request-Id', requestId)
       .expect(401);
     expect(response.body).toEqual({
+      type: 'about:blank',
+      title: 'Unauthorized',
+      status: 401,
       code: 'UNAUTHENTICATED',
-      message: 'Authentication required',
-      requestId,
+      detail: 'Authentication required',
+      request_id: requestId,
     });
     expect(response.headers['cache-control']).toBe('no-store');
   });
@@ -70,9 +73,12 @@ describe('administrator HTTP admission', () => {
       .expect(400);
     expect(malformed.body).toMatchObject({
       code: 'INVALID_REQUEST',
-      message: 'Invalid request',
-      requestId: expect.any(String),
+      detail: 'Bad Request',
+      request_id: expect.any(String),
     });
+    expect(malformed.headers['content-type']).toContain(
+      'application/problem+json',
+    );
 
     const oversized = await f
       .request('post', '/admin/test/fresh')
@@ -80,8 +86,8 @@ describe('administrator HTTP admission', () => {
       .expect(413);
     expect(oversized.body).toMatchObject({
       code: 'UPLOAD_TOO_LARGE',
-      message: 'Upload too large',
-      requestId: expect.any(String),
+      detail: 'Upload too large',
+      request_id: expect.any(String),
     });
   });
 

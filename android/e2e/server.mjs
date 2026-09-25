@@ -36,7 +36,7 @@ try {
   const api = fixture.spawn(process.execPath, [path.join(root, 'backend/dist/main.js')], environment);
   await until(async () => {
     if (api.failure || api.exitCode !== null) throw new Error('Isolated API startup failed');
-    try { return (await fetch(`http://127.0.0.1:${apiPort}/api/v1/health/ready`, { signal: AbortSignal.timeout(500) })).ok; }
+    try { return (await fetch(`http://127.0.0.1:${apiPort}/health/ready`, { signal: AbortSignal.timeout(500) })).ok; }
     catch { return false; }
   }, 'isolated mobile API');
 

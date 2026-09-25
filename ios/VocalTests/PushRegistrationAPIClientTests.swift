@@ -25,7 +25,7 @@ import XCTest
         return (
           200,
           Data(
-            "{\"installationId\":\"\(self.installation)\",\"active\":true,\"bindingRevision\":7}"
+            "{\"installation_id\":\"\(self.installation)\",\"active\":true,\"binding_revision\":7}"
               .utf8)
         )
       }
@@ -35,11 +35,11 @@ import XCTest
     try await api.deactivate(
       installationID: installation, expectedBindingRevision: result.bindingRevision)
     XCTAssertEqual(requests.map(\.httpMethod), ["PUT", "POST"])
-    XCTAssertEqual(requests.last?.url?.path, "/api/v1/devices/\(installation)/push/deactivate")
+    XCTAssertEqual(requests.last?.url?.path, "/devices/\(installation)/push-deactivations")
     XCTAssertEqual(requests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer fixed-token")
     let body =
       try JSONSerialization.jsonObject(with: requestData(requests.last!)) as! [String: Int64]
-    XCTAssertEqual(body, ["expectedBindingRevision": 7])
+    XCTAssertEqual(body, ["expected_binding_revision": 7])
   }
 
   func testUnauthorizedDeactivationNeverRefreshesOrReplays() async {

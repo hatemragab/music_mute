@@ -148,6 +148,7 @@ export interface WorkerDiagnosticPage {
     metrics: Array<{ name: string; value: number; unit: string }>;
     createdAt: string;
   }>;
+  nextCursor: string | null;
 }
 
 export interface WorkerInvitation {
@@ -173,6 +174,7 @@ export interface WorkerInvitation {
 
 export interface WorkerInvitationPage {
   items: WorkerInvitation[];
+  nextCursor: string | null;
   asOf: string;
 }
 

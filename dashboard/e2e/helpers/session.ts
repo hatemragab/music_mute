@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 
 import type { AdminRole } from "../../src/api/contracts";
+import { fromWireCase, fromWireUrl, toWireCase } from "../../src/api/wire-case";
 import {
   createDashboardFixture,
   type DashboardFixture,
@@ -49,9 +50,9 @@ export async function installDashboardFixture(
     }
     const response = await fixture.handle({
       method: request.method(),
-      url: request.url(),
+      url: fromWireUrl(request.url()),
       token,
-      body,
+      body: fromWireCase(body),
     });
     await route.fulfill({
       status: response.status,
@@ -59,7 +60,7 @@ export async function installDashboardFixture(
       body:
         typeof response.body === "string"
           ? response.body
-          : JSON.stringify(response.body),
+          : JSON.stringify(toWireCase(response.body)),
     });
   });
   return fixture;

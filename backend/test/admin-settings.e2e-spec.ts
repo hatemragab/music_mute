@@ -8,6 +8,7 @@ import { DEFAULT_ACCOUNT_POLICY_VALUES } from '../src/admin-settings/account-pol
 import {
   createAdminHarness,
   type AdminHarness,
+  wireJson,
 } from './helpers/admin-harness.js';
 
 describe('account policy HTTP boundary', () => {
@@ -63,13 +64,16 @@ describe('account policy HTTP boundary', () => {
   it('allows public no-store policy reads without Firebase', async () => {
     const { harness } = await setup();
     const response = await harness
-      .request('get', '/processing-policy?schemaVersion=2')
+      .request('get', '/processing-policy?schema_version=2')
       .expect(200);
     expect(response.headers['cache-control']).toBe('no-store');
-    expect(response.body.acceptNewJobs).toBe(false);
-    expect(response.body).not.toHaveProperty('updatedBy');
-    expect(response.body.limits.maxDurationSeconds).toBe(1_200);
-    expect(response.body.limits).not.toHaveProperty('allowanceAudioSeconds');
+    expect(response.body.accept_new_jobs).toBe(false);
+    expect(response.body).not.toHaveProperty('updated_by');
+    expect(response.body.limits.max_duration_seconds).toBe(1_200);
+    expect(response.body.limits).not.toHaveProperty('allowance_audio_seconds');
+    await harness
+      .request('get', '/processing-policy?schemaVersion=2')
+      .expect(400);
   });
 
   it('removes the old processing settings administrator routes', async () => {
@@ -98,7 +102,7 @@ describe('account policy HTTP boundary', () => {
       .request(
         'put',
         '/admin/settings/account-policy',
-        update,
+        wireJson(update),
         harness.signInAs('support'),
       )
       .expect(403);
@@ -106,7 +110,7 @@ describe('account policy HTTP boundary', () => {
       .request(
         'put',
         '/admin/settings/account-policy',
-        update,
+        wireJson(update),
         harness.signInAs('owner'),
       )
       .expect(200);
@@ -120,7 +124,7 @@ describe('account policy HTTP boundary', () => {
       .request(
         'put',
         '/admin/settings/account-policy',
-        { ...update, signedUrlTtlSeconds: 601 },
+        wireJson({ ...update, signedUrlTtlSeconds: 601 }),
         token,
       )
       .expect(400);
@@ -128,13 +132,18 @@ describe('account policy HTTP boundary', () => {
       .request(
         'put',
         '/admin/settings/account-policy',
-        { ...update, maintenanceMessageEn: '   ' },
+        wireJson({ ...update, maintenanceMessageEn: '   ' }),
         token,
       )
       .expect(400);
     const { reason: _reason, ...missing } = update;
     await harness
-      .request('put', '/admin/settings/account-policy', missing, token)
+      .request(
+        'put',
+        '/admin/settings/account-policy',
+        wireJson(missing),
+        token,
+      )
       .expect(400);
     expect(policies.update).not.toHaveBeenCalled();
   });

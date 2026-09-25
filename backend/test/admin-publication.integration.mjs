@@ -69,7 +69,7 @@ test(
       const config = new ConfigService({
         APP_UPDATES_ENABLED: true,
         APK_EXPECTED_PACKAGE_ID: 'com.example.fixture',
-        RELEASE_LANDING_BASE_URL: 'https://example.invalid/api/v1',
+        RELEASE_LANDING_BASE_URL: 'https://example.invalid/',
       });
       const operations = new AdminOperationsService(
         connection,

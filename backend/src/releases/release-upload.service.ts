@@ -210,7 +210,7 @@ export class ReleaseUploadService implements OnModuleInit {
       throw adminError('INVALID_REQUEST');
     const command: AdminCommand = {
       operationId: body.operationId,
-      route: `POST /admin/releases/${releaseId}/uploads/${uploadId}/complete`,
+      route: `POST /admin/releases/${releaseId}/uploads/${uploadId}/completions`,
       request: { uploadId, releaseId, operationId: body.operationId },
       action: 'releases.upload.complete',
       resourceType: 'release_upload',

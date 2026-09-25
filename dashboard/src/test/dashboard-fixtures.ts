@@ -63,7 +63,15 @@ const error = (
   message: string,
 ): FixtureResponse => ({
   status,
-  body: { code, message, requestId: "fixture-request" },
+  body: {
+    type: "about:blank",
+    title: status === 429 ? "Too Many Requests" : "Request failed",
+    status,
+    detail: message,
+    code,
+    request_id: "fixture-request",
+  },
+  headers: { "content-type": "application/problem+json" },
 });
 
 const hasExactKeys = (value: unknown, keys: string[]): boolean =>
@@ -482,6 +490,7 @@ export class DashboardFixture {
     commands: [],
   };
   workerDiagnostics: WorkerDiagnosticPage = {
+    nextCursor: null,
     items: [
       {
         id: FIXTURE_IDS.workerDiagnostic,
@@ -538,7 +547,7 @@ export class DashboardFixture {
   async handle(input: FixtureRequest): Promise<FixtureResponse> {
     const method = input.method.toUpperCase();
     const url = new URL(input.url, "http://127.0.0.1");
-    const path = url.pathname.replace(/^\/api\/v1/, "");
+    const path = url.pathname;
     const request = { ...input, method, url: url.toString() };
     this.requests.push(request);
 
@@ -733,7 +742,10 @@ export class DashboardFixture {
       return { status: 200, body: page([this.job]) };
     if (path === `/admin/jobs/${this.job.id}` && method === "GET")
       return { status: 200, body: this.job };
-    if (path === `/admin/jobs/${this.job.id}/cancel` && method === "POST") {
+    if (
+      path === `/admin/jobs/${this.job.id}/cancellations` &&
+      method === "POST"
+    ) {
       this.job = {
         ...this.job,
         status: "cancelled",
@@ -800,22 +812,23 @@ export class DashboardFixture {
     )
       return { status: 200, body: this.recovery };
     if (
-      path.startsWith(
-        `/admin/account-recovery-requests/${this.recovery.id}/`,
-      ) &&
+      (path ===
+        `/admin/account-recovery-requests/${this.recovery.id}/approvals` ||
+        path ===
+          `/admin/account-recovery-requests/${this.recovery.id}/rejections`) &&
       method === "POST"
     ) {
       const action = path.split("/").at(-1);
       const body = input.body as { reason: string };
       this.recovery = {
         ...this.recovery,
-        status: action === "approve" ? "approved" : "rejected",
+        status: action === "approvals" ? "approved" : "rejected",
         reviewedAt: NOW,
         reviewReason: body.reason,
         revision: this.recovery.revision + 1,
         user: {
           ...this.recovery.user,
-          status: action === "approve" ? "active" : "deleting",
+          status: action === "approvals" ? "active" : "deleting",
         },
       };
       return { status: 201, body: this.recovery };
@@ -915,7 +928,7 @@ export class DashboardFixture {
     if (path === "/admin/worker-fleet/invitations" && method === "GET")
       return {
         status: 200,
-        body: { items: this.workerInvitations, asOf: NOW },
+        body: { items: this.workerInvitations, asOf: NOW, nextCursor: null },
       };
     if (path === "/admin/workers/invitations" && method === "POST") {
       const body = input.body as {
@@ -959,7 +972,7 @@ export class DashboardFixture {
       };
     }
     const invitationRevoke = path.match(
-      /^\/admin\/workers\/invitations\/([^/]+)\/revoke$/,
+      /^\/admin\/workers\/invitations\/([^/]+)\/revocations$/,
     );
     if (invitationRevoke && method === "POST") {
       const invitation = this.workerInvitations.find(
@@ -981,7 +994,7 @@ export class DashboardFixture {
     }
     const machineAction = path.match(
       new RegExp(
-        `^/admin/workers/machines/${FIXTURE_IDS.workerMachine}/(pause|drain|resume|revoke)$`,
+        `^/admin/workers/machines/${FIXTURE_IDS.workerMachine}/(pauses|drains|resumptions|revocations)$`,
       ),
     );
     if (machineAction && method === "POST") {
@@ -990,11 +1003,11 @@ export class DashboardFixture {
         return error(409, "REVISION_CONFLICT", "Worker revision changed.");
       const action = machineAction[1];
       const status =
-        action === "pause"
+        action === "pauses"
           ? "paused"
-          : action === "drain"
+          : action === "drains"
             ? "draining"
-            : action === "resume"
+            : action === "resumptions"
               ? "active"
               : "revoked";
       this.workerMachine = {
@@ -1138,7 +1151,7 @@ export class DashboardFixture {
     }
     if (path === "/admin/update-policy" && method === "GET")
       return { status: 200, body: this.policy };
-    if (path === "/admin/update-policy/preview" && method === "POST") {
+    if (path === "/admin/update-policy/previews" && method === "POST") {
       if (!validPolicySelection(input.body))
         return error(400, "INVALID_REQUEST", "Invalid policy selection.");
       return {
@@ -1160,28 +1173,28 @@ export class DashboardFixture {
       };
     }
     const publication = path.match(
-      /^\/admin\/releases\/([^/]+)\/(publish|withdraw)$/,
+      /^\/admin\/releases\/([^/]+)\/(publications|withdrawals)$/,
     );
     if (publication && method === "POST") {
       const release = this.releases.find(({ id }) => id === publication[1]);
       if (!release) return error(404, "NOT_FOUND", "Release was not found.");
-      const operation = publication[2] as "publish" | "withdraw";
+      const operation = publication[2] as "publications" | "withdrawals";
       const policyField =
-        operation === "publish" ? "policy" : "replacementPolicy";
+        operation === "publications" ? "policy" : "replacementPolicy";
       const keys = [
         "expectedRevision",
         "expectedReleaseRevision",
         policyField,
         "operationId",
         "reason",
-        ...(operation === "publish" ? ["storeAvailabilityConfirmed"] : []),
+        ...(operation === "publications" ? ["storeAvailabilityConfirmed"] : []),
       ];
       if (!hasExactKeys(input.body, keys))
         return error(400, "INVALID_REQUEST", "Invalid publication request.");
       const body = input.body as Record<string, unknown>;
       if (!validPolicySelection(body[policyField]))
         return error(400, "INVALID_REQUEST", "Invalid policy selection.");
-      release.state = operation === "publish" ? "published" : "withdrawn";
+      release.state = operation === "publications" ? "published" : "withdrawn";
       release.revision += 1;
       this.policy = {
         ...(body[policyField] as Omit<UpdatePolicy, "revision">),
@@ -1242,7 +1255,7 @@ export class DashboardFixture {
     if (path === "/admin/alerts" && method === "GET")
       return { status: 200, body: page([this.alert]) };
     if (
-      path === `/admin/alerts/${this.alert.id}/acknowledge` &&
+      path === `/admin/alerts/${this.alert.id}/acknowledgements` &&
       method === "POST"
     ) {
       this.alert = {

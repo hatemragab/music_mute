@@ -4,6 +4,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '../dist/auth/auth.guard.js';
+import { WorkerAuthGuard } from '../dist/worker-fleet/auth/worker-auth.guard.js';
+import {
+  WORKER_CREDENTIAL_KIND,
+  WORKER_ROUTE,
+} from '../dist/worker-fleet/auth/worker-auth.decorators.js';
 import { AUTH_OPERATION } from '../dist/auth/auth.decorators.js';
 import { Redis } from 'ioredis';
 import { RateBudgetService } from '../dist/rate-limits/rate-budget.service.js';
@@ -127,6 +132,124 @@ test('shares rolling rate budgets atomically through Redis', async (t) => {
       await firstClient.quit();
       const afterRestart = new RateBudgetService(client());
       assert.equal((await afterRestart.reserve(bucket)).allowed, false);
+    },
+  );
+
+  await t.test(
+    'limits one authenticated worker across guard instances',
+    async () => {
+      const credential = Buffer.alloc(32, 6).toString('base64url');
+      const machine = {
+        findOne: () => ({
+          maxTimeMS: () => ({
+            lean: async () => ({ _id: 'shared-worker', status: 'active' }),
+          }),
+        }),
+      };
+      const config = new ConfigService({ WORKER_MACHINE_PER_MINUTE: 1 });
+      const keys = {
+        bucket: (scope, id) => `fixture:{project}:worker:${scope}:${id}`,
+      };
+      const workerGuard = () =>
+        new WorkerAuthGuard(
+          new Reflector(),
+          {},
+          {},
+          machine,
+          new RateBudgetService(client()),
+          keys,
+          config,
+        );
+      class WorkerEndpoint {
+        status() {}
+      }
+      Reflect.defineMetadata(WORKER_ROUTE, true, WorkerEndpoint);
+      Reflect.defineMetadata(WORKER_CREDENTIAL_KIND, 'machine', WorkerEndpoint);
+      const retryHeaders = [];
+      const invoke = (guard) => {
+        return guard.canActivate({
+          getHandler: () => WorkerEndpoint.prototype.status,
+          getClass: () => WorkerEndpoint,
+          switchToHttp: () => ({
+            getRequest: () => ({
+              headers: { authorization: `Bearer ${credential}` },
+              rawHeaders: ['Authorization', `Bearer ${credential}`],
+            }),
+            getResponse: () => ({
+              setHeader: (name, value) => retryHeaders.push([name, value]),
+            }),
+          }),
+        });
+      };
+      const results = await Promise.allSettled([
+        invoke(workerGuard()),
+        invoke(workerGuard()),
+      ]);
+      assert.equal(
+        results.filter((result) => result.status === 'fulfilled').length,
+        1,
+      );
+      const rejected = results.find((result) => result.status === 'rejected');
+      assert.equal(rejected.reason.getStatus(), 429);
+      assert.ok(
+        retryHeaders.some(
+          ([name, value]) => name === 'Retry-After' && value > 0,
+        ),
+      );
+    },
+  );
+
+  await t.test(
+    'limits unknown worker credentials before MongoDB across instances',
+    async () => {
+      let lookups = 0;
+      const machine = {
+        findOne: () => {
+          lookups += 1;
+          return { maxTimeMS: () => ({ lean: async () => null }) };
+        },
+      };
+      class WorkerEndpoint {
+        status() {}
+      }
+      Reflect.defineMetadata(WORKER_ROUTE, true, WorkerEndpoint);
+      Reflect.defineMetadata(WORKER_CREDENTIAL_KIND, 'machine', WorkerEndpoint);
+      const credential = Buffer.alloc(32, 8).toString('base64url');
+      const guard = () =>
+        new WorkerAuthGuard(
+          new Reflector(),
+          {},
+          {},
+          machine,
+          new RateBudgetService(client()),
+          {
+            bucket: (scope, id) =>
+              `fixture:{project}:unknown-worker:${scope}:${id}`,
+          },
+          new ConfigService({ WORKER_PREAUTH_IP_PER_MINUTE: 1 }),
+        );
+      const invoke = (workerGuard) =>
+        workerGuard.canActivate({
+          getHandler: () => WorkerEndpoint.prototype.status,
+          getClass: () => WorkerEndpoint,
+          switchToHttp: () => ({
+            getRequest: () => ({
+              headers: { authorization: `Bearer ${credential}` },
+              rawHeaders: ['Authorization', `Bearer ${credential}`],
+              ip: '198.51.100.8',
+            }),
+            getResponse: () => ({ setHeader() {} }),
+          }),
+        });
+      await assert.rejects(
+        invoke(guard()),
+        (error) => error.getStatus() === 401,
+      );
+      await assert.rejects(
+        invoke(guard()),
+        (error) => error.getStatus() === 429,
+      );
+      assert.equal(lookups, 1);
     },
   );
 
