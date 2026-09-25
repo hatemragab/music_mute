@@ -3,6 +3,14 @@ import { Controller, Get, Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
+import { BullRegistrar, getQueueToken } from '@nestjs/bullmq';
+import {
+  IMPORT_QUEUE,
+  ImportsService,
+} from '../../src/url-imports/imports.service.js';
+import { ImportProcessor } from '../../src/url-imports/import-processor.js';
+import { ImportRuntime } from '../../src/url-imports/import-runtime.js';
+import { MediaImport } from '../../src/url-imports/media-import.schema.js';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Types } from 'mongoose';
 import { vi } from 'vitest';
@@ -89,6 +97,7 @@ class ProcessingProbeController {
 }
 
 export async function authFixture() {
+  const urlImports = { create: vi.fn(), get: vi.fn() };
   const events: string[] = [];
   const ownerId = new Types.ObjectId();
   const otherId = new Types.ObjectId();
@@ -342,6 +351,13 @@ export async function authFixture() {
       disconnect: () => undefined,
       quit: async () => undefined,
     });
+  builder
+    .overrideProvider(BullRegistrar)
+    .useValue({ register: () => undefined });
+  builder.overrideProvider(getQueueToken(IMPORT_QUEUE)).useValue({});
+  builder.overrideProvider(ImportProcessor).useValue({});
+  builder.overrideProvider(ImportRuntime).useValue({});
+  builder.overrideProvider(ImportsService).useValue(urlImports);
   for (const name of [
     User.name,
     UserIdentityFence.name,
@@ -361,6 +377,7 @@ export async function authFixture() {
     AccountPolicyOverride.name,
     ProcessingAdmissionFence.name,
     StorageCleanupTask.name,
+    MediaImport.name,
     ...PROCESSING_MODELS.map(({ name }) => name),
   ])
     builder.overrideProvider(getModelToken(name)).useValue({
@@ -389,5 +406,6 @@ export async function authFixture() {
     installations,
     ownerId,
     otherId,
+    urlImports,
   };
 }

@@ -6,15 +6,16 @@ Prepared on 2026-09-23 in `hatem/worker-gpu-processing-performance`. The checkou
 already contains earlier worker implementation changes. This follow-up was
 authorized separately and implemented here; `main` remains untouched.
 
+Updated 2026-09-26: mobile source downloaders are removed; see
+[the cleanup and validation record](../mobile-url-acquisition-removal.md).
+
 ## Agreed behavior
 
-- Mobile prepares the audio before upload. YouTube and phone-picked audio/video
-  follow the same bitrate policy: preserve a supported compressed audio stream
+- Mobile prepares picked local audio/video before upload using this bitrate policy: preserve a supported compressed audio stream
   when its known bitrate is at or below **160,000 bits/s**; encode once at
   160,000 bits/s when it is higher. Do not raise a known lower bitrate.
-- For YouTube, prefer the highest suitable audio-only stream at or below
-  160 kbps when available. If only a higher supported stream is available,
-  download within existing source limits and prepare it once on mobile.
+- URL acquisition is server-only through `/media-imports`. No source media is
+  downloaded or prepared on the phone for a URL import.
 - Extract the selected audio track from video. Upload compressed audio, not an
   uncompressed WAV. WAV remains a possible picked source when the platform can
   decode it. Preserve compatible MP3/AAC uploads; reuse native AAC/M4A for required
@@ -80,8 +81,8 @@ approval. Keep the candidate local until those checks and deployment are approve
 | 01 | [Define bitrate policy and contract cases](01-policy-and-contracts.md) | First: one decision table for all components and explicit edge-case decisions. |
 | 02 | [Update backend policy and upload protection](02-backend-policy-and-size.md) | 01: publish the policy and enforce declared/actual upload size without transcoding. |
 | 03 | [Update worker output and CLI diagnostics](03-worker-output-and-cli.md) | 01–02: reuse the input probe and produce MP3 at the selected rate. |
-| 04 | [Unify Android picked-media and YouTube preparation](04-android-preparation.md) | 01–03: prepare once, enforce size, and upload with consistent metadata. |
-| 05 | [Unify iOS picked-media and YouTube preparation](05-ios-preparation.md) | 01–04: match the same behavior using existing native media APIs. |
+| 04 | [Unify Android picked-media preparation](04-android-preparation.md) | 01–03: prepare once, enforce size, and upload with consistent metadata. |
+| 05 | [Unify iOS picked-media preparation](05-ios-preparation.md) | 01–04: match the same behavior using existing native media APIs. |
 | 06 | [Validate the complete flow and compare time/quality](06-validation-and-handoff.md) | 01–05: measured transfer/preparation totals and reviewed vocal output. |
 
 ## Review decisions and limits
@@ -89,19 +90,16 @@ approval. Keep the candidate local until those checks and deployment are approve
 - Unknown or unreliable bitrate: reuse metadata from existing inspection. If
   still unknown, encode once at 160 kbps as the user approved. This can enlarge
   a lower-rate source; never claim its original rate was preserved.
-- For downloaded YouTube audio, Android uses yt-dlp's selected-format bitrate
-  only when the platform track bitrate is absent. It rounds fractional reported
-  kbps upward so a rate just over 160 is not treated as within the cap. The
-  source is inspected and hashed before upload; its complete decode check occurs
-  on the worker. A truncated source may therefore fail after upload rather than
-  during phone preparation. Picked phone audio now follows the same bounded
-  inspection and checksum path without a second complete decode on the phone.
+- URL audio is acquired by the server through `/media-imports`. Mobile preparation
+  applies only to picked local files. Phone extraction packages are removed.
+  Picked compatible audio retains bounded inspection and checksum checks without
+  a redundant complete decode on the phone.
 - MP3 supports particular bitrate/sample-rate combinations. Propose the nearest
   supported rate at or below the requested rate; document very-low-rate sources
   that cannot meet this without changing output sample rate. Do not silently
   up-rate or introduce a new downsampling policy.
-- The 50 MB rule here governs the prepared upload. Existing source download,
-  source-file, duration and preparation-resource limits remain in force unless
+- The 50 MB rule here governs the prepared upload. Server acquisition,
+  local source-file, duration and preparation-resource limits remain in force unless
   the user separately changes them. This plan does not authorize importing an
   arbitrarily large original file just because it could shrink below 50 MB.
 - Five-second preparation is a measurement target, not a guarantee. Higher-rate

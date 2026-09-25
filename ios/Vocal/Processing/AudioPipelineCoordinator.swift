@@ -7,18 +7,11 @@ struct PipelineSourceFile: Sendable {
 }
 
 enum AudioPipelineFailure: Error, Equatable {
-  case invalidURL
   case sessionChanged
   case sourceNeedsReselection
 }
 
 @MainActor final class AudioPipelineCoordinator: ObservableObject {
-  typealias Download =
-    @MainActor (
-      _ videoID: String, _ operationID: UUID, _ ownerUid: String,
-      _ stage: @escaping @Sendable (DownloadStatus) -> Void,
-      _ progress: @escaping @Sendable (DownloadProgress) -> Void
-    ) async throws -> PipelineSourceFile
   typealias FailureReporter =
     @MainActor (
       _ fence: SessionFence, _ operationID: UUID, _ jobID: String?, _ stage: ClientErrorStage,
@@ -27,23 +20,18 @@ enum AudioPipelineFailure: Error, Equatable {
 
   var beforePreparation: @MainActor () async throws -> Void = {}
   @Published private(set) var pipelines: [AudioPipelineIntent] = []
-  @Published private(set) var sourceProgress: [UUID: DownloadProgress] = [:]
 
   private enum Source {
-    case url(String)
     case file(URL, securityScoped: Bool, temporary: Bool)
   }
 
   private let store: ProcessingStore
   private let repository: ProcessingRepository
   private let preparer: AudioInputPreparer
-  private let download: Download
   private let retrySleep: @Sendable (TimeInterval) async throws -> Void
   private let jitter: @Sendable () -> TimeInterval
   private let reportFailure: FailureReporter
   private let flushDiagnostics: @MainActor (SessionFence) async -> Void
-  private let sourceSessionChanged: @MainActor (String?) async -> Void
-  private let cancelSourceTransfer: @MainActor (String, UUID) async -> Void
   private let maxConcurrent: Int
   private var session: SessionFence?
   private var queued: [UUID] = []
@@ -59,27 +47,22 @@ enum AudioPipelineFailure: Error, Equatable {
 
   init(
     store: ProcessingStore, repository: ProcessingRepository, preparer: AudioInputPreparer,
-    maxConcurrent: Int = 2, download: @escaping Download,
+    maxConcurrent: Int = 2,
     retrySleep: @escaping @Sendable (TimeInterval) async throws -> Void = {
       try await Task.sleep(for: .seconds($0))
     },
     jitter: @escaping @Sendable () -> TimeInterval = { Double.random(in: 0...0.5) },
     reportFailure: @escaping FailureReporter = { _, _, _, _, _ in },
-    flushDiagnostics: @escaping @MainActor (SessionFence) async -> Void = { _ in },
-    sourceSessionChanged: @escaping @MainActor (String?) async -> Void = { _ in },
-    cancelSourceTransfer: @escaping @MainActor (String, UUID) async -> Void = { _, _ in }
+    flushDiagnostics: @escaping @MainActor (SessionFence) async -> Void = { _ in }
   ) {
     self.store = store
     self.repository = repository
     self.preparer = preparer
     self.maxConcurrent = max(1, maxConcurrent)
-    self.download = download
     self.retrySleep = retrySleep
     self.jitter = jitter
     self.reportFailure = reportFailure
     self.flushDiagnostics = flushDiagnostics
-    self.sourceSessionChanged = sourceSessionChanged
-    self.cancelSourceTransfer = cancelSourceTransfer
     repository.$operations.sink { [weak self] operations in
       self?.repositoryOperationsChanged(operations)
     }.store(in: &subscriptions)
@@ -99,11 +82,9 @@ enum AudioPipelineFailure: Error, Equatable {
       }
     }
     sources.removeAll()
-    sourceProgress.removeAll()
     pipelines.removeAll()
     for run in stopping { await run.task.value }
     guard session == fence else { return }
-    await sourceSessionChanged(fence?.uid)
     guard session == fence, let fence else { return }
     await flushDiagnostics(fence)
     guard session == fence else { return }
@@ -132,10 +113,6 @@ enum AudioPipelineFailure: Error, Equatable {
     {
       let existing = try? await store.operation(id: intent.operationId, ownerUid: fence.uid)
       if intent.reviewInput != nil || existing != nil {
-        sources[intent.operationId] = .url(intent.sourceVideoID ?? "")
-        enqueue(intent.operationId)
-      } else if let videoID = intent.sourceVideoID, intent.sourceKind == .url {
-        sources[intent.operationId] = .url(videoID)
         enqueue(intent.operationId)
       } else {
         _ = try? await store.updatePipeline(id: intent.operationId, ownerUid: fence.uid) {
@@ -145,27 +122,6 @@ enum AudioPipelineFailure: Error, Equatable {
       }
     }
     await publish(fence)
-  }
-
-  @discardableResult
-  func acceptURL(_ rawValue: String, eventID: UUID = UUID()) async throws -> UUID {
-    guard let fence = session else { throw AudioPipelineFailure.sessionChanged }
-    guard YouTubePreflight.isIndividualURL(rawValue) else {
-      throw AudioInputPreparationError.youtubePlaylist
-    }
-    guard let videoID = YouTubeURL.videoID(from: rawValue) else {
-      throw AudioPipelineFailure.invalidURL
-    }
-    if try await store.pipeline(id: eventID, ownerUid: fence.uid) != nil { return eventID }
-    let started = Date()
-    _ = try await store.createPipeline(
-      operationId: eventID, ownerUid: fence.uid, sourceKind: .url,
-      sourceVideoID: videoID, clientStartedAt: started)
-    try check(fence)
-    sources[eventID] = .url(videoID)
-    await publish(fence)
-    enqueue(eventID)
-    return eventID
   }
 
   @discardableResult
@@ -211,7 +167,7 @@ enum AudioPipelineFailure: Error, Equatable {
     else { return }
     if intent.phase == .failed || intent.phase == .awaitingAppResume {
       let hasUpload = (try? await store.operation(id: operationID, ownerUid: fence.uid)) != nil
-      if !hasUpload, intent.sourceKind == .file {
+      if !hasUpload {
         _ = try? await store.updatePipeline(id: operationID, ownerUid: fence.uid) {
           $0.phase = .awaitingAppResume
           $0.lastFailureCode = "processing_reselect_input"
@@ -220,7 +176,7 @@ enum AudioPipelineFailure: Error, Equatable {
         return
       }
       _ = try? await store.updatePipeline(id: operationID, ownerUid: fence.uid) {
-        $0.phase = hasUpload ? .reservingJob : .resolvingSource
+        $0.phase = hasUpload ? .reservingJob : .preparingInput
         $0.completedAt = nil
         $0.retryAttempt = 0
         $0.nextRetryAt = nil
@@ -229,7 +185,6 @@ enum AudioPipelineFailure: Error, Equatable {
       }
     }
     guard session == fence else { return }
-    if let videoID = intent.sourceVideoID { sources[operationID] = .url(videoID) }
     await publish(fence)
     enqueue(operationID)
   }
@@ -247,7 +202,6 @@ enum AudioPipelineFailure: Error, Equatable {
     }
     let stopping = running[operationID]
     stopping?.task.cancel()
-    await cancelSourceTransfer(fence.uid, operationID)
     queued.removeAll { $0 == operationID }
     await publish(fence)
     await stopping?.task.value
@@ -372,7 +326,6 @@ enum AudioPipelineFailure: Error, Equatable {
     try await store.removeOperation(id: operationID, ownerUid: fence.uid)
     try check(fence)
     sources[operationID] = nil
-    sourceProgress[operationID] = nil
     transferSlots.remove(operationID)
     await publish(fence)
   }
@@ -409,7 +362,6 @@ enum AudioPipelineFailure: Error, Equatable {
       PreparedMediaCleanup.discardPhotoCopy(url)
     }
     sources[id] = nil
-    sourceProgress[id] = nil
     startAvailable()
   }
 
@@ -518,38 +470,11 @@ enum AudioPipelineFailure: Error, Equatable {
     } else {
       try await beforePreparation()
       try checkRun(id, token: token, fence: fence)
-      let source = sources[id] ?? intent.sourceVideoID.map(Source.url)
+      let source = sources[id]
       guard let source else { throw AudioPipelineFailure.sourceNeedsReselection }
       let sourceFile: PipelineSourceFile
       let needsSecurityScope: Bool
       switch source {
-      case .url(let videoID):
-        _ = try await mutateRun(id, token: token, fence: fence) {
-          $0.phase = .resolvingSource
-          $0.lastFailureCode = nil
-        }
-        await publish(fence)
-        sourceFile = try await download(
-          videoID, id, fence.uid,
-          { [weak self] status in
-            Task {
-              @MainActor in
-              await self?.recordDownloadStage(status, id: id, token: token, fence: fence)
-            }
-          },
-          { [weak self] progress in
-            Task { @MainActor in
-              guard self?.running[id]?.token == token, self?.session == fence else { return }
-              self?.sourceProgress[id] = progress
-            }
-          })
-        try checkRun(id, token: token, fence: fence)
-        _ = try await mutateRun(id, token: token, fence: fence) {
-          $0.sourceTitle = String(sourceFile.title.prefix(200))
-          if $0.displayName == nil { $0.displayName = $0.sourceTitle }
-          $0.phase = .inspectingSource
-        }
-        needsSecurityScope = false
       case .file(let file, let securityScoped, _):
         sourceFile = PipelineSourceFile(
           url: file, title: intent.sourceTitle ?? file.lastPathComponent)
@@ -569,9 +494,6 @@ enum AudioPipelineFailure: Error, Equatable {
           operationId: id, sourceTitle: current.sourceTitle ?? sourceFile.title,
           sourceKind: current.sourceKind, clientStartedAt: current.clientStartedAt,
           displayName: current.displayName,
-          canonicalSourceURL: current.sourceVideoID.flatMap {
-            YouTubeURL.canonicalURL(videoID: $0)
-          },
           onPreparation: { [weak self] in
             guard let self else { throw CancellationError() }
             _ = try await self.mutateRun(id, token: token, fence: fence) {
@@ -607,21 +529,6 @@ enum AudioPipelineFailure: Error, Equatable {
     await publish(fence)
   }
 
-  private func recordDownloadStage(
-    _ status: DownloadStatus, id: UUID, token: UUID, fence: SessionFence
-  ) async {
-    guard running[id]?.token == token, session == fence else { return }
-    _ = try? await mutateRun(id, token: token, fence: fence) {
-      switch status {
-      case .resolving: $0.phase = .resolvingSource
-      case .downloading: $0.phase = .downloadingSource
-      case .checking: $0.phase = .inspectingSource
-      default: break
-      }
-    }
-    await publish(fence)
-  }
-
   private func publish(_ fence: SessionFence) async {
     guard let values = try? await store.pipelines(ownerUid: fence.uid), session == fence else {
       return
@@ -640,7 +547,6 @@ enum AudioPipelineFailure: Error, Equatable {
 
   private static func clientStage(_ phase: AudioPipelinePhase) -> ClientErrorStage {
     switch phase {
-    case .resolvingSource, .downloadingSource: return .downloadingSource
     case .inspectingSource, .preparingInput: return .preparingInput
     case .reservingJob: return .reservingJob
     case .uploadingInput: return .uploadingInput

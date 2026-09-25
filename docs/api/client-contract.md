@@ -39,6 +39,39 @@ where appropriate. For example, create a job with `POST /jobs`, cancel one with
 `POST /jobs/{id}/download-grants`. Use the exact method and path in OpenAPI;
 renamed action routes have no fallback.
 
+## Supported intake paths
+
+`POST /jobs` accepts prepared local files only: `source` is `audio_file` or
+`video_file`, and optional `source_kind` is `file`. Device URL downloads and
+`source_url` submissions are removed. URL acquisition uses `POST /media-imports`.
+The public media policy no longer includes device source-download limits.
+This intentionally retires the old mobile flow; older clients require an update.
+Server import jobs still carry URL attribution and original titles.
+
+## Optional URL imports
+
+`POST /media-imports` accepts `url` and a UUIDv4 `request_id`, using the same
+Firebase bearer token and `X-Installation-Id` processing-access checks as job
+creation. HTTP 202 returns `import_id`, `status`, nullable `job_id`/`error`, and
+timestamps. Reuse the request ID for retries of the same URL.
+
+Poll owner-scoped `GET /media-imports/{import_id}` until `submitted` or `failed`.
+After `submitted`, follow `GET /jobs/{job_id}` for worker progress and results.
+Android sends only the source URL; the backend acquires validated native audio
+and uses the existing S3 pipeline. Existing file-upload calls remain available.
+
+Public single-item links are resolved by yt-dlp, including YouTube and Facebook.
+There is no fixed provider allowlist. Site support and native audio availability
+are evaluated for each link. Only separate audio streams are downloaded; sources
+requiring video acquisition return `IMPORT_UNSUPPORTED_AUDIO_SOURCE`. Playlists,
+live streams, private-network URLs, and account-cookie access are unsupported.
+
+Clients must handle `IMPORT_DISABLED`, `IMPORT_UNSUPPORTED_PROVIDER`,
+`IMPORT_SINGLE_ITEM_REQUIRED`, `IMPORT_UNSUPPORTED_AUDIO_SOURCE`, size/duration
+errors, and retryable capacity or dependency errors. Source duration is checked
+against independently measured audio. Internal service credentials and delivery
+URLs are never returned to clients. See [deployment and validation](../../ytdlp_test/README.md).
+
 ## Authentication and ownership
 
 | Audience       | Credential and access rule                                                                                                                                                                                                  |
@@ -136,3 +169,39 @@ fixture, and the relevant docs together. Review authentication and ownership,
 input bounds, status codes, pagination, and retry behavior. Add focused contract
 tests for behavior changes. A change to source or docs alone does not prove a
 production deployment or live client compatibility.
+
+## Optional silence trimming (2026-09-26)
+
+`POST /jobs` and `POST /media-imports` accept the optional JSON boolean
+`trim_enabled` (default `true`). Set it to `false` to keep quiet sections and the
+full separated-audio timeline for future video synchronization. This still removes
+music and encodes MP3; encoder delay/padding must be handled by the future muxer.
+The choice is immutable per job and is preserved by retries. Changing it with an
+existing `request_id` conflicts; omitted and explicit `true` are equivalent.
+Strings and null are rejected. Audio acquisition remains audio-only.
+
+Recipe revision 6 trims at -40 dBFS, with the existing 0.6-second minimum gap,
+0.2-second padding and 5 ms fades. Revision 5 queued/retry snapshots retain -32
+dBFS. Deploy upgraded workers before the backend creates revision 6 jobs: older
+workers reject unknown recipe snapshots. No mobile switch is added in this change.
+
+API preflight: https://opensource.zalando.com/restful-api-guidelines/ read on
+2026-09-26; rules 101 (OpenAPI), 104 (security), 106 (compatibility), 118
+(snake_case), and 176 (problem responses). Existing auth and errors are preserved.
+
+### Imported source titles
+
+Media import responses include nullable `source_title`. The private audio downloader
+passes the provider title using a bounded UTF-8/base64 response header. The API
+removes control characters and limits the title to 200 Unicode code points before
+saving it on the import and the resulting job (`source_title` and initial
+`display_name`). Missing metadata remains nullable; previously imported titles are
+not reconstructed automatically. Existing clients may ignore this additive field.
+
+Android presents acquisition and processing as one job card. Submitted imports are
+acknowledged locally once their job appears, preventing stale cards after history
+pagination or job deletion. Original titles remain stored on the server job.
+
+API guideline review: https://opensource.zalando.com/restful-api-guidelines/
+(retrieved 2026-09-26); rules 101, 106 and 118 shaped the documented, additive,
+snake_case response field. Authentication and routes are unchanged.

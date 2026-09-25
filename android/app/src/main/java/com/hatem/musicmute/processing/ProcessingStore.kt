@@ -24,10 +24,22 @@ import com.hatem.musicmute.library.StoredLibraryTrack
 
 data class ProcessingSession(val uid: String, val epoch: Long)
 
-@Serializable
+@Serializable(with = ProcessingPhaseSerializer::class)
 enum class ProcessingPhase {
-    SOURCE_INTAKE, SOURCE_QUEUED, DOWNLOADING_SOURCE, INSPECTING, PREPARING_INPUT,
+    SOURCE_QUEUED, INSPECTING, PREPARING_INPUT,
     WAITING, RESERVING, UPLOADING, CONFIRMING, RETRY_WAIT, PAUSED, COMPLETE, CANCELLING,
+}
+
+/** Unknown persisted states stop recovery instead of scheduling work or hiding other jobs. */
+object ProcessingPhaseSerializer : kotlinx.serialization.KSerializer<ProcessingPhase> {
+    override val descriptor = kotlinx.serialization.descriptors.PrimitiveSerialDescriptor(
+        "ProcessingPhase", kotlinx.serialization.descriptors.PrimitiveKind.STRING)
+    override fun serialize(encoder: kotlinx.serialization.encoding.Encoder, value: ProcessingPhase) =
+        encoder.encodeString(value.name)
+    override fun deserialize(decoder: kotlinx.serialization.encoding.Decoder): ProcessingPhase {
+        val value = decoder.decodeString()
+        return ProcessingPhase.entries.firstOrNull { it.name == value } ?: ProcessingPhase.PAUSED
+    }
 }
 
 @Serializable
@@ -59,11 +71,8 @@ data class ProcessingOperation(
     val acceptedAtMillis: Long = 0,
     val transientRetryCount: Int = 0,
     val uploadGrantRequestId: String? = null,
-    val sourceDownloadedBytes: Long = 0,
-    val sourceTotalBytes: Long? = null,
     val pendingDelete: Boolean = false,
     val reservationAttempted: Boolean = false,
-    val sourceWorkRequestId: String? = null,
     val awaitingCloudConsent: Boolean = false,
     val sourceUri: String? = null,
     val sourceName: String? = null,
@@ -75,7 +84,7 @@ data class ProcessingOperation(
 )
 
 private val processingMilestones = listOf(
-    ProcessingPhase.DOWNLOADING_SOURCE, ProcessingPhase.INSPECTING, ProcessingPhase.PREPARING_INPUT,
+    ProcessingPhase.INSPECTING, ProcessingPhase.PREPARING_INPUT,
     ProcessingPhase.RESERVING, ProcessingPhase.UPLOADING, ProcessingPhase.CONFIRMING,
 )
 
@@ -103,6 +112,7 @@ data class ProcessingDocument(
     val schemaVersion: Int = 3,
     val library: List<StoredLibraryTrack> = emptyList(),
     val deletedLibraryJobs: Set<String> = emptySet(),
+    val urlImports: List<UrlImportRecord> = emptyList(),
 )
 
 private object ProcessingSerializer : Serializer<ProcessingDocument> {
@@ -153,6 +163,41 @@ class ProcessingStore(
     fun snapshots(uid: String): Flow<List<Job>> = store(uid).data.map { document ->
         validateOwner(uid, document)
         document.snapshots
+    }
+
+    fun urlImports(uid: String): Flow<List<UrlImportRecord>> = store(uid).data.map { document ->
+        validateOwner(uid, document)
+        document.urlImports
+    }
+
+    /** Persist the request ID before making any network request. */
+    suspend fun addUrlImport(uid: String, value: UrlImportRecord): UrlImportRecord {
+        require(value.ownerUid == uid)
+        val document = store(uid).updateData { current ->
+            validateOwner(uid, current)
+            val existing = current.urlImports.firstOrNull {
+                it.url == value.url && it.status !in UrlImportRecord.terminalStatuses
+            }
+            if (existing != null) current else {
+                val retained = current.urlImports.filterNot {
+                    it.status in UrlImportRecord.terminalStatuses && it.url == value.url
+                }
+                current.copy(urlImports = retained.filter { it.status in UrlImportRecord.terminalStatuses }
+                    .takeLast(20) + retained.filterNot { it.status in UrlImportRecord.terminalStatuses } + value)
+            }
+        }
+        return document.urlImports.first { it.url == value.url && it.status !in UrlImportRecord.terminalStatuses }
+    }
+
+    suspend fun updateUrlImport(uid: String, requestId: String, transform: (UrlImportRecord) -> UrlImportRecord) {
+        store(uid).updateData { current ->
+            validateOwner(uid, current)
+            current.copy(urlImports = current.urlImports.map { record ->
+                if (record.requestId != requestId) record else transform(record).also {
+                    require(it.ownerUid == uid && it.requestId == requestId && it.url == record.url)
+                }
+            })
+        }
     }
 
     suspend fun get(uid: String, operationId: String): ProcessingOperation? =
@@ -286,6 +331,8 @@ class ProcessingStore(
 
     private fun validateOwner(uid: String, document: ProcessingDocument) {
         if (document.operations.any { it.ownerUid != uid } || document.clientErrors.any { it.ownerUid != uid } ||
+            document.urlImports.any { it.ownerUid != uid } ||
+            document.urlImports.map { it.requestId }.distinct().size != document.urlImports.size ||
             document.operations.map { it.operationId }.distinct().size != document.operations.size
         ) throw CorruptionException("Processing metadata owner is invalid")
     }

@@ -57,6 +57,39 @@ export class JobActionsService {
     return { id: job._id.toHexString(), status: job.status };
   }
 
+  /** Release only an unsubmitted server import reservation; never cancel accepted work. */
+  async cancelPendingUpload(userId: string, requestId: string): Promise<void> {
+    await this.transactions.run(async (session) => {
+      const current = await this.jobs
+        .findOne({
+          userId: objectId(userId),
+          requestId,
+          status: 'awaiting_upload',
+          inputObject: null,
+        })
+        .session(session)
+        .lean();
+      if (!current) return;
+      const updated = await this.jobs
+        .findOneAndUpdate(
+          {
+            _id: current._id,
+            revision: current.revision,
+            status: 'awaiting_upload',
+            inputObject: null,
+          },
+          {
+            $set: { status: 'cancelled', finishedAt: new Date() },
+            $inc: { revision: 1 },
+          },
+          { session, runValidators: true, returnDocument: 'after' },
+        )
+        .lean();
+      if (!updated) throw jobError('JOB_STATE_CONFLICT');
+      await this.usage.settleJob(updated, session);
+    });
+  }
+
   /** Internal cleanup path. The account is already durably fenced, so owner access must not be re-asserted. */
   async cancelForAccountDeletion(userId: string, jobId: string) {
     const principal: JobActionPrincipal = {

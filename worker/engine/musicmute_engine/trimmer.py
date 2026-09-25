@@ -34,7 +34,7 @@ class TrimResult:
 def trim_vocal_gaps(
     source: Path,
     destination: Path,
-    threshold_db: float = -32,
+    threshold_db: float = -40,
     min_silence: float = 0.6,
     padding: float = 0.2,
     *,

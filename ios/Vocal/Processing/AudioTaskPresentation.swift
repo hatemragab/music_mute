@@ -226,8 +226,6 @@ struct AudioTaskPresentation: Equatable, Identifiable, Sendable {
 
   private static func localStage(_ phase: AudioPipelinePhase) -> Stage {
     switch phase {
-    case .resolvingSource: return .source
-    case .downloadingSource: return .download
     case .inspectingSource: return .inspect
     case .preparingInput: return .prepare
     case .reservingJob: return .reserve

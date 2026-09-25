@@ -1,15 +1,16 @@
-# 05 — Unify iOS picked-media and YouTube preparation
+# 05 — Unify iOS picked-media preparation
 
 **Status: implemented locally; physical-device timing pending.** Depends on tasks 01–04. Own iOS
-policy, import/export, YouTube selection and prepared-upload admission.
+policy, import/export and prepared-upload admission.
+
+Updated 2026-09-26: device URL acquisition is removed. See [removal evidence](../mobile-url-acquisition-removal.md).
 
 ## Source entry points
 
 - `ios/Vocal/Processing/ProcessingMediaPolicy.swift` and `MediaSourceInspector.swift`
 - `ios/Vocal/Processing/AudioInputPreparer.swift` and `AudioPreparationEngine.swift`
 - `ios/Vocal/Processing/PreparedInput.swift` and `MediaPreparationCoordinator.swift`
-- `ios/Vocal/Data/YouTubeAudioService.swift` and `YouTubePreflight.swift`
-- Existing preparation, download, upload and policy tests under `ios/VocalTests/`
+- Existing preparation, upload and policy tests under `ios/VocalTests/`
 
 ## Planned work
 
@@ -20,12 +21,10 @@ policy, import/export, YouTube selection and prepared-upload admission.
    selected video audio track when possible. Encode once with the existing native
    AAC/M4A path when required, honoring known lower rates and the unknown policy.
    Avoid WAV upload and avoid a second conversion to MP3 on the phone.
-3. Apply the same YouTube stream-selection order as Android using the downloader's
-   real codec/rate metadata. Respect iOS-supported formats; do not select an
-   undecodable format just to match a numeric bitrate. Reuse the same preparation
-   decision for downloaded and locally picked audio.
+3. URL acquisition is server-only through `/media-imports`; no phone source
+   downloader or stream-selection package is bundled.
 4. Enforce 50,000,000 prepared-upload bytes before upload begins. Keep existing
-   source limits and preserve security-scoped file access, background download
+   source limits and preserve security-scoped file access, background upload
    receipts, cancellation, insufficient-space errors and cleanup. Reuse valid
    prepared artifacts on resume/retry without repeated lossy encoding.
 5. Keep policy fields, prepared metadata, content type/extension, checksum and
@@ -37,7 +36,7 @@ policy, import/export, YouTube selection and prepared-upload admission.
 - Match Android's shared decision fixtures for lower/equal/higher rates, video,
   lossless sources, unsupported input, unknown metadata, VBR and size boundaries.
 - Verify output duration and decodability, pass-through payload preservation,
-  one encoder pass when needed, and no repeated download on recoverable resume.
+  one encoder pass when needed, and no repeated preparation on recoverable upload resume.
 - Inspect the current Xcode scheme/test instructions. For device/UI tests use
   only iPhone 17 Pro / iOS 26.0 simulator
   `3CC14436-EC3C-4419-A079-C84951E5FA07`, explicitly selected with parallel testing

@@ -44,7 +44,9 @@ export class JobsService {
     input: InputDeclaration,
     requestId: string,
     metadata: JobMetadata = {},
+    trimEnabled = true,
   ) {
+    if (typeof trimEnabled !== 'boolean') throw authError('INVALID_INPUT');
     const normalized = normalizeJobMetadata(metadata);
     assertInputDeclaration(input);
     if (!isUUID(requestId, '4')) throw authError('INVALID_INPUT');
@@ -52,6 +54,7 @@ export class JobsService {
     const owner = objectId(userId);
     const hash = requestHash({
       operation: 'create',
+      ...(trimEnabled ? {} : { trimEnabled: false }),
       input,
       ...(Object.keys(normalized).length ? { metadata: normalized } : {}),
     });
@@ -93,7 +96,10 @@ export class JobsService {
                   key: `users/${owner.toHexString()}/jobs/${id.toHexString()}/input/${randomUUID()}.${input.extension}`,
                 },
                 admissionSnapshot,
-                recipeSnapshot: workerRecipeSnapshot(DEFAULT_WORKER_RECIPE_ID),
+                recipeSnapshot: workerRecipeSnapshot(
+                  DEFAULT_WORKER_RECIPE_ID,
+                  trimEnabled,
+                ),
                 retryEligibility: {
                   eligible: true,
                   attemptsRemaining:

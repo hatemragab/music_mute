@@ -1,0 +1,14 @@
+{
+  "TaskTemplate": {
+    "ContainerSpec": {
+      "Init": true,
+      "CapabilityDrop": ["ALL"],
+      "Mounts": [
+        {"Type": "tmpfs", "Target": "/work", "TmpfsOptions": {"SizeBytes": 268435456, "Mode": 1023}},
+        {"Type": "bind", "Source": "/captain/data/musicmute-ytdlp/api-key", "Target": "/run/musicmute-ytdlp/api-key", "ReadOnly": true}
+      ]
+    },
+    "Resources": {"Limits": {"NanoCPUs": 1000000000, "MemoryBytes": 805306368}},
+    "LogDriver": {"Name": "json-file", "Options": {"max-size": "5m", "max-file": "2"}}
+  }
+}

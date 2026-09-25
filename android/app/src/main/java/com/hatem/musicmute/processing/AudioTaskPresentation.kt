@@ -31,27 +31,61 @@ data class AudioTaskPresentation(
     val problem: JobsProblem? = null,
     val localProblem: ProcessingLocalProblem? = null,
     val lastReachedStage: AudioTaskStage = stage,
+    val importRequestId: String? = null,
+    val importOnly: Boolean = false,
 )
 
 fun audioTaskPresentations(
     operations: List<ProcessingOperation>,
     jobs: List<Job>,
     nowMillis: Long,
+    imports: List<UrlImportRecord> = emptyList(),
 ): List<AudioTaskPresentation> {
     val operationsByJob = operations.filter { it.jobId != null }.associateBy { it.jobId }
     val operationsByRequest = operations.associateBy { it.requestId }
     val merged = jobs.map { job ->
         val operation = operationsByJob[job.id] ?: job.requestId?.let(operationsByRequest::get)
-        presentation(operation, job, nowMillis)
+        val record = imports.firstOrNull { it.jobId == job.id }
+        if (record != null && record.status != "submitted") importPresentation(record, nowMillis)
+        else presentation(operation, job, nowMillis).copy(importRequestId = record?.requestId)
     }.toMutableList()
     val represented = merged.mapNotNull { it.operationId }.toSet()
     operations.filterNot { it.operationId in represented || it.pendingDelete }
         .forEach { merged += presentation(it, null, nowMillis) }
+    imports.filter { record -> jobs.none { it.id == record.jobId } &&
+        !(record.status == "submitted" && (record.jobObserved || record.createdAtMillis == 0L)) }.forEach { record ->
+        merged += importPresentation(record, nowMillis)
+    }
     return merged.sortedByDescending { task ->
         jobs.firstOrNull { it.id == task.jobId }?.createdAt?.toEpochMilli()
             ?: operations.firstOrNull { it.operationId == task.operationId }?.acceptedAtMillis
+            ?: imports.firstOrNull { it.requestId == task.importRequestId }?.createdAtMillis
             ?: 0
     }
+}
+
+private fun importPresentation(record: UrlImportRecord, nowMillis: Long): AudioTaskPresentation {
+    val stage = when (record.status) {
+        "downloading" -> AudioTaskStage.DOWNLOADING_SOURCE
+        "validating" -> AudioTaskStage.INSPECTING
+        "uploading" -> AudioTaskStage.UPLOADING_INPUT
+        "submitted" -> AudioTaskStage.QUEUED
+        "failed", "attention" -> AudioTaskStage.FAILED
+        else -> AudioTaskStage.WAITING
+    }
+    return AudioTaskPresentation(
+        operationId = null, jobId = record.jobId, displayName = record.sourceTitle.orEmpty(),
+        sourceTitle = record.sourceTitle, sourceKind = SourceKind.URL,
+        stage = stage, active = stage != AudioTaskStage.FAILED,
+        progressFraction = null, transferredBytes = null, totalBytes = null,
+        totalElapsedMs = record.createdAtMillis.takeIf { it > 0 && stage != AudioTaskStage.FAILED }
+            ?.let { (nowMillis - it).coerceAtLeast(0) },
+        totalElapsedApproximate = true, processingElapsedMs = null,
+        processingElapsedApproximate = false, workerAvailable = null,
+        canCancel = false, canRetry = stage == AudioTaskStage.FAILED,
+        canDelete = false, canPlay = false, errorCode = record.errorCode,
+        importRequestId = record.requestId, importOnly = true,
+    )
 }
 
 private fun presentation(
@@ -67,12 +101,10 @@ private fun presentation(
         AudioTaskStage.UPLOADING_RESULT, AudioTaskStage.INTERRUPTED, AudioTaskStage.CANCELLING,
     )
     val transferred = when (stage) {
-        AudioTaskStage.DOWNLOADING_SOURCE -> operation?.sourceDownloadedBytes?.coerceAtLeast(0)
         AudioTaskStage.UPLOADING_INPUT -> operation?.uploadedBytes?.coerceAtLeast(0)
         else -> null
     }
     val total = when (stage) {
-        AudioTaskStage.DOWNLOADING_SOURCE -> operation?.sourceTotalBytes
         AudioTaskStage.UPLOADING_INPUT -> operation?.input?.bytes
         else -> null
     }
@@ -156,7 +188,6 @@ private fun lastReachedStage(stage: AudioTaskStage, operation: ProcessingOperati
         operation?.hasUploadedInput == true -> AudioTaskStage.CONFIRMING_UPLOAD
         job != null || operation?.jobId != null -> AudioTaskStage.UPLOADING_INPUT
         operation?.input != null -> AudioTaskStage.RESERVING_JOB
-        operation?.sourceTotalBytes?.let { it > 0 && operation.sourceDownloadedBytes >= it } == true -> AudioTaskStage.PREPARING_INPUT
         else -> AudioTaskStage.UNKNOWN
     }
     return listOfNotNull(stage, recorded, localEvidence,
@@ -180,9 +211,8 @@ private fun serverStage(status: String): AudioTaskStage = when (status) {
 }
 
 private fun localStage(phase: ProcessingPhase): AudioTaskStage = when (phase) {
-    ProcessingPhase.SOURCE_INTAKE, ProcessingPhase.SOURCE_QUEUED, ProcessingPhase.WAITING ->
+    ProcessingPhase.SOURCE_QUEUED, ProcessingPhase.WAITING ->
         AudioTaskStage.WAITING
-    ProcessingPhase.DOWNLOADING_SOURCE -> AudioTaskStage.DOWNLOADING_SOURCE
     ProcessingPhase.INSPECTING -> AudioTaskStage.INSPECTING
     ProcessingPhase.PREPARING_INPUT -> AudioTaskStage.PREPARING_INPUT
     ProcessingPhase.RESERVING -> AudioTaskStage.RESERVING_JOB

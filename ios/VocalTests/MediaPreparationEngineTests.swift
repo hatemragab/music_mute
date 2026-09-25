@@ -8,8 +8,7 @@ final class MediaPreparationEngineTests: XCTestCase {
   private let policy = ProcessingMediaPolicy(
     version: 2, maxDuration: 1_200,
     maxBytes: 50_000_000, maxSourceBytes: 200_000_000,
-    maxPreparationSeconds: 60, profileID: "audio-cap-aac-lc-160-v1",
-    maxSourceDownloadBytes: 50_000_000, maxSourceDownloadSeconds: 120)
+    maxPreparationSeconds: 60, profileID: "audio-cap-aac-lc-160-v1")
   override func setUpWithError() throws {
     root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -73,8 +72,7 @@ final class MediaPreparationEngineTests: XCTestCase {
         policy: ProcessingMediaPolicy(
           version: 2, maxDuration: 1_200, maxBytes: 50_000_000,
           maxSourceBytes: nil, maxPreparationSeconds: 120,
-          profileID: "audio-cap-aac-lc-160-v1",
-          maxSourceDownloadBytes: 50_000_000, maxSourceDownloadSeconds: 120),
+          profileID: "audio-cap-aac-lc-160-v1"),
         availableCapacity: { _ in 1_000_000_000 })
       XCTFail("null bounds expanded preparation")
     } catch { XCTAssertEqual(error as? AudioInputPreparationError, .policyUnavailable) }

@@ -128,8 +128,10 @@ The apps integrate Firebase Authentication and optional Firebase Messaging.
 Messaging registration depends on notification permission and successful backend
 device/session synchronization; iOS also requires APNs provisioning/token setup.
 Client SDK integration does not establish live provider configuration or delivery.
-YouTube downloads and original history remain local; processing storage uses the
-backend's short-lived signed S3 grants.
+Local files use the backend's short-lived signed S3 upload grants. URL imports
+use `/media-imports`: the server acquires audio and uploads it to S3. Mobile
+source downloaders and their packages are removed. See
+[the removal and validation record](docs/mobile-url-acquisition-removal.md).
 
 The production Android and iOS configuration files are local-only and ignored by
 Git. They contain client identifiers that are shipped in the apps and therefore

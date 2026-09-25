@@ -2,8 +2,7 @@ import XCTest
 
 final class ProcessingUITests: XCTestCase {
   private func launch(
-    id: String = UUID().uuidString, arabic: Bool = false, offline: Bool = false,
-    pasteURL: String? = nil
+    id: String = UUID().uuidString, arabic: Bool = false, offline: Bool = false
   )
     -> XCUIApplication
   {
@@ -19,7 +18,6 @@ final class ProcessingUITests: XCTestCase {
       ]
     }
     if offline { app.launchArguments += ["--processing-fixture-offline"] }
-    if let pasteURL { app.launchArguments += ["--processing-fixture-paste-url", pasteURL] }
     app.launch()
     let tab = app.tabBars.buttons[arabic ? "معالجة الصوت" : "Voice processing"]
     XCTAssertTrue(tab.waitForExistence(timeout: 10))
@@ -140,32 +138,9 @@ final class ProcessingUITests: XCTestCase {
     attach(app, "Deleted processed audio removed from library")
   }
 
-  func testExplicitDownloadAndNativeFileRequireRightsAndCloudConfirmation() {
+  func testNativeFileRequiresRightsAndCloudConfirmation() {
     let fixtureID = "00000000-0000-4000-8000-" + UUID().uuidString.suffix(12)
-    let app = launch(id: fixtureID, pasteURL: "https://youtu.be/jNQXAC9IVRw")
-    for number in 5...6 {
-      app.tabBars.buttons["Home"].tap()
-      if number == 5 {
-        reveal(app.buttons["YouTube (secondary option)"], app: app, scrollID: nil).tap()
-      }
-      reveal(app.buttons["pasteURL"], app: app, scrollID: nil).tap()
-      XCTAssertTrue(app.textFields["youtubeURL"].exists || app.textViews["youtubeURL"].exists)
-      reveal(app.buttons["downloadAudio"], app: app, scrollID: nil).tap()
-      confirmReview(app)
-      XCTAssertTrue(app.scrollViews["processingHistory"].waitForExistence(timeout: 5))
-      XCTAssertTrue(row(number, app).exists)
-    }
-    assertMetric("fixtureCreatedJobs", equals: 2, app: app)
-    row(5, app).tap()
-    for label in [
-      "Find source", "Download audio", "Preparing audio…", "Creating the processing job…",
-      "Uploading audio…", "Confirming the upload…", "Checking audio", "Removing music",
-      "Saving voice result",
-    ] {
-      XCTAssertTrue(app.scrollViews["processingDetail"].staticTexts[label].exists, label)
-    }
-    attach(app, "Confirmed URL task exposes all transfer and worker stages")
-    app.navigationBars.buttons.firstMatch.tap()
+    let app = launch(id: fixtureID)
     reveal(app.buttons["processingImport"], app: app, scrollID: "processingHistory").tap()
     let browse = app.buttons["Browse"].firstMatch
     if browse.waitForExistence(timeout: 3), browse.isHittable { browse.tap() }
@@ -176,13 +151,13 @@ final class ProcessingUITests: XCTestCase {
     attach(app, "Native Files picker shows synthetic fixture audio")
     tapPickerItem("Fixture input", app: app, alternate: "Fixture input.mp3")
     confirmReview(app)
-    assertMetric("fixtureCreatedJobs", equals: 3, app: app)
+    assertMetric("fixtureCreatedJobs", equals: 1, app: app)
     if app.scrollViews["processingDetail"].exists {
       app.navigationBars.buttons.firstMatch.tap()
     }
     XCTAssertTrue(app.scrollViews["processingHistory"].waitForExistence(timeout: 5))
-    XCTAssertTrue(row(7, app).exists)
-    row(7, app).tap()
+    XCTAssertTrue(row(5, app).exists)
+    row(5, app).tap()
     XCTAssertTrue(app.staticTexts["Queued"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.scrollViews["processingDetail"].staticTexts["Find source"].exists)
     XCTAssertFalse(app.scrollViews["processingDetail"].staticTexts["Download audio"].exists)
@@ -238,6 +213,15 @@ final class ProcessingUITests: XCTestCase {
   ) {
     let names = [label, alternate].compactMap { $0 }
     for _ in 0..<5 {
+      if alternate != nil {
+        for name in names {
+          let caption = app.staticTexts[name].firstMatch
+          if caption.exists, caption.isHittable {
+            caption.tap()
+            return
+          }
+        }
+      }
       for name in names {
         let cell = app.cells.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
         if cell.waitForExistence(timeout: 1), cell.isHittable {

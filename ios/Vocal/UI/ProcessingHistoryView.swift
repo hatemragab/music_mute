@@ -56,7 +56,7 @@ struct ProcessingHistoryView: View {
     guard let operationID = task.operationID else { return nil }
     switch task.statusKey {
     case "processing_finding_downloading":
-      return pipeline.sourceProgress[operationID]?.fraction
+      return nil
     case "processing_uploading_audio":
       return repository.transferProgress[operationID]?.fraction
     default:

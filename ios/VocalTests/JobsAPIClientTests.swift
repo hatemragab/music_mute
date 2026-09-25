@@ -115,8 +115,10 @@ import XCTest
         [0, 1, 2, 6].contains(index) ? installation.lowercased() : nil)
       if [2, 5].contains(index) { XCTAssertEqual(try body(request).count, 0) }
     }
-    XCTAssertEqual(try body(received[0])["request_id"] as? String, requestId.uuidString.lowercased())
-    XCTAssertEqual(try body(received[1])["request_id"] as? String, requestId.uuidString.lowercased())
+    XCTAssertEqual(
+      try body(received[0])["request_id"] as? String, requestId.uuidString.lowercased())
+    XCTAssertEqual(
+      try body(received[1])["request_id"] as? String, requestId.uuidString.lowercased())
     XCTAssertEqual(
       Set(try body(received[0]).keys),
       ["policy_version", "preparation_profile_id", "source", "request_id", "input"])
@@ -124,8 +126,10 @@ import XCTest
     XCTAssertEqual(
       Set(declaration.keys), ["extension", "content_type", "bytes", "duration_seconds", "sha256"])
     XCTAssertEqual(declaration["bytes"] as? Int, 123)
-    XCTAssertEqual(try body(received[6])["request_id"] as? String, requestId.uuidString.lowercased())
-    XCTAssertEqual(try body(received[7])["request_id"] as? String, requestId.uuidString.lowercased())
+    XCTAssertEqual(
+      try body(received[6])["request_id"] as? String, requestId.uuidString.lowercased())
+    XCTAssertEqual(
+      try body(received[7])["request_id"] as? String, requestId.uuidString.lowercased())
     XCTAssertEqual(try body(received[7])["artifact"] as? String, "output")
     XCTAssertEqual(try body(received[7])["artifact"] as? String, "output")
     XCTAssertEqual(
@@ -182,8 +186,7 @@ import XCTest
       reservation = try await api.create(
         requestId: requestId, input: input,
         metadata: JobSourceMetadata(
-          sourceTitle: "Interview", sourceKind: .url, clientStartedAt: started,
-          sourceURL: "https://www.youtube.com/watch?v=jNQXAC9IVRw"))
+          sourceTitle: "Interview", sourceKind: .file, clientStartedAt: started))
     } catch {
       XCTFail("create metadata failed: \(error)")
       return
@@ -214,10 +217,8 @@ import XCTest
 
     let createBody = try body(received[0])
     XCTAssertEqual(createBody["source_title"] as? String, "Interview")
-    XCTAssertEqual(createBody["source_kind"] as? String, "url")
-    XCTAssertEqual(
-      createBody["source_url"] as? String,
-      "https://www.youtube.com/watch?v=jNQXAC9IVRw")
+    XCTAssertEqual(createBody["source_kind"] as? String, "file")
+    XCTAssertNil(createBody["source_url"])
     XCTAssertEqual(createBody["client_started_at"] as? String, "2026-09-10T12:00:00.000Z")
     XCTAssertEqual(try body(received[1])["display_name"] as? String, "My interview")
     let report = try body(received[3])

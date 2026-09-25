@@ -38,7 +38,7 @@ class TrimmerParityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "source.wav"
-            for gap_seconds, level, removed_seconds in ((0.7, 0.011, 0.3), (0.7, 0.007, 0.3), (0.6, 0.007, 0.2), (0.59, 0.007, 0), (0.7, 0.02, 0.3), (0.7, 0.03, 0)):
+            for gap_seconds, level, removed_seconds in ((0.7, 0.011, 0), (0.7, 0.007, 0.3), (0.6, 0.007, 0.2), (0.59, 0.007, 0), (0.7, 0.02, 0), (0.7, 0.03, 0)):
                 gap = np.full((round(RATE * gap_seconds), 2), level, dtype=np.float32)
                 sf.write(source, np.concatenate((tone(RATE), gap, tone(RATE))), RATE, subtype="PCM_16")
                 result = trim_vocal_gaps(source, root / "trial.wav")

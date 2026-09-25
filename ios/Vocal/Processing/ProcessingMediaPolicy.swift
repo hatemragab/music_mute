@@ -7,14 +7,11 @@ struct ProcessingMediaPolicy: Codable, Equatable, Sendable {
   let maxSourceBytes: Int64?
   let maxPreparationSeconds: Double?
   let profileID: String?
-  var maxSourceDownloadBytes: Int64? = nil
-  var maxSourceDownloadSeconds: Double? = nil
 
   static let standard = Self(
     version: 2, maxDuration: 1_200, maxBytes: 50_000_000,
     maxSourceBytes: 200_000_000, maxPreparationSeconds: 120,
-    profileID: "audio-cap-aac-lc-160-v1",
-    maxSourceDownloadBytes: 50_000_000, maxSourceDownloadSeconds: 120)
+    profileID: "audio-cap-aac-lc-160-v1")
 
   func accepts(bytes: Int64, duration: Double) -> Bool {
     bytes > 0 && duration.isFinite && duration > 0
@@ -28,8 +25,6 @@ struct ProcessingPolicyResponse: Decodable, Sendable {
     let maxPreparedAudioBytes: Int64
     let maxLocalSourceBytes: Int64?
     let maxPreparationSeconds: Double?
-    let maxSourceDownloadBytes: Int64?
-    let maxSourceDownloadSeconds: Double?
     let longJobThresholdSeconds: Double
   }
   struct Profile: Decodable, Sendable {
@@ -66,13 +61,6 @@ struct ProcessingPolicyResponse: Decodable, Sendable {
       limits.maxPreparationSeconds.map({
         $0.isFinite && $0 > 0
           && $0 <= ProcessingMediaPolicy.standard.maxPreparationSeconds!
-      }) == true,
-      limits.maxSourceDownloadBytes.map({
-        $0 > 0 && $0 <= ProcessingMediaPolicy.standard.maxSourceDownloadBytes!
-      }) == true,
-      limits.maxSourceDownloadSeconds.map({
-        $0.isFinite && $0 > 0
-          && $0 <= ProcessingMediaPolicy.standard.maxSourceDownloadSeconds!
       }) == true
     else { throw JobsFailure.malformedResponse }
     return ProcessingMediaPolicy(
@@ -83,8 +71,6 @@ struct ProcessingPolicyResponse: Decodable, Sendable {
       maxBytes: limits.maxPreparedAudioBytes,
       maxSourceBytes: limits.maxLocalSourceBytes,
       maxPreparationSeconds: limits.maxPreparationSeconds,
-      profileID: preparationProfile.id,
-      maxSourceDownloadBytes: limits.maxSourceDownloadBytes,
-      maxSourceDownloadSeconds: limits.maxSourceDownloadSeconds)
+      profileID: preparationProfile.id)
   }
 }

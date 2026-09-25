@@ -33,27 +33,19 @@ private struct ProductionVocalView: View {
 @MainActor private final class ProductionAppGraph: ObservableObject {
   let preferences = AppPreferences()
   let player: AudioPlayer
-  let downloads: DownloadModel
   let auth: AuthSessionModel
   let processing: ProcessingModel
   let artifacts: JobArtifactRepository
   let push: PushRegistrationCoordinator
   let notificationDelegate: NotificationDelegate
-  let files: AudioFiles
 
   init() {
     if FirebaseApp.app() == nil { FirebaseApp.configure() }
+    // Cancel outstanding transfers scheduled by the retired device downloader.
     let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
       0
     ]
     .appendingPathComponent("Vocal", isDirectory: true)
-    let files = AudioFiles(root: support.appendingPathComponent("Audio", isDirectory: true))
-    self.files = files
-    let audioService = YouTubeAudioService(
-      files: files, sourceTransfers: BackgroundSourceTransferCoordinator.shared)
-    downloads = DownloadModel(
-      service: audioService,
-      history: HistoryStore(file: support.appendingPathComponent("history.json")))
     let firebase = FirebaseAuthGateway()
     let installationStore = InstallationStore.applicationStore()
     let configuration = try? AuthConfiguration.load()
@@ -98,21 +90,10 @@ private struct ProductionVocalView: View {
     let preparer = AudioInputPreparer(root: staging)
     let pipeline = AudioPipelineCoordinator(
       store: repository.store, repository: repository, preparer: preparer,
-      download: { videoID, operationID, ownerUid, stage, progress in
-        let saved = try await audioService.downloadForProcessing(
-          videoID: videoID, id: operationID, ownerUid: ownerUid,
-          policy: await preparer.currentPolicy(), stage: stage, progress: progress)
-        guard let url = files.url(for: saved.relativePath) else { throw AudioFailure.storage }
-        return PipelineSourceFile(url: url, title: saved.title)
-      },
       reportFailure: reportFailure,
       flushDiagnostics: { fence in
         await diagnostics.flush(
           fence: fence, api: jobs, currentSession: { [weak repository] in repository?.session })
-      },
-      sourceSessionChanged: { await BackgroundSourceTransferCoordinator.shared.bind(ownerUid: $0) },
-      cancelSourceTransfer: {
-        await BackgroundSourceTransferCoordinator.shared.cancel(ownerUid: $0, operationId: $1)
       })
     let artifacts = JobArtifactRepository(
       api: jobs,
@@ -178,11 +159,7 @@ private struct ProductionVocalView: View {
         }.map(\.identifier))
       if repository.session?.uid == uid { await processing.bindOwner(nil) }
       if repository.session == nil { player.stopAndClear() }
-      try await BackgroundSourceTransferCoordinator.shared.purge(ownerUid: uid)
       try await artifacts.purge(ownerUid: uid)
-      for intent in owned where intent.sourceKind == .url {
-        try await files.purgePrivateAttempt(intent.operationId)
-      }
       try await preparer.purge(ownerUid: uid)
       try await diagnostics.purge(ownerUid: uid)
       try await repository.store.purge(ownerUid: uid)
@@ -194,31 +171,27 @@ private struct ProductionVocalView: View {
 private struct ProductionContentView: View {
   @ObservedObject private var preferences: AppPreferences
   @ObservedObject private var player: AudioPlayer
-  @ObservedObject private var downloads: DownloadModel
   @ObservedObject private var auth: AuthSessionModel
   @ObservedObject private var processing: ProcessingModel
   @ObservedObject private var artifacts: JobArtifactRepository
   @ObservedObject private var push: PushRegistrationCoordinator
   private let notificationDelegate: NotificationDelegate
-  private let files: AudioFiles
   @Environment(\.scenePhase) private var scenePhase
 
   init(graph: ProductionAppGraph) {
     preferences = graph.preferences
     player = graph.player
-    downloads = graph.downloads
     auth = graph.auth
     processing = graph.processing
     artifacts = graph.artifacts
     push = graph.push
     notificationDelegate = graph.notificationDelegate
-    files = graph.files
   }
 
   var body: some View {
     AuthGate(model: auth) {
       VocalRootView(
-        preferences: preferences, downloads: downloads, player: player, files: files, auth: auth,
+        preferences: preferences, player: player, auth: auth,
         processing: processing, artifacts: artifacts, push: push,
         requestNotifications: { Task { await notificationDelegate.requestPermission() } })
     }
@@ -227,7 +200,6 @@ private struct ProductionContentView: View {
     .preferredColorScheme(preferences.colorScheme)
     .task {
       auth.start()
-      await downloads.load()
       await notificationDelegate.refreshAuthorization()
     }
     .task(id: "\(auth.phase):\(auth.identity?.uid ?? "")") {
@@ -255,9 +227,7 @@ private struct ProductionContentView: View {
 
 struct VocalRootView: View {
   @ObservedObject var preferences: AppPreferences
-  @ObservedObject var downloads: DownloadModel
   @ObservedObject var player: AudioPlayer
-  let files: AudioFiles
   @ObservedObject var auth: AuthSessionModel
   @ObservedObject var processing: ProcessingModel
   @ObservedObject var artifacts: JobArtifactRepository
@@ -270,30 +240,16 @@ struct VocalRootView: View {
     TabView(selection: $tab) {
       NavigationStack {
         HomeView(
-          model: downloads, acceptURL: processing.acceptURL,
           beginImport: processing.beginSourceImport,
           importAudio: { processing.importAudio($0) },
           photoSourceLimit: processing.photoSourceLimit, importPhoto: processing.importPhoto,
           reportImportFailure: processing.reportImportFailure,
           showProcessing: { tab = 2 }
-        ) { tab = 1 }
+        ) { tab = 2 }
         .background(
           VocalStyle.background(scheme))
       }
       .tabItem { Label("home_tab", systemImage: "house") }.tag(0)
-      NavigationStack {
-        HistoryView(
-          model: downloads, player: player, files: files,
-          removeMusic: {
-            if let url = files.url(for: $0.relativePath) {
-              processing.removeMusic(from: url)
-              tab = 2
-            }
-          }
-        ) { tab = 0 }.background(
-          VocalStyle.background(scheme))
-      }
-      .tabItem { Label("history_tab", systemImage: "music.note.list") }.tag(1)
       NavigationStack {
         ProcessingRootView(
           model: processing, repository: processing.repository, player: player,

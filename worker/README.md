@@ -521,9 +521,9 @@ For primary-vocal output, the worker skips the unused secondary-stem and
 existing separation stage, not additional work or backend processing stages.
 
 Both `kim-vocals-v2` and the compatibility name `kim-vocals-v2-trim` now use
-recipe revision 5: separate to WAV, trim WAV, encode one final 160 kbps MP3,
-then validate it. Trimming is mandatory. The reference algorithm remains:
-10 ms louder-channel RMS windows, a strict -32 dBFS threshold, 0.6-second minimum
+recipe revision 6: separate to WAV, optionally trim WAV, encode one final 160 kbps MP3,
+then validate it. Trimming defaults to enabled and can be disabled per job.
+The algorithm uses 10 ms louder-channel RMS windows, a strict -40 dBFS threshold, 0.6-second minimum
 gaps, 0.2-second retained padding, 5 ms boundary fades, and all-silent
 preservation. If no samples are removed, encoding reads the existing separated
 WAV instead of writing another copy. All generated WAVs are removed on success
@@ -542,10 +542,10 @@ checks remain required. The final checksum and upload grant must exist before
 upload starts; network latency cannot be eliminated by local processing.
 
 Rollout requires the matching backend recipe catalog and worker together.
-Drain old-revision queued/in-flight jobs with the old worker before switching;
-revision 4 snapshots are not silently reinterpreted as revision 5. Historical
-records retain their original step IDs. No database migration or deployment is
-performed by these source changes.
+Upgrade workers before enabling revision 6 in the backend. Revision 5 snapshots
+remain supported with their original -32 dBFS threshold; revision 4 is not silently
+reinterpreted. Historical records retain their original step IDs; no database
+rewrite is required.
 
 Local validation on 2026-09-24: 62 Python engine tests and 267 TypeScript worker
 tests passed (2 platform-specific tests skipped). Backend verification passed
@@ -578,3 +578,22 @@ errors receive bounded recovery; exhausted child recovery and unsafe workspace
 cleanup remain admission blockers. See the
 [ranked reliability audit](../docs/worker-rebuild/validation/PRODUCTION-RELIABILITY-AUDIT.md)
 for reproduction cases, local test evidence and remaining production gates.
+
+## Optional silence trimming (2026-09-26)
+
+`POST /jobs` and `POST /media-imports` accept the optional JSON boolean
+`trim_enabled` (default `true`). Set it to `false` to keep quiet sections and the
+full separated-audio timeline for future video synchronization. This still removes
+music and encodes MP3; encoder delay/padding must be handled by the future muxer.
+The choice is immutable per job and is preserved by retries. Changing it with an
+existing `request_id` conflicts; omitted and explicit `true` are equivalent.
+Strings and null are rejected. Audio acquisition remains audio-only.
+
+Recipe revision 6 trims at -40 dBFS, with the existing 0.6-second minimum gap,
+0.2-second padding and 5 ms fades. Revision 5 queued/retry snapshots retain -32
+dBFS. Deploy upgraded workers before the backend creates revision 6 jobs: older
+workers reject unknown recipe snapshots. No mobile switch is added in this change.
+
+API preflight: https://opensource.zalando.com/restful-api-guidelines/ read on
+2026-09-26; rules 101 (OpenAPI), 104 (security), 106 (compatibility), 118
+(snake_case), and 176 (problem responses). Existing auth and errors are preserved.

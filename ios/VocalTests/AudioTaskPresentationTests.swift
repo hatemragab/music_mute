@@ -7,20 +7,20 @@ final class AudioTaskPresentationTests: XCTestCase {
   func testPreJobUsesReferenceAndActualLocalPhase() {
     let id = UUID()
     let intent = AudioPipelineIntent(
-      operationId: id, ownerUid: "owner", sourceKind: .url, sourceVideoID: "jNQXAC9IVRw",
-      sourceTitle: "Interview", displayName: "My interview",
+      operationId: id, ownerUid: "owner", sourceKind: .file, sourceTitle: "Interview",
+      displayName: "My interview",
       clientStartedAt: Date(timeIntervalSince1970: 100),
       updatedAt: Date(timeIntervalSince1970: 110),
-      phase: .downloadingSource)
+      phase: .preparingInput)
 
     let task = AudioTaskPresentation.merge(pipelines: [intent], uploads: [], jobs: []).first
 
     XCTAssertEqual(task?.title, "My interview")
     XCTAssertEqual(task?.reference, id.uuidString.lowercased())
     XCTAssertNil(task?.jobID)
-    XCTAssertEqual(task?.statusKey, "processing_finding_downloading")
+    XCTAssertEqual(task?.statusKey, "processing_preparing")
     XCTAssertEqual(
-      task?.timeline.map(\.state), [.complete, .active] + Array(repeating: .pending, count: 9))
+      task?.timeline.map(\.state), [.active] + Array(repeating: .pending, count: 8))
   }
 
   func testMergedReadyJobKeepsNameIDsAndSeparateTiming() {

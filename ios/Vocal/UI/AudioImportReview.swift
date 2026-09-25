@@ -12,7 +12,7 @@ struct AudioImportReview: View {
     Form {
       Section("import_review_title") {
         Text(intent.sourceTitle ?? intent.reviewInput?.fileURL.lastPathComponent ?? "")
-        Text(intent.sourceKind == .url ? "youtube_secondary" : "processing_import")
+        Text("processing_import")
         if let input = intent.reviewInput {
           Text(
             ByteCountFormatter.string(fromByteCount: input.declaration.bytes, countStyle: .file))

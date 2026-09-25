@@ -89,6 +89,8 @@ fun VocalApp(
     processingSession: ProcessingSession?,
     artifactProgress: Map<String, ArtifactProgress>,
     openHistory: Boolean = false,
+    sharedUrlText: String? = null,
+    onSharedUrlConsumed: () -> Unit = {},
     openProcessing: Boolean = false,
     openProcessingJob: String? = null,
     openProcessingOperation: String? = null,
@@ -109,6 +111,20 @@ fun VocalApp(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val app = context.applicationContext as VocalApplication
+    val urlImports by app.urlImports.records.collectAsStateWithLifecycle()
+    var urlImportText by rememberSaveable { mutableStateOf("") }
+    var urlImportError by remember { mutableStateOf<String?>(null) }
+    var urlImportBusy by remember { mutableStateOf(false) }
+    var confirmUrlImport by remember { mutableStateOf(false) }
+    LaunchedEffect(sharedUrlText) {
+        if (sharedUrlText != null) {
+            val extracted = UrlImportSource.sharedText(sharedUrlText)
+            if (extracted == null) urlImportError = "IMPORT_SINGLE_ITEM_REQUIRED"
+            else { urlImportText = extracted; urlImportError = null }
+            nav.navigate(Destination.Home.name) { launchSingleTop = true }
+            onSharedUrlConsumed()
+        }
+    }
     val libraryModel: LibraryViewModel = viewModel(key = "library:${processingSession?.uid}",
         factory = viewModelFactory { initializer { LibraryViewModel(app.libraryRepository) } })
     val library by libraryModel.state.collectAsStateWithLifecycle()
@@ -122,6 +138,34 @@ fun VocalApp(
     var showPlaybackQueue by rememberSaveable(processingSession) { mutableStateOf(false) }
     val processing by processingModel.state.collectAsStateWithLifecycle()
     val jobs by processingModel.history.state.collectAsStateWithLifecycle()
+    LaunchedEffect(urlImports.filter { it.status == "submitted" }.mapNotNull { it.jobId }) {
+        if (urlImports.any { it.status == "submitted" && it.jobId != null })
+            processingModel.history.refreshAfterChange()
+    }
+    LaunchedEffect(jobs.jobs.map { it.id }, urlImports) {
+        app.urlImports.observeJobs(jobs.jobs.map { it.id }.toSet())
+    }
+    val submitUrlImport: () -> Unit = {
+        if (!urlImportBusy) scope.launch {
+            urlImportBusy = true
+            try {
+                app.urlImports.submit(urlImportText)
+                urlImportText = ""
+                urlImportError = null
+            } catch (error: UrlImportFailure) {
+                urlImportError = error.code
+            } catch (_: Exception) {
+                urlImportError = "SERVICE_UNAVAILABLE"
+            } finally { urlImportBusy = false }
+        }
+    }
+    val startUrlImport: () -> Unit = {
+        try {
+            UrlImportSource.canonical(urlImportText)
+            urlImportError = null
+            confirmUrlImport = true
+        } catch (error: UrlImportFailure) { urlImportError = error.code }
+    }
     LaunchedEffect(entry?.id, processingSession) {
         val operationId = entry?.arguments?.getString("operationId")
         if (route in setOf(JobDetailRoute, SourceDetailRoute) &&
@@ -130,7 +174,7 @@ fun VocalApp(
             processingModel.selectTask(operationId, selectedLibraryId)
         }
     }
-    val audioTasks = audioTaskPresentations(processing.operations, jobs.jobs, System.currentTimeMillis())
+    val audioTasks = audioTaskPresentations(processing.operations, jobs.jobs, System.currentTimeMillis(), urlImports)
     val selectedTask = audioTasks.firstOrNull {
         (processing.selectedOperationId != null && it.operationId == processing.selectedOperationId) ||
             (jobs.selectedId != null && it.jobId == jobs.selectedId)
@@ -226,31 +270,10 @@ fun VocalApp(
             onHistoryOpened()
         }
     }
-    val noClipboardText = stringResource(R.string.clipboard_empty)
-    var confirmYoutube by remember { mutableStateOf(false) }
-    val start: () -> Unit = {
-        if (model.validateYoutubeUrl()) { confirmYoutube = true }
-    }
-    val downloadConfirmed: () -> Unit = {
-        if (model.validateYoutubeUrl()) {
-            val acceptedUrl = state.url
-            model.updateUrl("")
-            processingModel.submitUrl(acceptedUrl) {
-                nav.navigate(Destination.Home.name) { launchSingleTop = true }
-            }
-        }
-    }
-    val pasteYoutube: () -> Unit = {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = clipboard.primaryClip
-        val text = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).text?.toString() else null
-        if (text.isNullOrBlank()) scope.launch { snackbar.showSnackbar(noClipboardText) }
-        else model.updateUrl(text)
-    }
-    if (confirmYoutube) {
-        YoutubeConfirmationSheet(state.url, processing.busy,
-            onDismiss = { confirmYoutube = false },
-            onConfirm = { confirmYoutube = false; downloadConfirmed() })
+    if (confirmUrlImport) {
+        UrlImportConfirmationSheet(urlImportText, urlImportBusy,
+            onDismiss = { confirmUrlImport = false },
+            onConfirm = { confirmUrlImport = false; submitUrlImport() })
     }
     if (showPlaybackQueue) {
         PlaybackQueueSheet(voicePlayback, libraryEntries,
@@ -337,6 +360,32 @@ fun VocalApp(
                     composable(Destination.Home.name) {
                         com.hatem.musicmute.ui.home.HomeScreen(
                             tasks = audioTasks, history = jobs, busy = processing.preparing,
+                            urlImports = urlImports,
+                            urlImportText = urlImportText,
+                            urlImportError = urlImportError,
+                            urlImportBusy = urlImportBusy,
+                            onUrlImportText = { urlImportText = it; urlImportError = null },
+                            onUrlImport = startUrlImport,
+                            onUrlImportPaste = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = clipboard.primaryClip
+                                val value = if (clip != null && clip.itemCount > 0)
+                                    clip.getItemAt(0).text?.toString() else null
+                                if (value.isNullOrBlank()) urlImportError = "IMPORT_INVALID_URL"
+                                else {
+                                    val extracted = UrlImportSource.sharedText(value)
+                                    if (extracted == null) urlImportError = "IMPORT_SINGLE_ITEM_REQUIRED"
+                                    else urlImportText = extracted
+                                    if (extracted != null) urlImportError = null
+                                }
+                            },
+                            onUrlImportRetry = { record ->
+                                scope.launch {
+                                    try { app.urlImports.retry(record) }
+                                    catch (error: UrlImportFailure) { urlImportError = error.code }
+                                    catch (_: Exception) { urlImportError = "SERVICE_UNAVAILABLE" }
+                                }
+                            },
                             actionBusy = processing.busy,
                             onDelete = { task, onDeleted ->
                                 processingModel.deleteTask(task.operationId, task.jobId, onDeleted)
@@ -346,9 +395,7 @@ fun VocalApp(
                                 if (Build.VERSION.SDK_INT >= 33) processingNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
                                 else onProcessingNotifications()
                             },
-                            onImport = openImport, onYoutube = start,
-                            youtubeUrl = state.url, invalidYoutubeUrl = state.invalidUrl,
-                            onYoutubeUrl = model::updateUrl, onPasteYoutube = pasteYoutube,
+                            onImport = openImport,
                             onPhotos = { importVideo.launch(arrayOf("video/*")) },
                             onRefresh = processingModel.history::refresh,
                             onLoadMore = processingModel.history::loadMore,

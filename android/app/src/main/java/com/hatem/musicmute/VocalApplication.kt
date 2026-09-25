@@ -15,11 +15,6 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.hatem.musicmute.auth.*
 import com.hatem.musicmute.data.DataStorePreferencesRepository
-import com.hatem.musicmute.data.DemoWorkflowRepository
-import com.hatem.musicmute.download.DownloadRepository
-import com.hatem.musicmute.download.HistorySerializer
-import com.hatem.musicmute.download.HistoryStore
-import com.hatem.musicmute.download.YoutubeAudioDownloader
 import com.hatem.musicmute.processing.*
 import com.hatem.musicmute.playback.AudioPlaybackService
 import com.hatem.musicmute.updates.*
@@ -108,6 +103,14 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
                 { firebaseIdentity.token(it) },
             )
     }
+    val urlImports by lazy {
+        UrlImportCoordinator(
+            processingStore,
+            UrlImportsApiClient(authApi) { authSession.state.value.installationId.orEmpty() },
+            applicationScope,
+            ::processingSession,
+        )
+    }
     private val updateDataStore by lazy {
         DataStoreFactory.create(UpdateStateSerializer) { dataStoreFile("app_updates.json") }
     }
@@ -168,7 +171,7 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
     }
     val processingUsage by lazy { com.hatem.musicmute.processing.ProcessingUsageRepository(jobsApi, ::processingSession) }
     val audioPipelineCoordinator by lazy {
-        AudioPipelineCoordinator(processingRepository, audioInputPreparer, ::processingSession, downloadRepository, processingUsage, com.hatem.musicmute.processing.WorkManagerMediaPreparationScheduler(this), jobsApi::mediaPolicy)
+        AudioPipelineCoordinator(processingRepository, audioInputPreparer, ::processingSession, processingUsage, com.hatem.musicmute.processing.WorkManagerMediaPreparationScheduler(this), jobsApi::mediaPolicy)
     }
     val clientErrorOutbox by lazy {
         val scheduler = WorkManagerClientErrorScheduler(this)
@@ -213,12 +216,12 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
         require(uid.isNotBlank())
         if (mutableProcessingSession.value?.uid == uid) {
             mutableProcessingSession.value = null
+            urlImports.bindSession(null)
             stopService(android.content.Intent(this, com.hatem.musicmute.playback.AudioPlaybackService::class.java))
         }
         processingRepository.purgeOwner(uid)
         audioPipelineCoordinator.onSessionChanged(uid)
         processingArtifacts.purgeOwner(uid)
-        downloadRepository.purgeOwner(uid)
         kotlinx.coroutines.withContext(Dispatchers.IO) {
             listOf(processingStagingRoot, File(filesDir, "processed_audio_share")).forEach { root ->
                 purgePrivateOwnerDirectory(root, uid)
@@ -235,7 +238,6 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
     override fun onCreate() {
         super.onCreate()
         SentryMonitoring.initialize(this)
-        com.hatem.musicmute.download.ExtractorMaintenanceWorker.schedule(this)
         val connectivity = getSystemService(ConnectivityManager::class.java)
         val updateNetworkAvailable = AtomicBoolean(updatesOnline())
         connectivity.registerDefaultNetworkCallback(
@@ -308,6 +310,7 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
                 if (uid != mutableProcessingSession.value?.uid) {
                     val previousUid = mutableProcessingSession.value?.uid
                     mutableProcessingSession.value = uid?.let { ProcessingSession(it, ++processingEpoch) }
+                    urlImports.bindSession(mutableProcessingSession.value)
                     processingArtifacts.onSessionChanged()
                     try {
                         processingRepository.onSessionChanged()
@@ -336,14 +339,5 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
             capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
     val preferencesRepository by lazy { DataStorePreferencesRepository(preferencesStore) }
-    val workflowRepository by lazy { DemoWorkflowRepository() }
-    private val historyStore by lazy {
-        HistoryStore(
-            DataStoreFactory.create(HistorySerializer) { dataStoreFile("download_history.json") }
-        )
-    }
-    val downloadRepository by lazy {
-        DownloadRepository(this, historyStore, File(filesDir, "audio_downloads"), processingStore)
-    }
-    val audioDownloader by lazy { YoutubeAudioDownloader(this) { jobsApi.mediaPolicy() } }
+
 }

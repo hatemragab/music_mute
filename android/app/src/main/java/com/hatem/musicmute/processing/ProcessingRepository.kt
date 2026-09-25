@@ -54,15 +54,14 @@ class ProcessingRepository(
         operationId: String,
         sourceKind: SourceKind,
         sourceTitle: String,
-        sourceUrl: String? = null,
     ): ProcessingOperation = submitLock.withLock {
         requireUpdateAllowed()
         val owner = requireSession()
         require(UUID.fromString(operationId).toString() == operationId)
         val normalizedTitle = boundedSourceTitle(sourceTitle)
-        require((sourceKind == SourceKind.URL) == (sourceUrl != null))
+        require(sourceKind == SourceKind.FILE)
         store.get(owner.uid, operationId)?.let { existing ->
-            require(existing.sourceKind == sourceKind && existing.sourceUrl == sourceUrl)
+            require(existing.sourceKind == sourceKind)
             return@withLock existing
         }
         val acceptedAt = now()
@@ -73,16 +72,14 @@ class ProcessingRepository(
             displayName = normalizedTitle,
             sourceKind = sourceKind,
             sourceTitle = normalizedTitle,
-            sourceUrl = sourceUrl,
             clientStartedAtMillis = acceptedAt,
             acceptedAtMillis = acceptedAt,
-            phase = if (sourceKind == SourceKind.URL) ProcessingPhase.DOWNLOADING_SOURCE else ProcessingPhase.PREPARING_INPUT,
+            phase = ProcessingPhase.PREPARING_INPUT,
         ).also { store.put(owner.uid, it) }
     }
 
     suspend fun submit(
         prepared: PreparedInput,
-        expectedSourceWorkRequestId: String? = null,
         requireCloudConsent: Boolean = false,
     ): ProcessingOperation = submitLock.withLock {
         requireUpdateAllowed()
@@ -100,8 +97,6 @@ class ProcessingRepository(
         checkSession(owner)
         if (existing?.input != null) {
             require(existing.input == prepared.declaration && existing.stagedRelativePath == relative)
-            if (expectedSourceWorkRequestId != null &&
-                existing.sourceWorkRequestId != expectedSourceWorkRequestId) changedSession()
             return@withLock existing
         }
         val candidate = if (existing == null) ProcessingOperation(
@@ -133,8 +128,6 @@ class ProcessingRepository(
         } else {
             store.update(owner.uid, prepared.operationId) { latest ->
                 checkSession(owner)
-                if (expectedSourceWorkRequestId != null &&
-                    latest.sourceWorkRequestId != expectedSourceWorkRequestId) changedSession()
                 if (latest.cancellationRequested || latest.pendingDelete) latest
                 else latest.copy(
                     input = prepared.declaration,
@@ -624,18 +617,6 @@ class ProcessingRepository(
             checkSession(owner)
             if (it.cancellationRequested || it.pendingDelete) it
             else it.copy(phase = ProcessingPhase.PAUSED, localProblem = problem)
-        }
-    }
-
-    suspend fun updateSourceTitle(operationId: String, sourceTitle: String): ProcessingOperation? {
-        val owner = requireSession()
-        val safe = boundedSourceTitle(sourceTitle)
-        return store.update(owner.uid, operationId) {
-            checkSession(owner)
-            it.copy(
-                sourceTitle = safe,
-                displayName = if (it.displayName.isBlank() || it.displayName == "Audio") safe else it.displayName,
-            )
         }
     }
 

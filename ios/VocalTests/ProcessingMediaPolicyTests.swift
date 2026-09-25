@@ -8,8 +8,7 @@ final class ProcessingMediaPolicyTests: XCTestCase {
     {"schemaVersion":2,"acceptNewJobs":true,"acceptLongJobs":true,
      "limits":{"maxDurationSeconds":1200,"maxPreparedAudioBytes":50000000,
      "maxLocalSourceBytes":200000000,"maxPreparationSeconds":120,
-     "longJobThresholdSeconds":600,"maxSourceDownloadBytes":50000000,
-     "maxSourceDownloadSeconds":120},
+     "longJobThresholdSeconds":600},
      "preparationProfile":{"id":"audio-cap-aac-lc-160-v1","preserveCompatibleAudio":true,
      "fallbackConversion":{"codec":"aac-lc","outputContentType":"audio/mp4","targetBitrate":160000}}}
     """
@@ -79,16 +78,4 @@ final class ProcessingMediaPolicyTests: XCTestCase {
     XCTAssertThrowsError(try MediaSourceInspector.selectTrack(ids: [], defaultID: nil))
   }
 
-  func testYouTubePreflightUsesTheInclusiveStandardDuration() throws {
-    XCTAssertNoThrow(
-      try YouTubePreflight.validate(duration: 1_200, isLive: false, isUpcoming: false))
-    XCTAssertThrowsError(
-      try YouTubePreflight.validate(duration: nil, isLive: false, isUpcoming: false))
-    XCTAssertThrowsError(
-      try YouTubePreflight.validate(duration: 1_200.001, isLive: false, isUpcoming: false))
-    XCTAssertThrowsError(
-      try YouTubePreflight.validate(duration: 1, isLive: true, isUpcoming: false))
-    XCTAssertThrowsError(
-      try YouTubePreflight.validate(duration: 1, isLive: false, isUpcoming: true))
-  }
 }

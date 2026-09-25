@@ -13,14 +13,11 @@ data class ProcessingMediaPolicy(
     val profileId: String = "audio-cap-aac-lc-160-v1",
     val maxLocalSourceBytes: Long? = 200_000_000,
     val maxPreparationSeconds: Long? = 120,
-    val maxSourceDownloadBytes: Long? = 50_000_000,
-    val maxSourceDownloadSeconds: Long? = 120,
     val acceptNewJobs: Boolean = true,
     val acceptLongJobs: Boolean = true,
     val longJobThresholdSeconds: Double? = null,
 ) {
     val localPreparationReady get() = (maxLocalSourceBytes ?: 0) > 0 && (maxPreparationSeconds ?: 0) > 0
-    val youtubePreparationReady get() = localPreparationReady && maxSourceDownloadBytes != null && maxSourceDownloadSeconds != null
     fun acceptsPrepared(bytes: Long, durationSeconds: Double): Boolean = bytes > 0 &&
         durationSeconds.isFinite() && durationSeconds > 0 &&
         bytes <= maxPreparedAudioBytes && durationSeconds <= maxDurationSeconds
@@ -61,15 +58,10 @@ data class ProcessingMediaPolicy(
                 require(bytes <= STANDARD.maxPreparedAudioBytes)
                 val localBytes = positiveBound("maxLocalSourceBytes")
                 val preparationSeconds = positiveBound("maxPreparationSeconds")
-                val sourceBytes = positiveBound("maxSourceDownloadBytes")
-                val sourceSeconds = positiveBound("maxSourceDownloadSeconds")
                 require(localBytes != null && localBytes <= STANDARD.maxLocalSourceBytes!!)
                 require(preparationSeconds != null && preparationSeconds <= STANDARD.maxPreparationSeconds!!)
-                require(sourceBytes != null && sourceBytes <= STANDARD.maxSourceDownloadBytes!!)
-                require(sourceSeconds != null && sourceSeconds <= STANDARD.maxSourceDownloadSeconds!!)
                 return ProcessingMediaPolicy(2, root.number("revision")?.toInt() ?: error("Missing revision"),
                     duration, bytes, id, localBytes, preparationSeconds,
-                    sourceBytes, sourceSeconds,
                     root.getValue("acceptNewJobs").jsonPrimitive.boolean,
                     root["acceptLongJobs"]?.jsonPrimitive?.booleanOrNull ?: false,
                     limits.number("longJobThresholdSeconds")?.takeIf { it.isFinite() && it > 0 && it <= duration })

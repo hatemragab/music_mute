@@ -102,6 +102,10 @@ extension JobsAPI {
   func create(requestId: UUID, input: InputDeclaration, metadata: JobSourceMetadata) async throws
     -> CreateReservation
   {
+    guard metadata.sourceKind != .url, metadata.sourceURL == nil, metadata.source != "youtube"
+    else {
+      throw JobsFailure.invalidInput
+    }
     struct Body: Encodable {
       let policyVersion: Int?
       let preparationProfileId: String?
@@ -110,7 +114,6 @@ extension JobsAPI {
       let input: InputDeclaration
       let sourceTitle: String?
       let sourceKind: JobSourceKind?
-      let sourceUrl: String?
       let clientStartedAt: String?
     }
     let title = try normalizedName(metadata.sourceTitle, optional: true)
@@ -121,10 +124,10 @@ extension JobsAPI {
           policyVersion: metadata.policyVersion ?? 2,
           preparationProfileId: metadata.preparationProfileId
             ?? ProcessingMediaPolicy.standard.profileID,
-          source: metadata.source ?? (metadata.sourceKind == .url ? "youtube" : "audio_file"),
+          source: metadata.source ?? "audio_file",
           requestId: try requestUUID(requestId), input: input,
           sourceTitle: title,
-          sourceKind: metadata.sourceKind, sourceUrl: metadata.sourceURL,
+          sourceKind: metadata.sourceKind,
           clientStartedAt: metadata.clientStartedAt.map(Self.iso8601))),
       installation: true)
   }
@@ -158,7 +161,8 @@ extension JobsAPI {
   func retry(id: String, requestId: UUID) async throws -> JobMutation {
     struct Body: Encodable { let requestId: String }
     return try await send(
-      "POST", route(id, "retry-attempts"), body: encoder.encode(Body(requestId: try requestUUID(requestId))),
+      "POST", route(id, "retry-attempts"),
+      body: encoder.encode(Body(requestId: try requestUUID(requestId))),
       installation: true)
   }
   func download(id: String, artifact: String) async throws -> DownloadGrant {

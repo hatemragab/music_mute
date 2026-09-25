@@ -14,7 +14,7 @@ hash. Do not commit user audio or personal filesystem paths.
 | MP3/AAC at 64, 96, 128 and 160 kbps | Compatible payload copied/extracted; no encoding; final MP3 does not raise the known rate. |
 | MP3/AAC at 192, 256 and 320 kbps | Exactly one mobile encode targeting 160; one final worker MP3 encode. |
 | Decodable WAV/lossless and video | Compressed audio-only upload; correct selected track, duration and channel handling. |
-| YouTube exact/lower/higher/unknown choices | Deterministic selector behavior, bounded single download and the approved fallback. |
+| Server URL imports | Audio-only acquisition, provider title persistence, bounded transfer and S3 handoff; no device extraction. |
 | VBR/missing metadata/unsupported low MP3 rate | No fabricated rate; approved edge-case behavior; no extra full media scan. |
 | 49,999,999 / 50,000,000 / 50,000,001 bytes | Mobile admission and backend declared/actual size boundary tests. |
 | False size/MIME/rate hints and malformed files | Existing ownership/media validation protects processing and reports useful errors. |

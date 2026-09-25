@@ -89,6 +89,29 @@ const schema = Joi.object({
   GOOGLE_APPLICATION_CREDENTIALS: Joi.string().min(1).optional(),
   FIREBASE_AUTH_EMULATOR_HOST: Joi.string().min(1).optional(),
   AUDIO_PROCESSING_ENABLED: Joi.boolean().default(false),
+  URL_IMPORT_ENABLED: Joi.boolean().default(false),
+  URL_IMPORT_PROCESSOR_ENABLED: Joi.boolean().default(false),
+  URL_IMPORT_CONCURRENCY: Joi.number().integer().min(1).max(1).default(1),
+  URL_IMPORT_MAX_OUTSTANDING: Joi.number()
+    .integer()
+    .min(1)
+    .max(100)
+    .default(20),
+  URL_IMPORT_TEMP_ROOT: Joi.string()
+    .pattern(/^\//)
+    .default('/tmp/musicmute-url-imports'),
+  URL_IMPORT_MIN_FREE_BYTES: Joi.number()
+    .integer()
+    .min(50_000_000)
+    .max(10_000_000_000)
+    .default(128_000_000),
+  URL_IMPORT_FFPROBE_PATH: Joi.string()
+    .pattern(/^\//)
+    .default('/usr/bin/ffprobe'),
+  YTDLP_API_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .optional(),
+  YTDLP_API_KEY: Joi.string().min(32).max(256).optional(),
   APK_AAPT2_PATH: Joi.string().pattern(/^\//).max(4096).optional(),
   APK_APKSIGNER_PATH: Joi.string().pattern(/^\//).max(4096).optional(),
   APK_EXPECTED_PACKAGE_ID: Joi.string()
@@ -253,6 +276,28 @@ export function validateEnvironment(
     );
   }
   const env = result.value as Record<string, unknown>;
+  if (
+    env.URL_IMPORT_ENABLED === true &&
+    (env.URL_IMPORT_PROCESSOR_ENABLED !== true ||
+      env.AUDIO_PROCESSING_ENABLED !== true)
+  )
+    throw new Error('URL importing requires audio processing');
+  if (
+    env.URL_IMPORT_PROCESSOR_ENABLED === true &&
+    (!env.YTDLP_API_URL || !env.YTDLP_API_KEY)
+  )
+    throw new Error('URL importing requires yt-dlp configuration');
+  if (env.YTDLP_API_URL) {
+    const downloader = new URL(String(env.YTDLP_API_URL));
+    if (
+      downloader.username ||
+      downloader.password ||
+      downloader.search ||
+      downloader.hash ||
+      downloader.pathname !== '/'
+    )
+      throw new Error('YTDLP_API_URL must be a base URL without credentials');
+  }
   const production = env.APP_ENV === 'production';
   if (production !== (env.NODE_ENV === 'production'))
     throw new Error('APP_ENV and NODE_ENV disagree');

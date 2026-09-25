@@ -27,7 +27,7 @@ import { fromWireCase, toWireCase } from "./wire-case.js";
 const RESPONSE_LIMIT_BYTES = 64 * 1024;
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 const WORKER_ERROR_CODES = new Set([
   "WORKER_INVALID_REQUEST",
   "WORKER_UNAUTHENTICATED",
