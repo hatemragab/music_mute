@@ -117,8 +117,16 @@ Routes below are relative to the configured application API prefix. One fleet mo
 | `POST /worker/v1/attempts/:id/complete` | Current attempt or same terminal operation | Idempotent finalization |
 | `POST /worker/v1/attempts/:id/fail` | Current attempt or same terminal operation | Categorized failure and recovery |
 | `POST /worker/v1/logs` | Machine credential | Ordered runtime diagnostic batches |
+| `GET /worker/v1/logs/cursor?sessionId=UUID&incarnation=UUID` | Machine credential/current session | Returns `{ acknowledgedSequence: number }` from the durable machine cursor; missing legacy value is zero. Revoked, missing or stale sessions return `WORKER_UNAUTHENTICATED`; invalid stored cursor returns `WORKER_CONFLICT`. |
+
 | `GET /worker/v1/events` | Authenticated WebSocket upgrade | Notices, heartbeat and progress |
 | `/admin/worker-fleet/...` | Existing admin session + explicit permission | Fleet UI operations, enrollment, policy, reports, releases |
+Diagnostic recovery reads this cursor only when the local delivery outbox is
+missing. It starts new batches at cursor plus one; surviving pending batches must
+be replayed exactly before advancement. The cursor survives diagnostic TTL expiry.
+Deploy this additive backend route before updated workers: a missing/unavailable
+cursor route defers new-outbox delivery instead of guessing sequence zero. This
+does not reconstruct log bytes lost with an outbox or provide S3 archival.
 
 Endpoints must support size limits, redacted request logging, request IDs, typed safe errors and purpose-specific rate limiting. Do not make all worker routes globally public to bypass existing user guards. Give them an explicit machine/installation authentication path and retain separate admin checks.
 

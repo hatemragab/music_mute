@@ -1,5 +1,5 @@
 import { lstat, readFile } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import {
   WORKER_RECIPE_IDS,
   type WorkerRecipeId,
@@ -10,6 +10,8 @@ import {
   type RuntimeProvider,
 } from "../platform/runtime-adapter.js";
 import type { RuntimeSlotDefinition } from "./worker-runtime.js";
+
+import { installedCapacityIdentity } from "./capacity-identity.js";
 
 const CONFIG_LIMIT_BYTES = 64 * 1024;
 const UUID_V4 =
@@ -63,6 +65,23 @@ export interface RuntimeConfig {
 export async function loadRuntimeConfig(
   path: string,
   host: { platform: NodeJS.Platform; arch: string } = process,
+): Promise<RuntimeConfig> {
+  return await readRuntimeConfig(path, host, true);
+}
+
+/** Read identity for offline qualification without accepting an old capacity receipt.
+ * Never returns a runtime configuration that could be used to admit work.
+ */
+export async function readBenchmarkMachineIdentity(
+  path: string,
+): Promise<string> {
+  return (await readRuntimeConfig(path, process, false)).machineId;
+}
+
+async function readRuntimeConfig(
+  path: string,
+  host: { platform: NodeJS.Platform; arch: string },
+  enforceCapacityEvidence: boolean,
 ): Promise<RuntimeConfig> {
   assertAbsolute(path, "Runtime config path");
   const configInfo = await lstat(path);
@@ -126,10 +145,9 @@ export async function loadRuntimeConfig(
         );
   if (capacityValidationFile !== undefined)
     assertAbsolute(capacityValidationFile, "capacityValidationFile");
-  if (validatedMaxWorkersPerGpu === 2) {
+  if (validatedMaxWorkersPerGpu === 2 && enforceCapacityEvidence) {
     if (capacityValidationFile === undefined)
       throw new TypeError("Two-worker capacity requires benchmark evidence");
-    await assertCapacityValidation(capacityValidationFile, value.machineId);
   }
   assertSlotCapacity(slots, validatedMaxWorkersPerGpu);
   if (
@@ -147,6 +165,14 @@ export async function loadRuntimeConfig(
   };
   for (const [name, current] of Object.entries(paths))
     assertAbsolute(current, name);
+  if (validatedMaxWorkersPerGpu === 2 && enforceCapacityEvidence) {
+    await assertCapacityValidation(
+      capacityValidationFile!,
+      value.machineId,
+      paths,
+      slots,
+    );
+  }
   const localLifecyclePath =
     value.localLifecyclePath === undefined
       ? undefined
@@ -181,6 +207,14 @@ export async function loadRuntimeConfig(
 async function assertCapacityValidation(
   path: string,
   machineId: unknown,
+  paths: {
+    engineRoot: string;
+    modelCacheRoot: string;
+    pythonPath: string;
+    ffmpegPath: string;
+    ffprobePath: string;
+  },
+  slots: RuntimeSlotDefinition[],
 ): Promise<void> {
   const info = await lstat(path);
   if (
@@ -213,11 +247,13 @@ async function assertCapacityValidation(
       "fixtureDigest",
       "validatedAt",
       "expiresAt",
+      "hostDigest",
+      "recipeIds",
     ]),
     "Capacity benchmark evidence",
   );
   if (
-    record.schemaVersion !== 1 ||
+    record.schemaVersion !== 2 ||
     record.status !== "PASS" ||
     typeof record.machineId !== "string" ||
     !UUID_V4.test(record.machineId) ||
@@ -247,6 +283,25 @@ async function assertCapacityValidation(
       Date.parse(record.validatedAt as string) + 7 * 24 * 60 * 60_000
   )
     throw new TypeError("Capacity benchmark evidence did not pass");
+  const recipeIds = [
+    ...new Set(slots.flatMap((slot) => slot.recipeIds)),
+  ].sort();
+  if (
+    !Array.isArray(record.recipeIds) ||
+    JSON.stringify(record.recipeIds) !== JSON.stringify(recipeIds)
+  )
+    throw new TypeError("Capacity recipe identity changed");
+  const identity = await installedCapacityIdentity({
+    ...paths,
+    fixturePath: join(dirname(path), "qualification.wav"),
+    modelDigest: record.modelDigest as string,
+  });
+  for (const [key, expected] of Object.entries(identity)) {
+    if (record[key] !== expected)
+      throw new TypeError(
+        "Capacity benchmark does not match the installed runtime",
+      );
+  }
 }
 
 function positiveFinite(value: unknown): value is number {

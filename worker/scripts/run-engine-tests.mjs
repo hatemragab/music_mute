@@ -16,7 +16,7 @@ const python =
       : "python3");
 const completed = spawnSync(
   python,
-  ["-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
+  ["-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
   {
     cwd: resolve(workerRoot, "engine"),
     env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },

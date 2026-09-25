@@ -3,6 +3,8 @@ import { lstat, readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import type { WorkerEnrollmentClient } from "./enrollment-client.js";
 
+import { TransferBudget } from "./transfer-budget.js";
+
 const MAX_RESULT_BYTES = 30_000_000;
 const VERSION_ID = /^[A-Za-z0-9+/=_.,:-]{1,1024}$/u;
 
@@ -22,6 +24,8 @@ export interface QualificationUploadOptions {
   expectedSha256: string;
   fetch?: typeof fetch;
   timeoutMs?: number;
+  idleTimeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface QualificationUploadResult {
@@ -34,6 +38,7 @@ export interface QualificationUploadResult {
 export async function uploadQualificationResult(
   options: QualificationUploadOptions,
 ): Promise<QualificationUploadResult> {
+  options.signal?.throwIfAborted();
   if (!isAbsolute(options.outputPath))
     throw new TypeError("Qualification output path must be absolute");
   const info = await lstat(options.outputPath);
@@ -71,24 +76,55 @@ export async function uploadQualificationResult(
   const grant = reservation.grant;
   if (grant === null || Date.parse(grant.expiresAt) <= Date.now())
     throw new TypeError("Qualification upload grant is unavailable");
-  const timeoutMs = options.timeoutMs ?? 10 * 60_000;
-  if (
-    !Number.isSafeInteger(timeoutMs) ||
-    timeoutMs < 1_000 ||
-    timeoutMs > 60 * 60_000
-  )
-    throw new TypeError("Qualification upload timeout is invalid");
-  const response = await (options.fetch ?? fetch)(grant.url, {
-    method: "PUT",
-    redirect: "error",
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: grant.headers,
-    body: payload,
-  });
-  if (!response.ok) throw new Error("Qualification result upload failed");
-  const versionId = response.headers.get("x-amz-version-id");
-  if (versionId === null || !VERSION_ID.test(versionId))
-    throw new TypeError("Qualification upload version is unavailable");
+  const budget = new TransferBudget(
+    options.timeoutMs,
+    options.idleTimeoutMs,
+    options.signal,
+  );
+  let response: Response | undefined;
+  let versionId: string;
+  try {
+    budget.signal.throwIfAborted();
+    let offset = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (budget.signal.aborted) {
+          controller.error(budget.signal.reason);
+          return;
+        }
+        if (offset === payload.byteLength) {
+          controller.close();
+          return;
+        }
+        const end = Math.min(offset + 64 * 1024, payload.byteLength);
+        controller.enqueue(payload.subarray(offset, end));
+        offset = end;
+        budget.progress();
+      },
+    });
+    const request: RequestInit & { duplex: "half" } = {
+      method: "PUT",
+      redirect: "error",
+      signal: budget.signal,
+      headers: {
+        ...grant.headers,
+        "Content-Length": String(payload.byteLength),
+      },
+      body,
+      duplex: "half",
+    };
+    response = await (options.fetch ?? fetch)(grant.url, request);
+    budget.signal.throwIfAborted();
+    if (!response.ok) throw new Error("Qualification result upload failed");
+    const version = response.headers.get("x-amz-version-id");
+    if (version === null || !VERSION_ID.test(version))
+      throw new TypeError("Qualification upload version is unavailable");
+    versionId = version;
+  } finally {
+    budget.dispose();
+    await response?.body?.cancel().catch(() => undefined);
+  }
+  options.signal?.throwIfAborted();
   const confirmed = await options.client.confirmQualificationUpload(
     options.installationId,
     options.installationCredential,

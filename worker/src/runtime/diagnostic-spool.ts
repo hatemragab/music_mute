@@ -50,7 +50,7 @@ export interface RuntimeDiagnostics {
   coverage?(): DiagnosticCoverage;
 }
 
-interface DiagnosticRecord {
+export interface DiagnosticRecord {
   schemaVersion: 1;
   streamId: string;
   sequence: number;
@@ -257,6 +257,55 @@ export class DiagnosticSpool implements RuntimeDiagnostics {
     this.syncTimer = null;
     await this.writes;
     await this.syncActive();
+  }
+
+  async deliveryRecords(
+    after: number,
+  ): Promise<{ streamId: string; records: DiagnosticRecord[] }> {
+    this.assertInitialized();
+    await this.writes;
+    return await withDiagnosticStoreLock(this.root, async () => {
+      await this.refreshAfterClear();
+      if (this.blocked) throw new Error("Diagnostic spool is blocked");
+      await this.syncActive();
+      if (process.platform !== "win32") {
+        const directory = await open(this.root, "r");
+        try {
+          await directory.sync();
+        } finally {
+          await directory.close();
+        }
+      }
+      const records: DiagnosticRecord[] = [];
+      for (const path of [
+        ...this.segments.map((segment) => segment.path),
+        this.eventsPath,
+      ]) {
+        let info;
+        try {
+          info = await lstat(path);
+        } catch (error) {
+          if (
+            (error as NodeJS.ErrnoException).code === "ENOENT" &&
+            path === this.eventsPath
+          )
+            continue;
+          throw error;
+        }
+        assertSafePrivateFile(info, "Diagnostic delivery source");
+        const content = await readFile(path, "utf8");
+        validateExistingRecords(Buffer.from(content), this.streamId, null);
+        for (const line of content.split("\n")) {
+          if (!line) continue;
+          const record = JSON.parse(line) as DiagnosticRecord;
+          if (record.sequence <= after) continue;
+          records.push(record);
+          if (records.length === 50)
+            return { streamId: this.streamId, records };
+        }
+      }
+      return { streamId: this.streamId, records };
+    });
   }
 
   coverage(): DiagnosticCoverage {

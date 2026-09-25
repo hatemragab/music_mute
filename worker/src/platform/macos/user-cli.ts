@@ -1,3 +1,5 @@
+import { dirname, join } from "node:path";
+import { resetRestartBudget } from "../../runtime/restart-budget.js";
 import { lstat, readFile, readlink, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import {
@@ -28,12 +30,14 @@ import {
   installMacUserWorker,
   readPendingMacUserEnrollmentCredential,
   recoverMacUserWorker,
+  resumeMacUserInstallation,
   resetPendingMacUserEnrollment,
   type MacUserInstallationResult,
   type MacUserRecoveryResult,
 } from "./user-installer.js";
 import {
   checkMacUserUpdate,
+  recoverInterruptedMacUpdate,
   updateMacUserWorker,
   type MacUserUpdateCheck,
 } from "./user-updater.js";
@@ -191,8 +195,10 @@ export async function runMacUserCommand(
   else if (command === "unpair" || command === "uninstall")
     await requireManagedInstallation(layout);
   else await requireInstalled(layout);
-  return await withMacUserCommandLock(layout.commandLockPath, async () =>
-    runUnlocked(command, arguments_, context, host, layout),
+  return await withMacUserCommandLock(
+    layout.commandLockPath,
+    async () => runUnlocked(command, arguments_, context, host, layout),
+    command,
   );
 }
 
@@ -215,6 +221,20 @@ async function runUnlocked(
         jsonFlag.remaining,
         new Set(["label", "group-id"]),
       );
+      const resumed = await resumeMacUserInstallation({
+        layout,
+        uid: host.uid,
+        launchAgent,
+      });
+      if (resumed !== null) {
+        stdout(
+          formatActionResult(
+            { status: "ok", action: "recover", ...resumed },
+            jsonFlag.present,
+          ),
+        );
+        return 0;
+      }
       if (await isRegularFile(layout.configPath)) {
         if (await pathExists(layout.currentLink))
           throw new Error(
@@ -310,6 +330,7 @@ async function runUnlocked(
     }
     case "start": {
       exactArguments(arguments_, new Set(["--wait-ready", "--json"]));
+      await recoverInterruptedMacUpdate(layout, launchAgent);
       const result = await start(layout, launchAgent, context.preflight);
       let readiness: Awaited<ReturnType<typeof readStatus>> | null = null;
       if (arguments_.includes("--wait-ready")) {
@@ -360,12 +381,16 @@ async function runUnlocked(
     }
     case "restart": {
       exactArguments(arguments_, new Set(["--force", "--json"]));
+      await recoverInterruptedMacUpdate(layout, launchAgent);
       await gracefulStop(layout, launchAgent, arguments_.includes("--force"), {
         ...(context.wait === undefined ? {} : { wait: context.wait }),
         ...(context.drainTimeoutMs === undefined
           ? {}
           : { timeoutMs: context.drainTimeoutMs }),
       });
+      await resetRestartBudget(
+        join(dirname(layout.configPath), "restart-budget.json"),
+      );
       await start(layout, launchAgent, context.preflight);
       stdout(
         formatActionResult(
@@ -418,6 +443,7 @@ async function runUnlocked(
     }
     case "resume": {
       exactArguments(arguments_, new Set(["--json"]));
+      await recoverInterruptedMacUpdate(layout, launchAgent);
       return await transition(
         layout,
         launchAgent,

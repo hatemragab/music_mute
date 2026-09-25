@@ -25,7 +25,7 @@ describe("Windows PowerShell tooling", () => {
       "utf8",
     );
     expect(source).toContain(
-      '[ValidateSet("Stage", "Install", "Repair", "Doctor", "Uninstall")]',
+      '[ValidateSet("Stage", "Install", "Repair", "Doctor", "ResetRestartBudget", "Uninstall")]',
     );
     expect(source).toContain('$StagingOnly = $Action -eq "Stage"');
     expect(source).toContain("if (-not $StagingOnly)");
@@ -100,5 +100,35 @@ describe("Windows PowerShell tooling", () => {
     expect(source).not.toContain('@("refresh"');
     expect(source).not.toMatch(/Set-Service.+(driver|firewall)/iu);
     expect(source).not.toContain("ExecutionPolicy Bypass");
+  });
+
+  it("packages a stopped-service reset that preserves the previous budget", async () => {
+    // Source contract only; actual service state and ACL behavior require Windows.
+    const source = await readFile(
+      resolve(workerRoot, "scripts/manage-windows-service.ps1"),
+      "utf8",
+    );
+    const start = source.indexOf('if ($Action -eq "ResetRestartBudget")');
+    const end = source.indexOf('if ($Action -eq "Doctor")', start);
+    expect(start).toBeGreaterThan(source.indexOf("$Mutex.WaitOne(0)"));
+    expect(end).toBeGreaterThan(start);
+    const reset = source.slice(start, end);
+    expect(reset).toContain(
+      "[ServiceProcess.ServiceControllerStatus]::Stopped",
+    );
+    expect(reset).toContain("[IO.FileAttributes]::ReparsePoint");
+    expect(reset.indexOf("::Stopped")).toBeLessThan(
+      reset.indexOf("Move-Item -LiteralPath $BudgetPath"),
+    );
+    expect(reset).toContain(
+      'Assert-RegularFile $BudgetPath "restart budget" 4096',
+    );
+    expect(reset).toContain(
+      "Move-Item -LiteralPath $BudgetPath -Destination $SavedBudget -ErrorAction Stop",
+    );
+    expect(reset).not.toMatch(
+      /Start-Service|Remove-Item|Set-Content|Invoke-Checked/u,
+    );
+    expect(reset).toContain("service remains stopped");
   });
 });

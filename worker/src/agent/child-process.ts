@@ -5,6 +5,7 @@ import {
 } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { fileURLToPath } from "node:url";
 import { delimiter, isAbsolute } from "node:path";
 import {
   ChildFrameDecoder,
@@ -38,6 +39,7 @@ export interface ChildProcessOptions {
   startTimeoutMs?: number;
   requestTimeoutMs?: number;
   stopTimeoutMs?: number;
+  windowsJobObject?: boolean;
   onStartupStage?: (stage: "loading" | "warming") => void;
 }
 
@@ -80,6 +82,15 @@ export class WorkerChildProcess {
     return this.currentIncarnation;
   }
 
+  isAlive(): boolean {
+    return (
+      this.child !== null &&
+      this.child.exitCode === null &&
+      this.child.signalCode === null &&
+      this.child.stdin.writable
+    );
+  }
+
   async start(): Promise<ChildResponse> {
     if (this.child || this.ready)
       throw new Error("Worker child has already been started");
@@ -102,11 +113,41 @@ export class WorkerChildProcess {
       // terminates media decoders, not just the Python parent.
       detached: process.platform !== "win32",
     };
-    const child = spawn(
-      this.options.command,
-      [...this.options.args, "--incarnation", this.incarnation],
-      spawnOptions,
+    const arguments_ = [
+      ...this.options.args,
+      "--incarnation",
+      this.incarnation,
+    ];
+    const guardian = fileURLToPath(
+      new URL(
+        import.meta.url.endsWith(".ts")
+          ? "./process-guardian.ts"
+          : "./process-guardian.js",
+        import.meta.url,
+      ),
     );
+    const child =
+      process.platform === "win32"
+        ? spawn(
+            this.options.command,
+            this.options.windowsJobObject
+              ? [
+                  "-B",
+                  "-m",
+                  "musicmute_engine.windows_guardian",
+                  "--parent-pid",
+                  String(process.pid),
+                  "--",
+                  ...arguments_,
+                ]
+              : arguments_,
+            spawnOptions,
+          )
+        : (spawn(
+            process.execPath,
+            [guardian, this.options.command, ...arguments_],
+            { ...spawnOptions, stdio: ["pipe", "pipe", "pipe", "ipc"] },
+          ) as ChildProcessWithoutNullStreams);
     this.child = child;
     child.stdout.on("data", (chunk: Buffer) => this.onData(chunk));
     child.stderr.on("data", (chunk: Buffer) => this.onStderr(chunk));

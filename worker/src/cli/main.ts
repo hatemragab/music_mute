@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
@@ -8,11 +8,14 @@ import {
   WorkerChildProcess,
 } from "../agent/child-process.js";
 import { MachineSupervisor } from "../agent/machine-supervisor.js";
-import { WorkerControlPlaneClient } from "../runtime/control-plane-client.js";
+import {
+  ControlPlaneError,
+  WorkerControlPlaneClient,
+} from "../runtime/control-plane-client.js";
 import { WorkerHintClient } from "../runtime/worker-hint-client.js";
 import { loadRuntimeConfig } from "../runtime/runtime-config.js";
 import { PackagedRuntimeCommandExecutor } from "../runtime/remote-command-executor.js";
-import { WorkerTransferClient } from "../runtime/transfers.js";
+import { IsolatedWorkerTransferClient } from "../runtime/isolated-transfers.js";
 import { WorkerRuntime } from "../runtime/worker-runtime.js";
 import {
   MAC_PACKAGE_USAGE,
@@ -35,14 +38,25 @@ import {
 } from "../enrollment/cli.js";
 import { createMacUserLayout } from "../platform/macos/user-paths.js";
 import {
+  MacUpdateStartupRecovered,
+  recoverMacUpdateAtStartup,
+} from "../platform/macos/user-updater.js";
+import {
   appendMacFatalError,
   maintainMacUserLogs,
 } from "../platform/macos/operational-logs.js";
 import {
   captureWorkerFailure,
+  captureWorkerRuntimeEvent,
   engineTelemetryEnvironment,
   initializeWorkerSentry,
 } from "../observability/sentry.js";
+
+import {
+  PersistentRestartBudget,
+  RestartCircuitOpenError,
+  waitForOperatorStop,
+} from "../runtime/restart-budget.js";
 
 const command = process.argv[2];
 if (command === "run") initializeWorkerSentry();
@@ -148,11 +162,23 @@ if (command === "--help" || command === "help") {
     const logLayout =
       process.platform === "darwin" ? createMacUserLayout(homedir()) : null;
     let nextLogMaintenanceAt = 0;
+    let restartAdmitted = false;
+    let restartPersistenceFailed = false;
+    const restartBudget = new PersistentRestartBudget(
+      join(dirname(configPath), "restart-budget.json"),
+    );
     const stopping = new AbortController();
     const stop = () => stopping.abort();
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
+      await restartBudget.admit(stopping.signal);
+      restartAdmitted = true;
+      if (
+        logLayout !== null &&
+        resolve(configPath) === resolve(logLayout.configPath)
+      )
+        await recoverMacUpdateAtStartup(logLayout);
       if (logLayout !== null) await maintainMacUserLogs(logLayout);
       const config = await loadRuntimeConfig(configPath);
       const supervisor = new MachineSupervisor(
@@ -161,6 +187,7 @@ if (command === "--help" || command === "help") {
           gpuId: slot.gpuId,
           child: {
             command: config.pythonPath,
+            windowsJobObject: process.platform === "win32",
             args: [
               "-m",
               "musicmute_engine.child",
@@ -187,7 +214,8 @@ if (command === "--help" || command === "help") {
         credential: config.credential,
         allowInsecureLoopback: config.allowInsecureLoopback,
       });
-      const transfers = new WorkerTransferClient({
+      const transfers = new IsolatedWorkerTransferClient({
+        workRoot: config.workRoot,
         allowInsecureLoopback: config.allowInsecureLoopback,
       });
       const primarySlot = config.slots[0]!;
@@ -228,6 +256,10 @@ if (command === "--help" || command === "help") {
           commandExecutor,
           hintClientFactory: (onHint) => new WorkerHintClient(control, onHint),
           onEvent: (event) => {
+            if (event.kind === "attempt-succeeded") {
+              void restartBudget.recordSuccess().catch(() => stopping.abort());
+            }
+            captureWorkerRuntimeEvent(event);
             console.log(JSON.stringify(event));
             if (logLayout !== null && Date.now() >= nextLogMaintenanceAt) {
               nextLogMaintenanceAt = Date.now() + 60_000;
@@ -240,8 +272,18 @@ if (command === "--help" || command === "help") {
         supervisor,
       );
       await runtime.run(stopping.signal);
+      await restartBudget.orderlyStop();
     } catch (error) {
-      if (!stopping.signal.aborted) {
+      if (error instanceof MacUpdateStartupRecovered) {
+        await restartBudget.orderlyStop();
+        console.error(
+          "MusicMute worker: interrupted update restored before processing",
+        );
+        process.exitCode = error.restart ? 1 : 0;
+      } else if (!stopping.signal.aborted) {
+        await restartBudget.recordFailure(error).catch(() => {
+          restartPersistenceFailed = true;
+        });
         await captureWorkerFailure(error);
         if (logLayout !== null)
           await appendMacFatalError(
@@ -254,6 +296,16 @@ if (command === "--help" || command === "help") {
         ).slice(0, 2_000);
         console.error(`MusicMute worker runtime: FAILED (${detail})`);
         process.exitCode = 1;
+        if (
+          !restartAdmitted ||
+          restartPersistenceFailed ||
+          error instanceof RestartCircuitOpenError ||
+          error instanceof TypeError ||
+          (error instanceof ControlPlaneError && !error.retryable)
+        )
+          await waitForOperatorStop(stopping.signal);
+      } else if (restartAdmitted) {
+        await restartBudget.orderlyStop().catch(() => undefined);
       }
     } finally {
       process.removeListener("SIGINT", stop);

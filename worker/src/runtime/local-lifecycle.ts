@@ -1,6 +1,7 @@
 import {
   chmod,
   lstat,
+  link,
   mkdir,
   open,
   readFile,
@@ -9,6 +10,7 @@ import {
 } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
+import { withDarwinFileLock } from "./darwin-file-lock.js";
 
 const MAXIMUM_BYTES = 4096;
 const VALID_INTENTS = ["active", "paused", "draining"] as const;
@@ -63,15 +65,83 @@ export async function setLocalLifecycleIntent(
 ): Promise<LocalLifecycleState> {
   if (!VALID_INTENTS.includes(intent))
     throw new TypeError("Local lifecycle intent is invalid");
+  assertAbsolute(path);
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  if (process.platform === "darwin")
+    return await withDarwinFileLock(`${path}.lock.guard`, async () => {
+      await recoverDeadLifecycleLock(`${path}.lock`);
+      return await writeLifecycleIntent(path, intent);
+    });
+  return await writeLifecycleIntent(path, intent);
+}
+
+/** Caller holds the persistent kernel lock; no concurrent reclaimer can unlink a new owner. */
+async function recoverDeadLifecycleLock(path: string): Promise<void> {
+  const info = await lstat(path).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  });
+  if (!info) return;
+  if (
+    !info.isFile() ||
+    info.isSymbolicLink() ||
+    info.size > 1024 ||
+    (info.mode & 0o077) !== 0 ||
+    info.uid !== process.getuid?.()
+  )
+    throw new Error("Local lifecycle lock ownership is unsafe");
+  let owner: { schemaVersion?: unknown; pid?: unknown };
+  try {
+    owner = JSON.parse(await readFile(path, "utf8"));
+  } catch {
+    throw new Error(
+      "Local lifecycle lock ownership is unknown; operator recovery required",
+    );
+  }
+  if (
+    !owner ||
+    owner.schemaVersion !== 1 ||
+    !Number.isSafeInteger(owner.pid) ||
+    (owner.pid as number) < 1
+  )
+    throw new Error(
+      "Local lifecycle lock ownership is unknown; operator recovery required",
+    );
+  try {
+    process.kill(owner.pid as number, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    await rm(path);
+    return;
+  }
+  throw new Error("Local lifecycle update is already in progress");
+}
+
+async function writeLifecycleIntent(
+  path: string,
+  intent: LocalLifecycleIntent,
+): Promise<LocalLifecycleState> {
   const lockPath = `${path}.lock`;
   assertAbsolute(path);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const lock = await open(lockPath, "wx", 0o600).catch((error: unknown) => {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST")
-      throw new Error("Local lifecycle update is already in progress");
-    throw error;
-  });
+  // Publish ownership atomically: a killed writer must not leave an empty lock
+  // that cannot be distinguished from a live writer still initializing it.
+  const temporaryLock = `${lockPath}.${process.pid}.${randomUUID()}.tmp`;
+  const lock = await open(temporaryLock, "wx", 0o600);
+  let published = false;
   try {
+    await lock.writeFile(
+      `${JSON.stringify({ schemaVersion: 1, pid: process.pid })}\n`,
+    );
+    await lock.sync();
+    try {
+      await link(temporaryLock, lockPath);
+      published = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST")
+        throw new Error("Local lifecycle update is already in progress");
+      throw error;
+    }
     const previous = await loadLocalLifecycle(path);
     const next: LocalLifecycleState = {
       schemaVersion: 1,
@@ -83,7 +153,8 @@ export async function setLocalLifecycleIntent(
     return next;
   } finally {
     await lock.close();
-    await rm(lockPath, { force: true });
+    if (published) await rm(lockPath, { force: true });
+    await rm(temporaryLock, { force: true });
   }
 }
 
@@ -103,21 +174,30 @@ async function writeState(
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   const handle = await open(temporary, "wx", 0o600);
   try {
-    await handle.writeFile(`${JSON.stringify(state, null, 2)}\n`, "utf8");
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  try {
-    if (exclusive) {
-      const destination = await open(path, "wx", 0o600);
-      await destination.close();
+    try {
+      await handle.writeFile(`${JSON.stringify(state, null, 2)}\n`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
     }
-    await rename(temporary, path);
+    if (exclusive) {
+      // Publish the complete file exclusively; never expose an empty placeholder
+      // that a crash could leave behind as the authoritative lifecycle state.
+      await link(temporary, path);
+    } else {
+      await rename(temporary, path);
+    }
     await chmod(path, 0o600);
-  } catch (error) {
+    if (process.platform !== "win32") {
+      const directory = await open(dirname(path), "r");
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
+    }
+  } finally {
     await rm(temporary, { force: true });
-    throw error;
   }
 }
 
