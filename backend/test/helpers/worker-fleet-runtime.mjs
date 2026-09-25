@@ -914,6 +914,36 @@ try {
     });
 
     const machineA = await seedMachine('Race machine A');
+    const logClient = new WorkerControlPlaneClient({
+      baseUrl,
+      credential: machineA.credential,
+      allowInsecureLoopback: true,
+    });
+    assert.equal(
+      await logClient.diagnosticLogCursor(
+        machineA.sessionId,
+        machineA.incarnation,
+      ),
+      0,
+    );
+    await logClient.appendDiagnosticLogs({
+      sessionId: machineA.sessionId,
+      incarnation: machineA.incarnation,
+      sequenceStart: 1,
+      sequenceEnd: 1,
+      lines: ['isolated cursor acceptance'],
+    });
+    assert.equal(
+      await logClient.diagnosticLogCursor(
+        machineA.sessionId,
+        machineA.incarnation,
+      ),
+      1,
+    );
+    await assert.rejects(
+      logClient.diagnosticLogCursor(randomUUID(), machineA.incarnation),
+      (error) => error.code === 'WORKER_UNAUTHENTICATED',
+    );
     const machineB = await seedMachine('Race machine B');
     const racedJob = await createQueuedJob('Worker ownership race');
     const claimA = claimBody(machineA);

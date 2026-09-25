@@ -49,7 +49,7 @@ export async function assertPythonSentrySdk(
   ) as { dependencies?: Record<string, string> };
   if (!manifest.dependencies?.["@sentry/node"]) return;
   try {
-    await execFileAsync(pythonBinary, ["-I", "-c", "import sentry_sdk"], {
+    await execFileAsync(pythonBinary, ["-I", "-B", "-c", "import sentry_sdk"], {
       timeout: 10_000,
       maxBuffer: 1024,
     });

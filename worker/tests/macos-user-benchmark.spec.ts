@@ -1,4 +1,11 @@
-import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +15,7 @@ import {
   compareBenchmarkReports,
   parseStoredRepeatedBenchmarkReport,
   runFileBenchmarkProcess,
+  runTwoWorkerCapacityBenchmark,
   summarizeFileBenchmarkReport,
   summarizeRepeatedBenchmarkReport,
 } from "../src/platform/macos/user-benchmark.js";
@@ -25,6 +33,31 @@ afterEach(async () => {
 });
 
 describe("macOS local benchmark admission", () => {
+  it("invalidates a previous PASS before a failed capacity rerun", async () => {
+    const home = await mkdtemp(join(tmpdir(), "capacity-rerun-"));
+    roots.push(home);
+    const layout = createMacUserLayout(home);
+    await createMacUserDirectories(layout);
+    await writeFile(
+      layout.capacityValidationPath,
+      JSON.stringify({ status: "PASS" }),
+      { mode: 0o600 },
+    );
+    await expect(
+      runTwoWorkerCapacityBenchmark({
+        layout,
+        machineId: "unused",
+        releaseRoot: layout.currentLink,
+        fixturePath: join(layout.stateRoot, "qualification.wav"),
+        fixtureSha256: "a".repeat(64),
+        baseline: {},
+      }),
+    ).rejects.toThrow();
+    expect(
+      JSON.parse(await readFile(layout.capacityValidationPath, "utf8")),
+    ).toMatchObject({ status: "IN_PROGRESS" });
+  });
+
   it("terminates an interrupted benchmark subprocess", async () => {
     const controller = new AbortController();
     const run = runFileBenchmarkProcess(

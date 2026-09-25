@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("Stage", "Install", "Repair", "Doctor", "Uninstall")]
+  [ValidateSet("Stage", "Install", "Repair", "Doctor", "ResetRestartBudget", "Uninstall")]
   [string]$Action,
 
   [string]$Release = "",
@@ -439,6 +439,26 @@ try {
     return
   }
   $StateRoot = Join-Path $Root "state"
+  if ($Action -eq "ResetRestartBudget") {
+    $Service = Get-Service -Name $ServiceName -ErrorAction Stop
+    if ($Service.Status -ne [ServiceProcess.ServiceControllerStatus]::Stopped) {
+      throw "Stop MusicMuteWorker before resetting its restart budget."
+    }
+    $StateDirectory = Get-Item -LiteralPath $StateRoot -Force -ErrorAction Stop
+    if (-not $StateDirectory.PSIsContainer -or ($StateDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+      throw "The worker state directory is unsafe."
+    }
+    $BudgetPath = Join-Path $StateRoot "restart-budget.json"
+    if (Test-Path -LiteralPath $BudgetPath) {
+      Assert-RegularFile $BudgetPath "restart budget" 4096 | Out-Null
+      # Preserve evidence and its ACL. On the next explicit start the worker creates
+      # a fresh budget under the existing LocalService-writable state directory.
+      $SavedBudget = Join-Path $StateRoot "restart-budget.reset.$([guid]::NewGuid()).json"
+      Move-Item -LiteralPath $BudgetPath -Destination $SavedBudget -ErrorAction Stop
+    }
+    Write-Output "MusicMute Windows restart budget reset; service remains stopped. Start it after repairing the cause."
+    return
+  }
   if ($Action -eq "Doctor") {
     $Version = Read-ActiveVersion $StateRoot
     if ($Version -eq "") {

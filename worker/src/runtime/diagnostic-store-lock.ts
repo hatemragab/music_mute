@@ -1,12 +1,36 @@
-import { lstat, open, readFile, unlink } from "node:fs/promises";
+import { lstat, open, readFile, unlink, link } from "node:fs/promises";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import {
+  DarwinFileLockBusyError,
+  withDarwinFileLock,
+} from "./darwin-file-lock.js";
 import { setTimeout as delay } from "node:timers/promises";
 
 const WAIT_MS = 5_000;
 const RETRY_MS = 25;
-const STALE_INCOMPLETE_MS = 30_000;
 
 export async function withDiagnosticStoreLock<T>(
+  root: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (process.platform !== "darwin")
+    return await withWriterLock(root, operation);
+  const deadline = Date.now() + WAIT_MS;
+  while (true) {
+    try {
+      return await withDarwinFileLock(join(root, "writer.lock.guard"), () =>
+        withWriterLock(root, operation),
+      );
+    } catch (error) {
+      if (!(error instanceof DarwinFileLockBusyError)) throw error;
+      if (Date.now() >= deadline) throw new Error("Diagnostic history is busy");
+      await delay(RETRY_MS);
+    }
+  }
+}
+
+async function withWriterLock<T>(
   root: string,
   operation: () => Promise<T>,
 ): Promise<T> {
@@ -15,7 +39,7 @@ export async function withDiagnosticStoreLock<T>(
   let handle: Awaited<ReturnType<typeof open>>;
   while (true) {
     try {
-      handle = await open(path, "wx", 0o600);
+      handle = await publishOwner(path);
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
@@ -26,9 +50,6 @@ export async function withDiagnosticStoreLock<T>(
   }
   const identity = await handle.stat();
   try {
-    await handle.writeFile(
-      `${JSON.stringify({ pid: process.pid, createdAt: Date.now() })}\n`,
-    );
     return await operation();
   } finally {
     await handle.close();
@@ -57,7 +78,7 @@ async function staleLock(path: string): Promise<boolean> {
         pid = candidate as number;
     }
   } catch {
-    // A process may die before it writes its PID. Wait before reclaiming.
+    // An old incomplete lock is ambiguous, regardless of its age.
   }
   if (pid !== null) {
     try {
@@ -66,12 +87,34 @@ async function staleLock(path: string): Promise<boolean> {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") return false;
     }
-  } else if (Date.now() - information.mtimeMs < STALE_INCOMPLETE_MS) {
-    return false;
+  } else {
+    throw new Error(
+      "Diagnostic lock ownership is unknown; operator recovery required",
+    );
   }
+  // Only reclaim under a kernel lock shared by all new macOS writers.
+  if (process.platform !== "darwin") return false;
   const current = await lstat(path).catch(() => null);
   if (current?.dev !== information.dev || current.ino !== information.ino)
     return false;
   await unlink(path).catch(() => undefined);
   return true;
+}
+
+async function publishOwner(path: string) {
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  const handle = await open(temporary, "wx", 0o600);
+  try {
+    await handle.writeFile(
+      `${JSON.stringify({ pid: process.pid, createdAt: Date.now() })}\n`,
+    );
+    await handle.sync();
+    await link(temporary, path);
+    return handle;
+  } catch (error) {
+    await handle.close();
+    throw error;
+  } finally {
+    await unlink(temporary);
+  }
 }

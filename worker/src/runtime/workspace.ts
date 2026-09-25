@@ -1,3 +1,4 @@
+import { assertNoLiveTransfer } from "./transfer-workspace-owner.js";
 import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 
@@ -46,6 +47,7 @@ export class WorkspaceManager {
         throw new TypeError(
           "Worker workspace contains an unsafe attempt entry",
         );
+      await assertNoLiveTransfer(target);
       await rm(target, { recursive: true, force: true });
     }
   }
@@ -72,12 +74,16 @@ export class WorkspaceManager {
     const name = basename(target);
     if (!UUID_V4.test(name) || target !== this.childPath(name))
       throw new TypeError("Attempt workspace escaped the configured root");
-    const information = await lstat(target).catch(() => null);
+    const information = await lstat(target).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
     if (
       information &&
       (!information.isDirectory() || information.isSymbolicLink())
     )
       throw new TypeError("Attempt workspace became unsafe");
+    await assertNoLiveTransfer(target);
     await rm(target, { recursive: true, force: true });
   }
 
