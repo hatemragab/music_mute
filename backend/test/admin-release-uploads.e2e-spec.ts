@@ -7,6 +7,7 @@ import {
 import {
   createAdminHarness,
   type AdminHarness,
+  wireJson,
 } from './helpers/admin-harness.js';
 
 describe('release upload HTTP permissions', () => {
@@ -61,14 +62,14 @@ describe('release upload HTTP permissions', () => {
     const { harness } = await setup(),
       token = harness.signInAs('release_manager');
     const response = await harness
-      .request('post', path, body, token)
+      .request('post', path, wireJson(body), token)
       .expect(201);
     expect(response.headers['cache-control']).toBe('no-store');
     await harness
-      .request('post', path, { ...body, key: 'attacker' }, token)
+      .request('post', path, wireJson({ ...body, key: 'attacker' }), token)
       .expect(400);
     await harness
-      .request('post', path, { ...body, bytes: 268435457 }, token)
+      .request('post', path, wireJson({ ...body, bytes: 268435457 }), token)
       .expect(413);
   });
   it('allows release readers to observe verification but not start it', async () => {
@@ -80,8 +81,8 @@ describe('release upload HTTP permissions', () => {
     await harness
       .request(
         'post',
-        path + '/507f1f77bcf86cd799439012/complete',
-        { operationId: body.operationId },
+        path + '/507f1f77bcf86cd799439012/completions',
+        wireJson({ operationId: body.operationId }),
         token,
       )
       .expect(403);

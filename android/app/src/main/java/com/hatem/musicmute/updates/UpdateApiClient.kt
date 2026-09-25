@@ -1,6 +1,7 @@
 package com.hatem.musicmute.updates
 
 import com.hatem.musicmute.auth.AuthConfiguration
+import com.hatem.musicmute.auth.ApiWireJson
 import com.hatem.musicmute.auth.AuthFailure
 import com.hatem.musicmute.auth.AuthHttpResponse
 import com.hatem.musicmute.auth.AuthHttpTransport
@@ -36,7 +37,7 @@ class UpdateApiClient(
         if (!releaseId.matches(Regex("^[a-f0-9]{24}$")))
             throw UpdateFailure(UpdateProblem.RELEASE_UNAVAILABLE)
         val grant: ReleaseDownloadGrant =
-            decode(request("POST", "/app-updates/releases/$releaseId/download", "{}"))
+            decode(request("POST", "/app-updates/releases/$releaseId/download-grants", "{}"))
         validateDownloadGrant(grant)
         if (grant.releaseId != releaseId) throw UpdateFailure(UpdateProblem.INVALID_POLICY)
         return grant
@@ -49,7 +50,7 @@ class UpdateApiClient(
                     configuration.apiRoot() + path,
                     method,
                     mapOf("Cache-Control" to "no-store"),
-                    body,
+                    body?.let(ApiWireJson::request),
                 )
             } catch (_: TimeoutCancellationException) {
                 throw UpdateFailure(UpdateProblem.SERVICE_UNAVAILABLE)
@@ -64,7 +65,13 @@ class UpdateApiClient(
                 throw UpdateFailure(UpdateProblem.OFFLINE)
             }
         if (response.status !in 200..299) throw response.failure()
-        return response.body
+        return try {
+            ApiWireJson.response(response.body)
+        } catch (_: SerializationException) {
+            throw UpdateFailure(UpdateProblem.INVALID_POLICY)
+        } catch (_: IllegalArgumentException) {
+            throw UpdateFailure(UpdateProblem.INVALID_POLICY)
+        }
     }
 
     private inline fun <reified T> decode(body: String): T =

@@ -127,10 +127,10 @@ class AuthApiClient(
     private var refreshVersion = 0L
 
     suspend fun bootstrap(report: InstallationReport): SessionResponse =
-        decode(request("POST", "/auth/session", json.encodeToString(report)))
+        decode(request("POST", "/auth/sessions", json.encodeToString(report)))
 
     suspend fun profileSync(): ProfileSyncResponse =
-        decode(request("POST", "/auth/profile-sync", "{}"))
+        decode(request("POST", "/auth/profile-synchronizations", "{}"))
 
     suspend fun me(): AccountProfile = decode(request("GET", "/users/me"))
 
@@ -165,13 +165,13 @@ class AuthApiClient(
     suspend fun policy(): AppPolicy = decode(request("GET", "/app-policy", authenticated = false))
 
     suspend fun requestVerification(): MailOutcome =
-        decode(request("POST", "/auth/verification-email", "{}", replaySafe = false))
+        decode(request("POST", "/auth/verification-emails", "{}", replaySafe = false))
 
     suspend fun requestPasswordReset(email: String): MailOutcome =
         decode(
             request(
                 "POST",
-                "/auth/password-reset",
+                "/auth/password-reset-requests",
                 buildJsonObject { put("email", email) }.toString(),
                 authenticated = false,
                 replaySafe = false,
@@ -202,7 +202,7 @@ class AuthApiClient(
         )
 
     suspend fun logoutAll() {
-        request("POST", "/auth/logout-all", "{}", replaySafe = false, expectedStatus = 204)
+        request("POST", "/auth/session-revocations", "{}", replaySafe = false, expectedStatus = 204)
     }
 
     internal suspend fun request(
@@ -227,6 +227,7 @@ class AuthApiClient(
         }
         return try {
             checkIdentity()
+            val wireBody = body?.let(ApiWireJson::request)
             val initialRefreshVersion = refreshVersion
             var bearer = if (authenticated) token(false) else null
             checkIdentity()
@@ -235,7 +236,7 @@ class AuthApiClient(
                     url,
                     method,
                     additionalHeaders + (bearer?.let { mapOf("Authorization" to "Bearer $it") } ?: emptyMap()),
-                    body,
+                    wireBody,
                 )
             if (!retainResponseForOwner) checkIdentity()
             if (response.status == 401 && authenticated && replaySafe) {
@@ -246,13 +247,19 @@ class AuthApiClient(
                 }
                 checkIdentity()
                 response =
-                    transport.execute(url, method, additionalHeaders + mapOf("Authorization" to "Bearer $bearer"), body)
+                    transport.execute(url, method, additionalHeaders + mapOf("Authorization" to "Bearer $bearer"), wireBody)
                 checkIdentity()
             }
             if (response.status !in 200..299) throw responseFailure(response)
             if (expectedStatus != null && response.status != expectedStatus)
                 throw AuthFailure(AuthProblem.SERVICE_UNAVAILABLE)
-            response.body
+            try {
+                ApiWireJson.response(response.body)
+            } catch (_: SerializationException) {
+                throw AuthFailure(AuthProblem.SERVICE_UNAVAILABLE)
+            } catch (_: IllegalArgumentException) {
+                throw AuthFailure(AuthProblem.SERVICE_UNAVAILABLE)
+            }
         } catch (_: TimeoutCancellationException) {
             throw AuthFailure(AuthProblem.OFFLINE)
         } catch (error: CancellationException) {

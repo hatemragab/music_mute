@@ -40,7 +40,7 @@ function digest(value: string): string {
 
 function deriveCredential(secret: string, domain: string, id: string): string {
   return createHmac('sha256', Buffer.from(secret, 'base64url'))
-    .update(`musicmute-worker/v1:${domain}:${id}`, 'utf8')
+    .update(`musicmute-worker:${domain}:${id}`, 'utf8')
     .digest('base64url');
 }
 

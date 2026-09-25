@@ -47,6 +47,7 @@ import { ADMIN_RATE_LIMIT_DEFAULTS } from '../src/config/environment.js';
 import {
   createAdminHarness,
   type AdminHarness,
+  wireJson,
 } from './helpers/admin-harness.js';
 
 interface RouteFixture {
@@ -236,7 +237,7 @@ describe('complete administration route authorization contract', () => {
       const method = route.method.toLowerCase() as
         'get' | 'post' | 'put' | 'patch' | 'delete';
       const send = (token?: string, body: unknown = route.requestBody) =>
-        harness.request(method, endpoint(route), body, token);
+        harness.request(method, endpoint(route), wireJson(body), token);
       for (const token of [
         undefined,
         'ordinary-google-token',

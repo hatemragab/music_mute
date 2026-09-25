@@ -39,7 +39,7 @@ export const cancelJob = (
     operationId: input.operationId,
     submit: () =>
       client.post<JobDetail>(
-        `/admin/jobs/${encodeURIComponent(id)}/cancel`,
+        `/admin/jobs/${encodeURIComponent(id)}/cancellations`,
         input,
       ),
     readResult: (receipt) => getJob(client, receipt.resourceId ?? id),

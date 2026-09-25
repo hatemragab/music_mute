@@ -326,17 +326,19 @@ it.each([0, 70, -1, 1.5, Number.MAX_SAFE_INTEGER, null])(
   async (cursor) => {
     const f = await fixture();
     const client = new WorkerControlPlaneClient({
-      baseUrl: "https://backend.example/api/",
+      baseUrl: "https://backend.example/",
       credential: "x".repeat(43),
       fetch: async (url, init) => {
         const parsed = new URL(String(url));
-        expect(parsed.pathname).toBe("/api/worker/v1/logs/cursor");
-        expect(parsed.searchParams.get("sessionId")).toBe(f.identity.sessionId);
+        expect(parsed.pathname).toBe("/worker/logs/cursor");
+        expect(parsed.searchParams.get("session_id")).toBe(
+          f.identity.sessionId,
+        );
         expect(parsed.searchParams.get("incarnation")).toBe(
           f.identity.incarnation,
         );
         expect(init?.method).toBe("GET");
-        return new Response(JSON.stringify({ acknowledgedSequence: cursor }), {
+        return new Response(JSON.stringify({ acknowledged_sequence: cursor }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -355,15 +357,15 @@ it.each([0, 70, -1, 1.5, Number.MAX_SAFE_INTEGER, null])(
 it("requires an exact backend acknowledgement on the authenticated log route", async () => {
   const f = await fixture();
   const transport = vi.fn(async (url, options) => {
-    expect(String(url)).toBe("https://backend.example/api/worker/v1/logs");
+    expect(String(url)).toBe("https://backend.example/worker/logs");
     expect(JSON.parse(options!.body as string).lines).toEqual(["safe event"]);
     return new Response(
-      JSON.stringify({ acknowledgedSequence: 2, replayed: false }),
+      JSON.stringify({ acknowledged_sequence: 2, replayed: false }),
       { headers: { "content-type": "application/json" } },
     );
   });
   const client = new WorkerControlPlaneClient({
-    baseUrl: "https://backend.example/api/",
+    baseUrl: "https://backend.example/",
     credential: "a".repeat(43),
     fetch: transport as typeof fetch,
     maxAttempts: 1,

@@ -65,7 +65,7 @@ export class JobsController {
     );
   }
 
-  @Post(':id/cancel')
+  @Post(':id/cancellations')
   @LimitOperation('processing-cancel')
   @HttpCode(200)
   cancel(
@@ -76,7 +76,7 @@ export class JobsController {
     return this.actions.cancel(req.user!._id.toHexString(), id);
   }
 
-  @Post(':id/retry')
+  @Post(':id/retry-attempts')
   @LimitOperation('processing-retry')
   @RequireProcessingAccess()
   retry(
@@ -106,7 +106,7 @@ export class JobsController {
     return this.query.detail(req.user!._id.toHexString(), id);
   }
 
-  @Post(':id/download-url')
+  @Post(':id/download-grants')
   @LimitOperation('processing-download')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
@@ -137,7 +137,7 @@ export class JobsController {
     );
   }
 
-  @Post(':id/upload-url')
+  @Post(':id/upload-grants')
   @LimitOperation('processing-upload-grant')
   @RequireProcessingAccess()
   @HttpCode(200)
@@ -154,7 +154,7 @@ export class JobsController {
     );
   }
 
-  @Post(':id/upload-complete')
+  @Post(':id/upload-completions')
   @LimitOperation('processing-upload-confirm')
   @RequireProcessingAccess()
   @HttpCode(200)

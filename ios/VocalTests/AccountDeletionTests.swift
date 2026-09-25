@@ -98,7 +98,7 @@ final class AccountDeletionTests: XCTestCase {
     let id = "0e47b60a-4835-4cc3-a5b9-2d64d48f8c19"
     defer { RecoveryURLProtocol.handler = nil }
     RecoveryURLProtocol.handler = { request in
-      XCTAssertEqual(request.url?.path, "/api/v1/users/me/devices/\(id)")
+      XCTAssertEqual(request.url?.path, "/users/me/devices/\(id)")
       XCTAssertEqual(request.httpMethod, "DELETE")
       XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token")
       XCTAssertTrue(recoveryRequestData(request).isEmpty)
@@ -126,13 +126,13 @@ final class AccountDeletionTests: XCTestCase {
     var requests: [URLRequest] = []
     RecoveryURLProtocol.handler = { request in
       requests.append(request)
-      if request.url?.path == "/api/v1/users/me" {
+      if request.url?.path == "/users/me" {
         return (403, Data(#"{"code":"ACCOUNT_DELETION_PENDING"}"#.utf8))
       }
       return (
         202,
         Data(
-          #"{"id":"recovery-1","status":"pending","reason":null,"requestedAt":"2026-09-11T00:00:00.000Z","reviewedAt":null,"reviewReason":null,"revision":0}"#
+          #"{"id":"recovery-1","status":"pending","reason":null,"requested_at":"2026-09-11T00:00:00.000Z","reviewed_at":null,"review_reason":null,"revision":0}"#
             .utf8)
       )
     }
@@ -148,7 +148,7 @@ final class AccountDeletionTests: XCTestCase {
     XCTAssertEqual(request.id, "recovery-1")
     XCTAssertEqual(request.status, "pending")
     XCTAssertEqual(requests.last?.httpMethod, "POST")
-    XCTAssertEqual(requests.last?.url?.path, "/api/v1/users/me/account-recovery")
+    XCTAssertEqual(requests.last?.url?.path, "/users/me/account-recovery")
     XCTAssertEqual(recoveryRequestData(requests.last!), Data("{}".utf8))
     XCTAssertEqual(requests.last?.value(forHTTPHeaderField: "Authorization"), "Bearer token")
   }

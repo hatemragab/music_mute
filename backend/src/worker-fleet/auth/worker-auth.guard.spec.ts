@@ -1,7 +1,7 @@
 import { GUARDS_METADATA } from '@nestjs/common/constants.js';
 import { Reflector } from '@nestjs/core';
 import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AllowRevokedMachine,
   WorkerRoute,
@@ -10,6 +10,31 @@ import {
 import { WorkerAuthGuard } from './worker-auth.guard.js';
 
 describe('worker authorization boundary', () => {
+  const reserve = vi.fn(async () => ({ allowed: true, retryAfterSeconds: 0 }));
+  const budgets = { reserve };
+  const keys = { bucket: (scope: string, id: string) => `${scope}:${id}` };
+  const config = { get: (_key: string, fallback: number) => fallback };
+  const guard = (
+    reflector: Reflector,
+    invitations: unknown,
+    installations: unknown,
+    machines: unknown,
+  ) =>
+    new WorkerAuthGuard(
+      reflector,
+      invitations as never,
+      installations as never,
+      machines as never,
+      budgets as never,
+      keys as never,
+      config as never,
+    );
+
+  beforeEach(() => {
+    reserve.mockReset();
+    reserve.mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
+  });
+
   const query = (value: unknown) => ({
     maxTimeMS: vi.fn().mockReturnValue({
       lean: vi.fn().mockResolvedValue(value),
@@ -35,12 +60,7 @@ describe('worker authorization boundary', () => {
   it('rejects a worker route without exactly one bounded bearer credential', async () => {
     const reflector = new Reflector();
     const model = { findOne: vi.fn() };
-    const guard = new WorkerAuthGuard(
-      reflector,
-      model as never,
-      model as never,
-      model as never,
-    );
+    const auth = guard(reflector, model, model, model);
     class Controller {
       @WorkerRoute('machine')
       endpoint() {}
@@ -53,9 +73,18 @@ describe('worker authorization boundary', () => {
         getRequest: () => ({ headers: {}, rawHeaders: [] }),
       }),
     };
-    await expect(guard.canActivate(context as never)).rejects.toThrow(
+    await expect(auth.canActivate(context as never)).rejects.toThrow(
       'Worker authentication is required',
     );
+    expect(reserve).toHaveBeenCalledWith([
+      { key: 'worker-preauth-ip:unknown', limit: 300, windowMs: 60_000 },
+      {
+        key: 'worker-preauth-service:global',
+        limit: 3_000,
+        windowMs: 60_000,
+      },
+    ]);
+    expect(model.findOne).not.toHaveBeenCalled();
   });
 
   it('authenticates an active enrollment credential by digest', async () => {
@@ -70,11 +99,11 @@ describe('worker authorization boundary', () => {
         }),
       ),
     };
-    const guard = new WorkerAuthGuard(
+    const auth = guard(
       reflector,
-      invitations as never,
-      { findOne: vi.fn() } as never,
-      { findOne: vi.fn() } as never,
+      invitations,
+      { findOne: vi.fn() },
+      { findOne: vi.fn() },
     );
     class Controller {
       @WorkerRoute('enrollment')
@@ -89,7 +118,7 @@ describe('worker authorization boundary', () => {
       getClass: () => Controller,
       switchToHttp: () => ({ getRequest: () => request }),
     };
-    await expect(guard.canActivate(context as never)).resolves.toBe(true);
+    await expect(auth.canActivate(context as never)).resolves.toBe(true);
     expect(invitations.findOne).toHaveBeenCalledWith({
       codeDigest: createHash('sha256').update(credential).digest('hex'),
     });
@@ -99,17 +128,20 @@ describe('worker authorization boundary', () => {
         subjectId: 'f9d8df9d-1111-4111-8111-111111111111',
       },
     });
+    expect(reserve).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'worker-enrollment:f9d8df9d-1111-4111-8111-111111111111',
+          limit: 20,
+        }),
+      ]),
+    );
   });
 
   it('rejects duplicate authorization headers before a database lookup', async () => {
     const reflector = new Reflector();
     const model = { findOne: vi.fn() };
-    const guard = new WorkerAuthGuard(
-      reflector,
-      model as never,
-      model as never,
-      model as never,
-    );
+    const auth = guard(reflector, model, model, model);
     class Controller {
       @WorkerRoute('machine')
       endpoint() {}
@@ -130,7 +162,7 @@ describe('worker authorization boundary', () => {
         }),
       }),
     };
-    await expect(guard.canActivate(context as never)).rejects.toThrow(
+    await expect(auth.canActivate(context as never)).rejects.toThrow(
       'Worker authentication is required',
     );
     expect(model.findOne).not.toHaveBeenCalled();
@@ -147,11 +179,11 @@ describe('worker authorization boundary', () => {
         }),
       ),
     };
-    const guard = new WorkerAuthGuard(
+    const auth = guard(
       reflector,
-      { findOne: vi.fn() } as never,
-      { findOne: vi.fn() } as never,
-      machines as never,
+      { findOne: vi.fn() },
+      { findOne: vi.fn() },
+      machines,
     );
     class Controller {
       @WorkerRoute('machine')
@@ -171,18 +203,78 @@ describe('worker authorization boundary', () => {
       switchToHttp: () => ({ getRequest: () => value }),
     });
     await expect(
-      guard.canActivate(
+      auth.canActivate(
         context(Controller.prototype.ordinary, request()) as never,
       ),
     ).rejects.toThrow('Worker authentication is required');
     const replayRequest = request();
     await expect(
-      guard.canActivate(
+      auth.canActivate(
         context(Controller.prototype.unpair, replayRequest) as never,
       ),
     ).resolves.toBe(true);
     expect(replayRequest).toMatchObject({
       workerPrincipal: { kind: 'machine', machineStatus: 'revoked' },
     });
+  });
+
+  it('rejects a machine over its shared budget with a retry header', async () => {
+    reserve
+      .mockResolvedValueOnce({ allowed: true, retryAfterSeconds: 0 })
+      .mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 17 });
+    const credential = Buffer.alloc(32, 4).toString('base64url');
+    const machines = {
+      findOne: vi
+        .fn()
+        .mockReturnValue(query({ _id: 'machine-1', status: 'active' })),
+    };
+    class Controller {
+      @WorkerRoute('machine')
+      endpoint() {}
+    }
+    const setHeader = vi.fn();
+    const context = {
+      getHandler: () => Controller.prototype.endpoint,
+      getClass: () => Controller,
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: { authorization: `Bearer ${credential}` },
+          rawHeaders: ['Authorization', `Bearer ${credential}`],
+        }),
+        getResponse: () => ({ setHeader }),
+      }),
+    };
+    await expect(
+      guard(new Reflector(), {}, {}, machines).canActivate(context as never),
+    ).rejects.toMatchObject({ status: 429 });
+    expect(setHeader).toHaveBeenCalledWith('Retry-After', 17);
+    expect(reserve).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'worker-machine:machine-1' }),
+      ]),
+    );
+  });
+
+  it('blocks credential lookup when the preauth service ceiling is exhausted', async () => {
+    reserve.mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 11 });
+    const model = { findOne: vi.fn() };
+    class Controller {
+      @WorkerRoute('machine')
+      endpoint() {}
+    }
+    const setHeader = vi.fn();
+    const context = {
+      getHandler: () => Controller.prototype.endpoint,
+      getClass: () => Controller,
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: {}, rawHeaders: [], ip: '192.0.2.9' }),
+        getResponse: () => ({ setHeader }),
+      }),
+    };
+    await expect(
+      guard(new Reflector(), model, model, model).canActivate(context as never),
+    ).rejects.toMatchObject({ status: 429 });
+    expect(setHeader).toHaveBeenCalledWith('Retry-After', 11);
+    expect(model.findOne).not.toHaveBeenCalled();
   });
 });

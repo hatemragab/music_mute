@@ -23,7 +23,7 @@ test(
         AUDIO_PROCESSING_ENABLED: 'true',
         APP_UPDATES_ENABLED: 'true',
         APK_EXPECTED_PACKAGE_ID: 'com.example.fixture',
-        RELEASE_LANDING_BASE_URL: 'https://example.invalid/api/v1',
+        RELEASE_LANDING_BASE_URL: 'https://example.invalid/',
         ADMIN_SENSITIVE_OPERATIONS_PER_MINUTE: '30',
         ...(process.env.DASHBOARD_CAPTURE_CONTRACTS === '1'
           ? { DASHBOARD_CAPTURE_CONTRACTS: '1' }
@@ -76,7 +76,7 @@ test(
           try {
             return (
               (
-                await fetch(`http://127.0.0.1:${port}/api/v1/health/ready`, {
+                await fetch(`http://127.0.0.1:${port}/health/ready`, {
                   signal: AbortSignal.timeout(2000),
                 })
               ).status === 200
@@ -89,7 +89,7 @@ test(
         15000,
       );
       assert.equal(
-        (await fetch(`http://127.0.0.1:${port}/api/v1/health/live`)).status,
+        (await fetch(`http://127.0.0.1:${port}/health/live`)).status,
         200,
       );
     } finally {

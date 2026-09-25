@@ -13,6 +13,7 @@ import { WorkerControlPlaneClient } from "../src/runtime/control-plane-client.js
 import type { WorkerRecipeSnapshot } from "../src/runtime/contracts.js";
 import { WorkerTransferClient } from "../src/runtime/transfers.js";
 import { WorkerRuntime } from "../src/runtime/worker-runtime.js";
+import { fromWireCase, toWireCase } from "../src/runtime/wire-case.js";
 
 const machineId = "cb56441d-f2df-4b44-a320-6f37dfa81f7f";
 const workerId = "a69d3899-2214-4427-98cf-b9a4449aeae1";
@@ -121,11 +122,11 @@ describe("worker runtime HTTP integration", () => {
     const server = createServer(async (request, response) => {
       try {
         const url = new URL(request.url ?? "/", origin);
-        if (url.pathname.startsWith("/api/v1/worker/")) {
+        if (url.pathname.startsWith("/worker/")) {
           if (request.headers.authorization !== `Bearer ${credential}`)
             return sendJson(response, 401, { code: "WORKER_UNAUTHENTICATED" });
           const body = request.method === "POST" ? await jsonBody(request) : {};
-          if (url.pathname === "/api/v1/worker/v1/session") {
+          if (url.pathname === "/worker/sessions") {
             transitions.push("session");
             return sendJson(response, 200, {
               machineId,
@@ -133,7 +134,7 @@ describe("worker runtime HTTP integration", () => {
               serverTime: new Date(started).toISOString(),
             });
           }
-          if (url.pathname === "/api/v1/worker/v1/config") {
+          if (url.pathname === "/worker/config") {
             transitions.push("config");
             return sendJson(response, 200, {
               machineId,
@@ -159,7 +160,7 @@ describe("worker runtime HTTP integration", () => {
               serverTime: new Date().toISOString(),
             });
           }
-          if (url.pathname === "/api/v1/worker/v1/slots") {
+          if (url.pathname === "/worker/slots") {
             transitions.push("slot");
             return sendJson(response, 200, {
               workerId,
@@ -168,7 +169,7 @@ describe("worker runtime HTTP integration", () => {
               serverTime: new Date().toISOString(),
             });
           }
-          if (url.pathname === "/api/v1/worker/v1/claims") {
+          if (url.pathname === "/worker/claims") {
             transitions.push("claim");
             if (claimed)
               return sendJson(response, 200, {
@@ -196,7 +197,7 @@ describe("worker runtime HTTP integration", () => {
               serverTime: new Date().toISOString(),
             });
           }
-          if (url.pathname.endsWith("/input-grant")) {
+          if (url.pathname.endsWith("/input-grants")) {
             transitions.push("input-grant");
             return sendJson(response, 200, {
               requestId: body.requestId,
@@ -214,7 +215,7 @@ describe("worker runtime HTTP integration", () => {
               },
             });
           }
-          if (url.pathname.endsWith("/output-grant")) {
+          if (url.pathname.endsWith("/output-grants")) {
             transitions.push("output-grant");
             return sendJson(response, 200, {
               requestId: body.requestId,
@@ -239,7 +240,7 @@ describe("worker runtime HTTP integration", () => {
               object: null,
             });
           }
-          if (url.pathname.endsWith("/complete")) {
+          if (url.pathname.endsWith("/completions")) {
             transitions.push("complete");
             expect(body.versionId).toBe("output-version");
             return sendJson(response, 200, {
@@ -308,7 +309,7 @@ describe("worker runtime HTTP integration", () => {
         resources: { assertAvailable: vi.fn(async () => undefined) },
       },
       new WorkerControlPlaneClient({
-        baseUrl: `${origin}/api/v1`,
+        baseUrl: `${origin}`,
         credential,
         allowInsecureLoopback: true,
       }),
@@ -339,10 +340,9 @@ describe("worker runtime HTTP integration", () => {
 async function jsonBody(
   request: IncomingMessage,
 ): Promise<Record<string, unknown>> {
-  return JSON.parse((await rawBody(request)).toString("utf8")) as Record<
-    string,
-    unknown
-  >;
+  return fromWireCase(
+    JSON.parse((await rawBody(request)).toString("utf8")),
+  ) as Record<string, unknown>;
 }
 
 async function rawBody(request: IncomingMessage): Promise<Buffer> {
@@ -363,5 +363,5 @@ function sendJson(
   body: Record<string, unknown>,
 ): void {
   response.writeHead(status, { "Content-Type": "application/json" });
-  response.end(JSON.stringify(body));
+  response.end(JSON.stringify(toWireCase(body)));
 }

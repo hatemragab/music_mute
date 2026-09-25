@@ -6,6 +6,7 @@ import { AdminHealthService } from '../src/admin-observability/admin-health.serv
 import {
   createAdminHarness,
   type AdminHarness,
+  wireJson,
 } from './helpers/admin-harness.js';
 
 describe('admin health HTTP boundary', () => {
@@ -64,24 +65,24 @@ describe('admin health HTTP boundary', () => {
 
   it('allows owner acknowledgment and validates the body', async () => {
     const { harness, alerts } = await setup();
-    const path = '/admin/alerts/64b000000000000000000001/acknowledge';
+    const path = '/admin/alerts/64b000000000000000000001/acknowledgements';
     const body = {
       expectedRevision: 0,
       operationId: 'e183f234-ac55-4d06-9d08-b92d5d829ed8',
       reason: 'Investigating service incident',
     };
     await harness
-      .request('post', path, body, harness.signInAs('owner'))
+      .request('post', path, wireJson(body), harness.signInAs('owner'))
       .expect(201)
       .expect((response) => expect(response.body.state).toBe('active'));
     await harness
-      .request('post', path, body, harness.signInAs('support'))
+      .request('post', path, wireJson(body), harness.signInAs('support'))
       .expect(403);
     await harness
       .request(
         'post',
         path,
-        { ...body, reason: '   ' },
+        wireJson({ ...body, reason: '   ' }),
         harness.signInAs('owner'),
       )
       .expect(400);

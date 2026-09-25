@@ -183,7 +183,7 @@ try {
   app = module.createNestApplication({ logger: false });
   configureHttp(app);
   await app.listen(requestedPort, '127.0.0.1');
-  const base = `${await app.getUrl()}/api/v1`;
+  const base = await app.getUrl();
   const accesses = app.get(getModelToken('AdminAccess'));
   await accesses.create({
     uid: 'owner-fixture',
@@ -193,7 +193,7 @@ try {
   });
   const model = (name) => app.get(getModelToken(name));
   const command = (extra = {}) => ({
-    operationId: randomUUID(),
+    operation_id: randomUUID(),
     reason: 'Owned dashboard integration fixture',
     ...extra,
   });
@@ -223,9 +223,7 @@ try {
       ? await curlResponse(method, `${base}${path}`, body, token)
       : await fetch(`${base}${path}`, options);
     const text = await response.text();
-    const value = response.headers
-      .get('content-type')
-      ?.includes('application/json')
+    const value = response.headers.get('content-type')?.includes('json')
       ? JSON.parse(text)
       : text;
     assert.equal(
@@ -238,8 +236,8 @@ try {
     requests++;
     if (response.ok && typeof value === 'object')
       snapshots.push({ method, path: path.split('?')[0], response: value });
-    if (response.ok && body?.operationId)
-      successfulOperations.add(body.operationId);
+    if (response.ok && body?.operation_id)
+      successfulOperations.add(body.operation_id);
     return value;
   }
   let curlProbes = 0;
@@ -268,7 +266,7 @@ try {
     'POST',
     '/admin/access',
     command({
-      verifiedEmail: 'support-fixture@example.invalid',
+      verified_email: 'support-fixture@example.invalid',
       role: 'support',
     }),
   );
@@ -333,9 +331,9 @@ try {
     'PUT',
     `/admin/users/${userId}/restriction`,
     {
-      operationId: randomUUID(),
-      expectedRevision: 0,
-      reasonCode: 'manual_review',
+      operation_id: randomUUID(),
+      expected_revision: 0,
+      reason_code: 'manual_review',
       note: 'Owned dashboard integration fixture',
     },
     'support-fixture',
@@ -348,7 +346,7 @@ try {
     'support-fixture',
   );
   assert.equal(media.bytes, 42);
-  assert.equal(media.contentType, 'audio/mpeg');
+  assert.equal(media.content_type, 'audio/mpeg');
   assert.ok(media.url);
   await api('GET', `/admin/jobs/${jobId}`, undefined, 'support-fixture');
   const draft = await api(
@@ -357,56 +355,56 @@ try {
     command({
       platform: 'android',
       source: 'direct_apk',
-      versionName: '1.0.0',
-      buildNumber: 2,
-      changelogEn: 'Fixture release notes',
-      storeUrl: null,
+      version_name: '1.0.0',
+      build_number: 2,
+      changelog_en: 'Fixture release notes',
+      store_url: null,
     }),
   );
   const upload = await api('POST', `/admin/releases/${draft.id}/uploads`, {
-    operationId: randomUUID(),
-    expectedRevision: draft.revision,
+    operation_id: randomUUID(),
+    expected_revision: draft.revision,
     bytes: 32,
-    sha256Hex: 'a'.repeat(64),
+    sha256_hex: 'a'.repeat(64),
   });
   await api(
     'POST',
-    `/admin/releases/${draft.id}/uploads/${upload.uploadId}/complete`,
-    { operationId: randomUUID() },
+    `/admin/releases/${draft.id}/uploads/${upload.upload_id}/completions`,
+    { operation_id: randomUUID() },
   );
   const verified = await api('GET', `/admin/releases/${draft.id}`);
-  assert.equal(verified.artifactState, 'verified');
+  assert.equal(verified.artifact_state, 'verified');
   const policy = await api('GET', '/admin/update-policy');
   const selection = {
     android: {
-      minimumBuild: null,
-      directReleaseId: draft.id,
-      storeReleaseId: null,
+      minimum_build: null,
+      direct_release_id: draft.id,
+      store_release_id: null,
       source: 'direct_apk',
     },
-    ios: { minimumBuild: null, storeReleaseId: null },
+    ios: { minimum_build: null, store_release_id: null },
   };
   const published = await api(
     'POST',
-    `/admin/releases/${draft.id}/publish`,
+    `/admin/releases/${draft.id}/publications`,
     command({
       policy: selection,
-      expectedRevision: policy.revision,
-      expectedReleaseRevision: verified.revision,
-      storeAvailabilityConfirmed: false,
+      expected_revision: policy.revision,
+      expected_release_revision: verified.revision,
+      store_availability_confirmed: false,
     }),
   );
   assert.equal(published.release.state, 'published');
   const withdrawal = await api(
     'POST',
-    `/admin/releases/${draft.id}/withdraw`,
+    `/admin/releases/${draft.id}/withdrawals`,
     command({
-      replacementPolicy: {
+      replacement_policy: {
         ...selection,
-        android: { ...selection.android, directReleaseId: null },
+        android: { ...selection.android, direct_release_id: null },
       },
-      expectedRevision: published.policyRevision,
-      expectedReleaseRevision: published.release.revision,
+      expected_revision: published.policy_revision,
+      expected_release_revision: published.release.revision,
     }),
   );
   assert.equal(withdrawal.release.state, 'withdrawn');

@@ -21,6 +21,7 @@ import { sanitizeWorkerDiagnosticLine } from '../telemetry/worker-diagnostic-san
 import { WorkerCommand } from './worker-command.schema.js';
 import type {
   AdminWorkerListQueryDto,
+  AdminWorkerPageQueryDto,
   ApplyWorkerConfigDto,
   CompleteWorkerCommandDto,
   RequestWorkerBenchmarkDto,
@@ -288,16 +289,27 @@ export class WorkerControlService {
     };
   }
 
-  async machineDiagnostics(_actor: AdminActor, id: string) {
+  async machineDiagnostics(
+    _actor: AdminActor,
+    id: string,
+    query: AdminWorkerPageQueryDto = { limit: 50 },
+  ) {
     if (!(await this.machines.exists({ _id: id })))
       throw adminError('RESOURCE_NOT_FOUND');
+    const scope = JSON.stringify(['machine-diagnostics', id, query.limit]);
+    const after = query.cursor
+      ? createdPageAfter(decodeWorkerListCursor(query.cursor, scope))
+      : null;
     const items = await this.diagnostics
-      .find({ machineId: id })
+      .find(after ? { $and: [{ machineId: id }, after] } : { machineId: id })
       .sort({ createdAt: -1, _id: -1 })
-      .limit(100)
+      .limit(query.limit + 1)
+      .maxTimeMS(3000)
       .lean();
+    const page = items.slice(0, query.limit);
+    const last = page.at(-1);
     return {
-      items: items.map((item) => ({
+      items: page.map((item) => ({
         id: item._id,
         kind: item.kind,
         sequenceStart: item.sequenceStart,
@@ -306,17 +318,30 @@ export class WorkerControlService {
         metrics: item.metrics,
         createdAt: item.createdAt,
       })),
+      nextCursor:
+        items.length > query.limit && last
+          ? encodeWorkerListCursor(scope, last._id, last.createdAt)
+          : null,
     };
   }
 
-  async listInvitations(_actor: AdminActor) {
+  async listInvitations(
+    _actor: AdminActor,
+    query: AdminWorkerPageQueryDto = { limit: 50 },
+  ) {
     const now = new Date();
+    const scope = JSON.stringify(['worker-invitations', query.limit]);
+    const after = query.cursor
+      ? createdPageAfter(decodeWorkerListCursor(query.cursor, scope))
+      : null;
     const items = await this.invitations
-      .find()
-      .sort({ createdAt: -1 })
-      .limit(100)
+      .find(after ?? {})
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(query.limit + 1)
+      .maxTimeMS(3000)
       .lean();
-    const installationIds = items.flatMap((item) =>
+    const page = items.slice(0, query.limit);
+    const installationIds = page.flatMap((item) =>
       item.installationSessionId ? [item.installationSessionId] : [],
     );
     const installations = installationIds.length
@@ -329,8 +354,9 @@ export class WorkerControlService {
     const installationById = new Map(
       installations.map((installation) => [installation._id, installation]),
     );
+    const last = page.at(-1);
     return {
-      items: items.map((item) => {
+      items: page.map((item) => {
         const installation = item.installationSessionId
           ? installationById.get(item.installationSessionId)
           : null;
@@ -360,6 +386,10 @@ export class WorkerControlService {
           revision: item.revision,
         };
       }),
+      nextCursor:
+        items.length > query.limit && last
+          ? encodeWorkerListCursor(scope, last._id, last.createdAt)
+          : null,
       asOf: now,
     };
   }
@@ -687,6 +717,17 @@ function workerListAfter(cursor: WorkerListCursor) {
       { lastSeenAt: trusted({ $lt: at }) },
       { lastSeenAt: at, _id: trusted({ $gt: cursor.id }) },
       { lastSeenAt: null },
+    ],
+  };
+}
+
+function createdPageAfter(cursor: WorkerListCursor) {
+  if (cursor.at === null) throw adminError('INVALID_CURSOR');
+  const at = new Date(cursor.at);
+  return {
+    $or: [
+      { createdAt: trusted({ $lt: at }) },
+      { createdAt: at, _id: trusted({ $lt: cursor.id }) },
     ],
   };
 }

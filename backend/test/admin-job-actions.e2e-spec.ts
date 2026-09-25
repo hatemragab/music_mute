@@ -6,6 +6,7 @@ import { ProcessingUnavailableService } from '../src/processing/processing-unava
 import {
   createAdminHarness,
   type AdminHarness,
+  wireJson,
 } from './helpers/admin-harness.js';
 
 const id = '64b000000000000000000001';
@@ -44,24 +45,24 @@ describe('administrative job action HTTP boundary', () => {
   it('permits owner and support while rejecting viewer and release manager', async () => {
     const f = await fixture();
     for (const role of ['owner', 'support'] as const) {
-      for (const operation of ['cancel', 'retry']) {
+      for (const operation of ['cancellations', 'retry-attempts']) {
         await f.harness
           .request(
             'post',
             `/admin/jobs/${id}/${operation}`,
-            body,
+            wireJson(body),
             f.harness.signInAs(role),
           )
           .expect(200);
       }
     }
     for (const role of ['viewer', 'release_manager'] as const) {
-      for (const operation of ['cancel', 'retry']) {
+      for (const operation of ['cancellations', 'retry-attempts']) {
         await f.harness
           .request(
             'post',
             `/admin/jobs/${id}/${operation}`,
-            body,
+            wireJson(body),
             f.harness.signInAs(role),
           )
           .expect(403);
@@ -93,8 +94,8 @@ describe('administrative job action HTTP boundary', () => {
       await f.harness
         .request(
           'post',
-          `/admin/jobs/${id}/retry`,
-          { ...body, ...override },
+          `/admin/jobs/${id}/retry-attempts`,
+          wireJson({ ...body, ...override }),
           token,
         )
         .expect(400);
@@ -118,15 +119,18 @@ describe('administrative job action HTTP boundary', () => {
     const response = await harness
       .request(
         'post',
-        `/admin/jobs/${id}/retry`,
-        body,
+        `/admin/jobs/${id}/retry-attempts`,
+        wireJson(body),
         harness.signInAs('support'),
       )
       .expect(503);
     expect(response.body).toEqual({
+      type: 'about:blank',
+      title: 'Service Unavailable',
+      status: 503,
       code: 'PROCESSING_UNAVAILABLE',
-      message: 'New audio processing work is unavailable',
-      requestId: expect.any(String),
+      detail: 'New audio processing work is unavailable',
+      request_id: expect.any(String),
     });
   });
 });

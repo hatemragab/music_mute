@@ -52,7 +52,7 @@ try {
       AUDIO_PROCESSING_ENABLED: "true",
       APP_UPDATES_ENABLED: "true",
       APK_EXPECTED_PACKAGE_ID: "com.example.fixture",
-      RELEASE_LANDING_BASE_URL: "https://example.invalid/api/v1",
+      RELEASE_LANDING_BASE_URL: "https://example.invalid",
       RATE_LIMIT: "10000",
       ADMIN_SENSITIVE_OPERATIONS_PER_MINUTE: "100",
       DASHBOARD_SERVE_FOR_BROWSER: "1",

@@ -22,17 +22,23 @@ describe("worker hint client", () => {
     });
     const port = (server.address() as AddressInfo).port;
     const hinted = vi.fn();
+    const ticket = "t".repeat(43);
+    let upgradeUrl: string | undefined;
+    let protocols: string | undefined;
     const client = new WorkerHintClient(
       {
         hintTicket: async () => ({
           socketUrl: `ws://127.0.0.1:${port}`,
+          ticket,
           expiresAt: new Date(Date.now() + 30_000).toISOString(),
         }),
       },
       hinted,
     );
     cleanup.push(() => client.stop());
-    sockets.once("connection", (socket) => {
+    sockets.once("connection", (socket, request) => {
+      upgradeUrl = request.url;
+      protocols = request.headers["sec-websocket-protocol"];
       socket.send(
         JSON.stringify({
           type: "work_available",
@@ -44,5 +50,7 @@ describe("worker hint client", () => {
     client.start();
 
     await vi.waitFor(() => expect(hinted).toHaveBeenCalledOnce());
+    expect(upgradeUrl).toBe("/");
+    expect(protocols).toBe(`musicmute.worker-hint.v1, ticket.${ticket}`);
   });
 });

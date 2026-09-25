@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createAdminHarness,
   type AdminHarness,
+  wireJson,
 } from './helpers/admin-harness.js';
 import { AdminReleasesController } from '../src/releases/admin-releases.controller.js';
 import { ReleaseDraftsService } from '../src/releases/release-drafts.service.js';
@@ -52,19 +53,24 @@ describe('release administration HTTP admission', () => {
     const drafts = await setup(),
       token = harness.signInAs('release_manager');
     await harness
-      .request('post', '/admin/releases', { ...body, buildNumber: 0 }, token)
+      .request(
+        'post',
+        '/admin/releases',
+        wireJson({ ...body, buildNumber: 0 }),
+        token,
+      )
       .expect(400);
     await harness
       .request(
         'post',
         '/admin/releases',
-        { ...body, state: 'published' },
+        wireJson({ ...body, state: 'published' }),
         token,
       )
       .expect(400);
     expect(drafts.create).not.toHaveBeenCalled();
     const response = await harness
-      .request('post', '/admin/releases', body, token)
+      .request('post', '/admin/releases', wireJson(body), token)
       .expect(201);
     expect(response.headers['cache-control']).toBe('no-store');
     expect(response.body.state).toBe('draft');
@@ -82,8 +88,8 @@ describe('release administration HTTP admission', () => {
     expect(response.body).toEqual({
       platform: 'android',
       source: 'direct_apk',
-      current: { versionName: '0.1.0', buildNumber: 1 },
-      suggested: { versionName: '0.1.1', buildNumber: 2 },
+      current: { version_name: '0.1.0', build_number: 1 },
+      suggested: { version_name: '0.1.1', build_number: 2 },
     });
     expect(drafts.proposal).toHaveBeenCalledWith({
       platform: 'android',

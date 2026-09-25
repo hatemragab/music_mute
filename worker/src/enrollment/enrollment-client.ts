@@ -7,6 +7,11 @@ import {
   type WorkerProvider,
   type WorkerRecipeId,
 } from "../../protocol/v1/protocol.js";
+import {
+  MAX_RETRY_DELAY_MS,
+  retryAfterMilliseconds,
+} from "../runtime/retry-after.js";
+import { fromWireCase, toWireCase } from "../runtime/wire-case.js";
 
 const RESPONSE_LIMIT_BYTES = 64 * 1024;
 const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
@@ -150,6 +155,7 @@ export class WorkerEnrollmentError extends Error {
     readonly code: string,
     readonly status: number,
     readonly retryable: boolean,
+    readonly retryAfterMs?: number,
   ) {
     super(`Worker enrollment request failed (${code})`);
     this.name = "WorkerEnrollmentError";
@@ -195,7 +201,7 @@ export class WorkerEnrollmentClient {
     oneOf(platform, WORKER_PLATFORMS, "worker platform");
     const value = strictRecord(
       await this.request(
-        `worker/v1/installations/${installationId}/artifacts`,
+        `worker/installations/${installationId}/artifacts`,
         installationCredential,
         { platform },
         signal,
@@ -249,7 +255,7 @@ export class WorkerEnrollmentClient {
     assertUuid(requestId, "Exchange request ID");
     const value = strictRecord(
       await this.request(
-        "worker/v1/installations",
+        "worker/installations",
         enrollmentCredential,
         { requestId },
         signal,
@@ -303,7 +309,7 @@ export class WorkerEnrollmentClient {
     assertInstallationReport(report);
     const value = strictRecord(
       await this.request(
-        `worker/v1/installations/${installationId}/report`,
+        `worker/installations/${installationId}/reports`,
         installationCredential,
         { requestId, expectedRevision, ...report },
         signal,
@@ -352,7 +358,7 @@ export class WorkerEnrollmentClient {
       throw new TypeError("Qualification output digest is invalid");
     const value = strictRecord(
       await this.request(
-        `worker/v1/installations/${installationId}/qualification-output/grant`,
+        `worker/installations/${installationId}/qualification-output-grants`,
         installationCredential,
         { requestId, bytes, sha256 },
         signal,
@@ -409,7 +415,7 @@ export class WorkerEnrollmentClient {
       throw new TypeError("Qualification upload version is invalid");
     const value = strictRecord(
       await this.request(
-        `worker/v1/installations/${installationId}/qualification-output/confirm`,
+        `worker/installations/${installationId}/qualification-output-confirmations`,
         installationCredential,
         { requestId, versionId },
         signal,
@@ -450,7 +456,7 @@ export class WorkerEnrollmentClient {
       throw new TypeError("Machine credential digest is invalid");
     const value = strictRecord(
       await this.request(
-        `worker/v1/installations/${installationId}/activate`,
+        `worker/installations/${installationId}/activations`,
         installationCredential,
         {
           requestId,
@@ -484,7 +490,7 @@ export class WorkerEnrollmentClient {
     const url = new URL(path, this.baseUrl);
     if (url.origin !== this.baseUrl.origin)
       throw new TypeError("Enrollment request escaped the configured origin");
-    const serialized = JSON.stringify(body);
+    const serialized = JSON.stringify(toWireCase(body));
     let lastError: unknown;
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       if (signal?.aborted) throw signal.reason;
@@ -504,7 +510,7 @@ export class WorkerEnrollmentClient {
           },
           body: serialized,
         });
-        if (response.ok) return await readJson(response);
+        if (response.ok) return fromWireCase(await readJson(response));
         const error = await responseError(response);
         if (!error.retryable || attempt === this.maxAttempts) throw error;
         lastError = error;
@@ -515,7 +521,20 @@ export class WorkerEnrollmentClient {
         lastError = error;
         if (attempt === this.maxAttempts) break;
       }
-      await abortableDelay(Math.min(2_000, 200 * 2 ** (attempt - 1)), signal);
+      if (
+        lastError instanceof WorkerEnrollmentError &&
+        lastError.status === 429
+      ) {
+        if (lastError.retryAfterMs !== undefined) {
+          if (lastError.retryAfterMs > MAX_RETRY_DELAY_MS) throw lastError;
+          await abortableDelay(lastError.retryAfterMs, signal);
+          continue;
+        }
+      }
+      await abortableDelay(
+        Math.min(MAX_RETRY_DELAY_MS, 200 * 2 ** (attempt - 1)),
+        signal,
+      );
     }
     if (lastError instanceof WorkerEnrollmentError) throw lastError;
     throw new WorkerEnrollmentError("NETWORK_UNAVAILABLE", 0, true);
@@ -708,6 +727,7 @@ function parseQualificationUploadGrant(
     record.headers,
     new Set(["Content-Type", "x-amz-checksum-sha256", "If-None-Match"]),
     "Qualification upload headers",
+    true,
   );
   const expectedChecksum = Buffer.from(sha256, "hex").toString("base64");
   if (
@@ -746,6 +766,7 @@ export function assertInstallationReport(
       "summary",
     ]),
     "Installation report",
+    true,
   );
   boundedText(value.label, "report label", 120);
   if (value.groupId !== undefined)
@@ -755,6 +776,7 @@ export function assertInstallationReport(
     value.hardware,
     new Set(["os", "osBuild", "architecture", "cpu", "memoryBytes", "gpus"]),
     "Hardware report",
+    true,
   );
   boundedText(hardware.os, "hardware OS", 100);
   boundedText(hardware.osBuild, "hardware OS build", 100);
@@ -777,6 +799,7 @@ export function assertInstallationReport(
       item,
       new Set(["id", "name", "driverVersion", "memoryBytes"]),
       "GPU report",
+      true,
     );
     boundedText(gpu.id, "GPU ID", 128);
     boundedText(gpu.name, "GPU name", 200);
@@ -794,6 +817,7 @@ export function assertInstallationReport(
       "providerRuntimeVersion",
     ]),
     "Runtime report",
+    true,
   );
   boundedText(runtime.workerVersion, "worker version", 100);
   if (runtime.protocolVersion !== WORKER_PROTOCOL_VERSION)
@@ -817,6 +841,7 @@ export function assertInstallationReport(
       item,
       new Set(["platform", "provider", "gpuId", "recipeIds", "maxSlots"]),
       "Worker capability",
+      true,
     );
     oneOf(capability.platform, WORKER_PLATFORMS, "worker platform");
     oneOf(capability.provider, WORKER_PROVIDERS, "worker provider");
@@ -843,16 +868,24 @@ function validatedBaseUrl(value: string, allowInsecureLoopback: boolean): URL {
   const url = new URL(value);
   if (url.username || url.password || url.search || url.hash)
     throw new TypeError("Enrollment URL contains forbidden components");
+  if (url.pathname !== "/")
+    throw new TypeError("Enrollment URL must be an API origin");
   const loopback = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
   if (url.protocol !== "https:" && !(allowInsecureLoopback && loopback))
     throw new TypeError("Enrollment URL must use HTTPS");
-  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
   return url;
 }
 
-async function readJson(response: Response): Promise<unknown> {
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.toLowerCase().includes("application/json"))
+async function readJson(
+  response: Response,
+  mediaType = "application/json",
+): Promise<unknown> {
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+  if (contentType !== mediaType)
     throw new WorkerEnrollmentError("RESPONSE_INVALID", response.status, false);
   const contentLength = Number(response.headers.get("content-length") ?? "0");
   if (contentLength > RESPONSE_LIMIT_BYTES)
@@ -893,12 +926,17 @@ async function responseError(
   let code = `HTTP_${response.status}`;
   try {
     const body = strictRecord(
-      await readJson(response),
-      new Set(["statusCode", "code", "message", "path", "timestamp"]),
+      await readJson(response, "application/problem+json"),
+      new Set(["type", "title", "status", "detail", "code", "request_id"]),
       "Enrollment error response",
       false,
     );
-    if (typeof body.code === "string" && body.code.length <= 100)
+    if (
+      body.type === "about:blank" &&
+      body.status === response.status &&
+      typeof body.code === "string" &&
+      /^[A-Z][A-Z0-9_]{1,79}$/.test(body.code)
+    )
       code = body.code;
   } catch {
     // The bounded status is sufficient when an upstream omitted safe JSON.
@@ -907,6 +945,9 @@ async function responseError(
     code,
     response.status,
     RETRYABLE_STATUS.has(response.status),
+    response.status === 429
+      ? retryAfterMilliseconds(response.headers.get("retry-after"))
+      : undefined,
   );
 }
 
@@ -914,7 +955,7 @@ function strictRecord(
   value: unknown,
   allowed: ReadonlySet<string>,
   label: string,
-  rejectUnknown = true,
+  rejectUnknown = false,
 ): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     throw new TypeError(`${label} must be an object`);

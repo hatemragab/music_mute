@@ -405,12 +405,7 @@ export function parseWorkerHintTicket(value: unknown): WorkerHintTicket {
     throw new TypeError("Worker hint ticket is expired");
   return {
     ticket: text(item.ticket, "ticket", /^[A-Za-z0-9_-]{43}$/u, 43),
-    path: text(
-      item.path,
-      "path",
-      /^\/api\/v1\/worker\/v1\/hints\/socket$/u,
-      128,
-    ),
+    path: text(item.path, "path", /^\/worker\/hints\/socket$/u, 128),
     expiresAt,
   };
 }

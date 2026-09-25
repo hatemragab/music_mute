@@ -367,7 +367,7 @@ describe("macOS one-command user installation", () => {
         workerId,
       }),
     ).toMatchObject({
-      backendBaseUrl: "https://api.music-mute.com/api/v1/",
+      backendBaseUrl: "https://api.music-mute.com/",
       localLifecyclePath: layout.lifecyclePath,
     });
   });

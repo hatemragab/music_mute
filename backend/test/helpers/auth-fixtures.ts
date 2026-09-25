@@ -71,6 +71,16 @@ export const deviceReport = {
   osVersion: '16',
   deviceModel: 'Test device',
 };
+
+export const wireDeviceReport = {
+  installation_id: deviceReport.installationId,
+  platform: deviceReport.platform,
+  app_version: deviceReport.appVersion,
+  build_number: deviceReport.buildNumber,
+  metadata_revision: deviceReport.metadataRevision,
+  os_version: deviceReport.osVersion,
+  device_model: deviceReport.deviceModel,
+};
 @Controller('processing-probe')
 class ProcessingProbeController {
   @Get() @RequireProcessingAccess() run() {

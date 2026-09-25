@@ -40,7 +40,7 @@ describe('processing admission HTTP boundary', () => {
       ],
     }).compile();
     app = module.createNestApplication();
-    app.setGlobalPrefix('api/v1');
+    app.setGlobalPrefix('');
     app.use((rawRequest: Request, _response: Response, next: NextFunction) => {
       const req = rawRequest as AuthRequest;
       req.user = {
@@ -67,7 +67,7 @@ describe('processing admission HTTP boundary', () => {
       sha256: Buffer.alloc(32).toString('base64'),
     };
     const responses = [
-      await request(server).post('/api/v1/jobs').send({
+      await request(server).post('/jobs').send({
         policyVersion: 2,
         preparationProfileId: PREPARATION_PROFILE_ID,
         source: 'audio_file',
@@ -75,12 +75,12 @@ describe('processing admission HTTP boundary', () => {
         input,
       }),
       await request(server)
-        .post(`/api/v1/jobs/${id}/retry`)
+        .post(`/jobs/${id}/retry-attempts`)
         .send({ requestId: '24b2d476-e40e-4aeb-a8dd-24db12337695' }),
-      await request(server).post(`/api/v1/jobs/${id}/upload-url`).send({
+      await request(server).post(`/jobs/${id}/upload-grants`).send({
         requestId: '34b2d476-e40e-4aeb-a8dd-24db12337695',
       }),
-      await request(server).post(`/api/v1/jobs/${id}/upload-complete`).send({}),
+      await request(server).post(`/jobs/${id}/upload-completions`).send({}),
     ];
     expect(responses.map((response) => response.status)).toEqual([
       201, 201, 200, 200,

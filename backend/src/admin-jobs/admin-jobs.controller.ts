@@ -32,7 +32,7 @@ export class AdminJobsController {
   @Get(':id') detail(@Req() req: AuthRequest, @Param('id') id: string) {
     return this.jobs.detail(req.adminActor!, id);
   }
-  @Post(':id/cancel')
+  @Post(':id/cancellations')
   @HttpCode(200)
   @RequireAdminPermission('jobs.manage')
   @LimitAdmin('write')
@@ -44,7 +44,7 @@ export class AdminJobsController {
     return this.actions.cancel(req.adminActor!, id, body);
   }
 
-  @Post(':id/retry')
+  @Post(':id/retry-attempts')
   @HttpCode(200)
   @RequireAdminPermission('jobs.manage')
   @LimitAdmin('write')

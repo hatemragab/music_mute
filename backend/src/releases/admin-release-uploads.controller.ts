@@ -21,7 +21,7 @@ export class AdminReleaseUploadsController {
   ) {
     return this.uploads.reserve(request.adminActor!, id, body);
   }
-  @Post(':uploadId/complete')
+  @Post(':uploadId/completions')
   @RequireAdminPermission('releases.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')

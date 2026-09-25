@@ -32,7 +32,7 @@ class AuthContractTest {
     }
 
     private val profile =
-        """{"id":"profile-1","displayName":"Listener","email":null,"emailVerified":false,"providers":["apple.com"]}"""
+        """{"id":"profile-1","display_name":"Listener","email":null,"email_verified":false,"providers":["apple.com"]}"""
 
     private fun client(
         transport: AuthHttpTransport,
@@ -46,7 +46,7 @@ class AuthContractTest {
             assertEquals("DELETE", method)
             assertNull(body)
             assertEquals("Bearer token", headers["Authorization"])
-            AuthHttpResponse(202, """{"requestId":"receipt","status":"accepted","recoverUntil":"2026-09-26T00:00:00.000Z"}""")
+            AuthHttpResponse(202, """{"request_id":"receipt","status":"accepted","recover_until":"2026-09-26T00:00:00.000Z"}""")
         })
         assertEquals("receipt", api.deleteAccount().requestId)
     }
@@ -60,9 +60,9 @@ class AuthContractTest {
     }
 
     @Test fun deletionRejectsUnexpectedSuccessAndMalformedReceipt() = runTest {
-        listOf(AuthHttpResponse(200, """{"requestId":"receipt","status":"accepted"}"""),
-            AuthHttpResponse(202, """{"requestId":"","status":"accepted"}"""),
-            AuthHttpResponse(202, """{"requestId":"receipt","status":"completed"}""")).forEach { response ->
+        listOf(AuthHttpResponse(200, """{"request_id":"receipt","status":"accepted"}"""),
+            AuthHttpResponse(202, """{"request_id":"","status":"accepted"}"""),
+            AuthHttpResponse(202, """{"request_id":"receipt","status":"completed"}""")).forEach { response ->
             val api = client(AuthHttpTransport { _, _, _, _ -> response })
             assertEquals(AuthProblem.SERVICE_UNAVAILABLE, (runCatching { api.deleteAccount() }.exceptionOrNull() as AuthFailure).problem)
         }
@@ -72,7 +72,7 @@ class AuthContractTest {
         var uid = "first"
         val api = client(AuthHttpTransport { _, _, _, _ ->
             uid = "second"
-            AuthHttpResponse(202, """{"requestId":"receipt","status":"accepted","recoverUntil":"2026-09-26T00:00:00.000Z"}""")
+            AuthHttpResponse(202, """{"request_id":"receipt","status":"accepted","recover_until":"2026-09-26T00:00:00.000Z"}""")
         }, uid = { uid })
         assertEquals("receipt", api.deleteAccount("first").requestId)
     }
@@ -91,7 +91,7 @@ class AuthContractTest {
                 assertEquals("{}", body)
                 AuthHttpResponse(
                     202,
-                    """{"id":"recovery-1","status":"pending","reason":null,"requestedAt":"2026-09-11T00:00:00.000Z","reviewedAt":null,"reviewReason":null,"revision":0}""",
+                    """{"id":"recovery-1","status":"pending","reason":null,"requested_at":"2026-09-11T00:00:00.000Z","reviewed_at":null,"review_reason":null,"revision":0}""",
                 )
             }
         })
@@ -114,7 +114,7 @@ class AuthContractTest {
                 assertFalse(AuthConfiguration(it, false).isConfigured())
             }
         assertEquals(
-            "https://example.test/api/v1",
+            "https://example.test",
             AuthConfiguration("https://example.test/", false).apiRoot(),
         )
         assertTrue(AuthConfiguration("http://127.0.0.1:3000", true).isConfigured())

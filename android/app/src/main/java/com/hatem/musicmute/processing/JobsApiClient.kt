@@ -80,7 +80,7 @@ class JobsApiClient(
     }
 
     override suspend fun mediaPolicy(): ProcessingMediaPolicy = try {
-        ProcessingMediaPolicy.parse(request("GET", "/processing-policy?schemaVersion=2"))
+        ProcessingMediaPolicy.parse(request("GET", "/processing-policy?schema_version=2"))
     } catch (error: JobsFailure) {
         if (error.problem in setOf(JobsProblem.JOB_NOT_FOUND, JobsProblem.OFFLINE)) ProcessingMediaPolicy.STANDARD else throw error
     }
@@ -90,12 +90,12 @@ class JobsApiClient(
 
     override suspend fun renewUpload(id: String, requestId: String): UploadGrant {
         uuid(requestId)
-        return decode<UploadGrant>(request("POST", "${path(id)}/upload-url",
+        return decode<UploadGrant>(request("POST", "${path(id)}/upload-grants",
             buildJsonObject { put("requestId", requestId) }.toString(), true)).also(::validateUpload)
     }
 
     override suspend fun confirmUpload(id: String): JobMutation =
-        decode(request("POST", "${path(id)}/upload-complete", "{}", true))
+        decode(request("POST", "${path(id)}/upload-completions", "{}", true))
 
     override suspend fun list(cursor: String?, status: String?): JobPage {
         if (cursor != null && cursor.length > 512) invalidInput()
@@ -108,11 +108,11 @@ class JobsApiClient(
     override suspend fun detail(id: String): Job = decode(request("GET", path(id)))
 
     override suspend fun cancel(id: String): JobMutation =
-        decode(request("POST", "${path(id)}/cancel", "{}"))
+        decode(request("POST", "${path(id)}/cancellations", "{}"))
 
     override suspend fun retry(id: String, requestId: String): JobMutation {
         uuid(requestId)
-        return decode(request("POST", "${path(id)}/retry", buildJsonObject { put("requestId", requestId) }.toString(), true))
+        return decode(request("POST", "${path(id)}/retry-attempts", buildJsonObject { put("requestId", requestId) }.toString(), true))
     }
 
     override suspend fun download(id: String, artifact: String): DownloadGrant {
@@ -122,7 +122,7 @@ class JobsApiClient(
     override suspend fun download(id: String, artifact: String, requestId: String): DownloadGrant {
         if (artifact !in setOf("input", "output")) invalidInput()
         uuid(requestId)
-        return decode<DownloadGrant>(request("POST", "${path(id)}/download-url", buildJsonObject {
+        return decode<DownloadGrant>(request("POST", "${path(id)}/download-grants", buildJsonObject {
             put("artifact", artifact)
             put("requestId", requestId)
         }.toString())).also { validateUrl(it.url) }

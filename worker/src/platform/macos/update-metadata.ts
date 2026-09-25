@@ -39,6 +39,7 @@ export function parseMacUpdateCandidate(value: unknown): MacUpdateCandidate {
     value,
     new Set(["schemaVersion", "platform", "signed", "grant"]),
     "Update candidate",
+    false,
   );
   if (root.schemaVersion !== 1 || root.platform !== "darwin-arm64")
     throw new TypeError("Update candidate target is invalid");
@@ -47,6 +48,7 @@ export function parseMacUpdateCandidate(value: unknown): MacUpdateCandidate {
     root.grant,
     new Set(["url", "expiresAt"]),
     "Update grant",
+    false,
   );
   if (typeof grant.url !== "string" || typeof grant.expiresAt !== "string")
     throw new TypeError("Update grant is invalid");
@@ -190,11 +192,12 @@ function strictRecord(
   value: unknown,
   allowed: ReadonlySet<string>,
   label: string,
+  rejectUnknown = true,
 ): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     throw new TypeError(`${label} is invalid`);
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !allowed.has(key)))
+  if (rejectUnknown && Object.keys(record).some((key) => !allowed.has(key)))
     throw new TypeError(`${label} contains unknown fields`);
   return record;
 }

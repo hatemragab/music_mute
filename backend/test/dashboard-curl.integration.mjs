@@ -71,7 +71,7 @@ test(
           AUDIO_PROCESSING_ENABLED: 'true',
           APP_UPDATES_ENABLED: 'true',
           APK_EXPECTED_PACKAGE_ID: 'com.example.fixture',
-          RELEASE_LANDING_BASE_URL: 'https://example.invalid/api/v1',
+          RELEASE_LANDING_BASE_URL: 'https://example.invalid/',
           RATE_LIMIT: '10000',
           ADMIN_SENSITIVE_OPERATIONS_PER_MINUTE: '30',
           DASHBOARD_HTTP_CLIENT: 'curl',
@@ -88,7 +88,7 @@ test(
       assert.equal(child.exitCode, 0, child.output);
       assert.match(
         child.output,
-        /DASHBOARD_CURL_OK probes=45 requests=36 auditedEvents=13/,
+        /DASHBOARD_CURL_OK probes=59 requests=27 auditedEvents=10/,
       );
       const collections = await database.db
         .listCollections({}, { nameOnly: true })

@@ -60,7 +60,7 @@ For a macOS release that can be selected by the manual updater, the catalog's
 `releases.darwin-arm64` entry also carries the signed metadata fields
 `sequence`, `publishedAt`, `expiresAt`, `keyId`, and `signature`. The signature
 is Ed25519 over the canonical JSON payload returned as `signed.metadata` by
-`POST /api/v1/worker/v1/update`. That payload binds the platform, release
+`POST /worker/updates`. That payload binds the platform, release
 version, sequence, validity window, filename, byte count, SHA-256, and content
 type. Do not sign a temporary S3 URL; the authenticated backend mints that
 short-lived grant only when the CLI runs `update`, not for `update --check`.

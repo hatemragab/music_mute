@@ -37,7 +37,7 @@ describe("service runtime config builder", () => {
     await writeFile(layout.credentialPath, `${CREDENTIAL}\n`, { mode: 0o600 });
     const document = buildServiceRuntimeConfig({
       platform: "darwin-arm64",
-      backendBaseUrl: "https://api.musicmute.test/api",
+      backendBaseUrl: "https://api.musicmute.test",
       machineId: MACHINE_ID,
       workerId: WORKER_ID,
       installRoot: root,
@@ -52,7 +52,7 @@ describe("service runtime config builder", () => {
       arch: "arm64",
     });
     expect(loaded).toMatchObject({
-      backendBaseUrl: "https://api.musicmute.test/api/",
+      backendBaseUrl: "https://api.musicmute.test/",
       machineId: MACHINE_ID,
       credential: CREDENTIAL,
       validatedMaxWorkersPerGpu: 1,
@@ -75,7 +75,7 @@ describe("service runtime config builder", () => {
   it("builds the fixed Windows DirectML adapter-0 config", () => {
     const document = buildServiceRuntimeConfig({
       platform: "windows-amd64",
-      backendBaseUrl: "https://api.musicmute.test/api/",
+      backendBaseUrl: "https://api.musicmute.test/",
       machineId: MACHINE_ID,
       workerId: WORKER_ID,
       installRoot: "C:\\ProgramData\\MusicMuteWorker",
@@ -113,7 +113,15 @@ describe("service runtime config builder", () => {
     expect(() =>
       buildServiceRuntimeConfig({
         platform: "darwin-arm64",
-        backendBaseUrl: "http://api.musicmute.test/api",
+        backendBaseUrl: "https://api.musicmute.test/old-prefix",
+        machineId: MACHINE_ID,
+        workerId: WORKER_ID,
+      }),
+    ).toThrow("API origin");
+    expect(() =>
+      buildServiceRuntimeConfig({
+        platform: "darwin-arm64",
+        backendBaseUrl: "http://api.musicmute.test",
         machineId: MACHINE_ID,
         workerId: WORKER_ID,
       }),
@@ -121,7 +129,7 @@ describe("service runtime config builder", () => {
     expect(() =>
       buildServiceRuntimeConfig({
         platform: "windows-amd64",
-        backendBaseUrl: "http://127.0.0.1:3000/api",
+        backendBaseUrl: "http://127.0.0.1:3000",
         machineId: MACHINE_ID,
         workerId: WORKER_ID,
         allowInsecureLoopback: true,
@@ -130,7 +138,7 @@ describe("service runtime config builder", () => {
     expect(() =>
       buildServiceRuntimeConfig({
         platform: "darwin-arm64",
-        backendBaseUrl: "https://api.musicmute.test/api",
+        backendBaseUrl: "https://api.musicmute.test",
         machineId: MACHINE_ID,
         workerId: WORKER_ID,
         releaseVersion: "0.1.1",
@@ -148,7 +156,7 @@ describe("service runtime config builder", () => {
     const document = structuredClone(
       buildServiceRuntimeConfig({
         platform: "darwin-arm64",
-        backendBaseUrl: "https://api.musicmute.test/api",
+        backendBaseUrl: "https://api.musicmute.test",
         machineId: MACHINE_ID,
         workerId: WORKER_ID,
         installRoot: root,

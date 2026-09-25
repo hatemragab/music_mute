@@ -44,6 +44,8 @@ describe('Public account deletion and privacy pages', () => {
     expect(response.text).toContain('mailto:support@example.test?subject=');
     expect(response.text).toContain('ownership');
     expect(response.text).toContain('exactly 15 days');
+    expect(response.text).toContain('starts a 15-day recovery period');
+    expect(response.text).not.toContain('three-calendar-month');
     expect(response.text).toContain('without reinstalling');
     expect(response.text).toContain(configured.PUBLIC_DELETION_TIMEFRAME);
     expect(response.text).toContain(configured.PUBLIC_RETENTION_NOTICE);
@@ -118,6 +120,8 @@ describe('Public account deletion and privacy pages', () => {
       expect(response.text).toContain(value);
     }
     expect(response.text).toContain('href="/delete-account"');
+    expect(response.text).toContain('15-day account-deletion recovery period');
+    expect(response.text).not.toContain('three-calendar-month');
     expect(response.text).not.toMatch(/https?:\/\/[^\s"<]+/);
     expect(response.headers['content-security-policy']).toContain(
       "script-src 'none'",

@@ -5,7 +5,10 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChildResponse } from "../src/agent/ipc/child-protocol.js";
 import type { ChildProgress } from "../src/agent/ipc/child-progress.js";
-import { ControlPlaneError } from "../src/runtime/control-plane-client.js";
+import {
+  ControlPlaneError,
+  type WorkerIdentity,
+} from "../src/runtime/control-plane-client.js";
 import type {
   Claim,
   WorkerRemoteCommand,
@@ -193,11 +196,19 @@ function fixture(
     })),
     applyConfig: vi.fn(async () => undefined),
     registerSlot: vi.fn(async () => undefined),
-    claim: vi.fn(async () => {
-      const result = nextClaim;
-      nextClaim = null;
-      return { claim: result, serverTime: new Date(now).toISOString() };
-    }),
+    claim: vi.fn(
+      async (
+        _identity: WorkerIdentity,
+        _gpuId: string,
+        _slotIndex: number,
+        _revision: number,
+        _requestId: string,
+      ) => {
+        const result = nextClaim;
+        nextClaim = null;
+        return { claim: result, serverTime: new Date(now).toISOString() };
+      },
+    ),
     renew: vi.fn(async () => ({
       serverTime: new Date().toISOString(),
       results: [
@@ -632,6 +643,78 @@ describe("worker runtime ownership", () => {
     expect(f.supervisor.stop).toHaveBeenCalledOnce();
   });
 
+  it("recovers a transient startup configuration rate limit", async () => {
+    const base = fixture();
+    for (let attempt = 0; attempt < 3; attempt += 1)
+      base.control.config.mockRejectedValueOnce(
+        new ControlPlaneError("WORKER_RATE_LIMITED", 429, true, 0),
+      );
+    const f = await runtimeFixture(base);
+
+    await expect(f.runtime.start()).resolves.toBeUndefined();
+    expect(f.control.config).toHaveBeenCalledTimes(4);
+    await f.runtime.stop();
+  });
+
+  it("defers configuration polling after a rate limit and then claims normally", async () => {
+    const base = fixture();
+    const f = await runtimeFixture(base);
+    await f.runtime.start();
+    base.control.config.mockRejectedValueOnce(
+      new ControlPlaneError("WORKER_RATE_LIMITED", 429, true, 250),
+    );
+
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(0);
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(0);
+    expect(f.control.claim).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(1);
+    await f.runtime.waitForIdle();
+    expect(f.control.fail).not.toHaveBeenCalled();
+    await f.runtime.stop();
+  });
+
+  it("keeps the claim request identity across a deferred rate limit", async () => {
+    const base = fixture();
+    const f = await runtimeFixture(base);
+    await f.runtime.start();
+    base.control.claim.mockRejectedValueOnce(
+      new ControlPlaneError("WORKER_RATE_LIMITED", 429, true, 250),
+    );
+
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(0);
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(1);
+    await f.runtime.waitForIdle();
+    expect(f.control.claim.mock.calls[0]?.[4]).toBe(
+      f.control.claim.mock.calls[1]?.[4],
+    );
+    expect(f.control.fail).not.toHaveBeenCalled();
+    await f.runtime.stop();
+  });
+
+  it("keeps the run loop alive through a deferred claim", async () => {
+    const base = fixture();
+    base.control.claim.mockRejectedValueOnce(
+      new ControlPlaneError("WORKER_RATE_LIMITED", 429, true, 200),
+    );
+    const f = await runtimeFixture(base);
+    const running = f.runtime.run();
+    try {
+      await vi.waitFor(
+        () => expect(f.control.complete).toHaveBeenCalledOnce(),
+        {
+          timeout: 2_000,
+        },
+      );
+      expect(f.control.fail).not.toHaveBeenCalled();
+    } finally {
+      await f.runtime.stop();
+      await running;
+    }
+  });
+
   it("executes and reports a remote Doctor command", async () => {
     const base = fixture();
     const command: WorkerRemoteCommand = {
@@ -933,6 +1016,79 @@ describe("worker runtime ownership", () => {
       "completion",
     ]);
     expect(await readdir(join(f.root, "attempts"))).toEqual([]);
+    await f.runtime.stop();
+  });
+
+  it("renews its lease and recovers an input-grant rate limit", async () => {
+    const base = fixture();
+    base.control.inputGrant.mockRejectedValueOnce(
+      new ControlPlaneError("WORKER_RATE_LIMITED", 429, true, 250),
+    );
+    const f = await runtimeFixture(base);
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+
+    expect(f.control.inputGrant).toHaveBeenCalledTimes(2);
+    expect(f.control.renew).toHaveBeenCalled();
+    expect(f.control.complete).toHaveBeenCalledOnce();
+    expect(f.control.fail).not.toHaveBeenCalled();
+    await f.runtime.stop();
+  });
+
+  it("recovers an output-grant dependency failure without failing the attempt", async () => {
+    const base = fixture();
+    base.control.outputGrant.mockRejectedValueOnce(
+      new ControlPlaneError("WORKER_DEPENDENCY_UNAVAILABLE", 503, true),
+    );
+    const f = await runtimeFixture(base);
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+
+    expect(f.control.outputGrant).toHaveBeenCalledTimes(2);
+    expect(f.control.complete).toHaveBeenCalledOnce();
+    expect(f.control.fail).not.toHaveBeenCalled();
+    await f.runtime.stop();
+  });
+
+  it("defers a grant rate limit beyond the deadline without a false failure", async () => {
+    const base = fixture();
+    base.control.inputGrant.mockRejectedValue(
+      new ControlPlaneError("WORKER_RATE_LIMITED", 429, true, 60_000),
+    );
+    const f = await runtimeFixture(base);
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+
+    expect(f.control.inputGrant).toHaveBeenCalledOnce();
+    expect(f.control.fail).not.toHaveBeenCalled();
+    expect(f.control.complete).not.toHaveBeenCalled();
+    expect(f.events).toContainEqual(
+      expect.objectContaining({
+        kind: "attempt-stopped",
+        code: "control-plane-rate-limited",
+      }),
+    );
+    await f.runtime.stop();
+  });
+
+  it("stops a grant retry when lease renewal rejects ownership", async () => {
+    const base = fixture({ cancelled: true });
+    base.control.inputGrant.mockRejectedValueOnce(
+      new ControlPlaneError("WORKER_RATE_LIMITED", 429, true, 500),
+    );
+    const f = await runtimeFixture(base);
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+
+    expect(f.control.inputGrant).toHaveBeenCalledOnce();
+    expect(f.control.fail).not.toHaveBeenCalled();
+    expect(f.events).toContainEqual(
+      expect.objectContaining({ kind: "attempt-stopped", code: "cancelled" }),
+    );
     await f.runtime.stop();
   });
 

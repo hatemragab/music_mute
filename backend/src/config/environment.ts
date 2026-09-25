@@ -38,6 +38,20 @@ export const ADMIN_RATE_LIMIT_DEFAULTS = {
   ADMIN_SERVICE_PER_MINUTE: 1_000,
 } as const;
 
+export const WORKER_RATE_LIMIT_DEFAULTS = {
+  WORKER_PREAUTH_IP_PER_MINUTE: 300,
+  WORKER_PREAUTH_SERVICE_PER_MINUTE: 3_000,
+  WORKER_MACHINE_PER_MINUTE: 300,
+  WORKER_INSTALLATION_PER_MINUTE: 120,
+  WORKER_ENROLLMENT_PER_MINUTE: 20,
+  WORKER_STANDARD_PER_MINUTE: 120,
+  WORKER_POLL_PER_MINUTE: 240,
+  WORKER_TRANSFER_PER_MINUTE: 30,
+  WORKER_TELEMETRY_PER_MINUTE: 30,
+  WORKER_ENDPOINT_PER_MINUTE: 1_200,
+  WORKER_SERVICE_PER_MINUTE: 3_000,
+} as const;
+
 const allowance = (defaultValue: number) =>
   Joi.number().integer().min(1).max(1_000_000).default(defaultValue);
 
@@ -126,6 +140,7 @@ const schema = Joi.object({
   PUBLIC_RETENTION_NOTICE: Joi.string().trim().min(1).max(4000).optional(),
   TRUST_PROXY: Joi.string().valid('false', '1').default('false'),
   RATE_LIMIT: Joi.number().integer().min(1).max(10000).default(60),
+  PUBLIC_RELEASE_GRANTS_PER_MINUTE: allowance(300),
   RATE_IP_CEILING_PER_MINUTE: allowance(600),
   RATE_TTL_MS: Joi.number().integer().min(1000).max(3600000).default(60000),
   AUTH_UID_PER_MINUTE: allowance(AUTH_RATE_LIMIT_DEFAULTS.AUTH_UID_PER_MINUTE),
@@ -214,6 +229,12 @@ const schema = Joi.object({
     .min(60)
     .max(300)
     .default(ADMIN_RATE_LIMIT_DEFAULTS.ADMIN_REAUTH_MAX_AGE_SECONDS),
+  ...Object.fromEntries(
+    Object.entries(WORKER_RATE_LIMIT_DEFAULTS).map(([key, value]) => [
+      key,
+      allowance(value),
+    ]),
+  ),
   BODY_LIMIT_BYTES: Joi.number()
     .integer()
     .min(1024)

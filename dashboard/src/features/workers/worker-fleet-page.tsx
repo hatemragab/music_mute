@@ -63,6 +63,7 @@ export function WorkerFleetPage() {
   const queryClient = useQueryClient();
   const { can, reauthenticate } = useAdminSession();
   const [activeTab, setActiveTab] = useState("machines");
+  const [invitationCursor, setInvitationCursor] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
   const status = params.get("status") ?? "all";
   const platform = params.get("platform") ?? "all";
@@ -83,8 +84,9 @@ export function WorkerFleetPage() {
     enabled: activeTab === "machines",
   });
   const invitations = useQuery({
-    queryKey: ["worker-invitations"],
-    queryFn: () => listWorkerInvitations(client),
+    queryKey: ["worker-invitations", invitationCursor],
+    queryFn: () =>
+      listWorkerInvitations(client, { cursor: invitationCursor, limit: 25 }),
     enabled: activeTab === "enrollment" && can("workers.enroll"),
   });
   useVisibleInterval(
@@ -101,6 +103,10 @@ export function WorkerFleetPage() {
   const [revokeTarget, setRevokeTarget] = useState<WorkerInvitation | null>(
     null,
   );
+  const refreshInvitations = async () => {
+    setInvitationCursor(null);
+    await queryClient.invalidateQueries({ queryKey: ["worker-invitations"] });
+  };
   const revoke = useMutation({
     mutationFn: ({
       target,
@@ -114,9 +120,7 @@ export function WorkerFleetPage() {
         expectedRevision: target.revision,
         reason,
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["worker-invitations"] });
-    },
+    onSuccess: refreshInvitations,
   });
   const change = (name: string, value: string) => {
     const next = new URLSearchParams(params);
@@ -145,18 +149,18 @@ export function WorkerFleetPage() {
               />
             ) : null}
             {can("workers.enroll") ? (
-              <WorkerEnrollmentDialog
-                onCreated={() =>
-                  queryClient.invalidateQueries({
-                    queryKey: ["worker-invitations"],
-                  })
-                }
-              />
+              <WorkerEnrollmentDialog onCreated={refreshInvitations} />
             ) : null}
           </>
         }
       />
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          setActiveTab(value);
+          if (value === "enrollment") setInvitationCursor(null);
+        }}
+      >
         <TabsList aria-label="Worker fleet sections">
           <TabsTrigger value="machines">Machines</TabsTrigger>
           {can("workers.enroll") ? (
@@ -252,11 +256,7 @@ export function WorkerFleetPage() {
                   ) ? (
                     <WorkerEnrollmentDialog
                       label="Create replacement"
-                      onCreated={() =>
-                        queryClient.invalidateQueries({
-                          queryKey: ["worker-invitations"],
-                        })
-                      }
+                      onCreated={refreshInvitations}
                     />
                   ) : null
                 }
@@ -267,6 +267,12 @@ export function WorkerFleetPage() {
                 description="Create a short-lived invitation when a native machine is ready to install."
               />
             )}
+            <CursorPagination
+              cursor={invitationCursor}
+              nextCursor={invitations.data?.nextCursor ?? null}
+              pending={invitations.isFetching}
+              onCursorChange={setInvitationCursor}
+            />
           </TabsContent>
         ) : null}
         <TabsContent value="policy">

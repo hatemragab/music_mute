@@ -1,5 +1,5 @@
 import { Body, Controller, Post, Req } from '@nestjs/common';
-import { WorkerRoute } from '../auth/worker-auth.decorators.js';
+import { LimitWorker, WorkerRoute } from '../auth/worker-auth.decorators.js';
 import type { WorkerRequest } from '../auth/worker-auth.types.js';
 import {
   ClaimWorkerJobDto,
@@ -8,12 +8,12 @@ import {
 } from './worker-claim.dto.js';
 import { WorkerClaimService } from './worker-claim.service.js';
 
-@Controller('worker/v1')
+@Controller('worker')
 @WorkerRoute('machine')
 export class WorkerClaimController {
   constructor(private readonly claims: WorkerClaimService) {}
 
-  @Post('session')
+  @Post('sessions')
   openSession(
     @Req() request: WorkerRequest,
     @Body() dto: OpenWorkerSessionDto,
@@ -30,6 +30,7 @@ export class WorkerClaimController {
   }
 
   @Post('claims')
+  @LimitWorker('poll')
   claim(@Req() request: WorkerRequest, @Body() dto: ClaimWorkerJobDto) {
     return this.claims.claim(request.workerPrincipal!, dto);
   }

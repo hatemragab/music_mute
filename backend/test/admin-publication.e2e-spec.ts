@@ -23,7 +23,7 @@ describe('publication HTTP authorization', () => {
         { provide: ReleasePublicationService, useValue: publication },
       ],
     });
-    const path = `/admin/releases/${'a'.repeat(24)}/publish`;
+    const path = `/admin/releases/${'a'.repeat(24)}/publications`;
     await harness.request('post', path, {}).expect(401);
     await harness
       .request('post', path, {}, harness.signInAs('viewer'))
@@ -35,7 +35,7 @@ describe('publication HTTP authorization', () => {
     expect(stale.body.code).toBe('ADMIN_REAUTH_REQUIRED');
     expect(publication.mutate).not.toHaveBeenCalled();
     await harness
-      .request('post', '/admin/update-policy/preview', {}, token)
+      .request('post', '/admin/update-policy/previews', {}, token)
       .expect(201);
     harness.identities.get(token)!.authTimeSec = Math.floor(Date.now() / 1000);
     await harness.request('post', path, {}, token).expect(201);

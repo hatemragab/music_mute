@@ -9,7 +9,7 @@ const HINT_TYPES = new Set([
 interface HintTicketSource {
   hintTicket(
     signal?: AbortSignal,
-  ): Promise<{ socketUrl: string; expiresAt: string }>;
+  ): Promise<{ socketUrl: string; ticket: string; expiresAt: string }>;
 }
 
 export class WorkerHintClient {
@@ -42,7 +42,7 @@ export class WorkerHintClient {
     while (!this.stopping.signal.aborted) {
       try {
         const ticket = await this.source.hintTicket(this.stopping.signal);
-        await this.listen(ticket.socketUrl);
+        await this.listen(ticket.socketUrl, ticket.ticket);
         delayMs = 1_000;
       } catch {
         if (this.stopping.signal.aborted) break;
@@ -52,9 +52,12 @@ export class WorkerHintClient {
     }
   }
 
-  private listen(socketUrl: string): Promise<void> {
+  private listen(socketUrl: string, ticket: string): Promise<void> {
     return new Promise((resolve) => {
-      const socket = new WebSocket(socketUrl);
+      const socket = new WebSocket(socketUrl, [
+        "musicmute.worker-hint.v1",
+        `ticket.${ticket}`,
+      ]);
       this.socket = socket;
       let finished = false;
       const finish = () => {

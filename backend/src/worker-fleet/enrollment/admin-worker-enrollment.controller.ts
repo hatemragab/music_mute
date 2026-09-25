@@ -26,7 +26,7 @@ export class AdminWorkerEnrollmentController {
     return this.enrollment.createInvitation(request.adminActor!, dto);
   }
 
-  @Post('invitations/:id/revoke')
+  @Post('invitations/:id/revocations')
   @RequireAdminPermission('workers.enroll')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -38,7 +38,7 @@ export class AdminWorkerEnrollmentController {
     return this.enrollment.revokeInvitation(request.adminActor!, id, dto);
   }
 
-  @Post('machines/:id/pause')
+  @Post('machines/:id/pauses')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -50,7 +50,7 @@ export class AdminWorkerEnrollmentController {
     return this.enrollment.pause(request.adminActor!, id, dto);
   }
 
-  @Post('machines/:id/drain')
+  @Post('machines/:id/drains')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -62,7 +62,7 @@ export class AdminWorkerEnrollmentController {
     return this.enrollment.drain(request.adminActor!, id, dto);
   }
 
-  @Post('machines/:id/resume')
+  @Post('machines/:id/resumptions')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -74,7 +74,7 @@ export class AdminWorkerEnrollmentController {
     return this.enrollment.resume(request.adminActor!, id, dto);
   }
 
-  @Post('machines/:id/revoke')
+  @Post('machines/:id/revocations')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')

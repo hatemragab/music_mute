@@ -36,7 +36,7 @@ export const decideAccountRecoveryRequest = (
     operationId: input.operationId,
     submit: () =>
       client.post<AccountRecoveryRequest>(
-        `/admin/account-recovery-requests/${encodeURIComponent(request.id)}/${decision}`,
+        `/admin/account-recovery-requests/${encodeURIComponent(request.id)}/${decision === "approve" ? "approvals" : "rejections"}`,
         input,
       ),
     readResult: () => getAccountRecoveryRequest(client, request.id),

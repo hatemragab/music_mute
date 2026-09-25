@@ -76,7 +76,7 @@ func processingJobHint(_ data: [AnyHashable: Any]) -> ProcessingJobHint? {
     }
     struct Body: Encodable { let expectedBindingRevision: Int64 }
     _ = try await send(
-      "POST", route(installationID) + "/deactivate",
+      "POST", route(installationID) + "-deactivations",
       body: JSONEncoder().encode(Body(expectedBindingRevision: expectedBindingRevision)),
       expectedStatus: 204, replay401: false)
   }

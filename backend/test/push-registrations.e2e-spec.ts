@@ -102,7 +102,7 @@ describe('push registration HTTP boundary', () => {
       imports: [FixtureModule],
     }).compile();
     const app = module.createNestApplication({ logger: false });
-    app.setGlobalPrefix('api/v1');
+    app.setGlobalPrefix('');
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -126,7 +126,7 @@ describe('push registration HTTP boundary', () => {
 
   it('binds authenticated user, installation and auth time without exposing destination data', async () => {
     const response = await request(app.getHttpServer())
-      .put(`/api/v1/devices/${installationId.toUpperCase()}/push`)
+      .put(`/devices/${installationId.toUpperCase()}/push`)
       .set('Authorization', `Bearer ${bearer}`)
       .send({ token })
       .expect(200);
@@ -148,7 +148,7 @@ describe('push registration HTTP boundary', () => {
 
   it('requires authentication and rejects invalid, oversized and forged input', async () => {
     await request(app.getHttpServer())
-      .put(`/api/v1/devices/${installationId}/push`)
+      .put(`/devices/${installationId}/push`)
       .send({ token })
       .expect(401);
     for (const body of [
@@ -159,12 +159,12 @@ describe('push registration HTTP boundary', () => {
       { token, active: true },
     ])
       await request(app.getHttpServer())
-        .put(`/api/v1/devices/${installationId}/push`)
+        .put(`/devices/${installationId}/push`)
         .set('Authorization', `Bearer ${bearer}`)
         .send(body)
         .expect(400);
     await request(app.getHttpServer())
-      .put('/api/v1/devices/not-a-uuid/push')
+      .put('/devices/not-a-uuid/push')
       .set('Authorization', `Bearer ${bearer}`)
       .send({ token })
       .expect(400);
@@ -172,12 +172,12 @@ describe('push registration HTTP boundary', () => {
 
   it('rejects deactivation without a binding revision', async () => {
     await request(app.getHttpServer())
-      .post(`/api/v1/devices/${installationId}/push/deactivate`)
+      .post(`/devices/${installationId}/push-deactivations`)
       .set('Authorization', `Bearer ${bearer}`)
       .send({})
       .expect(400);
     await request(app.getHttpServer())
-      .post(`/api/v1/devices/${installationId}/push/deactivate`)
+      .post(`/devices/${installationId}/push-deactivations`)
       .set('Authorization', `Bearer ${bearer}`)
       .send({ active: false })
       .expect(400);
@@ -186,7 +186,7 @@ describe('push registration HTTP boundary', () => {
 
   it('passes an expected revision to the owned deactivation operation', async () => {
     await request(app.getHttpServer())
-      .post(`/api/v1/devices/${installationId.toUpperCase()}/push/deactivate`)
+      .post(`/devices/${installationId.toUpperCase()}/push-deactivations`)
       .set('Authorization', `Bearer ${bearer}`)
       .send({ expectedBindingRevision: 4 })
       .expect(204);
@@ -196,7 +196,7 @@ describe('push registration HTTP boundary', () => {
       4,
     );
     await request(app.getHttpServer())
-      .post(`/api/v1/devices/${installationId}/push/deactivate`)
+      .post(`/devices/${installationId}/push-deactivations`)
       .set('Authorization', `Bearer ${bearer}`)
       .send({ expectedBindingRevision: Number.MAX_SAFE_INTEGER })
       .expect(204);
@@ -217,7 +217,7 @@ describe('push registration HTTP boundary', () => {
     ]) {
       const calls = registrations.deactivate.mock.calls.length;
       await request(app.getHttpServer())
-        .post(`/api/v1/devices/${installationId}/push/deactivate`)
+        .post(`/devices/${installationId}/push-deactivations`)
         .set('Authorization', `Bearer ${bearer}`)
         .send(body)
         .expect(400);

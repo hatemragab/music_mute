@@ -22,9 +22,15 @@ import {
   runEnrollmentCommand,
   runInstallationPreparationCommand,
 } from "../src/enrollment/cli.js";
-import { WorkerEnrollmentClient } from "../src/enrollment/enrollment-client.js";
+import {
+  assertInstallationReport,
+  WorkerEnrollmentClient,
+  type WorkerEnrollmentError,
+  type WorkerInstallationReport,
+} from "../src/enrollment/enrollment-client.js";
 import { readInstallationArtifactsReceipt } from "../src/enrollment/installation-receipt.js";
 import { writeMacReleaseManifest } from "../src/platform/macos/release-manifest.js";
+import { fromWireCase, toWireCase } from "../src/runtime/wire-case.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -42,12 +48,95 @@ afterEach(async () => {
 });
 
 describe("worker enrollment client", () => {
+  it("requires the API origin without a route prefix", () => {
+    expect(
+      () =>
+        new WorkerEnrollmentClient({
+          baseUrl: "https://workers.example.invalid/old-prefix",
+        }),
+    ).toThrow("API origin");
+  });
+
+  it("surfaces a rate limit whose Retry-After exceeds the retry ceiling", async () => {
+    const fetchMock = vi.fn(async () =>
+      problem("WORKER_RATE_LIMITED", 429, { "Retry-After": "60" }),
+    );
+    const client = new WorkerEnrollmentClient({
+      baseUrl: "http://127.0.0.1",
+      allowInsecureLoopback: true,
+      fetch: fetchMock as unknown as typeof fetch,
+      maxAttempts: 3,
+    });
+
+    await expect(
+      client.exchange(
+        enrollmentCredential,
+        "32410a14-e85a-4a1d-bb99-61fa54b07eaa",
+      ),
+    ).rejects.toMatchObject({
+      code: "WORKER_RATE_LIMITED",
+      status: 429,
+      retryable: true,
+      retryAfterMs: 60_000,
+    } satisfies Partial<WorkerEnrollmentError>);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not decode legacy JSON errors as problem details", async () => {
+    const client = new WorkerEnrollmentClient({
+      baseUrl: "http://127.0.0.1",
+      allowInsecureLoopback: true,
+      fetch: vi.fn(async () =>
+        json({ code: "WORKER_FORBIDDEN", message: "legacy" }, 403),
+      ) as unknown as typeof fetch,
+      maxAttempts: 1,
+    });
+
+    await expect(
+      client.exchange(
+        enrollmentCredential,
+        "32410a14-e85a-4a1d-bb99-61fa54b07eaa",
+      ),
+    ).rejects.toMatchObject({ code: "HTTP_403", status: 403 });
+  });
+
+  it("retries enrollment after a short Retry-After", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        problem("WORKER_RATE_LIMITED", 429, { "Retry-After": "0" }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          installationId,
+          phase: "restricted",
+          expiresAt: "2026-09-19T20:00:00.000Z",
+          credential: installationCredential,
+          replayed: true,
+        }),
+      );
+    const client = new WorkerEnrollmentClient({
+      baseUrl: "http://127.0.0.1",
+      allowInsecureLoopback: true,
+      fetch: fetchMock as unknown as typeof fetch,
+      maxAttempts: 2,
+    });
+
+    await expect(
+      client.exchange(
+        enrollmentCredential,
+        "32410a14-e85a-4a1d-bb99-61fa54b07eaa",
+      ),
+    ).resolves.toMatchObject({ installationId });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("retries a transient exchange with the same request body", async () => {
     const bodies: string[] = [];
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       bodies.push(String(init?.body));
       if (bodies.length === 1)
-        return json({ code: "WORKER_DEPENDENCY_UNAVAILABLE" }, 503);
+        return problem("WORKER_DEPENDENCY_UNAVAILABLE", 503);
       return json({
         installationId,
         phase: "restricted",
@@ -57,7 +146,7 @@ describe("worker enrollment client", () => {
       });
     });
     const client = new WorkerEnrollmentClient({
-      baseUrl: "http://127.0.0.1/api/v1",
+      baseUrl: "http://127.0.0.1",
       allowInsecureLoopback: true,
       fetch: fetchMock as unknown as typeof fetch,
       maxAttempts: 2,
@@ -69,7 +158,9 @@ describe("worker enrollment client", () => {
     ).resolves.toMatchObject({ installationId, replayed: true });
     expect(bodies).toHaveLength(2);
     expect(bodies[0]).toBe(bodies[1]);
-    expect(JSON.parse(bodies[0]!) as unknown).toEqual({ requestId });
+    expect(JSON.parse(bodies[0]!) as unknown).toEqual({
+      request_id: requestId,
+    });
   });
 
   it("requests and strictly validates installation artifact grants", async () => {
@@ -90,7 +181,7 @@ describe("worker enrollment client", () => {
       },
     );
     const client = new WorkerEnrollmentClient({
-      baseUrl: "http://127.0.0.1/api/v1",
+      baseUrl: "http://127.0.0.1",
       allowInsecureLoopback: true,
       fetch: fetchMock as unknown as typeof fetch,
     });
@@ -100,11 +191,40 @@ describe("worker enrollment client", () => {
     ).resolves.toEqual(artifactManifest("darwin-arm64"));
     expect(requests).toEqual([
       {
-        url: `http://127.0.0.1/api/v1/worker/v1/installations/${installationId}/artifacts`,
+        url: `http://127.0.0.1/worker/installations/${installationId}/artifacts`,
         authorization: `Bearer ${installationCredential}`,
         body: { platform: "darwin-arm64" },
       },
     ]);
+  });
+
+  it("accepts future fields in enrollment responses while validating required artifact fields", async () => {
+    const manifest = artifactManifest("darwin-arm64");
+    const client = new WorkerEnrollmentClient({
+      baseUrl: "https://workers.example.invalid",
+      fetch: (async () =>
+        json({
+          ...manifest,
+          future_field: "new server field",
+          release: { ...manifest.release, future_field: true },
+          model: { ...manifest.model, future_field: { nested_value: 1 } },
+          fixture: { ...manifest.fixture, future_field: null },
+        })) as typeof fetch,
+      maxAttempts: 1,
+    });
+
+    await expect(
+      client.artifacts(installationId, installationCredential, "darwin-arm64"),
+    ).resolves.toEqual(manifest);
+  });
+
+  it("keeps installation report request fields exact", () => {
+    expect(() =>
+      assertInstallationReport({
+        ...report(),
+        futureField: true,
+      } as unknown as WorkerInstallationReport),
+    ).toThrow("unknown field");
   });
 
   it.each([
@@ -112,11 +232,6 @@ describe("worker enrollment client", () => {
       "a changed platform",
       { ...artifactManifest("darwin-arm64"), platform: "windows-amd64" },
       "platform changed",
-    ],
-    [
-      "an unknown field",
-      { ...artifactManifest("darwin-arm64"), internalKey: "private" },
-      "unknown field",
     ],
     [
       "an insecure artifact URL",
@@ -142,7 +257,7 @@ describe("worker enrollment client", () => {
     ],
   ])("rejects artifact responses with %s", async (_name, response, message) => {
     const client = new WorkerEnrollmentClient({
-      baseUrl: "https://workers.example.invalid/api/v1",
+      baseUrl: "https://workers.example.invalid",
       fetch: (async () => json(response)) as typeof fetch,
       maxAttempts: 1,
     });
@@ -159,11 +274,11 @@ describe("worker enrollment client", () => {
     const confirmRequestId = "92e0a366-6f0c-475f-84ce-e0cd5a0c919f";
     const requests: Array<{ url: string; body: unknown }> = [];
     const client = new WorkerEnrollmentClient({
-      baseUrl: "https://workers.example.invalid/api/v1",
+      baseUrl: "https://workers.example.invalid",
       fetch: (async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
         requests.push({ url, body: JSON.parse(String(init?.body)) as unknown });
-        if (url.endsWith("/grant"))
+        if (url.endsWith("/qualification-output-grants"))
           return json({
             requestId: grantRequestId,
             reservation: {
@@ -213,8 +328,8 @@ describe("worker enrollment client", () => {
       replayed: false,
     });
     expect(requests.map((request) => request.body)).toEqual([
-      { requestId: grantRequestId, bytes: 1234, sha256: outputDigest },
-      { requestId: confirmRequestId, versionId: "version-1" },
+      { request_id: grantRequestId, bytes: 1234, sha256: outputDigest },
+      { request_id: confirmRequestId, version_id: "version-1" },
     ]);
   });
 
@@ -257,7 +372,7 @@ describe("worker enrollment client", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const arguments_ = [
       "--backend-url",
-      `http://127.0.0.1:${address.port}/api/v1`,
+      `http://127.0.0.1:${address.port}`,
       "--enrollment-file",
       enrollmentFile,
       "--report",
@@ -277,11 +392,11 @@ describe("worker enrollment client", () => {
     }
 
     expect(requests.map((request) => request.path)).toEqual([
-      "/api/v1/worker/v1/installations",
-      `/api/v1/worker/v1/installations/${installationId}/report`,
-      `/api/v1/worker/v1/installations/${installationId}/activate`,
-      "/api/v1/worker/v1/installations",
-      `/api/v1/worker/v1/installations/${installationId}/activate`,
+      "/worker/installations",
+      `/worker/installations/${installationId}/reports`,
+      `/worker/installations/${installationId}/activations`,
+      "/worker/installations",
+      `/worker/installations/${installationId}/activations`,
     ]);
     expect(requests[0]?.authorization).toBe(`Bearer ${enrollmentCredential}`);
     expect(requests[3]?.authorization).toBe(`Bearer ${enrollmentCredential}`);
@@ -364,7 +479,7 @@ describe("worker enrollment client", () => {
           return;
         }
         const body = JSON.parse(await readBody(request)) as unknown;
-        if (request.url === "/api/v1/worker/v1/installations") {
+        if (request.url === "/worker/installations") {
           exchangeBodies.push(body);
           send(response, {
             installationId,
@@ -397,7 +512,7 @@ describe("worker enrollment client", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const arguments_ = [
       "--backend-url",
-      `http://127.0.0.1:${address.port}/api/v1`,
+      `http://127.0.0.1:${address.port}`,
       "--enrollment-file",
       enrollmentFile,
       "--platform",
@@ -479,7 +594,7 @@ describe("worker enrollment client", () => {
     await expect(
       runEnrollmentCommand([
         "--backend-url",
-        "https://workers.example.test/api/v1",
+        "https://workers.example.test",
         "--enrollment-file",
         enrollmentFile,
         "--report",
@@ -503,13 +618,16 @@ async function handleRequest(
   markActivated: () => void,
 ): Promise<void> {
   try {
-    const body = JSON.parse(await readBody(request)) as Record<string, unknown>;
+    const body = fromWireCase(JSON.parse(await readBody(request))) as Record<
+      string,
+      unknown
+    >;
     requests.push({
       path: request.url ?? "",
       authorization: request.headers.authorization,
       body,
     });
-    if (request.url === "/api/v1/worker/v1/installations") {
+    if (request.url === "/worker/installations") {
       send(response, {
         installationId,
         phase: isActivated() ? "activated" : "restricted",
@@ -519,7 +637,7 @@ async function handleRequest(
       });
       return;
     }
-    if (request.url?.endsWith("/report")) {
+    if (request.url?.endsWith("/reports")) {
       send(response, {
         installationId,
         phase: "reported",
@@ -529,7 +647,7 @@ async function handleRequest(
       });
       return;
     }
-    if (request.url?.endsWith("/activate")) {
+    if (request.url?.endsWith("/activations")) {
       markActivated();
       send(response, {
         machineId,
@@ -556,14 +674,37 @@ function readBody(request: IncomingMessage): Promise<string> {
 
 function send(response: ServerResponse, value: unknown): void {
   response.writeHead(200, { "Content-Type": "application/json" });
-  response.end(JSON.stringify(value));
+  response.end(JSON.stringify(toWireCase(value)));
 }
 
-function json(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), {
+function json(
+  value: unknown,
+  status = 200,
+  headers?: Record<string, string>,
+): Response {
+  return new Response(JSON.stringify(toWireCase(value)), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   });
+}
+
+function problem(
+  code: string,
+  status: number,
+  headers?: Record<string, string>,
+): Response {
+  return json(
+    {
+      type: "about:blank",
+      title: status === 429 ? "Too Many Requests" : "Service Unavailable",
+      status,
+      detail: "The request cannot be completed yet.",
+      code,
+      request_id: "request-1",
+    },
+    status,
+    { "Content-Type": "application/problem+json; charset=utf-8", ...headers },
+  );
 }
 
 function report() {

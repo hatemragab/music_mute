@@ -16,14 +16,14 @@ class AuthPushRegistrationApiTest {
             calls += method
             val payload = Json.parseToJsonElement(body!!).jsonObject
             if (method == "PUT") {
-                assertEquals("https://api.invalid/api/v1/devices/$installation/push", url)
+                assertEquals("https://api.invalid/devices/$installation/push", url)
                 assertEquals(setOf("token"), payload.keys)
                 assertEquals("private-token", payload["token"]!!.jsonPrimitive.content)
-                AuthHttpResponse(200, """{"installationId":"$installation","active":true,"bindingRevision":7}""")
+                AuthHttpResponse(200, """{"installation_id":"$installation","active":true,"binding_revision":7}""")
             } else {
-                assertEquals("https://api.invalid/api/v1/devices/$installation/push/deactivate", url)
-                assertEquals(setOf("expectedBindingRevision"), payload.keys)
-                assertEquals(7L, payload["expectedBindingRevision"]!!.jsonPrimitive.long)
+                assertEquals("https://api.invalid/devices/$installation/push-deactivations", url)
+                assertEquals(setOf("expected_binding_revision"), payload.keys)
+                assertEquals(7L, payload["expected_binding_revision"]!!.jsonPrimitive.long)
                 AuthHttpResponse(204, "")
             }
         }))
@@ -48,7 +48,7 @@ class AuthPushRegistrationApiTest {
     @Test fun invalidBindingResponseCannotAuthorizeCleanup() = runTest {
         for (revision in listOf("0", "-1", "1.5", "null", "\"7\"", "9007199254740992")) {
             val api = AuthPushRegistrationApi(client(AuthHttpTransport { _, _, _, _ ->
-                AuthHttpResponse(200, """{"installationId":"$installation","active":true,"bindingRevision":$revision}""")
+                AuthHttpResponse(200, """{"installation_id":"$installation","active":true,"binding_revision":$revision}""")
             }))
             try { api.register(installation, "token"); fail("Unsafe revision accepted") }
             catch (error: AuthFailure) { assertEquals(AuthProblem.SERVICE_UNAVAILABLE, error.problem) }

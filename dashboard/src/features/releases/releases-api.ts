@@ -165,7 +165,7 @@ export const completeReleaseUpload = (
     operationId,
     submit: () =>
       client.post<ReleaseUploadStatus>(
-        `/admin/releases/${encodeURIComponent(releaseId)}/uploads/${encodeURIComponent(uploadId)}/complete`,
+        `/admin/releases/${encodeURIComponent(releaseId)}/uploads/${encodeURIComponent(uploadId)}/completions`,
         { operationId },
       ),
     readResult: (receipt) =>
@@ -200,7 +200,7 @@ export const previewUpdatePolicy = (
       decision: string;
       targetBuild: number | null;
     }>;
-  }>("/admin/update-policy/preview", policySelection(policy));
+  }>("/admin/update-policy/previews", policySelection(policy));
 
 export const publishRelease = (
   client: ApiClient,
@@ -227,7 +227,7 @@ export const publishRelease = (
         release: ReleaseDetail;
         policyRevision: number;
         operationId: string;
-      }>(`/admin/releases/${encodeURIComponent(id)}/publish`, body),
+      }>(`/admin/releases/${encodeURIComponent(id)}/publications`, body),
     readResult: async (receipt) => {
       const [release, policy] = await Promise.all([
         getRelease(client, receipt.resourceId ?? id),
@@ -269,7 +269,7 @@ export const withdrawRelease = (
         release: ReleaseDetail;
         policyRevision: number;
         operationId: string;
-      }>(`/admin/releases/${encodeURIComponent(id)}/withdraw`, body),
+      }>(`/admin/releases/${encodeURIComponent(id)}/withdrawals`, body),
     readResult: async (receipt) => {
       const [release, policy] = await Promise.all([
         getRelease(client, receipt.resourceId ?? id),

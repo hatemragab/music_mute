@@ -144,7 +144,7 @@ describe("dashboard/backend contract alignment", () => {
 
     expect(api.post).toHaveBeenNthCalledWith(
       1,
-      "/admin/update-policy/preview",
+      "/admin/update-policy/previews",
       {
         android: policy.android,
         ios: policy.ios,
@@ -152,7 +152,7 @@ describe("dashboard/backend contract alignment", () => {
     );
     expect(api.post).toHaveBeenNthCalledWith(
       2,
-      "/admin/releases/release-1/publish",
+      "/admin/releases/release-1/publications",
       {
         expectedRevision: 7,
         expectedReleaseRevision: 3,
@@ -176,7 +176,7 @@ describe("dashboard/backend contract alignment", () => {
     });
 
     expect(api.post).toHaveBeenCalledWith(
-      "/admin/releases/release-1/withdraw",
+      "/admin/releases/release-1/withdrawals",
       {
         expectedRevision: 7,
         expectedReleaseRevision: 3,
@@ -241,7 +241,7 @@ describe("dashboard/backend contract alignment", () => {
       "/admin/account-recovery-requests/summary",
     );
     expect(api.post).toHaveBeenCalledWith(
-      "/admin/account-recovery-requests/recovery-1/approve",
+      "/admin/account-recovery-requests/recovery-1/approvals",
       command,
     );
   });

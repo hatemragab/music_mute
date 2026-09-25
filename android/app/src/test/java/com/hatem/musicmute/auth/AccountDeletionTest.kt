@@ -74,7 +74,7 @@ class AccountDeletionTest {
                 assertEquals("Bearer token-A", headers["Authorization"])
                 assertNull(body)
                 response.await()
-                AuthHttpResponse(202, """{"requestId":"receipt-A","status":"accepted","recoverUntil":"2026-09-26T00:00:00.000Z"}""")
+                AuthHttpResponse(202, """{"request_id":"receipt-A","status":"accepted","recover_until":"2026-09-26T00:00:00.000Z"}""")
             })
         val action = launch {
             requestAccountDeletionDurably("A", journal::requested, journal::accepted, journal::rejected, api::deleteAccount)

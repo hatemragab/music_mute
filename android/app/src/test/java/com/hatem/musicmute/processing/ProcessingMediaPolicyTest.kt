@@ -1,20 +1,21 @@
 package com.hatem.musicmute.processing
 
+import com.hatem.musicmute.auth.ApiWireJson
 import org.junit.Assert.*
 import org.junit.Test
 
 class ProcessingMediaPolicyTest {
     private val fixture = """{
-      "schemaVersion":2,"revision":1,"acceptNewJobs":true,"acceptLongJobs":true,
-      "limits":{"maxDurationSeconds":1200,"maxPreparedAudioBytes":50000000,"maxLocalSourceBytes":200000000,
-      "maxPreparationSeconds":120,"maxSourceDownloadBytes":50000000,"maxSourceDownloadSeconds":120,
-      "longJobThresholdSeconds":600},
-      "preparationProfile":{"id":"audio-cap-aac-lc-160-v1","preserveCompatibleAudio":true,
-      "compatibilityRevision":"unavailable","fallbackConversion":{"codec":"aac-lc","outputContentType":"audio/mp4","targetBitrate":160000}}
+      "schema_version":2,"revision":1,"accept_new_jobs":true,"accept_long_jobs":true,
+      "limits":{"max_duration_seconds":1200,"max_prepared_audio_bytes":50000000,"max_local_source_bytes":200000000,
+      "max_preparation_seconds":120,"max_source_download_bytes":50000000,"max_source_download_seconds":120,
+      "long_job_threshold_seconds":600},
+      "preparation_profile":{"id":"audio-cap-aac-lc-160-v1","preserve_compatible_audio":true,
+      "compatibility_revision":"unavailable","fallback_conversion":{"codec":"aac-lc","output_content_type":"audio/mp4","target_bitrate":160000}}
     }"""
 
     @Test fun serverPolicyParsesAsTheOnlyStandardPolicy() {
-        val policy = ProcessingMediaPolicy.parse(fixture)
+        val policy = ProcessingMediaPolicy.parse(ApiWireJson.response(fixture))
         assertEquals(2, policy.version)
         assertTrue(policy.acceptsPrepared(50_000_000, 1_200.0))
         assertTrue(policy.localPreparationReady)
@@ -24,17 +25,17 @@ class ProcessingMediaPolicyTest {
 
     @Test(expected = JobsFailure::class)
     fun unknownProfileRejected() {
-        ProcessingMediaPolicy.parse(fixture.replace("audio-cap-aac-lc-160-v1", "future-profile"))
+        ProcessingMediaPolicy.parse(ApiWireJson.response(fixture.replace("audio-cap-aac-lc-160-v1", "future-profile")))
     }
 
     @Test(expected = JobsFailure::class)
     fun unknownVersionRejected() {
-        ProcessingMediaPolicy.parse(fixture.replace("\"schemaVersion\":2", "\"schemaVersion\":1"))
+        ProcessingMediaPolicy.parse(ApiWireJson.response(fixture.replace("\"schema_version\":2", "\"schema_version\":1")))
     }
 
     @Test(expected = JobsFailure::class)
     fun responseCannotExpandSafeOfflineCeilings() {
-        ProcessingMediaPolicy.parse(fixture.replace("50000000", "50000001"))
+        ProcessingMediaPolicy.parse(ApiWireJson.response(fixture.replace("50000000", "50000001")))
     }
 
     @Test(expected = JobsFailure::class)

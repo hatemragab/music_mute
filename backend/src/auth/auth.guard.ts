@@ -56,7 +56,9 @@ export class AuthGuard implements CanActivate {
     if (workerRoute) return true;
     const req = context.switchToHttp().getRequest<AuthRequest>();
     const response = context.switchToHttp().getResponse<Response>();
-    const requestId = adminRoute ? adminRequestId(req) : undefined;
+    const requestId = adminRoute
+      ? (req.adminRequestId ?? adminRequestId(req))
+      : undefined;
     if (requestId) {
       req.adminRequestId = requestId;
       response.setHeader('Cache-Control', 'no-store');

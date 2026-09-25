@@ -14,7 +14,7 @@ export class AdminAlertsController {
     return this.alerts.list(query);
   }
 
-  @Post(':id/acknowledge')
+  @Post(':id/acknowledgements')
   @RequireAdminPermission('alerts.manage')
   acknowledge(
     @Req() req: AuthRequest,

@@ -12,6 +12,26 @@ import {
   until,
 } from './helpers/isolated-services.mjs';
 
+const convertWireKeys = (value, keyTransform) => {
+  if (Array.isArray(value))
+    return value.map((entry) => convertWireKeys(entry, keyTransform));
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      keyTransform(key),
+      convertWireKeys(entry, keyTransform),
+    ]),
+  );
+};
+const toWire = (value) =>
+  convertWireKeys(value, (key) =>
+    key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+  );
+const fromWire = (value) =>
+  convertWireKeys(value, (key) =>
+    key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()),
+  );
+
 test(
   'compiled API with isolated Firebase Auth, MongoDB and shared Redis',
   { timeout: 120000 },
@@ -70,7 +90,7 @@ test(
             throw new Error('Compiled auth API failed to start');
           try {
             return (
-              await fetch(`${origin}/api/v1/health/live`, {
+              await fetch(`${origin}/health/live`, {
                 signal: AbortSignal.timeout(500),
               })
             ).ok;
@@ -100,20 +120,25 @@ test(
         route,
         { token, method = 'GET', body, expected = 200, headers = {} } = {},
       ) => {
-        const response = await fetch(`${api.origin}/api/v1${route}`, {
-          method,
-          headers: {
-            ...headers,
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        const response = await fetch(
+          `${api.origin}${route.startsWith('/') ? '' : '/'}${route}`,
+          {
+            method,
+            headers: {
+              ...headers,
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              ...(body === undefined
+                ? {}
+                : { 'Content-Type': 'application/json' }),
+            },
             ...(body === undefined
               ? {}
-              : { 'Content-Type': 'application/json' }),
+              : { body: JSON.stringify(toWire(body)) }),
+            signal: AbortSignal.timeout(10000),
           },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-          signal: AbortSignal.timeout(10000),
-        });
+        );
         assert.equal(response.status, expected, `API ${method} ${route}`);
-        return expected === 204 ? null : response.json();
+        return expected === 204 ? null : fromWire(await response.json());
       };
       const firstReport = {
         installationId: '0e47b60a-4835-4cc3-a5b9-2d64d48f8c19',
@@ -151,12 +176,12 @@ test(
         platform: 'ios',
         osVersion: '26.0',
       };
-      const first = await call(apiOne, '/auth/session', {
+      const first = await call(apiOne, '/auth/sessions', {
         token: one.idToken,
         method: 'POST',
         body: firstReport,
       });
-      const second = await call(apiTwo, '/auth/session', {
+      const second = await call(apiTwo, '/auth/sessions', {
         token: two.idToken,
         method: 'POST',
         body: secondReport,
@@ -206,7 +231,7 @@ test(
         ...credentials,
         email: 'other@fixture.invalid',
       });
-      await call(apiTwo, '/auth/session', {
+      await call(apiTwo, '/auth/sessions', {
         token: other.idToken,
         method: 'POST',
         body: firstReport,
@@ -221,13 +246,13 @@ test(
           .items[0].buildNumber,
         1,
       );
-      await call(apiOne, '/auth/verification-email', {
+      await call(apiOne, '/auth/verification-emails', {
         token: one.idToken,
         method: 'POST',
         body: {},
         expected: 202,
       });
-      await call(apiTwo, '/auth/verification-email', {
+      await call(apiTwo, '/auth/verification-emails', {
         token: two.idToken,
         method: 'POST',
         body: {},
@@ -235,7 +260,7 @@ test(
       });
       await fixture.stopChild(apiOne.child);
       apiOne = await startApi();
-      await call(apiOne, '/auth/verification-email', {
+      await call(apiOne, '/auth/verification-emails', {
         token: one.idToken,
         method: 'POST',
         body: {},
@@ -258,7 +283,7 @@ test(
       // account must be strictly newer than the intervening owner's sign-in.
       await delay(1100);
       const refreshed = await rest('signInWithPassword', credentials);
-      const profile = await call(apiOne, '/auth/profile-sync', {
+      const profile = await call(apiOne, '/auth/profile-synchronizations', {
         token: refreshed.idToken,
         method: 'POST',
         body: {},
@@ -277,18 +302,18 @@ test(
         token: refreshed.idToken,
         headers: installationHeader,
       });
-      await call(apiTwo, '/auth/verification-email', {
+      await call(apiTwo, '/auth/verification-emails', {
         token: refreshed.idToken,
         method: 'POST',
         body: {},
         expected: 200,
       });
-      await call(apiOne, '/auth/password-reset', {
+      await call(apiOne, '/auth/password-reset-requests', {
         method: 'POST',
         body: { email: 'unknown@fixture.invalid' },
         expected: 202,
       });
-      await call(apiTwo, '/auth/password-reset', {
+      await call(apiTwo, '/auth/password-reset-requests', {
         method: 'POST',
         body: { email: 'unknown@fixture.invalid' },
         expected: 429,
@@ -297,7 +322,7 @@ test(
         sanitizeFilter: true,
         bufferCommands: false,
       }).asPromise();
-      await call(apiOne, '/auth/logout-all', {
+      await call(apiOne, '/auth/session-revocations', {
         token: refreshed.idToken,
         method: 'POST',
         body: {},
@@ -319,7 +344,7 @@ test(
         ...credentials,
         email: 'deletion@fixture.invalid',
       });
-      const deletionAccount = await call(apiOne, '/auth/session', {
+      const deletionAccount = await call(apiOne, '/auth/sessions', {
         token: deletionIdentity.idToken,
         method: 'POST',
         body: {
@@ -347,7 +372,7 @@ test(
         .findOne({ firebaseUid: deletionIdentity.localId });
       assert.equal(deletingProfile.status, 'deleting');
       assert.equal(deletingProfile._id.toString(), deletionAccount.user.id);
-      const fencedResponse = await fetch(`${apiOne.origin}/api/v1/users/me`, {
+      const fencedResponse = await fetch(`${apiOne.origin}/users/me`, {
         headers: { Authorization: `Bearer ${deletionIdentity.idToken}` },
       });
       assert.ok([401, 403].includes(fencedResponse.status));
@@ -380,10 +405,9 @@ test(
       await until(
         async () => {
           try {
-            const response = await fetch(
-              `${limitedOne.origin}/api/v1/app-policy`,
-              { signal: AbortSignal.timeout(5000) },
-            );
+            const response = await fetch(`${limitedOne.origin}/app-policy`, {
+              signal: AbortSignal.timeout(5000),
+            });
             return response.status === 429;
           } catch {
             return false;

@@ -78,6 +78,15 @@ export class AdminWorkerListQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 50;
 }
 
+export class AdminWorkerPageQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  @Matches(/^[A-Za-z0-9_-]+$/)
+  cursor?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 50;
+}
+
 export class RequestWorkerDoctorDto {
   @IsUUID('4') operationId!: string;
   @IsInt() @Min(0) @Max(Number.MAX_SAFE_INTEGER - 1) expectedRevision!: number;

@@ -76,7 +76,7 @@ Set these variables on the CapRover dashboard app before it starts:
 - `NODE_ENV=production`
 - `HOST=0.0.0.0`
 - `PORT=80`
-- `VITE_API_ORIGIN=https://api.example.com` — HTTPS origin only, without `/api/v1`, credentials, query or fragment.
+- `VITE_API_ORIGIN=https://api.example.com` — HTTPS origin only, without a path, credentials, query or fragment.
 - `VITE_APP_BASE_PATH=/` — use a root-relative subpath such as `/operations` only when the reverse proxy serves the app there.
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`
