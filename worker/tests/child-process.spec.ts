@@ -224,7 +224,7 @@ describe("worker child lifecycle", () => {
     await child.start();
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     await expect(child.request("ping", {})).rejects.toThrow(
-      /Worker child (pipe|is not running)/u,
+      /Worker child (pipe|is not running|exited)/u,
     );
   });
 });

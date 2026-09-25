@@ -26,7 +26,7 @@ output.write(encode_frame({
 output.close()
 """
         completed = subprocess.run(
-            [sys.executable, "-c", script],
+            [sys.executable, "-B", "-c", script],
             check=True,
             capture_output=True,
         )

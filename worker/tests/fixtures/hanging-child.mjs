@@ -18,6 +18,7 @@ const body = Buffer.from(
     sentAt: new Date().toISOString(),
     payload: {
       processCapacity: 1,
+      enginePid: process.pid,
       path: process.env.PATH,
       descendantPid: descendant?.pid,
     },
@@ -31,3 +32,10 @@ process.stderr.write(
   "token=fixture-secret /Users/hatem/fixture https://storage.invalid/object?X-Amz-Signature=fixture\n",
 );
 process.stdin.resume();
+
+if (process.argv.includes("--busy"))
+  setImmediate(() => {
+    while (true) {
+      /* Simulated stuck native inference. */
+    }
+  });

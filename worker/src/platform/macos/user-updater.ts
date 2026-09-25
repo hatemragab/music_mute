@@ -6,10 +6,12 @@ import {
   mkdir,
   open,
   readFile,
+  readlink,
   rename,
+  rm,
   statfs,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { downloadVerifiedArtifact } from "../../enrollment/artifact-download.js";
 import { prepareInstallationRelease } from "../../enrollment/release-archive.js";
 import { WorkerControlPlaneClient } from "../../runtime/control-plane-client.js";
@@ -36,7 +38,53 @@ import {
   type MacUpdateMetadata,
 } from "./update-metadata.js";
 import { waitForLocalDrain } from "./local-drain.js";
+import { verifyMacRelease } from "./release-manifest.js";
 import { inspectMacUserHealth } from "./user-health.js";
+import { MacCommandBusyError, withMacUserCommandLock } from "./command-lock.js";
+
+export class MacUpdateStartupRecovered extends Error {
+  constructor(readonly restart: boolean) {
+    super("Interrupted update restored; exit before starting processing");
+  }
+}
+
+/** Runs before creating any engine or backend session in the managed service. */
+export async function recoverMacUpdateAtStartup(
+  layout: MacUserLayout,
+  service: Pick<
+    MacLaunchAgentController,
+    "status"
+  > = new MacLaunchAgentController(process.getuid?.() ?? 0),
+): Promise<void> {
+  const before = await loadUpdateState(layout.updateStatePath);
+  if (before.status !== "staged" && before.status !== "activating") return;
+  const currentService = await service.status();
+  if (!currentService.loaded || currentService.pid !== process.pid)
+    throw new TypeError(
+      "Update startup recovery requires the managed service process",
+    );
+  let restart: boolean | undefined;
+  try {
+    await withMacUserCommandLock(layout.commandLockPath, async () => {
+      const state = await loadUpdateState(layout.updateStatePath);
+      if (state.status !== "staged" && state.status !== "activating") return;
+      restart = state.recovery?.serviceWasLoaded;
+      await recoverInterruptedMacUpdate(
+        layout,
+        new MacLaunchAgentController(process.getuid?.() ?? 0),
+        "Interrupted update recovered at service startup",
+        true,
+      );
+    });
+  } catch (error) {
+    // The updating CLI deliberately boots the candidate while holding this lock
+    // and needs it running to complete health acceptance. Do not roll it back.
+    if (error instanceof MacCommandBusyError && error.operation === "update")
+      return;
+    throw error;
+  }
+  if (restart !== undefined) throw new MacUpdateStartupRecovered(restart);
+}
 
 export const BUILT_IN_MAC_UPDATE_TRUST: Readonly<Record<string, string>> =
   Object.freeze({
@@ -55,6 +103,11 @@ interface UpdateState {
   quarantinedVersions: string[];
   updatedAt: string;
   failure?: string;
+  recovery?: {
+    previousVersion: string;
+    intent: "active" | "paused" | "draining";
+    serviceWasLoaded: boolean;
+  };
 }
 
 export interface MacUserUpdateCheck {
@@ -213,6 +266,10 @@ export async function updateMacUserWorker(options: {
   releaseVersion: string;
   sequence: number;
 }> {
+  await recoverInterruptedMacUpdate(
+    options.layout,
+    options.launchAgent ?? new MacLaunchAgentController(options.uid),
+  );
   const checked = await checkMacUserUpdate(options.layout, {
     ...(options.candidate === undefined
       ? {}
@@ -271,26 +328,38 @@ export async function updateMacUserWorker(options: {
   const previousLifecycle = await loadLocalLifecycle(
     options.layout.lifecyclePath,
   );
-  await setLocalLifecycleIntent(options.layout.lifecyclePath, "draining");
   const serviceWasLoaded = (await launchAgent.status()).loaded;
-  if (serviceWasLoaded) {
-    await waitForLocalDrain({
-      runtimeStatusPath: options.layout.runtimeStatusPath,
-      force: options.force === true,
-    });
-    await launchAgent.bootout();
-  }
-  await writeUpdateState(options.layout.updateStatePath, {
+  const previousTarget = await readlink(options.layout.currentLink);
+  if (previousTarget !== `releases/${checked.currentVersion}`)
+    throw new Error("Installed release and active pointer disagree");
+  await verifyMacRelease(
+    join(options.layout.releasesRoot, checked.currentVersion),
+  );
+  const pending: UpdateState = {
     ...checked.state,
     status: "staged",
     candidateVersion: staged.releaseVersion,
+    recovery: {
+      previousVersion: checked.currentVersion,
+      intent: previousLifecycle.intent,
+      serviceWasLoaded,
+    },
     updatedAt: new Date().toISOString(),
-  });
-  const fixturePath = join(options.layout.stateRoot, "qualification.wav");
-  const fixtureSha256 = await sha256(fixturePath);
-  const qualify = options.qualify ?? qualifyMacUserRelease;
-  let previousRelease: string | null = null;
+  };
+  // Commit recovery intent before the first lifecycle/service mutation.
+  await writeUpdateState(options.layout.updateStatePath, pending);
   try {
+    await setLocalLifecycleIntent(options.layout.lifecyclePath, "draining");
+    if (serviceWasLoaded) {
+      await waitForLocalDrain({
+        runtimeStatusPath: options.layout.runtimeStatusPath,
+        force: options.force === true,
+      });
+      await launchAgent.bootout();
+    }
+    const fixturePath = join(options.layout.stateRoot, "qualification.wav");
+    const fixtureSha256 = await sha256(fixturePath);
+    const qualify = options.qualify ?? qualifyMacUserRelease;
     await qualify(
       options.layout,
       staged.releaseRoot,
@@ -299,31 +368,30 @@ export async function updateMacUserWorker(options: {
       launchAgent,
     );
     await writeUpdateState(options.layout.updateStatePath, {
-      ...checked.state,
+      ...pending,
       status: "activating",
       candidateVersion: staged.releaseVersion,
       updatedAt: new Date().toISOString(),
     });
-    previousRelease = await activateMacUserRelease(
-      options.layout,
-      staged.releaseVersion,
-    );
+    await activateMacUserRelease(options.layout, staged.releaseVersion);
     await writeLaunchAgentPlist(options.layout);
     await setLocalLifecycleIntent(
       options.layout.lifecyclePath,
       previousLifecycle.intent,
     );
-    await launchAgent.bootstrap(options.layout.plistPath);
-    const service = await (
-      options.confirmStarted ?? (() => waitForLoadedService(launchAgent))
-    )();
-    if (!service) throw new Error("Updated LaunchAgent failed to start");
-    const healthy = await (
-      options.health ??
-      (async () =>
-        (await inspectMacUserHealth(options.layout, launchAgent)).healthy)
-    )();
-    if (!healthy) throw new Error("Updated worker failed runtime doctor");
+    if (serviceWasLoaded) {
+      await launchAgent.bootstrap(options.layout.plistPath);
+      const service = await (
+        options.confirmStarted ?? (() => waitForLoadedService(launchAgent))
+      )();
+      if (!service) throw new Error("Updated LaunchAgent failed to start");
+      const healthy = await (
+        options.health ??
+        (async () =>
+          (await inspectMacUserHealth(options.layout, launchAgent)).healthy)
+      )();
+      if (!healthy) throw new Error("Updated worker failed runtime doctor");
+    }
     await writePrivateRecord(options.layout.installationStatePath, {
       ...checked.installationState,
       releaseVersion: staged.releaseVersion,
@@ -346,38 +414,73 @@ export async function updateMacUserWorker(options: {
       sequence: checked.sequence,
     };
   } catch (error) {
-    if ((await launchAgent.status()).loaded)
-      await launchAgent.bootout().catch(() => undefined);
-    if (previousRelease !== null)
-      await rollbackMacUserRelease(options.layout, previousRelease);
-    await writeLaunchAgentPlist(options.layout);
-    await setLocalLifecycleIntent(
-      options.layout.lifecyclePath,
-      previousLifecycle.intent,
+    await recoverInterruptedMacUpdate(
+      options.layout,
+      launchAgent,
+      error instanceof Error ? error.message.slice(0, 240) : "unknown",
     );
-    if (serviceWasLoaded)
-      await launchAgent
-        .bootstrap(options.layout.plistPath)
-        .catch(() => undefined);
-    await writePrivateRecord(
-      options.layout.installationStatePath,
-      checked.installationState,
-    ).catch(() => undefined);
-    await writeUpdateState(options.layout.updateStatePath, {
-      ...checked.state,
-      status: "rolled-back",
-      candidateVersion: staged.releaseVersion,
-      quarantinedVersions: [
-        ...new Set([
-          ...checked.state.quarantinedVersions,
-          staged.releaseVersion,
-        ]),
-      ],
-      updatedAt: new Date().toISOString(),
-      failure: error instanceof Error ? error.message.slice(0, 240) : "unknown",
-    });
     throw error;
   }
+}
+
+/** Caller holds the CLI command lock. Recovery is repeatable after interruption. */
+export async function recoverInterruptedMacUpdate(
+  layout: MacUserLayout,
+  launchAgent: Pick<
+    MacLaunchAgentController,
+    "bootstrap" | "bootout" | "status"
+  >,
+  failure = "Interrupted update recovered",
+  serviceStartup = false,
+): Promise<boolean> {
+  const state = await loadUpdateState(layout.updateStatePath);
+  if (state.status !== "staged" && state.status !== "activating") return false;
+  const recovery = state.recovery;
+  if (!recovery || !state.candidateVersion)
+    throw new Error("Interrupted legacy update requires operator recovery");
+  // Never switch to a damaged or missing rollback bundle.
+  await verifyMacRelease(join(layout.releasesRoot, recovery.previousVersion));
+  const activeTarget = await readlink(layout.currentLink);
+  if (
+    ![
+      `releases/${recovery.previousVersion}`,
+      `releases/${state.candidateVersion}`,
+    ].includes(activeTarget)
+  )
+    throw new Error("Update recovery found an unrelated active release");
+  await setLocalLifecycleIntent(layout.lifecyclePath, "draining");
+  if (!serviceStartup && (await launchAgent.status()).loaded) {
+    await waitForLocalDrain({
+      runtimeStatusPath: layout.runtimeStatusPath,
+      force: false,
+    });
+    await launchAgent.bootout();
+  }
+  await rollbackMacUserRelease(layout, `releases/${recovery.previousVersion}`);
+  await writeLaunchAgentPlist(layout);
+  const installation = await readPrivateRecord(layout.installationStatePath);
+  await writePrivateRecord(layout.installationStatePath, {
+    ...installation,
+    releaseVersion: recovery.previousVersion,
+    updatedAt: new Date().toISOString(),
+  });
+  await setLocalLifecycleIntent(layout.lifecyclePath, recovery.intent);
+  if (!serviceStartup && recovery.serviceWasLoaded) {
+    await launchAgent.bootstrap(layout.plistPath);
+    if (!(await waitForLoadedService(launchAgent)))
+      throw new Error("Recovered LaunchAgent failed to start");
+  }
+  const { recovery: _recovery, ...restored } = state;
+  await writeUpdateState(layout.updateStatePath, {
+    ...restored,
+    status: "rolled-back",
+    quarantinedVersions: [
+      ...new Set([...state.quarantinedVersions, state.candidateVersion]),
+    ],
+    updatedAt: new Date().toISOString(),
+    failure,
+  });
+  return true;
 }
 
 async function waitForLoadedService(
@@ -437,6 +540,7 @@ async function loadUpdateState(path: string): Promise<UpdateState> {
       "quarantinedVersions",
       "updatedAt",
       "failure",
+      "recovery",
     ]);
     if (
       Object.keys(record).some((key) => !allowed.has(key)) ||
@@ -471,6 +575,23 @@ async function loadUpdateState(path: string): Promise<UpdateState> {
         (typeof record.failure !== "string" || record.failure.length > 240))
     )
       throw new TypeError("Update state is invalid");
+    if (record.recovery !== undefined) {
+      const recovery = record.recovery as Record<string, unknown>;
+      if (
+        !recovery ||
+        typeof recovery !== "object" ||
+        Array.isArray(recovery) ||
+        Object.keys(recovery).some(
+          (key) =>
+            !["previousVersion", "intent", "serviceWasLoaded"].includes(key),
+        ) ||
+        typeof recovery.previousVersion !== "string" ||
+        !/^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u.test(recovery.previousVersion) ||
+        !["active", "paused", "draining"].includes(String(recovery.intent)) ||
+        typeof recovery.serviceWasLoaded !== "boolean"
+      )
+        throw new TypeError("Update recovery state is invalid");
+    }
     return record as unknown as UpdateState;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -498,13 +619,23 @@ async function writePrivateRecord(
   const temporary = `${path}.${randomUUID()}.tmp`;
   const handle = await open(temporary, "wx", 0o600);
   try {
-    await handle.writeFile(`${JSON.stringify(state, null, 2)}\n`, "utf8");
-    await handle.sync();
+    try {
+      await handle.writeFile(`${JSON.stringify(state, null, 2)}\n`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, path);
+    await chmod(path, 0o600);
+    const directory = await open(dirname(path), "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
   } finally {
-    await handle.close();
+    await rm(temporary, { force: true });
   }
-  await rename(temporary, path);
-  await chmod(path, 0o600);
 }
 
 async function readPrivateRecord(

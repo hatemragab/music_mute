@@ -440,6 +440,69 @@ export class WorkerControlPlaneClient {
     );
   }
 
+  async diagnosticLogCursor(
+    sessionId: string,
+    incarnation: string,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    if (!UUID_V4.test(sessionId) || !UUID_V4.test(incarnation))
+      throw new TypeError("Diagnostic session is invalid");
+    const query = new URLSearchParams({ session_id: sessionId, incarnation });
+    const response = await this.request(
+      `worker/logs/cursor?${query}`,
+      "GET",
+      null,
+      signal,
+    );
+    const cursor = (response as { acknowledgedSequence?: unknown } | null)
+      ?.acknowledgedSequence;
+    if (
+      !Number.isSafeInteger(cursor) ||
+      (cursor as number) < 0 ||
+      (cursor as number) >= Number.MAX_SAFE_INTEGER
+    )
+      throw new TypeError("Diagnostic cursor is invalid");
+    return cursor as number;
+  }
+
+  async appendDiagnosticLogs(
+    batch: {
+      sessionId: string;
+      incarnation: string;
+      sequenceStart: number;
+      sequenceEnd: number;
+      lines: string[];
+    },
+    signal?: AbortSignal,
+  ): Promise<{ acknowledgedSequence: number; replayed: boolean }> {
+    if (
+      !UUID_V4.test(batch.sessionId) ||
+      !UUID_V4.test(batch.incarnation) ||
+      !Number.isSafeInteger(batch.sequenceStart) ||
+      batch.sequenceStart < 0 ||
+      !Number.isSafeInteger(batch.sequenceEnd) ||
+      batch.sequenceEnd >= Number.MAX_SAFE_INTEGER ||
+      batch.sequenceEnd - batch.sequenceStart + 1 !== batch.lines.length ||
+      batch.lines.length < 1 ||
+      batch.lines.length > 100 ||
+      batch.lines.some((line) => typeof line !== "string" || line.length > 1000)
+    )
+      throw new TypeError("Diagnostic batch is invalid");
+    const response = await this.request("worker/logs", "POST", batch, signal);
+    if (!response || typeof response !== "object" || Array.isArray(response))
+      throw new TypeError("Diagnostic acknowledgement is invalid");
+    const result = response as Record<string, unknown>;
+    if (
+      result.acknowledgedSequence !== batch.sequenceEnd ||
+      typeof result.replayed !== "boolean"
+    )
+      throw new TypeError("Diagnostic acknowledgement does not match batch");
+    return {
+      acknowledgedSequence: batch.sequenceEnd,
+      replayed: result.replayed,
+    };
+  }
+
   private async request(
     path: string,
     method: "GET" | "POST",
@@ -624,14 +687,14 @@ async function abortableDelay(
 ): Promise<void> {
   if (signal?.aborted) throw signal.reason;
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(resolve, milliseconds);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timeout);
-        reject(signal.reason);
-      },
-      { once: true },
-    );
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(signal?.reason);
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }

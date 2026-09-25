@@ -1,3 +1,4 @@
+import { DiagnosticForwarder } from "./diagnostic-forwarder.js";
 import { randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
@@ -39,7 +40,11 @@ import {
   RuntimeResourceGate,
   RuntimeResourceLimitError,
 } from "./resource-limits.js";
-import { TransferError, type WorkerTransferClient } from "./transfers.js";
+import {
+  TransferError,
+  TransferOwnershipError,
+  type WorkerTransferClient,
+} from "./transfers.js";
 import { WorkspaceManager, type AttemptWorkspace } from "./workspace.js";
 import {
   AttemptProgressReporter,
@@ -98,6 +103,13 @@ export type AttemptStage =
 
 type RuntimeEventInput =
   | { kind: "started" }
+  | { kind: "diagnostic-delivery-deferred" }
+  | { kind: "reconciliation-failed"; code: string; detail: string }
+  | ({
+      kind: "failure-report-deferred" | "workspace-cleanup-failed";
+      code: string;
+    } & AttemptEventIdentity)
+  | { kind: "resource-recovered"; workerId: string }
   | {
       kind: "model-ready";
       workerId: string;
@@ -196,6 +208,8 @@ interface RuntimeControlPlane {
   progress?: WorkerControlPlaneClient["progress"];
   complete: WorkerControlPlaneClient["complete"];
   fail: WorkerControlPlaneClient["fail"];
+  appendDiagnosticLogs?: WorkerControlPlaneClient["appendDiagnosticLogs"];
+  diagnosticLogCursor?: WorkerControlPlaneClient["diagnosticLogCursor"];
   completeCommand: WorkerControlPlaneClient["completeCommand"];
 }
 
@@ -226,6 +240,7 @@ interface ProcessingChild {
   ): Promise<ChildResponse>;
   terminateActive(): void;
   isProcessing(): boolean;
+  isAlive?(): boolean;
   diagnosticTail?(): string;
 }
 
@@ -236,14 +251,17 @@ function eventSeverity(
     kind === "attempt-failed" ||
     kind === "child-failed" ||
     kind === "transfer-failed" ||
-    kind === "child-unavailable"
+    kind === "child-unavailable" ||
+    kind === "workspace-cleanup-failed"
   )
     return "error";
   if (
     kind === "resource-blocked" ||
     kind === "attempt-stopped" ||
     kind === "progress-sync-failed" ||
-    kind === "command-report-deferred"
+    kind === "command-report-deferred" ||
+    kind === "reconciliation-failed" ||
+    kind === "failure-report-deferred"
   )
     return "warning";
   return "info";
@@ -288,7 +306,16 @@ export class WorkerRuntime {
   private readonly lastProgressSnapshotAt = new Map<string, number>();
   private readonly pendingClaims = new Map<string, string>();
   private readonly unavailable = new Set<string>();
+  private readonly cleanupBlocked = new Set<string>();
+  private readonly resourceRecovery = new Map<
+    string,
+    { inputBytes: number; retryAt: number }
+  >();
+  private diagnosticForwarder: DiagnosticForwarder | undefined;
+  private readonly idleChildExits = new Map<string, number>();
   private readonly childRecoveryAfter = new Map<string, number>();
+  private readonly childRecoveryFailures = new Map<string, number>();
+  private readonly childRecoveryExhausted = new Set<string>();
   private readonly pendingCommandResults = new Map<
     string,
     { requestId: string; result: WorkerCommandResult }
@@ -308,10 +335,12 @@ export class WorkerRuntime {
   private lastSuccessfulJob?: RuntimeJobSummary;
   private lastFailedJob?: RuntimeJobSummary & { code: string };
   private started = false;
+  private stopPromise: Promise<void> | undefined;
   private wakeResolver: (() => void) | null = null;
   private wakeGeneration = 0;
   private eventSequence = 0;
   private reconcileNotBefore = 0;
+  private diagnosticRecordingFailed = false;
 
   constructor(
     private readonly options: WorkerRuntimeOptions,
@@ -324,6 +353,23 @@ export class WorkerRuntime {
     this.diagnostics =
       options.diagnostics ??
       new DiagnosticSpool(join(dirname(options.workRoot), "logs"));
+    if (
+      this.diagnostics instanceof DiagnosticSpool &&
+      control.appendDiagnosticLogs
+    ) {
+      this.diagnosticForwarder = new DiagnosticForwarder(
+        join(dirname(options.workRoot), "logs", "delivery.json"),
+        this.diagnostics,
+        {
+          appendDiagnosticLogs: control.appendDiagnosticLogs.bind(control),
+          ...(control.diagnosticLogCursor
+            ? { diagnosticLogCursor: control.diagnosticLogCursor.bind(control) }
+            : {}),
+        },
+        { sessionId: this.sessionId, incarnation: this.incarnation },
+        () => this.emit({ kind: "diagnostic-delivery-deferred" }),
+      );
+    }
     this.resources =
       options.resources ?? new RuntimeResourceGate(options.workRoot);
     this.hintClient = options.hintClientFactory?.(() =>
@@ -377,6 +423,7 @@ export class WorkerRuntime {
       this.hintClient?.start(this.stopping.signal);
       await this.publishLocalStatus();
       this.emit({ kind: "started" });
+      this.diagnosticForwarder?.start();
     } catch (error) {
       await this.hintClient?.stop();
       await this.supervisor.stop();
@@ -385,7 +432,10 @@ export class WorkerRuntime {
   }
 
   async run(signal?: AbortSignal): Promise<void> {
-    const onAbort = () => void this.stop();
+    if (signal?.aborted) return;
+    const onAbort = () => {
+      void this.stop().catch(() => undefined);
+    };
     signal?.addEventListener("abort", onAbort, { once: true });
     let lifecycleWatcher: FSWatcher | undefined;
     try {
@@ -408,9 +458,31 @@ export class WorkerRuntime {
           // The bounded idle poll remains the fallback when watching is unavailable.
         }
       }
+      let consecutiveFailures = 0;
       while (!this.stopping.signal.aborted) {
         const wakeGeneration = this.wakeGeneration;
-        await this.reconcileOnce();
+        try {
+          await this.reconcileOnce();
+          consecutiveFailures = 0;
+        } catch (error) {
+          if (this.stopping.signal.aborted) break;
+          // Preserve pending claim IDs across bounded transport recovery. Auth,
+          // ownership and protocol failures must still fail closed.
+          if (!(error instanceof ControlPlaneError) || !error.retryable)
+            throw error;
+          this.emit({
+            kind: "reconciliation-failed",
+            code: error.code,
+            detail:
+              "Control-plane unavailable; claims suspended during recovery",
+          });
+          if (++consecutiveFailures >= 3) throw error;
+          await abortableDelay(
+            1_000 * 2 ** (consecutiveFailures - 1),
+            this.stopping.signal,
+          ).catch(() => undefined);
+          continue;
+        }
         if (this.stopping.signal.aborted) break;
         const deferredMs = this.reconcileNotBefore - Date.now();
         if (deferredMs > 0)
@@ -444,9 +516,15 @@ export class WorkerRuntime {
     }
     await this.publishLocalStatus();
     await this.processRemoteCommands(config);
+    this.detectIdleChildExit();
     await this.recoverChildren();
+    await this.recoverResources();
     await this.publishLocalStatus();
-    if (!(await this.diagnostics.canAdmitJobs())) return 0;
+    if (
+      this.diagnosticRecordingFailed ||
+      !(await this.diagnostics.canAdmitJobs())
+    )
+      return 0;
     const idle = this.options.slots.filter(
       (slot) =>
         !this.busy.has(slot.workerId) && !this.unavailable.has(slot.workerId),
@@ -503,9 +581,13 @@ export class WorkerRuntime {
           this.activeAttemptIds.delete(slot.workerId);
           this.activeJobs.delete(slot.workerId);
           this.lastProgressSnapshotAt.delete(slot.workerId);
-          await this.publishLocalStatus();
-          this.wake();
-        });
+          try {
+            await this.publishLocalStatus();
+          } finally {
+            this.wake();
+          }
+        })
+        .catch(() => undefined);
       this.busy.set(slot.workerId, attempt);
       await this.publishLocalStatus();
     }
@@ -513,7 +595,10 @@ export class WorkerRuntime {
   }
 
   private deferReconciliation(error: unknown): boolean {
-    if (!(error instanceof ControlPlaneError) || !error.retryable) return false;
+    // A rate limit supplies a safe retry window; other transient failures must
+    // reach the run loop's bounded recovery and diagnostic path.
+    if (!(error instanceof ControlPlaneError) || error.status !== 429)
+      return false;
     const delayMs = Math.min(
       60_000,
       Math.max(200, error.retryAfterMs ?? 1_000),
@@ -549,21 +634,31 @@ export class WorkerRuntime {
     await Promise.allSettled(this.busy.values());
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    this.stopPromise ??= this.stopOnce();
+    return this.stopPromise;
+  }
+
+  private async stopOnce(): Promise<void> {
+    this.diagnosticForwarder?.stop();
     if (!this.stopping.signal.aborted)
       this.stopping.abort(new OwnershipLostError("runtime-stopping"));
     this.wake();
-    for (const slot of this.options.slots) {
-      if (this.busy.has(slot.workerId))
-        this.supervisor.child(slot.workerId).terminateActive();
-    }
+    // Active attempts observe the abort and terminate their processing child.
+    // Await recovery/cleanup before stopping all remaining children once.
     await this.waitForIdle();
-    await this.hintClient?.stop();
-    await this.supervisor.stop();
-    this.childState = "stopped";
-    await this.publishLocalStatus();
-    await this.diagnostics.flush();
-    this.started = false;
+    try {
+      await this.hintClient?.stop();
+    } finally {
+      await this.supervisor.stop();
+      this.childState = "stopped";
+      this.started = false;
+      try {
+        await this.publishLocalStatus();
+      } finally {
+        await this.diagnostics.flush();
+      }
+    }
   }
 
   private async publishLocalStatus(): Promise<void> {
@@ -576,7 +671,8 @@ export class WorkerRuntime {
         workerId,
         ...attempt,
       })),
-      childState: this.childState,
+      childState:
+        this.unavailable.size > 0 ? ("unavailable" as const) : this.childState,
       sessionId: this.sessionId,
       incarnation: this.incarnation,
       processId: process.pid,
@@ -592,7 +688,9 @@ export class WorkerRuntime {
         ? {}
         : {
             diagnostics: {
-              blockedReason: coverage.blockedReason,
+              blockedReason: this.diagnosticRecordingFailed
+                ? "write-failed"
+                : coverage.blockedReason,
               earliestAvailableAt: coverage.earliestAvailableAt,
               incompleteHistory: coverage.incompleteHistory,
               retainedBytes: coverage.retainedBytes,
@@ -826,6 +924,10 @@ export class WorkerRuntime {
         );
       } catch (error) {
         if (error instanceof ChildCommandError) {
+          if (error.code === "GPU_OOM") {
+            childTerminated = true;
+            child.terminateActive();
+          }
           this.emit({
             kind: "child-failed",
             workerId: slot.workerId,
@@ -895,6 +997,7 @@ export class WorkerRuntime {
         throw new PublicationUncertainError();
       }
       terminal = true;
+      this.idleChildExits.delete(slot.workerId);
       this.lastSuccessfulJob = {
         jobId: claim.jobId,
         attemptId: claim.attemptId,
@@ -923,8 +1026,23 @@ export class WorkerRuntime {
         outputBitrateKbps: result.outputBitrateKbps,
       });
     } catch (error) {
+      if (error instanceof TransferOwnershipError) {
+        this.unavailable.add(slot.workerId);
+        this.cleanupBlocked.add(slot.workerId);
+        this.emit({
+          kind: "workspace-cleanup-failed",
+          workerId: slot.workerId,
+          jobId: claim.jobId,
+          attemptId: claim.attemptId,
+          code: "writer-not-closed",
+        });
+      }
       if (error instanceof RuntimeResourceLimitError) {
         this.unavailable.add(slot.workerId);
+        this.resourceRecovery.set(slot.workerId, {
+          inputBytes: claim.input.bytes,
+          retryAt: Date.now() + 30_000,
+        });
         this.emit({
           kind: "resource-blocked",
           workerId: slot.workerId,
@@ -986,7 +1104,17 @@ export class WorkerRuntime {
           );
           terminal = true;
         } catch (failureError) {
-          if (!isOwnershipRejection(failureError)) throw failureError;
+          this.emit({
+            kind: "failure-report-deferred",
+            workerId: slot.workerId,
+            jobId: claim.jobId,
+            attemptId: claim.attemptId,
+            code: isOwnershipRejection(failureError)
+              ? "ownership-rejected"
+              : "failure-ack-uncertain",
+          });
+          // Stop renewing below; the backend remains the recovery authority.
+          // Reporting failure must not suppress the original attempt diagnostic.
         }
         this.emit({
           kind: "attempt-failed",
@@ -1004,7 +1132,23 @@ export class WorkerRuntime {
       controller.abort(new OwnershipLostError("attempt-finished"));
       this.stopping.signal.removeEventListener("abort", stopListener);
       await Promise.allSettled([watchdog, renewal]);
-      if (workspace) await this.workspace.cleanup(workspace);
+      if (workspace && !this.cleanupBlocked.has(slot.workerId)) {
+        try {
+          await this.workspace.cleanup(workspace);
+        } catch {
+          // Preserve the unsafe/undeletable workspace for operator recovery;
+          // do not admit more work, but still recover a terminated child.
+          this.unavailable.add(slot.workerId);
+          this.cleanupBlocked.add(slot.workerId);
+          this.emit({
+            kind: "workspace-cleanup-failed",
+            workerId: slot.workerId,
+            jobId: claim.jobId,
+            attemptId: claim.attemptId,
+            code: "cleanup-required",
+          });
+        }
+      }
       if (childTerminated && !this.stopping.signal.aborted) {
         try {
           await this.supervisor.restart(slot.workerId, (_workerId, stage) => {
@@ -1204,6 +1348,58 @@ export class WorkerRuntime {
     return result;
   }
 
+  private async recoverResources(): Promise<void> {
+    for (const [workerId, blocked] of this.resourceRecovery) {
+      if (blocked.retryAt > Date.now() || this.busy.has(workerId)) continue;
+      try {
+        await this.resources.assertAvailable(blocked.inputBytes);
+        this.resourceRecovery.delete(workerId);
+        if (
+          !this.childRecoveryAfter.has(workerId) &&
+          !this.childRecoveryExhausted.has(workerId) &&
+          !this.cleanupBlocked.has(workerId)
+        )
+          this.unavailable.delete(workerId);
+        this.emit({ kind: "resource-recovered", workerId });
+      } catch {
+        blocked.retryAt = Date.now() + 30_000;
+      }
+    }
+  }
+
+  private detectIdleChildExit(): void {
+    for (const { workerId } of this.options.slots) {
+      if (
+        this.busy.has(workerId) ||
+        this.childRecoveryAfter.has(workerId) ||
+        this.childRecoveryExhausted.has(workerId)
+      )
+        continue;
+      let alive: boolean | undefined;
+      try {
+        alive = this.supervisor.child(workerId).isAlive?.();
+      } catch {
+        alive = false;
+      }
+      if (alive !== false) continue;
+      this.unavailable.add(workerId);
+      this.childState = "unavailable";
+      const exits = (this.idleChildExits.get(workerId) ?? 0) + 1;
+      this.idleChildExits.set(workerId, exits);
+      if (exits >= 3) this.childRecoveryExhausted.add(workerId);
+      else this.childRecoveryAfter.set(workerId, Date.now());
+      this.emit({
+        kind: "child-unavailable",
+        workerId,
+        code: exits >= 3 ? "child-recovery-exhausted" : "child-exited-idle",
+        detail:
+          exits >= 3
+            ? "Repeated idle child exits require intervention"
+            : "Idle child exited; restarting before admission",
+      });
+    }
+  }
+
   private async recoverChildren(): Promise<void> {
     const now = Date.now();
     for (const [workerId, retryAt] of this.childRecoveryAfter) {
@@ -1213,20 +1409,34 @@ export class WorkerRuntime {
           this.childState = stage;
           void this.publishLocalStatus().catch(() => undefined);
         });
-        this.unavailable.delete(workerId);
+        if (
+          !this.cleanupBlocked.has(workerId) &&
+          !this.resourceRecovery.has(workerId)
+        )
+          this.unavailable.delete(workerId);
         this.childState = "ready";
         this.childRecoveryAfter.delete(workerId);
+        this.childRecoveryFailures.delete(workerId);
         const slot = this.options.slots.find(
           (candidate) => candidate.workerId === workerId,
         );
         if (slot) this.emitModelReady(slot, "slot-recovery");
         this.emit({ kind: "child-recovered", workerId });
       } catch (error) {
-        this.childRecoveryAfter.set(workerId, now + 30_000);
+        const failures = (this.childRecoveryFailures.get(workerId) ?? 0) + 1;
+        this.childRecoveryFailures.set(workerId, failures);
+        if (failures >= 3) {
+          this.childRecoveryAfter.delete(workerId);
+          this.childRecoveryExhausted.add(workerId);
+        } else
+          this.childRecoveryAfter.set(workerId, Date.now() + 30_000 * failures);
         this.emit({
           kind: "child-unavailable",
           workerId,
-          code: "child-recovery-failed",
+          code:
+            failures >= 3
+              ? "child-recovery-exhausted"
+              : "child-recovery-failed",
           detail: sanitizeDiagnostic(
             error instanceof Error ? error.message : "Child recovery failed",
           ).slice(-2_000),
@@ -1352,8 +1562,17 @@ export class WorkerRuntime {
       severity: eventSeverity(event.kind),
       ...event,
     };
-    this.options.onEvent?.(record);
-    this.diagnostics.record(record);
+    try {
+      this.options.onEvent?.(record);
+    } catch {
+      // An optional observer cannot interrupt ownership or child recovery.
+    }
+    try {
+      this.diagnostics.record(record);
+    } catch {
+      // Preserve active-attempt cleanup while failing closed for future claims.
+      this.diagnosticRecordingFailed = true;
+    }
   }
 
   private wake(): void {

@@ -6891,6 +6891,63 @@ paths:
           $ref: '#/components/responses/Problem503'
       x-audience:
         - worker-runtime
+  /worker/logs/cursor:
+    get:
+      tags:
+        - worker
+      operationId: WorkerRuntimeDiagnosticsController.cursor
+      summary: GET /worker/logs/cursor
+      description: Read the durable acknowledged diagnostic sequence for the authenticated machine's current session.
+      security:
+        - WorkerCredential: []
+      x-source: src/worker-fleet/telemetry/worker-runtime-diagnostics.controller.ts
+      x-auth-policy: W-M
+      x-rate-policy: Wx telemetry
+      x-worker-principal: W-M
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+            pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$
+          style: form
+          explode: false
+          description: One scalar value; repeated keys are rejected.
+        - name: incarnation
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+            pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$
+          style: form
+          explode: false
+          description: One scalar value; repeated keys are rejected.
+      responses:
+        '200':
+          description: Current acknowledged diagnostic sequence; zero when no batch has been acknowledged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response_WorkerRuntimeDiagnosticsController_cursor'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '500':
+          $ref: '#/components/responses/Problem500'
+        '503':
+          $ref: '#/components/responses/Problem503'
+      x-audience:
+        - worker-runtime
   /worker/logs:
     post:
       tags:
@@ -17437,6 +17494,16 @@ components:
         - request_id
         - server_time
         - results
+    Response_WorkerRuntimeDiagnosticsController_cursor:
+      type: object
+      additionalProperties: true
+      properties:
+        acknowledged_sequence:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740990
+      required:
+        - acknowledged_sequence
     Response_WorkerRuntimeDiagnosticsController_logs:
       type: object
       additionalProperties: true

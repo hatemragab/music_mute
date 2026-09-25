@@ -26,10 +26,39 @@ personal workstation. See [the public-upload review](../docs/worker-rebuild/vali
 
 Media subprocess output is bounded while being read; exceeding the limit kills
 the tool. On POSIX, each processing child owns a process group so forced
-termination, request timeout and parent exit also terminate decoder descendants.
-Windows currently retains direct-child termination and needs a Job Object for
-an equivalent process-tree guarantee. These controls do not provide a hard
+termination and request timeout also terminate decoder descendants. A separate guardian observes supervisor
+lifetime through an IPC channel, including when engine input is backpressured.
+The Windows runtime uses a guardian-owned kill-on-close Job Object plus an
+independent supervisor process-handle watcher. Native Windows acceptance remains
+open; see the [implementation tracker](../docs/worker-rebuild/validation/RELIABILITY-IMPLEMENTATION-TRACKER.md). These controls do not provide a hard
 CPU, GPU or resident-memory quota.
+
+Service startup has a persisted five-start failure budget with jittered backoff.
+Successful jobs and orderly shutdown reset it; abrupt process death consumes a
+start. Permanent errors or exhausted admission leave the service quiescent and
+log an operator recovery message. After fixing the cause, `mw restart` stops the
+macOS service and resets its budget. Repeated idle-child exits also block admission.
+
+Runtime diagnostics use a private acknowledged outbox for the existing backend log
+endpoint. Network delivery runs separately from processing, retries exact pending
+batches after uncertain acknowledgements, and bounds its state to 128 KiB. Large
+records use numbered fragments under the backend line limit. A local spool entry
+or Sentry capture call alone is not proof of remote archival or dashboard receipt.
+If the outbox is missing, the worker reads the authenticated backend log cursor
+before assigning new remote sequences. Deploy `GET /worker/logs/cursor` before
+this worker version; an unavailable route defers delivery. Surviving pending
+batches replay unchanged, and replacement local spools retain the remote cursor.
+This recovers sequence continuity, not diagnostic bytes lost with deleted state.
+
+macOS CLI and lifecycle mutations use persistent advisory-lock guard files.
+The OS releases ownership when a command exits or is killed; guard files must not
+be deleted during operation. Complete dead-owner records can be recovered under
+that lock. Ambiguous legacy records require operator inspection.
+
+If installation is interrupted after enrollment, rerun `mw install`. A private
+finalization journal resumes local setup without requesting another one-use code.
+Recovery preserves lifecycle intent and verifies the expected release before
+starting the service. A loaded service still requires runtime health validation.
 
 ## Development
 
@@ -102,9 +131,12 @@ upstream URL in authenticated catalog metadata, verify its size and SHA-256,
 and only then place it in the local content-addressed cache.
 
 The runtime also keeps an ordered private diagnostic spool beside the attempt
-root. Records are capped at 8 KiB, the spool is capped at 8 MiB and signed URLs,
+root. Records are capped at 8 KiB, retained history is capped at 100 MiB with a
+seven-day retention window, and signed URLs,
 secret-like fields and user-home components are redacted before persistence.
-If resource probes or the spool fail, new claims stop instead of treating
+Handled failures also submit sanitized, attempt-correlated Sentry events when
+reporting is enabled; live delivery and backend log archival are separate
+acceptance gates. If resource probes or the spool fail, new claims stop instead of treating
 unknown capacity or logging loss as safe. Each job requires 2 GiB available
 host memory and its declared input size plus a 2,300 MiB disk reserve; media and
 subprocess outputs have their own hard caps. FFmpeg accepts only the fixed MVP
@@ -169,17 +201,23 @@ Available local commands are `status`, `start`, `stop`, `restart`, `pause`,
 `unpair`, and `uninstall`. Every command prints a human-readable terminal view
 by default; pass `--json` only when stable machine-readable output is needed by
 a script or monitoring tool. `benchmark` deliberately requires the worker to
-be already drained and stopped. `benchmark --workers 2` first records the
+be already drained and stopped. `benchmark --workers 2` invalidates any previous
+capacity approval before qualification, then records the
 single-worker baseline, then runs two isolated MPS qualifications
 concurrently. It writes an owner-only, seven-day capacity receipt only when
 both accelerated runs preserve the model/release/fixture identity and improve
 throughput by at least 1.1x. Runtime configuration defaults to one worker per
 GPU, requires that fresh receipt to select two, and rejects more than two;
 backend-approved machine capability and policy remain additional hard gates.
+Version 2 receipts additionally verify the installed release inventory, executable
+paths, model and fixture bytes, recipe set, and host/OS signature. Older receipts
+require requalification. These checks do not replace sustained workload and output
+quality acceptance before enabling two slots.
 `update --check` verifies signed metadata
 without minting a download grant or changing local state. `update` downloads a
 verified candidate, checks the private Node/FFmpeg versions, qualifies MPS,
-switches the release pointer atomically, starts the agent, runs the packaged
+switches the release pointer atomically, restores whether the agent was running,
+and, for a running service, runs the packaged
 runtime doctor, and restores the known-good release if either startup or the
 doctor fails. Failed candidates are locally quarantined. Mutating CLI commands
 hold an owner-only process lock; a concurrent operation fails without changing
@@ -381,6 +419,22 @@ powershell.exe -NoProfile -File C:\MusicMuteBuild\musicmute-worker-0.1.0-win\ins
 powershell.exe -NoProfile -File C:\MusicMuteBuild\musicmute-worker-0.1.0-win\installer\manage-windows-service.ps1 -Action Doctor
 ```
 
+After repairing a restart-budget exhaustion cause, drain the worker and stop
+`MusicMuteWorker`. From an elevated PowerShell prompt, reset its budget and then
+explicitly start it:
+
+```powershell
+powershell.exe -NoProfile -File C:\MusicMuteBuild\musicmute-worker-0.1.0-win\installer\manage-windows-service.ps1 -Action ResetRestartBudget
+Start-Service -Name MusicMuteWorker
+```
+
+For a custom installation, supply the same `-InstallRoot` used during install.
+Reset refuses a running service, preserves the previous budget under a unique
+`restart-budget.reset.*.json` name, and leaves the service stopped. Unsafe or
+invalid-sized budget files fail closed for operator inspection. The next start
+creates a new budget with the service's normal state-directory permissions.
+Native Windows service and ACL acceptance for this operation remains pending.
+
 `Repair` accepts the same four private inputs. `Uninstall` removes only the
 Windows Service definition, stable wrapper and active-release marker; releases,
 credentials, models and job state remain preserved. The scripts never bypass
@@ -508,3 +562,11 @@ were separate from those job times (24.65 seconds in the first session). In a
 second session, two plain jobs took 10.24 and 9.99 seconds. These
 are local candidate-engine measurements, not a packaged CLI or full backend
 job benchmark. Listening review of the output remains pending.
+
+Job downloads and uploads enforce a 30-second inactivity timeout in addition to
+total and ownership budgets. Upload progress measures body consumption by the
+HTTP client, not remote acknowledgement of each byte. Transient reconciliation
+errors receive bounded recovery; exhausted child recovery and unsafe workspace
+cleanup remain admission blockers. See the
+[ranked reliability audit](../docs/worker-rebuild/validation/PRODUCTION-RELIABILITY-AUDIT.md)
+for reproduction cases, local test evidence and remaining production gates.

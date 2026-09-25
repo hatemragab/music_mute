@@ -7,6 +7,8 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
+  rename,
   readFile,
   realpath,
   rm,
@@ -22,8 +24,10 @@ import {
 } from "./launch-agent.js";
 import { qualifyMacUserRelease } from "./user-installer.js";
 import type { MacUserLayout } from "./user-paths.js";
-import { loadRuntimeConfig } from "../../runtime/runtime-config.js";
+import { readBenchmarkMachineIdentity } from "../../runtime/runtime-config.js";
 import { MAC_RECIPE_IDS, type MacRecipeId } from "./runtime-recipes.js";
+
+import { installedCapacityIdentity } from "../../runtime/capacity-identity.js";
 
 const executeFile = promisify(execFile);
 const CAPACITY_TIMEOUT_MS = 7_200_000;
@@ -1027,6 +1031,7 @@ export async function benchmarkMacUserWorker(options: {
     options.layout,
     launchAgent,
   );
+  if (options.workers === 2) await invalidateCapacityEvidence(options.layout);
   const fixturePath = join(options.layout.stateRoot, "qualification.wav");
   const fixtureSha256 = await sha256(fixturePath);
   const qualify = options.qualify ?? qualifyMacUserRelease;
@@ -1047,7 +1052,7 @@ export async function benchmarkMacUserWorker(options: {
       options.capacityBenchmark ?? runTwoWorkerCapacityBenchmark
     )({
       layout: options.layout,
-      machineId: (await loadRuntimeConfig(options.layout.configPath)).machineId,
+      machineId: await readBenchmarkMachineIdentity(options.layout.configPath),
       releaseRoot,
       fixturePath,
       fixtureSha256,
@@ -1067,6 +1072,7 @@ export async function runTwoWorkerCapacityBenchmark(options: {
   fixtureSha256: string;
   baseline: unknown;
 }) {
+  await invalidateCapacityEvidence(options.layout);
   const baselineEvidence = parseQualificationEvidence(options.baseline);
   const root = await mkdtemp(join(options.layout.temporaryRoot, "capacity-"));
   await chmod(root, 0o700);
@@ -1084,7 +1090,7 @@ export async function runTwoWorkerCapacityBenchmark(options: {
       reportPath: join(root, `worker-${index}.json`),
     }));
     const started = process.hrtime.bigint();
-    const evidence = await Promise.all(
+    const outcomes = await Promise.allSettled(
       reports.map(({ workRoot, reportPath }) =>
         runCapacityQualification({
           ...options,
@@ -1094,6 +1100,11 @@ export async function runTwoWorkerCapacityBenchmark(options: {
         }),
       ),
     );
+    // Never remove the shared workspace while another qualification still writes.
+    const evidence = outcomes.map((outcome) => {
+      if (outcome.status === "rejected") throw outcome.reason;
+      return outcome.value;
+    });
     const elapsedSeconds = Number(process.hrtime.bigint() - started) / 1e9;
     assertSameRuntimeIdentity(
       baselineEvidence,
@@ -1107,9 +1118,30 @@ export async function runTwoWorkerCapacityBenchmark(options: {
       throw new Error(
         `Two-worker capacity did not improve throughput by ${MINIMUM_TWO_WORKER_SPEEDUP.toFixed(1)}x`,
       );
+    const identity = await installedCapacityIdentity({
+      pythonPath: options.layout.pythonPath,
+      ffmpegPath: options.layout.ffmpegPath,
+      ffprobePath: options.layout.ffprobePath,
+      engineRoot: options.layout.engineRoot,
+      modelCacheRoot: options.layout.modelRoot,
+      fixturePath: options.fixturePath,
+      modelDigest: baselineEvidence.modelDigest,
+    });
+    for (const key of [
+      "releaseManifestDigest",
+      "modelDigest",
+      "fixtureDigest",
+    ] as const) {
+      if (identity[key] !== baselineEvidence[key])
+        throw new TypeError(
+          "Capacity evidence does not match the installed runtime",
+        );
+    }
     const validatedAt = new Date();
     const result = {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      hostDigest: identity.hostDigest,
+      recipeIds: [...baselineEvidence.recipeIds].sort(),
       status: "PASS" as const,
       machineId: options.machineId,
       validatedMaxWorkersPerGpu: 2 as const,
@@ -1125,15 +1157,45 @@ export async function runTwoWorkerCapacityBenchmark(options: {
         validatedAt.getTime() + 7 * 24 * 60 * 60_000,
       ).toISOString(),
     };
-    await writeFile(
-      options.layout.capacityValidationPath,
-      `${JSON.stringify(result, null, 2)}\n`,
-      { mode: 0o600 },
-    );
-    await chmod(options.layout.capacityValidationPath, 0o600);
+    await writeCapacityEvidence(options.layout.capacityValidationPath, result);
     return result;
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function invalidateCapacityEvidence(
+  layout: MacUserLayout,
+): Promise<void> {
+  await writeCapacityEvidence(layout.capacityValidationPath, {
+    schemaVersion: 1,
+    status: "IN_PROGRESS",
+    startedAt: new Date().toISOString(),
+  });
+}
+
+async function writeCapacityEvidence(
+  path: string,
+  evidence: object,
+): Promise<void> {
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  const handle = await open(temporary, "wx", 0o600);
+  try {
+    try {
+      await handle.writeFile(`${JSON.stringify(evidence, null, 2)}\n`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, path);
+    const directory = await open(dirname(path), "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } finally {
+    await rm(temporary, { force: true });
   }
 }
 

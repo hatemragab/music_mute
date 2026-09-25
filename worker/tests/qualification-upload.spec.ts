@@ -50,7 +50,9 @@ describe("qualification result upload", () => {
         expect(init?.method).toBe("PUT");
         expect(init?.redirect).toBe("error");
         expect(new Headers(init?.headers).get("If-None-Match")).toBe("*");
-        expect(Buffer.from(init?.body as ArrayBuffer)).toEqual(payload);
+        expect(
+          Buffer.from(await new Response(init?.body).arrayBuffer()),
+        ).toEqual(payload);
         return new Response(null, {
           status: 200,
           headers: { "x-amz-version-id": "version-1" },
@@ -82,6 +84,55 @@ describe("qualification result upload", () => {
       "confirm-request",
       "version-1",
     );
+  });
+
+  it("does not confirm a PUT that stalls after consuming its body", async () => {
+    const payload = Buffer.from("qualified service output");
+    const outputPath = await privateOutput(payload);
+    const client = {
+      qualificationUploadGrant: vi.fn(async () => ({
+        requestId: "grant-request",
+        reservation: {
+          bytes: payload.length,
+          sha256: createHash("sha256").update(payload).digest("hex"),
+          contentType: "audio/mpeg" as const,
+        },
+        grant: {
+          method: "PUT" as const,
+          url: "https://storage.example.invalid/qualification",
+          headers: { "Content-Type": "audio/mpeg" },
+          expiresAt: "2099-09-20T12:00:00.000Z",
+        },
+        confirmed: false,
+      })),
+      confirmQualificationUpload: vi.fn(),
+    };
+    const fetchMock: typeof fetch = async (_url, init) => {
+      await new Response(init?.body).arrayBuffer();
+      const signal = init?.signal;
+      if (!signal) throw new Error("Missing cancellation");
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      });
+    };
+    await expect(
+      uploadQualificationResult({
+        client,
+        installationId: "installation-id",
+        installationCredential: "credential",
+        grantRequestId: "grant-request",
+        confirmRequestId: "confirm-request",
+        outputPath,
+        expectedBytes: payload.length,
+        expectedSha256: createHash("sha256").update(payload).digest("hex"),
+        fetch: fetchMock,
+        idleTimeoutMs: 1000,
+        timeoutMs: 5000,
+      }),
+    ).rejects.toThrow("inactivity timeout");
+    expect(client.confirmQualificationUpload).not.toHaveBeenCalled();
   });
 
   it("recovers an already confirmed upload without another PUT", async () => {

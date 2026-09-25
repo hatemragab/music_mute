@@ -7,7 +7,8 @@ import {
   open,
   readdir,
   readFile,
-  rename,
+  readlink,
+  link,
   rm,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
@@ -38,6 +39,7 @@ import {
 } from "./user-release.js";
 import { createMacUserDirectories, type MacUserLayout } from "./user-paths.js";
 import { inspectMacUserHealth } from "./user-health.js";
+import { verifyMacRelease } from "./release-manifest.js";
 import { MAC_RECIPE_IDS } from "./runtime-recipes.js";
 
 export const PRODUCTION_BACKEND_BASE_URL = "https://api.music-mute.com";
@@ -371,48 +373,137 @@ export async function installMacUserWorker(
       join(transactionRoot, "machine.credential"),
       options.layout.credentialPath,
     );
-    await writePrivateJson(
-      options.layout.configPath,
-      buildMacUserRuntimeConfig(
-        options.layout,
-        backendBaseUrl,
-        allowInsecureLoopback,
-        enrollmentState,
-      ),
-    );
-    try {
-      await loadLocalLifecycle(options.layout.lifecyclePath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      await initializeLocalLifecycle(options.layout.lifecyclePath);
-    }
-    await writeLocalRuntimeStatus(options.layout.runtimeStatusPath, []);
-    await writeLaunchAgentPlist(options.layout);
-    await writePrivateJson(options.layout.installationStatePath, {
+    await writePrivateJson(join(transactionRoot, "finalization.json"), {
       schemaVersion: 1,
+      backendBaseUrl,
+      allowInsecureLoopback,
+      enrollmentState,
       installationId: receipt.installationId,
-      machineId: enrollmentState.machineId,
-      releaseVersion: release.releaseVersion,
-      runtimePreflight: runtime,
       installedAt: new Date().toISOString(),
+      result: {
+        machineId: enrollmentState.machineId,
+        releaseVersion: release.releaseVersion,
+        reusedRelease: release.reused,
+        reusedModel: model.reused,
+        serviceLoaded: true,
+        runtime,
+      },
     });
-    await launchAgent.bootstrap(options.layout.plistPath);
-    const service = await launchAgent.status();
-    if (!service.loaded)
-      throw new Error("MusicMute worker LaunchAgent did not load");
-    await rm(enrollmentPath, { force: true });
-    return {
-      machineId: enrollmentState.machineId,
-      releaseVersion: release.releaseVersion,
-      reusedRelease: release.reused,
-      reusedModel: model.reused,
-      serviceLoaded: true,
-      runtime,
-    };
+    const result = await resumeMacUserInstallation({
+      layout: options.layout,
+      uid: options.uid,
+      launchAgent,
+    });
+    if (!result)
+      throw new Error("Installation finalization journal disappeared");
+    return result;
   } catch (error) {
     if (!backendActivated)
       await rollbackMacUserRelease(options.layout, release.previousRelease);
     throw error;
+  }
+}
+
+/** Caller holds the CLI command lock. No enrollment exchange is repeated here. */
+export async function resumeMacUserInstallation(options: {
+  layout: MacUserLayout;
+  uid: number;
+  launchAgent?: Pick<
+    MacLaunchAgentController,
+    "bootstrap" | "bootout" | "status"
+  >;
+}): Promise<MacUserInstallationResult | null> {
+  const { layout } = options;
+  const transactionRoot = join(layout.transactionRoot, "install");
+  const journalPath = join(transactionRoot, "finalization.json");
+  let raw: unknown;
+  try {
+    raw = await readPrivateJson(journalPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  const journal = asRecord(raw, "Installation finalization journal");
+  const identity = asRecord(journal.enrollmentState, "Enrollment identity");
+  const result = asRecord(journal.result, "Installation result");
+  if (
+    journal.schemaVersion !== 1 ||
+    typeof journal.backendBaseUrl !== "string" ||
+    typeof journal.allowInsecureLoopback !== "boolean" ||
+    !UUID_V4.test(String(journal.installationId)) ||
+    typeof journal.installedAt !== "string" ||
+    !Number.isFinite(Date.parse(journal.installedAt)) ||
+    typeof result.releaseVersion !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/u.test(result.releaseVersion) ||
+    typeof identity.machineId !== "string" ||
+    typeof identity.workerId !== "string" ||
+    result.machineId !== identity.machineId ||
+    result.serviceLoaded !== true ||
+    typeof result.reusedRelease !== "boolean" ||
+    typeof result.reusedModel !== "boolean"
+  )
+    throw new TypeError("Installation finalization journal is invalid");
+  const runtime = asRecord(result.runtime, "Installation runtime");
+  for (const name of ["node", "ffmpeg", "ffprobe"]) {
+    const component = asRecord(runtime[name], "Installation runtime component");
+    if (
+      component.decision !== "reuse" ||
+      typeof component.installedVersion !== "string"
+    )
+      throw new TypeError("Installation runtime evidence is invalid");
+  }
+  const config = buildMacUserRuntimeConfig(
+    layout,
+    journal.backendBaseUrl,
+    journal.allowInsecureLoopback,
+    { machineId: identity.machineId, workerId: identity.workerId },
+  );
+  if (
+    (await readlink(layout.currentLink)) !== `releases/${result.releaseVersion}`
+  )
+    throw new Error("Installation recovery found an unrelated active release");
+  await verifyMacRelease(join(layout.releasesRoot, result.releaseVersion));
+  await installMachineCredential(
+    join(transactionRoot, "machine.credential"),
+    layout.credentialPath,
+  );
+  await writePrivateJson(layout.configPath, config);
+  try {
+    await loadLocalLifecycle(layout.lifecyclePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    await initializeLocalLifecycle(layout.lifecyclePath);
+  }
+  if (!(await exists(layout.runtimeStatusPath)))
+    await writeLocalRuntimeStatus(layout.runtimeStatusPath, []);
+  await writeLaunchAgentPlist(layout);
+  await writePrivateJson(layout.installationStatePath, {
+    schemaVersion: 1,
+    installationId: journal.installationId,
+    machineId: identity.machineId,
+    releaseVersion: result.releaseVersion,
+    runtimePreflight: result.runtime,
+    installedAt: journal.installedAt,
+  });
+  const service =
+    options.launchAgent ?? new MacLaunchAgentController(options.uid);
+  if (!(await service.status()).loaded)
+    await service.bootstrap(layout.plistPath);
+  if (!(await service.status()).loaded)
+    throw new Error("MusicMute worker LaunchAgent did not load");
+  await rm(join(transactionRoot, "enrollment.credential"), { force: true });
+  await rm(journalPath);
+  await syncDirectory(transactionRoot);
+  return result as unknown as MacUserInstallationResult;
+}
+
+async function syncDirectory(path: string): Promise<void> {
+  if (process.platform === "win32") return;
+  const directory = await open(path, "r");
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
   }
 }
 
@@ -616,8 +707,12 @@ async function writeStablePrivateText(
   } finally {
     await handle.close();
   }
-  await rename(temporary, path);
-  await chmod(path, 0o600);
+  try {
+    await link(temporary, path);
+    await syncDirectory(dirname(path));
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 async function exists(path: string): Promise<boolean> {

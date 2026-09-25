@@ -1,3 +1,4 @@
+import { getEventListeners } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import {
   ControlPlaneError,
@@ -141,6 +142,7 @@ describe("worker control-plane client", () => {
       maxAttempts: 2,
     });
     const requestId = "74fcfb85-8cc8-49cb-b8c2-5db33a9896ea";
+    const controller = new AbortController();
 
     await expect(
       client.claim(
@@ -149,11 +151,13 @@ describe("worker control-plane client", () => {
         0,
         1,
         requestId,
+        controller.signal,
       ),
     ).resolves.toEqual({
       claim: null,
       serverTime: "2026-01-01T00:00:00.000Z",
     });
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
     expect(requestBodies).toHaveLength(2);
     expect(requestBodies[0]).toBe(requestBodies[1]);
     expect(JSON.parse(requestBodies[0]!) as unknown).toMatchObject({

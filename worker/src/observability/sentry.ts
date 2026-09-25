@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import type { RuntimeEvent } from "../runtime/worker-runtime.js";
 import * as Sentry from "@sentry/node";
 
 const CLI_DSN =
@@ -111,7 +112,7 @@ export function initializeWorkerSentry(): void {
                     : {}),
                 })),
               },
-              tags: { component: "worker-cli" },
+              tags: { component: "worker-cli", ...safeRuntimeTags(event.tags) },
             }
           : null,
     });
@@ -156,5 +157,57 @@ export async function captureWorkerFailure(error: unknown): Promise<void> {
     await Sentry.flush(1_500);
   } catch {
     // Telemetry cannot alter the worker's failure path.
+  }
+}
+
+// Keep only bounded machine-generated correlation fields. Never forward
+// diagnostic detail, signed URLs, media paths, or arbitrary exception messages.
+export function safeRuntimeTags(value: unknown): Record<string, string> {
+  if (value === null || typeof value !== "object") return {};
+  const tags = value as Record<string, unknown>;
+  const safe: Record<string, string> = {};
+  for (const key of ["eventKind", "failureCode", "stage"]) {
+    const item = tags[key];
+    if (typeof item === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(item))
+      safe[key] = item;
+  }
+  for (const key of ["attemptId", "workerId", "sessionId"]) {
+    const item = tags[key];
+    if (
+      typeof item === "string" &&
+      /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(
+        item,
+      )
+    )
+      safe[key] = item;
+  }
+  return safe;
+}
+
+export function captureWorkerRuntimeEvent(event: RuntimeEvent): void {
+  if (
+    !enabled ||
+    ![
+      "attempt-failed",
+      "child-unavailable",
+      "workspace-cleanup-failed",
+    ].includes(event.kind)
+  )
+    return;
+  try {
+    Sentry.captureException(new Error("Worker runtime failure"), {
+      tags: safeRuntimeTags({
+        eventKind: event.kind,
+        failureCode: "code" in event ? event.code : undefined,
+        stage: "stage" in event ? event.stage : undefined,
+        attemptId: "attemptId" in event ? event.attemptId : undefined,
+        workerId: "workerId" in event ? event.workerId : undefined,
+        sessionId: event.sessionId,
+      }),
+    });
+    // Delivery is best effort and asynchronous. Local diagnostics remain the
+    // durable evidence; telemetry cannot delay cleanup or lease fencing.
+  } catch {
+    // The optional reporting SDK must not affect runtime recovery.
   }
 }

@@ -14,7 +14,13 @@ import type {
   WorkerRemoteCommand,
   WorkerRecipeSnapshot,
 } from "../src/runtime/contracts.js";
-import { TransferError } from "../src/runtime/transfers.js";
+import {
+  TransferError,
+  TransferOwnershipError,
+} from "../src/runtime/transfers.js";
+import { ChildCommandError } from "../src/agent/child-process.js";
+import { DiagnosticSpool } from "../src/runtime/diagnostic-spool.js";
+import { WorkspaceManager } from "../src/runtime/workspace.js";
 import { RuntimeResourceLimitError } from "../src/runtime/resource-limits.js";
 import {
   initializeLocalLifecycle,
@@ -55,6 +61,7 @@ const recipe: WorkerRecipeSnapshot = {
 };
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true })),
   );
@@ -339,6 +346,303 @@ async function runtimeFixture(
 }
 
 describe("worker runtime ownership", () => {
+  it("starts diagnostic forwarding only after establishing the machine session", async () => {
+    const f = fixture();
+    const send = vi.fn(async (batch: { sequenceEnd: number }) => ({
+      acknowledgedSequence: batch.sequenceEnd,
+      replayed: false,
+    }));
+    Object.assign(f.control, { appendDiagnosticLogs: send });
+    const running = await runtimeFixture(f);
+    await running.runtime.start();
+    try {
+      await vi.waitFor(() => expect(send).toHaveBeenCalled());
+      expect(f.control.openSession.mock.invocationCallOrder[0]).toBeLessThan(
+        send.mock.invocationCallOrder[0]!,
+      );
+    } finally {
+      await running.runtime.stop();
+    }
+  });
+
+  it("stops an idle crash loop even when every replacement initially starts", async () => {
+    const f = await runtimeFixture();
+    Object.assign(f.child, { isAlive: () => false });
+    f.control.claim.mockResolvedValue({
+      claim: null,
+      serverTime: new Date().toISOString(),
+    });
+    await f.runtime.start();
+    try {
+      for (let i = 0; i < 5; i++) await f.runtime.reconcileOnce();
+      expect(f.supervisor.restart).toHaveBeenCalledTimes(2);
+      expect(f.control.claim).toHaveBeenCalledTimes(2);
+      expect(f.events).toContainEqual(
+        expect.objectContaining({ code: "child-recovery-exhausted" }),
+      );
+    } finally {
+      await f.runtime.stop();
+    }
+  });
+
+  it("recovers an exited idle child before claiming the next job", async () => {
+    const f = await runtimeFixture();
+    let alive = false;
+    Object.assign(f.child, { isAlive: () => alive });
+    f.supervisor.restart.mockImplementation(async () => {
+      alive = true;
+      return f.child;
+    });
+    await f.runtime.start();
+    try {
+      await f.runtime.reconcileOnce();
+      await f.runtime.waitForIdle();
+      expect(f.supervisor.restart).toHaveBeenCalledOnce();
+      expect(f.supervisor.restart.mock.invocationCallOrder[0]).toBeLessThan(
+        f.control.claim.mock.invocationCallOrder[0]!,
+      );
+      expect(f.control.complete).toHaveBeenCalledOnce();
+    } finally {
+      await f.runtime.stop();
+    }
+  });
+
+  it("recovers a transient claim failure with the same request ID", async () => {
+    const f = await runtimeFixture();
+    f.control.claim.mockRejectedValueOnce(
+      new ControlPlaneError("NETWORK_UNAVAILABLE", 0, true),
+    );
+    const running = f.runtime.run();
+    try {
+      await vi.waitFor(
+        () => expect(f.control.complete).toHaveBeenCalledOnce(),
+        { timeout: 4000 },
+      );
+      expect(f.control.claim.mock.calls[0]).toEqual(
+        f.control.claim.mock.calls[1],
+      );
+      expect(f.events).toContainEqual(
+        expect.objectContaining({ kind: "reconciliation-failed" }),
+      );
+    } finally {
+      await f.runtime.stop();
+      await running;
+    }
+  });
+
+  it("does not retry authorization rejection", async () => {
+    const f = await runtimeFixture();
+    await f.runtime.start();
+    f.control.config.mockRejectedValueOnce(
+      new ControlPlaneError("WORKER_FORBIDDEN", 403, false),
+    );
+    await expect(f.runtime.run()).rejects.toMatchObject({ status: 403 });
+    expect(f.control.claim).not.toHaveBeenCalled();
+    expect(f.supervisor.stop).toHaveBeenCalled();
+  });
+
+  it("stops after three exhausted reconciliation rounds", async () => {
+    const f = await runtimeFixture();
+    await f.runtime.start();
+    f.control.config
+      .mockClear()
+      .mockRejectedValue(new ControlPlaneError("NETWORK_UNAVAILABLE", 0, true));
+    await expect(f.runtime.run()).rejects.toMatchObject({
+      code: "NETWORK_UNAVAILABLE",
+    });
+    expect(f.control.config).toHaveBeenCalledTimes(3);
+    expect(f.control.claim).not.toHaveBeenCalled();
+  });
+
+  it("preserves a workspace with uncertain file ownership and blocks subsequent claims", async () => {
+    const f = await runtimeFixture();
+    f.transfers.download.mockRejectedValueOnce(
+      new TransferOwnershipError("DOWNLOAD_FAILED"),
+    );
+    await f.runtime.start();
+    try {
+      await f.runtime.reconcileOnce();
+      await f.runtime.waitForIdle();
+      expect(await readdir(join(f.root, "attempts"))).toContain(attemptId);
+      const claims = f.control.claim.mock.calls.length;
+      await f.runtime.reconcileOnce();
+      expect(f.control.claim).toHaveBeenCalledTimes(claims);
+      expect(f.events).toContainEqual(
+        expect.objectContaining({
+          kind: "workspace-cleanup-failed",
+          code: "writer-not-closed",
+        }),
+      );
+    } finally {
+      await f.runtime.stop();
+    }
+  });
+
+  it("reports the original failure and releases the slot when failure acknowledgement is lost", async () => {
+    const f = await runtimeFixture();
+    f.transfers.download.mockRejectedValueOnce(
+      new TransferError("DOWNLOAD_FAILED", true, "download-idle-timeout"),
+    );
+    f.control.fail.mockRejectedValueOnce(
+      new ControlPlaneError("NETWORK_UNAVAILABLE", 0, true),
+    );
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+    expect(f.events).toContainEqual(
+      expect.objectContaining({ kind: "failure-report-deferred", attemptId }),
+    );
+    expect(f.events).toContainEqual(
+      expect.objectContaining({
+        kind: "attempt-failed",
+        code: "DOWNLOAD_FAILED",
+        attemptId,
+      }),
+    );
+    f.control.claim.mockResolvedValueOnce({
+      claim: { ...f.claim, attemptId: randomUUID() },
+      serverTime: new Date().toISOString(),
+    });
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(1);
+    await f.runtime.waitForIdle();
+    expect(f.control.complete).toHaveBeenCalledOnce();
+    await f.runtime.stop();
+  });
+
+  it("rechecks resource admission before releasing a blocked slot", async () => {
+    const resources = { assertAvailable: vi.fn(async () => undefined) };
+    resources.assertAvailable.mockRejectedValueOnce(
+      new RuntimeResourceLimitError("memory"),
+    );
+    const f = await runtimeFixture(fixture(), resources);
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(0);
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + 31_000);
+    f.control.claim.mockResolvedValueOnce({
+      claim: { ...f.claim, attemptId: randomUUID() },
+      serverTime: new Date().toISOString(),
+    });
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(1);
+    await f.runtime.waitForIdle();
+    expect(f.control.complete).toHaveBeenCalledOnce();
+    expect(f.events).toContainEqual(
+      expect.objectContaining({ kind: "resource-recovered", workerId }),
+    );
+    expect(resources.assertAvailable).toHaveBeenCalledTimes(3);
+    expect(f.supervisor.restart).not.toHaveBeenCalled();
+    await f.runtime.stop();
+  });
+
+  it("recovers the child despite cleanup failure and keeps admission blocked", async () => {
+    const f = await runtimeFixture();
+    vi.spyOn(f.child, "request").mockRejectedValueOnce(
+      new Error("child exited"),
+    );
+    vi.spyOn(WorkspaceManager.prototype, "cleanup").mockRejectedValueOnce(
+      new Error("disk I/O"),
+    );
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+    expect(f.supervisor.restart).toHaveBeenCalledOnce();
+    expect(f.events).toContainEqual(
+      expect.objectContaining({ kind: "workspace-cleanup-failed", attemptId }),
+    );
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(0);
+    expect(f.control.claim).toHaveBeenCalledOnce();
+    await f.runtime.stop();
+  });
+
+  it("recreates a GPU OOM child and completes a later attempt", async () => {
+    const f = await runtimeFixture();
+    vi.spyOn(f.child, "request").mockRejectedValueOnce(
+      new ChildCommandError("GPU_OOM"),
+    );
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+    expect(f.child.terminate).toHaveBeenCalledOnce();
+    expect(f.supervisor.restart).toHaveBeenCalledOnce();
+    f.control.claim.mockResolvedValueOnce({
+      claim: { ...f.claim, attemptId: randomUUID() },
+      serverTime: new Date().toISOString(),
+    });
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(1);
+    await f.runtime.waitForIdle();
+    expect(f.control.complete).toHaveBeenCalledOnce();
+    await f.runtime.stop();
+  });
+
+  it("bounds failed child restarts and requires intervention after exhaustion", async () => {
+    const f = await runtimeFixture();
+    vi.spyOn(f.child, "request").mockRejectedValueOnce(
+      new Error("child exited"),
+    );
+    f.supervisor.restart.mockRejectedValue(new Error("provider unavailable"));
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now");
+    for (const elapsed of [6_000, 40_000, 110_000, 200_000]) {
+      clock.mockReturnValue(now + elapsed);
+      await expect(f.runtime.reconcileOnce()).resolves.toBe(0);
+    }
+    expect(f.supervisor.restart).toHaveBeenCalledTimes(4);
+    expect(f.events).toContainEqual(
+      expect.objectContaining({
+        kind: "child-unavailable",
+        code: "child-recovery-exhausted",
+      }),
+    );
+    await f.runtime.stop();
+  });
+
+  it("a diagnostic write exception cannot prevent cleanup or admit more work", async () => {
+    const f = await runtimeFixture();
+    await f.runtime.start();
+    vi.spyOn(DiagnosticSpool.prototype, "record").mockImplementation(() => {
+      throw new Error("disk full");
+    });
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+    expect(f.control.complete).toHaveBeenCalledOnce();
+    expect(await readdir(join(f.root, "attempts"))).toEqual([]);
+    await expect(f.runtime.reconcileOnce()).resolves.toBe(0);
+    expect(f.control.claim).toHaveBeenCalledOnce();
+    await f.runtime.stop();
+  });
+
+  it("an optional event observer cannot interrupt a job", async () => {
+    const f = await runtimeFixture();
+    await f.runtime.start();
+    vi.spyOn(f.events, "push").mockImplementation(() => {
+      throw new Error("observer failed");
+    });
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+    expect(f.control.complete).toHaveBeenCalledOnce();
+    expect(await readdir(join(f.root, "attempts"))).toEqual([]);
+    await f.runtime.stop();
+  });
+
+  it("does not start for a pre-cancelled run", async () => {
+    const f = await runtimeFixture();
+    await f.runtime.run(AbortSignal.abort());
+    expect(f.supervisor.start).not.toHaveBeenCalled();
+    expect(f.control.openSession).not.toHaveBeenCalled();
+  });
+
+  it("shares shutdown across concurrent callers", async () => {
+    const f = await runtimeFixture();
+    await f.runtime.start();
+    await Promise.all([f.runtime.stop(), f.runtime.stop(), f.runtime.stop()]);
+    expect(f.supervisor.stop).toHaveBeenCalledOnce();
+  });
+
   it("recovers a transient startup configuration rate limit", async () => {
     const base = fixture();
     for (let attempt = 0; attempt < 3; attempt += 1)

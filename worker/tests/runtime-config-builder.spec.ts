@@ -1,7 +1,7 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildServiceRuntimeConfig } from "../src/enrollment/runtime-config-builder.js";
 import { createMacUserLayout } from "../src/platform/macos/user-paths.js";
 import { loadRuntimeConfig } from "../src/runtime/runtime-config.js";
@@ -10,6 +10,15 @@ const MACHINE_ID = "00000000-0000-4000-8000-000000000010";
 const WORKER_ID = "00000000-0000-4000-8000-000000000011";
 const SECOND_WORKER_ID = "00000000-0000-4000-8000-000000000012";
 const CREDENTIAL = "a".repeat(43);
+vi.mock("../src/runtime/capacity-identity.js", () => ({
+  installedCapacityIdentity: vi.fn(async () => ({
+    releaseManifestDigest: "a".repeat(64),
+    modelDigest: "b".repeat(64),
+    fixtureDigest: "c".repeat(64),
+    hostDigest: "d".repeat(64),
+  })),
+}));
+
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -203,11 +212,31 @@ describe("service runtime config builder", () => {
     await writeFile(configPath, `${JSON.stringify(document)}\n`, {
       mode: 0o600,
     });
-    const loaded = await loadRuntimeConfig(configPath, {
-      platform: "darwin",
-      arch: "arm64",
-    });
-    expect(loaded.validatedMaxWorkersPerGpu).toBe(2);
-    expect(loaded.slots).toHaveLength(2);
+    await expect(
+      loadRuntimeConfig(configPath, {
+        platform: "darwin",
+        arch: "arm64",
+      }),
+    ).rejects.toThrow("did not pass");
+    const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+    evidence.schemaVersion = 2;
+    evidence.hostDigest = "d".repeat(64);
+    evidence.recipeIds = [
+      ...new Set(document.slots.flatMap((slot) => slot.recipeIds)),
+    ].sort();
+    await writeFile(evidencePath, JSON.stringify(evidence), { mode: 0o600 });
+    expect(
+      (
+        await loadRuntimeConfig(configPath, {
+          platform: "darwin",
+          arch: "arm64",
+        })
+      ).validatedMaxWorkersPerGpu,
+    ).toBe(2);
+    evidence.hostDigest = "e".repeat(64);
+    await writeFile(evidencePath, JSON.stringify(evidence), { mode: 0o600 });
+    await expect(
+      loadRuntimeConfig(configPath, { platform: "darwin", arch: "arm64" }),
+    ).rejects.toThrow("does not match the installed runtime");
   });
 });
