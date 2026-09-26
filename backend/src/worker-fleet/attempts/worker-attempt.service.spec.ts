@@ -419,7 +419,7 @@ describe('worker attempt transfers and finalization', () => {
     expect(f.usage.recordRetainedOutput).toHaveBeenCalledOnce();
     expect(f.usage.recordRetainedOutput).toHaveBeenCalledWith(
       expect.objectContaining({ _id: f.job._id }),
-      object.bytes,
+      object.bytes + f.job.inputObject.bytes,
       expect.any(Object),
     );
     expect(f.job.currentExecution).toBeNull();

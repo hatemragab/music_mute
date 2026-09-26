@@ -4,7 +4,6 @@ import com.hatem.musicmute.auth.AuthApiClient
 import com.hatem.musicmute.auth.AuthFailure
 import com.hatem.musicmute.auth.AuthHttpResponse
 import com.hatem.musicmute.auth.AuthProblem
-import java.net.URI
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -37,6 +36,8 @@ data class UrlImportRecord(
     val sourceTitle: String? = null,
     val createdAtMillis: Long = 0,
     val jobObserved: Boolean = false,
+    val trimEnabled: Boolean = false,
+    val serverStageTimings: ServerStageTimings? = null,
 ) {
     companion object {
         val terminalStatuses = setOf("submitted", "failed")
@@ -51,6 +52,7 @@ data class UrlImportView(
     val error: UrlImportError?,
     val createdAt: String,
     val updatedAt: String,
+    val serverStageTimings: ServerStageTimings? = null,
     val sourceTitle: String? = null,
 )
 
@@ -60,6 +62,7 @@ class UrlImportFailure(val code: String, val retryAfterSeconds: Long? = null) : 
 
 interface UrlImportsApi {
     suspend fun create(url: String, requestId: String): UrlImportView
+    suspend fun create(url: String, requestId: String, trimEnabled: Boolean): UrlImportView = create(url, requestId)
     suspend fun detail(importId: String): UrlImportView
     fun updates(importId: String): Flow<UrlImportView> = flow { emit(detail(importId)) }
 }
@@ -71,9 +74,11 @@ class UrlImportsApiClient(
 ) : UrlImportsApi {
     constructor(auth: AuthApiClient, installationId: () -> String) : this(auth, null, installationId)
     private val json = Json { ignoreUnknownKeys = true }
-    override suspend fun create(url: String, requestId: String): UrlImportView {
+    override suspend fun create(url: String, requestId: String): UrlImportView = create(url, requestId, false)
+    override suspend fun create(url: String, requestId: String, trimEnabled: Boolean): UrlImportView {
+        UrlImportSource.canonical(url) // Guard restored imports before authentication/network.
         require(UUID.fromString(requestId).version() == 4)
-        val body = buildJsonObject { put("url", url); put("requestId", requestId) }.toString()
+        val body = buildJsonObject { put("url", url); put("requestId", requestId); put("trimEnabled", trimEnabled) }.toString()
         return decode(authRequest("POST", "/media-imports", body, true, 202))
     }
 
@@ -154,47 +159,8 @@ object UrlImportSource {
         return matches.singleOrNull()
     }
 
-    fun canonical(raw: String): String {
-        val value = raw.trim()
-        if (value.length !in 1..2048 || value.any { it.isWhitespace() || it.isISOControl() || it == '\\' })
-            throw UrlImportFailure("IMPORT_INVALID_URL")
-        val uri = try { URI(value) } catch (_: Exception) { throw UrlImportFailure("IMPORT_INVALID_URL") }
-        if (uri.scheme?.lowercase() !in setOf("http", "https") || uri.host == null ||
-            uri.rawUserInfo != null || uri.port != -1 || uri.rawFragment != null)
-            throw UrlImportFailure("IMPORT_INVALID_URL")
-        val host = uri.host.lowercase().removePrefix("www.")
-        val path = uri.rawPath.orEmpty().trimEnd('/')
-        return when {
-            host in setOf("soundcloud.com", "m.soundcloud.com") -> {
-                if (uri.rawQuery.orEmpty().split('&').any { it.startsWith("in=") } ||
-                    !Regex("/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+").matches(path) ||
-                    path.split('/').contains("sets")) throw UrlImportFailure("IMPORT_SINGLE_ITEM_REQUIRED")
-                "https://soundcloud.com$path"
-            }
-            host == "on.soundcloud.com" -> {
-                if (!Regex("/[A-Za-z0-9]+").matches(path)) throw UrlImportFailure("IMPORT_SINGLE_ITEM_REQUIRED")
-                "https://on.soundcloud.com$path"
-            }
-            host == "tumblr.com" || Regex("[a-z0-9-]+\\.tumblr\\.com").matches(host) -> {
-                val match = if (host == "tumblr.com")
-                    Regex("/(?:blog/view/)?([A-Za-z0-9-]{1,32})/(\\d{1,20})(?:/[^/]+)?").matchEntire(path)
-                else Regex("/post/(\\d{1,20})(?:/[^/]+)?").matchEntire(path)
-                if (match == null) throw UrlImportFailure("IMPORT_SINGLE_ITEM_REQUIRED")
-                val blog = if (host == "tumblr.com") match.groupValues[1] else host.substringBefore('.')
-                val post = if (host == "tumblr.com") match.groupValues[2] else match.groupValues[1]
-                "https://www.tumblr.com/$blog/$post"
-            }
-            else -> {
-                // The server determines extractor support and enforces audio-only downloads.
-                // Keep provider query parameters intact (they may identify the media).
-                if (!host.contains('.') || host.startsWith('[') ||
-                    host.matches(Regex("[0-9.]+")) ||
-                    Regex("(?:^|\\.)(?:local|localhost|internal)$").containsMatchIn(host))
-                    throw UrlImportFailure("IMPORT_INVALID_URL")
-                value
-            }
-        }
-    }
+    fun canonical(raw: String): String = SupportedAudioSites.canonical(raw)
+
 }
 
 /** Server admission and state survive Activity recreation and process restart. */
@@ -239,11 +205,11 @@ class UrlImportCoordinator(
         }
     }
 
-    suspend fun submit(text: String) {
+    suspend fun submit(text: String, trimEnabled: Boolean = false) {
         val ticket = owner?.takeIf { it == session() } ?: throw UrlImportFailure("UNAUTHENTICATED")
         val url = UrlImportSource.canonical(text)
         val record = store.addUrlImport(ticket.uid,
-            UrlImportRecord(ticket.uid, url, UUID.randomUUID().toString(), createdAtMillis = System.currentTimeMillis()))
+            UrlImportRecord(ticket.uid, url, UUID.randomUUID().toString(), createdAtMillis = System.currentTimeMillis(), trimEnabled = trimEnabled))
         if (record.status == "attention") retry(record)
     }
 
@@ -285,11 +251,12 @@ class UrlImportCoordinator(
                     }
                     return
                 }
-                val view = api.create(record.url, record.requestId)
+                val view = api.create(record.url, record.requestId, record.trimEnabled)
                 if (owner != ticket || session() != ticket) return
                 store.updateUrlImport(ticket.uid, requestId) {
                     it.copy(importId = view.importId, status = view.status, jobId = view.jobId,
-                        errorCode = view.error?.code, sourceTitle = view.sourceTitle ?: it.sourceTitle)
+                        errorCode = view.error?.code, sourceTitle = view.sourceTitle ?: it.sourceTitle,
+                        serverStageTimings = view.serverStageTimings)
                 }
                 if (view.status == "submitted") {
                     return

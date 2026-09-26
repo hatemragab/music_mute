@@ -69,7 +69,7 @@ class AudioPipelineCoordinator(
         }
     }
 
-    suspend fun acceptDocument(operationId: String, name: String, uri: String): ProcessingOperation {
+    suspend fun acceptDocument(operationId: String, name: String, uri: String, trimEnabled: Boolean = false): ProcessingOperation {
         repository.requireUpdateAllowed()
         val owner = requireSession()
         preflightAvailability()
@@ -80,7 +80,7 @@ class AudioPipelineCoordinator(
         if (existing != null) return existing
         repository.acceptIntent(operationId, SourceKind.FILE, boundedSourceTitle(name.substringBeforeLast('.', name)))
         val operation = repository.store.update(owner.uid, operationId) {
-            it.copy(sourceUri = uri, sourceName = name, phase = ProcessingPhase.SOURCE_QUEUED)
+            it.copy(sourceUri = uri, sourceName = name, phase = ProcessingPhase.SOURCE_QUEUED, trimEnabled = trimEnabled)
         } ?: changedSession()
         checkSession(owner)
         preparationScheduler?.enqueue(owner.uid, operationId, owner.epoch)

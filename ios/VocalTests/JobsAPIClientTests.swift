@@ -4,6 +4,87 @@ import XCTest
 @testable import Vocal
 
 @MainActor final class JobsAPIClientTests: XCTestCase {
+  func testImportQueueCooldownPreventsEarlyRetry() async throws {
+    let token = JobsTokenFixture()
+    var clock: TimeInterval = 0
+    let api = client(token, now: { clock })
+    var calls = 0
+    JobsURLProtocol.handler = { _ in
+      calls += 1
+      if calls == 1 {
+        return (503, ["Retry-After": "7"], Data(#"{"code":"IMPORT_QUEUE_FULL"}"#.utf8))
+      }
+      return (
+        202, [:],
+        Data(
+          #"{"import_id":"68c000000000000000000001","status":"queued","job_id":null,"error":null}"#
+            .utf8)
+      )
+    }
+    _ = try? await api.createURLImport(
+      url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId, trimEnabled: false)
+    _ = try? await api.createURLImport(url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId)
+    XCTAssertEqual(calls, 1)
+    clock = 7
+    _ = try await api.createURLImport(url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId)
+    XCTAssertEqual(calls, 2)
+  }
+
+  func testUnsupportedImportNeverAcquiresTokenOrTransport() async {
+    let token = JobsTokenFixture()
+    let api = client(token)
+    var calls = 0
+    JobsURLProtocol.handler = { _ in
+      calls += 1
+      return (500, [:], Data())
+    }
+    do {
+      _ = try await api.createURLImport(url: "https://unknown.example/audio", requestId: requestId)
+      XCTFail("Unsupported URL admitted")
+    } catch { XCTAssertEqual(error as? URLImportFailure, .unsupportedSite) }
+    XCTAssertEqual(calls, 0)
+    XCTAssertTrue(token.refreshes.isEmpty)
+  }
+
+  func testImportWireContractAndSanitizedFailure() async throws {
+    let token = JobsTokenFixture()
+    let api = client(token)
+    var calls = 0
+    JobsURLProtocol.handler = { request in
+      calls += 1
+      if calls == 1 {
+        XCTAssertEqual(request.url?.path, "/media-imports")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(
+          request.value(forHTTPHeaderField: "X-Installation-Id"), self.installation.lowercased())
+        let fields = try! self.body(request)
+        XCTAssertEqual(fields["url"] as? String, "https://youtu.be/UXqq0ZvbOnk")
+        XCTAssertEqual(fields["trim_enabled"] as? Bool, false)
+        XCTAssertEqual(fields["request_id"] as? String, self.requestId.uuidString.lowercased())
+        return (
+          202, [:],
+          Data(
+            #"{"import_id":"68c000000000000000000001","status":"queued","job_id":null,"error":null}"#
+              .utf8)
+        )
+      }
+      return (
+        422, [:],
+        Data(
+          #"{"code":"IMPORT_UNSUPPORTED_AUDIO_SOURCE","message":"private upstream detail"}"#.utf8)
+      )
+    }
+    let view = try await api.createURLImport(
+      url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId, trimEnabled: false)
+    XCTAssertEqual(view.status, "queued")
+    do {
+      _ = try await api.urlImport(id: view.importId)
+      XCTFail("Failure accepted")
+    } catch {
+      XCTAssertEqual(error as? URLImportFailure, .server("IMPORT_UNSUPPORTED_AUDIO_SOURCE"))
+    }
+  }
+
   func testRateLimitStopsOtherJobRoutesBeforeTransport() async {
     let token = JobsTokenFixture()
     var clock: TimeInterval = 0
@@ -121,7 +202,8 @@ import XCTest
       try body(received[1])["request_id"] as? String, requestId.uuidString.lowercased())
     XCTAssertEqual(
       Set(try body(received[0]).keys),
-      ["policy_version", "preparation_profile_id", "source", "request_id", "input"])
+      ["policy_version", "preparation_profile_id", "source", "request_id", "input", "trim_enabled"])
+    XCTAssertEqual(try body(received[0])["trim_enabled"] as? Bool, false)
     let declaration = try XCTUnwrap(try body(received[0])["input"] as? [String: Any])
     XCTAssertEqual(
       Set(declaration.keys), ["extension", "content_type", "bytes", "duration_seconds", "sha256"])
@@ -198,6 +280,8 @@ import XCTest
       return
     }
     XCTAssertEqual(renamed.displayName, "My interview")
+    XCTAssertEqual(renamed.serverStageTimings?.totalMs, 60000)
+    XCTAssertEqual(renamed.serverStageTimings?.stages.first?.stage, "separation")
     XCTAssertEqual(renamed.sourceTitle, "Interview")
     XCTAssertEqual(renamed.sourceKind, .url)
     XCTAssertEqual(renamed.timing?.processingElapsedMs, 20_000)
@@ -395,7 +479,7 @@ import XCTest
   private func jobJSON(status: String, metadata: Bool = false) -> String {
     let extra =
       metadata
-      ? "\"request_id\":\"c21a2eaa-7e73-4f08-89da-6ac35baa83e1\",\"source_title\":\"Interview\",\"display_name\":\"My interview\",\"source_kind\":\"url\",\"server_time\":\"2026-09-10T12:01:10.000Z\",\"timing\":{\"processing_elapsed_ms\":20000,\"processing_elapsed_approximate\":false,\"total_elapsed_ms\":70000,\"total_elapsed_approximate\":true},\"stages\":{\"validating_at\":\"2026-09-10T12:00:40.000Z\",\"processing_started_at\":\"2026-09-10T12:00:45.000Z\",\"processing_finished_at\":\"2026-09-10T12:01:05.000Z\",\"uploading_result_at\":\"2026-09-10T12:01:05.000Z\"},"
+      ? "\"request_id\":\"c21a2eaa-7e73-4f08-89da-6ac35baa83e1\",\"source_title\":\"Interview\",\"display_name\":\"My interview\",\"source_kind\":\"url\",\"server_time\":\"2026-09-10T12:01:10.000Z\",\"server_stage_timings\":{\"total_ms\":60000,\"total_complete\":true,\"stages\":[{\"stage\":\"separation\",\"duration_ms\":20000,\"complete\":true}],\"attempts\":[]},\"timing\":{\"processing_elapsed_ms\":20000,\"processing_elapsed_approximate\":false,\"total_elapsed_ms\":70000,\"total_elapsed_approximate\":true},\"stages\":{\"validating_at\":\"2026-09-10T12:00:40.000Z\",\"processing_started_at\":\"2026-09-10T12:00:45.000Z\",\"processing_finished_at\":\"2026-09-10T12:01:05.000Z\",\"uploading_result_at\":\"2026-09-10T12:01:05.000Z\"},"
       : ""
     return
       "{\(extra)\"id\":\"\(id)\",\"status\":\"\(status)\",\"created_at\":\"2026-09-09T12:00:00Z\",\"updated_at\":\"2026-09-09T12:00:00.123Z\",\"input\":{\"extension\":\"mp3\",\"bytes\":123,\"duration_seconds\":2.5},\"can_download_input\":true,\"can_download_output\":false,\"worker_available\":false}"

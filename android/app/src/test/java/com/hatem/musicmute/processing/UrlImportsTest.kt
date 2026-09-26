@@ -33,8 +33,6 @@ class UrlImportsTest {
     @Test fun shareTextRequiresOneLinkAndCanonicalizesTracking() {
         assertEquals("https://soundcloud.com/Artist/Track", UrlImportSource.canonical(
             " https://www.soundcloud.com/Artist/Track?utm_source=share "))
-        assertEquals("https://www.tumblr.com/blog/123", UrlImportSource.canonical(
-            "https://blog.tumblr.com/post/123/name?source=share"))
         assertEquals(source, UrlImportSource.sharedText("Listen here: $source"))
         assertNull(UrlImportSource.sharedText("$source https://www.tumblr.com/blog/123"))
         assertNull(UrlImportSource.sharedText("nothing to share"))
@@ -52,9 +50,8 @@ class UrlImportsTest {
             "https://www.youtube.com/shorts/UXqq0ZvbOnk",
             "https://www.facebook.com/share/v/19duj8sfLg/",
             "https://www.facebook.com/watch/?v=123456789",
-            "https://www.instagram.com/reel/Example/?igsh=share",
-            "https://www.tiktok.com/@creator/video/123456789",
-            "https://vimeo.com/123456789",
+            "https://benprunty.bandcamp.com/track/lanius-battle",
+            "https://www.mixcloud.com/dholbach/cryptkeeper/",
         )) assertEquals(url, UrlImportSource.canonical(url))
     }
 
@@ -69,7 +66,7 @@ class UrlImportsTest {
         }
     }
 
-    @Test fun authenticatedWireRequestContainsOnlyUrlAndStableId() = runTest {
+    @Test fun authenticatedWireRequestContainsUrlStableIdAndTrimChoice() = runTest {
         val requestId = UUID.randomUUID().toString()
         var calls = 0
         val api = UrlImportsApiClient(AuthApiClient(
@@ -82,7 +79,8 @@ class UrlImportsTest {
                     assertTrue(url.endsWith("/media-imports"))
                     assertEquals(installed, headers["X-Installation-Id"])
                     val fields = Json.parseToJsonElement(body!!).jsonObject
-                    assertEquals(setOf("url", "request_id"), fields.keys)
+                    assertEquals(setOf("url", "request_id", "trim_enabled"), fields.keys)
+                    assertEquals("false", fields["trim_enabled"]?.jsonPrimitive?.content)
                     assertEquals(source, fields["url"]?.jsonPrimitive?.content)
                     assertEquals(requestId, fields["request_id"]?.jsonPrimitive?.content)
                 } else {

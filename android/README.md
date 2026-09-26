@@ -175,8 +175,10 @@ Python runtime, JavaScript challenge engine or downloader update worker.
   process recreation; uncertain submissions reuse their request ID. The app polls
   import progress, then opens the existing job and result experience after
   `submitted`. Failed imports and account/provider limits are shown separately.
-  The backend uses yt-dlp to determine site support and requires an audio-only
-  source. Unsupported, private, live and playlist sources are rejected by the server.
+  A bundled verified-site catalog rejects unsupported sites and link shapes locally,
+  including restored submissions, before any import request. The backend still
+  verifies audio-only availability, private/live media and playlists. See the
+  [shared site policy](../docs/url-imports/supported-sites.md).
 - **Home:** Import audio is primary. Selecting a supported file creates a local,
   validated review showing filename, size and duration. A rights checkbox and
   explicit Remove music action are required before cloud processing. Cancelling

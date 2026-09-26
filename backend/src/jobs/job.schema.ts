@@ -389,6 +389,10 @@ export class Job {
   outputObject!: ObjectIdentity | null;
   @Prop({ type: Date, default: null })
   retainedOutputAccountedAt!: Date | null;
+  @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
+  retainedInputBytes!: number;
+  @Prop({ type: [[Number]], default: null })
+  comparisonRanges!: number[][] | null;
   @Prop({ type: Date, default: null })
   retainedOutputReleasedAt!: Date | null;
   @Prop({ type: workerRecipeSnapshot, default: null, immutable: true })

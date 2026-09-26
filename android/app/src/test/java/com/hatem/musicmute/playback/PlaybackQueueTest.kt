@@ -85,6 +85,15 @@ class PlaybackQueueTest {
         } finally { root.deleteRecursively() }
     }
 
+    @Test fun originalVariantAndItsTimelineSurviveRestart() {
+        val root = Files.createTempDirectory("queue-original").toFile()
+        try {
+            val snapshot = QueueSnapshot(listOf(tracks[0].copy(original = true)), positionMs = 12_000)
+            PlaybackQueueStore(root).save("owner", snapshot)
+            assertEquals(snapshot, PlaybackQueueStore(root).load("owner"))
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun ownerEpochChangeDuringAcquisitionCannotReturnFile() = runTest {
         val root = Files.createTempDirectory("queue-owner").toFile()
         val file = root.resolve("audio.wav").apply { writeBytes(byteArrayOf(1)) }

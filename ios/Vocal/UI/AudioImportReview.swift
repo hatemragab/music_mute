@@ -2,8 +2,9 @@ import SwiftUI
 
 struct AudioImportReview: View {
   let intent: AudioPipelineIntent
-  let confirm: () async throws -> Void
+  let confirm: (Bool) async throws -> Void
   let cancel: () async -> Void
+  @State private var trimEnabled = false
   @State private var rightsConfirmed = false
   @State private var submitting = false
   @State private var failed = false
@@ -21,6 +22,8 @@ struct AudioImportReview: View {
               .time(pattern: .minuteSecond)))
         }
         Text("import_cloud_disclosure")
+        Toggle("trim_silence", isOn: $trimEnabled).disabled(submitting)
+          .accessibilityIdentifier("importTrimSilence")
         Toggle("import_rights_confirmation", isOn: $rightsConfirmed)
           .accessibilityIdentifier("importRightsConfirmation")
       }
@@ -29,7 +32,7 @@ struct AudioImportReview: View {
         guard rightsConfirmed, !submitting else { return }
         submitting = true
         Task {
-          do { try await confirm() } catch {
+          do { try await confirm(trimEnabled) } catch {
             failed = true
             submitting = false
           }
@@ -56,8 +59,9 @@ struct PendingAudioReviews: ViewModifier {
       if let intent = pipeline.pipelines.first(where: { $0.phase == .awaitingConfirmation }) {
         AudioImportReview(
           intent: intent,
-          confirm: {
-            try await pipeline.confirmProcessing(intent.operationId, rightsConfirmed: true)
+          confirm: { trimEnabled in
+            try await pipeline.confirmProcessing(
+              intent.operationId, rightsConfirmed: true, trimEnabled: trimEnabled)
           }, cancel: { await pipeline.cancel(intent.operationId) }
         )
         .id(intent.operationId)

@@ -46,8 +46,30 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
         com.hatem.musicmute.playback.PlaybackQueueStore(File(noBackupFilesDir, "playback"))
     }
     val audioPlayback by lazy { com.hatem.musicmute.playback.AudioPlaybackController(this) }
-    override suspend fun resolvePlaybackFile(key: com.hatem.musicmute.library.LibraryKey): File =
-        libraryRepository.ensureLocal(key)
+    override suspend fun resolvePlaybackFile(key: com.hatem.musicmute.library.LibraryKey): File {
+        val expected = processingSession() ?: throw java.io.IOException("Playback account changed")
+        val file = libraryRepository.ensureLocal(key)
+        applicationScope.launch {
+            if (processingSession() != expected) return@launch
+            try { processingArtifacts.ensureOriginal(key.jobId) }
+            catch (error: CancellationException) { throw error }
+            catch (_: Exception) { /* Voice remains playable; an explicit switch can retry. */ }
+        }
+        return file
+    }
+    override suspend fun resolveOriginalFile(key: com.hatem.musicmute.library.LibraryKey): File {
+        if (processingSession()?.uid != key.ownerUid) throw java.io.IOException("Playback account changed")
+        return processingArtifacts.ensureOriginal(key.jobId)
+    }
+    override suspend fun comparisonJob(key: com.hatem.musicmute.library.LibraryKey): Job {
+        if (processingSession()?.uid != key.ownerUid) throw java.io.IOException("Playback account changed")
+        libraryRepository.storedJob(key)?.let { return it }
+        val expected = processingSession()
+        val job = jobsApi.detail(key.jobId)
+        if (processingSession() != expected) throw CancellationException("Playback account changed")
+        processingStore.updateLibraryJob(key.ownerUid, job)
+        return job
+    }
     override suspend fun reportPlaybackFailure(
         key: com.hatem.musicmute.library.LibraryKey,
         diagnostic: com.hatem.musicmute.playback.PlaybackFailureDiagnostic,

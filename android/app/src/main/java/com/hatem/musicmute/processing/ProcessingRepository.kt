@@ -408,6 +408,7 @@ class ProcessingRepository(
                         2,
                         operation.mediaPolicy.profileId,
                         operation.mediaSource,
+                        trimEnabled = operation.trimEnabled,
                     ),
                 )
                 if (result.requestId != null && result.requestId != operation.requestId)

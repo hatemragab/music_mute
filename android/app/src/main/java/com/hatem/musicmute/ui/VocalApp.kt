@@ -115,6 +115,7 @@ fun VocalApp(
     var urlImportText by rememberSaveable { mutableStateOf("") }
     var urlImportError by remember { mutableStateOf<String?>(null) }
     var urlImportBusy by remember { mutableStateOf(false) }
+    var trimEnabled by rememberSaveable(processingSession) { mutableStateOf(false) }
     var confirmUrlImport by remember { mutableStateOf(false) }
     LaunchedEffect(sharedUrlText) {
         if (sharedUrlText != null) {
@@ -149,7 +150,7 @@ fun VocalApp(
         if (!urlImportBusy) scope.launch {
             urlImportBusy = true
             try {
-                app.urlImports.submit(urlImportText)
+                app.urlImports.submit(urlImportText, trimEnabled)
                 urlImportText = ""
                 urlImportError = null
             } catch (error: UrlImportFailure) {
@@ -233,10 +234,10 @@ fun VocalApp(
         }
     }
     val importVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) processingModel.importAudio(uri)
+        if (uri != null) processingModel.importAudio(uri, trimEnabled)
     }
     val importAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) processingModel.importAudio(uri)
+        if (uri != null) processingModel.importAudio(uri, trimEnabled)
     }
     val processingNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { onProcessingNotifications() }
     var pendingOutput by remember { mutableStateOf<Pair<File, ProcessingSession>?>(null) }
@@ -245,6 +246,13 @@ fun VocalApp(
         pendingOutput = null
         if (uri != null && output != null && output.second == processingSession)
             processingModel.export(output.first, uri, output.second)
+    }
+    var pendingOriginal by remember { mutableStateOf<Pair<File, ProcessingSession>?>(null) }
+    val exportOriginal = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/*")) { uri ->
+        val original = pendingOriginal
+        pendingOriginal = null
+        if (uri != null && original != null && original.second == processingSession)
+            processingModel.export(original.first, uri, original.second)
     }
     val openImport: () -> Unit = {
         nav.navigate(Destination.Home.name) { launchSingleTop = true }
@@ -361,6 +369,7 @@ fun VocalApp(
                         com.hatem.musicmute.ui.home.HomeScreen(
                             tasks = audioTasks, history = jobs, busy = processing.preparing,
                             urlImports = urlImports,
+                            trimEnabled = trimEnabled, onTrimEnabled = { trimEnabled = it },
                             urlImportText = urlImportText,
                             urlImportError = urlImportError,
                             urlImportBusy = urlImportBusy,
@@ -480,6 +489,24 @@ fun VocalApp(
                             previous = app.audioPlayback::previous, shuffle = app.audioPlayback::setShuffle,
                             repeat = app.audioPlayback::setRepeat, autoNext = app.audioPlayback::setAutoNext,
                             speed = app.audioPlayback::setSpeed, volume = app.audioPlayback::setVolume,
+                            original = app.audioPlayback::selectOriginal,
+                            saveOriginal = {
+                                val key = currentTrackKey
+                                val owner = app.processingSession()
+                                if (key != null && owner != null) scope.launch {
+                                    try {
+                                        val job = app.comparisonJob(key)
+                                        val file = app.processingArtifacts.ensureOriginal(key.jobId)
+                                        if (app.processingSession() == owner) {
+                                            pendingOriginal = file to owner
+                                            val name = (job.displayName ?: job.sourceTitle ?: "Audio")
+                                                .replace(Regex("[^\\p{L}\\p{N} ._-]"), "_").take(100)
+                                            exportOriginal.launch("$name-original.${job.input.extension}")
+                                        }
+                                    } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                                    catch (_: Exception) { snackbar.showSnackbar(context.getString(R.string.original_unavailable)) }
+                                }
+                            },
                             queue = { showPlaybackQueue = true },
                             info = { currentTrackKey?.let(openAudioDetails) },
                             star = { currentTrackKey?.let(libraryModel::toggleStar) }))

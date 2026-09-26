@@ -678,7 +678,7 @@ export class ProcessingUsageService {
       | 'outputObject'
       | 'retainedOutputAccountedAt'
       | 'retainedOutputReleasedAt'
-    >,
+    > & { retainedInputBytes?: number },
     session: ClientSession,
   ) {
     this.assertTransaction(session);
@@ -688,12 +688,14 @@ export class ProcessingUsageService {
       job.retainedOutputReleasedAt
     )
       return;
+    const retainedBytes =
+      job.outputObject.bytes + (job.retainedInputBytes ?? 0);
     const updated = await this.users.updateOne(
       {
         _id: job.userId,
-        retainedOutputBytes: trusted({ $gte: job.outputObject.bytes }),
+        retainedOutputBytes: trusted({ $gte: retainedBytes }),
       },
-      { $inc: { retainedOutputBytes: -job.outputObject.bytes } },
+      { $inc: { retainedOutputBytes: -retainedBytes } },
       { session, runValidators: true },
     );
     if (updated.modifiedCount !== 1)

@@ -10,6 +10,25 @@ class AudioTaskTimelineTest {
         queuedAt = Instant.EPOCH,
         stages = JobStages(validatingAt = Instant.EPOCH, processingStartedAt = Instant.EPOCH))
 
+    @Test fun serverMeasurementsDriveTimelineAndTotalWithoutClientElapsedTime() {
+        val measurements = ServerStageTimings(6000, true, listOf(
+            ServerStageMeasurement("queue", 1000, true),
+            ServerStageMeasurement("input-download", 500, true),
+            ServerStageMeasurement("separation", 3000, false),
+            ServerStageMeasurement("output-upload", 500, true),
+        ))
+        val task = audioTaskPresentations(emptyList(), listOf(job.copy(
+            status = "ready", serverStageTimings = measurements,
+            timing = JobTiming(totalElapsedMs = 999999, totalElapsedApproximate = true),
+        )), 9999999).single()
+        assertEquals(6000L, task.totalElapsedMs)
+        assertFalse(task.totalElapsedApproximate)
+        val steps = audioTaskTimeline(task)
+        assertEquals(1000L, steps.single { it.stage == AudioTaskStage.QUEUED }.measurement?.durationMs)
+        assertEquals(false, steps.single { it.stage == AudioTaskStage.PROCESSING }.measurement?.complete)
+        assertNull(steps.single { it.stage == AudioTaskStage.PREPARING_INPUT }.measurement)
+    }
+
     @Test fun serverOutcomesRetainCompletedStepsWhenReopenedWithoutLocalOperation() {
         for ((status, outcome) in listOf(
             "interrupted" to AudioStepState.INTERRUPTED,

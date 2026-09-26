@@ -55,6 +55,8 @@ fun HomeScreen(
     onCancel: (AudioTaskPresentation) -> Unit,
     onRetry: (AudioTaskPresentation) -> Unit,
     onDelete: (AudioTaskPresentation, () -> Unit) -> Unit,
+    trimEnabled: Boolean = false,
+    onTrimEnabled: (Boolean) -> Unit = {},
     urlImports: List<UrlImportRecord> = emptyList(),
     urlImportText: String = "",
     urlImportError: String? = null,
@@ -100,10 +102,14 @@ fun HomeScreen(
                     Spacer(Modifier.height(24.dp))
                     CreativeWave(Modifier.fillMaxWidth().height(56.dp).alpha(0.35f))
                     Spacer(Modifier.height(20.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.trim_silence), Modifier.weight(1f))
+                        Switch(trimEnabled, onTrimEnabled, enabled = !importBusy)
+                    }
                     CreativeCard(contentPadding = 12.dp, contentGap = 8.dp,
                         shape = RoundedCornerShape(14.dp)) {
                         Text(stringResource(R.string.url_import_title), style = MaterialTheme.typography.titleMedium)
-                        Text(stringResource(R.string.url_import_supported),
+                        Text(stringResource(R.string.url_import_supported, com.hatem.musicmute.processing.SupportedAudioSites.names.joinToString(", ")),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {

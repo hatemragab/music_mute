@@ -271,3 +271,10 @@ Processing updates use authenticated raw WebSocket snapshots with automatic
 reconnection. See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
 and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
 HTTP remains responsible for authentication, commands and file transfers.
+
+## Audio transfer performance
+
+See [transfer performance](../docs/audio-transfer-performance/README.md) for concurrent
+bucket checks, server/worker diagnostics, the synthetic benchmark and the opt-in
+`S3_TRANSFER_ACCELERATION_ENABLED` flag (default false). Regional management and
+private immutable grants remain required.

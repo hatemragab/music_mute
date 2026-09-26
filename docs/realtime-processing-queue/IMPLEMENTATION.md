@@ -161,3 +161,35 @@ single-host fixture is not evidence for the 3,000-connection production limit.
 - APK verification stays subscribed until terminal state or cancellation. Commands,
   media grants, explicit security revalidation and file transfers remain HTTP.
 - Nothing committed, pushed, published or deployed.
+
+
+## Direct-main integration — 2026-09-26
+
+Integrated realtime work with remote main `796ce894`, preserving original-audio
+comparison, optional trimming, transfer diagnostics/acceleration, startup UI and
+build-version monitoring. Build-version checks remain distinct from the migrated
+job/status data subscriptions. Regenerated the iOS project from project.yml to
+include both source sets. Production images from the earlier deployment do not
+prove this later combined source revision has been deployed.
+
+Validation of the combined source:
+
+- Backend `pnpm run verify`: 933 unit and 148 HTTP tests passed, along with
+  format, lint, typecheck, secrets checks, transfer benchmark and build.
+- Compiled worker-flow, imports and realtime integrations: seven passed using
+  isolated local services. Six-socket propagation maximum was 1,153 ms.
+- Dashboard: typecheck, lint, 79 unit tests, build and two realtime Chrome tests
+  passed. Public web: typecheck, lint, 90 unit tests, build, seven server tests and
+  the realtime Chrome test passed. Initial web server test used stale dist; after
+  rebuilding it passed. Browser suites were run sequentially due to shared port.
+- Worker: typecheck, lint, 394 tests passed (two skipped), and build passed.
+- Android: focused processing JVM tests, assembleDirectAuthE2e and
+  lintDirectAuthE2e passed. No device test was run.
+- iOS: fixture build-for-testing passed for the mandated iPhone 17 Pro simulator.
+  The fixture omits the absent local Firebase plist; production configuration
+  remains required. Checked repository configuration was preserved.
+- iOS focused fixture tests: 37 passed, zero failures on the specified simulator.
+  The first test invocation lacked the fixture launch argument and failed on the
+  absent Firebase plist; rerunning with the test-owned argument passed.
+- Android focused processing suite: 161 tests. Swift conflict files passed strict
+  swift-format lint; merged source passed git diff --check.

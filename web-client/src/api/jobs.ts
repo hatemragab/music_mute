@@ -1,3 +1,4 @@
+import { supportedAudioUrl } from "../site-policy/source";
 import type { ApiClient } from "./client";
 import type {
   JobListView,
@@ -16,7 +17,7 @@ export const jobsApi = (api: ApiClient) => ({
     api.get<JobView>(`/jobs/${encodeURIComponent(id)}`, signal),
   createImport: (url: string, trimEnabled: boolean, requestId: string) =>
     api.post<MediaImportView>("/media-imports", {
-      url,
+      url: supportedAudioUrl(url),
       trimEnabled,
       requestId,
     }),

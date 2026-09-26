@@ -69,7 +69,9 @@ class AudioPlaybackService : MediaSessionService() {
                 if (parts.size != 2 || parts[0] != expected.uid || deps.currentPlaybackSession() != expected)
                     throw IOException("Playback account changed")
                 val file = try { runBlocking {
-                    resolveQueueFile(LibraryKey(parts[0], parts[1]), expected, deps::currentPlaybackSession, deps::resolvePlaybackFile)
+                    resolveQueueFile(LibraryKey(parts[0], parts[1]), expected, deps::currentPlaybackSession) { key ->
+                        if (spec.uri.authority == "input") deps.resolveOriginalFile(key) else deps.resolvePlaybackFile(key)
+                    }
                 } }
                     catch (error: Exception) { throw IOException("Audio unavailable", error) }
                 if (deps.currentPlaybackSession() != expected || !file.isFile || file.length() == 0L)

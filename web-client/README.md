@@ -49,6 +49,14 @@ isolated integration tests and browser-origin CORS preflight; authenticated
 production journeys have not been exercised. Backend verification lives in
 `backend/`.
 
+## Startup recovery
+
+The startup screen identifies whether the browser is restoring Firebase sign-in or
+connecting the account session to the API. Each step has a 15-second limit. If a
+step stalls, the screen shows a localized explanation and Retry; retry starts a
+new auth subscription and cancels the previous session request. This avoids an
+unbounded loading screen without signing users out or discarding their data.
+
 ## Audio behavior
 
 Local intake accepts audio only. Browser-decodable MP3, AAC/M4A, Ogg/Opus and
@@ -60,7 +68,11 @@ have lower account limits, which the client reads before admission. Source
 audio that the browser cannot inspect is rejected with an actionable message.
 The server remains authoritative for duration, format, checksum, quota and job
 state. Closing the tab interrupts preparation or upload. URL imports happen on
-the server and never download provider media into the browser.
+the server and never download provider media into the browser. A bundled
+[verified-site policy](../docs/url-imports/supported-sites.md) rejects unknown
+sites and invalid item links locally before saving retry state or submitting
+an import. The catalog in `src/site-policy/data/` is also bundled by Android
+and iOS; changing it requires rebuilding all clients.
 
 The AAC encoder bundle is about 1 MB before compression and is fetched only when
 conversion is needed. Mediabunny and its AAC encoder declare MPL-2.0; their
@@ -93,3 +105,31 @@ Processing updates use authenticated raw WebSocket snapshots with automatic
 reconnection. See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
 and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
 HTTP remains responsible for authentication, commands and file transfers.
+
+## Optional accelerated audio transfers
+
+`PUBLIC_MEDIA_ACCELERATION_ENABLED=true` adds the accelerated HTTPS origin for
+the same bucket specified by `PUBLIC_MEDIA_ORIGIN` to the connect/media CSP, while
+keeping regional grants valid. It defaults to false and requires a regional S3
+origin with a bucket name without dots. Deploy this before opting the backend
+into acceleration. See [transfer rollout](../docs/audio-transfer-performance/README.md).
+
+## Deployment updates
+
+Each production build embeds a unique version in its HTML. Open tabs check the
+non-cacheable entry page every 60 seconds while visible and online, and on focus,
+visibility changes or reconnection. A different valid version automatically reloads
+the current URL, including for rollbacks. Development builds do not poll.
+
+Reload waits while a local audio file is selected or being inspected/prepared/uploaded,
+while text fields contain drafts, or while visible media is playing. Clear drafts
+or finish the operation to allow the next check to reload. Failed, timed-out or
+malformed responses leave the current app running. A session-storage guard permits
+only one automatic reload per loaded version, with at least five minutes between
+automatic reloads across versions, to avoid stale-cache or mixed-replica loops;
+when session storage is unavailable, refresh manually.
+
+This takes effect for tabs that have loaded a build containing the monitor. Tabs
+opened before its first deployment still need one manual refresh. Reusing the same
+built image keeps the same version; changing only runtime configuration does not
+trigger a reload.

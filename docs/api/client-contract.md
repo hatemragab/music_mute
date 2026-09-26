@@ -207,6 +207,22 @@ API guideline review: https://opensource.zalando.com/restful-api-guidelines/
 (retrieved 2026-09-26); rules 101, 106 and 118 shaped the documented, additive,
 snake_case response field. Authentication and routes are unchanged.
 
+## 2026-09-26: server-owned stage timing snapshots
+
+Job and media-import views and administrator job detail add nullable
+`server_stage_timings`: `total_ms`, `total_complete`, `stages`, and `attempts`.
+Stage entries contain `stage`, integer `duration_ms`, and `complete`. Missing
+measurements remain unavailable; incomplete entries are last-observed lower bounds.
+Clients must not extrapolate these values with their own clocks. Totals for URL
+jobs include the import phase; queue totals exclude failed execution and separate
+retry backoff. Detailed boundaries and rollout notes are in
+[Server-owned job stage timings](../job-stage-timings.md).
+
+Worker progress, completion, and failure requests accept optional bounded
+`execution_timings` snapshots. Deploy backend support before updating workers.
+The existing client `timing` and administrator `stage_timings` fields remain
+backward compatible; new UIs use `server_stage_timings` for authoritative totals.
+
 ## Web client installation (2026-09-26)
 
 `POST /auth/sessions` and `PUT /users/me/devices/{installation_id}` accept

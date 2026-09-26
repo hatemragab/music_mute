@@ -75,8 +75,59 @@ fun AudioStepTimeline(task: AudioTaskPresentation) {
                         color = if (step.state == AudioStepState.PENDING) MaterialTheme.colorScheme.onSurfaceVariant
                             else MaterialTheme.colorScheme.onSurface,
                     )
+                    step.measurement?.takeIf { it.durationMs >= 0 }?.let {
+                        val duration = String.format(java.util.Locale.getDefault(), "%.1f s", it.durationMs / 1000.0)
+                        Text(if (it.complete) duration else stringResource(R.string.timing_partial, duration),
+                            style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
         }
+        task.serverStageTimings?.let { timing ->
+            HorizontalDivider()
+            Text(stringResource(R.string.server_timings), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.timing_note), style = MaterialTheme.typography.bodySmall)
+            timing.stages.filter { it.durationMs >= 0 }.forEach { measurement ->
+                ServerTimingRow(stringResource(serverTimingLabel(measurement.stage)), measurement.durationMs, measurement.complete)
+            }
+            timing.totalMs?.takeIf { it >= 0 }?.let {
+                ServerTimingRow(stringResource(R.string.server_total), it, timing.totalComplete)
+            }
+        }
     }
+}
+
+@Composable
+private fun ServerTimingRow(label: String, durationMs: Long, complete: Boolean) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        val duration = String.format(java.util.Locale.getDefault(), "%.1f s", durationMs / 1000.0)
+        Text(if (complete) duration else stringResource(R.string.timing_partial, duration),
+            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace))
+    }
+}
+
+private fun serverTimingLabel(stage: String): Int = when (stage) {
+    "import-queue" -> R.string.timing_stage_import_queue
+    "source-download" -> R.string.timing_stage_source_download
+    "source-validation" -> R.string.timing_stage_source_validation
+    "source-upload" -> R.string.timing_stage_source_upload
+    "upload-confirmation" -> R.string.timing_stage_upload_confirmation
+    "submission-window" -> R.string.timing_stage_submission_window
+    "queue" -> R.string.timing_stage_queue
+    "retry-wait" -> R.string.timing_stage_retry_wait
+    "resource-check" -> R.string.timing_stage_resource_check
+    "input-download" -> R.string.timing_stage_input_download
+    "input-validation" -> R.string.timing_stage_input_validation
+    "preparation" -> R.string.timing_stage_preparation
+    "model-load" -> R.string.timing_stage_model_load
+    "separation" -> R.string.timing_stage_separation
+    "denoise" -> R.string.timing_stage_denoise
+    "trim" -> R.string.timing_stage_trim
+    "encoding" -> R.string.timing_stage_encoding
+    "output-validation" -> R.string.timing_stage_output_validation
+    "output-ready" -> R.string.timing_stage_output_ready
+    "output-upload" -> R.string.timing_stage_output_upload
+    "completion" -> R.string.timing_stage_completion
+    else -> R.string.timing_stage_other
 }

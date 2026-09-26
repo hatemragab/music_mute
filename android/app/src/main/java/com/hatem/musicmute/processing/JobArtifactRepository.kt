@@ -43,9 +43,10 @@ class JobArtifactRepository(
     private val isPlayableMp3: (File) -> Boolean = ::isPlayableProcessingMp3,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val now: () -> Instant = Instant::now,
+    private val isPlayableAudio: (File) -> Boolean = { isPlayableProcessingAudio(it) },
 ) {
     private val downloads = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[CoroutineJob]))
-    private data class Request(val session: ProcessingSession, val jobId: String, val revision: Long)
+    private data class Request(val session: ProcessingSession, val jobId: String, val revision: Long, val artifact: String = "output")
     private val lock = Any()
     private var revision = 0L
     private val requests = mutableMapOf<Request, Deferred<File>>()
@@ -78,14 +79,18 @@ class JobArtifactRepository(
         result
     }
 
-    suspend fun ensureOutput(jobId: String): File {
+    suspend fun ensureOutput(jobId: String): File = ensureArtifact(jobId, "output")
+
+    suspend fun ensureOriginal(jobId: String): File = ensureArtifact(jobId, "input")
+
+    private suspend fun ensureArtifact(jobId: String, artifact: String): File {
         if (!jobId.matches(Regex("[a-fA-F0-9]{24}"))) throw JobsFailure(JobsProblem.INVALID_INPUT)
         val (request, task) = synchronized(lock) {
             val session = sessionProvider()?.takeIf { it.uid.isNotBlank() }
                 ?: throw JobsFailure(JobsProblem.UNAUTHENTICATED)
             if (cacheIdentity(session.uid, jobId) in deleted)
                 throw ArtifactException(ArtifactProblem.NOT_READY)
-            val request = Request(session, jobId.lowercase(java.util.Locale.ROOT), revision)
+            val request = Request(session, jobId.lowercase(java.util.Locale.ROOT), revision, artifact)
             val task = requests[request] ?: downloads.async(start = CoroutineStart.LAZY) {
                 try { fetch(request) }
                 finally {
@@ -103,7 +108,7 @@ class JobArtifactRepository(
             currentCoroutineContext().ensureActive()
             synchronized(lock) {
                 requireCurrent(request)
-                mutableAvailability.value = mutableAvailability.value + (request.jobId to true)
+                if (artifact == "output") mutableAvailability.value = mutableAvailability.value + (request.jobId to true)
             }
         }
     }
@@ -142,7 +147,8 @@ class JobArtifactRepository(
         val identity = cacheIdentity(session.uid, normalized)
         val cancelled = synchronized(lock) {
             deleted += identity
-            grantRequestIds.remove(identity)
+            grantRequestIds.remove("$identity:input")
+            grantRequestIds.remove("$identity:output")
             mutableProgress.value = mutableProgress.value - normalized
             mutableAvailability.value = mutableAvailability.value + (normalized to false)
             requests.filterKeys { it.session == session && it.jobId == normalized }.values.toList().also {
@@ -155,6 +161,8 @@ class JobArtifactRepository(
             "${outputCacheKey(session.uid, normalized)}.mp3",
         )
         if (destination.isFile && !destination.delete()) throw ArtifactException(ArtifactProblem.STORAGE)
+        val original = File(File(processingOwnerDirectory(root, session.uid), "originals"), "${outputCacheKey(session.uid, normalized)}.audio")
+        if (original.isFile && !original.delete()) throw ArtifactException(ArtifactProblem.STORAGE)
         destination.parentFile?.listFiles()?.filter {
             it.name.startsWith(destination.name + ".") && it.name.endsWith(".partial")
         }?.forEach { it.delete() }
@@ -171,19 +179,22 @@ class JobArtifactRepository(
     private fun valid(file: File): Boolean = file.isFile && file.length() > 0 &&
         runCatching { isPlayableMp3(file) }.getOrDefault(false)
 
+    private fun validArtifact(file: File, artifact: String): Boolean =
+        if (artifact == "input") runCatching { isPlayableAudio(file) }.getOrDefault(false) else valid(file)
+
     private suspend fun fetch(request: Request): File {
         requireCurrent(request)
-        val directory = File(processingOwnerDirectory(root, request.session.uid), "outputs")
-        val destination = File(directory, "${outputCacheKey(request.session.uid, request.jobId)}.mp3")
+        val directory = File(processingOwnerDirectory(root, request.session.uid), if (request.artifact == "input") "originals" else "outputs")
+        val destination = File(directory, "${outputCacheKey(request.session.uid, request.jobId)}.${if (request.artifact == "input") "audio" else "mp3"}")
         val partial = File(directory, "${destination.name}.${UUID.randomUUID()}.partial")
-        val identity = cacheIdentity(request.session.uid, request.jobId)
+        val identity = cacheIdentity(request.session.uid, request.jobId) + ":" + request.artifact
         var grantRequestId = synchronized(lock) {
             grantRequestIds.getOrPut(identity) { UUID.randomUUID().toString() }
         }
         try {
             if (!destination.canonicalPath.startsWith(root.canonicalPath + File.separator))
                 throw ArtifactException(ArtifactProblem.STORAGE)
-            if (valid(destination)) {
+            if (validArtifact(destination, request.artifact)) {
                 requireCurrent(request)
                 synchronized(lock) { grantRequestIds.remove(identity) }
                 return destination
@@ -220,11 +231,11 @@ class JobArtifactRepository(
                 }
                 currentCoroutineContext().ensureActive()
                 requireCurrent(request)
-                if (!valid(partial)) throw ArtifactException(ArtifactProblem.INVALID_OUTPUT)
+                if (!validArtifact(partial, request.artifact)) throw ArtifactException(ArtifactProblem.INVALID_OUTPUT)
                 return synchronized(lock) {
                     requireCurrent(request)
                     // Never replace a valid cache created while this attempt was in flight.
-                    if (!valid(destination)) {
+                    if (!validArtifact(destination, request.artifact)) {
                         try {
                             Files.move(partial.toPath(), destination.toPath(),
                                 StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
@@ -253,17 +264,19 @@ class JobArtifactRepository(
         requireCurrent(request)
         val job = api.detail(request.jobId)
         requireCurrent(request)
-        if (job.id != request.jobId || job.status != "ready" || !job.canDownloadOutput)
+        if (job.id != request.jobId || job.status != "ready" || !(if (request.artifact == "input") job.canDownloadInput else job.canDownloadOutput))
             throw ArtifactException(ArtifactProblem.NOT_READY)
-        return api.download(request.jobId, "output", requestId).also { requireCurrent(request) }
+        return api.download(request.jobId, request.artifact, requestId).also { requireCurrent(request) }
     }
 }
 
 private fun cacheIdentity(uid: String, jobId: String) = "$uid:$jobId"
 
 /** Require an actual MP3 audio track, a platform decoder and readable sample data. */
-internal fun isPlayableProcessingMp3(file: File): Boolean {
-    if (!file.isFile || file.length() <= 0 || sniffProcessingContainer(file) != "audio/mpeg") return false
+internal fun isPlayableProcessingMp3(file: File): Boolean = isPlayableProcessingAudio(file, true)
+
+internal fun isPlayableProcessingAudio(file: File, mp3Only: Boolean = false): Boolean {
+    if (!file.isFile || file.length() <= 0 || (mp3Only && sniffProcessingContainer(file) != "audio/mpeg")) return false
     val extractor = MediaExtractor()
     return try {
         extractor.setDataSource(file.absolutePath)
@@ -273,7 +286,7 @@ internal fun isPlayableProcessingMp3(file: File): Boolean {
             val mime = format.getString(MediaFormat.KEY_MIME).orEmpty()
             if (mime.startsWith("video/")) return false
             if (mime.startsWith("audio/")) {
-                if (mime != "audio/mpeg" || !format.containsKey(MediaFormat.KEY_DURATION) ||
+                if ((mp3Only && mime != "audio/mpeg") || !format.containsKey(MediaFormat.KEY_DURATION) ||
                     format.getLong(MediaFormat.KEY_DURATION) <= 0 ||
                     MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(format) == null) return false
                 audioTrack = index

@@ -18,6 +18,9 @@ struct ProcessingDetailView: View {
   var onDelete: () -> Void
   var onCancel: () -> Void
   var onRetry: () -> Void
+  var original: Bool = false
+  var onOriginal: (Bool) -> Void = { _ in }
+  var onSaveOriginal: () -> Void = {}
   @State private var renaming = false
   @State private var deleting = false
   @State private var proposedName = ""
@@ -38,7 +41,7 @@ struct ProcessingDetailView: View {
               .contentTransition(.opacity)
               .animation(.easeInOut(duration: reduceMotion ? 0 : 0.2), value: task.statusKey)
           }
-          AudioStepTimeline(steps: task.timeline)
+          AudioStepTimeline(steps: task.timeline, timings: task.serverStageTimings)
           identifierRow(
             title: task.jobID == nil ? "processing_reference" : "processing_job_id",
             value: task.jobID ?? task.reference)
@@ -123,9 +126,17 @@ struct ProcessingDetailView: View {
       }
       .buttonStyle(PrimaryButtonStyle()).disabled(busy).accessibilityIdentifier("processingPlay")
       if duration > 0 {
+        Picker("comparison_track", selection: Binding(get: { original }, set: onOriginal)) {
+          Text("voice_track").tag(false)
+          Text("original_track").tag(true)
+        }.pickerStyle(.segmented).disabled(busy)
+          .accessibilityIdentifier("comparisonSource")
+
         Slider(value: Binding(get: { min(position, duration) }, set: onSeek), in: 0...duration)
           .accessibilityLabel(Text("playback_position"))
       }
+      Button("save_original", action: onSaveOriginal).disabled(
+        busy || history.detail?.canDownloadInput != true)
       Button("processing_download", action: onDownload).disabled(busy)
         .accessibilityIdentifier("processingDownload")
       Button("processing_share", action: onShare).disabled(busy)

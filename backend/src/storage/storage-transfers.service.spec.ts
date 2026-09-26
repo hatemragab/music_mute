@@ -40,6 +40,50 @@ function fixture() {
 }
 
 describe('StorageTransfersService', () => {
+  it('uses the opt-in signer for audio PUT/GET and keeps verification regional', async () => {
+    const { service, client, send } = fixture();
+    const accelerated = new S3Client({
+      region: 'us-east-1',
+      useAccelerateEndpoint: true,
+      credentials: {
+        accessKeyId: 'fixture-access-key',
+        secretAccessKey: 'fixture-secret-key',
+      },
+    });
+    Object.assign(client, { transferSigner: accelerated });
+    try {
+      const grant = await service.createWorkerOutputGrant(
+        object,
+        new Date(Date.now() + 60_000),
+      );
+      const url = new URL(grant.url);
+      expect(url.hostname).toBe(
+        'private-fixture-bucket.s3-accelerate.amazonaws.com',
+      );
+      expect(url.searchParams.get('X-Amz-SignedHeaders')).toContain(
+        'if-none-match',
+      );
+      expect(grant.headers['x-amz-checksum-sha256']).toBe(object.sha256);
+      const download = new URL((await service.createDownloadGrant(object)).url);
+      expect(download.hostname).toBe(url.hostname);
+      expect(download.searchParams.get('versionId')).toBe('pinned');
+      send.mockResolvedValueOnce({
+        VersionId: 'pinned',
+        ContentLength: object.bytes,
+        ContentType: object.contentType,
+        ChecksumSHA256: object.sha256,
+      } as never);
+      await expect(
+        service.verifyUploadedVersion(object, 'pinned'),
+      ).resolves.toEqual(object);
+      expect(send).toHaveBeenCalledOnce();
+      expect(client.config.useAccelerateEndpoint).toBe(false);
+    } finally {
+      accelerated.destroy();
+      client.destroy();
+    }
+  });
+
   it('signs immutable input uploads with exact size, type, and checksum', async () => {
     const { service, client, preflight } = fixture();
     const reservation = {

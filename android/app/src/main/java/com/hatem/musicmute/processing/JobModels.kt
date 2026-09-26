@@ -33,6 +33,7 @@ data class CreateJobMetadata(
     val policyVersion: Int? = null,
     val preparationProfileId: String? = null,
     val source: String? = null,
+    val trimEnabled: Boolean = false,
 )
 
 /** Unknown server states remain displayable, but have no actionable enum value. */
@@ -94,6 +95,16 @@ data class JobStages(
 )
 
 @Serializable
+data class ServerStageMeasurement(val stage: String, val durationMs: Long, val complete: Boolean)
+
+@Serializable
+data class ServerStageTimings(
+    val totalMs: Long? = null,
+    val totalComplete: Boolean = false,
+    val stages: List<ServerStageMeasurement> = emptyList(),
+)
+
+@Serializable
 data class Job(
     val id: String,
     val status: String,
@@ -113,9 +124,12 @@ data class Job(
     val sourceKind: String? = null,
     @Serializable(with = JobInstantSerializer::class) val serverTime: Instant? = null,
     val timing: JobTiming? = null,
+    val serverStageTimings: ServerStageTimings? = null,
     val stages: JobStages? = null,
     val queue: ProcessingQueue? = null,
     val processingProgress: ProcessingProgress? = null,
+    val trimEnabled: Boolean = true,
+    val comparisonRanges: List<List<Long>>? = null,
 ) {
     val knownStatus: JobStatus? get() = JobStatus.entries.find { it.wireValue == status }
 }

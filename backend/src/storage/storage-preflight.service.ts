@@ -1,5 +1,6 @@
 import {
   GetBucketAclCommand,
+  GetBucketAccelerateConfigurationCommand,
   GetBucketLifecycleConfigurationCommand,
   GetBucketLocationCommand,
   GetBucketPolicyStatusCommand,
@@ -62,6 +63,7 @@ function confirmedAbsent(error: unknown, expectedName: string): boolean {
 export class StoragePreflightService {
   private readonly bucket: string;
   private readonly region: string;
+  private readonly accelerationEnabled: boolean;
   private readyUntil = 0;
   private pending: Promise<void> | undefined;
 
@@ -71,6 +73,8 @@ export class StoragePreflightService {
   ) {
     this.bucket = config.getOrThrow<string>('S3_BUCKET');
     this.region = config.getOrThrow<string>('AWS_REGION');
+    this.accelerationEnabled =
+      config.get<boolean>('S3_TRANSFER_ACCELERATION_ENABLED') === true;
   }
 
   async assertReady(): Promise<void> {
@@ -88,82 +92,100 @@ export class StoragePreflightService {
   }
 
   private async check(): Promise<void> {
-    let operation = 'GetBucketLocation';
-    try {
-      const request = {
-        abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS),
-      };
-      const location = await this.storage.send(
+    const request = {
+      abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS),
+    };
+    // Independent reads share one deadline. Wait for every read to settle so a
+    // failed check cannot leave background requests overlapping the next check.
+    const results = await Promise.allSettled([
+      this.storage.send(
         new GetBucketLocationCommand({ Bucket: this.bucket }),
         request,
-      );
-      operation = 'GetBucketVersioning';
-      const versioning = await this.storage.send(
+      ),
+      this.storage.send(
         new GetBucketVersioningCommand({ Bucket: this.bucket }),
         request,
-      );
-      operation = 'GetPublicAccessBlock';
-      const publicAccess = await this.storage.send(
+      ),
+      this.storage.send(
         new GetPublicAccessBlockCommand({ Bucket: this.bucket }),
         request,
-      );
-      operation = 'GetBucketPolicyStatus';
-      const policy = await this.policyStatus(request);
-      operation = 'GetBucketAcl';
-      const acl = await this.storage.send(
+      ),
+      this.policyStatus(request),
+      this.storage.send(
         new GetBucketAclCommand({ Bucket: this.bucket }),
         request,
-      );
-      operation = 'GetBucketLifecycleConfiguration';
-      const lifecycle = await this.lifecycleConfiguration(request);
-
-      const actualRegion =
-        location.LocationConstraint === undefined
-          ? 'us-east-1'
-          : location.LocationConstraint === 'EU'
-            ? 'eu-west-1'
-            : location.LocationConstraint;
-      const block = publicAccess.PublicAccessBlockConfiguration;
-      const hasPublicAcl = acl.Grants?.some((grant) =>
-        PUBLIC_ACL_GROUPS.has(grant.Grantee?.URI ?? ''),
-      );
-      const policyVerified =
-        policy === undefined || policy.PolicyStatus?.IsPublic === false;
-      const aclVerified = Array.isArray(acl.Grants);
-      const lifecycleVerified =
-        lifecycle === undefined || Array.isArray(lifecycle.Rules);
-      const unsafeLifecycle = lifecycle?.Rules?.some(
-        (rule) => !safeLifecycleRule(rule),
-      );
-
-      const fail = (reason: string): never => {
+      ),
+      this.lifecycleConfiguration(request),
+      this.accelerationEnabled
+        ? this.storage.send(
+            new GetBucketAccelerateConfigurationCommand({
+              Bucket: this.bucket,
+            }),
+            request,
+          )
+        : Promise.resolve(undefined),
+    ]);
+    const unwrap = <T>(
+      result: PromiseSettledResult<T>,
+      operation: string,
+    ): T => {
+      if (result.status === 'rejected')
         throw new StartupDependencyError(
-          `Storage bucket preflight failed: ${reason}`,
+          `Storage bucket preflight failed: ${operation}`,
+          result.reason,
         );
-      };
-      if (actualRegion !== this.region)
-        fail('bucket region does not match AWS_REGION');
-      if (versioning.Status !== 'Enabled') fail('versioning must be Enabled');
-      if (
-        !block?.BlockPublicAcls ||
-        !block.IgnorePublicAcls ||
-        !block.BlockPublicPolicy ||
-        !block.RestrictPublicBuckets
-      )
-        fail('all four public access blocks must be enabled');
-      if (!policyVerified) fail('bucket policy must be confirmed private');
-      if (!aclVerified || hasPublicAcl)
-        fail('bucket ACL must be confirmed private');
-      if (!lifecycleVerified)
-        fail('lifecycle configuration could not be verified');
-      if (unsafeLifecycle) fail('unsafe lifecycle actions are not allowed');
-    } catch (error) {
-      if (error instanceof StartupDependencyError) throw error;
+      return result.value;
+    };
+    const location = unwrap(results[0], 'GetBucketLocation');
+    const versioning = unwrap(results[1], 'GetBucketVersioning');
+    const publicAccess = unwrap(results[2], 'GetPublicAccessBlock');
+    const policy = unwrap(results[3], 'GetBucketPolicyStatus');
+    const acl = unwrap(results[4], 'GetBucketAcl');
+    const lifecycle = unwrap(results[5], 'GetBucketLifecycleConfiguration');
+    const acceleration = unwrap(results[6], 'GetBucketAccelerateConfiguration');
+
+    const actualRegion =
+      location.LocationConstraint === undefined
+        ? 'us-east-1'
+        : location.LocationConstraint === 'EU'
+          ? 'eu-west-1'
+          : location.LocationConstraint;
+    const block = publicAccess.PublicAccessBlockConfiguration;
+    const hasPublicAcl = acl.Grants?.some((grant) =>
+      PUBLIC_ACL_GROUPS.has(grant.Grantee?.URI ?? ''),
+    );
+    const policyVerified =
+      policy === undefined || policy.PolicyStatus?.IsPublic === false;
+    const aclVerified = Array.isArray(acl.Grants);
+    const lifecycleVerified =
+      lifecycle === undefined || Array.isArray(lifecycle.Rules);
+    const unsafeLifecycle = lifecycle?.Rules?.some(
+      (rule) => !safeLifecycleRule(rule),
+    );
+
+    const fail = (reason: string): never => {
       throw new StartupDependencyError(
-        `Storage bucket preflight failed: ${operation}`,
-        error,
+        `Storage bucket preflight failed: ${reason}`,
       );
-    }
+    };
+    if (this.accelerationEnabled && acceleration?.Status !== 'Enabled')
+      fail('transfer acceleration must be Enabled');
+    if (actualRegion !== this.region)
+      fail('bucket region does not match AWS_REGION');
+    if (versioning.Status !== 'Enabled') fail('versioning must be Enabled');
+    if (
+      !block?.BlockPublicAcls ||
+      !block.IgnorePublicAcls ||
+      !block.BlockPublicPolicy ||
+      !block.RestrictPublicBuckets
+    )
+      fail('all four public access blocks must be enabled');
+    if (!policyVerified) fail('bucket policy must be confirmed private');
+    if (!aclVerified || hasPublicAcl)
+      fail('bucket ACL must be confirmed private');
+    if (!lifecycleVerified)
+      fail('lifecycle configuration could not be verified');
+    if (unsafeLifecycle) fail('unsafe lifecycle actions are not allowed');
   }
 
   private async policyStatus(request: {

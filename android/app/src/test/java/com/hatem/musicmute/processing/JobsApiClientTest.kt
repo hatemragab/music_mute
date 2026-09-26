@@ -97,7 +97,7 @@ class JobsApiClientTest {
             assertEquals(if (index in listOf(0, 1, 2, 6)) requestId else null, headers["X-Installation-Id"])
         }
         listOf(2,5).forEach { assertEquals("{}", requests[it][3]) }
-        assertEquals(Json.parseToJsonElement("""{"request_id":"$requestId","input":{"extension":"mp3","content_type":"audio/mpeg","bytes":42,"duration_seconds":1.5,"sha256":"${input.sha256}"}}"""), Json.parseToJsonElement(requests[0][3] as String))
+        assertEquals(Json.parseToJsonElement("""{"request_id":"$requestId","trim_enabled":false,"input":{"extension":"mp3","content_type":"audio/mpeg","bytes":42,"duration_seconds":1.5,"sha256":"${input.sha256}"}}"""), Json.parseToJsonElement(requests[0][3] as String))
         assertEquals("""{"request_id":"$requestId"}""", requests[1][3])
         assertEquals("""{"request_id":"$requestId"}""", requests[6][3])
         assertEquals("""{"artifact":"output","request_id":"$requestId"}""", requests[7][3])
@@ -220,7 +220,7 @@ class JobsApiClientTest {
 
     @Test fun audioExperienceMetadataMutationsAndDiagnosticsUseExactContract() = runTest {
         val requests = mutableListOf<List<Any?>>()
-        val projection = """{"id":"$id","request_id":"$requestId","source_title":"Interview","display_name":"My interview","source_kind":"url","status":"ready","server_time":"2026-09-10T12:01:10.000Z","created_at":"2026-09-10T12:00:10.000Z","updated_at":"2026-09-10T12:01:10.000Z","queued_at":"2026-09-10T12:00:20.000Z","finished_at":"2026-09-10T12:01:10.000Z","input":{"extension":"mp3","bytes":42,"duration_seconds":1.5},"timing":{"processing_elapsed_ms":20000,"processing_elapsed_approximate":false,"total_elapsed_ms":70000,"total_elapsed_approximate":true},"stages":{"validating_at":"2026-09-10T12:00:40.000Z","processing_started_at":"2026-09-10T12:00:45.000Z","processing_finished_at":"2026-09-10T12:01:05.000Z","uploading_result_at":"2026-09-10T12:01:05.000Z"},"can_download_input":true,"can_download_output":true,"worker_available":true}"""
+        val projection = """{"id":"$id","request_id":"$requestId","source_title":"Interview","display_name":"My interview","source_kind":"url","status":"ready","server_time":"2026-09-10T12:01:10.000Z","server_stage_timings":{"total_ms":60000,"total_complete":true,"stages":[{"stage":"separation","duration_ms":20000,"complete":true}],"attempts":[]},"created_at":"2026-09-10T12:00:10.000Z","updated_at":"2026-09-10T12:01:10.000Z","queued_at":"2026-09-10T12:00:20.000Z","finished_at":"2026-09-10T12:01:10.000Z","input":{"extension":"mp3","bytes":42,"duration_seconds":1.5},"timing":{"processing_elapsed_ms":20000,"processing_elapsed_approximate":false,"total_elapsed_ms":70000,"total_elapsed_approximate":true},"stages":{"validating_at":"2026-09-10T12:00:40.000Z","processing_started_at":"2026-09-10T12:00:45.000Z","processing_finished_at":"2026-09-10T12:01:05.000Z","uploading_result_at":"2026-09-10T12:01:05.000Z"},"can_download_input":true,"can_download_output":true,"worker_available":true}"""
         val replies = ArrayDeque(listOf(
             """{"id":"$id","request_id":"$requestId","status":"awaiting_upload","upload":$upload}""",
             projection,
@@ -241,6 +241,8 @@ class JobsApiClientTest {
         val renamed = api.rename(id, "My interview")
         assertEquals("My interview", renamed.displayName)
         assertEquals(20_000L, renamed.timing?.processingElapsedMs)
+        assertEquals(60_000L, renamed.serverStageTimings?.totalMs)
+        assertEquals("separation", renamed.serverStageTimings?.stages?.single()?.stage)
         assertEquals(Instant.parse("2026-09-10T12:00:45Z"), renamed.stages?.processingStartedAt)
         api.delete(id)
         val accepted = api.reportClientError(ClientErrorReport(
@@ -251,7 +253,7 @@ class JobsApiClientTest {
         assertEquals("bba62714-ab09-4c79-9453-ccae688c092c", accepted.eventId)
         assertEquals(listOf("POST", "PATCH", "DELETE", "POST"), requests.map { it[1] })
         assertEquals(listOf("/jobs", "/jobs/$id", "/jobs/$id", "/client-errors"), requests.map { it[0] })
-        assertEquals(Json.parseToJsonElement("""{"request_id":"$requestId","source_title":"Interview","source_kind":"file","client_started_at":"2026-09-10T12:00:00.123Z","input":{"extension":"mp3","content_type":"audio/mpeg","bytes":42,"duration_seconds":1.5,"sha256":"${input.sha256}"}}"""), Json.parseToJsonElement(requests[0][3] as String))
+        assertEquals(Json.parseToJsonElement("""{"request_id":"$requestId","trim_enabled":false,"source_title":"Interview","source_kind":"file","client_started_at":"2026-09-10T12:00:00.123Z","input":{"extension":"mp3","content_type":"audio/mpeg","bytes":42,"duration_seconds":1.5,"sha256":"${input.sha256}"}}"""), Json.parseToJsonElement(requests[0][3] as String))
         assertEquals("""{"display_name":"My interview"}""", requests[1][3])
         assertNull((requests[2][2] as Map<*, *>)["X-Installation-Id"])
         val diagnostic = Json.parseToJsonElement(requests[3][3] as String).jsonObject

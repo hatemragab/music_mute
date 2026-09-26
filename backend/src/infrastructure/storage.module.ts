@@ -4,10 +4,18 @@ import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class StorageClient extends S3Client implements OnModuleDestroy {
+  readonly transferSigner: S3Client;
+
   constructor(config: ConfigService) {
-    super({ region: config.getOrThrow<string>('AWS_REGION'), maxAttempts: 3 });
+    const region = config.getOrThrow<string>('AWS_REGION');
+    super({ region, maxAttempts: 3 });
+    this.transferSigner =
+      config.get<boolean>('S3_TRANSFER_ACCELERATION_ENABLED') === true
+        ? new S3Client({ region, maxAttempts: 3, useAccelerateEndpoint: true })
+        : this;
   }
   onModuleDestroy(): void {
+    if (this.transferSigner !== this) this.transferSigner.destroy();
     this.destroy();
   }
 }

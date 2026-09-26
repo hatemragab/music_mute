@@ -11,6 +11,7 @@ struct InputDeclaration: Codable, Equatable, Sendable {
 enum JobSourceKind: String, Codable, Equatable, Sendable { case url, file }
 
 struct JobSourceMetadata: Codable, Equatable, Sendable {
+  let trimEnabled: Bool
   let policyVersion: Int?
   let preparationProfileId: String?
   let source: String?
@@ -22,8 +23,10 @@ struct JobSourceMetadata: Codable, Equatable, Sendable {
   init(
     sourceTitle: String? = nil, sourceKind: JobSourceKind? = nil,
     clientStartedAt: Date? = nil, sourceURL: String? = nil,
-    policyVersion: Int? = nil, preparationProfileId: String? = nil, source: String? = nil
+    policyVersion: Int? = nil, preparationProfileId: String? = nil, source: String? = nil,
+    trimEnabled: Bool = false
   ) {
+    self.trimEnabled = trimEnabled
     self.policyVersion = policyVersion
     self.preparationProfileId = preparationProfileId
     self.source = source
@@ -32,6 +35,18 @@ struct JobSourceMetadata: Codable, Equatable, Sendable {
     self.clientStartedAt = clientStartedAt
     self.sourceURL = sourceURL
   }
+}
+
+struct ServerStageMeasurement: Codable, Equatable, Sendable {
+  let stage: String
+  let durationMs: Int64
+  let complete: Bool
+}
+
+struct ServerStageTimings: Codable, Equatable, Sendable {
+  let totalMs: Int64?
+  let totalComplete: Bool
+  let stages: [ServerStageMeasurement]
 }
 
 struct JobTiming: Codable, Equatable, Sendable {
@@ -49,6 +64,8 @@ struct JobStages: Codable, Equatable, Sendable {
 }
 
 struct Job: Codable, Equatable, Identifiable, Sendable {
+  var trimEnabled: Bool? = nil
+  var comparisonRanges: [[Int64]]? = nil
   struct Input: Codable, Equatable, Sendable {
     let `extension`: String
     let bytes: Int64
@@ -77,6 +94,7 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
   let sourceKind: JobSourceKind?
   let serverTime: Date?
   let timing: JobTiming?
+  let serverStageTimings: ServerStageTimings?
   let stages: JobStages?
   let queue: ProcessingQueue?
   let processingProgress: ProcessingProgress?
@@ -88,7 +106,8 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
     requestId: String? = nil, sourceTitle: String? = nil, displayName: String? = nil,
     sourceKind: JobSourceKind? = nil, serverTime: Date? = nil, timing: JobTiming? = nil,
     stages: JobStages? = nil, queue: ProcessingQueue? = nil,
-    processingProgress: ProcessingProgress? = nil
+    processingProgress: ProcessingProgress? = nil,
+    serverStageTimings: ServerStageTimings? = nil
   ) {
     self.id = id
     self.status = status
@@ -108,6 +127,7 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
     self.sourceKind = sourceKind
     self.serverTime = serverTime
     self.timing = timing
+    self.serverStageTimings = serverStageTimings
     self.stages = stages
     self.queue = queue
     self.processingProgress = processingProgress

@@ -143,7 +143,9 @@ enum AudioPipelineFailure: Error, Equatable {
     return eventID
   }
 
-  func confirmProcessing(_ operationID: UUID, rightsConfirmed: Bool) async throws {
+  func confirmProcessing(_ operationID: UUID, rightsConfirmed: Bool, trimEnabled: Bool = false)
+    async throws
+  {
     guard rightsConfirmed, let fence = session,
       let intent = try await store.pipeline(id: operationID, ownerUid: fence.uid),
       intent.phase == .awaitingConfirmation, intent.reviewInput != nil,
@@ -153,6 +155,7 @@ enum AudioPipelineFailure: Error, Equatable {
     try check(fence)
     _ = try await store.updatePipeline(id: operationID, ownerUid: fence.uid) {
       $0.cloudConsent = true
+      $0.trimEnabled = trimEnabled
       $0.phase = .reservingJob
     }
     try check(fence)
@@ -516,7 +519,8 @@ enum AudioPipelineFailure: Error, Equatable {
       $0.phase = .reservingJob
     }
     await publish(fence)
-    let uploaded = try await repository.submit(prepared: prepared)
+    let uploaded = try await repository.submit(
+      prepared: prepared, trimEnabled: intent.trimEnabled ?? false)
     try checkRun(id, token: token, fence: fence)
     _ = try await mutateRun(id, token: token, fence: fence) {
       $0.jobId = uploaded.jobId
