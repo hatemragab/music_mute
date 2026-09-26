@@ -94,3 +94,23 @@ the same bucket specified by `PUBLIC_MEDIA_ORIGIN` to the connect/media CSP, whi
 keeping regional grants valid. It defaults to false and requires a regional S3
 origin with a bucket name without dots. Deploy this before opting the backend
 into acceleration. See [transfer rollout](../docs/audio-transfer-performance/README.md).
+
+## Deployment updates
+
+Each production build embeds a unique version in its HTML. Open tabs check the
+non-cacheable entry page every 60 seconds while visible and online, and on focus,
+visibility changes or reconnection. A different valid version automatically reloads
+the current URL, including for rollbacks. Development builds do not poll.
+
+Reload waits while a local audio file is selected or being inspected/prepared/uploaded,
+while text fields contain drafts, or while visible media is playing. Clear drafts
+or finish the operation to allow the next check to reload. Failed, timed-out or
+malformed responses leave the current app running. A session-storage guard permits
+only one automatic reload per loaded version, with at least five minutes between
+automatic reloads across versions, to avoid stale-cache or mixed-replica loops;
+when session storage is unavailable, refresh manually.
+
+This takes effect for tabs that have loaded a build containing the monitor. Tabs
+opened before its first deployment still need one manual refresh. Reusing the same
+built image keeps the same version; changing only runtime configuration does not
+trigger a reload.

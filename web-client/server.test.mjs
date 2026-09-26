@@ -110,3 +110,14 @@ test("rejects unsafe media origins and unsupported acceleration configuration", 
     }),
   );
 });
+
+test("deployment checks return uncached HTML with a build version", async () => {
+  const response = await fetch(`${origin}/?deployment-check=123`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.match(response.headers.get("content-type"), /text\/html/);
+  assert.match(
+    await response.text(),
+    /name="musicmute-build" content="[a-f0-9-]{36}"/,
+  );
+});
