@@ -1019,6 +1019,58 @@ describe("worker runtime ownership", () => {
     await f.runtime.stop();
   });
 
+  it("separates grant latency from PUT duration and includes retried PUTs", async () => {
+    const base = fixture();
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+    const inputGrant = base.control.inputGrant.getMockImplementation()!;
+    base.control.inputGrant.mockImplementation(async () => {
+      clock += 10;
+      return inputGrant();
+    });
+    const download = base.transfers.download.getMockImplementation()!;
+    base.transfers.download.mockImplementation(async (...args) => {
+      clock += 20;
+      return download(...args);
+    });
+    const outputGrant = base.control.outputGrant.getMockImplementation()!;
+    base.control.outputGrant.mockImplementation(async () => {
+      clock += 30;
+      return outputGrant();
+    });
+    base.transfers.upload
+      .mockImplementationOnce(async () => {
+        clock += 40;
+        throw new TransferError("OUTPUT_UPLOAD_FAILED", true);
+      })
+      .mockImplementationOnce(async () => {
+        clock += 50;
+        return "output-version";
+      });
+    const complete = base.control.complete.getMockImplementation()!;
+    base.control.complete.mockImplementation(async () => {
+      clock += 60;
+      return complete();
+    });
+    const f = await runtimeFixture(base);
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+    const event = f.events.find((entry) => entry.kind === "attempt-succeeded");
+    expect(event).toMatchObject({
+      stageTimings: expect.arrayContaining([
+        { stage: "inputGrant", durationMs: 10 },
+        { stage: "download", durationMs: 20 },
+        { stage: "outputGrant", durationMs: 60 },
+        { stage: "outputPut", durationMs: 90 },
+        { stage: "upload", durationMs: 150 },
+        { stage: "completionAck", durationMs: 60 },
+      ]),
+    });
+    expect(base.transfers.upload).toHaveBeenCalledTimes(2);
+    await f.runtime.stop();
+  });
+
   it("renews its lease and recovers an input-grant rate limit", async () => {
     const base = fixture();
     base.control.inputGrant.mockRejectedValueOnce(

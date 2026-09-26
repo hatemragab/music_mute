@@ -249,7 +249,7 @@ export class StorageTransfersService {
     await this.preflight.assertReady();
     const now = Date.now();
     const url = await getSignedUrl(
-      this.storage,
+      this.storage.transferSigner ?? this.storage,
       new GetObjectCommand({
         Bucket: this.bucket,
         Key: object.key,
@@ -285,7 +285,7 @@ export class StorageTransfersService {
       : this.grantSeconds;
     if (expiresIn < 1) throw jobError('UPLOAD_RESERVATION_EXPIRED');
     return createImmutableUploadGrant({
-      storage: this.storage,
+      storage: this.storage.transferSigner ?? this.storage,
       bucket: this.bucket,
       key: reservation.key,
       bytes: reservation.bytes,

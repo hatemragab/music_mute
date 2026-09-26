@@ -52,8 +52,30 @@ export function createWebServer({
     env.PUBLIC_MEDIA_ORIGIN ||
     "https://music-remover.s3.us-east-2.amazonaws.com";
   const media = new URL(mediaOrigin);
-  if (media.protocol !== "https:" || media.pathname !== "/")
+  if (
+    media.protocol !== "https:" ||
+    media.pathname !== "/" ||
+    media.username ||
+    media.password ||
+    media.search ||
+    media.hash
+  )
     throw new Error("PUBLIC_MEDIA_ORIGIN must be an HTTPS origin.");
+  const acceleration = env.PUBLIC_MEDIA_ACCELERATION_ENABLED ?? "false";
+  if (!["true", "false"].includes(acceleration))
+    throw new Error("PUBLIC_MEDIA_ACCELERATION_ENABLED must be true or false.");
+  const mediaOrigins = [media.origin];
+  if (acceleration === "true") {
+    const match =
+      /^([a-z0-9][a-z0-9-]{1,61}[a-z0-9])\.s3\.[a-z0-9-]+\.amazonaws\.com$/.exec(
+        media.hostname,
+      );
+    if (!match || media.port)
+      throw new Error("Acceleration requires a regional S3 bucket origin.");
+    // Keep regional grants valid during rollout/rollback; permit only this bucket.
+    mediaOrigins.push(`https://${match[1]}.s3-accelerate.amazonaws.com`);
+  }
+  const mediaSources = mediaOrigins.join(" ");
   const csp = [
     "default-src 'self'",
     "base-uri 'self'",
@@ -64,8 +86,8 @@ export function createWebServer({
     "worker-src 'self' blob:",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https://www.gstatic.com https://accounts.google.com",
-    `connect-src 'self' ${config.apiOrigin} ${media.origin} https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://firebaseinstallations.googleapis.com`,
-    `media-src 'self' ${media.origin}`,
+    `connect-src 'self' ${config.apiOrigin} ${mediaSources} https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://firebaseinstallations.googleapis.com`,
+    `media-src 'self' ${mediaSources}`,
     `frame-src https://${config.firebase.authDomain} https://accounts.google.com`,
   ].join("; ");
   return createHttpServer(async (request, response) => {
