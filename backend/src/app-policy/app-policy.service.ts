@@ -2,7 +2,7 @@ import { HttpException, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import { authError } from '../auth/auth.errors.js';
-import type { Platform } from '../auth/auth.types.js';
+import type { ClientPlatform } from '../auth/auth.types.js';
 import { Release } from '../releases/release.schema.js';
 import { AppPolicy } from './app-policy.schema.js';
 import { defaultPolicy, validatePolicy } from './access-policy.js';
@@ -29,8 +29,9 @@ export class AppPolicyService {
 
   async assertProcessingTargetAvailable(
     policy: AppPolicy,
-    platform: Platform,
+    platform: ClientPlatform,
   ): Promise<void> {
+    if (platform === 'web') return;
     const channel = policy.platforms[platform];
     const selection = channel.releaseSelection;
     const id =

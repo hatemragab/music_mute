@@ -28,7 +28,10 @@ const privateBucketResponses = (): Record<string, AwsResponse> => ({
   GetBucketLifecycleConfigurationCommand: { Rules: [] },
 });
 
-function fixture(overrides: Record<string, AwsResponse | Error> = {}) {
+function fixture(
+  overrides: Record<string, AwsResponse | Error> = {},
+  accelerationEnabled = false,
+) {
   const responses = { ...privateBucketResponses(), ...overrides };
   const send = vi.fn(
     async (command: {
@@ -42,6 +45,7 @@ function fixture(overrides: Record<string, AwsResponse | Error> = {}) {
   );
   const config = new ConfigService({
     AWS_REGION: 'us-east-1',
+    S3_TRANSFER_ACCELERATION_ENABLED: accelerationEnabled,
     S3_BUCKET: 'private-fixture-bucket',
   });
   const service = new StoragePreflightService(
@@ -88,6 +92,70 @@ describe('StoragePreflightService', () => {
     expect(send).toHaveBeenCalledTimes(6);
     for (const [command] of send.mock.calls)
       expect(command.input).toEqual({ Bucket: 'private-fixture-bucket' });
+  });
+
+  it('runs six concurrent reads, shares in-flight work, and waits for every check', async () => {
+    const { service, send } = fixture();
+    const pending: Array<() => void> = [];
+    send.mockImplementation(
+      (command) =>
+        new Promise((resolve) => {
+          pending.push(() =>
+            resolve(privateBucketResponses()[command.constructor.name]),
+          );
+        }),
+    );
+    let ready = false;
+    const first = service.assertReady().then(() => {
+      ready = true;
+    });
+    const second = service.assertReady();
+    expect(send).toHaveBeenCalledTimes(6);
+    for (const finish of pending.slice(0, 5)) finish();
+    await Promise.resolve();
+    expect(ready).toBe(false);
+    pending[5]();
+    await Promise.all([first, second]);
+    expect(ready).toBe(true);
+    await service.assertReady();
+    expect(send).toHaveBeenCalledTimes(6);
+  });
+
+  it('does not cache failure and preserves the failed concurrent operation', async () => {
+    const { service, send } = fixture({
+      GetBucketAclCommand: awsError('AccessDenied', 403),
+    });
+    await expect(service.assertReady()).rejects.toThrow(
+      'GetBucketAcl (AccessDenied, HTTP 403)',
+    );
+    expect(send).toHaveBeenCalledTimes(6);
+    await expect(service.assertReady()).rejects.toThrow('GetBucketAcl');
+    expect(send).toHaveBeenCalledTimes(12);
+  });
+
+  it('requires bucket acceleration only when opted in', async () => {
+    const enabled = fixture(
+      { GetBucketAccelerateConfigurationCommand: { Status: 'Enabled' } },
+      true,
+    );
+    await expect(enabled.service.assertReady()).resolves.toBeUndefined();
+    expect(enabled.send).toHaveBeenCalledTimes(7);
+    const disabled = fixture(
+      { GetBucketAccelerateConfigurationCommand: { Status: 'Suspended' } },
+      true,
+    );
+    await expect(disabled.service.assertReady()).rejects.toThrow(
+      'transfer acceleration must be Enabled',
+    );
+    const denied = fixture(
+      {
+        GetBucketAccelerateConfigurationCommand: awsError('AccessDenied', 403),
+      },
+      true,
+    );
+    await expect(denied.service.assertReady()).rejects.toThrow(
+      'GetBucketAccelerateConfiguration (AccessDenied, HTTP 403)',
+    );
   });
 
   it('allows only incomplete-multipart abort and expired delete-marker cleanup', async () => {

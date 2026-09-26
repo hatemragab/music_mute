@@ -37,6 +37,8 @@ const SAFE_DEPENDENCY_STAGES = new Set([
   'User identity fence schema initialization failed',
   ...[
     'GetBucketLocation',
+    'GetBucketAccelerateConfiguration',
+    'transfer acceleration must be Enabled',
     'GetBucketVersioning',
     'GetPublicAccessBlock',
     'GetBucketPolicyStatus',

@@ -606,3 +606,10 @@ NestJS retains each attempt and computes queue/retry and end-to-end durations.
 Incomplete stages remain last-observed lower bounds after a crash or cancellation.
 Deploy backend support before this worker update; see
 [server-owned stage timings](../docs/job-stage-timings.md) for boundaries and compatibility.
+
+## Transfer timing breakdown
+
+Successful-attempt diagnostics add `inputGrant`, `outputGrant`, and `outputPut`
+to the existing stage timings. `upload` includes its grant/PUT components; do not
+sum overlapping measurements. `outputPut` includes failed transfer calls before
+successful retry/recovery. See [the measurement and rollout guide](../docs/audio-transfer-performance/README.md).

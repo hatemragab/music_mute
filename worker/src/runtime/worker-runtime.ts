@@ -808,6 +808,8 @@ export class WorkerRuntime {
       modelLoadState: "preloaded",
       childIncarnation: child.incarnation,
     });
+    let inputGrantMs: number | null = null;
+    const publicationTiming = { outputGrantMs: 0, outputPutMs: 0 };
     let downloadMs: number | null = null;
     let uploadMs: number | null = null;
     let completionMs: number | null = null;
@@ -894,12 +896,14 @@ export class WorkerRuntime {
         claim.attemptId,
         claim.input.contentType,
       );
+      const inputGrantStarted = performance.now();
       const input = await this.retryAttemptControlRequest(
         () =>
           this.control.inputGrant(claim.attemptId, identity, controller.signal),
         authority,
         controller.signal,
       );
+      inputGrantMs = Math.max(0, performance.now() - inputGrantStarted);
       if (!sameObject(input.object, claim.input))
         throw new TransferError("DOWNLOAD_FAILED", false);
       enterStage("input-download");
@@ -985,6 +989,7 @@ export class WorkerRuntime {
         result,
         authority,
         controller.signal,
+        publicationTiming,
       );
       uploadMs = Math.max(0, performance.now() - uploadStarted);
       authority.assertCurrent();
@@ -1029,6 +1034,11 @@ export class WorkerRuntime {
         stageTimings: [
           ...result.stageTimings,
           ...(result.separationTimings ?? []),
+          ...(inputGrantMs === null
+            ? []
+            : [{ stage: "inputGrant", durationMs: inputGrantMs }]),
+          { stage: "outputGrant", durationMs: publicationTiming.outputGrantMs },
+          { stage: "outputPut", durationMs: publicationTiming.outputPutMs },
           ...(downloadMs === null
             ? []
             : [{ stage: "download", durationMs: downloadMs }]),
@@ -1237,11 +1247,13 @@ export class WorkerRuntime {
     output: ReturnType<typeof parseChildProcessResult>,
     authority: LeaseAuthority,
     signal: AbortSignal,
+    timing: { outputGrantMs: number; outputPutMs: number },
   ): Promise<string> {
     const maximum = this.options.uploadAttempts ?? 3;
     let lastError: unknown;
     for (let attempt = 0; attempt < maximum; attempt += 1) {
       authority.assertCurrent();
+      const grantStarted = performance.now();
       const response = await this.retryAttemptControlRequest(
         () =>
           this.control.outputGrant(
@@ -1258,12 +1270,14 @@ export class WorkerRuntime {
         authority,
         signal,
       );
+      timing.outputGrantMs += Math.max(0, performance.now() - grantStarted);
       assertReservation(response, output);
       if (response.object) {
         if (!sameOutput(response.object, response.reservation))
           throw new TransferError("OUTPUT_UPLOAD_FAILED", false);
         return response.object.versionId;
       }
+      const putStarted = performance.now();
       try {
         return await this.transfers.upload(
           response.grant!,
@@ -1274,6 +1288,9 @@ export class WorkerRuntime {
       } catch (error) {
         lastError = error;
         if (!(error instanceof TransferError) || !error.retryable) throw error;
+      } finally {
+        // Includes failed PUTs before recovery, without counting grant/backoff time.
+        timing.outputPutMs += Math.max(0, performance.now() - putStarted);
       }
     }
     throw lastError ?? new TransferError("OUTPUT_UPLOAD_FAILED", true);

@@ -1,6 +1,6 @@
 # MusicMute API client contract
 
-This is the HTTP contract in this repository for the Android and iOS apps, the
+This is the HTTP contract in this repository for the Android and iOS apps, the end-user web client, the
 administrator dashboard, and the worker runtime. [OpenAPI](../../backend/openapi.yaml)
 defines the request and response schemas for each operation; the
 [route matrix](../backend-security/route-matrix.md) records authentication,
@@ -21,15 +21,16 @@ that origin. The current API has no `/api/v1`, `/api/v2`, or `/worker/v1` URL
 prefix and provides no legacy route aliases. OpenAPI's `info.version` versions
 the specification; it is not a URL segment.
 
-| Consumer  | Origin setting                                         | Example current route     |
-| --------- | ------------------------------------------------------ | ------------------------- |
-| Android   | Gradle `-PauthApiUrl=https://api.example.com`          | `POST /auth/sessions`     |
-| iOS       | Xcode `MUSICMUTE_API_BASE_URL=https://api.example.com` | `GET /jobs`               |
-| Dashboard | `VITE_API_ORIGIN=https://api.example.com`              | `GET /admin/access`       |
-| Worker    | `backendBaseUrl` in protected runtime JSON             | `GET /worker/logs/cursor` |
+| Consumer   | Origin setting                                         | Example current route     |
+| ---------- | ------------------------------------------------------ | ------------------------- |
+| Android    | Gradle `-PauthApiUrl=https://api.example.com`          | `POST /auth/sessions`     |
+| iOS        | Xcode `MUSICMUTE_API_BASE_URL=https://api.example.com` | `GET /jobs`               |
+| Web client | Public runtime `apiOrigin=https://api.example.com`     | `POST /auth/sessions`     |
+| Dashboard  | `VITE_API_ORIGIN=https://api.example.com`              | `GET /admin/access`       |
+| Worker     | `backendBaseUrl` in protected runtime JSON             | `GET /worker/logs/cursor` |
 
 Debug or local fixtures may use an explicitly configured loopback HTTP origin
-where each client permits it. A browser dashboard origin must be listed in the
+where each client permits it. Each browser client origin must be listed in the
 backend's `CORS_ORIGINS`; CORS does not authenticate it. Native apps and workers
 do not rely on CORS.
 
@@ -74,12 +75,12 @@ URLs are never returned to clients. See [deployment and validation](../../ytdlp_
 
 ## Authentication and ownership
 
-| Audience       | Credential and access rule                                                                                                                                                                                                  |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Public         | Only operations marked public in OpenAPI; for example `GET /health/live`.                                                                                                                                                   |
-| Mobile account | `Authorization: Bearer <Firebase ID token>`. Bootstrap with `POST /auth/sessions`; owner routes require the active account. The server selects the owner from the authenticated identity, not a caller-supplied account ID. |
-| Administrator  | Firebase bearer token plus an active, verified Google administrator record and the permission listed for the operation. Some writes also require recent authentication, revision fences, and operation IDs.                 |
-| Worker         | `Authorization: Bearer <worker credential>`, with enrollment, installation, or machine scope specified per operation. Machine credentials do not grant administrator access.                                                |
+| Audience         | Credential and access rule                                                                                                                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Public           | Only operations marked public in OpenAPI; for example `GET /health/live`.                                                                                                                                                                        |
+| End-user account | `Authorization: Bearer <Firebase ID token>`. Android, iOS and web bootstrap with `POST /auth/sessions`; owner routes require the active account. The server selects the owner from the authenticated identity, not a caller-supplied account ID. |
+| Administrator    | Firebase bearer token plus an active, verified Google administrator record and the permission listed for the operation. Some writes also require recent authentication, revision fences, and operation IDs.                                      |
+| Worker           | `Authorization: Bearer <worker credential>`, with enrollment, installation, or machine scope specified per operation. Machine credentials do not grant administrator access.                                                                     |
 
 For the worker hint socket, first mint a single-use ticket with authenticated
 `POST /worker/hints/tickets`. Connect to `/worker/hints/socket` with that ticket
@@ -221,3 +222,15 @@ Worker progress, completion, and failure requests accept optional bounded
 `execution_timings` snapshots. Deploy backend support before updating workers.
 The existing client `timing` and administrator `stage_timings` fields remain
 backward compatible; new UIs use `server_stage_timings` for authoritative totals.
+
+## Web client installation (2026-09-26)
+
+`POST /auth/sessions` and `PUT /users/me/devices/{installation_id}` accept
+`platform: web` alongside Android and iOS. A web client uses a random UUIDv4
+installation ID retained in that browser profile, app/build/OS metadata within
+the existing bounds, and the same account ownership and revocation rules. The
+`X-Installation-Id` processing guard still requires a current owned device.
+Web follows shared email-verification and processing policies; native APK/App
+Store minimum-build and selected-release checks do not apply to web. Native
+release records, operator release policy shape, and native push registrations
+remain Android/iOS only. A browser must not register a native push token.

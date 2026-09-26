@@ -1,3 +1,4 @@
+import { measureTransferOperation } from './transfer-timing.js';
 import { withAttemptMeasurements } from '../../jobs/job-stage-timing.js';
 import { Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -191,6 +192,16 @@ export class WorkerAttemptService {
     attemptId: string,
     dto: WorkerOutputGrantDto,
   ) {
+    return measureTransferOperation('output_grant', attemptId, () =>
+      this.issueOutputGrant(principal, attemptId, dto),
+    );
+  }
+
+  private async issueOutputGrant(
+    principal: WorkerPrincipal,
+    attemptId: string,
+    dto: WorkerOutputGrantDto,
+  ) {
     const first = await this.loadCurrent(principal, attemptId, dto);
     const reservation = this.outputReservation(first.job, first.attempt, dto);
     this.assertReservation(first.attempt.outputReservation, reservation);
@@ -213,67 +224,78 @@ export class WorkerAttemptService {
         };
       }
     }
-    const grant = await this.storage.createWorkerOutputGrant(
-      reservation,
-      first.attempt.deadlineAt,
+    const grant = await measureTransferOperation(
+      'output_grant_signing',
+      attemptId,
+      () =>
+        this.storage.createWorkerOutputGrant(
+          reservation,
+          first.attempt.deadlineAt,
+        ),
     );
     const grantExpiresAt = new Date(grant.expiresAt);
     const session = await this.connection.startSession();
     try {
-      await session.withTransaction(async () => {
-        const { attempt, job } = await this.loadCurrent(
-          principal,
-          attemptId,
-          dto,
-          session,
-        );
-        this.assertReservation(attempt.outputReservation, reservation);
-        await this.accountAccess.assertActive(job.userId, session);
-        await this.usage.reconcileMeasured(
-          job,
-          dto.measuredDurationSeconds,
-          session,
-        );
-        const attemptFence = await this.attempts.updateOne(
-          { _id: attempt._id, revision: attempt.revision },
-          {
-            $set: {
-              state: 'uploading',
-              stage: 'uploading',
-              outputReservation: { ...reservation, grantExpiresAt },
-            },
-            $inc: { revision: 1 },
-          },
-          { session, runValidators: true },
-        );
-        if (attemptFence.modifiedCount !== 1)
-          throw workerError('WORKER_CONFLICT');
-        const now = new Date();
-        const jobFence = await this.jobs.updateOne(
-          this.jobOwnershipFilter(job, attempt, now),
-          {
-            $set: {
-              status: 'uploading_result',
-              measuredDurationSeconds: dto.measuredDurationSeconds,
-              processingFinishedAt: job.processingFinishedAt ?? now,
-              uploadingResultAt: job.uploadingResultAt ?? now,
-            },
-            $inc: { revision: 1 },
-          },
-          { session, runValidators: true },
-        );
-        if (jobFence.modifiedCount !== 1) throw workerError('WORKER_CONFLICT');
-        await this.cleanup.schedule(
-          {
-            key: reservation.key,
-            ownerUserId: job.userId,
-            reason: 'AUDIO_OUTPUT_ORPHANED',
-            nextAt: attempt.deadlineAt,
-            settleUntil: new Date(attempt.deadlineAt.getTime() + 300_000),
-          },
-          session,
-        );
-      });
+      await measureTransferOperation(
+        'output_grant_transaction',
+        attemptId,
+        () =>
+          session.withTransaction(async () => {
+            const { attempt, job } = await this.loadCurrent(
+              principal,
+              attemptId,
+              dto,
+              session,
+            );
+            this.assertReservation(attempt.outputReservation, reservation);
+            await this.accountAccess.assertActive(job.userId, session);
+            await this.usage.reconcileMeasured(
+              job,
+              dto.measuredDurationSeconds,
+              session,
+            );
+            const attemptFence = await this.attempts.updateOne(
+              { _id: attempt._id, revision: attempt.revision },
+              {
+                $set: {
+                  state: 'uploading',
+                  stage: 'uploading',
+                  outputReservation: { ...reservation, grantExpiresAt },
+                },
+                $inc: { revision: 1 },
+              },
+              { session, runValidators: true },
+            );
+            if (attemptFence.modifiedCount !== 1)
+              throw workerError('WORKER_CONFLICT');
+            const now = new Date();
+            const jobFence = await this.jobs.updateOne(
+              this.jobOwnershipFilter(job, attempt, now),
+              {
+                $set: {
+                  status: 'uploading_result',
+                  measuredDurationSeconds: dto.measuredDurationSeconds,
+                  processingFinishedAt: job.processingFinishedAt ?? now,
+                  uploadingResultAt: job.uploadingResultAt ?? now,
+                },
+                $inc: { revision: 1 },
+              },
+              { session, runValidators: true },
+            );
+            if (jobFence.modifiedCount !== 1)
+              throw workerError('WORKER_CONFLICT');
+            await this.cleanup.schedule(
+              {
+                key: reservation.key,
+                ownerUserId: job.userId,
+                reason: 'AUDIO_OUTPUT_ORPHANED',
+                nextAt: attempt.deadlineAt,
+                settleUntil: new Date(attempt.deadlineAt.getTime() + 300_000),
+              },
+              session,
+            );
+          }),
+      );
     } finally {
       await session.endSession();
     }
@@ -297,6 +319,16 @@ export class WorkerAttemptService {
     attemptId: string,
     dto: CompleteWorkerAttemptDto,
   ) {
+    return measureTransferOperation('completion', attemptId, () =>
+      this.completeMeasured(principal, attemptId, dto),
+    );
+  }
+
+  private async completeMeasured(
+    principal: WorkerPrincipal,
+    attemptId: string,
+    dto: CompleteWorkerAttemptDto,
+  ) {
     const completionStarted = performance.now();
     const first = await this.loadAttemptAndJob(principal, attemptId, dto);
     this.assertRecipe(first.job, dto);
@@ -305,111 +337,120 @@ export class WorkerAttemptService {
     this.assertCurrent(first.attempt, first.job, new Date());
     const reservation = first.attempt.outputReservation;
     if (!reservation) throw workerError('WORKER_CONFLICT');
-    const object = await this.storage.verifyUploadedVersion(
-      reservation,
-      dto.versionId,
+    const object = await measureTransferOperation(
+      'completion_storage_verification',
+      attemptId,
+      () => this.storage.verifyUploadedVersion(reservation, dto.versionId),
     );
     const session = await this.connection.startSession();
     try {
-      const result = await session.withTransaction(async () => {
-        const current = await this.loadAttemptAndJob(
-          principal,
-          attemptId,
-          dto,
-          session,
-        );
-        this.assertRecipe(current.job, dto);
-        if (current.attempt.state === 'succeeded')
-          return this.presentCompletion(current.attempt, dto, true);
-        const now = new Date();
-        this.assertCurrent(current.attempt, current.job, now);
-        this.assertReservation(current.attempt.outputReservation, reservation);
-        if (!sameReservationObject(reservation, object))
-          throw workerError('WORKER_CONFLICT');
-        await this.accountAccess.assertActive(current.job.userId, session);
-        const attemptFence = await this.attempts.updateOne(
-          {
-            _id: current.attempt._id,
-            revision: current.attempt.revision,
-            state: trusted({ $in: ACTIVE_ATTEMPTS }),
-          },
-          {
-            $set: {
-              state: 'succeeded',
-              stage: 'finalizing',
-              outputObject: object,
-              terminalCode: null,
-              failureClass: null,
-              terminalSummary: null,
-              finishedAt: now,
-              leaseExpiresAt: now,
-              processingStageTimings: dto.stageTimings,
-            },
-            $inc: { revision: 1 },
-          },
-          { session, runValidators: true },
-        );
-        if (attemptFence.modifiedCount !== 1)
-          throw workerError('WORKER_CONFLICT');
-        await this.usage.recordRetainedOutput(
-          current.job,
-          object.bytes,
-          session,
-        );
-        const readyAt = new Date();
-        const finalizationMs = Math.round(
-          performance.now() - completionStarted,
-        );
-        const job = await this.jobs
-          .findOneAndUpdate(
-            this.jobOwnershipFilter(current.job, current.attempt, readyAt),
-            {
-              $set: {
-                status: 'ready',
-                outputObject: object,
-                retainedOutputAccountedAt: readyAt,
-                retainedOutputReleasedAt: null,
-                currentExecution: null,
-                workerProgress: null,
-                finishedAt: readyAt,
-                workerStageTimings: dto.stageTimings,
-                stageTimingAttempts: withAttemptMeasurements(
-                  current.job,
-                  attemptId,
-                  current.attempt.attemptNumber,
-                  dto.executionTimings?.map((timing) =>
-                    timing.stage === 'completion'
-                      ? {
-                          stage: 'completion',
-                          durationMs: finalizationMs,
-                          complete: true,
-                        }
-                      : timing,
-                  ),
-                ),
-                retryEligibility: {
-                  eligible: false,
-                  attemptsRemaining: 0,
-                  nextAttemptAt: null,
-                },
+      const result = await measureTransferOperation(
+        'completion_transaction',
+        attemptId,
+        () =>
+          session.withTransaction(async () => {
+            const current = await this.loadAttemptAndJob(
+              principal,
+              attemptId,
+              dto,
+              session,
+            );
+            this.assertRecipe(current.job, dto);
+            if (current.attempt.state === 'succeeded')
+              return this.presentCompletion(current.attempt, dto, true);
+            const now = new Date();
+            this.assertCurrent(current.attempt, current.job, now);
+            this.assertReservation(
+              current.attempt.outputReservation,
+              reservation,
+            );
+            if (!sameReservationObject(reservation, object))
+              throw workerError('WORKER_CONFLICT');
+            await this.accountAccess.assertActive(current.job.userId, session);
+            const attemptFence = await this.attempts.updateOne(
+              {
+                _id: current.attempt._id,
+                revision: current.attempt.revision,
+                state: trusted({ $in: ACTIVE_ATTEMPTS }),
               },
-              $inc: { revision: 1 },
-            },
-            { session, runValidators: true, returnDocument: 'after' },
-          )
-          .lean();
-        if (!job) throw workerError('WORKER_CONFLICT');
-        await this.releaseSlot(current.attempt, now, session);
-        await this.usage.settleJob(job, session);
-        await this.enqueueNotification(job, 'ready', now, session);
-        await this.cleanup.cancelScheduled(reservation.key, session);
-        return {
-          attemptId,
-          jobId: job._id.toHexString(),
-          status: 'ready',
-          replayed: false,
-        };
-      });
+              {
+                $set: {
+                  state: 'succeeded',
+                  stage: 'finalizing',
+                  outputObject: object,
+                  terminalCode: null,
+                  failureClass: null,
+                  terminalSummary: null,
+                  finishedAt: now,
+                  leaseExpiresAt: now,
+                  processingStageTimings: dto.stageTimings,
+                },
+                $inc: { revision: 1 },
+              },
+              { session, runValidators: true },
+            );
+            if (attemptFence.modifiedCount !== 1)
+              throw workerError('WORKER_CONFLICT');
+            await this.usage.recordRetainedOutput(
+              current.job,
+              object.bytes,
+              session,
+            );
+            const readyAt = new Date();
+            const finalizationMs = Math.round(
+              performance.now() - completionStarted,
+            );
+            const job = await this.jobs
+              .findOneAndUpdate(
+                this.jobOwnershipFilter(current.job, current.attempt, readyAt),
+                {
+                  $set: {
+                    status: 'ready',
+                    outputObject: object,
+                    retainedOutputAccountedAt: readyAt,
+                    retainedOutputReleasedAt: null,
+                    currentExecution: null,
+                    workerProgress: null,
+                    finishedAt: readyAt,
+                    workerStageTimings: dto.stageTimings,
+                    stageTimingAttempts: withAttemptMeasurements(
+                      current.job,
+                      attemptId,
+                      current.attempt.attemptNumber,
+                      dto.executionTimings?.map((timing) =>
+                        timing.stage === 'completion'
+                          ? {
+                              stage: 'completion',
+                              durationMs: finalizationMs,
+                              complete: true,
+                            }
+                          : timing,
+                      ),
+                    ),
+                    retryEligibility: {
+                      eligible: false,
+                      attemptsRemaining: 0,
+                      nextAttemptAt: null,
+                    },
+                  },
+                  $inc: { revision: 1 },
+                },
+                { session, runValidators: true, returnDocument: 'after' },
+              )
+              .lean();
+            if (!job) throw workerError('WORKER_CONFLICT');
+            await this.releaseSlot(current.attempt, now, session);
+            await this.usage.settleJob(job, session);
+            await this.enqueueNotification(job, 'ready', now, session);
+            await this.cleanup.cancelScheduled(reservation.key, session);
+            return {
+              attemptId,
+              jobId: job._id.toHexString(),
+              status: 'ready',
+              replayed: false,
+            };
+          }),
+      );
       if (!result) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
       return result;
     } finally {
