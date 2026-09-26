@@ -45,3 +45,15 @@ upload/download, processing and account lifecycle still need a dedicated
 test identity and safe live fixture. Local browser previews were mocked. At
 initial deployment, no commit, push or PR had been made; check the task ledger
 for subsequent source publication and image versions.
+
+## Source publication and latest web release
+
+[PR #35](https://github.com/hatemragab/music_mute/pull/35) merged the web
+implementation into `main` at `bcc0f520d4e44127e415a2401b7339541896b0a3`.
+The feature and main branches were synchronized locally and on `origin`. A fresh
+allowlisted archive from that checkout deployed as CapRover web image 3. Live
+checks confirmed HTTPS redirect, web health, the 192-pixel PNG favicon, root
+title/description/canonical, `robots.txt`, root-only sitemap, private-route
+`noindex` and unknown-route 404. Installed Chrome displayed both languages with
+Arabic RTL and no application exceptions at phone width. Search inclusion is
+not guaranteed; production authenticated workflows still need a test identity.
