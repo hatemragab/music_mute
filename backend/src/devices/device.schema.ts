@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Schema as MongooseSchema } from 'mongoose';
 import type { HydratedDocument, Types } from 'mongoose';
-import type { Platform } from '../auth/auth.types.js';
+import type { ClientPlatform } from '../auth/auth.types.js';
 
 const printable = /^[^\p{Cc}\p{Cf}]+$/u;
 
@@ -36,10 +36,10 @@ export class Device {
   @Prop({
     type: String,
     required: true,
-    enum: ['android', 'ios'],
+    enum: ['android', 'ios', 'web'],
     immutable: true,
   })
-  platform!: Platform;
+  platform!: ClientPlatform;
   @Prop({
     required: true,
     validate: (value: string) => isBoundedPrintable(value, 32),

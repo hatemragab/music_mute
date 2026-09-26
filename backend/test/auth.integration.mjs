@@ -214,6 +214,38 @@ test(
         token: one.idToken,
         headers: installationHeader,
       });
+      const webReport = {
+        ...firstReport,
+        installationId: 'b8b40999-46fa-42ce-91a7-c8b334eef201',
+        platform: 'web',
+        appVersion: '0.1.0',
+        osVersion: 'Browser',
+      };
+      const webSession = await call(apiOne, '/auth/sessions', {
+        token: one.idToken,
+        method: 'POST',
+        body: webReport,
+      });
+      assert.equal(webSession.device.platform, 'web');
+      assert.equal(webSession.access.allowed, true);
+      const webHeader = { 'X-Installation-Id': webReport.installationId };
+      await call(probe, '/integration-processing', {
+        token: one.idToken,
+        headers: webHeader,
+      });
+      assert.equal(
+        (
+          await call(apiOne, '/users/me/devices', { token: one.idToken })
+        ).items.some((device) => device.platform === 'web'),
+        true,
+      );
+      const unsupportedPlatform = await call(apiOne, '/auth/sessions', {
+        token: one.idToken,
+        method: 'POST',
+        body: { ...webReport, platform: 'desktop' },
+        expected: 400,
+      });
+      assert.equal(unsupportedPlatform.code, 'INVALID_INPUT');
       await runPolicy({ requireVerifiedEmail: true }, 0, false);
       assert.equal((await call(apiOne, '/app-policy')).revision, 0);
       await runPolicy({ requireVerifiedEmail: true }, 0);
@@ -224,6 +256,16 @@ test(
         { token: one.idToken, headers: installationHeader, expected: 403 },
       );
       assert.equal(verificationRequired.code, 'EMAIL_VERIFICATION_REQUIRED');
+      const webVerificationRequired = await call(
+        probe,
+        '/integration-processing',
+        {
+          token: one.idToken,
+          headers: webHeader,
+          expected: 403,
+        },
+      );
+      assert.equal(webVerificationRequired.code, 'EMAIL_VERIFICATION_REQUIRED');
       await call(apiOne, '/users/me', { token: one.idToken });
       // A later authenticated account switch must outrank the old installation owner.
       await delay(1100);
@@ -236,6 +278,12 @@ test(
         method: 'POST',
         body: firstReport,
       });
+      const foreignWebAccess = await call(probe, '/integration-processing', {
+        token: other.idToken,
+        headers: webHeader,
+        expected: 403,
+      });
+      assert.equal(foreignWebAccess.code, 'EMAIL_VERIFICATION_REQUIRED');
       assert.equal(
         (await call(apiTwo, '/users/me/devices', { token: other.idToken }))
           .items.length,
@@ -335,7 +383,7 @@ test(
         });
       assert.equal(
         await connection.collection('user_devices').countDocuments(),
-        3,
+        4,
       );
       await delay(1100);
       const fresh = await rest('signInWithPassword', credentials);

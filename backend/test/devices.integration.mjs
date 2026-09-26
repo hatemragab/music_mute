@@ -230,6 +230,24 @@ test(
         )._id.toString(),
         unicodeDevice._id.toString(),
       );
+      const webReport = {
+        ...report,
+        installationId: 'f09d48ad-c982-47c6-9bbd-dd248916b031',
+        platform: 'web',
+        osVersion: 'Browser',
+      };
+      const webDevice = await service.sync(owner, 104, webReport);
+      assert.equal(webDevice.platform, 'web');
+      assert.equal(
+        await service.findOwned(other, webReport.installationId),
+        null,
+      );
+      assert.equal(
+        (await service.listOwned(owner, {})).items.some(
+          (device) => device.installationId === webReport.installationId,
+        ),
+        true,
+      );
     } finally {
       await connection?.close();
       await fixture.stop();

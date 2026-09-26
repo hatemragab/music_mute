@@ -10,12 +10,13 @@ compatibility impact in an issue before starting a large implementation.
 Clone `https://github.com/hatemragab/music_mute.git` and create a focused branch.
 Each component owns its dependencies and commands; there is no root package install.
 
-| Component | Guide                        | Relevant checks                                  |
-| --------- | ---------------------------- | ------------------------------------------------ |
-| Android   | [Setup](android/README.md)   | Gradle build, lint, and unit tests               |
-| iOS       | [Setup](ios/README.md)       | Xcode build/tests and Swift formatting           |
-| Backend   | [Setup](backend/README.md)   | `pnpm run verify`; relevant infrastructure suites |
-| Dashboard | [Setup](dashboard/README.md) | Format, lint, typecheck, tests, and build        |
+| Component  | Guide                         | Relevant checks                                              |
+| ---------- | ----------------------------- | ------------------------------------------------------------ |
+| Android    | [Setup](android/README.md)    | Gradle build, lint, and unit tests                           |
+| iOS        | [Setup](ios/README.md)        | Xcode build/tests and Swift formatting                       |
+| Backend    | [Setup](backend/README.md)    | `pnpm run verify`; relevant infrastructure suites            |
+| Dashboard  | [Setup](dashboard/README.md)  | Format, lint, typecheck, tests, and build                    |
+| Web client | [Setup](web-client/README.md) | Format, lint, typecheck, unit/server/Chrome tests, and build |
 
 Run commands from the component directory. Follow the existing simulator policy
 in the iOS guide for runtime/UI checks; do not automatically substitute devices.

@@ -40,6 +40,27 @@ describe('processing access policy', () => {
     ).toEqual({ allowed: true });
   });
 
+  it('admits an owned web device without a native build channel while retaining verification', async () => {
+    const policy = defaultPolicy();
+    policy.platforms.android.minimumBuild = 10;
+    policy.platforms.android.releaseSelection.directReleaseId = 'a'.repeat(24);
+    policy.requireVerifiedEmail = true;
+    const web = { platform: 'web' as const, buildNumber: 1 };
+    expect(evaluateProcessingAccess(policy, false, web)).toEqual({
+      allowed: false,
+      reason: 'EMAIL_VERIFICATION_REQUIRED',
+    });
+    expect(evaluateProcessingAccess(policy, true, web)).toEqual({
+      allowed: true,
+    });
+    const releases = { findById: vi.fn() };
+    const service = new AppPolicyService({} as never, releases as never);
+    await expect(
+      service.assertProcessingTargetAvailable(policy, 'web'),
+    ).resolves.toBeUndefined();
+    expect(releases.findById).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       minimumBuild: 2,

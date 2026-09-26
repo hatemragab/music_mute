@@ -33,9 +33,14 @@ describe('device report boundary', () => {
       }),
     ).toEqual([]);
   });
+  it('accepts a browser installation without changing native metadata bounds', async () => {
+    expect(
+      await errors({ ...report, platform: 'web', osVersion: 'Browser' }),
+    ).toEqual([]);
+  });
   it.each([
     { installationId: 'not-a-uuid' },
-    { platform: 'web' },
+    { platform: 'desktop' },
     { appVersion: '' },
     { appVersion: 'a'.repeat(33) },
     { osVersion: 'a\nb' },
