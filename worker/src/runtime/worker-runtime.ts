@@ -1006,6 +1006,7 @@ export class WorkerRuntime {
             recipeDigest: result.recipeDigest,
             modelDigest: result.modelDigest,
             trimEnabled: result.trimEnabled,
+            comparisonRanges: result.comparisonRanges,
             denoiseEnabled: result.denoiseEnabled,
             outputFormat: result.outputFormat,
             outputBitrateKbps: result.outputBitrateKbps,

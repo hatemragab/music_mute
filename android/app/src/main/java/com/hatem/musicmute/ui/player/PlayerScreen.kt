@@ -30,6 +30,8 @@ data class PlayerActions(
     val repeat: (RepeatMode) -> Unit, val autoNext: (Boolean) -> Unit,
     val queue: () -> Unit, val info: () -> Unit, val star: () -> Unit,
     val speed: (Float) -> Unit, val volume: (Float) -> Unit,
+    val original: (Boolean) -> Unit = {},
+    val saveOriginal: () -> Unit = {},
 )
 
 @Composable

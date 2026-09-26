@@ -86,9 +86,12 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
     await publish(captured)
   }
 
-  func submit(prepared: PreparedInput) async throws -> UploadOperation {
+  func submit(prepared: PreparedInput, trimEnabled: Bool = false) async throws -> UploadOperation {
     let fence = try requireSession(owner: prepared.ownerUid)
     let operation = try await store.createOperation(prepared: prepared)
+    _ = try await store.update(id: operation.operationId, ownerUid: fence.uid) {
+      if $0.trimEnabled == nil { $0.trimEnabled = trimEnabled }
+    }
     try check(fence)
     await publish(fence)
     return try await start(operationId: operation.operationId, fence: fence)
@@ -267,7 +270,7 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
             clientStartedAt: operation.clientStartedAt, sourceURL: operation.sourceURL,
             policyVersion: operation.policyVersion,
             preparationProfileId: operation.preparationProfileId,
-            source: operation.mediaSource))
+            source: operation.mediaSource, trimEnabled: operation.trimEnabled ?? false))
         operation = try await store.update(id: operationId, ownerUid: fence.uid) {
           $0.jobId = reservation.id
           $0.jobStatus = reservation.status
@@ -395,7 +398,7 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
               clientStartedAt: operation.clientStartedAt, sourceURL: operation.sourceURL,
               policyVersion: operation.policyVersion,
               preparationProfileId: operation.preparationProfileId,
-              source: operation.mediaSource))
+              source: operation.mediaSource, trimEnabled: operation.trimEnabled ?? false))
           // Save an acknowledged reservation even if its session became stale while waiting.
           // It remains owned by the captured UID and never enters a new session's visible state.
           try await store.update(id: operationId, ownerUid: fence.uid) {

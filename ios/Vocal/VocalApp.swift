@@ -99,6 +99,9 @@ private struct ProductionVocalView: View {
       api: jobs,
       root: support.appendingPathComponent("ProcessingOutputs", isDirectory: true),
       sessionProvider: { [weak repository] in repository?.session })
+    let originals = JobArtifactRepository(
+      api: jobs, root: support.appendingPathComponent("ProcessingOriginals", isDirectory: true),
+      sessionProvider: { [weak repository] in repository?.session }, original: true)
     let pushAPI: PushRegistrationAPI =
       configuration.map {
         PushRegistrationAPIClient(
@@ -128,9 +131,14 @@ private struct ProductionVocalView: View {
       api: jobs, repository: repository,
       preparer: preparer, pipeline: pipeline, player: player,
       outputFile: { try await artifacts.preparedOutput(jobId: $0, displayName: $1) },
-      removeOutput: { await artifacts.removeCached(jobId: $0) },
+      originalFile: { try await originals.preparedOutput(jobId: $0, displayName: $1) },
+      removeOutput: {
+        await artifacts.removeCached(jobId: $0)
+        await originals.removeCached(jobId: $0)
+      },
       sessionDidChange: {
         artifacts.onSessionChanged()
+        originals.onSessionChanged()
         push.sessionChanged()
       }, reportFailure: reportFailure)
     let processing = self.processing
@@ -160,6 +168,7 @@ private struct ProductionVocalView: View {
       if repository.session?.uid == uid { await processing.bindOwner(nil) }
       if repository.session == nil { player.stopAndClear() }
       try await artifacts.purge(ownerUid: uid)
+      try await originals.purge(ownerUid: uid)
       try await preparer.purge(ownerUid: uid)
       try await diagnostics.purge(ownerUid: uid)
       try await repository.store.purge(ownerUid: uid)

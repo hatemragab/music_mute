@@ -87,7 +87,7 @@ class ProcessingViewModel(
         }
     }
 
-    fun importAudio(uri: Uri) {
+    fun importAudio(uri: Uri, trimEnabled: Boolean = false) {
         val operationId = UUID.randomUUID().toString()
         performIntake(operationId) { ticket ->
         val name = withContext(Dispatchers.IO) {
@@ -97,7 +97,7 @@ class ProcessingViewModel(
         }
         try { resolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         catch (_: SecurityException) { /* A provider may give only a temporary grant; lost grants require reselection. */ }
-        coordinator.acceptDocument(operationId, name, uri.toString())
+        coordinator.acceptDocument(operationId, name, uri.toString(), trimEnabled)
         checkSession(ticket)
         history.refreshAfterChange()
         }

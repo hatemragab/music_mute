@@ -21,6 +21,7 @@ struct URLImportView: Decodable, Sendable {
 struct URLImportRecord: Codable, Equatable, Sendable {
   let url: String
   let requestId: UUID
+  var trimEnabled: Bool? = nil
   var importId: String?
   var status = "pending"
   var jobId: String?
@@ -66,12 +67,12 @@ struct URLImportRecord: Codable, Equatable, Sendable {
     }
   }
 
-  func submit(_ raw: String) async {
+  func submit(_ raw: String, trimEnabled: Bool = false) async {
     guard !busy, record == nil || record?.terminal == true, let uid = owner else { return }
     let ticket = epoch
     do {
       let url = try SupportedAudioSites.canonical(raw)
-      let pending = URLImportRecord(url: url, requestId: UUID())
+      let pending = URLImportRecord(url: url, requestId: UUID(), trimEnabled: trimEnabled)
       busy = true
       try await store.saveURLImport(pending, ownerUid: uid)
       guard ticket == epoch else { return }
@@ -118,7 +119,7 @@ struct URLImportRecord: Codable, Equatable, Sendable {
             view = try await self.api.urlImport(id: id)
           } else {
             view = try await self.api.createURLImport(
-              url: current.url, requestId: current.requestId)
+              url: current.url, requestId: current.requestId, trimEnabled: current.trimEnabled)
           }
           try Task.checkCancellation()
           guard ticket == self.epoch else { return }

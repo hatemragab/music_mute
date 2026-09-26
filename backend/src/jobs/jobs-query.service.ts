@@ -166,7 +166,9 @@ export class JobsQueryService {
     artifact: 'input' | 'output',
   ): ObjectIdentity | null {
     return artifact === 'input'
-      ? job.inputObject
+      ? job.reservationCleanupScheduledAt
+        ? null
+        : job.inputObject
       : job.status === 'ready'
         ? job.outputObject
         : null;

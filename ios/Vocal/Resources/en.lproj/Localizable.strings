@@ -327,6 +327,11 @@
 "timing_stage_output_upload" = "Result upload";
 "timing_stage_completion" = "Server finalization";
 
+"trim_silence" = "Trim silent gaps";
+"comparison_track" = "Playback version";
+"voice_track" = "Voice";
+"original_track" = "Original";
+"save_original" = "Save original audio";
 // Verified-site URL imports
 "url_import_title" = "Import audio from a link";
 "url_import_supported" = "Supported sites. Each item must provide a separate audio stream.";

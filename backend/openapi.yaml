@@ -7734,6 +7734,16 @@ components:
       type: object
       additionalProperties: false
       properties:
+        comparison_ranges:
+          description: Retained source sample intervals at 44100 Hz. Optional for older workers.
+          type: array
+          minItems: 1
+          maxItems: 2001
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items: { type: integer, minimum: 0, maximum: 52920000 }
         execution_timings:
           type: array
           maxItems: 13
@@ -9704,7 +9714,20 @@ components:
                 - message
                 - at
             - type: 'null'
+        trim_enabled:
+          type: boolean
+          description: Whether silent gaps were removed from the voice output.
+        comparison_ranges:
+          description: Retained source sample intervals at 44100 Hz, in output order. Null for older workers. A position inside a removed gap maps to the next retained interval.
+          type: [array, 'null']
+          maxItems: 2001
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items: { type: integer, minimum: 0, maximum: 52920000 }
         can_download_input:
+          description: An input is retained and has not been scheduled for cleanup. Download grants verify the pinned object still exists.
           type: boolean
         can_download_output:
           type: boolean

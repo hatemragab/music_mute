@@ -327,6 +327,11 @@
 "timing_stage_output_upload" = "رفع النتيجة";
 "timing_stage_completion" = "إنهاء المعالجة على الخادم";
 
+"trim_silence" = "قص فترات الصمت";
+"comparison_track" = "نسخة التشغيل";
+"voice_track" = "الصوت المعالج";
+"original_track" = "الأصلي";
+"save_original" = "حفظ الصوت الأصلي";
 // Verified-site URL imports
 "url_import_title" = "استيراد الصوت من رابط";
 "url_import_supported" = "المواقع المدعومة. يجب أن يوفر كل عنصر مسار صوت منفصل.";

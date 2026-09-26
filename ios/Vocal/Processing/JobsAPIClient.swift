@@ -2,6 +2,8 @@ import Foundation
 
 @MainActor protocol JobsAPI {
   func createURLImport(url: String, requestId: UUID) async throws -> URLImportView
+  func createURLImport(url: String, requestId: UUID, trimEnabled: Bool?) async throws
+    -> URLImportView
   func urlImport(id: String) async throws -> URLImportView
   func processingPolicy() async throws -> ProcessingPolicyResponse
   func processingUsage() async throws -> ProcessingUsage
@@ -24,6 +26,11 @@ import Foundation
 }
 
 extension JobsAPI {
+  func createURLImport(url: String, requestId: UUID, trimEnabled: Bool?) async throws
+    -> URLImportView
+  {
+    try await createURLImport(url: url, requestId: requestId)
+  }
   func createURLImport(url: String, requestId: UUID) async throws -> URLImportView {
     throw JobsFailure.serviceUnavailable
   }
@@ -97,14 +104,21 @@ extension JobsAPI {
   }
 
   func createURLImport(url: String, requestId: UUID) async throws -> URLImportView {
+    try await createURLImport(url: url, requestId: requestId, trimEnabled: nil)
+  }
+  func createURLImport(url: String, requestId: UUID, trimEnabled: Bool?) async throws
+    -> URLImportView
+  {
     _ = try SupportedAudioSites.canonical(url)
     struct Body: Encodable {
       let url: String
       let requestId: String
+      let trimEnabled: Bool?
     }
     let result: URLImportView = try await send(
       "POST", "/media-imports",
-      body: encoder.encode(Body(url: url, requestId: try requestUUID(requestId))),
+      body: encoder.encode(
+        Body(url: url, requestId: try requestUUID(requestId), trimEnabled: trimEnabled)),
       installation: true)
     return try result.validated()
   }
@@ -131,6 +145,7 @@ extension JobsAPI {
       throw JobsFailure.invalidInput
     }
     struct Body: Encodable {
+      let trimEnabled: Bool
       let policyVersion: Int?
       let preparationProfileId: String?
       let source: String?
@@ -145,6 +160,7 @@ extension JobsAPI {
       "POST", "/jobs",
       body: encoder.encode(
         Body(
+          trimEnabled: metadata.trimEnabled,
           policyVersion: metadata.policyVersion ?? 2,
           preparationProfileId: metadata.preparationProfileId
             ?? ProcessingMediaPolicy.standard.profileID,

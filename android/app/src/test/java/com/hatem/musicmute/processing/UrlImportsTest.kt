@@ -66,7 +66,7 @@ class UrlImportsTest {
         }
     }
 
-    @Test fun authenticatedWireRequestContainsOnlyUrlAndStableId() = runTest {
+    @Test fun authenticatedWireRequestContainsUrlStableIdAndTrimChoice() = runTest {
         val requestId = UUID.randomUUID().toString()
         var calls = 0
         val api = UrlImportsApiClient(AuthApiClient(
@@ -79,7 +79,8 @@ class UrlImportsTest {
                     assertTrue(url.endsWith("/media-imports"))
                     assertEquals(installed, headers["X-Installation-Id"])
                     val fields = Json.parseToJsonElement(body!!).jsonObject
-                    assertEquals(setOf("url", "request_id"), fields.keys)
+                    assertEquals(setOf("url", "request_id", "trim_enabled"), fields.keys)
+                    assertEquals("false", fields["trim_enabled"]?.jsonPrimitive?.content)
                     assertEquals(source, fields["url"]?.jsonPrimitive?.content)
                     assertEquals(requestId, fields["request_id"]?.jsonPrimitive?.content)
                 } else {

@@ -50,7 +50,10 @@ export function presentJob(job: Job) {
           at: job.lastError.at.toISOString(),
         }
       : null,
-    canDownloadInput: job.inputObject !== null,
+    canDownloadInput:
+      job.inputObject != null && !job.reservationCleanupScheduledAt,
+    comparisonRanges: job.comparisonRanges ?? null,
+    trimEnabled: job.recipeSnapshot?.trimEnabled ?? true,
     canDownloadOutput: job.status === 'ready' && job.outputObject !== null,
   };
 }

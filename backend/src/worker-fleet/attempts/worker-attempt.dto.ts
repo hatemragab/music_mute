@@ -1,6 +1,7 @@
 import { EXECUTION_TIMING_STAGES } from '../../jobs/job-stage-timing.js';
 import {
   ArrayMaxSize,
+  IsArray,
   ArrayUnique,
   Equals,
   IsBoolean,
@@ -79,6 +80,10 @@ export class WorkerOutputGrantDto extends WorkerAttemptOwnershipDto {
 }
 
 export class CompleteWorkerAttemptDto extends TimedWorkerAttemptDto {
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined)
+  @IsArray()
+  @ArrayMaxSize(2001)
+  comparisonRanges?: number[][];
   @IsString() @MaxLength(1024) versionId!: string;
   @IsIn(WORKER_RECIPE_IDS) recipeId!: WorkerRecipeId;
   @IsInt() @Min(0) recipeRevision!: number;

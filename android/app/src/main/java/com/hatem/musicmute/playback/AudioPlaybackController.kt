@@ -24,6 +24,9 @@ import kotlinx.coroutines.launch
 
 data class PlaybackState(
     val trackId: String? = null,
+    val original: Boolean = false,
+    val switching: Boolean = false,
+    val comparisonFailed: Boolean = false,
     val playing: Boolean = false,
     val buffering: Boolean = false,
     val positionMs: Long = 0,
@@ -51,6 +54,7 @@ class AudioPlaybackController(context: Context) : QueueCommands {
             )
             .buildAsync()
     private var controller: MediaController? = null
+    private var comparisonTask: kotlinx.coroutines.Job? = null
     private var pendingQueue: Pair<List<QueueTrack>, LibraryKey>? = null
     private var released = false
     private var clearPrivateOnConnect = false
@@ -209,6 +213,36 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         }
     }
 
+    fun selectOriginal(original: Boolean) {
+        val player = controller ?: return
+        val item = player.currentMediaItem ?: return
+        val track = item.queueTrack() ?: return
+        val expected = dependencies?.currentPlaybackSession() ?: return
+        if (item.mediaMetadata.extras?.getBoolean("original") == original) return
+        comparisonTask?.cancel()
+        comparisonTask = scope.launch {
+            mutableState.update { it.copy(switching = true, comparisonFailed = false) }
+            try {
+                val deps = dependencies ?: return@launch
+                val job = deps.comparisonJob(track.key)
+                if (original) deps.resolveOriginalFile(track.key) else deps.resolvePlaybackFile(track.key)
+                if (deps.currentPlaybackSession() != expected || player.currentMediaItem != item) return@launch
+                val target = comparisonPosition(player.currentPosition, original, job.trimEnabled, job.comparisonRanges)
+                val playing = player.playWhenReady
+                val index = player.currentMediaItemIndex
+                player.replaceMediaItem(index, track.mediaItem(original))
+                player.seekTo(index, target)
+                player.prepare()
+                player.playWhenReady = playing
+                refresh()
+            } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+            catch (_: Exception) {
+                if (dependencies?.currentPlaybackSession() == expected && player.currentMediaItem == item)
+                    mutableState.update { it.copy(comparisonFailed = true) }
+            } finally { mutableState.update { it.copy(switching = false) } }
+        }
+    }
+
     fun seek(positionMs: Long) {
         controller?.seekTo(positionMs.coerceAtLeast(0))
         refresh()
@@ -239,6 +273,7 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         mutableState.update { old ->
             old.copy(
                 trackId = player.currentMediaItem?.mediaId,
+                original = player.currentMediaItem?.mediaMetadata?.extras?.getBoolean("original") == true,
                 playing =
                     player.isPlaying ||
                         (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING),

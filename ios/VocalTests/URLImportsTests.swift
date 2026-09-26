@@ -43,6 +43,7 @@ import XCTest
     for _ in 0..<200 where model.busy { try await Task.sleep(for: .milliseconds(10)) }
     XCTAssertEqual(api.requests.count, 1)
     XCTAssertNotNil(model.messageKey)
+    XCTAssertEqual(model.record?.trimEnabled, false)
     await model.bindOwner(nil)
     let reopened = ProcessingStore(root: root, stagingRoot: root.appendingPathComponent("staging"))
     let restored = URLImportsModel(api: api, store: reopened)
@@ -55,6 +56,7 @@ import XCTest
     XCTAssertEqual(api.requests.count, 2)
     XCTAssertEqual(api.requests.first, api.requests.last)
     XCTAssertEqual(restored.record?.status, "submitted")
+    XCTAssertEqual(restored.record?.trimEnabled, false)
     XCTAssertEqual(restored.record?.jobId, "68c000000000000000000002")
   }
 

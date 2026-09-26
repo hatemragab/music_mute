@@ -22,14 +22,43 @@ import XCTest
     try? FileManager.default.removeItem(at: root)
   }
 
-  private func repository() -> JobArtifactRepository {
+  func testComparisonMapsTrimmedAudioAndPreservesUntrimmedTime() throws {
+    var job = processingJob(id: jobId, status: "ready")
+    job.trimEnabled = false
+    XCTAssertEqual(try comparisonPosition(12, toOriginal: true, job: job), 12)
+    job.trimEnabled = true
+    XCTAssertThrowsError(try comparisonPosition(12, toOriginal: true, job: job))
+    job.comparisonRanges = [[0, 441000], [882000, 1_323_000]]
+    XCTAssertEqual(try comparisonPosition(12, toOriginal: true, job: job), 22)
+    XCTAssertEqual(try comparisonPosition(22, toOriginal: false, job: job), 12)
+    XCTAssertEqual(try comparisonPosition(15, toOriginal: false, job: job), 10)
+  }
+
+  private func repository(original: Bool = false) -> JobArtifactRepository {
     JobArtifactRepository(
       api: api, root: root, sessionProvider: { [weak self] in self?.fence }, transport: transfer,
+      original: original,
       validate: { file in
         guard try Data(contentsOf: file) == Data("fixture-mp3".utf8) else {
           throw JobArtifactFailure.invalidOutput
         }
       })
+  }
+
+  func testOriginalExportUsesCachedFileAndMetadataAfterOfflineRelaunch() async throws {
+    api.expectedArtifact = "input"
+    let first = try await repository(original: true).preparedOutput(
+      jobId: jobId, displayName: "Song")
+    XCTAssertEqual(first.pathExtension, "mp3")
+    XCTAssertEqual(api.detailCalls, 1)
+    XCTAssertEqual(api.downloadCalls, 1)
+    api.allowNetwork = false
+    let second = try await repository(original: true).preparedOutput(
+      jobId: jobId, displayName: "Song")
+    XCTAssertEqual(first, second)
+    XCTAssertEqual(api.detailCalls, 1)
+    XCTAssertEqual(api.downloadCalls, 1)
+    XCTAssertEqual(transfer.calls, 1)
   }
 
   func testReadyStateDoesNotDownloadAndExplicitActionsReuseValidatedCache() async throws {
@@ -226,11 +255,14 @@ import XCTest
 
 @MainActor private final class ArtifactJobsFixture: JobsAPI {
   var status = "ready"
+  var allowNetwork = true
+  var expectedArtifact = "output"
   var detailCalls = 0
   var downloadCalls = 0
   var requestIDs: [UUID] = []
   var grantExpiry = Date().addingTimeInterval(60)
   func detail(id: String) async throws -> Job {
+    guard allowNetwork else { throw AuthFailure.offline }
     detailCalls += 1
     return processingJob(id: id, status: status)
   }
@@ -238,7 +270,8 @@ import XCTest
     try await download(id: id, artifact: artifact, requestId: UUID())
   }
   func download(id: String, artifact: String, requestId: UUID) async throws -> DownloadGrant {
-    XCTAssertEqual(artifact, "output")
+    guard allowNetwork else { throw AuthFailure.offline }
+    XCTAssertEqual(artifact, expectedArtifact)
     downloadCalls += 1
     requestIDs.append(requestId)
     return DownloadGrant(

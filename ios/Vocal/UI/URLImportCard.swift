@@ -6,6 +6,7 @@ struct URLImportCard: View {
   @State private var source = ""
   @FocusState private var sourceFocused: Bool
   @State private var rights = false
+  @State private var trimEnabled = false
   @State private var localError: String?
 
   var body: some View {
@@ -22,13 +23,14 @@ struct URLImportCard: View {
           .onSubmit { sourceFocused = false }
           .onChange(of: source) { _, _ in localError = nil }
         Text("import_cloud_disclosure").font(.caption)
+        Toggle("trim_silence", isOn: $trimEnabled)
         Toggle("import_rights_confirmation", isOn: $rights)
           .accessibilityIdentifier("urlImportRights")
         Button("url_import_action") {
           do {
             _ = try SupportedAudioSites.canonical(source)
             localError = nil
-            Task { await model.submit(source) }
+            Task { await model.submit(source, trimEnabled: trimEnabled) }
           } catch {
             localError = (error as? URLImportFailure)?.messageKey ?? "url_import_invalid"
           }
@@ -57,6 +59,7 @@ struct URLImportCard: View {
     .onChange(of: model.owner) { _, _ in
       source = ""
       rights = false
+      trimEnabled = false
       localError = nil
     }
   }

@@ -21,7 +21,8 @@ import XCTest
             .utf8)
       )
     }
-    _ = try? await api.createURLImport(url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId)
+    _ = try? await api.createURLImport(
+      url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId, trimEnabled: false)
     _ = try? await api.createURLImport(url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId)
     XCTAssertEqual(calls, 1)
     clock = 7
@@ -58,6 +59,7 @@ import XCTest
           request.value(forHTTPHeaderField: "X-Installation-Id"), self.installation.lowercased())
         let fields = try! self.body(request)
         XCTAssertEqual(fields["url"] as? String, "https://youtu.be/UXqq0ZvbOnk")
+        XCTAssertEqual(fields["trim_enabled"] as? Bool, false)
         XCTAssertEqual(fields["request_id"] as? String, self.requestId.uuidString.lowercased())
         return (
           202, [:],
@@ -73,7 +75,7 @@ import XCTest
       )
     }
     let view = try await api.createURLImport(
-      url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId)
+      url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId, trimEnabled: false)
     XCTAssertEqual(view.status, "queued")
     do {
       _ = try await api.urlImport(id: view.importId)
@@ -200,7 +202,8 @@ import XCTest
       try body(received[1])["request_id"] as? String, requestId.uuidString.lowercased())
     XCTAssertEqual(
       Set(try body(received[0]).keys),
-      ["policy_version", "preparation_profile_id", "source", "request_id", "input"])
+      ["policy_version", "preparation_profile_id", "source", "request_id", "input", "trim_enabled"])
+    XCTAssertEqual(try body(received[0])["trim_enabled"] as? Bool, false)
     let declaration = try XCTUnwrap(try body(received[0])["input"] as? [String: Any])
     XCTAssertEqual(
       Set(declaration.keys), ["extension", "content_type", "bytes", "duration_seconds", "sha256"])
