@@ -1,5 +1,5 @@
 import { authError } from '../auth/auth.errors.js';
-import type { Platform, ProcessingDecision } from '../auth/auth.types.js';
+import type { ClientPlatform, ProcessingDecision } from '../auth/auth.types.js';
 import type { AppPolicy } from './app-policy.schema.js';
 
 export function defaultPolicy(): AppPolicy {
@@ -103,11 +103,13 @@ export function validatePolicy(value: unknown): asserts value is AppPolicy {
 export function evaluateProcessingAccess(
   policy: AppPolicy,
   emailVerified: boolean,
-  device: { platform: Platform; buildNumber: number } | null,
+  device: { platform: ClientPlatform; buildNumber: number } | null,
 ): ProcessingDecision {
   if (policy.requireVerifiedEmail && !emailVerified)
     return { allowed: false, reason: 'EMAIL_VERIFICATION_REQUIRED' };
   if (!device) return { allowed: false, reason: 'DEVICE_SYNC_REQUIRED' };
+  // Browser clients receive current code at page load; native release minimums do not apply.
+  if (device.platform === 'web') return { allowed: true };
   const platform = policy.platforms[device.platform];
   if (
     platform.minimumBuild !== null &&

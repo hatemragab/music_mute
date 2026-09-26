@@ -393,7 +393,11 @@ export class PushRegistrationsService {
     installationId: string,
   ): Promise<void> {
     const device = await this.devices
-      .findOne({ userId, installationId })
+      .findOne({
+        userId,
+        installationId,
+        platform: trusted({ $in: ['android', 'ios'] }),
+      })
       .setOptions({ sanitizeFilter: false })
       .select('_id')
       .session(session)

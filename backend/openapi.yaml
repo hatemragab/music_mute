@@ -4626,7 +4626,7 @@ paths:
         - authentication
       operationId: AuthController.session
       summary: POST /auth/sessions
-      description: '`SessionDto`: UUIDv4 installation, platform, app/build/OS metadata bounded to 100 chars'
+      description: '`SessionDto`: UUIDv4 installation, Android/iOS/web platform, app/build/OS metadata bounded to 100 chars. Web uses a browser-profile installation ID and has no native binary-update requirement.'
       security:
         - FirebaseBearer: []
       x-source: src/auth/auth.controller.ts
@@ -8009,6 +8009,7 @@ components:
           enum:
             - android
             - ios
+            - web
         app_version:
           type: string
           minLength: 1
@@ -8521,6 +8522,7 @@ components:
           enum:
             - android
             - ios
+            - web
         app_version:
           type: string
           minLength: 1
@@ -9349,6 +9351,7 @@ components:
           enum:
             - android
             - ios
+            - web
         app_version: *a9
         build_number: *a5
         metadata_revision:
