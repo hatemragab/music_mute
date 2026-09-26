@@ -12,7 +12,7 @@ import {
 import { AuthProvider, useAuth } from "./auth/AuthProvider";
 import { AuthScreen } from "./auth/AuthScreen";
 import { RecoveryScreen } from "./auth/RecoveryScreen";
-import { I18nProvider, friendlyError, useI18n } from "./i18n";
+import { I18nProvider, useI18n } from "./i18n";
 import { JobsPage, JobDetailPage } from "./jobs/JobsUI";
 import { PlayerProvider } from "./player/PlayerProvider";
 import { MiniPlayer, PlayerPage } from "./player/PlayerUI";
@@ -22,6 +22,7 @@ import { SettingsPage } from "./settings/SettingsPage";
 import { AccountPage } from "./settings/AccountPage";
 import { accentFor, applyAccent } from "./settings/accent";
 import { useSignedIn } from "./auth/AuthProvider";
+import { StartupScreen } from "./auth/StartupScreen";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -116,23 +117,9 @@ export function Shell() {
 }
 
 function Gate() {
-  const { state, retry } = useAuth();
-  const { t } = useI18n();
-  if (state.phase === "restoring")
-    return (
-      <main className="center-state" role="status">
-        {t("loading")}
-      </main>
-    );
-  if (state.phase === "error")
-    return (
-      <main className="center-state">
-        <p role="alert">{friendlyError(new Error(state.message), t)}</p>
-        <button type="button" onClick={retry}>
-          {t("retry")}
-        </button>
-      </main>
-    );
+  const { state } = useAuth();
+  if (state.phase === "restoring" || state.phase === "error")
+    return <StartupScreen />;
   if (state.phase === "signedOut") return <AuthScreen />;
   if (state.phase === "recovery") return <RecoveryScreen />;
   return <Shell key={state.user.uid} />;

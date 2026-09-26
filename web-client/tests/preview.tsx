@@ -5,6 +5,7 @@ import type { User } from "firebase/auth";
 import type { ApiClient } from "../src/api/client";
 import { Shell } from "../src/App";
 import { AuthContext } from "../src/auth/AuthProvider";
+import { StartupScreen } from "../src/auth/StartupScreen";
 import { I18nProvider } from "../src/i18n";
 import "../src/styles.css";
 
@@ -122,7 +123,16 @@ const session = {
   },
   access: { allowed: true },
 };
-const state = { phase: "signedIn" as const, user, session, api };
+const previewParams = new URLSearchParams(window.location.search);
+const startup = previewParams.get("startup");
+if (previewParams.get("lang") === "ar")
+  localStorage.setItem("musicmute.web.language", "ar");
+const state =
+  startup === "auth" || startup === "session"
+    ? { phase: "restoring" as const, step: startup }
+    : startup === "error"
+      ? { phase: "error" as const, message: "SESSION_TIMEOUT" }
+      : { phase: "signedIn" as const, user, session, api };
 
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider
@@ -133,7 +143,7 @@ createRoot(document.getElementById("root")!).render(
         <AuthContext.Provider
           value={{ state, retry: () => {}, logout: async () => {} }}
         >
-          <Shell />
+          {startup ? <StartupScreen /> : <Shell />}
         </AuthContext.Provider>
       </MemoryRouter>
     </I18nProvider>

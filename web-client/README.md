@@ -49,6 +49,14 @@ isolated integration tests and browser-origin CORS preflight; authenticated
 production journeys have not been exercised. Backend verification lives in
 `backend/`.
 
+## Startup recovery
+
+The startup screen identifies whether the browser is restoring Firebase sign-in or
+connecting the account session to the API. Each step has a 15-second limit. If a
+step stalls, the screen shows a localized explanation and Retry; retry starts a
+new auth subscription and cancels the previous session request. This avoids an
+unbounded loading screen without signing users out or discarding their data.
+
 ## Audio behavior
 
 Local intake accepts audio only. Browser-decodable MP3, AAC/M4A, Ogg/Opus and
