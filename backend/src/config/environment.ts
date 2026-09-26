@@ -75,6 +75,7 @@ const schema = Joi.object({
   AWS_REGION: Joi.string()
     .pattern(/^[a-z]{2}(?:-[a-z]+)+-\d$/)
     .required(),
+  S3_TRANSFER_ACCELERATION_ENABLED: Joi.boolean().default(false),
   S3_BUCKET: Joi.string()
     .pattern(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/)
     .required(),
@@ -276,6 +277,11 @@ export function validateEnvironment(
     );
   }
   const env = result.value as Record<string, unknown>;
+  if (
+    env.S3_TRANSFER_ACCELERATION_ENABLED === true &&
+    String(env.S3_BUCKET).includes('.')
+  )
+    throw new Error('Invalid environment: S3_BUCKET');
   if (
     env.URL_IMPORT_ENABLED === true &&
     (env.URL_IMPORT_PROCESSOR_ENABLED !== true ||

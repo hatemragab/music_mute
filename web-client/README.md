@@ -86,3 +86,11 @@ from Android's `ic_vocal.xml` brand mark; update `public/favicon.svg` and its
 192-pixel PNG together if the native mark changes. These measures support branded
 discovery; the signed-in application is not a substitute for a public product
 landing page, and indexing is controlled by search engines.
+
+## Optional accelerated audio transfers
+
+`PUBLIC_MEDIA_ACCELERATION_ENABLED=true` adds the accelerated HTTPS origin for
+the same bucket specified by `PUBLIC_MEDIA_ORIGIN` to the connect/media CSP, while
+keeping regional grants valid. It defaults to false and requires a regional S3
+origin with a bucket name without dots. Deploy this before opting the backend
+into acceleration. See [transfer rollout](../docs/audio-transfer-performance/README.md).

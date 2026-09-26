@@ -65,3 +65,48 @@ test("exposes the public entry point and crawl assets without indexing private r
   const health = await fetch(`${origin}/healthz`);
   assert.equal(health.headers.get("x-robots-tag"), "noindex");
 });
+
+test("opt-in acceleration allows only this bucket and keeps regional grants valid", async () => {
+  const accelerated = createWebServer({
+    env: { ...env, PUBLIC_MEDIA_ACCELERATION_ENABLED: "true" },
+  });
+  await new Promise((resolve) => accelerated.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${accelerated.address().port}/healthz`,
+    );
+    const policy = response.headers.get("content-security-policy");
+    assert.ok(
+      policy.includes(
+        "media-src 'self' https://music-remover.s3.us-east-2.amazonaws.com https://music-remover.s3-accelerate.amazonaws.com",
+      ),
+    );
+    assert.ok(!policy.includes("*.amazonaws"));
+  } finally {
+    await new Promise((resolve) => accelerated.close(resolve));
+  }
+});
+test("rejects unsafe media origins and unsupported acceleration configuration", () => {
+  for (const value of [
+    "https://user:password@s3.example.com",
+    "https://s3.example.com/?token=secret",
+    "https://s3.example.com/#fragment",
+  ])
+    assert.throws(() =>
+      createWebServer({ env: { ...env, PUBLIC_MEDIA_ORIGIN: value } }),
+    );
+  assert.throws(() =>
+    createWebServer({
+      env: { ...env, PUBLIC_MEDIA_ACCELERATION_ENABLED: "maybe" },
+    }),
+  );
+  assert.throws(() =>
+    createWebServer({
+      env: {
+        ...env,
+        PUBLIC_MEDIA_ACCELERATION_ENABLED: "true",
+        PUBLIC_MEDIA_ORIGIN: "https://cdn.example.com",
+      },
+    }),
+  );
+});

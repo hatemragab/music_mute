@@ -597,3 +597,10 @@ workers reject unknown recipe snapshots. No mobile switch is added in this chang
 API preflight: https://opensource.zalando.com/restful-api-guidelines/ read on
 2026-09-26; rules 101 (OpenAPI), 104 (security), 106 (compatibility), 118
 (snake_case), and 176 (problem responses). Existing auth and errors are preserved.
+
+## Transfer timing breakdown
+
+Successful-attempt diagnostics add `inputGrant`, `outputGrant`, and `outputPut`
+to the existing stage timings. `upload` includes its grant/PUT components; do not
+sum overlapping measurements. `outputPut` includes failed transfer calls before
+successful retry/recovery. See [the measurement and rollout guide](../docs/audio-transfer-performance/README.md).

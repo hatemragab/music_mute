@@ -1,10 +1,9 @@
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import type { StorageClient } from '../infrastructure/storage.module.js';
 import type { UploadGrant } from '../jobs/job.types.js';
 
 interface ImmutableUpload {
-  storage: StorageClient;
+  storage: S3Client;
   bucket: string;
   key: string;
   bytes: number;

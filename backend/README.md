@@ -264,3 +264,10 @@ Server imports still save original titles and URL attribution. This is a breakin
 retirement of old clients, with no compatibility route. See the
 [client contract](../docs/api/client-contract.md) and
 [validation record](../docs/mobile-url-acquisition-removal.md).
+
+## Audio transfer performance
+
+See [transfer performance](../docs/audio-transfer-performance/README.md) for concurrent
+bucket checks, server/worker diagnostics, the synthetic benchmark and the opt-in
+`S3_TRANSFER_ACCELERATION_ENABLED` flag (default false). Regional management and
+private immutable grants remain required.
