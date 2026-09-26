@@ -1,6 +1,6 @@
 # Android listening comfort
 
-Work is on branch `refractor-ui`, checked out at `/Users/hatemragap/work_spaces/refractor-ui`. Android only. iOS and the website client are unchanged.
+This change is scoped to Android. iOS and the website client are unchanged.
 
 ## What changed
 
@@ -50,4 +50,4 @@ Build and install the `directDebug` variant, then sign in.
 
 ## Checks run
 
-Unit tests for the comparison-file rules and the 15-second loop range. UI was not exercised on a device in this change. Install `directDebug` and walk the list above.
+The Direct and Play debug APKs, lint checks, and JVM test suites passed locally. The Direct debug APK was installed and launched on the connected CPH2573, but the UI flows above were not exercised. Walk the list above before treating device behavior as verified.
