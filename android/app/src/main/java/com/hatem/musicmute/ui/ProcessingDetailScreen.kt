@@ -89,7 +89,7 @@ fun ProcessingDetailScreen(
             if (task.totalElapsedMs != null || task.processingElapsedMs != null) {
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     task.totalElapsedMs?.let {
-                        JobTimingCard(stringResource(R.string.job_total_time_label), it, task.totalElapsedApproximate, Modifier.weight(1f).fillMaxHeight())
+                        JobTimingCard(stringResource(R.string.server_total), it, task.totalElapsedApproximate, Modifier.weight(1f).fillMaxHeight())
                     }
                     task.processingElapsedMs?.let {
                         JobTimingCard(stringResource(R.string.job_processing_time_label), it, task.processingElapsedApproximate, Modifier.weight(1f).fillMaxHeight())

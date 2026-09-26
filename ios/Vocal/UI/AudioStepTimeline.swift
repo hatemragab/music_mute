@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AudioStepTimeline: View {
   let steps: [AudioStepPresentation]
+  var timings: ServerStageTimings?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -21,10 +22,52 @@ struct AudioStepTimeline: View {
             }
           }.padding(.top, 2)
           Spacer()
+          if let measurement = step.measurement, measurement.durationMs >= 0 {
+            let duration = String(format: "%.1f s", Double(measurement.durationMs) / 1_000)
+            Text(
+              measurement.complete
+                ? duration : String(format: String(localized: "timing_partial"), duration)
+            )
+            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+          }
         }
         .accessibilityElement(children: .combine)
       }
+      if let timings {
+        Divider().padding(.vertical, 12)
+        Text("server_timings").font(.headline)
+        Text("timing_note").font(.caption).foregroundStyle(.secondary).padding(.bottom, 8)
+        ForEach(Array(timings.stages.enumerated()), id: \.offset) { _, measurement in
+          if measurement.durationMs >= 0 {
+            timingRow(stageTitle(measurement.stage), measurement.durationMs, measurement.complete)
+          }
+        }
+        if let total = timings.totalMs, total >= 0 {
+          timingRow("server_total", total, timings.totalComplete)
+        }
+      }
     }
+  }
+
+  private func timingRow(_ title: String, _ milliseconds: Int64, _ complete: Bool) -> some View {
+    HStack(alignment: .firstTextBaseline) {
+      Text(LocalizedStringKey(title))
+      Spacer()
+      let duration = String(format: "%.1f s", Double(milliseconds) / 1_000)
+      Text(complete ? duration : String(format: String(localized: "timing_partial"), duration))
+        .monospacedDigit()
+    }.font(.subheadline).padding(.vertical, 4)
+  }
+
+  private func stageTitle(_ stage: String) -> String {
+    let known = [
+      "import-queue", "source-download", "source-validation", "source-upload",
+      "upload-confirmation", "submission-window", "queue", "retry-wait", "resource-check",
+      "input-download", "input-validation", "preparation", "model-load", "separation", "denoise",
+      "trim", "encoding", "output-validation", "output-ready", "output-upload", "completion",
+    ]
+    return known.contains(stage)
+      ? "timing_stage_" + stage.replacingOccurrences(of: "-", with: "_") : "timing_stage_other"
   }
 
   private func symbol(_ state: AudioStepState) -> String {

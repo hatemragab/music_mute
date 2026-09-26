@@ -747,6 +747,26 @@ try {
 
   const completed = await api('GET', `/jobs/${created.id}`);
   assert.equal(completed.status, 'ready');
+  if (!externalService) {
+    assert.equal(completed.serverStageTimings.totalComplete, true);
+    assert.ok(Number.isSafeInteger(completed.serverStageTimings.totalMs));
+    assert.ok(completed.serverStageTimings.totalMs >= 0);
+    for (const stage of [
+      'queue',
+      'input-download',
+      'output-upload',
+      'completion',
+    ]) {
+      const measurement = completed.serverStageTimings.stages.find(
+        (entry) => entry.stage === stage,
+      );
+      assert.ok(measurement, `Missing server measurement: ${stage}`);
+      assert.ok(Number.isSafeInteger(measurement.durationMs));
+      assert.ok(measurement.durationMs >= 0);
+      assert.equal(measurement.complete, true);
+    }
+    assert.equal(completed.serverStageTimings.attempts.length, 1);
+  }
   const download = await api('POST', `/jobs/${created.id}/download-grants`, {
     artifact: 'output',
     requestId: randomUUID(),

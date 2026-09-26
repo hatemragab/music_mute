@@ -1,3 +1,4 @@
+import { elapsedMs, type StageMeasurement } from '../jobs/job-stage-timing.js';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -55,22 +56,62 @@ export class ImportProcessor extends WorkerHost {
       )
       .lean();
     if (!record) return;
+    const queueMs = elapsedMs(record.createdAt, new Date());
+    const stages: StageMeasurement[] =
+      queueMs === null
+        ? []
+        : [{ stage: 'import-queue', durationMs: queueMs, complete: true }];
+    let timingJobId: string | null = null;
+    const saveTimings = async () => {
+      await this.imports.records.updateOne(
+        { _id: record._id, executionId },
+        { $set: { stageTimings: stages } },
+        { runValidators: true },
+      );
+      if (timingJobId)
+        await this.jobRecords.updateOne(
+          { _id: timingJobId, userId: record.userId },
+          { $set: { importStageTimings: stages } },
+          { runValidators: true },
+        );
+    };
+    const measure = async <T>(
+      stage: string,
+      operation: () => Promise<T>,
+    ): Promise<T> => {
+      const entry: StageMeasurement = { stage, durationMs: 0, complete: false };
+      stages.push(entry);
+      await saveTimings();
+      const start = performance.now();
+      try {
+        const result = await operation();
+        entry.complete = true;
+        return result;
+      } finally {
+        entry.durationMs = Math.round(performance.now() - start);
+        await saveTimings();
+      }
+    };
     try {
       const limits = await this.imports.assertEligible(record.userId);
       await this.files.withFile(async (path, signal) => {
-        const downloaded = await this.downloader.download(
-          record.sourceUrl,
-          this.files,
-          path,
-          limits,
-          signal,
+        const downloaded = await measure('source-download', () =>
+          this.downloader.download(
+            record.sourceUrl,
+            this.files,
+            path,
+            limits,
+            signal,
+          ),
         );
         await this.stage(record, 'validating', signal);
-        const measured = await probeImport(
-          path,
-          limits.maxDuration,
-          signal,
-          this.config.getOrThrow<string>('URL_IMPORT_FFPROBE_PATH'),
+        const measured = await measure('source-validation', () =>
+          probeImport(
+            path,
+            limits.maxDuration,
+            signal,
+            this.config.getOrThrow<string>('URL_IMPORT_FFPROBE_PATH'),
+          ),
         );
         const { sourceTitle: downloadedTitle, ...audio } = downloaded;
         const sourceTitle = record.sourceTitle ?? downloadedTitle;
@@ -100,7 +141,9 @@ export class ImportProcessor extends WorkerHost {
               : {}),
           },
           record.trimEnabled ?? true,
+          { startedAt: record.createdAt, stages },
         );
+        timingJobId = reserved.id;
         const saved = await this.imports.records.updateOne(
           { _id: record._id, executionId, status: 'uploading' },
           { $set: { jobId: reserved.id, input } },
@@ -109,36 +152,41 @@ export class ImportProcessor extends WorkerHost {
           throw importError('IMPORT_DEPENDENCY_FAILED');
         signal.throwIfAborted();
         if (reserved.upload) {
-          // Use the existing signed immutable PUT contract, including checksum and length.
-          const body = createReadStream(path);
-          const uploadSignal = AbortSignal.any([
-            signal,
-            AbortSignal.timeout(120_000),
-          ]);
-          try {
-            const response = await fetch(reserved.upload.url, {
-              method: 'PUT',
-              headers: {
-                ...reserved.upload.headers,
-                // A stream has no inferred length; S3 signs the measured byte count.
-                'Content-Length': String(downloaded.bytes),
-              },
-              redirect: 'error',
-              signal: uploadSignal,
-              body: Readable.toWeb(body) as ReadableStream<Uint8Array>,
-              duplex: 'half',
-            } as RequestInit & { duplex: 'half' });
-            await response.body?.cancel();
-            // A lost successful response/immutable replay is resolved by confirmUpload's HEAD checks.
-            if (!response.ok && response.status !== 412)
-              throw importError('IMPORT_DEPENDENCY_FAILED');
-          } finally {
-            body.destroy();
-          }
+          const upload = reserved.upload;
+          await measure('source-upload', async () => {
+            // Use the existing signed immutable PUT contract, including checksum and length.
+            const body = createReadStream(path);
+            const uploadSignal = AbortSignal.any([
+              signal,
+              AbortSignal.timeout(120_000),
+            ]);
+            try {
+              const response = await fetch(upload.url, {
+                method: 'PUT',
+                headers: {
+                  ...upload.headers,
+                  // A stream has no inferred length; S3 signs the measured byte count.
+                  'Content-Length': String(downloaded.bytes),
+                },
+                redirect: 'error',
+                signal: uploadSignal,
+                body: Readable.toWeb(body) as ReadableStream<Uint8Array>,
+                duplex: 'half',
+              } as RequestInit & { duplex: 'half' });
+              await response.body?.cancel();
+              // A lost successful response/immutable replay is resolved by confirmUpload's HEAD checks.
+              if (!response.ok && response.status !== 412)
+                throw importError('IMPORT_DEPENDENCY_FAILED');
+            } finally {
+              body.destroy();
+            }
+          });
         }
         signal.throwIfAborted();
         await this.imports.assertAccountAllowed(record.userId);
-        await this.jobs.confirmUpload(record.userId.toHexString(), reserved.id);
+        await measure('upload-confirmation', () =>
+          this.jobs.confirmUpload(record.userId.toHexString(), reserved.id),
+        );
         await this.finish(record, 'submitted', reserved.id);
       }, this.shutdown.signal);
     } catch (error) {
@@ -190,6 +238,7 @@ export class ImportProcessor extends WorkerHost {
       {
         $set: {
           status: 'failed',
+          finishedAt: new Date(),
           error: safeImportError(error),
           expiresAt: new Date(Date.now() + 7 * 86400_000),
         },
@@ -213,6 +262,7 @@ export class ImportProcessor extends WorkerHost {
       {
         $set: {
           status,
+          finishedAt: new Date(),
           jobId,
           error: null,
           expiresAt: new Date(Date.now() + 7 * 86400_000),

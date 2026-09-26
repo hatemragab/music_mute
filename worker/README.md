@@ -597,3 +597,12 @@ workers reject unknown recipe snapshots. No mobile switch is added in this chang
 API preflight: https://opensource.zalando.com/restful-api-guidelines/ read on
 2026-09-26; rules 101 (OpenAPI), 104 (security), 106 (compatibility), 118
 (snake_case), and 176 (problem responses). Existing auth and errors are preserved.
+
+## Job stage measurements
+
+The runtime measures each attempt stage with a monotonic clock and sends bounded
+`execution_timings` snapshots through progress, completion and failure requests.
+NestJS retains each attempt and computes queue/retry and end-to-end durations.
+Incomplete stages remain last-observed lower bounds after a crash or cancellation.
+Deploy backend support before this worker update; see
+[server-owned stage timings](../docs/job-stage-timings.md) for boundaries and compatibility.

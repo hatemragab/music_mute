@@ -2,7 +2,7 @@ package com.hatem.musicmute.processing
 
 enum class AudioStepState { COMPLETE, CURRENT, PENDING, INTERRUPTED, FAILED, CANCELLED }
 
-data class AudioTaskStep(val stage: AudioTaskStage, val state: AudioStepState)
+data class AudioTaskStep(val stage: AudioTaskStage, val state: AudioStepState, val measurement: ServerStageMeasurement? = null)
 
 /** Ordered steps are independent of rendering, so refreshes never own their history. */
 fun audioTaskTimeline(task: AudioTaskPresentation): List<AudioTaskStep> {
@@ -34,7 +34,15 @@ fun audioTaskTimeline(task: AudioTaskPresentation): List<AudioTaskStep> {
             ) -> AudioStepState.INTERRUPTED
             else -> AudioStepState.PENDING
         }
-        AudioTaskStep(stage, state)
+        val timingStage = when (stage) {
+            AudioTaskStage.DOWNLOADING_SOURCE -> "source-download"
+            AudioTaskStage.QUEUED -> "queue"
+            AudioTaskStage.VALIDATING -> "input-validation"
+            AudioTaskStage.PROCESSING -> "separation"
+            AudioTaskStage.UPLOADING_RESULT -> "output-upload"
+            else -> null
+        }
+        AudioTaskStep(stage, state, task.serverStageTimings?.stages?.firstOrNull { it.stage == timingStage })
     }
 }
 

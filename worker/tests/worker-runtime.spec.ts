@@ -971,6 +971,23 @@ describe("worker runtime ownership", () => {
       expect.objectContaining({ workerId }),
       expect.objectContaining({
         versionId: "output-version",
+        executionTimings: expect.arrayContaining([
+          {
+            stage: "input-download",
+            durationMs: expect.any(Number),
+            complete: true,
+          },
+          {
+            stage: "output-upload",
+            durationMs: expect.any(Number),
+            complete: true,
+          },
+          {
+            stage: "completion",
+            durationMs: expect.any(Number),
+            complete: false,
+          },
+        ]),
         stageTimings: [
           { stage: "modelLoad", durationMs: 125 },
           { stage: "separation", durationMs: 1_500 },
@@ -984,6 +1001,7 @@ describe("worker runtime ownership", () => {
       "model-ready",
       "started",
       "attempt-started",
+      "attempt-progress",
       "attempt-progress",
       "attempt-progress",
       "attempt-progress",
@@ -1012,6 +1030,7 @@ describe("worker runtime ownership", () => {
     ).toEqual([
       "resource-check",
       "input-download",
+      "input-validation",
       "output-upload",
       "completion",
     ]);
@@ -1104,6 +1123,7 @@ describe("worker runtime ownership", () => {
     expect(progress).toMatchObject([
       { stage: "resource-check", jobId: f.claim.jobId, attemptId },
       { stage: "input-download", jobId: f.claim.jobId, attemptId },
+      { stage: "input-validation", jobId: f.claim.jobId, attemptId },
       { stage: "preparation", jobId: f.claim.jobId, attemptId },
       { stage: "separation", jobId: f.claim.jobId, attemptId },
       {

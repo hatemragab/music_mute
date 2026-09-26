@@ -34,6 +34,18 @@ struct JobSourceMetadata: Codable, Equatable, Sendable {
   }
 }
 
+struct ServerStageMeasurement: Codable, Equatable, Sendable {
+  let stage: String
+  let durationMs: Int64
+  let complete: Bool
+}
+
+struct ServerStageTimings: Codable, Equatable, Sendable {
+  let totalMs: Int64?
+  let totalComplete: Bool
+  let stages: [ServerStageMeasurement]
+}
+
 struct JobTiming: Codable, Equatable, Sendable {
   let processingElapsedMs: Int64?
   let processingElapsedApproximate: Bool
@@ -77,6 +89,7 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
   let sourceKind: JobSourceKind?
   let serverTime: Date?
   let timing: JobTiming?
+  let serverStageTimings: ServerStageTimings?
   let stages: JobStages?
 
   init(
@@ -85,7 +98,7 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
     canDownloadInput: Bool, canDownloadOutput: Bool, workerAvailable: Bool?,
     requestId: String? = nil, sourceTitle: String? = nil, displayName: String? = nil,
     sourceKind: JobSourceKind? = nil, serverTime: Date? = nil, timing: JobTiming? = nil,
-    stages: JobStages? = nil
+    stages: JobStages? = nil, serverStageTimings: ServerStageTimings? = nil
   ) {
     self.id = id
     self.status = status
@@ -105,6 +118,7 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
     self.sourceKind = sourceKind
     self.serverTime = serverTime
     self.timing = timing
+    self.serverStageTimings = serverStageTimings
     self.stages = stages
   }
 

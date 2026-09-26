@@ -220,7 +220,7 @@ class JobsApiClientTest {
 
     @Test fun audioExperienceMetadataMutationsAndDiagnosticsUseExactContract() = runTest {
         val requests = mutableListOf<List<Any?>>()
-        val projection = """{"id":"$id","request_id":"$requestId","source_title":"Interview","display_name":"My interview","source_kind":"url","status":"ready","server_time":"2026-09-10T12:01:10.000Z","created_at":"2026-09-10T12:00:10.000Z","updated_at":"2026-09-10T12:01:10.000Z","queued_at":"2026-09-10T12:00:20.000Z","finished_at":"2026-09-10T12:01:10.000Z","input":{"extension":"mp3","bytes":42,"duration_seconds":1.5},"timing":{"processing_elapsed_ms":20000,"processing_elapsed_approximate":false,"total_elapsed_ms":70000,"total_elapsed_approximate":true},"stages":{"validating_at":"2026-09-10T12:00:40.000Z","processing_started_at":"2026-09-10T12:00:45.000Z","processing_finished_at":"2026-09-10T12:01:05.000Z","uploading_result_at":"2026-09-10T12:01:05.000Z"},"can_download_input":true,"can_download_output":true,"worker_available":true}"""
+        val projection = """{"id":"$id","request_id":"$requestId","source_title":"Interview","display_name":"My interview","source_kind":"url","status":"ready","server_time":"2026-09-10T12:01:10.000Z","server_stage_timings":{"total_ms":60000,"total_complete":true,"stages":[{"stage":"separation","duration_ms":20000,"complete":true}],"attempts":[]},"created_at":"2026-09-10T12:00:10.000Z","updated_at":"2026-09-10T12:01:10.000Z","queued_at":"2026-09-10T12:00:20.000Z","finished_at":"2026-09-10T12:01:10.000Z","input":{"extension":"mp3","bytes":42,"duration_seconds":1.5},"timing":{"processing_elapsed_ms":20000,"processing_elapsed_approximate":false,"total_elapsed_ms":70000,"total_elapsed_approximate":true},"stages":{"validating_at":"2026-09-10T12:00:40.000Z","processing_started_at":"2026-09-10T12:00:45.000Z","processing_finished_at":"2026-09-10T12:01:05.000Z","uploading_result_at":"2026-09-10T12:01:05.000Z"},"can_download_input":true,"can_download_output":true,"worker_available":true}"""
         val replies = ArrayDeque(listOf(
             """{"id":"$id","request_id":"$requestId","status":"awaiting_upload","upload":$upload}""",
             projection,
@@ -241,6 +241,8 @@ class JobsApiClientTest {
         val renamed = api.rename(id, "My interview")
         assertEquals("My interview", renamed.displayName)
         assertEquals(20_000L, renamed.timing?.processingElapsedMs)
+        assertEquals(60_000L, renamed.serverStageTimings?.totalMs)
+        assertEquals("separation", renamed.serverStageTimings?.stages?.single()?.stage)
         assertEquals(Instant.parse("2026-09-10T12:00:45Z"), renamed.stages?.processingStartedAt)
         api.delete(id)
         val accepted = api.reportClientError(ClientErrorReport(

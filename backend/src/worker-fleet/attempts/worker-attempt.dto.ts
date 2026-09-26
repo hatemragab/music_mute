@@ -1,3 +1,4 @@
+import { EXECUTION_TIMING_STAGES } from '../../jobs/job-stage-timing.js';
 import {
   ArrayMaxSize,
   ArrayUnique,
@@ -33,6 +34,12 @@ export class WorkerProcessingStageTimingDto {
   @IsInt() @Min(0) @Max(7_200_000) durationMs!: number;
 }
 
+export class ExecutionStageTimingDto {
+  @IsIn(EXECUTION_TIMING_STAGES) stage!: string;
+  @IsInt() @Min(0) @Max(7_200_000) durationMs!: number;
+  @IsBoolean() complete!: boolean;
+}
+
 export class WorkerAttemptOwnershipDto {
   @IsUUID('4') requestId!: string;
   @IsUUID('4') workerId!: string;
@@ -42,7 +49,16 @@ export class WorkerAttemptOwnershipDto {
 
 export class WorkerInputGrantDto extends WorkerAttemptOwnershipDto {}
 
-export class UpdateWorkerAttemptProgressDto extends WorkerAttemptOwnershipDto {
+export class TimedWorkerAttemptDto extends WorkerAttemptOwnershipDto {
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined)
+  @ArrayMaxSize(EXECUTION_TIMING_STAGES.length)
+  @ArrayUnique((timing: ExecutionStageTimingDto) => timing.stage)
+  @ValidateNested({ each: true })
+  @Type(() => ExecutionStageTimingDto)
+  executionTimings?: ExecutionStageTimingDto[];
+}
+
+export class UpdateWorkerAttemptProgressDto extends TimedWorkerAttemptDto {
   @IsInt() @Min(1) @Max(1_000_000) sequence!: number;
   @IsIn(WORKER_PROGRESS_PHASES) phase!: WorkerProgressPhase;
   @ValidateIf((_object: unknown, value: unknown) => value !== null)
@@ -62,7 +78,7 @@ export class WorkerOutputGrantDto extends WorkerAttemptOwnershipDto {
   measuredDurationSeconds!: number;
 }
 
-export class CompleteWorkerAttemptDto extends WorkerAttemptOwnershipDto {
+export class CompleteWorkerAttemptDto extends TimedWorkerAttemptDto {
   @IsString() @MaxLength(1024) versionId!: string;
   @IsIn(WORKER_RECIPE_IDS) recipeId!: WorkerRecipeId;
   @IsInt() @Min(0) recipeRevision!: number;
@@ -89,7 +105,7 @@ const WORKER_FAILURE_CODES: readonly JobFailureCode[] = [
   'OUTPUT_UPLOAD_FAILED',
 ];
 
-export class FailWorkerAttemptDto extends WorkerAttemptOwnershipDto {
+export class FailWorkerAttemptDto extends TimedWorkerAttemptDto {
   @IsIn(WORKER_FAILURE_CODES) code!: JobFailureCode;
   @IsString() @MaxLength(500) summary!: string;
 }

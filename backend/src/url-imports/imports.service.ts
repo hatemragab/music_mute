@@ -1,3 +1,4 @@
+import { elapsedMs } from '../jobs/job-stage-timing.js';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -170,6 +171,22 @@ export class ImportsService {
 
   private present(record: MediaImport) {
     return {
+      serverStageTimings:
+        ['submitted', 'failed'].includes(record.status) && !record.finishedAt
+          ? null
+          : {
+              totalMs: elapsedMs(
+                record.createdAt,
+                record.finishedAt ?? new Date(),
+              ),
+              totalComplete: record.finishedAt != null,
+              stages: (record.stageTimings ?? []).map((s) => ({
+                stage: s.stage,
+                durationMs: s.durationMs,
+                complete: s.complete,
+              })),
+              attempts: [],
+            },
       importId: record._id.toHexString(),
       status: record.status,
       sourceTitle: record.sourceTitle ?? null,

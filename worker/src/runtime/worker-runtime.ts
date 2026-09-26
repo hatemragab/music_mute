@@ -1,3 +1,4 @@
+import { StageClock } from "./stage-clock.js";
 import { DiagnosticForwarder } from "./diagnostic-forwarder.js";
 import { randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
@@ -811,6 +812,7 @@ export class WorkerRuntime {
     let uploadMs: number | null = null;
     let completionMs: number | null = null;
     let currentStage: AttemptStage = "resource-check";
+    const stageClock = new StageClock();
     const progressReporter = new AttemptProgressReporter(
       async (update) => {
         if (this.control.progress)
@@ -840,6 +842,7 @@ export class WorkerRuntime {
       if (controller.signal.aborted || terminal) return;
       const previousStage = currentStage;
       currentStage = stage;
+      stageClock.enter(stage);
       const active = this.activeJobs.get(slot.workerId);
       if (active) {
         const now = new Date().toISOString();
@@ -869,8 +872,21 @@ export class WorkerRuntime {
         stage,
         ...(work === undefined ? {} : { work }),
       });
-      progressReporter.update(publicAttemptProgress(stage, work));
+      progressReporter.update({
+        ...publicAttemptProgress(stage, work),
+        executionTimings: stageClock.snapshot(),
+      });
     };
+    const timingHeartbeat = setInterval(() => {
+      if (!terminal && !controller.signal.aborted)
+        progressReporter.update({
+          ...publicAttemptProgress(
+            currentStage,
+            this.activeJobs.get(slot.workerId)?.work,
+          ),
+          executionTimings: stageClock.snapshot(),
+        });
+    }, 5_000);
     try {
       enterStage("resource-check");
       await this.resources.assertAvailable(claim.input.bytes);
@@ -897,6 +913,7 @@ export class WorkerRuntime {
       downloadMs = Math.max(0, performance.now() - downloadStarted);
       authority.assertCurrent();
 
+      enterStage("input-validation");
       let childResponse: ChildResponse;
       try {
         childResponse = await child.request(
@@ -988,6 +1005,7 @@ export class WorkerRuntime {
             outputFormat: result.outputFormat,
             outputBitrateKbps: result.outputBitrateKbps,
             stageTimings: result.stageTimings,
+            executionTimings: stageClock.snapshot(),
           },
           controller.signal,
         );
@@ -1099,7 +1117,7 @@ export class WorkerRuntime {
           await this.control.fail(
             claim.attemptId,
             identity,
-            failure,
+            { ...failure, executionTimings: stageClock.snapshot() },
             controller.signal,
           );
           terminal = true;
@@ -1128,6 +1146,7 @@ export class WorkerRuntime {
       }
     } finally {
       terminal = true;
+      clearInterval(timingHeartbeat);
       progressReporter.close();
       controller.abort(new OwnershipLostError("attempt-finished"));
       this.stopping.signal.removeEventListener("abort", stopListener);

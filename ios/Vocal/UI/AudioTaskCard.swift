@@ -95,36 +95,17 @@ struct AudioTaskCard: View {
   }
 }
 
-/// Only this leaf refreshes each second. Worker processing time remains the
-/// server-measured sample; an offline client must not invent worker activity.
+/// Server snapshots never advance on the phone, including while offline.
 struct AudioTaskElapsedTime: View {
   let task: AudioTaskPresentation
-  @State private var sampledAt = Date()
 
   var body: some View {
-    Group {
-      if task.isActive {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-          elapsedText(audioTaskTotalSeconds(task, at: context.date, sampledAt: sampledAt))
-        }
-      } else {
-        elapsedText(task.totalSeconds)
-      }
-    }
-    .onChange(of: task.totalSeconds) { _, _ in sampledAt = Date() }
-    .onChange(of: task.isActive) { _, _ in sampledAt = Date() }
-  }
-
-  private func elapsedText(_ seconds: Double?) -> Text {
-    Text(
-      seconds.map { (task.totalApproximate || task.isActive ? "≈ " : "") + audioTime($0) } ?? "—")
+    Text(task.totalSeconds.map { (task.totalApproximate ? "≥ " : "") + audioTime($0) } ?? "—")
   }
 }
 
 func audioTaskTotalSeconds(
   _ task: AudioTaskPresentation, at date: Date, sampledAt: Date
 ) -> Double? {
-  guard task.isActive else { return task.totalSeconds }
-  if task.operationID != nil { return max(0, date.timeIntervalSince(task.createdAt)) }
-  return task.totalSeconds.map { max(0, $0 + max(0, date.timeIntervalSince(sampledAt))) }
+  task.totalSeconds
 }

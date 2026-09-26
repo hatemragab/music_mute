@@ -1,3 +1,4 @@
+import { closeQueueTiming } from '../../jobs/job-stage-timing.js';
 import { Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
@@ -378,6 +379,7 @@ export class WorkerClaimService {
             },
             {
               $set: {
+                ...closeQueueTiming(candidate, now),
                 status: 'processing',
                 currentExecution: execution,
                 workerProgress: null,

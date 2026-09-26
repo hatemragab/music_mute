@@ -198,6 +198,8 @@ import XCTest
       return
     }
     XCTAssertEqual(renamed.displayName, "My interview")
+    XCTAssertEqual(renamed.serverStageTimings?.totalMs, 60000)
+    XCTAssertEqual(renamed.serverStageTimings?.stages.first?.stage, "separation")
     XCTAssertEqual(renamed.sourceTitle, "Interview")
     XCTAssertEqual(renamed.sourceKind, .url)
     XCTAssertEqual(renamed.timing?.processingElapsedMs, 20_000)
@@ -395,7 +397,7 @@ import XCTest
   private func jobJSON(status: String, metadata: Bool = false) -> String {
     let extra =
       metadata
-      ? "\"request_id\":\"c21a2eaa-7e73-4f08-89da-6ac35baa83e1\",\"source_title\":\"Interview\",\"display_name\":\"My interview\",\"source_kind\":\"url\",\"server_time\":\"2026-09-10T12:01:10.000Z\",\"timing\":{\"processing_elapsed_ms\":20000,\"processing_elapsed_approximate\":false,\"total_elapsed_ms\":70000,\"total_elapsed_approximate\":true},\"stages\":{\"validating_at\":\"2026-09-10T12:00:40.000Z\",\"processing_started_at\":\"2026-09-10T12:00:45.000Z\",\"processing_finished_at\":\"2026-09-10T12:01:05.000Z\",\"uploading_result_at\":\"2026-09-10T12:01:05.000Z\"},"
+      ? "\"request_id\":\"c21a2eaa-7e73-4f08-89da-6ac35baa83e1\",\"source_title\":\"Interview\",\"display_name\":\"My interview\",\"source_kind\":\"url\",\"server_time\":\"2026-09-10T12:01:10.000Z\",\"server_stage_timings\":{\"total_ms\":60000,\"total_complete\":true,\"stages\":[{\"stage\":\"separation\",\"duration_ms\":20000,\"complete\":true}],\"attempts\":[]},\"timing\":{\"processing_elapsed_ms\":20000,\"processing_elapsed_approximate\":false,\"total_elapsed_ms\":70000,\"total_elapsed_approximate\":true},\"stages\":{\"validating_at\":\"2026-09-10T12:00:40.000Z\",\"processing_started_at\":\"2026-09-10T12:00:45.000Z\",\"processing_finished_at\":\"2026-09-10T12:01:05.000Z\",\"uploading_result_at\":\"2026-09-10T12:01:05.000Z\"},"
       : ""
     return
       "{\(extra)\"id\":\"\(id)\",\"status\":\"\(status)\",\"created_at\":\"2026-09-09T12:00:00Z\",\"updated_at\":\"2026-09-09T12:00:00.123Z\",\"input\":{\"extension\":\"mp3\",\"bytes\":123,\"duration_seconds\":2.5},\"can_download_input\":true,\"can_download_output\":false,\"worker_available\":false}"

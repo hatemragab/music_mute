@@ -1,3 +1,9 @@
+import {
+  StageMeasurementSchema,
+  AttemptMeasurementsSchema,
+  type StageMeasurement,
+  type AttemptMeasurements,
+} from './job-stage-timing.js';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Schema as MongoSchema, type Types } from 'mongoose';
 import { AUDIO_TYPES, JOB_FAILURE_CODES, JOB_STATUSES } from './job.types.js';
@@ -280,6 +286,30 @@ const workerExecutionOwnership = new MongoSchema<WorkerExecutionOwnership>(
 })
 export class Job {
   _id!: Types.ObjectId;
+  @Prop({ type: Date, default: null }) serverTimingStartedAt!: Date | null;
+  @Prop({ type: Date, default: null }) queueTimingStartedAt!: Date | null;
+  @Prop({
+    type: Number,
+    default: null,
+    min: 0,
+    validate: (v: number | null) => v === null || Number.isSafeInteger(v),
+  })
+  queueAccumulatedMs!: number | null;
+  @Prop({
+    type: Number,
+    default: null,
+    min: 0,
+    validate: (v: number | null) => v === null || Number.isSafeInteger(v),
+  })
+  retryWaitAccumulatedMs!: number | null;
+  @Prop({ type: [StageMeasurementSchema], default: [] })
+  importStageTimings!: StageMeasurement[];
+  @Prop({
+    type: [AttemptMeasurementsSchema],
+    default: [],
+    validate: (v: AttemptMeasurements[]) => v.length <= 10,
+  })
+  stageTimingAttempts!: AttemptMeasurements[];
   @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
   userId!: Types.ObjectId;
   @Prop({ required: true, immutable: true, maxlength: 36 }) requestId!: string;
