@@ -318,6 +318,7 @@ export class WorkerControlPlaneClient {
       outputBitrateKbps: number;
       stageTimings: Array<{ stage: string; durationMs: number }>;
       executionTimings?: ExecutionStageTiming[];
+      comparisonRanges?: number[][] | undefined;
     },
     signal?: AbortSignal,
   ): Promise<void> {

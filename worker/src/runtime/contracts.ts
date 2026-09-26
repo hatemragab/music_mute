@@ -177,6 +177,7 @@ export interface ChildProcessResult {
   outputFormat: "mp3";
   outputBitrateKbps: number;
   stageTimings: WorkerProcessingStageTiming[];
+  comparisonRanges?: number[][] | undefined;
   separationTimings?: Array<{ stage: string; durationMs: number }>;
 }
 
@@ -672,6 +673,7 @@ export function parseChildProcessResult(value: unknown): ChildProcessResult {
       32,
       160,
     ),
+    comparisonRanges: comparisonRanges(item.editMap),
     separationTimings: Object.entries(
       item.separationTimings === undefined
         ? {}
@@ -707,4 +709,27 @@ export function parseChildProcessResult(value: unknown): ChildProcessResult {
       ];
     }),
   };
+}
+
+function comparisonRanges(value: unknown): number[][] | undefined {
+  if (value === undefined) return undefined;
+  const map = record(value, "editMap");
+  if (!Array.isArray(map.chunks)) throw new TypeError("Invalid edit map");
+  const ranges = map.chunks.flat().map((value: unknown) => {
+    const range = record(value, "edit range");
+    return [
+      integer(range.sourceStart, "sourceStart", 0, 52920000),
+      integer(range.sourceEnd, "sourceEnd", 1, 52920000),
+    ];
+  });
+  if (
+    ranges.length < 1 ||
+    ranges.length > 2001 ||
+    ranges.some(
+      (range, i) =>
+        range[1]! <= range[0]! || (i > 0 && range[0]! < ranges[i - 1]![1]!),
+    )
+  )
+    throw new TypeError("Invalid edit map intervals");
+  return ranges;
 }

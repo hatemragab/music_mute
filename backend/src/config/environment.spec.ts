@@ -42,6 +42,7 @@ describe('environment boundary', () => {
   it('parses validated defaults', () => {
     expect(validateEnvironment(local)).toMatchObject({
       PORT: 3000,
+      S3_TRANSFER_ACCELERATION_ENABLED: false,
       REDIS_URL: local.REDIS_URL,
       RATE_LIMIT: 60,
       APP_ANDROID_CURRENT_VERSION_NAME: '0.1.0',
@@ -52,6 +53,30 @@ describe('environment boundary', () => {
       ...AUTH_RATE_LIMIT_DEFAULTS,
       ...ADMIN_RATE_LIMIT_DEFAULTS,
     });
+  });
+  it('validates acceleration opt-in and rejects dotted bucket names', () => {
+    expect(
+      validateEnvironment({
+        ...local,
+        S3_TRANSFER_ACCELERATION_ENABLED: 'true',
+      }).S3_TRANSFER_ACCELERATION_ENABLED,
+    ).toBe(true);
+    expect(() =>
+      validateEnvironment({
+        ...local,
+        S3_TRANSFER_ACCELERATION_ENABLED: 'maybe',
+      }),
+    ).toThrow('S3_TRANSFER_ACCELERATION_ENABLED');
+    expect(() =>
+      validateEnvironment({
+        ...local,
+        S3_BUCKET: 'dotted.bucket',
+        S3_TRANSFER_ACCELERATION_ENABLED: true,
+      }),
+    ).toThrow('Invalid environment: S3_BUCKET');
+    expect(() =>
+      validateEnvironment({ ...local, S3_BUCKET: 'dotted.bucket' }),
+    ).not.toThrow();
   });
   it('accepts only an absolute optional worker installation catalog path', () => {
     expect(

@@ -53,3 +53,40 @@ describe("separation timing diagnostics", () => {
     ).toThrow();
   });
 });
+
+describe("original comparison timeline", () => {
+  it("preserves retained source intervals from the Python edit map", () => {
+    expect(
+      parseChildProcessResult({
+        ...result,
+        editMap: {
+          chunks: [
+            [
+              { sourceStart: 0, sourceEnd: 44100 },
+              { sourceStart: 88200, sourceEnd: 132300 },
+            ],
+          ],
+        },
+      }).comparisonRanges,
+    ).toEqual([
+      [0, 44100],
+      [88200, 132300],
+    ]);
+  });
+  it("rejects overlapping ranges and accepts older child results without a map", () => {
+    expect(parseChildProcessResult(result).comparisonRanges).toBeUndefined();
+    expect(() =>
+      parseChildProcessResult({
+        ...result,
+        editMap: {
+          chunks: [
+            [
+              { sourceStart: 0, sourceEnd: 44100 },
+              { sourceStart: 100, sourceEnd: 88200 },
+            ],
+          ],
+        },
+      }),
+    ).toThrow("Invalid edit map intervals");
+  });
+});

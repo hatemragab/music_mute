@@ -10,13 +10,13 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import type { Platform } from '../../auth/auth.types.js';
+import type { ClientPlatform } from '../../auth/auth.types.js';
 
 const printable = /^[^\p{Cc}\p{Cf}]+$/u;
 
 export class DeviceMetadataDto {
-  @IsIn(['android', 'ios'])
-  platform!: Platform;
+  @IsIn(['android', 'ios', 'web'])
+  platform!: ClientPlatform;
 
   @IsString()
   @Length(1, 32)

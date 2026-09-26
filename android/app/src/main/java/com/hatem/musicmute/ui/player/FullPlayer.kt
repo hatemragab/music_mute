@@ -78,7 +78,7 @@ internal fun FullPlayer(state: PlaybackState, entry: LibraryEntry?, actions: Pla
         }
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(R.string.creative_library_voice), style = MaterialTheme.typography.labelMedium,
+                Text(stringResource(if (state.original) R.string.original_track else R.string.creative_library_voice), style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary)
                 Text(entry?.title?.takeIf { it.isNotBlank() }
                     ?: state.queue.getOrNull(state.currentIndex)?.title?.takeIf { it.isNotBlank() }
@@ -86,7 +86,15 @@ internal fun FullPlayer(state: PlaybackState, entry: LibraryEntry?, actions: Pla
                     style = MaterialTheme.typography.titleLarge, fontSize = 24.sp, lineHeight = 32.sp,
                     textAlign = TextAlign.Center)
             }
-        if (state.buffering) LinearProgressIndicator(Modifier.fillMaxWidth())
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilterChip(!state.original, { actions.original(false) },
+                label = { Text(stringResource(R.string.voice_track)) }, enabled = !state.switching, modifier = Modifier.weight(1f))
+            FilterChip(state.original, { actions.original(true) },
+                label = { Text(stringResource(R.string.original_track)) }, enabled = !state.switching, modifier = Modifier.weight(1f))
+        }
+        TextButton(actions.saveOriginal, enabled = !state.switching) { Text(stringResource(R.string.save_original)) }
+        if (state.comparisonFailed) Text(stringResource(R.string.original_unavailable), color = MaterialTheme.colorScheme.error)
+        if (state.buffering || state.switching) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (state.failed) CreativeFeedback(stringResource(libraryProblemLabel(entry?.problem)), error = true,
             actionLabel = stringResource(R.string.retry), onAction = actions.toggle)
         Column {

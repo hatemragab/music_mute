@@ -1,5 +1,6 @@
 export type SupportedProvider = 'password' | 'google.com' | 'apple.com';
 export type Platform = 'android' | 'ios';
+export type ClientPlatform = Platform | 'web';
 
 export interface VerifiedIdentity {
   uid: string;
@@ -10,7 +11,7 @@ export interface VerifiedIdentity {
 
 export interface DeviceReport {
   installationId: string;
-  platform: Platform;
+  platform: ClientPlatform;
   appVersion: string;
   buildNumber: number;
   metadataRevision: number;

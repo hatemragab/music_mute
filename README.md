@@ -6,7 +6,8 @@ MusicMute is an AI-powered audio source separation project with native Android
 and iOS apps. Import audio you have permission to process, submit it for vocal
 isolation, and play, download, or share the voice-only result.
 
-This repository contains the mobile apps, API, and administrator dashboard.
+This repository contains the mobile apps, end-user web client, API, worker, and
+administrator dashboard.
 New audio processing is temporarily unavailable while the processing architecture
 is redesigned. Existing job history and completed-result access remain available.
 
@@ -17,6 +18,7 @@ is redesigned. Existing job history and completed-result access remain available
 ## Features
 
 - **Native mobile apps:** Kotlin/Jetpack Compose on Android and Swift/SwiftUI on iOS.
+- **End-user web app:** responsive English/Arabic browser journeys for accounts, imports, jobs, library, and playback.
 - **Processing library:** retain job history and completed voice-only results.
 - **Private transfers:** authenticated APIs and short-lived S3 upload/download grants.
 - **Job coordination:** durable processing state, cancellation, and recovery support.
@@ -28,20 +30,23 @@ is redesigned. Existing job history and completed-result access remain available
 ```mermaid
 flowchart LR
     Apps[Android and iOS apps] --> API[NestJS API]
+    Web[End-user web client] --> API
     Dashboard[React admin dashboard] --> API
     API --> Firebase[Firebase Authentication]
     API --> MongoDB[(MongoDB)]
     API --> Redis[(Redis)]
     API --> S3[(Private S3 storage)]
     Apps -->|Signed transfers| S3
+    Web -->|Signed transfers| S3
 ```
 
-| Component       | Technology                             | Setup and details                 |
-| --------------- | -------------------------------------- | --------------------------------- |
-| Android app     | Kotlin, Jetpack Compose                | [android/](android/README.md)     |
-| iOS app         | Swift, SwiftUI                         | [ios/](ios/README.md)             |
-| API             | NestJS, TypeScript, MongoDB, Redis, S3 | [backend/](backend/README.md)     |
-| Admin dashboard | React, TypeScript, Vite, Tailwind CSS  | [dashboard/](dashboard/README.md) |
+| Component       | Technology                             | Setup and details                   |
+| --------------- | -------------------------------------- | ----------------------------------- |
+| Android app     | Kotlin, Jetpack Compose                | [android/](android/README.md)       |
+| iOS app         | Swift, SwiftUI                         | [ios/](ios/README.md)               |
+| Web client      | React, TypeScript, Vite                | [web-client/](web-client/README.md) |
+| API             | NestJS, TypeScript, MongoDB, Redis, S3 | [backend/](backend/README.md)       |
+| Admin dashboard | React, TypeScript, Vite, Tailwind CSS  | [dashboard/](dashboard/README.md)   |
 
 ## Getting started
 
@@ -56,10 +61,13 @@ Choose the component you want to work on; there is no root-level install command
    MongoDB 8 and Redis 7.4 or later. Follow the [backend setup](backend/README.md)
    to configure an ignored local environment file, then run
    `pnpm install --frozen-lockfile` and `pnpm run start:dev` from `backend/`.
-2. **Dashboard:** follow the [dashboard setup](dashboard/README.md) for its API
+2. **Web client:** follow the [web client setup](web-client/README.md) for public
+   Firebase Web SDK settings and the API origin. The browser uses `web` platform
+   sessions and a standalone npm package.
+3. **Dashboard:** follow the [dashboard setup](dashboard/README.md) for its API
    origin and Firebase configuration. Administrator access requires backend
    authorization.
-3. **Mobile apps:** use JDK 17 and Android SDK 36 for Android, or macOS and Xcode
+4. **Mobile apps:** use JDK 17 and Android SDK 36 for Android, or macOS and Xcode
    for iOS. Configure Firebase and the API endpoint using the platform guides
    before building.
 
@@ -107,6 +115,17 @@ and a deployed API exposing the current administration routes. See the
 [dashboard task package](docs/tasks/full-dashboard/dashboard/README.md) and
 [validation record](docs/validation/full-dashboard-local.md) for recorded evidence
 and remaining integration requirements.
+
+## End-user web client
+
+The [web client](web-client/README.md) is separate from the dashboard. It follows
+the Android dark theme with responsive layouts and English/Arabic RTL support.
+It uses Firebase Web Authentication and the existing API for URL/audio imports,
+jobs, online library, playback and account management. Browser adaptations and
+remaining production verification are tracked in the
+[web task ledger](web-client/tasks/06-tasks.md). The deployed app is at
+[app.music-mute.com](https://app.music-mute.com); live health and CORS checks do
+not prove authenticated processing or signed transfers.
 
 ## Firebase
 
@@ -169,7 +188,7 @@ cd android
 Open `ios/MusicMute.xcodeproj` in Xcode. See [iOS setup and test commands](ios/README.md)
 for the authorized iPhone 17 Pro simulator and the opt-in real download test.
 
-## Validate the API and dashboard
+## Validate the API and web clients
 
 From `backend/`, run `pnpm install --frozen-lockfile` followed by
 `pnpm run verify`. Infrastructure
@@ -188,6 +207,12 @@ npm run build
 Browser and deployment checks are documented in the dashboard guide; browser
 integration tests also require local MongoDB, Redis, and Google Chrome.
 
+From `web-client/`, run `npm ci --ignore-scripts`, then `npm run format:check`,
+`npm run lint`, `npm run typecheck`, `npm test`, `npm run build`,
+`npm run test:server`, and `npm run test:e2e`. Its browser suite uses installed
+Chrome and synthetic or mocked fixtures; see the web guide for the live-proof
+boundary.
+
 ## Documentation
 
 | Guide                                                              | Contents                                                  |
@@ -196,6 +221,7 @@ integration tests also require local MongoDB, Redis, and Google Chrome.
 | [API client contract](docs/api/client-contract.md)                 | Routes, credentials, wire format, errors, and API rules   |
 | [OpenAPI](backend/openapi.yaml)                                    | Current HTTP operations and schemas                       |
 | [Dashboard](dashboard/README.md)                                   | Administrator setup, checks, and packaging                |
+| [Web client](web-client/README.md)                                 | End-user browser setup, checks, and deployment            |
 | [Account deletion](docs/account-deletion.md)                       | Identity and storage cleanup operations                   |
 | [Mobile processing tracker](docs/tasks/mobile-audio-processing.md) | Implementation status and validation boundaries           |
 | [Contributing](CONTRIBUTING.md)                                    | Change scope, local checks, and pull requests             |

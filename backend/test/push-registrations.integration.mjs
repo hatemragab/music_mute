@@ -21,6 +21,7 @@ import { IsolatedServices } from './helpers/isolated-services.mjs';
 const installA = 'd7ea7de6-52e9-4b96-8834-3b517941bdb0';
 const installB = '75dcab60-447a-4a44-b116-2dd3e1945d90';
 const installC = '33e91b43-a505-4bbb-b4a9-7bf42916c6ed';
+const installWeb = 'f09d48ad-c982-47c6-9bbd-dd248916b031';
 const installD = '1ec036f6-03d4-49e0-88d6-bb67abe57c88';
 
 test('push bindings survive rotation, account switches, logout and opt-out without destination confusion', async (t) => {
@@ -70,11 +71,11 @@ test('push bindings survive rotation, account switches, logout and opt-out witho
     });
   const owner = await createUser('push-owner');
   const other = await createUser('push-other');
-  const createDevice = (userId, installationId) =>
+  const createDevice = (userId, installationId, platform = 'ios') =>
     devices.create({
       userId,
       installationId,
-      platform: 'ios',
+      platform,
       appVersion: '1.0',
       buildNumber: 1,
       metadataRevision: 1,
@@ -91,13 +92,20 @@ test('push bindings survive rotation, account switches, logout and opt-out witho
     createDevice(other._id, installA),
     createDevice(other._id, installB),
     createDevice(other._id, installC),
+    createDevice(owner._id, installWeb, 'web'),
   ]);
   await Promise.all([
     ownerService.claim(owner._id.toHexString(), installA, 100),
     ownerService.claim(other._id.toHexString(), installB, 100),
     ownerService.claim(owner._id.toHexString(), installC, 100),
     ownerService.claim(owner._id.toHexString(), installD, 100),
+    ownerService.claim(owner._id.toHexString(), installWeb, 100),
   ]);
+
+  await assert.rejects(
+    service.register(owner, installWeb, 'fixture-web-push-token', 100),
+    (error) => error.getResponse?.().code === 'DEVICE_SYNC_REQUIRED',
+  );
 
   const staleAfterSwitch = await service.register(
     owner,

@@ -326,3 +326,21 @@
 "timing_stage_output_ready" = "Result preparation";
 "timing_stage_output_upload" = "Result upload";
 "timing_stage_completion" = "Server finalization";
+
+"trim_silence" = "Trim silent gaps";
+"comparison_track" = "Playback version";
+"voice_track" = "Voice";
+"original_track" = "Original";
+"save_original" = "Save original audio";
+// Verified-site URL imports
+"url_import_title" = "Import audio from a link";
+"url_import_supported" = "Supported sites. Each item must provide a separate audio stream.";
+"url_import_hint" = "Paste a public media link";
+"url_import_action" = "Import link";
+"url_import_invalid" = "Enter one valid public link.";
+"url_import_unsupported" = "This site or link is not supported, or this item has no separate audio. Choose an item from the supported sites.";
+"url_import_single" = "Choose one item without a playlist.";
+"url_import_pending" = "Importing audio…";
+"url_import_submitted" = "Imported. Processing has started.";
+"url_import_failed" = "The audio could not be imported. Check availability and try another link.";
+"url_import_open_job" = "View processing";

@@ -319,7 +319,7 @@
     <string name="media_error_reselect">Access to the selected file was lost. Choose the file again.</string>
     <string name="processing_fair_wait">Waiting order may change to share processing fairly. A reliable wait estimate is unavailable.</string>
     <string name="url_import_title">Import audio from a link</string>
-    <string name="url_import_supported">YouTube, Facebook, SoundCloud and other supported sites. Your phone sends only the link; the server imports audio when an audio-only stream is available.</string>
+    <string name="url_import_supported">Supported sites: %1$s. A separate audio stream must be available for this item.</string>
     <string name="url_import_rights_disclosure">Import audio only when you have permission and the source service permits it. The server downloads the audio and submits it for voice processing.</string>
     <string name="url_import_hint">Paste a public media link</string>
     <string name="url_import_action">Import link</string>
@@ -333,7 +333,7 @@
     <string name="url_import_attention">Import needs attention</string>
     <string name="url_import_invalid">Enter one valid link.</string>
     <string name="url_import_single">Share one audio item, without a playlist.</string>
-    <string name="url_import_unsupported">This source does not provide supported audio-only media. Try another public link.</string>
+    <string name="url_import_unsupported">This site or link is not supported, or the item has no separate audio. Choose an item from the supported sites.</string>
     <string name="url_import_disabled">Link import is unavailable right now. Try again later.</string>
     <string name="url_import_queue_full">The import queue is full. Try again shortly.</string>
     <string name="url_import_media_invalid">This audio is unsupported or exceeds the size or duration limit.</string>
@@ -368,4 +368,7 @@
     <string name="timing_stage_output_ready">Result preparation</string>
     <string name="timing_stage_output_upload">Result upload</string>
     <string name="timing_stage_completion">Server finalization</string>
+    <string name="trim_silence">Trim silent gaps</string>
+    <string name="save_original">Save original audio</string>
+    <string name="original_unavailable">Original comparison is unavailable for this track. Please try again.</string>
 </resources>

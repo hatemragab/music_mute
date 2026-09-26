@@ -11,6 +11,7 @@ struct InputDeclaration: Codable, Equatable, Sendable {
 enum JobSourceKind: String, Codable, Equatable, Sendable { case url, file }
 
 struct JobSourceMetadata: Codable, Equatable, Sendable {
+  let trimEnabled: Bool
   let policyVersion: Int?
   let preparationProfileId: String?
   let source: String?
@@ -22,8 +23,10 @@ struct JobSourceMetadata: Codable, Equatable, Sendable {
   init(
     sourceTitle: String? = nil, sourceKind: JobSourceKind? = nil,
     clientStartedAt: Date? = nil, sourceURL: String? = nil,
-    policyVersion: Int? = nil, preparationProfileId: String? = nil, source: String? = nil
+    policyVersion: Int? = nil, preparationProfileId: String? = nil, source: String? = nil,
+    trimEnabled: Bool = false
   ) {
+    self.trimEnabled = trimEnabled
     self.policyVersion = policyVersion
     self.preparationProfileId = preparationProfileId
     self.source = source
@@ -61,6 +64,8 @@ struct JobStages: Codable, Equatable, Sendable {
 }
 
 struct Job: Codable, Equatable, Identifiable, Sendable {
+  var trimEnabled: Bool? = nil
+  var comparisonRanges: [[Int64]]? = nil
   struct Input: Codable, Equatable, Sendable {
     let `extension`: String
     let bytes: Int64

@@ -255,11 +255,31 @@ class JobArtifactRepositoryTest {
         assertEquals(0, api.grants)
     }
 
+    @Test fun originalAndVoiceUseSeparateCachesAndDownloadGrants() = runTest {
+        val api = FakeApi()
+        val repository = repository(api, ArtifactDownloader { _, file, _ -> file.writeBytes(mp3) }, backgroundScope)
+        val original = repository.ensureOriginal(id)
+        val voice = repository.ensureOutput(id)
+        assertNotEquals(original, voice)
+        assertEquals(listOf("input", "output"), api.artifacts)
+        api.allowNetwork = false
+        val restored = repository(api, ArtifactDownloader { _, _, _ -> error("Offline transfer") }, backgroundScope)
+        assertEquals(original, restored.ensureOriginal(id))
+        assertEquals(voice, restored.ensureOutput(id))
+        assertEquals(2, api.details)
+        assertEquals(2, api.grants)
+        repository.evict(id)
+        assertFalse(original.exists())
+        assertFalse(voice.exists())
+    }
+
     private fun repository(api: FakeApi, downloader: ArtifactDownloader, scope: kotlinx.coroutines.CoroutineScope) =
         JobArtifactRepository(temporary.root, api, { session }, downloader,
-            isPlayableMp3 = { it.isFile && it.readBytes().contentEquals(mp3) }, scope = scope, now = { now })
+            isPlayableMp3 = { it.isFile && it.readBytes().contentEquals(mp3) }, scope = scope, now = { now },
+            isPlayableAudio = { it.isFile && it.readBytes().contentEquals(mp3) })
 
     private inner class FakeApi : JobsApi {
+        val artifacts = mutableListOf<String>()
         var allowNetwork = true
         var grants = 0
         var details = 0
@@ -277,7 +297,7 @@ class JobArtifactRepositoryTest {
         }
         override suspend fun download(id: String, artifact: String, requestId: String): DownloadGrant {
             check(allowNetwork) { "Offline grant request" }
-            assertEquals("output", artifact)
+            artifacts += artifact
             grantRequestIds += requestId
             grants++
             return onGrant?.invoke(grants) ?: grant

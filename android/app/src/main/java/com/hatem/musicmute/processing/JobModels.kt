@@ -33,6 +33,7 @@ data class CreateJobMetadata(
     val policyVersion: Int? = null,
     val preparationProfileId: String? = null,
     val source: String? = null,
+    val trimEnabled: Boolean = false,
 )
 
 /** Unknown server states remain displayable, but have no actionable enum value. */
@@ -125,6 +126,8 @@ data class Job(
     val timing: JobTiming? = null,
     val serverStageTimings: ServerStageTimings? = null,
     val stages: JobStages? = null,
+    val trimEnabled: Boolean = true,
+    val comparisonRanges: List<List<Long>>? = null,
 ) {
     val knownStatus: JobStatus? get() = JobStatus.entries.find { it.wireValue == status }
 }
