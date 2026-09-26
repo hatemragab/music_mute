@@ -1,7 +1,8 @@
 # MusicMute web client implementation handoff
 
-Status: implementation deployed on 2026-09-26; authenticated production journeys
-still require test-identity proof. See `06-tasks.md` and `08-infrastructure.md`.
+Status: implementation merged in [PR #35](https://github.com/hatemragab/music_mute/pull/35)
+and deployed on 2026-09-26; authenticated production journeys still require
+test-identity proof. See `06-tasks.md` and `08-infrastructure.md`.
 Prepared: 2026-09-26. Branch: `hatem/web-client`.
 Base: freshly fetched `origin/main`, commit `2d4d8ba00dac212ea55a0f4e73e736a4e4a0b05e`.
 Worktree: `/Users/hatemragap/.codex/worktrees/web-client/music_remover`.
@@ -23,8 +24,9 @@ Read these files in order:
 The user subsequently authorized implementation and deployment. The web client
 and minimal backend web support are in this worktree, and both were deployed to
 CapRover on 2026-09-26. At initial deployment no commit, push or PR had been
-made. Android remains read-only. Check the latest ledger entry for later Git
-publication and release state.
+made. The source was later merged through PR #35 and the web image was updated
+from the merged checkout. Android remains read-only. Check the latest ledger
+entry for exact publication and release evidence.
 
 Maintain the checklist in `06-tasks.md`. For each completed task record changed
 files, exact checks and results, and unresolved limitations. Never mark a task
