@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="listener_home_promise">Paste a link or choose a file you have the right to use. MusicMute keeps the voice.</string>
+    <string name="listener_you_can_leave">You can leave. We\'ll keep working.</string>
+    <string name="listener_notify_title">Want a nudge when it\'s ready?</string>
+    <string name="listener_notify_body">Turn on notifications and leave the app. We\'ll tell you when the voice is ready.</string>
+    <string name="listener_notify_action">Turn on notifications</string>
+    <string name="listener_notify_dismiss">Not now</string>
+    <string name="listener_ready_title">Voice ready</string>
+    <string name="listener_ready_open_library">All voice tracks</string>
+    <string name="listener_ready_play">Play</string>
+    <string name="listener_stage_waiting">Waiting to start</string>
+    <string name="listener_stage_downloading">Getting the audio</string>
+    <string name="listener_stage_preparing">Preparing your audio</string>
+    <string name="listener_stage_sending">Sending your audio</string>
+    <string name="listener_stage_removing">Removing the music</string>
+    <string name="listener_stage_paused">Paused. Your audio is safe and will continue when it can.</string>
+    <string name="listener_details">Details</string>
+    <string name="listener_hide_details">Hide details</string>
+    <string name="listener_voice">Voice</string>
+    <string name="listener_original">Original</string>
+    <string name="listener_original_missing">The original for this track isn\'t on this phone. New jobs keep a private copy here so you can compare.</string>
+    <string name="listener_original_kept">The original stays on this phone for comparison. Deleting the audio removes it.</string>
+    <string name="listener_loop">Repeat this part</string>
+    <string name="listener_loop_clear">Stop loop</string>
+    <string name="listener_loop_range">Looping %1$s–%2$s</string>
+    <string name="listener_usage_time">%1$d of %2$d minutes left</string>
+    <string name="listener_usage_uploads">%1$d uploads left today</string>
+    <string name="listener_usage_unavailable">Connect to see how much processing you have left.</string>
+    <string name="listener_source_link">Link</string>
+    <string name="listener_source_file">File</string>
+    <string name="listener_choose_file">Choose audio or video</string>
+    <string name="listener_supported_sites">Supported sites</string>
+</resources>

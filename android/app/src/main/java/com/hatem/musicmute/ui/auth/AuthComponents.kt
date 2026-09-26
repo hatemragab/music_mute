@@ -72,12 +72,14 @@ internal fun AuthMessages(state: AuthUiState, dismiss: () -> Unit) {
         Card(
             colors =
                 CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
             modifier = Modifier.fillMaxWidth().testTag("auth-error").semantics { liveRegion = LiveRegionMode.Polite },
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     stringResource(failure.problem.messageResource()),
                     color = MaterialTheme.colorScheme.onErrorContainer,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
                 TextButton(onClick = dismiss) { Text(stringResource(R.string.auth_dismiss)) }
             }
@@ -89,6 +91,7 @@ internal fun AuthMessages(state: AuthUiState, dismiss: () -> Unit) {
                 CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                 ),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
             modifier = Modifier.fillMaxWidth().testTag("auth-notice").semantics { liveRegion = LiveRegionMode.Polite },
         ) {
             Text(

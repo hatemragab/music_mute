@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -84,7 +86,7 @@ fun ProcessingDetailScreen(
                 Text(stringResource(R.string.audio_task_duration, formatElapsed(it)))
             }
             audioTaskFailureLabel(task)?.let {
-                Text(stringResource(it), color = MaterialTheme.colorScheme.error)
+                Text(stringResource(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
             }
             if (task.totalElapsedMs != null || task.processingElapsedMs != null) {
@@ -127,14 +129,15 @@ fun ProcessingDetailScreen(
                     if (task.active && task.progressFraction == null) {
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     }
-                    Text(stringResource(audioTaskStageLabel(task.stage)),
-                        modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(listenerStageLabel(task.stage)),
+                        modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 }
                 if (task.stage == AudioTaskStage.QUEUED) Text(stringResource(R.string.processing_fair_wait), style = MaterialTheme.typography.bodySmall)
                 if (task.active && task.progressFraction != null) {
                     Text(stringResource(R.string.progress_percent, (task.progressFraction * 100).toInt()),
                         style = MaterialTheme.typography.labelMedium)
-                    LinearProgressIndicator(progress = { task.progressFraction }, modifier = Modifier.fillMaxWidth())
+                    LinearProgressIndicator(progress = { task.progressFraction },
+                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)))
                 }
                 AudioStepTimeline(task)
             }

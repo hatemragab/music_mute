@@ -34,6 +34,7 @@ data class PlayerActions(
     val speed: (Float) -> Unit, val volume: (Float) -> Unit,
     val original: (Boolean) -> Unit = {},
     val saveOriginal: () -> Unit = {},
+    val loop: (Boolean) -> Unit = {},
 )
 
 @Composable

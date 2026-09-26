@@ -1,5 +1,7 @@
 package com.hatem.musicmute.ui.settings
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
@@ -23,14 +25,16 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+
 import com.hatem.musicmute.BuildConfig
 import com.hatem.musicmute.R
 import com.hatem.musicmute.data.LanguageChoice
+import com.hatem.musicmute.processing.ProcessingUsage
 import com.hatem.musicmute.state.VocalUiState
 import com.hatem.musicmute.ui.auth.AccountPublicLinks
 import com.hatem.musicmute.ui.design.*
@@ -44,9 +48,11 @@ fun CreativeSettingsScreen(
     onLanguage: (LanguageChoice) -> Unit,
     onRetry: () -> Unit,
     displayName: String? = null,
+    usage: ProcessingUsage? = null,
 ) {
     var showUsage by rememberSaveable { mutableStateOf(false) }
     var showLanguage by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
     val firstName = displayName?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.takeIf { it.isNotBlank() }
         ?: stringResource(R.string.creative_settings_profile)
     val preferencesEnabled = !state.preferencesLoading && !state.preferencesError
@@ -85,18 +91,14 @@ fun CreativeSettingsScreen(
             }
         }
         SettingsSection(stringResource(R.string.creative_settings_help)) {
-            SettingsItem(stringResource(R.string.creative_settings_feedback))
-            SettingsDivider()
-            SettingsItem(stringResource(R.string.creative_settings_support))
-            SettingsDivider()
-            SettingsItem(stringResource(R.string.creative_settings_sponsored))
-        }
-        SettingsSection(stringResource(R.string.creative_settings_legal)) {
-            SettingsItem(stringResource(R.string.creative_settings_terms))
-            SettingsDivider()
-            SettingsItem(stringResource(R.string.creative_settings_privacy))
+            SettingsItem(stringResource(R.string.creative_settings_support), onProfile)
             SettingsDivider()
             SettingsItem(stringResource(R.string.creative_settings_about), onAbout)
+        }
+        if (BuildConfig.PRIVACY_URL.isNotBlank()) SettingsSection(stringResource(R.string.creative_settings_legal)) {
+            SettingsItem(stringResource(R.string.creative_settings_privacy), {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(BuildConfig.PRIVACY_URL))) }
+            })
         }
         Text(stringResource(R.string.creative_settings_version, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -104,11 +106,17 @@ fun CreativeSettingsScreen(
     if (showUsage) {
         CreativeSheet(onDismiss = { showUsage = false }) {
             Text(stringResource(R.string.creative_settings_usage), style = MaterialTheme.typography.headlineMedium)
-            Text("∞", modifier = Modifier.fillMaxWidth(), fontSize = 64.sp, lineHeight = 72.sp,
-                color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
-            Text(stringResource(R.string.creative_settings_usage_unlimited), style = MaterialTheme.typography.titleLarge)
-            Text(stringResource(R.string.creative_settings_usage_temporary), style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (usage == null) {
+                Text(stringResource(R.string.listener_usage_unavailable), style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text(stringResource(R.string.listener_usage_time,
+                    (usage.processing.remainingSeconds / 60.0).toInt(),
+                    (usage.processing.limitSeconds / 60.0).toInt()),
+                    style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.listener_usage_uploads, usage.uploads.dailyRemainingGrants),
+                    style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             CreativePrimaryButton(onClick = { showUsage = false }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.creative_library_close))
             }
@@ -142,7 +150,8 @@ private fun SettingsSection(title: String, content: @Composable ColumnScope.() -
 
 @Composable
 private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))) {
         Column(content = content)
     }
 }

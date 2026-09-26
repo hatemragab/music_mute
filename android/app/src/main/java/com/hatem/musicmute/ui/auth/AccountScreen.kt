@@ -68,7 +68,7 @@ internal fun AccountScreen(
                 Text(stringResource(R.string.retry))
             }
         }
-        CreativeCard(contentPadding = 16.dp, contentGap = 8.dp, shape = RoundedCornerShape(14.dp)) {
+        CreativeCard(contentPadding = 16.dp, contentGap = 10.dp) {
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 AccountSymbol(Icons.Outlined.Person, Modifier.size(48.dp))
@@ -95,7 +95,7 @@ internal fun AccountScreen(
                 state.access.reason == "DEVICE_SYNC_REQUIRED" -> R.string.auth_processing_device
                 else -> R.string.auth_processing_unavailable
             }
-        CreativeCard(contentPadding = 12.dp, contentGap = 8.dp, shape = RoundedCornerShape(12.dp)) {
+        CreativeCard(contentPadding = 16.dp, contentGap = 8.dp) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -121,11 +121,21 @@ internal fun AccountScreen(
                 Modifier.weight(1f).widthIn(min = 140.dp).testTag("auth-devices"), !state.busy, onDevices)
         }
         Text(stringResource(R.string.creative_account_session), style = MaterialTheme.typography.labelMedium)
-        AccountActionRow(stringResource(R.string.auth_sign_out), Icons.Outlined.Logout, Modifier.testTag("auth-sign-out"), !state.busy, onClick = auth::signOut)
-        AccountActionRow(stringResource(R.string.auth_logout_all), Icons.Outlined.People, Modifier.testTag("auth-logout-all"), !state.busy, onClick = { confirmGlobalLogout = true })
-        HorizontalDivider()
-        AccountActionRow(stringResource(R.string.account_delete), Icons.Outlined.DeleteOutline, enabled = !state.busy, destructive = true,
-            onClick = { deletionStep = 1; auth.dismissMessage() })
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))) {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                AccountActionRow(stringResource(R.string.auth_sign_out), Icons.Outlined.Logout, Modifier.testTag("auth-sign-out"), !state.busy, onClick = auth::signOut)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                AccountActionRow(stringResource(R.string.auth_logout_all), Icons.Outlined.People, Modifier.testTag("auth-logout-all"), !state.busy, onClick = { confirmGlobalLogout = true })
+            }
+        }
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f))) {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                AccountActionRow(stringResource(R.string.account_delete), Icons.Outlined.DeleteOutline, enabled = !state.busy, destructive = true,
+                    onClick = { deletionStep = 1; auth.dismissMessage() })
+            }
+        }
         AccountPublicLinks()
     }
     if (verify) EmailVerificationSheet(state, state.identity?.email ?: state.profile?.email.orEmpty(), state.verificationCooldownUntil,
@@ -151,7 +161,8 @@ private fun ProfileActionTile(
     title: String, icon: ImageVector, modifier: Modifier, enabled: Boolean, onClick: () -> Unit,
 ) {
     Surface(onClick = onClick, enabled = enabled, modifier = modifier,
-        shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))) {
         Column(Modifier.heightIn(min = 80.dp).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(icon, null, Modifier.size(24.dp))
             Text(title, style = MaterialTheme.typography.labelMedium)

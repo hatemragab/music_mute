@@ -80,6 +80,16 @@ internal fun processingFailureLabel(problem: JobsProblem): Int = when (problem) 
     else -> R.string.processing_error_policy
 }
 
+internal fun listenerStageLabel(stage: AudioTaskStage): Int = when (stage) {
+    AudioTaskStage.WAITING, AudioTaskStage.QUEUED -> R.string.listener_stage_waiting
+    AudioTaskStage.DOWNLOADING_SOURCE -> R.string.listener_stage_downloading
+    AudioTaskStage.INSPECTING, AudioTaskStage.PREPARING_INPUT, AudioTaskStage.REVIEW -> R.string.listener_stage_preparing
+    AudioTaskStage.RESERVING_JOB, AudioTaskStage.UPLOADING_INPUT, AudioTaskStage.CONFIRMING_UPLOAD -> R.string.listener_stage_sending
+    AudioTaskStage.VALIDATING, AudioTaskStage.PROCESSING, AudioTaskStage.UPLOADING_RESULT -> R.string.listener_stage_removing
+    AudioTaskStage.INTERRUPTED -> R.string.listener_stage_paused
+    else -> audioTaskStageLabel(stage)
+}
+
 internal fun audioTaskStageLabel(stage: AudioTaskStage): Int = when (stage) {
     AudioTaskStage.WAITING -> R.string.audio_task_waiting
     AudioTaskStage.DOWNLOADING_SOURCE -> R.string.audio_task_downloading

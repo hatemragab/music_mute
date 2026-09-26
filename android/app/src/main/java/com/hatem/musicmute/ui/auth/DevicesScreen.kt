@@ -68,7 +68,7 @@ internal fun DevicesScreen(
                 )
                 CreativeCard {
                     group.forEachIndexed { index, device ->
-                        if (index > 0) HorizontalDivider()
+                        if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
                         Column(
                             Modifier.fillMaxWidth().testTag("auth-device-${device.installationId}"),
                             verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap),

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Design 1 with delete</title>
+<style>
+  :root {
+    --bg: #101115; --surface: #191b21; --text: #f2f0f5; --muted: #b9b8c3;
+    --orange: #ff814a; --red: #ffb4ab; --track: #2c2e36;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #07080b; color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; gap: 36px; padding: 28px; }
+  .col { width: 390px; }
+  .label { margin: 0 0 8px 4px; font-size: 16px; font-weight: 700; }
+  .note { margin: 0 0 14px 4px; color: var(--muted); font-size: 13px; line-height: 1.4; }
+  .phone { width: 390px; background: var(--bg); border: 1px solid #24262e; border-radius: 28px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .card { background: var(--surface); border: 1px solid rgba(58,60,71,.85); border-radius: 16px; padding: 12px 12px 12px 14px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .grow { flex: 1; min-width: 0; }
+  .title { font-size: 16px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .err { color: var(--red); font-size: 13px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .act { color: var(--orange); font-size: 14px; font-weight: 700; background: none; border: 0; padding: 0 2px; }
+  .time { color: var(--muted); font-size: 13px; }
+  .bar { height: 4px; border-radius: 2px; background: var(--track); margin-top: 8px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 62%; background: var(--orange); }
+  .trash {
+    width: 36px; height: 36px; border-radius: 10px; border: 0; background: transparent;
+    color: var(--red); flex: none; display: grid; place-items: center; padding: 0;
+  }
+  .trash svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .trash.box { background: rgba(255,180,171,.10); }
+</style>
+</head>
+<body>
+  <section class="col">
+    <p class="label">1A · Trash at the end</p>
+    <p class="note">Every row keeps its action. A trash icon is always last, including a finished voice and a job that is still working.</p>
+    <div class="phone">
+      <div class="card"><div class="row"><div class="grow"><div class="title">مهرجان العلبه الذهبيه</div><div class="sub">Voice ready</div></div><button class="act">Play</button><button class="trash" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13"/></svg></button></div></div>
+      <div class="card"><div class="row"><div class="grow"><div class="title">WEGZ - EL AYAM</div><div class="sub">Sending your audio · 0:14</div></div><button class="act">Cancel</button><button class="trash" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13"/></svg></button></div><div class="bar"><i></i></div></div>
+      <div class="card"><div class="row"><div class="grow"><div class="title">Import audio from a link</div><div class="err">The import service is temporarily unavailable.</div></div><button class="act">Retry</button><button class="trash" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13"/></svg></button></div></div>
+      <div class="card"><div class="row"><div class="grow"><div class="title">WEGZ - EL AYAM</div><div class="err">The audio separation failed.</div></div><span class="time">2:33</span><button class="act">Retry</button><button class="trash" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13"/></svg></button></div></div>
+    </div>
+  </section>
+  <section class="col">
+    <p class="label">1B · Trash in a quiet box</p>
+    <p class="note">Same row. The trash sits in its own small box so it is harder to hit while tapping Play, Retry, or Cancel.</p>
+    <div class="phone">
+      <div class="card"><div class="row"><div class="grow"><div class="title">مهرجان العلبه الذهبيه</div><div class="sub">Voice ready</div></div><button class="act">Play</button><button class="trash box" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13"/></svg></button></div></div>
+      <div class="card"><div class="row"><div class="grow"><div class="title">WEGZ - EL AYAM</div><div class="sub">Sending your audio · 0:14</div></div><button class="act">Cancel</button><button class="trash box" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13"/></svg></button></div><div class="bar"><i></i></div></div>
+      <div class="card"><div class="row"><div class="grow"><div class="title">Import audio from a link</div><div class="err">The import service is temporarily unavailable.</div></div><button class="act">Retry</button><button class="trash box" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13"/></svg></button></div></div>
+      <div class="card"><div class="row"><div class="grow"><div class="title">WEGZ - EL AYAM</div><div class="err">The audio separation failed.</div></div><span class="time">2:33</span><button class="act">Retry</button><button class="trash box" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13"/></svg></button></div></div>
+    </div>
+  </section>
+</body>
+</html>
