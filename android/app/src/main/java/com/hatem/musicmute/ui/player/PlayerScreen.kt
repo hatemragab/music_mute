@@ -9,6 +9,8 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -40,6 +42,30 @@ fun PlayerScreen(state: PlaybackState, entry: LibraryEntry?, actions: PlayerActi
     FullPlayer(state, entry, actions)
 }
 
+// Only controls subscribe here; ticking position is collected by PlaybackProgress.
+@Composable
+fun PlayerScreen(playback: StateFlow<PlaybackState>, entry: LibraryEntry?, actions: PlayerActions) {
+    val controls = remember(playback) { playback.controls() }
+    val state by controls.collectAsStateWithLifecycle(remember(playback) { playback.value.withoutPosition() })
+    FullPlayer(state, entry, actions, progress = { PlaybackProgress(playback, actions.seek) })
+}
+
+@Composable
+fun MiniPlayer(
+    playback: StateFlow<PlaybackState>,
+    onOpen: () -> Unit,
+    onToggle: () -> Unit,
+    onNext: () -> Unit,
+    onClose: () -> Unit,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val controls = remember(playback) { playback.controls() }
+    val state by controls.collectAsStateWithLifecycle(remember(playback) { playback.value.withoutPosition() })
+    MiniPlayer(state, onOpen, onToggle, onNext, onClose, onSeek, modifier,
+        progress = { PlaybackProgress(playback, onSeek, compact = true) })
+}
+
 @Composable
 fun MiniPlayer(
     state: PlaybackState,
@@ -49,6 +75,7 @@ fun MiniPlayer(
     onClose: () -> Unit,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    progress: @Composable () -> Unit = { PlaybackProgress(state, onSeek, compact = true) },
 ) {
     if (state.trackId == null) return
     Surface(
@@ -91,21 +118,7 @@ fun MiniPlayer(
             if (state.buffering) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (state.failed) Text(stringResource(R.string.creative_library_failed),
                 color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-            var seeking by remember(state.trackId) { mutableStateOf<Float?>(null) }
-            val seekLabel = stringResource(R.string.creative_library_seek)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(audioTime(seeking?.toLong() ?: state.positionMs), style = MaterialTheme.typography.labelSmall)
-                Slider(
-                    value = seeking ?: state.positionMs.toFloat().coerceIn(0f, state.durationMs.coerceAtLeast(1).toFloat()),
-                    onValueChange = { seeking = it },
-                    onValueChangeFinished = { seeking?.let { onSeek(it.toLong()) }; seeking = null },
-                    valueRange = 0f..state.durationMs.coerceAtLeast(1).toFloat(),
-                    enabled = state.canSeekAudio(),
-                    modifier = Modifier.weight(1f).semantics { contentDescription = seekLabel },
-                )
-                Text(audioTime(state.durationMs),
-                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            progress()
         }
     }
 }

@@ -50,6 +50,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hatem.musicmute.VocalApplication
 import com.hatem.musicmute.library.*
+import com.hatem.musicmute.playback.controls
 import com.hatem.musicmute.playback.QueueTrack
 import com.hatem.musicmute.ui.library.*
 import com.hatem.musicmute.ui.player.*
@@ -87,7 +88,7 @@ fun VocalApp(
     model: VocalViewModel,
     processingModel: ProcessingViewModel,
     processingSession: ProcessingSession?,
-    artifactProgress: Map<String, ArtifactProgress>,
+    artifactProgress: kotlinx.coroutines.flow.StateFlow<Map<String, ArtifactProgress>>,
     openHistory: Boolean = false,
     sharedUrlText: String? = null,
     onSharedUrlConsumed: () -> Unit = {},
@@ -128,9 +129,11 @@ fun VocalApp(
     }
     val libraryModel: LibraryViewModel = viewModel(key = "library:${processingSession?.uid}",
         factory = viewModelFactory { initializer { LibraryViewModel(app.libraryRepository) } })
+    // Delegated state is read inside route content/callbacks. Reading whole snapshots
+    // here would invalidate the navigation shell on search, transfers and job updates.
     val library by libraryModel.state.collectAsStateWithLifecycle()
     val libraryEntries by app.libraryRepository.entries.collectAsStateWithLifecycle()
-    val libraryTitles = remember(libraryEntries) { libraryEntries.associate { it.key to it.title } }
+    val libraryTitles by remember { derivedStateOf { libraryEntries.associate { it.key to it.title } } }
     LaunchedEffect(libraryTitles) { app.audioPlayback.updateLibraryTitles(libraryTitles) }
     val selectedLibraryId = when (route) {
         JobDetailRoute -> entry?.arguments?.getString("jobId")
@@ -139,12 +142,13 @@ fun VocalApp(
     var showPlaybackQueue by rememberSaveable(processingSession) { mutableStateOf(false) }
     val processing by processingModel.state.collectAsStateWithLifecycle()
     val jobs by processingModel.history.state.collectAsStateWithLifecycle()
-    LaunchedEffect(urlImports.filter { it.status == "submitted" }.mapNotNull { it.jobId }) {
-        if (urlImports.any { it.status == "submitted" && it.jobId != null })
-            processingModel.history.refreshAfterChange()
+    LaunchedEffect(app.urlImports, processingModel) {
+        snapshotFlow { urlImports.filter { it.status == "submitted" }.mapNotNull { it.jobId } }
+            .collect { if (it.isNotEmpty()) processingModel.history.refreshAfterChange() }
     }
-    LaunchedEffect(jobs.jobs.map { it.id }, urlImports) {
-        app.urlImports.observeJobs(jobs.jobs.map { it.id }.toSet())
+    LaunchedEffect(app.urlImports, processingModel.history) {
+        snapshotFlow { jobs.jobs.map { it.id }.toSet() to urlImports }
+            .collect { (ids, _) -> app.urlImports.observeJobs(ids) }
     }
     val submitUrlImport: () -> Unit = {
         if (!urlImportBusy) scope.launch {
@@ -175,15 +179,23 @@ fun VocalApp(
             processingModel.selectTask(operationId, selectedLibraryId)
         }
     }
-    val audioTasks = audioTaskPresentations(processing.operations, jobs.jobs, System.currentTimeMillis(), urlImports)
-    val selectedTask = audioTasks.firstOrNull {
-        (processing.selectedOperationId != null && it.operationId == processing.selectedOperationId) ||
-            (jobs.selectedId != null && it.jobId == jobs.selectedId)
+    val audioTasks by remember(processingModel, app.urlImports) {
+        derivedStateOf {
+            audioTaskPresentations(processing.operations, jobs.jobs, System.currentTimeMillis(), urlImports)
+        }
     }
-    LaunchedEffect(route, selectedTask?.jobId) {
-        if (route == SourceDetailRoute && selectedTask?.jobId != null &&
-            selectedTask.operationId == entry?.arguments?.getString("operationId")) {
-            nav.navigate(taskDetailRoute(selectedTask.operationId, selectedTask.jobId)) {
+    // Navigation only needs a new job identity, not every byte/stage update.
+    val selectedTaskJobId by remember(processingModel, app.urlImports) {
+        derivedStateOf {
+            audioTasks.firstOrNull {
+                it.operationId != null && it.operationId == processing.selectedOperationId
+            }?.jobId
+        }
+    }
+    LaunchedEffect(route, selectedTaskJobId) {
+        if (route == SourceDetailRoute && selectedTaskJobId != null &&
+            processing.selectedOperationId == entry?.arguments?.getString("operationId")) {
+            nav.navigate(taskDetailRoute(processing.selectedOperationId, selectedTaskJobId)) {
                 popUpTo(SourceDetailRoute) { inclusive = true }
                 launchSingleTop = true
             }
@@ -192,12 +204,14 @@ fun VocalApp(
     // Progress belongs to the active Player/mini-player, not the entire navigation
     // tree or the lazy Library. Queue and playback-mode changes still reach routes.
     val navigationPlayback = remember(app.audioPlayback) {
-        app.audioPlayback.state.map { it.copy(positionMs = 0) }.distinctUntilChanged()
+        app.audioPlayback.state.controls()
     }
     val voicePlayback by navigationPlayback.collectAsStateWithLifecycle(
         initialValue = com.hatem.musicmute.playback.PlaybackState())
     val currentTrackKey = voicePlayback.queue.getOrNull(voicePlayback.currentIndex)?.key
-    val currentLibraryEntry = libraryEntries.firstOrNull { it.key == currentTrackKey }
+    val currentLibraryEntry by remember(currentTrackKey) {
+        derivedStateOf { libraryEntries.firstOrNull { it.key == currentTrackKey } }
+    }
     val openAudioDetails: (LibraryKey) -> Unit = { key ->
         processingModel.clearMessage()
         processingModel.selectTask(null, key.jobId)
@@ -434,8 +448,7 @@ fun VocalApp(
                             },
                             onOpenLibrary = { navigate(Destination.Library) },
                             miniPlayer = {
-                                val miniPlayback by app.audioPlayback.state.collectAsStateWithLifecycle()
-                                MiniPlayer(miniPlayback, { nav.navigate("player") },
+                                MiniPlayer(app.audioPlayback.state, { nav.navigate("player") },
                                     app.audioPlayback::togglePlayback, app.audioPlayback::next,
                                     app.audioPlayback::closePlayback, app.audioPlayback::seek,
                                     Modifier.padding(horizontal = 16.dp))
@@ -485,15 +498,13 @@ fun VocalApp(
                             }, openPlayer = { nav.navigate("player") },
                             togglePlayback = app.audioPlayback::togglePlayback, next = app.audioPlayback::next),
                             miniPlayer = {
-                                val miniPlayback by app.audioPlayback.state.collectAsStateWithLifecycle()
-                                MiniPlayer(miniPlayback, { nav.navigate("player") },
+                                MiniPlayer(app.audioPlayback.state, { nav.navigate("player") },
                                     app.audioPlayback::togglePlayback, app.audioPlayback::next,
                                     app.audioPlayback::closePlayback, app.audioPlayback::seek)
                             })
                     }
                     composable("player") {
-                        val playerState by app.audioPlayback.state.collectAsStateWithLifecycle()
-                        PlayerScreen(playerState, currentLibraryEntry, PlayerActions(
+                        PlayerScreen(app.audioPlayback.state, currentLibraryEntry, PlayerActions(
                             back = {
                                 if (!nav.popBackStack(Destination.Library.name, false) &&
                                     !nav.popBackStack(Destination.Home.name, false)) navigate(Destination.Home)
@@ -542,12 +553,15 @@ fun VocalApp(
                             ?: detailState.detail?.let { audioTaskPresentations(emptyList(), listOf(it), System.currentTimeMillis()).firstOrNull() }
                         val resultKey = jobId?.let { id -> processingSession?.let { LibraryKey(it.uid, id) } }
                         val resultTitle = resultTrack?.title ?: jobTask?.displayName ?: voiceTrackTitle
-                        val progress = jobId?.let { artifactProgress[it] }
+                        val transfer = remember(artifactProgress, jobId) {
+                            artifactProgress.map { it[jobId] }.distinctUntilChanged()
+                        }
+                        val progress by transfer.collectAsStateWithLifecycle(remember(artifactProgress, jobId) { artifactProgress.value[jobId] })
                         val activeVoice = voicePlayback.queue.getOrNull(voicePlayback.currentIndex)?.key?.let {
                             it.ownerUid == processingSession?.uid && it.jobId == jobId
                         } == true
                         ProcessingDetailScreen(detailState, jobTask, processing.busy,
-                            progress?.totalBytes?.takeIf { it > 0 }?.let { (progress.bytes.toDouble() / it).toFloat().coerceIn(0f, 1f) },
+                            progress?.let { transferProgress -> transferProgress.totalBytes?.takeIf { it > 0 }?.let { (transferProgress.bytes.toDouble() / it).toFloat().coerceIn(0f, 1f) } },
                             processing.message, playing = activeVoice && voicePlayback.playing,
                             positionMs = if (activeVoice) voicePlayback.positionMs else 0,
                             durationMs = if (activeVoice) voicePlayback.durationMs else 0,

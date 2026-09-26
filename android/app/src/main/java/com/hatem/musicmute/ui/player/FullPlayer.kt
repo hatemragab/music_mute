@@ -35,7 +35,12 @@ import com.hatem.musicmute.ui.library.audioTime
 import com.hatem.musicmute.ui.library.libraryProblemLabel
 
 @Composable
-internal fun FullPlayer(state: PlaybackState, entry: LibraryEntry?, actions: PlayerActions) {
+internal fun FullPlayer(
+    state: PlaybackState,
+    entry: LibraryEntry?,
+    actions: PlayerActions,
+    progress: @Composable () -> Unit = { PlaybackProgress(state, actions.seek) },
+) {
     var panel by rememberSaveable { mutableStateOf<String?>(null) }
     // Restore unity gain when replacing the previous in-app volume control.
     LaunchedEffect(Unit) { actions.volume(1f) }
@@ -98,20 +103,7 @@ internal fun FullPlayer(state: PlaybackState, entry: LibraryEntry?, actions: Pla
         if (state.buffering || state.switching) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (state.failed) CreativeFeedback(stringResource(libraryProblemLabel(entry?.problem)), error = true,
             actionLabel = stringResource(R.string.retry), onAction = actions.toggle)
-        Column {
-            var seeking by remember(state.trackId) { mutableStateOf<Float?>(null) }
-            val seekLabel = stringResource(R.string.creative_library_seek)
-            Slider(value = seeking ?: state.positionMs.toFloat().coerceIn(0f, state.durationMs.coerceAtLeast(1).toFloat()),
-                onValueChange = { seeking = it },
-                onValueChangeFinished = { seeking?.let { actions.seek(it.toLong()) }; seeking = null },
-                valueRange = 0f..state.durationMs.coerceAtLeast(1).toFloat(), enabled = state.canSeekAudio(),
-                modifier = Modifier.fillMaxWidth().semantics { contentDescription = seekLabel })
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(audioTime(seeking?.toLong() ?: state.positionMs), style = MaterialTheme.typography.labelMedium)
-                Text(audioTime(state.durationMs), style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+        progress()
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             IconToggleButton(state.shuffle, actions.shuffle) {
                 Icon(Icons.Outlined.Shuffle, stringResource(R.string.creative_library_shuffle), Modifier.size(21.dp),
