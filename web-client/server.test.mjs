@@ -65,3 +65,14 @@ test("exposes the public entry point and crawl assets without indexing private r
   const health = await fetch(`${origin}/healthz`);
   assert.equal(health.headers.get("x-robots-tag"), "noindex");
 });
+
+test("deployment checks return uncached HTML with a build version", async () => {
+  const response = await fetch(`${origin}/?deployment-check=123`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.match(response.headers.get("content-type"), /text\/html/);
+  assert.match(
+    await response.text(),
+    /name="musicmute-build" content="[a-f0-9-]{36}"/,
+  );
+});
