@@ -2,6 +2,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct HomeView: View {
+  var urlImports: URLImportsModel?
+  var openImportedJob: (String) -> Void = { _ in }
   var beginImport: () -> Void = {}
   var importAudio: (URL) -> Void = { _ in }
   var photoSourceLimit = ProcessingMediaPolicy.standard.maxSourceBytes!
@@ -33,6 +35,7 @@ struct HomeView: View {
           Text("hero_body").foregroundStyle(.secondary)
           Waveform(color: VocalStyle.teal.opacity(0.65)).frame(height: 58).padding(.top, 8)
         }.padding(.vertical, 8)
+        if let urlImports { URLImportCard(model: urlImports, openJob: openImportedJob) }
         VocalCard {
           Button {
             beginImport()

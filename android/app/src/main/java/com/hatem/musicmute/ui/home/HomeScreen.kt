@@ -107,7 +107,7 @@ fun HomeScreen(
                     CreativeCard(contentPadding = 12.dp, contentGap = 8.dp,
                         shape = RoundedCornerShape(14.dp)) {
                         Text(stringResource(R.string.url_import_title), style = MaterialTheme.typography.titleMedium)
-                        Text(stringResource(R.string.url_import_supported),
+                        Text(stringResource(R.string.url_import_supported, com.hatem.musicmute.processing.SupportedAudioSites.names.joinToString(", ")),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {

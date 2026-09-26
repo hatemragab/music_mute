@@ -19,7 +19,7 @@ download; older iOS caches may need one metadata fetch to populate the sidecar. 
 queue after restart. Account/session fences prevent downloads from crossing users.
 
 Both native import flows start with trimming off and explicitly submit
-`trim_enabled: false`. Android URL imports persist this choice through retries.
+`trim_enabled: false`. Android and iOS URL imports persist this choice through retries.
 The API's omitted-field default remains unchanged for older clients and stable
 idempotent retries. There is no database migration or dependency change.
 
@@ -105,7 +105,7 @@ This is a local worker rollout, not a published fleet-wide worker release.
   clients report unavailable comparison instead of silently playing a wrong time.
 - Native playback remains limited to formats supported by the platform decoders.
 - Original retention increases stored bytes; new jobs account for input plus output.
-- Mobile changes require distribution of a new app build. The web client was not changed.
+- Mobile changes require distribution of a new app build. The web client was not changed by this feature.
 - Live backend health and worker qualification are verified; a new authenticated
   production job covering S3 retention, completion, and native playback end-to-end
   has not been run. Synthetic native UI tests are not production S3 proof.
@@ -127,3 +127,12 @@ and build passed. The debug APK was installed in place and launched on connected
 OPPO CPH2573 (`709a147`). iOS artifact tests and the offline comparison UI test
 passed on the specified iPhone 17 Pro simulator. Physical-phone airplane-mode
 comparison has not been measured; no latency number is claimed.
+
+Integration with the supported-sites change on main preserves URL validation and
+adds the same persisted, default-off trim choice to the newly added iOS URL import
+form. Older pending iOS URL imports keep an omitted trim field for idempotency.
+
+Post-main integration checks passed: 179 focused Android processing/playback tests,
+DirectDebug lint/build, 150 iOS tests with one skip, and both offline-comparison
+and unsupported-link UI tests. XcodeGen regenerated the project locally for
+validation; generated project output is not included in this change.

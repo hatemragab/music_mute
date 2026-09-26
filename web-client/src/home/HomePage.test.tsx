@@ -69,7 +69,7 @@ test("URL intake requires rights and sends the reviewed trim option", async () =
   const user = userEvent.setup();
   await user.type(
     screen.getByRole("textbox", { name: "Public media URL" }),
-    "https://example.com/audio",
+    "https://www.youtube.com/watch?v=UXqq0ZvbOnk",
   );
   await user.click(screen.getByRole("button", { name: "Start import" }));
   expect(screen.getByRole("alert")).toHaveTextContent("rights");
@@ -82,7 +82,7 @@ test("URL intake requires rights and sends the reviewed trim option", async () =
   await user.click(screen.getByRole("button", { name: "Start import" }));
   await waitFor(() => expect(requests).toHaveLength(1));
   expect(requests[0].body).toMatchObject({
-    url: "https://example.com/audio",
+    url: "https://www.youtube.com/watch?v=UXqq0ZvbOnk",
     trim_enabled: false,
   });
   expect(requests[0].body.request_id).toMatch(/^[a-f0-9-]{36}$/);
@@ -118,7 +118,7 @@ test("ambiguous import write reuses its request ID on retry", async () => {
   const user = userEvent.setup();
   await user.type(
     screen.getByRole("textbox", { name: "Public media URL" }),
-    "https://example.com/audio",
+    "https://www.youtube.com/watch?v=UXqq0ZvbOnk",
   );
   await user.click(
     screen.getByRole("checkbox", {
@@ -153,4 +153,34 @@ test("processing intake stays disabled when policy cannot be loaded", async () =
   expect(
     fetchMock.mock.calls.some(([url]) => url.endsWith("/media-imports")),
   ).toBe(false);
+});
+
+test("unknown links show unsupported locally without creating an import or retry identity", async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url.endsWith("/processing-policy"))
+      return new Response('{"accept_new_jobs":true}');
+    if (url.includes("/jobs?"))
+      return new Response('{"items":[],"next_cursor":null}');
+    throw new Error("Unexpected network request");
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  page();
+  const user = userEvent.setup();
+  await user.type(
+    screen.getByRole("textbox", { name: "Public media URL" }),
+    "https://unknown.example/audio",
+  );
+  await user.click(
+    screen.getByRole("checkbox", {
+      name: "I have the rights to process this audio",
+    }),
+  );
+  await user.click(screen.getByRole("button", { name: "Start import" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("not supported");
+  expect(
+    fetchMock.mock.calls.some(([url]) => url.includes("media-imports")),
+  ).toBe(false);
+  expect(
+    sessionStorage.getItem("musicmute.web.import.test-user.request"),
+  ).toBeNull();
 });

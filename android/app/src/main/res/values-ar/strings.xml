@@ -319,7 +319,7 @@
     <string name="media_error_reselect">فُقد الوصول إلى الملف المحدد. اختر الملف مرة أخرى.</string>
     <string name="processing_fair_wait">قد يتغير ترتيب الانتظار لتوزيع المعالجة بعدل. لا يتوفر تقدير موثوق لمدة الانتظار.</string>
     <string name="url_import_title">استيراد الصوت من رابط</string>
-    <string name="url_import_supported">يوتيوب وفيسبوك وساوندكلاود ومواقع أخرى مدعومة. يرسل هاتفك الرابط فقط، ويستورد الخادم الصوت عند توفر مسار صوتي منفصل.</string>
+    <string name="url_import_supported">المواقع المدعومة: %1$s. يجب أن يتوفر مسار صوت منفصل لهذا العنصر.</string>
     <string name="url_import_rights_disclosure">استورد الصوت فقط عندما تملك الإذن وتسمح به الخدمة المصدر. ينزّل الخادم الصوت ويرسله لمعالجة الصوت البشري.</string>
     <string name="url_import_hint">الصق رابط وسائط عامًا</string>
     <string name="url_import_action">استيراد الرابط</string>
@@ -333,7 +333,7 @@
     <string name="url_import_attention">يتطلب الاستيراد انتباهك</string>
     <string name="url_import_invalid">أدخل رابطًا واحدًا صالحًا.</string>
     <string name="url_import_single">شارك عنصرًا صوتيًا واحدًا دون قائمة تشغيل.</string>
-    <string name="url_import_unsupported">لا يوفر هذا المصدر مسارًا صوتيًا منفصلًا مدعومًا. جرّب رابطًا عامًا آخر.</string>
+    <string name="url_import_unsupported">هذا الموقع أو الرابط غير مدعوم، أو لا يحتوي العنصر على صوت منفصل. اختر عنصراً من المواقع المدعومة.</string>
     <string name="url_import_disabled">استيراد الروابط غير متاح الآن. حاول لاحقًا.</string>
     <string name="url_import_queue_full">قائمة انتظار الاستيراد ممتلئة. حاول بعد قليل.</string>
     <string name="url_import_media_invalid">هذا الصوت غير مدعوم أو يتجاوز حد الحجم أو المدة.</string>

@@ -332,3 +332,15 @@
 "voice_track" = "الصوت المعالج";
 "original_track" = "الأصلي";
 "save_original" = "حفظ الصوت الأصلي";
+// Verified-site URL imports
+"url_import_title" = "استيراد الصوت من رابط";
+"url_import_supported" = "المواقع المدعومة. يجب أن يوفر كل عنصر مسار صوت منفصل.";
+"url_import_hint" = "الصق رابط وسائط عام";
+"url_import_action" = "استيراد الرابط";
+"url_import_invalid" = "أدخل رابطاً عاماً صالحاً واحداً.";
+"url_import_unsupported" = "هذا الموقع أو الرابط غير مدعوم، أو لا يحتوي العنصر على صوت منفصل. اختر عنصراً من المواقع المدعومة.";
+"url_import_single" = "اختر عنصراً واحداً دون قائمة تشغيل.";
+"url_import_pending" = "جارٍ استيراد الصوت…";
+"url_import_submitted" = "تم الاستيراد وبدأت المعالجة.";
+"url_import_failed" = "تعذر استيراد الصوت. تحقق من توفره وجرب رابطاً آخر.";
+"url_import_open_job" = "عرض المعالجة";

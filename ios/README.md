@@ -5,8 +5,9 @@ and newer. Select one owned or permitted audio/video file, review its prepared a
 confirm permission, and explicitly start cloud processing for vocals-only MP3 output.
 Local Files/Photos preparation, cloud upload, job history and result playback remain.
 Device-side URL downloading, YouTubeKit, its background source transfer session,
-and the legacy download-history UI have been removed. The existing server import
-API remains available; this cleanup does not introduce a new iOS link-import UI.
+and the legacy download-history UI have been removed. Home also supports server-side link imports with a bundled verified-site list,
+local URL checks, rights confirmation, durable retry identity and import progress.
+See [the shared site policy](../docs/url-imports/supported-sites.md).
 Source metadata on existing server jobs remains readable.
 
 Open `MusicMute.xcodeproj` in Xcode 26.0.1 or newer. Regenerate with XcodeGen after

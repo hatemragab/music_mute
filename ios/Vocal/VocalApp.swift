@@ -221,6 +221,7 @@ private struct ProductionContentView: View {
       }
     }
     .onChange(of: scenePhase) { _, phase in
+      if phase != .active { processing.urlImports.pause() }
       if phase == .active {
         auth.validateOnForeground()
         Task {
@@ -249,6 +250,11 @@ struct VocalRootView: View {
     TabView(selection: $tab) {
       NavigationStack {
         HomeView(
+          urlImports: processing.urlImports,
+          openImportedJob: { _ in
+            tab = 2
+            Task { await processing.history.refreshAfterChange() }
+          },
           beginImport: processing.beginSourceImport,
           importAudio: { processing.importAudio($0) },
           photoSourceLimit: processing.photoSourceLimit, importPhoto: processing.importPhoto,

@@ -4,6 +4,87 @@ import XCTest
 @testable import Vocal
 
 @MainActor final class JobsAPIClientTests: XCTestCase {
+  func testImportQueueCooldownPreventsEarlyRetry() async throws {
+    let token = JobsTokenFixture()
+    var clock: TimeInterval = 0
+    let api = client(token, now: { clock })
+    var calls = 0
+    JobsURLProtocol.handler = { _ in
+      calls += 1
+      if calls == 1 {
+        return (503, ["Retry-After": "7"], Data(#"{"code":"IMPORT_QUEUE_FULL"}"#.utf8))
+      }
+      return (
+        202, [:],
+        Data(
+          #"{"import_id":"68c000000000000000000001","status":"queued","job_id":null,"error":null}"#
+            .utf8)
+      )
+    }
+    _ = try? await api.createURLImport(
+      url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId, trimEnabled: false)
+    _ = try? await api.createURLImport(url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId)
+    XCTAssertEqual(calls, 1)
+    clock = 7
+    _ = try await api.createURLImport(url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId)
+    XCTAssertEqual(calls, 2)
+  }
+
+  func testUnsupportedImportNeverAcquiresTokenOrTransport() async {
+    let token = JobsTokenFixture()
+    let api = client(token)
+    var calls = 0
+    JobsURLProtocol.handler = { _ in
+      calls += 1
+      return (500, [:], Data())
+    }
+    do {
+      _ = try await api.createURLImport(url: "https://unknown.example/audio", requestId: requestId)
+      XCTFail("Unsupported URL admitted")
+    } catch { XCTAssertEqual(error as? URLImportFailure, .unsupportedSite) }
+    XCTAssertEqual(calls, 0)
+    XCTAssertTrue(token.refreshes.isEmpty)
+  }
+
+  func testImportWireContractAndSanitizedFailure() async throws {
+    let token = JobsTokenFixture()
+    let api = client(token)
+    var calls = 0
+    JobsURLProtocol.handler = { request in
+      calls += 1
+      if calls == 1 {
+        XCTAssertEqual(request.url?.path, "/media-imports")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(
+          request.value(forHTTPHeaderField: "X-Installation-Id"), self.installation.lowercased())
+        let fields = try! self.body(request)
+        XCTAssertEqual(fields["url"] as? String, "https://youtu.be/UXqq0ZvbOnk")
+        XCTAssertEqual(fields["trim_enabled"] as? Bool, false)
+        XCTAssertEqual(fields["request_id"] as? String, self.requestId.uuidString.lowercased())
+        return (
+          202, [:],
+          Data(
+            #"{"import_id":"68c000000000000000000001","status":"queued","job_id":null,"error":null}"#
+              .utf8)
+        )
+      }
+      return (
+        422, [:],
+        Data(
+          #"{"code":"IMPORT_UNSUPPORTED_AUDIO_SOURCE","message":"private upstream detail"}"#.utf8)
+      )
+    }
+    let view = try await api.createURLImport(
+      url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId, trimEnabled: false)
+    XCTAssertEqual(view.status, "queued")
+    do {
+      _ = try await api.urlImport(id: view.importId)
+      XCTFail("Failure accepted")
+    } catch {
+      XCTAssertEqual(error as? URLImportFailure, .server("IMPORT_UNSUPPORTED_AUDIO_SOURCE"))
+    }
+  }
+
   func testRateLimitStopsOtherJobRoutesBeforeTransport() async {
     let token = JobsTokenFixture()
     var clock: TimeInterval = 0
