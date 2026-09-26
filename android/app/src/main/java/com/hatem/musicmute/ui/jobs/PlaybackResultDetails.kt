@@ -15,6 +15,10 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -49,17 +53,16 @@ fun PlaybackResultDetails(
     onDelete: () -> Unit,
 ) {
     val context = LocalContext.current
+    var showDetails by rememberSaveable(task.jobId, task.operationId) { mutableStateOf(false) }
     CreativePage(Modifier.testTag("processing-detail")) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back)) }
             Text(stringResource(R.string.result_details_title), Modifier.weight(1f),
                 style = MaterialTheme.typography.titleLarge, fontSize = 20.sp)
         }
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), verticalAlignment = Alignment.Top) {
-            Box(Modifier.width(3.dp).fillMaxHeight()
-                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)))
-            Column(Modifier.weight(1f).padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f).padding(top = 4.dp, bottom = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(task.displayName, style = MaterialTheme.typography.titleLarge, fontSize = 22.sp, lineHeight = 30.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.CheckCircle, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
@@ -91,7 +94,7 @@ fun PlaybackResultDetails(
                 }
                 OutlinedCard(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 ) {
                     ResultActionRow(Icons.Outlined.Download, stringResource(R.string.audio_export),
@@ -113,7 +116,10 @@ fun PlaybackResultDetails(
                 }
             }
         } else CreativeFeedback(stringResource(R.string.creative_jobs_wait_output))
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(onClick = { showDetails = !showDetails }, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(if (showDetails) R.string.listener_hide_details else R.string.listener_details))
+        }
+        if (showDetails) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.result_job_title), style = MaterialTheme.typography.titleMedium)
             ResultDetailRow(stringResource(R.string.result_status), stringResource(R.string.result_ready))
             task.audioDurationMs?.let { ResultDetailRow(stringResource(R.string.result_duration), audioTime(it)) }
@@ -143,19 +149,19 @@ fun PlaybackResultDetails(
                     }
                 }
             }
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.CheckCircle, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                Text(stringResource(R.string.result_completed), style = MaterialTheme.typography.titleMedium)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.CheckCircle, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.result_completed), style = MaterialTheme.typography.titleMedium)
+                }
+                AudioStepTimeline(task)
             }
-            AudioStepTimeline(task)
         }
         if (task.canDelete) {
             OutlinedCard(onClick = onDelete, enabled = !busy,
                 modifier = Modifier.fillMaxWidth().testTag("processing-delete"),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
                 colors = CardDefaults.outlinedCardColors(
                     containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),

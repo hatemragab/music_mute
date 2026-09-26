@@ -396,9 +396,6 @@ fun VocalApp(
                                 }
                             },
                             actionBusy = processing.busy,
-                            onDelete = { task, onDeleted ->
-                                processingModel.deleteTask(task.operationId, task.jobId, onDeleted)
-                            },
                             message = processing.message?.let { stringResource(it) },
                             onNotifications = {
                                 if (Build.VERSION.SDK_INT >= 33) processingNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -422,6 +419,20 @@ fun VocalApp(
                                 if (task.jobId != null) processingModel.retrySelected()
                                 else task.operationId?.let(processingModel::resume)
                             },
+                            notificationsNeeded = !processingNotificationsPermitted(context),
+                            onPlayReady = { task ->
+                                val track = task.jobId?.let { id -> libraryEntries.firstOrNull { it.key.jobId == id } }
+                                if (track != null) playLibraryTrack(track)
+                                else if (task.jobId != null && processingSession != null) {
+                                    val key = LibraryKey(processingSession.uid, task.jobId)
+                                    app.audioPlayback.playQueue(
+                                        listOf(QueueTrack(key, task.displayName.ifBlank { voiceTrackTitle })),
+                                        key,
+                                    )
+                                    nav.navigate("player") { launchSingleTop = true }
+                                }
+                            },
+                            onOpenLibrary = { navigate(Destination.Library) },
                             miniPlayer = {
                                 val miniPlayback by app.audioPlayback.state.collectAsStateWithLifecycle()
                                 MiniPlayer(miniPlayback, { nav.navigate("player") },
@@ -433,11 +444,13 @@ fun VocalApp(
                     }
                     composable(Destination.Settings.name) {
                         val account by app.authSession.state.collectAsStateWithLifecycle()
+                        val usage by app.processingUsage.usage.collectAsStateWithLifecycle()
                         CreativeSettingsScreen(
                             state = state, onProfile = onAccount,
                             displayName = account.identity?.displayName?.takeIf { it.isNotBlank() } ?: account.profile?.displayName,
                             onAccent = { nav.navigate("accent") }, onAbout = { nav.navigate("about") },
                             onLanguage = model::setLanguage, onRetry = model::loadPreferences,
+                            usage = usage,
                         )
                     }
                     composable("accent") {
@@ -507,6 +520,7 @@ fun VocalApp(
                                     catch (_: Exception) { snackbar.showSnackbar(context.getString(R.string.original_unavailable)) }
                                 }
                             },
+                            loop = app.audioPlayback::setSectionLoop,
                             queue = { showPlaybackQueue = true },
                             info = { currentTrackKey?.let(openAudioDetails) },
                             star = { currentTrackKey?.let(libraryModel::toggleStar) }))

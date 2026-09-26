@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="listener_home_promise">الصق رابطًا أو اختر ملفًا يحق لك استخدامه. MusicMute يبقي الصوت.</string>
+    <string name="listener_you_can_leave">يمكنك المغادرة. سنكمل العمل.</string>
+    <string name="listener_notify_title">هل تريد تنبيهًا عند الجاهزية؟</string>
+    <string name="listener_notify_body">فعّل الإشعارات وغادر التطبيق. سنخبرك عندما يصبح الصوت جاهزًا.</string>
+    <string name="listener_notify_action">تفعيل الإشعارات</string>
+    <string name="listener_notify_dismiss">ليس الآن</string>
+    <string name="listener_ready_title">الصوت جاهز</string>
+    <string name="listener_ready_open_library">كل المقاطع الصوتية</string>
+    <string name="listener_ready_play">تشغيل</string>
+    <string name="listener_stage_waiting">بانتظار البدء</string>
+    <string name="listener_stage_downloading">جارٍ جلب الصوت</string>
+    <string name="listener_stage_preparing">جارٍ تجهيز الصوت</string>
+    <string name="listener_stage_sending">جارٍ إرسال الصوت</string>
+    <string name="listener_stage_removing">جارٍ إزالة الموسيقى</string>
+    <string name="listener_stage_paused">متوقف مؤقتًا. صوتك محفوظ وسيكمل عندما يتاح ذلك.</string>
+    <string name="listener_details">التفاصيل</string>
+    <string name="listener_hide_details">إخفاء التفاصيل</string>
+    <string name="listener_voice">الصوت</string>
+    <string name="listener_original">الأصل</string>
+    <string name="listener_original_missing">الأصل لهذا المقطع غير موجود على هذا الهاتف. المهام الجديدة تحتفظ بنسخة خاصة هنا للمقارنة.</string>
+    <string name="listener_original_kept">يبقى الأصل على هذا الهاتف للمقارنة. حذف الصوت يزيله.</string>
+    <string name="listener_loop">كرر هذا الجزء</string>
+    <string name="listener_loop_clear">إيقاف التكرار</string>
+    <string name="listener_loop_range">تكرار %1$s–%2$s</string>
+    <string name="listener_usage_time">متبقٍ %1$d من %2$d دقيقة</string>
+    <string name="listener_usage_uploads">متبقٍ %1$d رفعًا اليوم</string>
+    <string name="listener_usage_unavailable">اتصل بالإنترنت لمعرفة المتبقي من المعالجة.</string>
+    <string name="listener_source_link">رابط</string>
+    <string name="listener_source_file">ملف</string>
+    <string name="listener_choose_file">اختر صوتًا أو فيديو</string>
+    <string name="listener_supported_sites">المواقع المدعومة</string>
+</resources>

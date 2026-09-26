@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -101,9 +102,6 @@ fun LibraryScreen(state: LibraryUiState, actions: LibraryActions, miniPlayer: @C
 @Composable
 private fun LibraryToolbar(state: LibraryUiState, actions: LibraryActions) {
     var sortMenu by remember { mutableStateOf(false) }
-    LaunchedEffect(state.filter) {
-        if (state.filter == LibraryFilter.REMOVED) actions.filter(LibraryFilter.ALL)
-    }
     val keyboard = LocalSoftwareKeyboardController.current
     val searchLabel = stringResource(R.string.creative_library_search)
     val sortLabel = stringResource(R.string.creative_library_sort)
@@ -157,7 +155,7 @@ private fun LibraryToolbar(state: LibraryUiState, actions: LibraryActions) {
     }
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        LibraryFilter.entries.filter { it != LibraryFilter.REMOVED }.forEach { filter ->
+        LibraryFilter.entries.forEach { filter ->
             val selected = state.filter == filter
             Column(Modifier.selectable(selected = selected, onClick = { actions.filter(filter) }, role = Role.Tab)) {
                 Box(Modifier.heightIn(min = 46.dp).padding(horizontal = 9.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
@@ -174,41 +172,44 @@ private fun LibraryToolbar(state: LibraryUiState, actions: LibraryActions) {
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 fun LibraryAudioCard(entry: LibraryEntry, onPlay: () -> Unit, onStar: () -> Unit, onMore: () -> Unit) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().combinedClickable(
+    Surface(
+        Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+    ) {
+        Column(Modifier.combinedClickable(
             onClick = onPlay, onClickLabel = stringResource(R.string.creative_library_play),
             onLongClick = onMore, onLongClickLabel = stringResource(R.string.creative_library_more),
-        ).padding(vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                Icon(Icons.Outlined.MusicNote, null, Modifier.size(48.dp).padding(11.dp),
-                    tint = MaterialTheme.colorScheme.primary)
-            }
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium, fontSize = 15.sp)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (entry.offlineStatus == OfflineStatus.AVAILABLE) {
-                        Icon(Icons.Outlined.CheckCircle, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                    }
+        ).padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
+                    Icon(Icons.Outlined.MusicNote, null, Modifier.size(44.dp).padding(10.dp),
+                        tint = MaterialTheme.colorScheme.primary)
+                }
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium)
                     Text(offlineLabel(entry.offlineStatus), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.labelSmall, fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (entry.offlineStatus == OfflineStatus.AVAILABLE) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                entry.durationMs?.let {
+                    Text(audioTime(it), style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                CreativeStarButton(entry.starred, onStar,
+                    stringResource(if (entry.starred) R.string.creative_library_unstar else R.string.creative_library_star))
             }
-            entry.durationMs?.let {
-                Text(audioTime(it), style = MaterialTheme.typography.labelSmall, fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (entry.offlineStatus == OfflineStatus.DOWNLOADING) {
+                Spacer(Modifier.height(8.dp))
+                val total = entry.totalBytes
+                val bar = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
+                if (total != null && total > 0) LinearProgressIndicator(progress = { (entry.downloadedBytes.toFloat() / total).coerceIn(0f, 1f) }, modifier = bar)
+                else LinearProgressIndicator(modifier = bar)
             }
-            CreativeStarButton(entry.starred, onStar,
-                stringResource(if (entry.starred) R.string.creative_library_unstar else R.string.creative_library_star))
         }
-        if (entry.offlineStatus == OfflineStatus.DOWNLOADING) {
-            val total = entry.totalBytes
-            if (total != null && total > 0) LinearProgressIndicator(progress = { (entry.downloadedBytes.toFloat() / total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-            else LinearProgressIndicator(Modifier.fillMaxWidth())
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 

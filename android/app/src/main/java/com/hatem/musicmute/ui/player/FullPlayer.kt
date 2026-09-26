@@ -31,7 +31,8 @@ import com.hatem.musicmute.playback.PlaybackState
 import com.hatem.musicmute.playback.RepeatMode
 import com.hatem.musicmute.playback.upcomingTracks
 import com.hatem.musicmute.ui.design.*
-import com.hatem.musicmute.ui.library.*
+import com.hatem.musicmute.ui.library.audioTime
+import com.hatem.musicmute.ui.library.libraryProblemLabel
 
 @Composable
 internal fun FullPlayer(state: PlaybackState, entry: LibraryEntry?, actions: PlayerActions) {
@@ -132,6 +133,18 @@ internal fun FullPlayer(state: PlaybackState, entry: LibraryEntry?, actions: Pla
                     repeatLabel, Modifier.size(21.dp),
                     tint = if (state.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+        val looping = state.loopStartMs != null && state.loopEndMs != null
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TextButton({ actions.loop(!looping) }, Modifier.weight(1f).heightIn(min = 48.dp)) {
+                Text(stringResource(if (looping) R.string.listener_loop_clear else R.string.listener_loop))
+            }
+            if (looping) Text(
+                stringResource(R.string.listener_loop_range, audioTime(state.loopStartMs ?: 0), audioTime(state.loopEndMs ?: 0)),
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TextButton({ panel = "speed" }, Modifier.weight(1f).heightIn(min = 48.dp).testTag("player-speed")) {

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Job card designs</title>
+<style>
+  :root {
+    --bg: #101115; --surface: #191b21; --text: #f2f0f5; --muted: #b9b8c3;
+    --orange: #ff814a; --red: #ffb4ab; --line: #3a3c47; --track: #2c2e36;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #07080b; color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; gap: 28px; padding: 24px; }
+  .col { width: 390px; }
+  .label { margin: 0 0 8px 4px; font-size: 16px; font-weight: 700; }
+  .note { margin: 0 0 12px 4px; color: var(--muted); font-size: 13px; line-height: 1.35; }
+  .phone { width: 390px; background: var(--bg); border: 1px solid #24262e; border-radius: 28px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .card { background: var(--surface); border: 1px solid rgba(58,60,71,.85); border-radius: 16px; padding: 12px 14px; }
+  .title { font-size: 16px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .err { color: var(--red); font-size: 13px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .grow { flex: 1; min-width: 0; }
+  .act { color: var(--orange); font-size: 14px; font-weight: 700; background: none; border: 0; padding: 0; }
+  .act.bad { color: var(--red); }
+  .time { color: var(--muted); font-size: 13px; }
+  .bar { height: 4px; border-radius: 2px; background: var(--track); margin-top: 8px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 62%; background: var(--orange); }
+  .pill { display: inline-block; color: var(--orange); background: rgba(255,129,74,.14); border-radius: 7px; padding: 2px 7px; font-size: 12px; font-weight: 650; }
+  .pill.bad { color: var(--red); background: rgba(255,180,171,.12); }
+  .list { background: var(--surface); border: 1px solid rgba(58,60,71,.85); border-radius: 16px; overflow: hidden; }
+  .line { padding: 10px 14px; }
+  .line + .line { border-top: 1px solid var(--line); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--orange); flex: none; }
+  .dot.bad { background: var(--red); }
+  .icon { width: 32px; height: 32px; border-radius: 10px; border: 1px solid #4a4c58; color: var(--orange); background: transparent; font-size: 14px; }
+</style>
+</head>
+<body>
+  <section class="col">
+    <p class="label">1 · One row</p>
+    <p class="note">Status and the action share the title line. The reason is one line. Progress is only the thin bar.</p>
+    <div class="phone">
+      <div class="card">
+        <div class="row"><div class="grow"><div class="title">مهرجان العلبه الذهبيه</div><div class="sub">Voice ready</div></div><button class="act">Play</button></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="title">WEGZ - EL AYAM</div><div class="sub">Sending your audio · 0:14</div></div><button class="act">Cancel</button></div>
+        <div class="bar"><i></i></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="title">Import audio from a link</div><div class="err">The import service is temporarily unavailable.</div></div><button class="act">Retry</button></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="title">WEGZ - EL AYAM</div><div class="err">The audio separation failed.</div></div><span class="time">2:33</span><button class="act bad">Delete</button><button class="act">Retry</button></div>
+      </div>
+    </div>
+  </section>
+  <section class="col">
+    <p class="label">2 · Status beside the title</p>
+    <p class="note">The pill stays, but on the title line. Buttons stay on that line too, including failures.</p>
+    <div class="phone">
+      <div class="card">
+        <div class="row"><div class="title grow">مهرجان العلبه الذهبيه</div><span class="pill">Ready</span><button class="act">Play</button></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="title grow">WEGZ - EL AYAM</div><span class="pill">Sending</span><button class="act">Cancel</button></div>
+        <div class="sub">You can leave · 0:14</div>
+        <div class="bar"><i></i></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="title grow">Import audio from a link</div><span class="pill bad">Failed</span><button class="act">Retry</button></div>
+        <div class="err">The import service is temporarily unavailable.</div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="title grow">WEGZ - EL AYAM</div><span class="time">2:33</span><span class="pill bad">Failed</span><button class="act bad">Delete</button><button class="act">Retry</button></div>
+        <div class="err">The audio separation failed.</div>
+      </div>
+    </div>
+  </section>
+  <section class="col">
+    <p class="label">3 · One list</p>
+    <p class="note">Jobs share one surface. A dot is the status. The full reason opens when you tap the row.</p>
+    <div class="phone">
+      <div class="list">
+        <div class="line"><div class="row"><span class="dot"></span><div class="grow"><div class="title">مهرجان العلبه الذهبيه</div><div class="sub">Voice ready</div></div><button class="act">Play</button></div></div>
+        <div class="line"><div class="row"><span class="dot"></span><div class="grow"><div class="title">WEGZ - EL AYAM</div><div class="sub">Sending your audio · 0:14</div></div><button class="icon">✕</button></div><div class="bar" style="margin-left:16px"><i></i></div></div>
+        <div class="line"><div class="row"><span class="dot bad"></span><div class="grow"><div class="title">Import audio from a link</div><div class="err">Import unavailable</div></div><button class="icon">↻</button></div></div>
+        <div class="line"><div class="row"><span class="dot bad"></span><div class="grow"><div class="title">WEGZ - EL AYAM</div><div class="err">Separation failed · 2:33</div></div><button class="icon">↻</button></div></div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Home import designs</title>
+<style>
+  :root {
+    --bg: #101115;
+    --surface: #191b21;
+    --text: #f2f0f5;
+    --muted: #b9b8c3;
+    --orange: #ff814a;
+    --line: #3a3c47;
+    --field: #12141a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #07080b;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex;
+    gap: 28px;
+    padding: 28px;
+  }
+  .shot { width: 390px; }
+  .label {
+    color: #fff;
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: 0.01em;
+    margin: 0 0 12px 4px;
+  }
+  .phone {
+    width: 390px;
+    background: var(--bg);
+    border-radius: 28px;
+    padding: 28px 20px 24px;
+    border: 1px solid #24262e;
+  }
+  h1 {
+    margin: 8px 0 14px;
+    font-size: 34px;
+    line-height: 1.12;
+    font-weight: 650;
+    letter-spacing: -0.03em;
+    text-align: center;
+  }
+  .promise {
+    margin: 0 8px 12px;
+    color: var(--muted);
+    font-size: 18px;
+    line-height: 1.35;
+    text-align: center;
+  }
+  .limits {
+    margin: 0 0 18px;
+    color: var(--orange);
+    font-size: 16px;
+    font-weight: 650;
+    text-align: center;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid rgba(58, 60, 71, 0.8);
+    border-radius: 16px;
+    padding: 16px;
+  }
+  .card h2 { margin: 0 0 10px; font-size: 22px; font-weight: 650; }
+  .sites {
+    margin: 0 0 14px;
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1.35;
+  }
+  .field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 56px;
+    border: 1px solid #4a4c58;
+    border-radius: 14px;
+    padding: 4px 4px 4px 14px;
+    background: var(--field);
+  }
+  .field span { color: #9b9aa6; font-size: 16px; flex: 1; }
+  .link { color: var(--orange); font-size: 18px; }
+  .paste {
+    height: 48px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--orange);
+    color: #1a100c;
+    font-size: 16px;
+    font-weight: 700;
+    padding: 0 18px;
+  }
+  .divider { height: 1px; background: var(--line); margin: 14px 0; }
+  .files { display: flex; gap: 10px; }
+  .file, .wide {
+    flex: 1;
+    height: 52px;
+    border-radius: 14px;
+    border: 1px solid #5a5c68;
+    background: transparent;
+    color: var(--text);
+    font-size: 15px;
+  }
+  .wide { width: 100%; margin-top: 10px; }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 48px;
+  }
+  .row p, .trim { margin: 0; font-size: 18px; }
+  .switch {
+    width: 52px;
+    height: 32px;
+    border-radius: 16px;
+    background: #3a3c44;
+    position: relative;
+    flex: none;
+  }
+  .switch i {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #c8c6d0;
+  }
+  .caption { margin: 10px 2px 0; color: var(--muted); font-size: 14px; }
+  .textbtn {
+    display: inline-block;
+    margin-top: 8px;
+    color: var(--orange);
+    font-size: 15px;
+    font-weight: 650;
+  }
+  .seg {
+    display: flex;
+    background: #12141a;
+    border-radius: 12px;
+    padding: 4px;
+    margin-bottom: 14px;
+  }
+  .seg b, .seg span {
+    flex: 1;
+    text-align: center;
+    height: 36px;
+    line-height: 36px;
+    border-radius: 9px;
+    font-size: 15px;
+  }
+  .seg b { background: #2a2c34; }
+  .seg span { color: var(--muted); }
+  .sheet-wrap { position: relative; min-height: 430px; }
+  .sheet {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    background: #1e2028;
+    border-radius: 20px 20px 0 0;
+    padding: 12px 16px 18px;
+    border: 1px solid #343640;
+  }
+  .grab { width: 42px; height: 4px; border-radius: 2px; background: #5a5c68; margin: 0 auto 12px; }
+  .sheet h3 { margin: 0 0 6px; font-size: 20px; }
+  .name { margin: 0 0 10px; font-size: 16px; }
+  .note { margin: 8px 0 14px; color: var(--muted); font-size: 14px; line-height: 1.35; }
+  .go {
+    width: 100%;
+    height: 52px;
+    border: 0;
+    border-radius: 14px;
+    background: var(--orange);
+    color: #1a100c;
+    font-size: 17px;
+    font-weight: 750;
+  }
+</style>
+</head>
+<body>
+  <section class="shot">
+    <p class="label">1 · Quiet field</p>
+    <div class="phone">
+      <h1>Make room for your voice.</h1>
+      <p class="promise">Paste a link or choose a file you have the right to use. MusicMute keeps the voice.</p>
+      <p class="limits">Audio only · up to 20 minutes · up to 50 MB</p>
+      <div class="card">
+        <div class="field"><b class="link">⌁</b><span>Paste a public media link</span><button class="paste">Paste</button></div>
+        <p class="caption">YouTube, Facebook, and 7 more</p>
+        <div class="divider"></div>
+        <div class="row"><p>Trim silent gaps</p><div class="switch"><i></i></div></div>
+        <div class="divider"></div>
+        <div class="files">
+          <button class="file">Audio / video file</button>
+          <button class="file">Video file</button>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="shot">
+    <p class="label">2 · Link or file</p>
+    <div class="phone">
+      <h1>Make room for your voice.</h1>
+      <p class="promise">Paste a link or choose a file you have the right to use. MusicMute keeps the voice.</p>
+      <p class="limits">Audio only · up to 20 minutes · up to 50 MB</p>
+      <div class="card">
+        <div class="seg"><b>Link</b><span>File</span></div>
+        <div class="field"><b class="link">⌁</b><span>Paste a public media link</span><button class="paste">Paste</button></div>
+        <div class="textbtn">Supported sites</div>
+        <div class="divider"></div>
+        <div class="row"><p>Trim silent gaps</p><div class="switch"><i></i></div></div>
+      </div>
+    </div>
+  </section>
+  <section class="shot">
+    <p class="label">3 · Three rows</p>
+    <div class="phone">
+      <h1>Make room for your voice.</h1>
+      <p class="promise">Paste a link or choose a file you have the right to use. MusicMute keeps the voice.</p>
+      <p class="limits">Audio only · up to 20 minutes · up to 50 MB</p>
+      <div class="card">
+        <div class="field"><b class="link">⌁</b><span>Paste a public media link</span><button class="paste">Paste</button></div>
+        <button class="wide">Choose audio or video</button>
+        <div class="divider"></div>
+        <div class="row"><p>Trim silent gaps</p><div class="switch"><i></i></div></div>
+        <div class="textbtn">9 supported sites</div>
+      </div>
+    </div>
+  </section>
+  <section class="shot">
+    <p class="label">4 · Action first</p>
+    <div class="phone">
+      <h1>Make room for your voice.</h1>
+      <p class="promise">Paste a link or choose a file you have the right to use. MusicMute keeps the voice.</p>
+      <p class="limits">Audio only · up to 20 minutes · up to 50 MB</p>
+      <div class="sheet-wrap">
+        <div class="card">
+          <div class="field"><b class="link">⌁</b><span>Paste a public media link</span><button class="paste">Paste</button></div>
+          <button class="wide">Choose audio or video</button>
+        </div>
+        <div class="sheet">
+          <div class="grab"></div>
+          <h3>Review</h3>
+          <p class="name">evening-session.m4a</p>
+          <p class="limits" style="text-align:left;margin:0">Audio only · up to 20 minutes · up to 50 MB</p>
+          <div class="row"><p class="trim">Trim silent gaps</p><div class="switch"><i></i></div></div>
+          <p class="note">YouTube, Facebook, SoundCloud, and the other supported sites. A separate audio stream must be available.</p>
+          <button class="go">Remove music</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

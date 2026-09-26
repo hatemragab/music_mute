@@ -1,5 +1,7 @@
 package com.hatem.musicmute.ui.home
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,21 +12,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
@@ -32,16 +32,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.processing.AudioTaskPresentation
 import com.hatem.musicmute.processing.AudioTaskStage
 import com.hatem.musicmute.ui.ProcessingConnectionStatus
+import com.hatem.musicmute.ui.ProcessingQueueStatus
 import com.hatem.musicmute.processing.JobHistoryState
 import com.hatem.musicmute.processing.UrlImportRecord
 import com.hatem.musicmute.ui.design.*
 import com.hatem.musicmute.ui.processingFailureLabel
-import com.hatem.musicmute.ui.library.DeleteAudioSheet
 
 @Composable
 fun HomeScreen(
@@ -54,7 +53,6 @@ fun HomeScreen(
     onOpen: (AudioTaskPresentation) -> Unit,
     onCancel: (AudioTaskPresentation) -> Unit,
     onRetry: (AudioTaskPresentation) -> Unit,
-    onDelete: (AudioTaskPresentation, () -> Unit) -> Unit,
     trimEnabled: Boolean = false,
     onTrimEnabled: (Boolean) -> Unit = {},
     urlImports: List<UrlImportRecord> = emptyList(),
@@ -70,8 +68,15 @@ fun HomeScreen(
     miniPlayer: @Composable () -> Unit = {},
     onPhotos: () -> Unit = {},
     actionBusy: Boolean = false,
+    notificationsNeeded: Boolean = false,
+    onPlayReady: (AudioTaskPresentation) -> Unit = {},
+    onOpenLibrary: () -> Unit = {},
 ) {
-    var pendingDelete by remember { mutableStateOf<AudioTaskPresentation?>(null) }
+    var notificationDismissed by rememberSaveable { mutableStateOf(false) }
+    var linkSource by rememberSaveable { mutableStateOf(true) }
+    var showSites by rememberSaveable { mutableStateOf(false) }
+    val openTasks = tasks.filter { it.stage != AudioTaskStage.READY }
+    val readyTasks = tasks.filter { it.stage == AudioTaskStage.READY }
     val keyboard = LocalSoftwareKeyboardController.current
     val importBusy = busy || actionBusy || urlImportBusy
     val startUrlImport = {
@@ -88,83 +93,105 @@ fun HomeScreen(
         ) {
             item {
                 ProcessingConnectionStatus(history.connection)
-                Column(Modifier.fillMaxWidth()) {
-                    val appName = stringResource(R.string.app_name)
-                    val wordmark = buildAnnotatedString {
-                        append(appName)
-                        val muteStart = appName.indexOf("Mute")
-                        if (muteStart >= 0) addStyle(SpanStyle(color = MaterialTheme.colorScheme.primary),
-                            start = muteStart, end = muteStart + "Mute".length)
-                    }
-                    Text(wordmark, modifier = Modifier.fillMaxWidth(),
-                        style = MaterialTheme.typography.headlineLarge.copy(fontSize = 40.sp, lineHeight = 48.sp, letterSpacing = (-1).sp),
-                        textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(24.dp))
-                    CreativeWave(Modifier.fillMaxWidth().height(56.dp).alpha(0.35f))
-                    Spacer(Modifier.height(20.dp))
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(R.string.trim_silence), Modifier.weight(1f))
-                        Switch(trimEnabled, onTrimEnabled, enabled = !importBusy)
-                    }
-                    CreativeCard(contentPadding = 12.dp, contentGap = 8.dp,
-                        shape = RoundedCornerShape(14.dp)) {
-                        Text(stringResource(R.string.url_import_title), style = MaterialTheme.typography.titleMedium)
-                        Text(stringResource(R.string.url_import_supported, com.hatem.musicmute.processing.SupportedAudioSites.names.joinToString(", ")),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                            CompactUrlImportField(
-                                value = urlImportText, onValueChange = onUrlImportText,
-                                enabled = !importBusy, isError = urlImportError != null,
-                                onPaste = onUrlImportPaste, onDone = startUrlImport,
-                            )
-                        }
-                        urlImportError?.let { code ->
-                            CreativeFeedback(stringResource(urlImportMessage(code)), error = true)
-                        }
-                        if (urlImportText.isNotBlank()) {
-                            TextButton(onClick = startUrlImport, enabled = !importBusy,
-                                modifier = Modifier.align(Alignment.End)) {
-                                Text(stringResource(R.string.url_import_action))
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(stringResource(R.string.creative_jobs_home_title), modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(8.dp))
+                    Text(stringResource(R.string.listener_home_promise), modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(4.dp))
+                    Text(stringResource(R.string.processing_limits), modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(16.dp))
+                    CreativeCard(contentPadding = 16.dp, contentGap = 12.dp) {
+                        SourceChoice(linkSource, enabled = !importBusy, onLink = { linkSource = true }, onFile = {
+                            keyboard?.hide()
+                            linkSource = false
+                        })
+                        if (linkSource) {
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                CompactUrlImportField(
+                                    value = urlImportText, onValueChange = onUrlImportText,
+                                    enabled = !importBusy, isError = urlImportError != null,
+                                    onPaste = onUrlImportPaste, onDone = startUrlImport,
+                                )
+                            }
+                            urlImportError?.let { code ->
+                                CreativeFeedback(stringResource(urlImportMessage(code)), error = true)
+                            }
+                            if (urlImportText.isNotBlank()) {
+                                TextButton(onClick = startUrlImport, enabled = !importBusy,
+                                    modifier = Modifier.align(Alignment.End)) {
+                                    Text(stringResource(R.string.url_import_action))
+                                }
+                            }
+                            TextButton(onClick = { showSites = true }, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text(stringResource(R.string.listener_supported_sites))
+                            }
+                        } else {
+                            OutlinedButton(onClick = onImport, enabled = !busy,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                                shape = RoundedCornerShape(14.dp)) {
+                                Icon(Icons.Outlined.FolderOpen, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.listener_choose_file))
                             }
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedButton(onClick = onImport, enabled = !busy,
-                                modifier = Modifier.weight(1f).heightIn(min = CreativeTokens.TouchTarget), shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
-                                Icon(Icons.Outlined.FolderOpen, null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.creative_home_files), style = MaterialTheme.typography.labelMedium)
-                            }
-                            OutlinedButton(onClick = onPhotos, enabled = !busy,
-                                modifier = Modifier.weight(1f).heightIn(min = CreativeTokens.TouchTarget), shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
-                                Icon(Icons.Outlined.PhotoLibrary, null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.creative_home_photos), style = MaterialTheme.typography.labelMedium)
-                            }
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.trim_silence), Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyLarge)
+                            Switch(trimEnabled, onTrimEnabled, enabled = !importBusy)
                         }
                     }
                 }
                 Spacer(Modifier.height(20.dp))
+            }
+            if (readyTasks.isNotEmpty()) item {
+                val latest = readyTasks.first()
+                CreativeCard(contentPadding = 12.dp, contentGap = 8.dp) {
+                    Text(stringResource(R.string.listener_ready_title), style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary)
+                    Text(latest.displayName.ifBlank { stringResource(R.string.voice_track) },
+                        style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { onPlayReady(latest) }) { Text(stringResource(R.string.listener_ready_play)) }
+                        if (readyTasks.size > 1) TextButton(onClick = onOpenLibrary) {
+                            Text(stringResource(R.string.listener_ready_open_library))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            if (openTasks.any { it.active } && notificationsNeeded && !notificationDismissed) item {
+                CreativeCard(contentPadding = 12.dp, contentGap = 8.dp) {
+                    Text(stringResource(R.string.listener_notify_title), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.listener_notify_body), style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onNotifications) { Text(stringResource(R.string.listener_notify_action)) }
+                        TextButton(onClick = { notificationDismissed = true }) { Text(stringResource(R.string.listener_notify_dismiss)) }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
             }
             if (busy || message != null) item {
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (busy) CreativeFeedback(stringResource(R.string.processing_preparing))
                 message?.let { CreativeFeedback(it) }
             }
-            if (tasks.isEmpty() && !history.loading && history.failure == null && !busy) item {
+            if (openTasks.isEmpty() && readyTasks.isEmpty() && !history.loading && history.failure == null && !busy) item {
                 CreativeCard { CreativeFeedback(stringResource(R.string.creative_jobs_empty)) }
             }
-            items(tasks, key = { it.importRequestId?.let { id -> "url:$id" } ?: it.operationId ?: requireNotNull(it.jobId) }) { task ->
+            items(openTasks, key = { it.importRequestId?.let { id -> "url:$id" } ?: it.operationId ?: requireNotNull(it.jobId) }) { task ->
                 Column {
-                JobCard(task, busy || actionBusy, { onOpen(task) }, { onCancel(task) }, {
-                    val record = urlImports.firstOrNull { it.requestId == task.importRequestId }
-                    if (task.importOnly && record != null) onUrlImportRetry(record) else onRetry(task)
-                },
-                    { pendingDelete = task })
-                com.hatem.musicmute.ui.ProcessingQueueStatus(history.jobs.firstOrNull { it.id == task.jobId }, history.connection)
+                    JobCard(task, busy || actionBusy, { onOpen(task) }, { onCancel(task) }, {
+                        val record = urlImports.firstOrNull { it.requestId == task.importRequestId }
+                        if (task.importOnly && record != null) onUrlImportRetry(record) else onRetry(task)
+                    })
+                    ProcessingQueueStatus(history.jobs.firstOrNull { it.id == task.jobId }, history.connection)
                 }
             }
             item {
@@ -182,22 +209,37 @@ fun HomeScreen(
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.creative_jobs_load_more))
                 }
-                TextButton(onNotifications) { Text(stringResource(R.string.processing_notifications)) }
-                Text(stringResource(R.string.processing_notifications_optional),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         miniPlayer()
     }
-    val deleting = pendingDelete?.let { selected ->
-        tasks.firstOrNull { it.operationId == selected.operationId && it.jobId == selected.jobId }
-    }?.takeIf { it.stage == AudioTaskStage.FAILED && it.canDelete }
-    if (deleting != null) DeleteAudioSheet(
-        deleting.displayName, busy || actionBusy,
-        onDismiss = { pendingDelete = null },
-        onDelete = { onDelete(deleting) { pendingDelete = null } },
-        message = message,
-    )
+    if (showSites) CreativeSheet(onDismiss = { showSites = false }) {
+        Text(stringResource(R.string.listener_supported_sites), style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(R.string.url_import_supported, com.hatem.musicmute.processing.SupportedAudioSites.names.joinToString(", ")),
+            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        CreativePrimaryButton(onClick = { showSites = false }, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.creative_library_close))
+        }
+    }
+}
+
+@Composable
+private fun SourceChoice(link: Boolean, enabled: Boolean, onLink: () -> Unit, onFile: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(48.dp).background(MaterialTheme.colorScheme.surfaceContainerLowest, RoundedCornerShape(12.dp))
+        .padding(4.dp)) {
+        SourceChoiceButton(stringResource(R.string.listener_source_link), link, enabled, Modifier.weight(1f), onLink)
+        SourceChoiceButton(stringResource(R.string.listener_source_file), !link, enabled, Modifier.weight(1f), onFile)
+    }
+}
+
+@Composable
+private fun SourceChoiceButton(label: String, selected: Boolean, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+    Box(modifier.height(40.dp).clip(RoundedCornerShape(9.dp))
+        .background(if (selected) MaterialTheme.colorScheme.surfaceContainerHigh else androidx.compose.ui.graphics.Color.Transparent)
+        .clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
+        Text(label, color = color, style = MaterialTheme.typography.labelLarge)
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

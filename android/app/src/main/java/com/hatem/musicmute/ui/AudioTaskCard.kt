@@ -1,6 +1,7 @@
 package com.hatem.musicmute.ui
 
 import android.animation.ValueAnimator
+import android.os.SystemClock
 import android.text.format.Formatter
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.*
@@ -10,7 +11,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
@@ -20,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.processing.AudioTaskPresentation
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.delay
 import androidx.compose.ui.text.style.TextOverflow
 import com.hatem.musicmute.ui.design.CreativeTokens
 
@@ -32,9 +36,23 @@ fun AudioTaskCard(
     onDelete: () -> Unit,
 ) {
     val context = LocalContext.current
-    val elapsed = task.totalElapsedMs
-    OutlinedCard(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    val elapsed by produceState(
+        task.totalElapsedMs,
+        task.operationId,
+        task.active,
+        task.totalElapsedMs,
+    ) {
+        value = task.totalElapsedMs
+        val base = task.totalElapsedMs
+        if (!task.active || base == null) return@produceState
+        val started = SystemClock.elapsedRealtime()
+        while (true) {
+            value = base + SystemClock.elapsedRealtime() - started
+            delay(1_000)
+        }
+    }
+    com.hatem.musicmute.ui.design.CreativeCard(onClick = onOpen, contentPadding = 16.dp, contentGap = 0.dp) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             AudioTaskWaveform(task.active, Modifier.size(40.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(task.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -50,7 +68,7 @@ fun AudioTaskCard(
                     )
                 }
                 task.progressFraction?.let {
-                    LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth())
+                    LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)))
                     Text(
                         "${Formatter.formatShortFileSize(context, task.transferredBytes ?: 0)} / " +
                             Formatter.formatShortFileSize(context, task.totalBytes ?: 0),
@@ -66,10 +84,12 @@ fun AudioTaskCard(
                         style = MaterialTheme.typography.labelSmall)
                 }
                 audioTaskFailureLabel(task)?.let {
-                    Text(androidx.compose.ui.res.stringResource(it), color = MaterialTheme.colorScheme.error)
+                    Text(androidx.compose.ui.res.stringResource(it), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 if (task.active && task.workerAvailable == false) {
-                    Text(androidx.compose.ui.res.stringResource(R.string.processing_worker_offline))
+                    Text(androidx.compose.ui.res.stringResource(R.string.listener_stage_paused),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
                     if (task.canCancel && task.stage != com.hatem.musicmute.processing.AudioTaskStage.CANCELLING) TextButton(onClick = onCancel) {
