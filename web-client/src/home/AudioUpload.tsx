@@ -177,7 +177,12 @@ export function AudioUpload({
     }
   }
   return (
-    <div className="intake-form">
+    <div
+      className="intake-form"
+      data-reload-blocked={
+        file !== null || phase !== "idle" ? "true" : undefined
+      }
+    >
       <h2>{t("uploadAudio")}</h2>
       <div
         className="drop-zone"
