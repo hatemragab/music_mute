@@ -1,5 +1,34 @@
 # yt-dlp isolated test results — 2026-09-25
 
+## Latency update — 2026-09-26
+
+- Deployed `img-captain-music-mute-ytdlp-test:8`; Swarm update completed at
+  16:48:58 UTC and the running container was healthy. Its runner/server SHA-256
+  values match the local sources. The app remains private.
+- Policy: 2-second success cooldown (10 seconds on failure), 1-second
+  pre-download delay, 250 ms extraction pacing, 8 MiB/s rate limit and two
+  concurrent fragments. Audio selection, full decoding, size/duration limits,
+  authentication, network guards and cleanup remain enabled.
+- All 23 tests passed locally and inside the production image build.
+- Same-source comparison (`2Z7-yR0J1jI`): the original backend-measured source
+  download was 17,323 ms; the new successful import measured 5,879 ms (66.1%
+  lower in this single comparison). Both transferred 4,554,387 bytes. This is
+  not a statistical benchmark or a guarantee for other providers.
+- A separate authenticated transfer from the API container returned HTTP 200
+  in 6,427 ms. Downloader logs measured acquisition 4,808 ms, full validation
+  1,513 ms, normalization 0 ms and transfer/consumer 25 ms, with no cooldown.
+- Import `6ab7f8ac4f69bec75447de26` submitted job
+  `6ab7f8b54f69bec75447de28`: validation 376 ms, S3 upload 519 ms, confirmation
+  1,434 ms. The worker job subsequently reached `ready`, verified in the live
+  application and dashboard. Displayed server total fell from 1m 13s to 1m 00s;
+  result upload remained 12.05 seconds. Playback/audio quality was not evaluated
+  in this comparison.
+- An initial comparison during the rolling update failed with
+  `IMPORT_DEPENDENCY_FAILED` before a downloader timing record appeared. After
+  update completion, private health/authentication and both acquisitions passed.
+- API `/health/ready` returned HTTP 200; no attempt directories remained after
+  transfer. No Git commit or push was performed.
+
 ## Outcome
 
 Created and deployed **music-mute-ytdlp-test** in CapRover. Three distinct public

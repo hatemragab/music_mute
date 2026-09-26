@@ -57,6 +57,14 @@ container replacement discards the tmpfs. Existing NestJS cleanup also remains.
 Delays, transfer caps and bounded retries reduce traffic but do not guarantee
 that upstream platforms will never restrict this server.
 
+Latency policy: one active acquisition, two concurrent fragments, an 8 MiB/s
+yt-dlp rate limit, 250 ms between extraction requests, and a one-second
+pre-download delay. Successful transfers have a two-second admission cooldown;
+failed or interrupted attempts retain ten seconds. Integrity checks and native
+audio passthrough are unchanged. Sanitized `audio-import-timing` log records
+report cooldown, acquisition (including extraction and pacing), validation,
+normalization, and consumer/transfer durations without source URLs or titles.
+
 Dependencies remain checksum-pinned official yt-dlp nightly 2026.09.16.232951
 (with matching EJS), Deno 2.9.7 and Python 3.12. FFmpeg/FFprobe inspect and decode local audio only. Compatible native audio is
 transferred unchanged; other verified audio containers are converted to AAC/M4A

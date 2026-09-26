@@ -20,6 +20,8 @@ ROOT = Path('/work')
 MAX_BYTES = 50_000_000
 MAX_SECONDS = 1200
 TIMEOUT = 600
+SUCCESS_COOLDOWN = 2
+FAILURE_COOLDOWN = 10
 
 
 def canonical_url(value):
@@ -52,8 +54,8 @@ def command(url, directory, limits=None):
             '--no-write-thumbnail', '--fixup', 'never', '--js-runtimes', 'deno',
             '--format', 'bestaudio[vcodec=none]', '--match-filter',
             f'!is_live & duration<={max_seconds}', '--max-filesize', str(max_bytes),
-            '--limit-rate', '1M', '--concurrent-fragments', '1',
-            '--sleep-requests', '1', '--sleep-interval', '5', '--max-sleep-interval', '10',
+            '--limit-rate', '8M', '--concurrent-fragments', '2',
+            '--sleep-requests', '0.25', '--sleep-interval', '1',
             '--retries', '1', '--fragment-retries', '1', '--extractor-retries', '1',
             '--socket-timeout', '20', '--abort-on-unavailable-fragments',
             '--print', 'after_move:%(.{id,title,format_id,ext,acodec,vcodec,duration,filesize})j',
@@ -213,7 +215,10 @@ def prepared(value, cancelled=None, wait=False, limits=None, normalize_audio=Fal
         except BlockingIOError:
             raise ValueError('BUSY') from None
         marker = ROOT / '.last-run'
-        while marker.exists() and time.time() - marker.stat().st_mtime < 10:
+        failed = ROOT / '.last-run-failed'
+        cooldown = FAILURE_COOLDOWN if failed.exists() else SUCCESS_COOLDOWN
+        admission_started = time.monotonic()
+        while marker.exists() and time.time() - marker.stat().st_mtime < cooldown:
             if not wait:
                 raise ValueError('COOLDOWN')
             if cancelled and cancelled():
@@ -221,11 +226,17 @@ def prepared(value, cancelled=None, wait=False, limits=None, normalize_audio=Fal
             time.sleep(0.2)
         if shutil.disk_usage(ROOT).free < MAX_BYTES + 128_000_000:
             raise ValueError('DISK_LIMIT')
+        succeeded = False
+        started = time.monotonic()
+        timings = {'cooldown_ms': round((started - admission_started) * 1000)}
         try:
             with tempfile.TemporaryDirectory(prefix='attempt-', dir=ROOT) as tmp:
                 path, source = (download(url, Path(tmp), cancelled, limits) if cancelled
                                 else download(url, Path(tmp)))
+                timings['acquisition_ms'] = round((time.monotonic() - started) * 1000)
+                stage_started = time.monotonic()
                 result = verify(path, cancelled) if cancelled else verify(path)
+                timings['validation_ms'] = round((time.monotonic() - stage_started) * 1000)
                 expected_bytes = source.get('filesize')
                 if expected_bytes and result['bytes'] != expected_bytes:
                     raise ValueError('INCOMPLETE_AUDIO')
@@ -233,11 +244,22 @@ def prepared(value, cancelled=None, wait=False, limits=None, normalize_audio=Fal
                 if expected_duration and abs(result['duration_seconds'] - expected_duration) > 2:
                     raise ValueError('DURATION_MISMATCH')
                 if normalize_audio:
+                    stage_started = time.monotonic()
                     path, result = normalize(path, result, cancelled or (lambda: False))
+                    timings['normalization_ms'] = round((time.monotonic() - stage_started) * 1000)
                 result['source'] = source
+                stage_started = time.monotonic()
                 yield path, result
+                timings['consumer_ms'] = round((time.monotonic() - stage_started) * 1000)
+                succeeded = True
         finally:
+            if succeeded:
+                failed.unlink(missing_ok=True)
+            else:
+                failed.touch()
             marker.touch()
+            print(json.dumps({'event': 'audio-import-timing', 'succeeded': succeeded,
+                              **timings}), file=sys.stderr, flush=True)
 
 
 def run(value):

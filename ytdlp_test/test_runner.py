@@ -37,6 +37,35 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'COOLDOWN'):
                 runner.run('https://youtu.be/aqz-KE-bpKQ')
 
+    def test_success_can_run_after_two_seconds_but_failure_waits_ten(self):
+        import os
+        import time
+        for previous_failed in [False, True]:
+            with self.subTest(previous_failed=previous_failed), tempfile.TemporaryDirectory() as tmp, \
+                    patch.object(runner, 'ROOT', Path(tmp)), \
+                    patch.object(runner, 'download', return_value=(Path(tmp) / 'audio', {})) as download, \
+                    patch.object(runner, 'verify', return_value={}):
+                marker = Path(tmp) / '.last-run'
+                marker.touch()
+                os.utime(marker, (time.time() - 3, time.time() - 3))
+                if previous_failed:
+                    (Path(tmp) / '.last-run-failed').touch()
+                    with self.assertRaisesRegex(ValueError, 'COOLDOWN'):
+                        runner.run('https://youtu.be/aqz-KE-bpKQ')
+                    download.assert_not_called()
+                else:
+                    runner.run('https://youtu.be/aqz-KE-bpKQ')
+                    download.assert_called_once()
+                    self.assertFalse((Path(tmp) / '.last-run-failed').exists())
+
+    def test_bounded_low_latency_download_policy(self):
+        args = runner.command('https://youtu.be/aqz-KE-bpKQ', Path('/work/test'))
+        for flag, value in {'--limit-rate': '8M', '--concurrent-fragments': '2',
+                            '--sleep-requests': '0.25', '--sleep-interval': '1',
+                            '--retries': '1'}.items():
+            self.assertEqual(args[args.index(flag) + 1], value)
+        self.assertNotIn('--max-sleep-interval', args)
+
     def test_concurrent_rejection(self):
         import fcntl
         with tempfile.TemporaryDirectory() as tmp, patch.object(runner, 'ROOT', Path(tmp)):
