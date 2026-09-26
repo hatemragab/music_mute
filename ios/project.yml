@@ -38,7 +38,10 @@ targets:
   MusicMute:
     type: application
     platform: iOS
-    sources: [Vocal]
+    sources:
+      - Vocal
+      - path: ../web-client/src/site-policy/data/supported-audio-sites.json
+        buildPhase: resources
     dependencies:
       - package: Sentry
         product: Sentry
@@ -61,7 +64,10 @@ targets:
   VocalTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [VocalTests]
+    sources:
+      - VocalTests
+      - path: ../web-client/src/site-policy/fixtures/url-policy-cases.json
+        buildPhase: resources
     dependencies:
       - target: MusicMute
     settings:

@@ -69,6 +69,10 @@ const en = {
   welcome: "Your studio, anywhere",
   welcomeBody:
     "Bring in a link or an audio file, then follow each step until your vocal track is ready.",
+  supportedSites: "Supported sites",
+  audioAvailability: "A separate audio stream must be available for this item.",
+  unsupportedSite:
+    "This site or link is not supported. Choose an item from the supported sites.",
   importUrl: "Import a link",
   url: "Public media URL",
   selectAudio: "Choose audio file",
@@ -252,6 +256,10 @@ const ar: Record<MessageKey, string> = {
   welcome: "استوديوك أينما كنت",
   welcomeBody:
     "أضف رابطًا أو ملفًا صوتيًا، ثم تابع الخطوات حتى يصبح المقطع الصوتي جاهزًا.",
+  supportedSites: "المواقع المدعومة",
+  audioAvailability: "يجب أن يتوفر مسار صوت منفصل لهذا العنصر.",
+  unsupportedSite:
+    "هذا الموقع أو الرابط غير مدعوم. اختر عنصراً من المواقع المدعومة.",
   importUrl: "استيراد رابط",
   url: "رابط وسائط عام",
   selectAudio: "اختر ملفًا صوتيًا",
@@ -483,7 +491,7 @@ export function friendlyError(error: unknown, t: I18nValue["t"]): string {
     IMPORT_QUEUE_FULL: "activeLimit",
     IMPORT_INVALID_URL: "invalidSource",
     IMPORT_SINGLE_ITEM_REQUIRED: "invalidSource",
-    IMPORT_UNSUPPORTED_PROVIDER: "invalidSource",
+    IMPORT_UNSUPPORTED_PROVIDER: "unsupportedSite",
     IMPORT_UNSUPPORTED_AUDIO_SOURCE: "invalidSource",
     MEDIA_TOO_LONG: "durationTooLong",
     IMPORT_TOO_LONG: "durationTooLong",

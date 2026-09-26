@@ -68,7 +68,11 @@ have lower account limits, which the client reads before admission. Source
 audio that the browser cannot inspect is rejected with an actionable message.
 The server remains authoritative for duration, format, checksum, quota and job
 state. Closing the tab interrupts preparation or upload. URL imports happen on
-the server and never download provider media into the browser.
+the server and never download provider media into the browser. A bundled
+[verified-site policy](../docs/url-imports/supported-sites.md) rejects unknown
+sites and invalid item links locally before saving retry state or submitting
+an import. The catalog in `src/site-policy/data/` is also bundled by Android
+and iOS; changing it requires rebuilding all clients.
 
 The AAC encoder bundle is about 1 MB before compression and is fetched only when
 conversion is needed. Mediabunny and its AAC encoder declare MPL-2.0; their
