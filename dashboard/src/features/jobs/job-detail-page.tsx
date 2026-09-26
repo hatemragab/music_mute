@@ -1,3 +1,4 @@
+import { JobStageTimings } from "./job-stage-timings";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Ban } from "lucide-react";
@@ -172,21 +173,7 @@ export function JobDetailPage() {
         <Card>
           <CardContent className="p-5">
             <PageSection title="Stage timing">
-              <ul className="space-y-3">
-                {data.stageTimings.map((stage) => (
-                  <li
-                    key={stage.stage}
-                    className="grid grid-cols-[1fr_auto] gap-3 border-b pb-2 text-sm"
-                  >
-                    <span className="capitalize">
-                      {stage.stage.replaceAll("_", " ")}
-                    </span>
-                    <span className="font-mono text-muted-foreground">
-                      {formatDuration(stage.durationSeconds)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <JobStageTimings timings={data.serverStageTimings} />
             </PageSection>
           </CardContent>
         </Card>

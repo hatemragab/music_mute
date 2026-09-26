@@ -1,3 +1,4 @@
+import type { ExecutionStageTiming } from "./stage-clock.js";
 import { randomUUID } from "node:crypto";
 import {
   parseClaimResponse,
@@ -277,6 +278,7 @@ export class WorkerControlPlaneClient {
     attemptId: string,
     identity: WorkerIdentity,
     progress: {
+      executionTimings?: ExecutionStageTiming[];
       sequence: number;
       phase: WorkerProgressPhase;
       phasePercent: number | null;
@@ -315,6 +317,7 @@ export class WorkerControlPlaneClient {
       outputFormat: "mp3";
       outputBitrateKbps: number;
       stageTimings: Array<{ stage: string; durationMs: number }>;
+      executionTimings?: ExecutionStageTiming[];
     },
     signal?: AbortSignal,
   ): Promise<void> {
@@ -333,7 +336,11 @@ export class WorkerControlPlaneClient {
   async fail(
     attemptId: string,
     identity: WorkerIdentity,
-    failure: { code: WorkerFailureCode; summary: string },
+    failure: {
+      code: WorkerFailureCode;
+      summary: string;
+      executionTimings?: ExecutionStageTiming[];
+    },
     signal?: AbortSignal,
   ): Promise<void> {
     const response = asRecord(

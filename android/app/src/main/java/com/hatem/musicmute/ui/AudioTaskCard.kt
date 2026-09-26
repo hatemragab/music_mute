@@ -1,7 +1,6 @@
 package com.hatem.musicmute.ui
 
 import android.animation.ValueAnimator
-import android.os.SystemClock
 import android.text.format.Formatter
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.*
@@ -21,7 +20,6 @@ import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.processing.AudioTaskPresentation
 import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.delay
 import androidx.compose.ui.text.style.TextOverflow
 import com.hatem.musicmute.ui.design.CreativeTokens
 
@@ -34,21 +32,7 @@ fun AudioTaskCard(
     onDelete: () -> Unit,
 ) {
     val context = LocalContext.current
-    val elapsed by produceState(
-        task.totalElapsedMs,
-        task.operationId,
-        task.active,
-        task.totalElapsedMs,
-    ) {
-        value = task.totalElapsedMs
-        val base = task.totalElapsedMs
-        if (!task.active || base == null) return@produceState
-        val started = SystemClock.elapsedRealtime()
-        while (true) {
-            value = base + SystemClock.elapsedRealtime() - started
-            delay(1_000)
-        }
-    }
+    val elapsed = task.totalElapsedMs
     OutlinedCard(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             AudioTaskWaveform(task.active, Modifier.size(40.dp))

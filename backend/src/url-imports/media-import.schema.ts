@@ -1,3 +1,7 @@
+import {
+  StageMeasurementSchema,
+  type StageMeasurement,
+} from '../jobs/job-stage-timing.js';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Schema as MongoSchema, Types } from 'mongoose';
 import { type ImportProvider } from './import-source.js';
@@ -27,6 +31,9 @@ export type ImportState = (typeof IMPORT_STATES)[number];
 })
 export class MediaImport {
   _id!: Types.ObjectId;
+  @Prop({ type: [StageMeasurementSchema], default: [] })
+  stageTimings!: StageMeasurement[];
+  @Prop({ type: Date, default: null }) finishedAt!: Date | null;
   @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
   userId!: Types.ObjectId;
   @Prop({ required: true, immutable: true }) requestId!: string;

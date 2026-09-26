@@ -37,7 +37,7 @@ struct ProcessingDetailView: View {
               .contentTransition(.opacity)
               .animation(.easeInOut(duration: reduceMotion ? 0 : 0.2), value: task.statusKey)
           }
-          AudioStepTimeline(steps: task.timeline)
+          AudioStepTimeline(steps: task.timeline, timings: task.serverStageTimings)
           identifierRow(
             title: task.jobID == nil ? "processing_reference" : "processing_job_id",
             value: task.jobID ?? task.reference)

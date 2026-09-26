@@ -1,4 +1,5 @@
 import { measureTransferOperation } from './transfer-timing.js';
+import { withAttemptMeasurements } from '../../jobs/job-stage-timing.js';
 import { Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { isUUID } from 'class-validator';
@@ -147,6 +148,12 @@ export class WorkerAttemptService {
       },
       {
         $set: {
+          stageTimingAttempts: withAttemptMeasurements(
+            current.job,
+            attemptId,
+            current.attempt.attemptNumber,
+            dto.executionTimings,
+          ),
           workerProgress: {
             attemptId,
             sequence: dto.sequence,
@@ -322,6 +329,7 @@ export class WorkerAttemptService {
     attemptId: string,
     dto: CompleteWorkerAttemptDto,
   ) {
+    const completionStarted = performance.now();
     const first = await this.loadAttemptAndJob(principal, attemptId, dto);
     this.assertRecipe(first.job, dto);
     if (first.attempt.state === 'succeeded')
@@ -388,19 +396,37 @@ export class WorkerAttemptService {
               object.bytes,
               session,
             );
+            const readyAt = new Date();
+            const finalizationMs = Math.round(
+              performance.now() - completionStarted,
+            );
             const job = await this.jobs
               .findOneAndUpdate(
-                this.jobOwnershipFilter(current.job, current.attempt, now),
+                this.jobOwnershipFilter(current.job, current.attempt, readyAt),
                 {
                   $set: {
                     status: 'ready',
                     outputObject: object,
-                    retainedOutputAccountedAt: now,
+                    retainedOutputAccountedAt: readyAt,
                     retainedOutputReleasedAt: null,
                     currentExecution: null,
                     workerProgress: null,
-                    finishedAt: now,
+                    finishedAt: readyAt,
                     workerStageTimings: dto.stageTimings,
+                    stageTimingAttempts: withAttemptMeasurements(
+                      current.job,
+                      attemptId,
+                      current.attempt.attemptNumber,
+                      dto.executionTimings?.map((timing) =>
+                        timing.stage === 'completion'
+                          ? {
+                              stage: 'completion',
+                              durationMs: finalizationMs,
+                              complete: true,
+                            }
+                          : timing,
+                      ),
+                    ),
                     retryEligibility: {
                       eligible: false,
                       attemptsRemaining: 0,
@@ -509,6 +535,12 @@ export class WorkerAttemptService {
             this.jobOwnershipFilter(current.job, current.attempt, now),
             {
               $set: {
+                stageTimingAttempts: withAttemptMeasurements(
+                  current.job,
+                  attemptId,
+                  current.attempt.attemptNumber,
+                  dto.executionTimings,
+                ),
                 status: retry ? 'queued' : 'failed',
                 currentExecution: null,
                 workerProgress: null,
@@ -526,7 +558,13 @@ export class WorkerAttemptService {
                   at: now,
                 },
                 ...(retry
-                  ? { queuedAt: now, finishedAt: null }
+                  ? {
+                      queuedAt: now,
+                      queueTimingStartedAt: current.job.serverTimingStartedAt
+                        ? now
+                        : null,
+                      finishedAt: null,
+                    }
                   : { finishedAt: now }),
               },
               $inc: { revision: 1 },

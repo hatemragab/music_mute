@@ -1,3 +1,4 @@
+import { presentServerStageTimings } from './job-stage-timing.js';
 import type { Job } from './job.schema.js';
 import { presentJobTiming } from './job-timing.js';
 
@@ -23,6 +24,7 @@ export function presentJob(job: Job) {
     sourceKind: job.sourceKind ?? null,
     status: job.status,
     serverTime: now.toISOString(),
+    serverStageTimings: presentServerStageTimings(job, now),
     timing: presentJobTiming(job, now),
     processingProgress,
     stages: {

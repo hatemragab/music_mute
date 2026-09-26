@@ -33,6 +33,7 @@ data class AudioTaskPresentation(
     val lastReachedStage: AudioTaskStage = stage,
     val importRequestId: String? = null,
     val importOnly: Boolean = false,
+    val serverStageTimings: ServerStageTimings? = null,
 )
 
 fun audioTaskPresentations(
@@ -46,15 +47,15 @@ fun audioTaskPresentations(
     val merged = jobs.map { job ->
         val operation = operationsByJob[job.id] ?: job.requestId?.let(operationsByRequest::get)
         val record = imports.firstOrNull { it.jobId == job.id }
-        if (record != null && record.status != "submitted") importPresentation(record, nowMillis)
-        else presentation(operation, job, nowMillis).copy(importRequestId = record?.requestId)
+        if (record != null && record.status != "submitted") importPresentation(record)
+        else presentation(operation, job).copy(importRequestId = record?.requestId)
     }.toMutableList()
     val represented = merged.mapNotNull { it.operationId }.toSet()
     operations.filterNot { it.operationId in represented || it.pendingDelete }
-        .forEach { merged += presentation(it, null, nowMillis) }
+        .forEach { merged += presentation(it, null) }
     imports.filter { record -> jobs.none { it.id == record.jobId } &&
         !(record.status == "submitted" && (record.jobObserved || record.createdAtMillis == 0L)) }.forEach { record ->
-        merged += importPresentation(record, nowMillis)
+        merged += importPresentation(record)
     }
     return merged.sortedByDescending { task ->
         jobs.firstOrNull { it.id == task.jobId }?.createdAt?.toEpochMilli()
@@ -64,7 +65,7 @@ fun audioTaskPresentations(
     }
 }
 
-private fun importPresentation(record: UrlImportRecord, nowMillis: Long): AudioTaskPresentation {
+private fun importPresentation(record: UrlImportRecord): AudioTaskPresentation {
     val stage = when (record.status) {
         "downloading" -> AudioTaskStage.DOWNLOADING_SOURCE
         "validating" -> AudioTaskStage.INSPECTING
@@ -78,8 +79,8 @@ private fun importPresentation(record: UrlImportRecord, nowMillis: Long): AudioT
         sourceTitle = record.sourceTitle, sourceKind = SourceKind.URL,
         stage = stage, active = stage != AudioTaskStage.FAILED,
         progressFraction = null, transferredBytes = null, totalBytes = null,
-        totalElapsedMs = record.createdAtMillis.takeIf { it > 0 && stage != AudioTaskStage.FAILED }
-            ?.let { (nowMillis - it).coerceAtLeast(0) },
+        serverStageTimings = record.serverStageTimings,
+        totalElapsedMs = record.serverStageTimings?.totalMs,
         totalElapsedApproximate = true, processingElapsedMs = null,
         processingElapsedApproximate = false, workerAvailable = null,
         canCancel = false, canRetry = stage == AudioTaskStage.FAILED,
@@ -91,7 +92,6 @@ private fun importPresentation(record: UrlImportRecord, nowMillis: Long): AudioT
 private fun presentation(
     operation: ProcessingOperation?,
     job: Job?,
-    nowMillis: Long,
 ): AudioTaskPresentation {
     val stage = resolvedTaskStage(operation, job)
     val active = stage in setOf(
@@ -110,14 +110,12 @@ private fun presentation(
     }
     val progress = if (transferred != null && total != null && total > 0)
         (transferred.toDouble() / total).toFloat().coerceIn(0f, 1f) else null
-    val localElapsed = operation?.clientStartedAtMillis?.takeIf { it > 0 }?.let {
-        val end = if (active) nowMillis else job?.finishedAt?.toEpochMilli()
-        end?.let { endMillis -> (endMillis - it).coerceAtLeast(0) }
-    }
     val display = operation?.displayName?.takeIf { it.isNotBlank() }
         ?: job?.displayName?.takeIf { it.isNotBlank() }
         ?: job?.sourceTitle?.takeIf { it.isNotBlank() }
         ?: "Audio"
+    val serverTiming = job?.serverStageTimings
+    val separation = serverTiming?.stages?.firstOrNull { it.stage == "separation" }
     return AudioTaskPresentation(
         operationId = operation?.operationId,
         jobId = job?.id ?: operation?.jobId,
@@ -131,10 +129,11 @@ private fun presentation(
         progressFraction = progress,
         transferredBytes = transferred,
         totalBytes = total,
-        totalElapsedMs = job?.timing?.totalElapsedMs ?: localElapsed,
-        totalElapsedApproximate = job?.timing?.totalElapsedApproximate ?: active,
-        processingElapsedMs = job?.timing?.processingElapsedMs,
-        processingElapsedApproximate = job?.timing?.processingElapsedApproximate ?: false,
+        serverStageTimings = job?.serverStageTimings,
+        totalElapsedMs = job?.serverStageTimings?.totalMs,
+        totalElapsedApproximate = job?.serverStageTimings?.let { !it.totalComplete } ?: true,
+        processingElapsedMs = if (serverTiming != null) separation?.durationMs else job?.timing?.processingElapsedMs,
+        processingElapsedApproximate = if (serverTiming != null) separation?.let { !it.complete } ?: false else job?.timing?.processingElapsedApproximate ?: false,
         workerAvailable = job?.workerAvailable,
         canCancel = active,
         canRetry = stage == AudioTaskStage.FAILED || (!active && operation?.localProblem != null),

@@ -1,3 +1,4 @@
+import { presentServerStageTimings } from '../jobs/job-stage-timing.js';
 import type { AdminActor } from '../admin/admin.types.js';
 import type { Job } from '../jobs/job.schema.js';
 import { presentJobTiming } from '../jobs/job-timing.js';
@@ -56,6 +57,7 @@ export function presentAdminJob(
     ...(detail
       ? {
           retryOfJobId: job.retryOfJobId?.toHexString() ?? null,
+          serverStageTimings: presentServerStageTimings(job, now),
           stageTimings: [
             stage('upload', job.createdAt, job.queuedAt),
             stage('queued', job.queuedAt, job.validatingAt),

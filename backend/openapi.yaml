@@ -7342,6 +7342,10 @@ components:
       type: object
       required: [import_id, status, job_id, error, created_at, updated_at]
       properties:
+        server_stage_timings:
+          anyOf:
+            - $ref: '#/components/schemas/ServerStageTimings'
+            - type: 'null'
         import_id: { type: string, pattern: '^[a-f0-9]{24}$' }
         source_title:
           type: [string, 'null']
@@ -7730,6 +7734,12 @@ components:
       type: object
       additionalProperties: false
       properties:
+        execution_timings:
+          type: array
+          maxItems: 13
+          description: Optional cumulative snapshot for this attempt, with unique stage names. Deploy backend support before enabling worker reports.
+          items:
+            $ref: '#/components/schemas/ExecutionStageTimingDto'
         request_id:
           type: string
           format: uuid
@@ -8105,6 +8115,12 @@ components:
       type: object
       additionalProperties: false
       properties:
+        execution_timings:
+          type: array
+          maxItems: 13
+          description: Optional cumulative snapshot for this attempt, with unique stage names. Deploy backend support before enabling worker reports.
+          items:
+            $ref: '#/components/schemas/ExecutionStageTimingDto'
         request_id:
           type: string
           format: uuid
@@ -8693,6 +8709,12 @@ components:
       type: object
       additionalProperties: false
       properties:
+        execution_timings:
+          type: array
+          maxItems: 13
+          description: Optional cumulative snapshot for this attempt, with unique stage names. Deploy backend support before enabling worker reports.
+          items:
+            $ref: '#/components/schemas/ExecutionStageTimingDto'
         request_id:
           type: string
           format: uuid
@@ -9493,10 +9515,90 @@ components:
       required:
         - user
         - policy
+    StageMeasurement:
+      type: object
+      additionalProperties: true
+      properties:
+        stage:
+          type: string
+        duration_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        complete:
+          type: boolean
+          description: False means an observed lower bound, not a completed duration.
+      required: [stage, duration_ms, complete]
+    ExecutionStageTimingDto:
+      allOf:
+        - $ref: '#/components/schemas/StageMeasurement'
+        - type: object
+          properties:
+            stage:
+              type: string
+              enum:
+                [
+                  resource-check,
+                  input-download,
+                  input-validation,
+                  preparation,
+                  model-load,
+                  separation,
+                  denoise,
+                  trim,
+                  encoding,
+                  output-validation,
+                  output-ready,
+                  output-upload,
+                  completion,
+                ]
+            duration_ms:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 7200000
+    ServerStageTimings:
+      description: Server-owned elapsed measurements. Stage totals aggregate attempts; incomplete stages are lower bounds. Total includes coordination overhead and is not a sum of stages. No client timestamps are used.
+      type: object
+      additionalProperties: true
+      properties:
+        total_ms:
+          anyOf:
+            - type: integer
+              format: int64
+              minimum: 0
+            - type: 'null'
+        total_complete:
+          type: boolean
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/StageMeasurement'
+        attempts:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              attempt_number:
+                type: integer
+                minimum: 1
+                maximum: 10
+              stages:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StageMeasurement'
+            required: [attempt_number, stages]
+      required: [total_ms, total_complete, stages, attempts]
     JobView:
       type: object
       additionalProperties: true
       properties:
+        server_stage_timings:
+          anyOf:
+            - $ref: '#/components/schemas/ServerStageTimings'
+            - type: 'null'
         id: *a4
         request_id: *a7
         source_title: *a11
@@ -11326,6 +11428,10 @@ components:
       type: object
       additionalProperties: true
       properties:
+        server_stage_timings:
+          anyOf:
+            - $ref: '#/components/schemas/ServerStageTimings'
+            - type: 'null'
         user_email:
           anyOf:
             - type: 'null'

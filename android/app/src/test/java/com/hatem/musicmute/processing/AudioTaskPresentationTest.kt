@@ -48,7 +48,7 @@ class AudioTaskPresentationTest {
             timing = JobTiming(totalElapsedMs = 9_000))
         val task = audioTaskPresentations(emptyList(), listOf(ready), 99_000).single()
         assertEquals(125_750L, task.audioDurationMs)
-        assertEquals(9_000L, task.totalElapsedMs)
+        assertNull(task.totalElapsedMs)
         for (duration in listOf(Double.NaN, Double.POSITIVE_INFINITY, -1.0, 0.0)) {
             assertNull(audioTaskPresentations(emptyList(), listOf(ready.copy(
                 input = ready.input.copy(durationSeconds = duration))), 0).single().audioDurationMs)
@@ -86,7 +86,7 @@ class AudioTaskPresentationTest {
         val finished = job("failed").copy(finishedAt = Instant.ofEpochMilli(6_000))
         val first = audioTaskPresentations(listOf(operation), listOf(finished), 10_000).single()
         val later = audioTaskPresentations(listOf(operation), listOf(finished), 90_000).single()
-        assertEquals(5_000L, first.totalElapsedMs)
+        assertNull(first.totalElapsedMs)
         assertEquals(first.totalElapsedMs, later.totalElapsedMs)
     }
 
@@ -118,7 +118,7 @@ class AudioTaskPresentationTest {
         assertEquals("68c000000000000000000002", tasks.single().jobId)
         assertEquals(AudioTaskStage.PROCESSING, tasks.single().stage)
         assertNull(tasks.single().progressFraction)
-        assertEquals(9_000L, tasks.single().totalElapsedMs)
+        assertNull(tasks.single().totalElapsedMs)
     }
 
     @Test fun stagesActionsAndServerTimingsAreHonestForTerminalAndUnknownStates() {

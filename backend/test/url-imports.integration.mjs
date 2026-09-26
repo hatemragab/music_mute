@@ -140,7 +140,23 @@ test('native acquisition cleans upload/finalization failures and preserves commi
   });
   let expectedTrim = false;
   const jobs = {
-    create: async (_owner, input, _requestId, _metadata, trimEnabled) => {
+    create: async (
+      _owner,
+      input,
+      _requestId,
+      _metadata,
+      trimEnabled,
+      serverTiming,
+    ) => {
+      assert.ok(serverTiming.startedAt instanceof Date);
+      assert.ok(
+        serverTiming.stages.some(
+          (stage) =>
+            stage.stage === 'source-download' &&
+            stage.complete &&
+            Number.isSafeInteger(stage.durationMs),
+        ),
+      );
       assert.equal(trimEnabled, expectedTrim);
       assert.equal(_metadata.sourceTitle, 'عنوان المصدر 🎵');
       assert.equal(input.sourceTitle, undefined);
@@ -178,7 +194,16 @@ test('native acquisition cleans upload/finalization failures and preserves commi
       },
     },
     config,
-    { findOne: () => ({ lean: async () => reservation }) },
+    {
+      findOne: () => ({ lean: async () => reservation }),
+      updateOne: async (_filter, update) => {
+        assert.ok(reservation);
+        reservation.importStageTimings = structuredClone(
+          update.$set.importStageTimings,
+        );
+        return { matchedCount: 1 };
+      },
+    },
   );
   try {
     for (const mode of ['none', 'upload', 'confirmation', 'lost-response']) {
@@ -202,6 +227,30 @@ test('native acquisition cleans upload/finalization failures and preserves commi
       );
       const accepted = mode === 'none' || mode === 'lost-response';
       assert.equal(result.status, accepted ? 'submitted' : 'failed');
+      assert.ok(result.finishedAt instanceof Date);
+      assert.ok(
+        result.stageTimings.every(
+          (stage) =>
+            Number.isSafeInteger(stage.durationMs) && stage.durationMs >= 0,
+        ),
+      );
+      assert.ok(
+        result.stageTimings.some(
+          (stage) => stage.stage === 'source-download' && stage.complete,
+        ),
+      );
+      if (mode === 'none')
+        assert.ok(
+          reservation.importStageTimings.some(
+            (stage) => stage.stage === 'upload-confirmation' && stage.complete,
+          ),
+        );
+      if (mode === 'confirmation')
+        assert.ok(
+          result.stageTimings.some(
+            (stage) => stage.stage === 'upload-confirmation' && !stage.complete,
+          ),
+        );
       if (accepted)
         assert.equal(result.jobId.toHexString(), reservation._id.toHexString());
       assert.deepEqual(await readdir(config.get('URL_IMPORT_TEMP_ROOT')), []);

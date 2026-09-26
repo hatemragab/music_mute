@@ -34,6 +34,7 @@ data class UrlImportRecord(
     val sourceTitle: String? = null,
     val createdAtMillis: Long = 0,
     val jobObserved: Boolean = false,
+    val serverStageTimings: ServerStageTimings? = null,
 ) {
     companion object {
         val terminalStatuses = setOf("submitted", "failed")
@@ -48,6 +49,7 @@ data class UrlImportView(
     val error: UrlImportError?,
     val createdAt: String,
     val updatedAt: String,
+    val serverStageTimings: ServerStageTimings? = null,
     val sourceTitle: String? = null,
 )
 
@@ -270,7 +272,8 @@ class UrlImportCoordinator(
                 if (owner != ticket || session() != ticket) return
                 store.updateUrlImport(ticket.uid, requestId) {
                     it.copy(importId = view.importId, status = view.status, jobId = view.jobId,
-                        errorCode = view.error?.code, sourceTitle = view.sourceTitle ?: it.sourceTitle)
+                        errorCode = view.error?.code, sourceTitle = view.sourceTitle ?: it.sourceTitle,
+                        serverStageTimings = view.serverStageTimings)
                 }
                 if (view.status == "submitted") {
                     return
