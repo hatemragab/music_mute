@@ -16,7 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 
 @Composable
-internal fun EmailVerificationSheet(state: AuthUiState, email: String, cooldown: Long,
+internal fun EmailVerificationSheet(state: AuthUiState, email: String, cooldownUntil: Long,
     onDismiss: () -> Unit, onSend: () -> Unit, onCheck: () -> Unit, dismissMessage: () -> Unit) {
     CreativeSheet(onDismiss, dismissible = !state.busy) {
         CreativeWave(Modifier.fillMaxWidth())
@@ -25,9 +25,11 @@ internal fun EmailVerificationSheet(state: AuthUiState, email: String, cooldown:
         Text(email)
         Text(stringResource(R.string.auth_optional_verification))
         AuthMessages(state, dismissMessage)
-        CreativePrimaryButton(onSend, Modifier.fillMaxWidth().testTag("auth-verify-email"),
-            enabled = cooldown == 0L && state.identity?.email != null, busy = state.busy) {
-            Text(if (cooldown > 0) stringResource(R.string.auth_retry_seconds, cooldown) else stringResource(R.string.auth_send_verification))
+        CooldownContent(cooldownUntil) { cooldown ->
+            CreativePrimaryButton(onSend, Modifier.fillMaxWidth().testTag("auth-verify-email"),
+                enabled = cooldown == 0L && state.identity?.email != null, busy = state.busy) {
+                Text(if (cooldown > 0) stringResource(R.string.auth_retry_seconds, cooldown) else stringResource(R.string.auth_send_verification))
+            }
         }
         OutlinedButton(onCheck, Modifier.fillMaxWidth().testTag("auth-check-verification"), enabled = !state.busy) { Text(stringResource(R.string.auth_check_verification)) }
     }

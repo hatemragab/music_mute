@@ -75,7 +75,6 @@ class MainActivity : AppCompatActivity() {
             val pushTap by app.processingPush.pendingTap.collectAsStateWithLifecycle()
             val requestedProcessing by openProcessing.collectAsStateWithLifecycle()
             val requestedJob by processingJob.collectAsStateWithLifecycle()
-            val artifacts by app.processingArtifacts.progress.collectAsStateWithLifecycle()
             val processing: ProcessingViewModel = viewModel(factory = viewModelFactory {
                 initializer {
                     ProcessingViewModel(app.jobsApi, app.processingRepository, app.audioPipelineCoordinator,
@@ -155,7 +154,7 @@ class MainActivity : AppCompatActivity() {
                             )
                         },
                     ) { onAccount ->
-                        VocalApp(state, model, processing, processingSession, artifacts,
+                        VocalApp(state, model, processing, processingSession, app.processingArtifacts.progress,
                             requestedHistory,
                             sharedUrlText = sharedText,
                             onSharedUrlConsumed = { sharedUrlText.value = null },

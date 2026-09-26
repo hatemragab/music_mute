@@ -10,6 +10,7 @@ class PlaybackPresentationTest {
         assertFalse(PlaybackState(trackId = "track", durationMs = 120_000, failed = true).canSeekAudio())
         assertFalse(PlaybackState(trackId = "track", durationMs = 120_000, buffering = true).canSeekAudio())
         assertFalse(PlaybackState(trackId = "track", durationMs = 0).canSeekAudio())
+        assertFalse(PlaybackState(trackId = "track", durationMs = 120_000, switching = true).canSeekAudio())
         assertTrue(PlaybackState(trackId = "track", durationMs = 120_000).canSeekAudio())
     }
 
