@@ -22,7 +22,6 @@ import com.hatem.musicmute.BuildConfig
 import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -49,15 +48,6 @@ internal fun AccountScreen(
     }
     fun cancelDeletion() { if (!state.busy) { deletionStep = 0; deletionPassword = "" } }
     BackHandler(deletionStep > 0) { cancelDeletion() }
-    var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
-    LaunchedEffect(state.verificationCooldownUntil) {
-        now = android.os.SystemClock.elapsedRealtime()
-        while (now < state.verificationCooldownUntil) {
-            delay(1000)
-            now = android.os.SystemClock.elapsedRealtime()
-        }
-    }
-    val cooldown = ((state.verificationCooldownUntil - now + 999) / 1000).coerceAtLeast(0)
     val context = LocalContext.current
     if (deletionStep > 0) {
         AccountDeletionReviewScreen(state, deletionPassword, { deletionPassword = it }, ::cancelDeletion, {
@@ -138,7 +128,7 @@ internal fun AccountScreen(
             onClick = { deletionStep = 1; auth.dismissMessage() })
         AccountPublicLinks()
     }
-    if (verify) EmailVerificationSheet(state, state.identity?.email ?: state.profile?.email.orEmpty(), cooldown,
+    if (verify) EmailVerificationSheet(state, state.identity?.email ?: state.profile?.email.orEmpty(), state.verificationCooldownUntil,
         { if (!state.busy) verify = false }, { scope.launch { auth.requestVerification() } },
         { scope.launch { auth.refreshAccount() } }, auth::dismissMessage)
     if (confirmGlobalLogout) SignOutAllSheet(state, { if (!state.busy) confirmGlobalLogout = false },
