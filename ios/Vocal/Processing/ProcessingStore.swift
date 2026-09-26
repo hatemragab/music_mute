@@ -172,6 +172,7 @@ actor ProcessingStore {
     var jobs: [Job]
     var retryIntents: [JobRetryIntent]? = nil
     var pipelines: [AudioPipelineIntent]? = nil
+    var urlImport: URLImportRecord? = nil
   }
   private let root: URL
   private let stagingRoot: URL
@@ -184,6 +185,14 @@ actor ProcessingStore {
 
   nonisolated static func ownerDirectoryName(_ uid: String) -> String {
     SHA256.hash(data: Data(uid.utf8)).map { String(format: "%02x", $0) }.joined()
+  }
+
+  func urlImport(ownerUid: String) throws -> URLImportRecord? { try load(ownerUid).urlImport }
+
+  func saveURLImport(_ record: URLImportRecord, ownerUid: String) throws {
+    var snapshot = try load(ownerUid)
+    snapshot.urlImport = record
+    try persist(snapshot)
   }
 
   func operations(ownerUid: String) throws -> [UploadOperation] {

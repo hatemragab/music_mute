@@ -35,6 +35,8 @@ fun buildConfigString(value: String) =
     "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
+    sourceSets.getByName("test").resources.srcDir("../../web-client/src/site-policy/fixtures")
+    sourceSets.getByName("main").resources.srcDir("../../web-client/src/site-policy/data")
     namespace = "com.hatem.musicmute"
     compileSdk = 36
 

@@ -1,6 +1,8 @@
 import Foundation
 
 @MainActor protocol JobsAPI {
+  func createURLImport(url: String, requestId: UUID) async throws -> URLImportView
+  func urlImport(id: String) async throws -> URLImportView
   func processingPolicy() async throws -> ProcessingPolicyResponse
   func processingUsage() async throws -> ProcessingUsage
   func create(requestId: UUID, input: InputDeclaration) async throws -> CreateReservation
@@ -22,6 +24,10 @@ import Foundation
 }
 
 extension JobsAPI {
+  func createURLImport(url: String, requestId: UUID) async throws -> URLImportView {
+    throw JobsFailure.serviceUnavailable
+  }
+  func urlImport(id: String) async throws -> URLImportView { throw JobsFailure.serviceUnavailable }
   func processingPolicy() async throws -> ProcessingPolicyResponse { throw JobsFailure.notFound }
   func processingUsage() async throws -> ProcessingUsage { throw JobsFailure.notFound }
   func create(requestId: UUID, input: InputDeclaration, metadata: JobSourceMetadata) async throws
@@ -90,6 +96,24 @@ extension JobsAPI {
       sessionConfiguration: sessionConfiguration, rejectRedirects: true)
   }
 
+  func createURLImport(url: String, requestId: UUID) async throws -> URLImportView {
+    _ = try SupportedAudioSites.canonical(url)
+    struct Body: Encodable {
+      let url: String
+      let requestId: String
+    }
+    let result: URLImportView = try await send(
+      "POST", "/media-imports",
+      body: encoder.encode(Body(url: url, requestId: try requestUUID(requestId))),
+      installation: true)
+    return try result.validated()
+  }
+  func urlImport(id: String) async throws -> URLImportView {
+    guard id.range(of: #"^[a-f0-9]{24}$"#, options: .regularExpression) != nil
+    else { throw JobsFailure.invalidInput }
+    let result: URLImportView = try await send("GET", "/media-imports/\(id)")
+    return try result.validated()
+  }
   func processingPolicy() async throws -> ProcessingPolicyResponse {
     try await send("GET", "/processing-policy?schema_version=2")
   }
@@ -266,6 +290,19 @@ extension JobsAPI {
       ]
       if let rawCode, ProcessingMediaMessage.serverCodes.contains(rawCode) {
         throw JobsFailure.conflict(code: rawCode)
+      }
+      if let rawCode,
+        [
+          "IMPORT_INVALID_URL", "IMPORT_UNSUPPORTED_PROVIDER", "IMPORT_SINGLE_ITEM_REQUIRED",
+          "IMPORT_UNSUPPORTED_AUDIO_SOURCE", "IMPORT_TOO_LARGE", "IMPORT_TOO_LONG",
+          "IMPORT_INVALID_AUDIO", "IMPORT_QUEUE_FULL", "IMPORT_DISABLED", "IMPORT_NOT_FOUND",
+          "IMPORT_REQUEST_CONFLICT", "IMPORT_SOURCE_UNAVAILABLE", "IMPORT_UPSTREAM_REFUSED",
+        ].contains(rawCode)
+      {
+        if response.statusCode == 429 || response.value(forHTTPHeaderField: "Retry-After") != nil {
+          _ = rateLimited(response)
+        }
+        throw URLImportFailure.server(rawCode)
       }
       let code = rawCode.flatMap { safeCodes.contains($0) ? $0 : nil }
       switch response.statusCode {

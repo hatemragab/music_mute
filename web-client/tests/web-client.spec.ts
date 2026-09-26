@@ -163,3 +163,25 @@ test("authenticated preview covers responsive home, jobs, library and settings i
     ).toBe(true);
   }
 });
+
+test("unsupported URL is rejected locally in the authenticated browser form", async ({
+  page,
+}) => {
+  await page.goto("/tests/preview.html");
+  await page
+    .getByRole("textbox", { name: "Public media URL" })
+    .fill("https://unknown.example/audio");
+  await page
+    .getByRole("checkbox", { name: "I have the rights to process this audio" })
+    .check();
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/media-imports")) requests.push(request.url());
+  });
+  await page.getByRole("button", { name: "Start import" }).click();
+  await expect(page.locator("form").getByRole("alert")).toContainText(
+    "not supported",
+  );
+  expect(requests).toEqual([]);
+  await expect(page.getByText(/Supported sites:/)).toContainText("Bandcamp");
+});

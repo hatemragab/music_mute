@@ -25,6 +25,24 @@ final class ProcessingUITests: XCTestCase {
     return app
   }
 
+  func testUnsupportedLinkIsRejectedOnHome() {
+    let app = launch()
+    app.tabBars.buttons["Home"].tap()
+    let source = app.textFields["urlImportSource"]
+    XCTAssertTrue(source.waitForExistence(timeout: 5))
+    source.tap()
+    source.typeText("https://unknown.example/audio\n")
+    let rights = app.switches["urlImportRights"]
+    XCTAssertTrue(rights.waitForExistence(timeout: 5))
+    for _ in 0..<3 where !rights.isHittable { app.swipeUp() }
+    rights.tap()
+    app.buttons["submitURLImport"].tap()
+    let error = app.staticTexts["urlImportError"]
+    XCTAssertTrue(error.waitForExistence(timeout: 5))
+    XCTAssertTrue(error.label.contains("not supported"))
+    XCTAssertEqual(app.otherElements["fixtureCreatedJobs"].label, "0")
+  }
+
   func testAccountDeletionFinalConfirmationCanBeCancelled() {
     let app = launch()
     app.tabBars.buttons["Settings"].tap()

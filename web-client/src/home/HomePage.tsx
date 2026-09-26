@@ -6,6 +6,7 @@ import type { MediaImportView } from "../api/types";
 import { useSignedIn } from "../auth/AuthProvider";
 import { friendlyError, statusLabel, useI18n } from "../i18n";
 import { JobCard, useJobs } from "../jobs/JobsUI";
+import { supportedAudioSites, supportedAudioUrl } from "../site-policy/source";
 import { AudioUpload } from "./AudioUpload";
 
 export function HomePage() {
@@ -65,18 +66,16 @@ export function HomePage() {
       setError(t("missingRights"));
       return;
     }
-    let parsed: URL;
+    let source: string;
     try {
-      parsed = new URL(url.trim());
-      if (parsed.protocol !== "https:" && parsed.protocol !== "http:")
-        throw new Error();
-    } catch {
-      setError(t("url"));
+      source = supportedAudioUrl(url);
+    } catch (error) {
+      setError(friendlyError(error, t));
       return;
     }
     setBusy(true);
     try {
-      const fingerprint = `${parsed.toString()}:${trim}`;
+      const fingerprint = `${source}:${trim}`;
       let requestId = crypto.randomUUID() as string;
       try {
         const previous = JSON.parse(
@@ -92,7 +91,7 @@ export function HomePage() {
         JSON.stringify({ fingerprint, requestId }),
       );
       const result: MediaImportView = await jobsApi(api).createImport(
-        parsed.toString(),
+        source,
         trim,
         requestId,
       );
@@ -164,6 +163,10 @@ export function HomePage() {
         {mode === "url" ? (
           <form onSubmit={submitUrl} className="intake-form">
             <h2>{t("importUrl")}</h2>
+            <p>
+              {t("supportedSites")}: {supportedAudioSites.join(", ")}.{" "}
+              {t("audioAvailability")}
+            </p>
             <label>
               {t("url")}
               <input

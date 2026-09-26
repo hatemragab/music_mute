@@ -1,0 +1,246 @@
+[
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk",
+    "accepted": true
+  },
+  {
+    "url": "https://www.facebook.com/share/v/19duj8sfLg/",
+    "accepted": true
+  },
+  {
+    "url": "https://soundcloud.com/ethmusic/lostin-powers-she-so-heavy",
+    "accepted": true
+  },
+  {
+    "url": "https://benprunty.bandcamp.com/track/lanius-battle",
+    "accepted": true
+  },
+  {
+    "url": "https://www.mixcloud.com/dholbach/cryptkeeper/",
+    "accepted": true
+  },
+  {
+    "url": "https://hearthis.at/moofi/dr-kreep",
+    "accepted": true
+  },
+  {
+    "url": "https://clyp.it/iynkjk4b",
+    "accepted": true
+  },
+  {
+    "url": "https://vocaroo.com/1de8yA3LNe77",
+    "accepted": true
+  },
+  {
+    "url": "https://whyp.it/tracks/example-track-HPuZgly3yViP",
+    "accepted": true
+  },
+  {
+    "url": "https://youtu.be/UXqq0ZvbOnk",
+    "accepted": true
+  },
+  {
+    "url": "https://www.youtube.com/shorts/UXqq0ZvbOnk",
+    "accepted": true
+  },
+  {
+    "url": "https://www.facebook.com/watch/?v=123456789",
+    "accepted": true
+  },
+  {
+    "url": "https://www.facebook.com/reel/123456789/",
+    "accepted": true
+  },
+  {
+    "url": " https://WWW.YOUTUBE.COM/watch?v=UXqq0ZvbOnk ",
+    "accepted": true
+  },
+  {
+    "url": "https://soundcloud.com/artist/track?utm_source=share",
+    "accepted": true
+  },
+  {
+    "url": "https://example.com/audio",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com.evil.example/watch?v=UXqq0ZvbOnk",
+    "accepted": false
+  },
+  {
+    "url": "https://youtube.com@evil.example/watch?v=UXqq0ZvbOnk",
+    "accepted": false
+  },
+  {
+    "url": "https://evil.example@youtube.com/watch?v=UXqq0ZvbOnk",
+    "accepted": false
+  },
+  {
+    "url": "https://youtube.com:443/watch?v=UXqq0ZvbOnk",
+    "accepted": false
+  },
+  {
+    "url": "https://youtube.com./watch?v=UXqq0ZvbOnk",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk#x",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/playlist?list=PL123",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&list=PL123",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&%6cist=PL123",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&v=UXqq0ZvbOnk",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=short",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/@creator",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/",
+    "accepted": false
+  },
+  {
+    "url": "https://soundcloud.com/artist/sets/album",
+    "accepted": false
+  },
+  {
+    "url": "https://soundcloud.com/artist/track?in=artist/sets/album",
+    "accepted": false
+  },
+  {
+    "url": "https://soundcloud.com/artist/tracks",
+    "accepted": false
+  },
+  {
+    "url": "https://benprunty.bandcamp.com/album/test",
+    "accepted": false
+  },
+  {
+    "url": "https://bandcamp.com/",
+    "accepted": false
+  },
+  {
+    "url": "https://www.mixcloud.com/artist/uploads/",
+    "accepted": false
+  },
+  {
+    "url": "https://www.facebook.com/",
+    "accepted": false
+  },
+  {
+    "url": "https://www.facebook.com/share/p/123/",
+    "accepted": false
+  },
+  {
+    "url": "https://vimeo.com/123456789",
+    "accepted": false
+  },
+  {
+    "url": "https://www.instagram.com/reel/Example",
+    "accepted": false
+  },
+  {
+    "url": "https://www.tiktok.com/@creator/video/123",
+    "accepted": false
+  },
+  {
+    "url": "https://www.tumblr.com/blog/123",
+    "accepted": false
+  },
+  {
+    "url": "https://on.soundcloud.com/unverified",
+    "accepted": false
+  },
+  {
+    "url": "https://fb.watch/unverified/",
+    "accepted": false
+  },
+  {
+    "url": "file:///tmp/audio",
+    "accepted": false
+  },
+  {
+    "url": "http://127.0.0.1/audio",
+    "accepted": false
+  },
+  {
+    "url": "http://[::1]/audio",
+    "accepted": false
+  },
+  {
+    "url": "https://localhost/audio",
+    "accepted": false
+  },
+  {
+    "url": "https://youtube.com\\@evil.example/watch?v=UXqq0ZvbOnk",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/a/../watch?v=UXqq0ZvbOnk",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/%2e%2e/watch?v=UXqq0ZvbOnk",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&x=%0a",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&x=%GG",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk\n&x=1",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk https://clyp.it/iynkjk4b",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&x=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "accepted": false
+  },
+  {
+    "url": "https://whyp.it/tracks/12345/example-track",
+    "accepted": true
+  },
+  {
+    "url": "https://www.facebook.com/watch?v=123456789",
+    "accepted": true
+  },
+  {
+    "url": "https://www.mixcloud.com/artist/stream/",
+    "accepted": false
+  },
+  {
+    "url": "https://www.mixcloud.com/artist/listens/",
+    "accepted": false
+  },
+  {
+    "url": "https://clyp.it/UPPER",
+    "accepted": false
+  },
+  {
+    "url": "https://hearthis.at/artist/example.track",
+    "accepted": true
+  }
+]

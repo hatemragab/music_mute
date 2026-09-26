@@ -10,6 +10,7 @@ import Foundation
   @Published var selectedJobID: String?
   @Published var selectedOperationID: UUID?
   @Published private(set) var sessionReady = false
+  let urlImports: URLImportsModel
   let usageRepository: ProcessingUsageRepository
   private let api: JobsAPI
   let repository: ProcessingRepository
@@ -39,6 +40,7 @@ import Foundation
     reportFailure: @escaping AudioPipelineCoordinator.FailureReporter = { _, _, _, _, _ in }
   ) {
     self.api = api
+    self.urlImports = URLImportsModel(api: api, store: repository.store)
     self.usageRepository = ProcessingUsageRepository(api: api)
     self.repository = repository
     self.preparer = preparer
@@ -60,6 +62,9 @@ import Foundation
     history.onJobsChanged = { [weak self, weak pipeline] jobs in
       await pipeline?.reconcile(jobs)
       await self?.usageRepository.refresh()
+    }
+    urlImports.onSubmitted = { [weak self] _ in
+      await self?.history.refreshAfterChange()
     }
     history.onJobMissing = { [weak self] id in await self?.handleMissingJob(id) }
     history.onFailure = { [weak self] id, error in
@@ -89,6 +94,7 @@ import Foundation
     preparing = false
     if let id = privatePlaybackID, player.currentID == id { player.stopAndClear() }
     privatePlaybackID = nil
+    await urlImports.bindOwner(nil)
     await history.bindOwner(nil)
     await repository.setSession(uid: uid)
     guard ticket == epoch else { return }
@@ -99,6 +105,8 @@ import Foundation
     sessionDidChange()
     await history.bindOwner(uid)
     guard ticket == epoch, uid != nil else { return }
+    await urlImports.bindOwner(uid)
+    guard ticket == epoch else { return }
     sessionReady = true
     await refreshAvailability()
   }
@@ -121,6 +129,7 @@ import Foundation
   }
 
   func resumePending() async {
+    await urlImports.restore()
     guard let fence = repository.session else { return }
     await pipeline.bind(fence)
     await repository.resumePendingMutations()

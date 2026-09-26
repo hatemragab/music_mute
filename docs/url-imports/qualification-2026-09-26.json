@@ -1,0 +1,218 @@
+[
+  {
+    "site": "YouTube",
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk",
+    "checkedAt": "2026-09-26T17:21:51.405784+00:00",
+    "extractor_key": "Youtube",
+    "format_id": "251",
+    "vcodec": "none",
+    "acodec": "opus",
+    "protocol": "https",
+    "is_live": false,
+    "duration": 263,
+    "ext": "webm",
+    "_type": "video",
+    "result": "verified"
+  },
+  {
+    "site": "Facebook",
+    "url": "https://www.facebook.com/share/v/19duj8sfLg/",
+    "checkedAt": "2026-09-26T17:21:51.405953+00:00",
+    "extractor_key": "Facebook",
+    "format_id": "1748803056418754a",
+    "vcodec": "none",
+    "acodec": "mp4a.40.5",
+    "protocol": "https",
+    "is_live": null,
+    "duration": 28.166,
+    "ext": "m4a",
+    "_type": "video",
+    "result": "verified"
+  },
+  {
+    "site": "SoundCloud",
+    "url": "https://soundcloud.com/ethmusic/lostin-powers-she-so-heavy",
+    "checkedAt": "2026-09-26T17:21:51.406051+00:00",
+    "extractor_key": "Soundcloud",
+    "format_id": "hls_aac_96k",
+    "vcodec": "none",
+    "acodec": "mp4a.40.2",
+    "protocol": "m3u8_native",
+    "is_live": null,
+    "duration": 143.206,
+    "ext": "m4a",
+    "_type": "video",
+    "result": "verified"
+  },
+  {
+    "site": "Bandcamp",
+    "url": "https://benprunty.bandcamp.com/track/lanius-battle",
+    "checkedAt": "2026-09-26T17:21:54.472969+00:00",
+    "extractor_key": "Bandcamp",
+    "format_id": "falac",
+    "vcodec": "none",
+    "acodec": "alac",
+    "protocol": "https",
+    "is_live": null,
+    "duration": 260.877,
+    "ext": "m4a",
+    "_type": "video",
+    "result": "verified"
+  },
+  {
+    "site": "Mixcloud",
+    "url": "https://www.mixcloud.com/dholbach/cryptkeeper/",
+    "checkedAt": "2026-09-26T17:21:54.702739+00:00",
+    "extractor_key": "Mixcloud",
+    "format_id": "dash-a1-x3",
+    "vcodec": "none",
+    "acodec": "mp4a.40.2",
+    "protocol": "http_dash_segments",
+    "is_live": null,
+    "duration": 3723,
+    "ext": "m4a",
+    "_type": "video",
+    "result": "verified"
+  },
+  {
+    "site": "Audiomack",
+    "url": "https://www.audiomack.com/song/roosh-williams/extraordinary",
+    "checkedAt": "2026-09-26T17:21:55.720042+00:00",
+    "result": "no qualifying format or upstream unavailable"
+  },
+  {
+    "site": "Vimeo",
+    "url": "https://player.vimeo.com/video/54469442",
+    "checkedAt": "2026-09-26T17:21:56.563787+00:00",
+    "result": "no qualifying format or upstream unavailable"
+  },
+  {
+    "site": "Dailymotion",
+    "url": "https://www.dailymotion.com/video/x5kesuj",
+    "checkedAt": "2026-09-26T17:21:57.613381+00:00",
+    "result": "no qualifying format or upstream unavailable"
+  },
+  {
+    "site": "Reddit",
+    "url": "https://www.reddit.com/r/aww/comments/90bu6w/heat_index_was_110_degrees_so_we_offered_him_a/",
+    "checkedAt": "2026-09-26T17:21:58.579310+00:00",
+    "result": "no qualifying format or upstream unavailable"
+  },
+  {
+    "site": "Internet Archive",
+    "url": "https://archive.org/details/Cops1922",
+    "checkedAt": "2026-09-26T17:21:58.917884+00:00",
+    "result": "no qualifying format or upstream unavailable"
+  },
+  {
+    "site": "AudioBoom",
+    "url": "https://audioboom.com/posts/7398103-asim-chaudhry",
+    "checkedAt": "2026-09-26T17:22:45.171548+00:00",
+    "result": "no qualifying format or upstream unavailable"
+  },
+  {
+    "site": "Spreaker",
+    "url": "https://api.spreaker.com/episode/12534508",
+    "checkedAt": "2026-09-26T17:22:45.172496+00:00",
+    "result": "no qualifying format or upstream unavailable"
+  },
+  {
+    "site": "Podomatic",
+    "url": "https://scienceteachingtips.podomatic.com/entry/2009-01-02T16_03_35-08_00",
+    "checkedAt": "2026-09-26T17:22:45.173337+00:00",
+    "result": "no qualifying format or upstream unavailable"
+  },
+  {
+    "site": "HearThisAt",
+    "url": "https://hearthis.at/moofi/dr-kreep",
+    "checkedAt": "2026-09-26T17:22:46.279185+00:00",
+    "extractor_key": "HearThisAt",
+    "format_id": "wav",
+    "vcodec": "none",
+    "acodec": "wav",
+    "protocol": "https",
+    "is_live": null,
+    "duration": 70,
+    "ext": "wav",
+    "_type": "video",
+    "result": "verified"
+  },
+  {
+    "site": "Jamendo",
+    "url": "https://www.jamendo.com/track/196219/stories-from-emona-i",
+    "checkedAt": "2026-09-26T17:22:46.281637+00:00",
+    "result": "no qualifying format or upstream unavailable"
+  },
+  {
+    "site": "Freesound",
+    "url": "https://www.freesound.org/people/miklovan/sounds/194503/",
+    "checkedAt": "2026-09-26T17:22:47.309720+00:00",
+    "result": "no qualifying format or upstream unavailable"
+  },
+  {
+    "site": "Clyp",
+    "url": "https://clyp.it/iynkjk4b",
+    "checkedAt": "2026-09-26T17:22:47.942714+00:00",
+    "extractor_key": "Clyp",
+    "format_id": "SecureOgg",
+    "vcodec": "none",
+    "acodec": "ogg",
+    "protocol": "https",
+    "is_live": null,
+    "duration": 51.278,
+    "ext": "ogg",
+    "_type": "video",
+    "result": "verified"
+  },
+  {
+    "site": "Tumblr",
+    "url": "https://tatianamaslanydaily.tumblr.com/post/54196191430/orphan-black-dvd-extra-behind-the-scenes",
+    "checkedAt": "2026-09-26T17:22:49.144871+00:00",
+    "result": "no qualifying format or upstream unavailable"
+  },
+  {
+    "site": "ApplePodcasts",
+    "url": "https://podcasts.apple.com/us/podcast/urbana-podcast-724-by-david-penn/id1531349107?i=1000748574256",
+    "checkedAt": "2026-09-26T17:22:49.291239+00:00",
+    "extractor_key": "ApplePodcasts",
+    "format_id": "0",
+    "vcodec": "none",
+    "acodec": null,
+    "protocol": "https",
+    "is_live": null,
+    "duration": 3602,
+    "ext": "m4a",
+    "_type": "video",
+    "result": "not qualified"
+  },
+  {
+    "site": "Vocaroo",
+    "url": "https://vocaroo.com/1de8yA3LNe77",
+    "checkedAt": "2026-09-26T17:22:50.145871+00:00",
+    "extractor_key": "Vocaroo",
+    "format_id": "0",
+    "vcodec": "none",
+    "acodec": "mp3",
+    "protocol": "https",
+    "is_live": null,
+    "duration": null,
+    "ext": "mp3",
+    "_type": "video",
+    "result": "verified"
+  },
+  {
+    "site": "Whyp",
+    "url": "https://whyp.it/tracks/example-track-HPuZgly3yViP",
+    "checkedAt": "2026-09-26T17:22:50.672478+00:00",
+    "extractor_key": "Whyp",
+    "format_id": "lossless",
+    "vcodec": "none",
+    "acodec": "flac",
+    "protocol": "https",
+    "is_live": null,
+    "duration": 135.629,
+    "ext": "flac",
+    "_type": "video",
+    "result": "verified"
+  }
+]

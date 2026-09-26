@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 1,
+  "ytDlpVersion": "2026.09.16.232951",
+  "ytDlpSha256": "f8ca14db511702a5dbfc5a527056312907ddd0914d0b4036f108d6849e17ef61",
+  "qualification": "Separate audio format observed; per-link availability and full production acquisition are not guaranteed.",
+  "blockedQueryKeys": ["list", "playlist", "in"],
+  "sites": [
+    {
+      "id": "youtube",
+      "name": "YouTube",
+      "rules": [
+        {
+          "host": "(?:www\\.|m\\.|music\\.)?youtube\\.com",
+          "path": "/watch/?",
+          "requiredQuery": {
+            "v": "[A-Za-z0-9_-]{11}"
+          }
+        },
+        {
+          "host": "(?:www\\.|m\\.|music\\.)?youtube\\.com",
+          "path": "/(?:shorts|embed|live)/[A-Za-z0-9_-]{11}/?",
+          "requiredQuery": {}
+        },
+        {
+          "host": "(?:www\\.)?youtu\\.be",
+          "path": "/[A-Za-z0-9_-]{11}/?",
+          "requiredQuery": {}
+        }
+      ],
+      "evidence": {
+        "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk",
+        "checkedAt": "2026-09-26T17:21:51.405784+00:00",
+        "extractor_key": "Youtube",
+        "format_id": "251",
+        "vcodec": "none",
+        "acodec": "opus",
+        "protocol": "https",
+        "is_live": false,
+        "duration": 263,
+        "ext": "webm",
+        "_type": "video"
+      }
+    },
+    {
+      "id": "facebook",
+      "name": "Facebook",
+      "rules": [
+        {
+          "host": "(?:www\\.|m\\.|web\\.)?facebook\\.com",
+          "path": "/(?:watch/?|video\\.php)",
+          "requiredQuery": {
+            "v": "[0-9]+"
+          }
+        },
+        {
+          "host": "(?:www\\.|m\\.|web\\.)?facebook\\.com",
+          "path": "/(?:share/(?:v|r)/[A-Za-z0-9]+|reel/[0-9]+|[^/]+/videos/(?:[^/]+/)?[0-9]+)/?",
+          "requiredQuery": {}
+        }
+      ],
+      "evidence": {
+        "url": "https://www.facebook.com/share/v/19duj8sfLg/",
+        "checkedAt": "2026-09-26T17:21:51.405953+00:00",
+        "extractor_key": "Facebook",
+        "format_id": "1748803056418754a",
+        "vcodec": "none",
+        "acodec": "mp4a.40.5",
+        "protocol": "https",
+        "is_live": null,
+        "duration": 28.166,
+        "ext": "m4a",
+        "_type": "video"
+      }
+    },
+    {
+      "id": "soundcloud",
+      "name": "SoundCloud",
+      "rules": [
+        {
+          "host": "(?:www\\.|m\\.)?soundcloud\\.com",
+          "path": "/[A-Za-z0-9_-]+/(?!sets(?:/|$)|likes(?:/|$)|reposts(?:/|$)|tracks(?:/|$))[A-Za-z0-9_-]+/?",
+          "requiredQuery": {}
+        }
+      ],
+      "evidence": {
+        "url": "https://soundcloud.com/ethmusic/lostin-powers-she-so-heavy",
+        "checkedAt": "2026-09-26T17:21:51.406051+00:00",
+        "extractor_key": "Soundcloud",
+        "format_id": "hls_aac_96k",
+        "vcodec": "none",
+        "acodec": "mp4a.40.2",
+        "protocol": "m3u8_native",
+        "is_live": null,
+        "duration": 143.206,
+        "ext": "m4a",
+        "_type": "video"
+      }
+    },
+    {
+      "id": "bandcamp",
+      "name": "Bandcamp",
+      "rules": [
+        {
+          "host": "[a-z0-9-]+\\.bandcamp\\.com",
+          "path": "/track/[A-Za-z0-9_-]+/?",
+          "requiredQuery": {}
+        }
+      ],
+      "evidence": {
+        "url": "https://benprunty.bandcamp.com/track/lanius-battle",
+        "checkedAt": "2026-09-26T17:21:54.472969+00:00",
+        "extractor_key": "Bandcamp",
+        "format_id": "falac",
+        "vcodec": "none",
+        "acodec": "alac",
+        "protocol": "https",
+        "is_live": null,
+        "duration": 260.877,
+        "ext": "m4a",
+        "_type": "video"
+      }
+    },
+    {
+      "id": "mixcloud",
+      "name": "Mixcloud",
+      "rules": [
+        {
+          "host": "(?:www\\.)?mixcloud\\.com",
+          "path": "/(?!discover/|categories/|live/)[A-Za-z0-9_-]+/(?!stream/?$|listens/?$|uploads/?$|favorites/?$|playlists/?$)[A-Za-z0-9_-]+/?",
+          "requiredQuery": {}
+        }
+      ],
+      "evidence": {
+        "url": "https://www.mixcloud.com/dholbach/cryptkeeper/",
+        "checkedAt": "2026-09-26T17:21:54.702739+00:00",
+        "extractor_key": "Mixcloud",
+        "format_id": "dash-a1-x3",
+        "vcodec": "none",
+        "acodec": "mp4a.40.2",
+        "protocol": "http_dash_segments",
+        "is_live": null,
+        "duration": 3723,
+        "ext": "m4a",
+        "_type": "video"
+      }
+    },
+    {
+      "id": "hearthisat",
+      "name": "hearthis.at",
+      "rules": [
+        {
+          "host": "(?:www\\.)?hearthis\\.at",
+          "path": "/[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+/?",
+          "requiredQuery": {}
+        }
+      ],
+      "evidence": {
+        "url": "https://hearthis.at/moofi/dr-kreep",
+        "checkedAt": "2026-09-26T17:22:46.279185+00:00",
+        "extractor_key": "HearThisAt",
+        "format_id": "wav",
+        "vcodec": "none",
+        "acodec": "wav",
+        "protocol": "https",
+        "is_live": null,
+        "duration": 70,
+        "ext": "wav",
+        "_type": "video"
+      }
+    },
+    {
+      "id": "clyp",
+      "name": "Clyp",
+      "rules": [
+        {
+          "host": "(?:www\\.)?clyp\\.it",
+          "path": "/[a-z0-9]+/?",
+          "requiredQuery": {}
+        }
+      ],
+      "evidence": {
+        "url": "https://clyp.it/iynkjk4b",
+        "checkedAt": "2026-09-26T17:22:47.942714+00:00",
+        "extractor_key": "Clyp",
+        "format_id": "SecureOgg",
+        "vcodec": "none",
+        "acodec": "ogg",
+        "protocol": "https",
+        "is_live": null,
+        "duration": 51.278,
+        "ext": "ogg",
+        "_type": "video"
+      }
+    },
+    {
+      "id": "vocaroo",
+      "name": "Vocaroo",
+      "rules": [
+        {
+          "host": "(?:www\\.)?vocaroo\\.com",
+          "path": "/(?:embed/)?[A-Za-z0-9_]+/?",
+          "requiredQuery": {}
+        }
+      ],
+      "evidence": {
+        "url": "https://vocaroo.com/1de8yA3LNe77",
+        "checkedAt": "2026-09-26T17:22:50.145871+00:00",
+        "extractor_key": "Vocaroo",
+        "format_id": "0",
+        "vcodec": "none",
+        "acodec": "mp3",
+        "protocol": "https",
+        "is_live": null,
+        "duration": null,
+        "ext": "mp3",
+        "_type": "video"
+      }
+    },
+    {
+      "id": "whyp",
+      "name": "Whyp",
+      "rules": [
+        {
+          "host": "(?:www\\.)?whyp\\.it",
+          "path": "/tracks/(?:[0-9]{5,}/)?[A-Za-z0-9_-]+/?",
+          "requiredQuery": {}
+        }
+      ],
+      "evidence": {
+        "url": "https://whyp.it/tracks/example-track-HPuZgly3yViP",
+        "checkedAt": "2026-09-26T17:22:50.672478+00:00",
+        "extractor_key": "Whyp",
+        "format_id": "lossless",
+        "vcodec": "none",
+        "acodec": "flac",
+        "protocol": "https",
+        "is_live": null,
+        "duration": 135.629,
+        "ext": "flac",
+        "_type": "video"
+      }
+    }
+  ]
+}
