@@ -2,7 +2,8 @@ import XCTest
 
 final class ProcessingUITests: XCTestCase {
   private func launch(
-    id: String = UUID().uuidString, arabic: Bool = false, offline: Bool = false
+    id: String = UUID().uuidString, arabic: Bool = false, offline: Bool = false,
+    offlineAfterCache: Bool = false
   )
     -> XCUIApplication
   {
@@ -18,11 +19,30 @@ final class ProcessingUITests: XCTestCase {
       ]
     }
     if offline { app.launchArguments += ["--processing-fixture-offline"] }
+    if offlineAfterCache { app.launchArguments += ["--processing-fixture-offline-after-cache"] }
     app.launch()
     let tab = app.tabBars.buttons[arabic ? "معالجة الصوت" : "Voice processing"]
     XCTAssertTrue(tab.waitForExistence(timeout: 10))
     tab.tap()
     return app
+  }
+
+  func testOriginalVoiceComparisonUsesSeparateArtifacts() {
+    let app = launch(offlineAfterCache: true)
+    row(1, app).tap()
+    reveal(app.buttons["processingPlay"], app: app).tap()
+    let original = app.segmentedControls["comparisonSource"].buttons["Original"]
+    XCTAssertTrue(original.waitForExistence(timeout: 5))
+    original.tap()
+    expectation(for: NSPredicate(format: "isSelected == true"), evaluatedWith: original)
+    waitForExpectations(timeout: 10)
+    assertMetric("fixtureOutputRequests", equals: 2, app: app)
+    let voice = app.segmentedControls["comparisonSource"].buttons["Voice"]
+    voice.tap()
+    expectation(for: NSPredicate(format: "isSelected == true"), evaluatedWith: voice)
+    waitForExpectations(timeout: 10)
+    assertMetric("fixtureOutputRequests", equals: 2, app: app)
+    attach(app, "Original and voice comparison uses separate cached audio")
   }
 
   func testAccountDeletionFinalConfirmationCanBeCancelled() {
@@ -170,6 +190,13 @@ final class ProcessingUITests: XCTestCase {
     if !appeared { attach(app, "Missing audio review after native selection") }
     XCTAssertTrue(appeared)
     XCTAssertFalse(confirm.isEnabled)
+    let trim = app.switches["importTrimSilence"]
+    XCTAssertTrue(trim.exists)
+    XCTAssertEqual(trim.value as? String, "0", "Trimming must be opt-in")
+    trim.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+    XCTAssertEqual(trim.value as? String, "1")
+    trim.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+    XCTAssertEqual(trim.value as? String, "0")
     app.switches["importRightsConfirmation"].coordinate(
       withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)
     ).tap()

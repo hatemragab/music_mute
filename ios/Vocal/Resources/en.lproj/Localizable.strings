@@ -326,3 +326,9 @@
 "timing_stage_output_ready" = "Result preparation";
 "timing_stage_output_upload" = "Result upload";
 "timing_stage_completion" = "Server finalization";
+
+"trim_silence" = "Trim silent gaps";
+"comparison_track" = "Playback version";
+"voice_track" = "Voice";
+"original_track" = "Original";
+"save_original" = "Save original audio";

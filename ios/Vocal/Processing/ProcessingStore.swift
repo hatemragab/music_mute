@@ -40,12 +40,13 @@ struct AudioPipelineIntent: Codable, Equatable, Identifiable, Sendable {
   var activeRunToken: UUID?
   var reviewInput: PreparedInput?
   var cloudConsent: Bool?
+  var trimEnabled: Bool? = nil
 
   enum CodingKeys: String, CodingKey {
     case operationId, ownerUid, sourceKind, sourceTitle, displayName
     case clientStartedAt, updatedAt, completedAt, phase, jobId, jobStatus, retryAttempt
     case nextRetryAt, lastFailureCode, cancellationRequested, activeRunToken, reviewInput,
-      cloudConsent
+      cloudConsent, trimEnabled
   }
 
   init(
@@ -102,13 +103,14 @@ struct UploadOperation: Codable, Equatable, Identifiable, Sendable {
   var policyVersion: Int? = nil
   var preparationProfileId: String? = nil
   var mediaSource: String? = nil
+  var trimEnabled: Bool? = nil
 
   enum CodingKeys: String, CodingKey {
     case operationId, ownerUid, requestId, input, stagedRelativePath, createdAt, updatedAt
     case jobId, jobStatus, phase, transferId, transferTaskId, uploadAttempts,
       uploadGrantRequestId, lastFailureCode
     case cancellationRequested, sourceTitle, sourceKind, sourceURL, clientStartedAt, displayName,
-      activeRunToken, policyVersion, preparationProfileId, mediaSource
+      activeRunToken, policyVersion, preparationProfileId, mediaSource, trimEnabled
   }
 }
 
@@ -141,7 +143,8 @@ extension UploadOperation {
       activeRunToken: try values.decodeIfPresent(UUID.self, forKey: .activeRunToken),
       policyVersion: try values.decodeIfPresent(Int.self, forKey: .policyVersion),
       preparationProfileId: try values.decodeIfPresent(String.self, forKey: .preparationProfileId),
-      mediaSource: try values.decodeIfPresent(String.self, forKey: .mediaSource))
+      mediaSource: try values.decodeIfPresent(String.self, forKey: .mediaSource),
+      trimEnabled: try values.decodeIfPresent(Bool.self, forKey: .trimEnabled))
   }
 }
 

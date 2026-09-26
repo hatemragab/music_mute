@@ -33,7 +33,7 @@ internal class OwnerQueueRestore {
     }
     fun canCheckpoint(owner: ProcessingSession?): Boolean = owner != null && attached == owner && ready
 }
-data class QueueTrack(val key: LibraryKey, val title: String)
+data class QueueTrack(val key: LibraryKey, val title: String, val original: Boolean = false)
 
 enum class PlaybackFailureSource { JOB_API, ARTIFACT, LOCAL_IO, PLAYER }
 
@@ -112,6 +112,8 @@ interface PlaybackDependencies {
     val playbackSessions: StateFlow<ProcessingSession?>
     val playbackQueueStore: PlaybackQueueStore
     suspend fun resolvePlaybackFile(key: LibraryKey): File
+    suspend fun resolveOriginalFile(key: LibraryKey): File = throw IOException("Original unavailable")
+    suspend fun comparisonJob(key: LibraryKey): com.hatem.musicmute.processing.Job = throw IOException("Comparison unavailable")
     suspend fun reportPlaybackFailure(key: LibraryKey, diagnostic: PlaybackFailureDiagnostic) {}
 }
 
@@ -171,7 +173,7 @@ fun unavailableCandidates(index: Int, order: List<Int>, repeat: RepeatMode): Lis
     return order.drop(at + 1) + if (repeat == RepeatMode.ALL) order.take(at) else emptyList()
 }
 
-@Serializable private data class StoredQueueTrack(val jobId: String, val title: String)
+@Serializable private data class StoredQueueTrack(val jobId: String, val title: String, val original: Boolean = false)
 @Serializable private data class StoredQueue(
     val tracks: List<StoredQueueTrack>, val index: Int, val positionMs: Long,
     val repeat: String, val shuffle: Boolean, val autoNext: Boolean, val shuffleSeed: Long,
@@ -192,7 +194,7 @@ class PlaybackQueueStore(private val root: File) {
         root.mkdirs()
         val target = file(uid)
         val temp = File(root, "${target.name}.tmp")
-        val stored = StoredQueue(snapshot.tracks.map { StoredQueueTrack(it.key.jobId, it.title) },
+        val stored = StoredQueue(snapshot.tracks.map { StoredQueueTrack(it.key.jobId, it.title, it.original) },
             snapshot.index.coerceIn(0, (snapshot.tracks.size - 1).coerceAtLeast(0)), snapshot.positionMs.coerceAtLeast(0),
             snapshot.repeat.name, snapshot.shuffle, snapshot.autoNext, snapshot.shuffleSeed, snapshot.order)
         temp.outputStream().use { out -> out.write(json.encodeToString(stored).toByteArray()); out.fd.sync() }
@@ -200,7 +202,7 @@ class PlaybackQueueStore(private val root: File) {
     }
     @Synchronized fun load(uid: String): QueueSnapshot? = try {
         val stored = json.decodeFromString<StoredQueue>(file(uid).readText())
-        QueueSnapshot(stored.tracks.map { QueueTrack(LibraryKey(uid, it.jobId), it.title) },
+        QueueSnapshot(stored.tracks.map { QueueTrack(LibraryKey(uid, it.jobId), it.title, it.original) },
             stored.index.coerceIn(0, (stored.tracks.size - 1).coerceAtLeast(0)), stored.positionMs.coerceAtLeast(0),
             RepeatMode.entries.firstOrNull { it.name == stored.repeat } ?: RepeatMode.OFF,
             stored.shuffle, stored.autoNext, stored.shuffleSeed, stored.order)

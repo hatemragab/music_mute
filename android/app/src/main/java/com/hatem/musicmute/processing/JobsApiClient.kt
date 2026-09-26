@@ -66,6 +66,7 @@ class JobsApiClient(
         uuid(requestId)
         val body = buildJsonObject {
             put("requestId", requestId)
+            put("trimEnabled", metadata.trimEnabled)
             metadata.sourceTitle?.let { put("sourceTitle", validatedName(it)) }
             metadata.sourceKind?.let { put("sourceKind", it.wireValue) }
             metadata.clientStartedAt?.let { put("clientStartedAt", wireInstant(it)) }

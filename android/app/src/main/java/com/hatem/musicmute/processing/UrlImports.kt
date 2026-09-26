@@ -34,6 +34,7 @@ data class UrlImportRecord(
     val sourceTitle: String? = null,
     val createdAtMillis: Long = 0,
     val jobObserved: Boolean = false,
+    val trimEnabled: Boolean = false,
     val serverStageTimings: ServerStageTimings? = null,
 ) {
     companion object {
@@ -59,6 +60,7 @@ class UrlImportFailure(val code: String, val retryAfterSeconds: Long? = null) : 
 
 interface UrlImportsApi {
     suspend fun create(url: String, requestId: String): UrlImportView
+    suspend fun create(url: String, requestId: String, trimEnabled: Boolean): UrlImportView = create(url, requestId)
     suspend fun detail(importId: String): UrlImportView
 }
 
@@ -67,9 +69,10 @@ class UrlImportsApiClient(
     private val installationId: () -> String,
 ) : UrlImportsApi {
     private val json = Json { ignoreUnknownKeys = true }
-    override suspend fun create(url: String, requestId: String): UrlImportView {
+    override suspend fun create(url: String, requestId: String): UrlImportView = create(url, requestId, false)
+    override suspend fun create(url: String, requestId: String, trimEnabled: Boolean): UrlImportView {
         require(UUID.fromString(requestId).version() == 4)
-        val body = buildJsonObject { put("url", url); put("requestId", requestId) }.toString()
+        val body = buildJsonObject { put("url", url); put("requestId", requestId); put("trimEnabled", trimEnabled) }.toString()
         return decode(authRequest("POST", "/media-imports", body, true, 202))
     }
 
@@ -232,11 +235,11 @@ class UrlImportCoordinator(
         }
     }
 
-    suspend fun submit(text: String) {
+    suspend fun submit(text: String, trimEnabled: Boolean = false) {
         val ticket = owner?.takeIf { it == session() } ?: throw UrlImportFailure("UNAUTHENTICATED")
         val url = UrlImportSource.canonical(text)
         val record = store.addUrlImport(ticket.uid,
-            UrlImportRecord(ticket.uid, url, UUID.randomUUID().toString(), createdAtMillis = System.currentTimeMillis()))
+            UrlImportRecord(ticket.uid, url, UUID.randomUUID().toString(), createdAtMillis = System.currentTimeMillis(), trimEnabled = trimEnabled))
         if (record.status == "attention") retry(record)
     }
 
@@ -267,7 +270,7 @@ class UrlImportCoordinator(
                 .firstOrNull { it.requestId == requestId } ?: return
             if (record.status in UrlImportRecord.terminalStatuses || record.status == "attention") return
             try {
-                val view = if (record.importId == null) api.create(record.url, record.requestId)
+                val view = if (record.importId == null) api.create(record.url, record.requestId, record.trimEnabled)
                     else api.detail(record.importId)
                 if (owner != ticket || session() != ticket) return
                 store.updateUrlImport(ticket.uid, requestId) {

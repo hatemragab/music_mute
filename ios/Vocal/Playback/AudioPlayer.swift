@@ -2,6 +2,7 @@ import AVFoundation
 import MediaPlayer
 
 @MainActor final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
+  @Published private(set) var original = false
   @Published private(set) var currentID: UUID?
   @Published private(set) var playing = false
   @Published private(set) var loading = false
@@ -89,6 +90,7 @@ import MediaPlayer
         guard audio.prepareToPlay() else { throw CocoaError(.fileReadCorruptFile) }
         player = audio
         currentID = id
+        original = false
         self.title = title
         duration = audio.duration
         position = 0
@@ -105,6 +107,21 @@ import MediaPlayer
       if position >= duration - 0.1 { seek(to: 0) }
       resume()
     }
+  }
+
+  func replaceSource(file: URL, original: Bool, position: Double) throws {
+    let audio = try AVAudioPlayer(contentsOf: file)
+    guard audio.prepareToPlay() else { throw CocoaError(.fileReadCorruptFile) }
+    let wasPlaying = playing
+    pause()
+    audio.delegate = self
+    player = audio
+    self.original = original
+    duration = audio.duration
+    audio.currentTime = min(max(0, position), duration)
+    self.position = audio.currentTime
+    failed = false
+    if wasPlaying { resume() } else { updateNowPlaying() }
   }
 
   func resume() {
@@ -128,6 +145,7 @@ import MediaPlayer
     } catch { failed = true }
   }
   func stopAndClear() {
+    original = false
     player?.stop()
     player = nil
     timer?.invalidate()

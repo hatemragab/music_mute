@@ -17,6 +17,7 @@ import Foundation
   let history: ProcessingHistoryModel
   let player: AudioPlayer
   private let preparer: AudioInputPreparer
+  private let originalFile: (String, String) async throws -> URL
   private let outputFile: (String, String) async throws -> URL
   private let removeOutput: (String) async -> Void
   private let sessionDidChange: () -> Void
@@ -27,6 +28,7 @@ import Foundation
   private var epoch: UInt64 = 0
   private var actions: [UUID: Task<Void, Never>] = [:]
   private var privatePlaybackID: UUID?
+  private var originalPrefetch: Task<Void, Never>?
   private var sourcePickerFence: SessionFence?
   private var sourcePickerPending = false
 
@@ -34,6 +36,9 @@ import Foundation
     api: JobsAPI, repository: ProcessingRepository, preparer: AudioInputPreparer,
     pipeline: AudioPipelineCoordinator,
     player: AudioPlayer, outputFile: @escaping (String, String) async throws -> URL,
+    originalFile: @escaping (String, String) async throws -> URL = { _, _ in
+      throw JobArtifactFailure.unavailable
+    },
     removeOutput: @escaping (String) async -> Void = { _ in },
     sessionDidChange: @escaping () -> Void = {},
     reportFailure: @escaping AudioPipelineCoordinator.FailureReporter = { _, _, _, _, _ in }
@@ -45,6 +50,7 @@ import Foundation
     self.pipeline = pipeline
     self.player = player
     self.outputFile = outputFile
+    self.originalFile = originalFile
     self.removeOutput = removeOutput
     self.sessionDidChange = sessionDidChange
     self.reportFailure = reportFailure
@@ -77,6 +83,8 @@ import Foundation
     photoSourceLimit = ProcessingMediaPolicy.standard.maxSourceBytes!
     await preparer.configure(policy: .standard)
     sessionReady = false
+    originalPrefetch?.cancel()
+    originalPrefetch = nil
     for action in actions.values { action.cancel() }
     actions.removeAll()
     prepared = nil
@@ -269,6 +277,40 @@ import Foundation
       try self.check(uid, ticket)
       self.privatePlaybackID = id
       self.player.toggle(id: id, title: job.preferredName, file: file)
+      self.originalPrefetch?.cancel()
+      self.originalPrefetch = Task { [weak self] in
+        guard let self, job.canDownloadInput else { return }
+        do {
+          try self.check(uid, ticket)
+          _ = try await self.originalFile(job.id, job.preferredName)
+        } catch { /* Voice remains playable; an explicit switch can retry. */  }
+      }
+    }
+  }
+
+  func selectOriginal(_ original: Bool) {
+    guard let job = history.detail, selectedHasPlayback, player.original != original, !busy else {
+      return
+    }
+    let expectedID = player.currentID
+    perform(stage: .playback, operationID: selectedOperationID, jobID: job.id) { uid, ticket in
+      let current = job
+      let file = try await (original ? self.originalFile : self.outputFile)(
+        job.id, job.preferredName)
+      try self.check(uid, ticket)
+      guard self.player.currentID == expectedID else { return }
+      let position = try comparisonPosition(
+        self.player.position, toOriginal: original, job: current)
+      try self.player.replaceSource(file: file, original: original, position: position)
+    }
+  }
+
+  func downloadOriginal(onReady: @escaping (URL) -> Void) {
+    guard let job = history.detail else { return }
+    perform(stage: .exporting, operationID: selectedOperationID, jobID: job.id) { uid, ticket in
+      let file = try await self.originalFile(job.id, job.preferredName)
+      try self.check(uid, ticket)
+      onReady(file)
     }
   }
 
@@ -427,4 +469,28 @@ import Foundation
         bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
       ))
   }
+}
+
+func comparisonPosition(_ seconds: Double, toOriginal: Bool, job: Job) throws -> Double {
+  if job.trimEnabled == false { return max(0, seconds) }
+  guard let ranges = job.comparisonRanges, !ranges.isEmpty else {
+    throw JobArtifactFailure.unavailable
+  }
+  let sample = max(0, seconds) * 44100
+  var previousEnd: Int64 = 0
+  var outputStart: Int64 = 0
+  for range in ranges {
+    guard range.count == 2, range[0] >= previousEnd, range[1] > range[0], range[1] <= 52_920_000
+    else { throw JobArtifactFailure.invalidOutput }
+    let length = range[1] - range[0]
+    if toOriginal && sample < Double(outputStart + length) {
+      return (Double(range[0]) + max(0, sample - Double(outputStart))) / 44100
+    }
+    if !toOriginal && sample < Double(range[1]) {
+      return (Double(outputStart) + min(Double(length), max(0, sample - Double(range[0])))) / 44100
+    }
+    previousEnd = range[1]
+    outputStart += length
+  }
+  return Double(toOriginal ? previousEnd : outputStart) / 44100
 }

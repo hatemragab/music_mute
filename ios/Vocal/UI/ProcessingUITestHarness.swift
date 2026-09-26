@@ -84,7 +84,9 @@
         firebase: ProcessingFixtureAuth(), apple: AppleCredentialProvider(),
         installationStore: InstallationStore(file: root.appendingPathComponent("auth.json")),
         api: nil)
-      let api = ProcessingFixtureJobs(offline: args.contains("--processing-fixture-offline"))
+      let api = ProcessingFixtureJobs(
+        offline: args.contains("--processing-fixture-offline"),
+        offlineAfterCache: args.contains("--processing-fixture-offline-after-cache"))
       self.api = api
       let inputRoot = root.appendingPathComponent("Inputs")
       let repository = ProcessingRepository(
@@ -99,6 +101,10 @@
         api: api, root: root.appendingPathComponent("Outputs"),
         sessionProvider: { repository.session },
         transport: ProcessingFixtureArtifacts())
+      let originalRepository = JobArtifactRepository(
+        api: api, root: root.appendingPathComponent("Originals"),
+        sessionProvider: { repository.session },
+        transport: ProcessingFixtureArtifacts(), original: true)
       artifacts = artifactRepository
       push = PushRegistrationCoordinator(
         api: ProcessingFixturePush(), jobs: api, session: { nil }, identityUID: { nil },
@@ -106,6 +112,7 @@
       processing = ProcessingModel(
         api: api, repository: repository, preparer: preparer, pipeline: pipeline, player: player,
         outputFile: { try await artifactRepository.preparedOutput(jobId: $0, displayName: $1) },
+        originalFile: { try await originalRepository.preparedOutput(jobId: $0, displayName: $1) },
         removeOutput: { await artifactRepository.removeCached(jobId: $0) },
         sessionDidChange: { artifactRepository.onSessionChanged() })
     }
@@ -117,10 +124,12 @@
     private var retried: [UUID: String] = [:]
     private var created: [UUID: String] = [:]
     private let offline: Bool
+    private let offlineAfterCache: Bool
     @Published private(set) var createdCount = 0
     @Published private(set) var outputRequestCount = 0
-    init(offline: Bool) {
+    init(offline: Bool, offlineAfterCache: Bool = false) {
       self.offline = offline
+      self.offlineAfterCache = offlineAfterCache
       for (index, status) in ["ready", "processing", "failed", "interrupted"].enumerated() {
         let id = String(format: "%024d", index + 1)
         jobs[id] = Self.job(id, status: status)
@@ -132,14 +141,15 @@
       clientStartedAt: Date? = nil
     ) -> Job {
       let now = Date()
-      return Job(
+      var result = Job(
         id: id, status: status, createdAt: Date(timeIntervalSince1970: 1_780_000_000),
         updatedAt: now, queuedAt: status == "awaiting_upload" ? nil : now,
         finishedAt: ["ready", "failed", "cancelled"].contains(status) ? now : nil,
         retryOfJobId: retryOf,
         input: .init(extension: "m4a", bytes: 4096, durationSeconds: 4),
         error: status == "failed" ? .init(code: "SEPARATOR_FAILED", at: Date()) : nil,
-        canDownloadInput: false, canDownloadOutput: status == "ready", workerAvailable: false,
+        canDownloadInput: status == "ready", canDownloadOutput: status == "ready",
+        workerAvailable: false,
         requestId: requestId, sourceTitle: sourceTitle ?? "Fixture audio \(id.suffix(2))",
         displayName: displayName, sourceKind: sourceKind, serverTime: now,
         timing: JobTiming(
@@ -148,13 +158,15 @@
           totalElapsedMs: clientStartedAt.map { Int64(max(0, now.timeIntervalSince($0)) * 1_000) },
           totalElapsedApproximate: clientStartedAt != nil),
         stages: nil)
+      result.trimEnabled = false
+      return result
     }
     func list(cursor: String?, status: String?) async throws -> JobPage {
-      if offline { throw AuthFailure.offline }
+      if offline || (offlineAfterCache && outputRequestCount >= 2) { throw AuthFailure.offline }
       return JobPage(items: jobs.values.sorted { $0.id < $1.id }, nextCursor: nil)
     }
     func detail(id: String) async throws -> Job {
-      if offline { throw AuthFailure.offline }
+      if offline || (offlineAfterCache && outputRequestCount >= 2) { throw AuthFailure.offline }
       guard let job = jobs[id] else { throw JobsFailure.notFound }
       return job
     }
@@ -204,6 +216,7 @@
       return JobMutation(id: id, status: "queued", retryOfJobId: nil)
     }
     func download(id: String, artifact: String) async throws -> DownloadGrant {
+      if offline || (offlineAfterCache && outputRequestCount >= 2) { throw AuthFailure.offline }
       outputRequestCount += 1
       return DownloadGrant(
         url: URL(string: "https://fixture.invalid/output")!,

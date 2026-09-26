@@ -31,7 +31,7 @@ export class ProcessingStorageCleanupService {
     const candidate = await this.jobs
       .findOne({
         $or: [
-          { status: trusted({ $in: ['ready', 'cancelled'] }) },
+          { status: 'cancelled' },
           {
             status: 'failed',
             'retryEligibility.eligible': trusted({ $ne: true }),

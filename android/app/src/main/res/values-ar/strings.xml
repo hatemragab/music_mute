@@ -368,4 +368,7 @@
     <string name="timing_stage_output_ready">تجهيز النتيجة</string>
     <string name="timing_stage_output_upload">رفع النتيجة</string>
     <string name="timing_stage_completion">إنهاء المعالجة على الخادم</string>
+    <string name="trim_silence">قص فترات الصمت</string>
+    <string name="save_original">حفظ الصوت الأصلي</string>
+    <string name="original_unavailable">المقارنة بالصوت الأصلي غير متاحة لهذا المقطع. حاول مرة أخرى.</string>
 </resources>

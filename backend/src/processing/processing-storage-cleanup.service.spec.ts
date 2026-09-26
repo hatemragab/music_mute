@@ -84,13 +84,13 @@ describe('ProcessingStorageCleanupService', () => {
     );
   });
 
-  it('schedules a successful terminal input by its exact immutable version', async () => {
+  it('schedules a cancelled terminal input by its exact immutable version', async () => {
     const { service, jobs, cleanup, session } = fixture();
     const job = {
       _id: new Types.ObjectId('507f1f77bcf86cd799439014'),
       userId: owner,
       revision: 5,
-      status: 'ready',
+      status: 'cancelled',
       finishedAt: now,
       reservationCleanupScheduledAt: null,
       inputReservation: {
@@ -158,6 +158,20 @@ describe('ProcessingStorageCleanupService', () => {
       }),
       expect.objectContaining({ session }),
     );
+  });
+
+  it('excludes successful jobs from terminal input cleanup', async () => {
+    const { service, jobs, cleanup } = fixture();
+    jobs.findOne.mockReturnValue(query(null));
+    await service.scheduleDue(now);
+    expect(jobs.findOne.mock.calls[0][0].$or).toEqual([
+      { status: 'cancelled' },
+      {
+        status: 'failed',
+        'retryEligibility.eligible': expect.objectContaining({ $ne: true }),
+      },
+    ]);
+    expect(cleanup.schedule).not.toHaveBeenCalled();
   });
 
   it('returns false when no input reservation has expired', async () => {

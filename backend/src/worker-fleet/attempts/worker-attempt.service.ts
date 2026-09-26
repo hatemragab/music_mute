@@ -1,3 +1,4 @@
+import { validComparisonRanges } from '../../jobs/comparison-ranges.js';
 import { measureTransferOperation } from './transfer-timing.js';
 import { withAttemptMeasurements } from '../../jobs/job-stage-timing.js';
 import { Injectable } from '@nestjs/common';
@@ -393,7 +394,7 @@ export class WorkerAttemptService {
               throw workerError('WORKER_CONFLICT');
             await this.usage.recordRetainedOutput(
               current.job,
-              object.bytes,
+              object.bytes + (current.job.inputObject?.bytes ?? 0),
               session,
             );
             const readyAt = new Date();
@@ -407,7 +408,9 @@ export class WorkerAttemptService {
                   $set: {
                     status: 'ready',
                     outputObject: object,
+                    comparisonRanges: dto.comparisonRanges ?? null,
                     retainedOutputAccountedAt: readyAt,
+                    retainedInputBytes: current.job.inputObject?.bytes ?? 0,
                     retainedOutputReleasedAt: null,
                     currentExecution: null,
                     workerProgress: null,
@@ -683,6 +686,11 @@ export class WorkerAttemptService {
   }
 
   private assertRecipe(job: Job, dto: CompleteWorkerAttemptDto): void {
+    if (
+      dto.comparisonRanges !== undefined &&
+      !validComparisonRanges(dto.comparisonRanges)
+    )
+      throw workerError('WORKER_CONFLICT');
     const recipe = job.recipeSnapshot;
     if (
       !recipe ||

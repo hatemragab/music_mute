@@ -74,6 +74,7 @@ data class ProcessingOperation(
     val pendingDelete: Boolean = false,
     val reservationAttempted: Boolean = false,
     val awaitingCloudConsent: Boolean = false,
+    val trimEnabled: Boolean = false,
     val sourceUri: String? = null,
     val sourceName: String? = null,
     val mediaPolicy: ProcessingMediaPolicy = ProcessingMediaPolicy.STANDARD,

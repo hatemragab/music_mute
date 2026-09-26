@@ -368,4 +368,7 @@
     <string name="timing_stage_output_ready">Result preparation</string>
     <string name="timing_stage_output_upload">Result upload</string>
     <string name="timing_stage_completion">Server finalization</string>
+    <string name="trim_silence">Trim silent gaps</string>
+    <string name="save_original">Save original audio</string>
+    <string name="original_unavailable">Original comparison is unavailable for this track. Please try again.</string>
 </resources>

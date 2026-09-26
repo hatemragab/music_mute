@@ -107,6 +107,7 @@ extension JobsAPI {
       throw JobsFailure.invalidInput
     }
     struct Body: Encodable {
+      let trimEnabled: Bool
       let policyVersion: Int?
       let preparationProfileId: String?
       let source: String?
@@ -121,6 +122,7 @@ extension JobsAPI {
       "POST", "/jobs",
       body: encoder.encode(
         Body(
+          trimEnabled: metadata.trimEnabled,
           policyVersion: metadata.policyVersion ?? 2,
           preparationProfileId: metadata.preparationProfileId
             ?? ProcessingMediaPolicy.standard.profileID,
