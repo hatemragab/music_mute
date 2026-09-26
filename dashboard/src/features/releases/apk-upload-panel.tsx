@@ -3,6 +3,7 @@ import { FileUp, X } from "lucide-react";
 
 import { createOperationId } from "@/api/api-client";
 import type { ReleaseDetail } from "@/api/contracts";
+import { useRealtime } from "@/realtime/hooks";
 import { useApiClient } from "@/auth/admin-session";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -11,8 +12,8 @@ import { Progress } from "@/components/ui/progress";
 import { formatBytes } from "@/lib/format";
 import { hashApk, uploadApk, validateApk } from "./apk-upload";
 import {
+  type ReleaseUploadStatus,
   completeReleaseUpload,
-  getReleaseUpload,
   reserveReleaseUpload,
 } from "./releases-api";
 
@@ -33,6 +34,7 @@ export function ApkUploadPanel({
   onComplete(): void;
 }) {
   const client = useApiClient();
+  const realtime = useRealtime();
   const [file, setFile] = useState<File | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState(0);
@@ -72,28 +74,47 @@ export function ApkUploadPanel({
         release.id,
         reservation.uploadId,
       );
-      const deadline = Date.now() + 120_000;
-      while (
-        !["verified", "rejected"].includes(status.artifactState) &&
-        Date.now() < deadline
-      ) {
-        await new Promise((resolve) => window.setTimeout(resolve, 2_000));
-        if (controller.signal.aborted)
-          throw new DOMException("Upload cancelled.", "AbortError");
-        status = await getReleaseUpload(
-          client,
-          release.id,
-          reservation.uploadId,
-        );
+      if (!["verified", "rejected"].includes(status.artifactState)) {
+        status = await new Promise<ReleaseUploadStatus>((resolve, reject) => {
+          let off = () => {};
+          let settled = false;
+          const done = (error?: unknown, value?: ReleaseUploadStatus) => {
+            if (settled) return;
+            settled = true;
+            controller.signal.removeEventListener("abort", abort);
+            off();
+            if (error) reject(error);
+            else resolve(value!);
+          };
+          const abort = () =>
+            done(new DOMException("Upload cancelled.", "AbortError"));
+          controller.signal.addEventListener("abort", abort, { once: true });
+          if (controller.signal.aborted) {
+            abort();
+            return;
+          }
+          off = realtime.watch(
+            "admin.release_upload",
+            { releaseId: release.id, uploadId: reservation.uploadId },
+            (result) => {
+              if (result.error) {
+                if (result.error.status < 500) done(result.error);
+                return;
+              }
+              const value = result.data as ReleaseUploadStatus;
+              if (["verified", "rejected"].includes(value.artifactState))
+                done(undefined, value);
+            },
+          );
+          if (settled) off();
+        });
       }
       if (status.artifactState === "verified") {
         setPhase("verified");
         onComplete();
       } else {
         setPhase("rejected");
-        setError(
-          status.code || "Verification did not complete within 120 seconds.",
-        );
+        setError(status.code || "APK verification was rejected.");
       }
     } catch (caught) {
       if ((caught as DOMException).name === "AbortError") setPhase("cancelled");

@@ -17,6 +17,7 @@ import { AdminHealthModule } from './admin-observability/admin-health.module.js'
 import { WorkerFleetModule } from './worker-fleet/worker-fleet.module.js';
 import { AbuseProtectionModule } from './abuse-protection/abuse-protection.module.js';
 import { WorkerHintsModule } from './worker-hints/worker-hints.module.js';
+import { RealtimeModule } from './realtime/realtime.module.js';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { WorkerHintsModule } from './worker-hints/worker-hints.module.js';
     AdminExportsModule,
     AdminHealthModule,
     WorkerFleetModule,
+    RealtimeModule,
   ],
   controllers: [HealthController],
 })

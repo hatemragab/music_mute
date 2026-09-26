@@ -185,7 +185,7 @@ class JobHistoryControllerTest {
         controller.close()
     }
 
-    @Test fun visibilityBeforeOwnerBindingStartsAndRestartsPolling() = runTest {
+    @Test fun visibilityBeforeOwnerBindingLoadsOnceWithoutPolling() = runTest {
         var calls = 0
         val api = HistoryTestApi().apply {
             page = { calls++; JobPage(listOf(job("queued")), null) }
@@ -197,15 +197,15 @@ class JobHistoryControllerTest {
         assertEquals(1, calls)
         advanceTimeBy(10_000)
         runCurrent()
-        assertEquals(2, calls)
+        assertEquals(1, calls)
         controller.bindOwner(null)
         controller.bindOwner("owner")
         runCurrent()
-        assertEquals(3, calls)
+        assertEquals(2, calls)
         controller.close()
         advanceTimeBy(20_000)
         runCurrent()
-        assertEquals(3, calls)
+        assertEquals(2, calls)
     }
 
     @Test fun unknownAndTerminalStatusesDoNotPoll() {

@@ -16,6 +16,7 @@ import { AdminAccountRecoveryService } from './admin-account-recovery.service.js
     UsersModule,
   ],
   controllers: [AdminUsersController, AdminAccountRecoveryController],
+  exports: [AdminAccountRecoveryService],
   providers: [AdminUsersService, AdminAccountRecoveryService],
 })
 export class AdminUsersModule {}

@@ -7,7 +7,12 @@ import { Shell } from "../src/App";
 import { AuthContext } from "../src/auth/AuthProvider";
 import { I18nProvider } from "../src/i18n";
 import "../src/styles.css";
+import { RealtimeClient } from "../src/realtime/client";
+import { realtimeFixture } from "./realtime-fixture";
 
+const networkRealtime = new URLSearchParams(location.search).has(
+  "network-realtime",
+);
 const createdAt = "2026-09-24T11:00:00.000Z";
 const jobs = [
   {
@@ -58,6 +63,11 @@ const jobs = [
 ];
 const api = {
   get: async (path: string) => {
+    if (
+      networkRealtime &&
+      /^\/(jobs|processing-policy|processing-usage)/.test(path)
+    )
+      throw new Error("Unexpected HTTP status read");
     if (path.startsWith("/jobs?")) return { items: jobs, nextCursor: null };
     if (path.startsWith("/jobs/"))
       return jobs.find((job) => path.includes(job.id));
@@ -107,6 +117,32 @@ const api = {
   },
 } as unknown as ApiClient;
 
+const { client: fixtureClient } = realtimeFixture((resource, params) => {
+  const path =
+    resource === "jobs"
+      ? "/jobs?limit=20"
+      : resource === "job"
+        ? `/jobs/${params.id}`
+        : resource === "policy"
+          ? "/processing-policy"
+          : resource === "usage"
+            ? "/processing-usage"
+            : "";
+  return api.get(path);
+});
+
+const realtimeClient = networkRealtime
+  ? new RealtimeClient({
+      origin: "http://127.0.0.1:3000",
+      ticket: async () =>
+        (
+          await fetch("http://127.0.0.1:3000/realtime-tickets", {
+            method: "POST",
+          })
+        ).json(),
+    })
+  : fixtureClient;
+
 const user = {
   uid: "preview-only",
   email: "preview@example.invalid",
@@ -133,7 +169,7 @@ createRoot(document.getElementById("root")!).render(
         <AuthContext.Provider
           value={{ state, retry: () => {}, logout: async () => {} }}
         >
-          <Shell />
+          <Shell realtimeClient={realtimeClient} />
         </AuthContext.Provider>
       </MemoryRouter>
     </I18nProvider>

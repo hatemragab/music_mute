@@ -218,3 +218,28 @@ Web follows shared email-verification and processing policies; native APK/App
 Store minimum-build and selected-release checks do not apply to web. Native
 release records, operator release policy shape, and native push registrations
 remain Android/iOS only. A browser must not register a native push token.
+
+## Realtime processing snapshots
+
+New clients use authenticated raw WebSocket snapshots for job lists/details,
+queue position, progress, URL imports, usage and policy. Existing HTTP commands,
+transfers and legacy read routes remain supported. See the versioned
+[realtime protocol](../realtime-processing-queue/PROTOCOL.md) for ticket issuance,
+resource permissions, sequence/reconnect rules, limits and deployment requirements.
+Queue position is a job's current same-recipe eligible waiting rank, not an ETA.
+
+## 2026-09-26: server-owned stage timing snapshots
+
+Job and media-import views and administrator job detail add nullable
+`server_stage_timings`: `total_ms`, `total_complete`, `stages`, and `attempts`.
+Stage entries contain `stage`, integer `duration_ms`, and `complete`. Missing
+measurements remain unavailable; incomplete entries are last-observed lower bounds.
+Clients must not extrapolate these values with their own clocks. Totals for URL
+jobs include the import phase; queue totals exclude failed execution and separate
+retry backoff. Detailed boundaries and rollout notes are in
+[Server-owned job stage timings](../job-stage-timings.md).
+
+Worker progress, completion, and failure requests accept optional bounded
+`execution_timings` snapshots. Deploy backend support before updating workers.
+The existing client `timing` and administrator `stage_timings` fields remain
+backward compatible; new UIs use `server_stage_timings` for authoritative totals.

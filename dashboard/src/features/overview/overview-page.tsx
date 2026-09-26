@@ -1,9 +1,8 @@
+import { useLiveQuery } from "@/realtime/hooks";
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 
-import { useAdminSession, useApiClient } from "@/auth/admin-session";
+import { useAdminSession } from "@/auth/admin-session";
 import { withQuery } from "@/api/query-string";
-import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { DateRangeFilter } from "@/components/date-range-filter";
 import {
   createRange,
@@ -16,13 +15,10 @@ import {
   LoadingState,
   PageHeader,
   PageSection,
-  RefreshButton,
 } from "@/components/page";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime, formatDuration } from "@/lib/format";
-import { useVisibleInterval } from "@/hooks/use-visible-interval";
 import { JobSeriesChart } from "./job-series-chart";
-import { getOverview } from "./overview-api";
 import { OverviewCards } from "./overview-cards";
 
 const readRange = (): DateRange => {
@@ -34,22 +30,13 @@ const readRange = (): DateRange => {
 };
 
 export function OverviewPage() {
-  const client = useApiClient();
   const { can } = useAdminSession();
   const [range, setRange] = useState(readRange);
-  const overview = useQuery({
+  const overview = useLiveQuery({
     queryKey: ["overview", range],
-    queryFn: ({ signal }) =>
-      getOverview(client, range).then((data) =>
-        signal.aborted
-          ? Promise.reject(new DOMException("Aborted", "AbortError"))
-          : data,
-      ),
+    resource: "admin.overview",
+    params: { ...range, bucket: "day" },
   });
-  useVisibleInterval(
-    () => void overview.refetch(),
-    DASHBOARD_POLL_INTERVAL_MS.background,
-  );
   useEffect(() => {
     const url = new URL(window.location.href);
     url.searchParams.set("from", range.from);
@@ -64,10 +51,6 @@ export function OverviewPage() {
         description="Job activity and outcomes for the selected UTC interval."
         actions={
           <div className="flex flex-wrap items-start justify-end gap-2">
-            <RefreshButton
-              refreshing={overview.isFetching}
-              onRefresh={() => void overview.refetch()}
-            />
             <DateRangeFilter range={range} onChange={setRange} />
             {can("exports.read") ? (
               <ExportCsvButton

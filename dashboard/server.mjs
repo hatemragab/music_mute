@@ -99,7 +99,7 @@ const safeJson = (value) =>
 export const runtimeConfigScript = (config) =>
   `window.__MUSICMUTE_RUNTIME_CONFIG__=${safeJson(config)};\n`;
 
-const commonHeaders = {
+const baseHeaders = {
   "content-security-policy": [
     "default-src 'self'",
     "base-uri 'self'",
@@ -121,11 +121,6 @@ const commonHeaders = {
   "permissions-policy": "camera=(), microphone=(), geolocation=()",
 };
 
-const send = (response, status, headers, body = "") => {
-  response.writeHead(status, { ...commonHeaders, ...headers });
-  response.end(body);
-};
-
 const isRegularFile = (path) => {
   try {
     return statSync(path).isFile();
@@ -135,6 +130,21 @@ const isRegularFile = (path) => {
 };
 
 export const createServer = ({ config, host = "0.0.0.0", port = 80 }) => {
+  const socketOrigin = config.apiOrigin
+    .replace(/^https:/, "wss:")
+    .replace(/^http:/, "ws:");
+  const commonHeaders = {
+    ...baseHeaders,
+    "content-security-policy": baseHeaders["content-security-policy"].replace(
+      "connect-src 'self' https:",
+      `connect-src 'self' https: ${socketOrigin}`,
+    ),
+  };
+  const send = (response, status, headers, body = "") => {
+    response.writeHead(status, { ...commonHeaders, ...headers });
+    response.end(body);
+  };
+
   const indexTemplate = readFileSync(join(dist, "index.html"), "utf8");
   const index = indexTemplate.replace(
     "<head>",

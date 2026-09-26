@@ -1,11 +1,10 @@
+import { useLiveQuery } from "@/realtime/hooks";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
 
 import { JOB_STATUSES } from "@/api/contracts";
 import { withQuery } from "@/api/query-string";
-import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
-import { useAdminSession, useApiClient } from "@/auth/admin-session";
+import { useAdminSession } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
 import { validateDateRange } from "@/components/date-range";
 import { ExportCsvButton } from "@/components/export-csv-button";
@@ -14,7 +13,6 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
-  RefreshButton,
 } from "@/components/page";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,12 +33,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime, formatDuration } from "@/lib/format";
-import { useVisibleInterval } from "@/hooks/use-visible-interval";
-import { listJobs } from "./jobs-api";
 import { JobSourceLink } from "./job-source-link";
 
 export function JobsPage() {
-  const client = useApiClient();
   const { can } = useAdminSession();
   const [params, setParams] = useSearchParams();
   const [jobId, setJobId] = useState(params.get("jobId") ?? "");
@@ -60,15 +55,12 @@ export function JobsPage() {
     to,
     cursor,
   };
-  const jobs = useQuery({
+  const jobs = useLiveQuery({
     queryKey: ["jobs", filters],
-    queryFn: () => listJobs(client, filters),
+    resource: "admin.jobs",
+    params: filters,
     enabled: !dateError,
   });
-  useVisibleInterval(
-    () => void jobs.refetch(),
-    DASHBOARD_POLL_INTERVAL_MS.live,
-  );
   const change = (name: string, value: string) => {
     const next = new URLSearchParams(params);
     if (value && value !== "all") next.set(name, value);
@@ -83,10 +75,6 @@ export function JobsPage() {
         description="Inspect job status, owner, source, timing and finalized results."
         actions={
           <>
-            <RefreshButton
-              refreshing={jobs.isFetching}
-              onRefresh={() => void jobs.refetch()}
-            />
             {can("exports.read") ? (
               <ExportCsvButton
                 path={withQuery("/admin/exports/jobs.csv", filters)}

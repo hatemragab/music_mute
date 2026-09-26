@@ -1,8 +1,8 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLiveQuery } from "../realtime/RealtimeProvider";
 import { Link, useNavigate } from "react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { jobsApi } from "../api/jobs";
-import type { MediaImportView } from "../api/types";
+import type { MediaImportView, ProcessingPolicyView } from "../api/types";
 import { useSignedIn } from "../auth/AuthProvider";
 import { friendlyError, statusLabel, useI18n } from "../i18n";
 import { JobCard, useJobs } from "../jobs/JobsUI";
@@ -12,13 +12,11 @@ export function HomePage() {
   const { api, user, session } = useSignedIn();
   const { t, lang } = useI18n();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const jobs = useJobs();
-  const policy = useQuery({
-    queryKey: [user.uid, "processing-policy"],
-    queryFn: ({ signal }) => jobsApi(api).policy(signal),
-    staleTime: 60_000,
-  });
+  const policy = useLiveQuery<ProcessingPolicyView>(
+    [user.uid, "processing-policy"],
+    "policy",
+  );
   const [mode, setMode] = useState<"url" | "audio">("url");
   const [url, setUrl] = useState("");
   const [rights, setRights] = useState(false);
@@ -30,33 +28,20 @@ export function HomePage() {
   const [importId, setImportId] = useState<string | null>(() =>
     sessionStorage.getItem(storageKey),
   );
-  const importQuery = useQuery({
-    queryKey: [user.uid, "import", importId],
-    enabled: !!importId,
-    queryFn: ({ signal }) => jobsApi(api).import(importId!, signal),
-    refetchInterval: (query) =>
-      document.visibilityState === "visible" &&
-      query.state.data &&
-      !["submitted", "failed"].includes(query.state.data.status)
-        ? 4000
-        : false,
-  });
+  const importQuery = useLiveQuery<MediaImportView>(
+    [user.uid, "import", importId],
+    "import",
+    { id: importId ?? "" },
+    !!importId,
+  );
   useEffect(() => {
     const current = importQuery.data;
     if (current?.status === "submitted" && current.jobId) {
       sessionStorage.removeItem(storageKey);
       sessionStorage.removeItem(requestKey);
-      void queryClient.invalidateQueries({ queryKey: [user.uid, "jobs"] });
       navigate(`/jobs/${current.jobId}`);
     }
-  }, [
-    importQuery.data,
-    navigate,
-    queryClient,
-    requestKey,
-    storageKey,
-    user.uid,
-  ]);
+  }, [importQuery.data, navigate, requestKey, storageKey, user.uid]);
 
   async function submitUrl(event: FormEvent) {
     event.preventDefault();

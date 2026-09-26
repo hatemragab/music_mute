@@ -14,6 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import { SECURITY_REDIS } from '../rate-limits/security-redis.provider.js';
 import { RateBudgetService } from '../rate-limits/rate-budget.service.js';
 import { RateLimitKeys } from '../rate-limits/rate-limit-keys.js';
+import { registerWebSocketUpgrade } from '../http/websocket-upgrades.js';
 
 const SOCKET_PATH = '/worker/hints/socket';
 const CHANNEL = 'musicmute:worker-hints:v1';
@@ -49,7 +50,7 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
     perMessageDeflate: false,
   });
   private revision = 0;
-  private attached = false;
+  private detachUpgrade?: () => void;
 
   constructor(
     @Inject(SECURITY_REDIS) private readonly redis: Redis,
@@ -72,6 +73,8 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.detachUpgrade?.();
+    this.detachUpgrade = undefined;
     for (const clients of this.sockets.values())
       for (const socket of clients) socket.close(1001, 'server shutdown');
     this.server.close();
@@ -83,11 +86,12 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
   }
 
   attach(httpServer: Server): void {
-    if (this.attached) return;
-    this.attached = true;
-    httpServer.on('upgrade', (request, socket, head) => {
-      void this.upgrade(request, socket, head);
-    });
+    if (this.detachUpgrade) return;
+    this.detachUpgrade = registerWebSocketUpgrade(
+      httpServer,
+      SOCKET_PATH,
+      (request, socket, head) => this.upgrade(request, socket, head),
+    );
   }
 
   async mintTicket(machineId: string): Promise<{

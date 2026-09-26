@@ -58,9 +58,6 @@ fun LibraryScreen(state: LibraryUiState, actions: LibraryActions, miniPlayer: @C
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(stringResource(R.string.creative_library_title),
                             Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
-                        IconButton(actions.refresh) {
-                            Icon(Icons.Outlined.Refresh, stringResource(R.string.creative_library_refresh))
-                        }
                     }
                     Spacer(Modifier.height(66.dp))
                     }

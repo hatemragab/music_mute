@@ -235,7 +235,7 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
 }
 
 /// Bounded JSON transport shared by account and job APIs; never used for storage transfers.
-private enum ApiWireJSON {
+enum ApiWireJSON {
   private static let snakeCase = try! NSRegularExpression(
     pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 

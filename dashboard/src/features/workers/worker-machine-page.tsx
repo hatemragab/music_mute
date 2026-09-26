@@ -1,5 +1,6 @@
+import { useLiveQuery } from "@/realtime/hooks";
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   ArrowLeft,
@@ -12,7 +13,6 @@ import {
 import { Link, useParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
-import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
 import {
@@ -20,7 +20,6 @@ import {
   LoadingState,
   PageHeader,
   PageSection,
-  RefreshButton,
 } from "@/components/page";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
@@ -34,12 +33,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useVisibleInterval } from "@/hooks/use-visible-interval";
 import { formatBytes, formatDateTime } from "@/lib/format";
 import {
   changeWorkerMachineState,
-  getWorkerDiagnostics,
-  getWorkerMachine,
   requestWorkerBenchmark,
   requestWorkerDoctor,
 } from "./worker-api";
@@ -109,21 +105,18 @@ export function WorkerMachinePage() {
   }>({ machineId: id, cursor: null });
   const diagnosticCursor =
     diagnosticPage.machineId === id ? diagnosticPage.cursor : null;
-  const machine = useQuery({
+  const machine = useLiveQuery({
     queryKey: ["worker-machine", id],
-    queryFn: () => getWorkerMachine(client, id),
+    resource: "admin.worker",
+    params: { id },
     enabled: Boolean(id),
   });
-  const diagnostics = useQuery({
+  const diagnostics = useLiveQuery({
     queryKey: ["worker-diagnostics", id, diagnosticCursor],
-    queryFn: () =>
-      getWorkerDiagnostics(client, id, { cursor: diagnosticCursor, limit: 10 }),
+    resource: "admin.diagnostics",
+    params: { id, cursor: diagnosticCursor, limit: 10 },
     enabled: Boolean(id) && can("workers.logs.read"),
   });
-  useVisibleInterval(() => {
-    void machine.refetch();
-    if (can("workers.logs.read")) void diagnostics.refetch();
-  }, DASHBOARD_POLL_INTERVAL_MS.live);
   const mutation = useMutation({
     mutationFn: async ({
       action,
@@ -197,13 +190,6 @@ export function WorkerMachinePage() {
         description={`${data.machine.machineId} · revision ${data.machine.revision}`}
         actions={
           <>
-            <RefreshButton
-              refreshing={machine.isFetching || diagnostics.isFetching}
-              onRefresh={() => {
-                void machine.refetch();
-                if (can("workers.logs.read")) void diagnostics.refetch();
-              }}
-            />
             {can("workers.manage") && data.machine.status !== "revoked" ? (
               <MachineActions data={data} onAction={setPendingAction} />
             ) : null}

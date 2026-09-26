@@ -54,6 +54,7 @@ func processingErrorKey(_ error: Error) -> String {
 }
 
 @MainActor final class ProcessingHistoryModel: ObservableObject {
+  @Published private(set) var connection: RealtimeState = .paused
   @Published private(set) var jobs: [Job] = []
   @Published private(set) var nextCursor: String?
   @Published private(set) var detail: Job?
@@ -69,6 +70,10 @@ func processingErrorKey(_ error: Error) -> String {
   private var pageVersion: UInt64 = 0
   private var detailVersion: UInt64 = 0
   private var polling: Task<Void, Never>?
+  private var liveDetail: Task<Void, Never>?
+  private var liveTasks: [String: Task<Void, Never>] = [:]
+  private var livePages: [String: JobPage] = [:]
+  private var liveCursors: [String] = []
   private var visible = false
   private var retryDelay: TimeInterval = 10
   private let now: () -> TimeInterval
@@ -98,6 +103,13 @@ func processingErrorKey(_ error: Error) -> String {
     guard uid != owner else { return }
     polling?.cancel()
     polling = nil
+    liveDetail?.cancel()
+    liveDetail = nil
+    for task in liveTasks.values { task.cancel() }
+    liveTasks.removeAll()
+    livePages.removeAll()
+    liveCursors.removeAll()
+    api.realtime?.bindOwner(uid)
     owner = uid
     epoch &+= 1
     pageVersion &+= 1
@@ -133,6 +145,11 @@ func processingErrorKey(_ error: Error) -> String {
   }
 
   func refresh() async {
+    if let realtime = api.realtime {
+      if visible { startLive() }
+      realtime.resync()
+      return
+    }
     guard let uid = owner, !reading, now() >= retryNotBefore else { return }
     refreshPending = false
     reading = true
@@ -176,6 +193,10 @@ func processingErrorKey(_ error: Error) -> String {
     guard let uid = owner, let cursor = nextCursor, !reading, now() >= retryNotBefore else {
       return
     }
+    if api.realtime != nil {
+      watchPage(cursor)
+      return
+    }
     reading = true
     let ticket = epoch
     let version = pageVersion
@@ -202,6 +223,8 @@ func processingErrorKey(_ error: Error) -> String {
   }
 
   func select(_ id: String?) async {
+    liveDetail?.cancel()
+    liveDetail = nil
     if reading, id == selectedId { return }
     detailVersion &+= 1
     let version = detailVersion
@@ -209,6 +232,35 @@ func processingErrorKey(_ error: Error) -> String {
     selectedId = id
     if detail?.id != id { detail = nil }
     guard let id, owner != nil else { return }
+    if let realtime = api.realtime {
+      guard visible else { return }
+      liveDetail = Task { [weak self] in
+        guard let self else { return }
+        do {
+          for try await data in realtime.watch("job", params: ["id": id]) {
+            let value = try JSONDecoder.authDecoder().decode(Job.self, from: data)
+            guard !Task.isCancelled, ticket == self.epoch, version == self.detailVersion else {
+              return
+            }
+            self.detail = value
+            self.jobs = self.jobs.map { $0.id == id ? value : $0 }
+            self.messageKey = nil
+            await self.onJobsChanged(self.jobs)
+          }
+        } catch is CancellationError {} catch {
+          guard ticket == self.epoch, version == self.detailVersion else { return }
+          if (error as? JobsFailure) == .notFound {
+            self.detail = nil
+            self.jobs.removeAll { $0.id == id }
+            if let owner = self.owner { try? await self.saveCached(owner, self.jobs) }
+            await self.onJobsChanged(self.jobs)
+            await self.onJobMissing(id)
+          }
+          await self.report(error)
+        }
+      }
+      return
+    }
     if freshIds.contains(id), let value = jobs.first(where: { $0.id == id }),
       value.workerAvailable != nil || ["ready", "failed", "cancelled"].contains(value.status),
       let lastSuccessfulRefreshAt, now() - lastSuccessfulRefreshAt < 10
@@ -253,23 +305,91 @@ func processingErrorKey(_ error: Error) -> String {
     self.visible = visible
     polling?.cancel()
     polling = nil
-    guard visible, owner != nil else { return }
-    polling = Task { [weak self] in
-      if let self,
-        self.refreshPending || self.lastSuccessfulRefreshAt.map({ self.now() - $0 >= 10 }) != false
-      {
-        await self.refreshAfterChange()
-      }
-      while !Task.isCancelled {
-        let seconds = self?.retryDelay ?? 10
-        do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
-        guard let self else { return }
-        if self.refreshPending || self.retryNotBefore > 0 || self.messageKey != nil
-          || self.jobs.contains(where: { shouldPollProcessingJob($0.status) })
-          || self.detail.map({ shouldPollProcessingJob($0.status) }) == true
-        {
-          await self.refresh()
+    api.realtime?.setForeground(visible)
+    if !visible {
+      liveDetail?.cancel()
+      liveDetail = nil
+      for task in liveTasks.values { task.cancel() }
+      liveTasks.removeAll()
+      livePages.removeAll()
+      liveCursors.removeAll()
+      return
+    }
+    guard owner != nil else { return }
+    if api.realtime != nil {
+      startLive()
+      return
+    }
+    polling = Task { [weak self] in await self?.refreshAfterChange() }
+  }
+
+  private func startLive() {
+    guard visible, owner != nil, let realtime = api.realtime else { return }
+    if polling == nil {
+      polling = Task { [weak self] in
+        for await state in realtime.$state.values {
+          guard let self, !Task.isCancelled else { return }
+          self.connection = state
+          if state == .signedOut {
+            self.jobs = []
+            self.detail = nil
+            self.messageKey = "processing_error_auth"
+          }
         }
+      }
+    }
+    if liveTasks.isEmpty || (livePages[""] != nil && liveTasks[""] == nil) { watchPage(nil) }
+    if let selectedId, liveDetail == nil { Task { await self.select(selectedId) } }
+  }
+
+  private func watchPage(_ cursor: String?) {
+    guard let owner, let realtime = api.realtime else { return }
+    let key = cursor ?? ""
+    guard liveTasks[key] == nil else { return }
+    if liveTasks.count >= 10, let oldest = liveCursors.first {
+      liveTasks.removeValue(forKey: oldest)?.cancel()
+      livePages.removeValue(forKey: oldest)
+      liveCursors.removeFirst()
+    }
+    if cursor == nil { pageVersion &+= 1 }
+    let ticket = epoch
+    if !liveCursors.contains(key) { liveCursors.append(key) }
+    loading = cursor == nil && jobs.isEmpty
+    loadingMore = cursor != nil
+    liveTasks[key] = Task { [weak self] in
+      guard let self else { return }
+      do {
+        var params = ["limit": "20"]
+        if let cursor { params["cursor"] = cursor }
+        for try await data in realtime.watch("jobs", params: params) {
+          let page = try JSONDecoder.authDecoder().decode(JobPage.self, from: data)
+          guard !Task.isCancelled, ticket == self.epoch else { return }
+          if let prior = self.livePages[key], prior.nextCursor != page.nextCursor,
+            let index = self.liveCursors.firstIndex(of: key)
+          {
+            for later in self.liveCursors.dropFirst(index + 1) {
+              self.liveTasks.removeValue(forKey: later)?.cancel()
+              self.livePages.removeValue(forKey: later)
+            }
+            self.liveCursors = Array(self.liveCursors.prefix(index + 1))
+          }
+          self.livePages[key] = page
+          self.jobs = self.deduplicated(
+            self.liveCursors.flatMap { self.livePages[$0]?.items ?? [] })
+          self.nextCursor =
+            self.liveCursors.last.flatMap { self.livePages[$0]?.nextCursor }
+          self.loading = false
+          self.loadingMore = false
+          self.messageKey = nil
+          try await self.saveCached(owner, self.jobs)
+          await self.onJobsChanged(self.jobs)
+        }
+      } catch is CancellationError {} catch {
+        guard ticket == self.epoch else { return }
+        self.liveTasks.removeValue(forKey: key)
+        self.loading = false
+        self.loadingMore = false
+        await self.report(error)
       }
     }
   }
@@ -306,5 +426,9 @@ func processingErrorKey(_ error: Error) -> String {
     return values.filter { seen.insert($0.id).inserted }
   }
 
-  deinit { polling?.cancel() }
+  deinit {
+    polling?.cancel()
+    liveDetail?.cancel()
+    for task in liveTasks.values { task.cancel() }
+  }
 }

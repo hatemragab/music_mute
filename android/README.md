@@ -369,3 +369,10 @@ URLs. Site support and audio-only availability are determined by the backend;
 Android sends only the URL and polls the durable import before opening its job.
 Device-side URL acquisition has been removed. Build
 with `-PauthApiUrl=https://api.music-mute.com` for production backend testing.
+
+## Realtime processing
+
+Processing updates use authenticated raw WebSocket snapshots with automatic
+reconnection. See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
+and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
+HTTP remains responsible for authentication, commands and file transfers.

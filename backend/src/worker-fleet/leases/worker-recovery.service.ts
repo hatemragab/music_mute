@@ -119,7 +119,14 @@ export class WorkerRecoveryService {
                 ...(cancelled
                   ? { finishedAt: now, lastError: null }
                   : retry
-                    ? { queuedAt: now, finishedAt: null, lastError: null }
+                    ? {
+                        queuedAt: now,
+                        queueTimingStartedAt: job.serverTimingStartedAt
+                          ? now
+                          : null,
+                        finishedAt: null,
+                        lastError: null,
+                      }
                     : {
                         finishedAt: now,
                         lastError: {

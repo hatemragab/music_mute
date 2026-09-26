@@ -78,6 +78,8 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
   let serverTime: Date?
   let timing: JobTiming?
   let stages: JobStages?
+  let queue: ProcessingQueue?
+  let processingProgress: ProcessingProgress?
 
   init(
     id: String, status: String, createdAt: Date, updatedAt: Date, queuedAt: Date?,
@@ -85,7 +87,8 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
     canDownloadInput: Bool, canDownloadOutput: Bool, workerAvailable: Bool?,
     requestId: String? = nil, sourceTitle: String? = nil, displayName: String? = nil,
     sourceKind: JobSourceKind? = nil, serverTime: Date? = nil, timing: JobTiming? = nil,
-    stages: JobStages? = nil
+    stages: JobStages? = nil, queue: ProcessingQueue? = nil,
+    processingProgress: ProcessingProgress? = nil
   ) {
     self.id = id
     self.status = status
@@ -106,6 +109,8 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
     self.serverTime = serverTime
     self.timing = timing
     self.stages = stages
+    self.queue = queue
+    self.processingProgress = processingProgress
   }
 
   var preferredName: String {
@@ -113,6 +118,20 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
     return value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
       ? value! : String(localized: "processing_untitled")
   }
+}
+
+struct ProcessingQueue: Codable, Equatable, Sendable {
+  let state: String
+  let position: Int?
+  let jobsAhead: Int?
+  let reason: String?
+  let asOf: Date
+}
+
+struct ProcessingProgress: Codable, Equatable, Sendable {
+  let phase: String
+  let phasePercent: Double?
+  let stale: Bool
 }
 
 struct JobPage: Codable, Equatable, Sendable {

@@ -47,6 +47,6 @@ import { ReleaseUploadCleanupMaintenanceService } from './release-upload-cleanup
     AdminReleaseUploadsController,
     AdminUpdatePolicyController,
   ],
-  exports: [MongooseModule, ReleasePolicyService],
+  exports: [MongooseModule, ReleasePolicyService, ReleaseUploadService],
 })
 export class ReleasesModule {}

@@ -106,7 +106,7 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
     val urlImports by lazy {
         UrlImportCoordinator(
             processingStore,
-            UrlImportsApiClient(authApi) { authSession.state.value.installationId.orEmpty() },
+            UrlImportsApiClient(authApi, realtime) { authSession.state.value.installationId.orEmpty() },
             applicationScope,
             ::processingSession,
         )
@@ -156,8 +156,10 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
             authApi,
             { authSession.state.value.installationId.orEmpty() },
             updateCoordinator::reportProcessingRejected,
+            realtime = realtime,
         )
     }
+    val realtime by lazy { RealtimeClient(authApi, applicationScope, { authSession.state.value.installationId.orEmpty() }) }
     val audioInputPreparer by lazy { AudioInputPreparer(processingStagingRoot, validateDecoded = { file, policy -> com.hatem.musicmute.processing.validateDecodedProcessingAudio(file, policy) }, inspect = ::inspectProcessingAudio) }
     override val processingRepository by lazy {
         ProcessingRepository(
@@ -310,6 +312,7 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
                 if (uid != mutableProcessingSession.value?.uid) {
                     val previousUid = mutableProcessingSession.value?.uid
                     mutableProcessingSession.value = uid?.let { ProcessingSession(it, ++processingEpoch) }
+                    realtime.bindSession(mutableProcessingSession.value)
                     urlImports.bindSession(mutableProcessingSession.value)
                     processingArtifacts.onSessionChanged()
                     try {

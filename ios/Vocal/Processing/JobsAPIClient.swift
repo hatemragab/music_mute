@@ -1,6 +1,7 @@
 import Foundation
 
 @MainActor protocol JobsAPI {
+  var realtime: ProcessingRealtime? { get }
   func processingPolicy() async throws -> ProcessingPolicyResponse
   func processingUsage() async throws -> ProcessingUsage
   func create(requestId: UUID, input: InputDeclaration) async throws -> CreateReservation
@@ -22,6 +23,7 @@ import Foundation
 }
 
 extension JobsAPI {
+  var realtime: ProcessingRealtime? { nil }
   func processingPolicy() async throws -> ProcessingPolicyResponse { throw JobsFailure.notFound }
   func processingUsage() async throws -> ProcessingUsage { throw JobsFailure.notFound }
   func create(requestId: UUID, input: InputDeclaration, metadata: JobSourceMetadata) async throws
@@ -48,6 +50,14 @@ extension JobsAPI {
 }
 
 @MainActor final class JobsAPIClient: JobsAPI {
+  private let configuration: AuthConfiguration
+  private lazy var realtimeClient = ProcessingRealtime(configuration: configuration) {
+    [weak self] in
+    guard let self else { throw AuthFailure.sessionExpired }
+    return try await self.send(
+      "POST", "/realtime-tickets", body: Data("{}".utf8), installation: true)
+  }
+  var realtime: ProcessingRealtime? { realtimeClient }
   private struct Empty: Encodable {}
   private struct ServerError: Decodable { let code: String? }
   private weak var tokenSource: IDTokenSource?
@@ -82,6 +92,7 @@ extension JobsAPI {
     sessionConfiguration: URLSessionConfiguration? = nil,
     now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
   ) {
+    self.configuration = configuration
     self.tokenSource = tokenSource
     self.installationId = installationId
     self.now = now

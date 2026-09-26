@@ -6,6 +6,28 @@ install; run checks from the component directory. Search existing source before
 adding a component or utility, preserve unrelated work, and report checks that
 actually ran.
 
+## Realtime processing: read before changing live data flows
+
+Read [the AI handoff](docs/realtime-processing-queue/AI-HANDOFF.md) when touching
+queue scheduling, job/import updates, browser data fetching, native history,
+WebSocket/auth infrastructure or processing UX. It maps the implementation and
+links the protocol, tests and dated validation evidence.
+
+- Reuse the existing raw WebSocket transport and full-snapshot subscriptions.
+  Do not reintroduce status polling, timer-driven HTTP reads, automatic query
+  refetches or Refresh controls on migrated live screens, including the dashboard.
+- HTTP still handles auth, commands, grants, transfers and explicit non-live reads;
+  legacy REST endpoints remain compatible. This is not an instruction to move all
+  HTTP traffic onto WebSockets.
+- Queue rank is per job among eligible waiting jobs in the same recipe, not an ETA
+  or an account-wide position. Preserve shared scheduler eligibility and capacity
+  rules, authorization fences, reconnect recovery and stale-rank hiding.
+- Use [PROTOCOL.md](docs/realtime-processing-queue/PROTOCOL.md) for the wire contract
+  and [IMPLEMENTATION.md](docs/realtime-processing-queue/IMPLEMENTATION.md) for dated
+  evidence. Local implementation does not establish deployment or production health.
+
+## Repository map
+
 | Directory          | Responsibility                                      | Guide                                          |
 | ------------------ | --------------------------------------------------- | ---------------------------------------------- |
 | `web-client/`      | End-user browser app (React, TypeScript, Vite, npm) | [`web-client/README.md`](web-client/README.md) |

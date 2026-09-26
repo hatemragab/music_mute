@@ -23,6 +23,104 @@ tags:
   - name: admin
   - name: worker
 paths:
+  /realtime-tickets:
+    post:
+      tags: [jobs]
+      operationId: RealtimeTicketController.create
+      summary: Create a single-use realtime connection ticket
+      description: Creates a 30-second, single-use ticket bound to the authenticated audience and exact Origin (or native absence of Origin). Send the ticket in the WebSocket subprotocol list, never in a URL. The socket expires no later than the Firebase token or 15 minutes and revalidates access. Tickets do not grant new resource permissions. Response and ticket must not be cached or logged.
+      security:
+        - FirebaseBearer: []
+      x-source: src/realtime/realtime-ticket.controller.ts
+      x-auth-policy: 'U; active owner session'
+      x-rate-policy: Existing authenticated read budgets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '201':
+          description: Single-use connection ticket issued.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, path, protocol, expires_at]
+                properties:
+                  ticket:
+                    {
+                      type: string,
+                      pattern: '^[A-Za-z0-9_-]{43}$',
+                      writeOnly: false,
+                    }
+                  path: { type: string, const: /realtime/socket }
+                  protocol: { type: string, const: musicmute.realtime.v1 }
+                  expires_at: { type: string, format: date-time }
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /admin/realtime-tickets:
+    post:
+      tags: [admin]
+      operationId: AdminRealtimeTicketController.create
+      summary: Create a single-use realtime connection ticket
+      description: Creates a 30-second, single-use ticket bound to the authenticated audience and exact Origin (or native absence of Origin). Send the ticket in the WebSocket subprotocol list, never in a URL. The socket expires no later than the Firebase token or 15 minutes and revalidates access. Tickets do not grant new resource permissions. Response and ticket must not be cached or logged.
+      security:
+        - FirebaseBearer: []
+      x-source: src/realtime/realtime-ticket.controller.ts
+      x-auth-policy: 'A; admitted administrator; resource permissions checked on subscribe'
+      x-rate-policy: Existing authenticated read budgets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '201':
+          description: Single-use connection ticket issued.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, path, protocol, expires_at]
+                properties:
+                  ticket:
+                    {
+                      type: string,
+                      pattern: '^[A-Za-z0-9_-]{43}$',
+                      writeOnly: false,
+                    }
+                  path: { type: string, const: /realtime/socket }
+                  protocol: { type: string, const: musicmute.realtime.v1 }
+                  expires_at: { type: string, format: date-time }
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
   /media-imports:
     post:
       tags: [jobs]
@@ -7342,6 +7440,10 @@ components:
       type: object
       required: [import_id, status, job_id, error, created_at, updated_at]
       properties:
+        server_stage_timings:
+          anyOf:
+            - $ref: '#/components/schemas/ServerStageTimings'
+            - type: 'null'
         import_id: { type: string, pattern: '^[a-f0-9]{24}$' }
         source_title:
           type: [string, 'null']
@@ -7730,6 +7832,12 @@ components:
       type: object
       additionalProperties: false
       properties:
+        execution_timings:
+          type: array
+          maxItems: 13
+          description: Optional cumulative snapshot for this attempt, with unique stage names. Deploy backend support before enabling worker reports.
+          items:
+            $ref: '#/components/schemas/ExecutionStageTimingDto'
         request_id:
           type: string
           format: uuid
@@ -8105,6 +8213,12 @@ components:
       type: object
       additionalProperties: false
       properties:
+        execution_timings:
+          type: array
+          maxItems: 13
+          description: Optional cumulative snapshot for this attempt, with unique stage names. Deploy backend support before enabling worker reports.
+          items:
+            $ref: '#/components/schemas/ExecutionStageTimingDto'
         request_id:
           type: string
           format: uuid
@@ -8693,6 +8807,12 @@ components:
       type: object
       additionalProperties: false
       properties:
+        execution_timings:
+          type: array
+          maxItems: 13
+          description: Optional cumulative snapshot for this attempt, with unique stage names. Deploy backend support before enabling worker reports.
+          items:
+            $ref: '#/components/schemas/ExecutionStageTimingDto'
         request_id:
           type: string
           format: uuid
@@ -9493,10 +9613,91 @@ components:
       required:
         - user
         - policy
+    StageMeasurement:
+      type: object
+      additionalProperties: true
+      properties:
+        stage:
+          type: string
+        duration_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        complete:
+          type: boolean
+          description: False means an observed lower bound, not a completed duration.
+      required: [stage, duration_ms, complete]
+    ExecutionStageTimingDto:
+      allOf:
+        - $ref: '#/components/schemas/StageMeasurement'
+        - type: object
+          properties:
+            stage:
+              type: string
+              enum:
+                [
+                  resource-check,
+                  input-download,
+                  input-validation,
+                  preparation,
+                  model-load,
+                  separation,
+                  denoise,
+                  trim,
+                  encoding,
+                  output-validation,
+                  output-ready,
+                  output-upload,
+                  completion,
+                ]
+            duration_ms:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 7200000
+    ServerStageTimings:
+      description: Server-owned elapsed measurements. Stage totals aggregate attempts; incomplete stages are lower bounds. Total includes coordination overhead and is not a sum of stages. No client timestamps are used.
+      type: object
+      additionalProperties: true
+      properties:
+        total_ms:
+          anyOf:
+            - type: integer
+              format: int64
+              minimum: 0
+            - type: 'null'
+        total_complete:
+          type: boolean
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/StageMeasurement'
+        attempts:
+          type: array
+          maxItems: 10
+          description: Per-attempt breakdown on job detail. Omitted from job lists to bound snapshot size.
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              attempt_number:
+                type: integer
+                minimum: 1
+                maximum: 10
+              stages:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StageMeasurement'
+            required: [attempt_number, stages]
+      required: [total_ms, total_complete, stages]
     JobView:
       type: object
       additionalProperties: true
       properties:
+        server_stage_timings:
+          anyOf:
+            - $ref: '#/components/schemas/ServerStageTimings'
+            - type: 'null'
         id: *a4
         request_id: *a7
         source_title: *a11
@@ -11326,6 +11527,10 @@ components:
       type: object
       additionalProperties: true
       properties:
+        server_stage_timings:
+          anyOf:
+            - $ref: '#/components/schemas/ServerStageTimings'
+            - type: 'null'
         user_email:
           anyOf:
             - type: 'null'

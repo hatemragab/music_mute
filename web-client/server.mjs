@@ -64,7 +64,7 @@ export function createWebServer({
     "worker-src 'self' blob:",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https://www.gstatic.com https://accounts.google.com",
-    `connect-src 'self' ${config.apiOrigin} ${media.origin} https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://firebaseinstallations.googleapis.com`,
+    `connect-src 'self' ${config.apiOrigin} ${config.apiOrigin.replace(/^https:/, "wss:").replace(/^http:/, "ws:")} ${media.origin} https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://firebaseinstallations.googleapis.com`,
     `media-src 'self' ${media.origin}`,
     `frame-src https://${config.firebase.authDomain} https://accounts.google.com`,
   ].join("; ");

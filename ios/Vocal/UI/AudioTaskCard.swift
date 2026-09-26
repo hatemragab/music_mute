@@ -20,6 +20,7 @@ struct AudioTaskCard: View {
               .foregroundStyle(.primary).lineLimit(2)
             Text(LocalizedStringKey(task.statusKey)).font(.subheadline.weight(.semibold))
               .foregroundStyle(task.isReady ? VocalStyle.teal : .secondary)
+              .fixedSize(horizontal: false, vertical: true)
               .contentTransition(.opacity)
               .animation(.easeInOut(duration: reduceMotion ? 0 : 0.2), value: task.statusKey)
             HStack(spacing: 5) {
@@ -58,7 +59,7 @@ struct AudioTaskCard: View {
       }
     }
     .buttonStyle(.plain)
-    .accessibilityIdentifier("audioTask-\(task.id)")
+    .accessibilityIdentifier("audioTask-\(task.jobID.map { "job:\($0)" } ?? task.id)")
     .task(id: task.isActive && !reduceMotion) {
       guard task.isActive, !reduceMotion else {
         pulsing = false

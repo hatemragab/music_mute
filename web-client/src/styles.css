@@ -1017,3 +1017,34 @@ html[dir="rtl"] .wave-art {
     transition-duration: 0.01ms !important;
   }
 }
+
+.connection-state {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-block-end: 1rem;
+  flex-wrap: wrap;
+}
+.connection-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.connection-live .connection-dot {
+  background: #70cfa0;
+}
+.queue-position {
+  display: grid;
+  gap: 0.25rem;
+  padding-block: 0.75rem;
+}
+.queue-position strong {
+  color: var(--accent);
+}
+.queue-position small {
+  color: var(--muted);
+}

@@ -104,7 +104,7 @@ export class JobsQueryService {
     const page = results.slice(0, limit);
     const last = page.at(-1);
     return {
-      items: page.map((job) => presentJob(job)),
+      items: page.map((job) => presentJob(job, false)),
       nextCursor:
         results.length > limit && last
           ? encodeHistoryCursor({

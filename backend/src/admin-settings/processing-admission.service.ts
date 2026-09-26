@@ -1,3 +1,4 @@
+import { hasProcessingCapacity } from '../jobs/dispatch-eligibility.js';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -143,12 +144,7 @@ export class ProcessingAdmissionService {
       throw new Error('Processing claim admission requires a transaction');
     const userId = job.userId;
     const maxProcessingJobs = job.admissionSnapshot?.maxProcessingJobs;
-    if (
-      typeof maxProcessingJobs !== 'number' ||
-      !Number.isSafeInteger(maxProcessingJobs) ||
-      maxProcessingJobs < 1
-    )
-      return false;
+    if (!hasProcessingCapacity(maxProcessingJobs, 0)) return false;
     await this.touchAccountFence(userId, session);
     const user = await this.users.updateOne(
       {
@@ -171,7 +167,7 @@ export class ProcessingAdmissionService {
       PROCESSING_CAPACITY_STATUSES,
       session,
     );
-    return processingJobs < maxProcessingJobs;
+    return hasProcessingCapacity(maxProcessingJobs, processingJobs);
   }
 
   private async touchAccountFence(

@@ -342,4 +342,12 @@
     <string name="url_import_conflict">يتعارض طلب الاستيراد هذا مع رابط آخر. حاول مجددًا.</string>
     <string name="url_import_expired">انتهت صلاحية سجل الاستيراد. ابدأ استيرادًا جديدًا.</string>
     <string name="url_import_allowance">يمنع حد حسابك هذا الاستيراد. راجع إعدادات الحساب أو حاول لاحقًا.</string>
+    <string name="realtime_queue_position">رقم %1$d في الانتظار</string>
+    <string name="realtime_account_wait">في انتظار انتهاء مهمتك الحالية</string>
+    <string name="realtime_retry_wait">في انتظار إعادة المحاولة</string>
+    <string name="realtime_processing_paused">المعالجة متوقفة مؤقتاً</string>
+    <string name="realtime_worker_wait">في انتظار توفر المعالجة</string>
+    <string name="realtime_queue_unavailable">رقم الانتظار غير متاح حالياً</string>
+    <string name="realtime_reconnecting">جارٍ الاتصال بالتحديثات المباشرة…</string>
+    <string name="realtime_live">تحديثات مباشرة</string>
 </resources>

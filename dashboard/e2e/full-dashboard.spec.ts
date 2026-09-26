@@ -138,20 +138,14 @@ test("jobs pagination follows opaque cursors and returns to the first page", asy
   await setDashboardRole(page, "owner");
   const fixture = await installDashboardFixture(page);
   const secondJobId = "000000000000000000000003";
-  await page.route(/\/admin\/jobs(?:\?.*)?$/, async (route) => {
-    if (route.request().method() === "OPTIONS") {
-      await route.fallback();
-      return;
-    }
-    const cursor = new URL(route.request().url()).searchParams.get("cursor");
-    await route.fulfill({
-      status: 200,
-      headers: {
-        "access-control-allow-origin": "http://127.0.0.1:4173",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(
-        toWireCase({
+  const original = fixture.handle.bind(fixture);
+  fixture.handle = async (request) => {
+    const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/admin/jobs") {
+      const cursor = url.searchParams.get("cursor");
+      return {
+        status: 200,
+        body: {
           items: [
             cursor
               ? { ...fixture.job, id: secondJobId, queuePosition: 2 }
@@ -159,10 +153,11 @@ test("jobs pagination follows opaque cursors and returns to the first page", asy
           ],
           nextCursor: cursor ? null : "fixture-next-page",
           asOf: "2026-09-11T00:00:00.000Z",
-        }),
-      ),
-    });
-  });
+        },
+      };
+    }
+    return original(request);
+  };
 
   await page.goto("/jobs");
   await expect(page.getByRole("link", { name: FIXTURE_IDS.job })).toBeVisible();

@@ -216,6 +216,9 @@ describe('worker attempt transfers and finalization', () => {
       sequence: 1,
       phase: 'separating' as const,
       phasePercent: 25,
+      executionTimings: [
+        { stage: 'input-download', durationMs: 123, complete: true },
+      ],
     };
     await expect(
       f.service.progress(principal, attemptId, update),
@@ -236,6 +239,13 @@ describe('worker attempt transfers and finalization', () => {
       sequence: 1,
     });
     expect(f.jobs.updateOne).toHaveBeenCalledTimes(1);
+    expect(f.job.stageTimingAttempts).toEqual([
+      {
+        attemptId,
+        attemptNumber: f.attempt.attemptNumber,
+        stages: update.executionTimings,
+      },
+    ]);
     await expect(
       f.service.progress({ ...principal, subjectId: workerId }, attemptId, {
         ...update,
@@ -336,9 +346,42 @@ describe('worker attempt transfers and finalization', () => {
     expect(f.cleanup.schedule).toHaveBeenCalledOnce();
   });
 
+  it('records server finalization when an older worker omits execution timings', async () => {
+    const f = fixture();
+    await f.service.outputGrant(principal, attemptId, output);
+    f.storage.verifyUploadedVersion.mockResolvedValue({
+      key: f.attempt.outputReservation.key,
+      versionId: completion.versionId,
+      bytes: output.bytes,
+      sha256: output.sha256,
+      contentType: output.contentType,
+    });
+    await f.service.complete(principal, attemptId, completion);
+    expect(f.job.stageTimingAttempts).toEqual([
+      {
+        attemptId,
+        attemptNumber: 1,
+        stages: [
+          {
+            stage: 'completion',
+            durationMs: expect.any(Number),
+            complete: true,
+          },
+        ],
+      },
+    ]);
+  });
+
   it('publishes one verified immutable version and replays identical completion', async () => {
     const f = fixture();
-    const lowerBitrateCompletion = { ...completion, outputBitrateKbps: 128 };
+    const lowerBitrateCompletion = {
+      ...completion,
+      outputBitrateKbps: 128,
+      executionTimings: [
+        { stage: 'input-download', durationMs: 123, complete: true },
+        { stage: 'completion', durationMs: 0, complete: false },
+      ],
+    };
     await f.service.outputGrant(principal, attemptId, output);
     const object = {
       key: f.attempt.outputReservation.key,
@@ -357,6 +400,20 @@ describe('worker attempt transfers and finalization', () => {
     ).resolves.toMatchObject({ status: 'ready', replayed: true });
 
     expect(f.storage.verifyUploadedVersion).toHaveBeenCalledOnce();
+    expect(f.job.stageTimingAttempts).toEqual([
+      {
+        attemptId,
+        attemptNumber: 1,
+        stages: [
+          { stage: 'input-download', durationMs: 123, complete: true },
+          {
+            stage: 'completion',
+            durationMs: expect.any(Number),
+            complete: true,
+          },
+        ],
+      },
+    ]);
     expect(f.job.outputObject).toEqual(object);
     expect(f.job.retainedOutputAccountedAt).toEqual(expect.any(Date));
     expect(f.usage.recordRetainedOutput).toHaveBeenCalledOnce();
@@ -421,6 +478,9 @@ describe('worker attempt transfers and finalization', () => {
       ...ownership,
       code: 'INVALID_AUDIO' as const,
       summary: 'Decoded media did not satisfy the recipe input contract',
+      executionTimings: [
+        { stage: 'input-validation', durationMs: 300, complete: false },
+      ],
     };
     await expect(
       f.service.fail(principal, attemptId, failure),
@@ -438,6 +498,9 @@ describe('worker attempt transfers and finalization', () => {
       message: 'The file does not contain supported playable audio.',
     });
     expect(f.attempt.failureClass).toBe('client_input');
+    expect(f.job.stageTimingAttempts[0].stages).toEqual(
+      failure.executionTimings,
+    );
     expect(f.outbox.updateOne).toHaveBeenCalledOnce();
     expect(f.slots.updateOne).toHaveBeenCalledOnce();
   });

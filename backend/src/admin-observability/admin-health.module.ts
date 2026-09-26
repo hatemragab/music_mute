@@ -31,6 +31,6 @@ import { HealthSamplerService } from './health-sampler.service.js';
   ],
   providers: [AdminAlertsService, HealthSamplerService, AdminHealthService],
   controllers: [AdminHealthController, AdminAlertsController],
-  exports: [AdminAlertsService, HealthSamplerService],
+  exports: [AdminAlertsService, HealthSamplerService, AdminHealthService],
 })
 export class AdminHealthModule {}

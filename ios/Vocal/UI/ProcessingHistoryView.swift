@@ -20,6 +20,7 @@ struct ProcessingHistoryView: View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 20) {
         Text("processing_title").font(.largeTitle.bold())
+        ProcessingConnectionStatus(connection: history.connection)
         Text("processing_description").foregroundStyle(.secondary)
         Text("processing_limits").font(.caption)
         Button(action: onImport) { Label("processing_import", systemImage: "doc.badge.plus") }
@@ -41,18 +42,25 @@ struct ProcessingHistoryView: View {
             onOpen: { onSelect(task) },
             onCancel: { onCancel(task) },
             onRetry: { onResume(task) })
+          ProcessingQueueStatus(
+            job: history.jobs.first { $0.id == task.jobID }, connection: history.connection)
         }
         if history.nextCursor != nil {
           Button("processing_more") { Task { await history.loadMore() } }.disabled(
             history.loadingMore)
         }
-        Button("processing_refresh") { Task { await history.refresh() } }.disabled(history.loading)
       }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
-    }.refreshable { await history.refresh() }
-      .accessibilityIdentifier("processingHistory")
+    }
+    .accessibilityIdentifier("processingHistory")
   }
 
   private func transferProgress(for task: AudioTaskPresentation) -> Double? {
+    if history.connection == .live, let job = history.jobs.first(where: { $0.id == task.jobID }),
+      let progress = job.processingProgress, !progress.stale, let percent = progress.phasePercent,
+      percent.isFinite
+    {
+      return min(1, max(0, percent / 100))
+    }
     guard let operationID = task.operationID else { return nil }
     switch task.statusKey {
     case "processing_finding_downloading":

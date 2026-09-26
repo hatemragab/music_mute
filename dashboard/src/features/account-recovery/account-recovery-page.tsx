@@ -1,11 +1,11 @@
+import { useLiveQuery } from "@/realtime/hooks";
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, ShieldAlert, XCircle } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
 import type { AccountRecoveryRequest } from "@/api/contracts";
-import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
 import {
@@ -13,7 +13,6 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
-  RefreshButton,
 } from "@/components/page";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
@@ -26,12 +25,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useVisibleInterval } from "@/hooks/use-visible-interval";
 import { formatDateTime } from "@/lib/format";
-import {
-  decideAccountRecoveryRequest,
-  listAccountRecoveryRequests,
-} from "./account-recovery-api";
+import { decideAccountRecoveryRequest } from "./account-recovery-api";
 
 type Decision = {
   request: AccountRecoveryRequest;
@@ -46,18 +41,11 @@ export function AccountRecoveryPage() {
   const status = params.get("status") ?? "pending";
   const cursor = params.get("cursor");
   const [decision, setDecision] = useState<Decision | null>(null);
-  const requests = useQuery({
+  const requests = useLiveQuery({
     queryKey: ["account-recovery-requests", status, cursor],
-    queryFn: () =>
-      listAccountRecoveryRequests(client, {
-        status,
-        cursor,
-      }),
+    resource: "admin.recoveries",
+    params: { status, cursor },
   });
-  useVisibleInterval(
-    () => void requests.refetch(),
-    DASHBOARD_POLL_INTERVAL_MS.background,
-  );
   const decide = useMutation({
     mutationFn: ({ target, reason }: { target: Decision; reason: string }) =>
       decideAccountRecoveryRequest(client, target.request, target.action, {
@@ -94,12 +82,6 @@ export function AccountRecoveryPage() {
       <PageHeader
         title="Account recovery"
         description="High-priority requests from people who signed in while their account was scheduled for deletion. Review before the recovery deadline."
-        actions={
-          <RefreshButton
-            refreshing={requests.isFetching}
-            onRefresh={() => void requests.refetch()}
-          />
-        }
       />
       {status === "pending" ? (
         <div className="flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm">

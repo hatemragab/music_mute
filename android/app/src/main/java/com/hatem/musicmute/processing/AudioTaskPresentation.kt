@@ -108,7 +108,9 @@ private fun presentation(
         AudioTaskStage.UPLOADING_INPUT -> operation?.input?.bytes
         else -> null
     }
-    val progress = if (transferred != null && total != null && total > 0)
+    val progress = if (stage in setOf(AudioTaskStage.PROCESSING, AudioTaskStage.UPLOADING_RESULT))
+        job?.processingProgress?.takeUnless { it.stale }?.phasePercent?.takeIf { it.isFinite() }?.let { (it / 100).toFloat().coerceIn(0f, 1f) }
+    else if (transferred != null && total != null && total > 0)
         (transferred.toDouble() / total).toFloat().coerceIn(0f, 1f) else null
     val localElapsed = operation?.clientStartedAtMillis?.takeIf { it > 0 }?.let {
         val end = if (active) nowMillis else job?.finishedAt?.toEpochMilli()

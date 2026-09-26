@@ -1,9 +1,5 @@
-import {
-  useInfiniteQuery,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
+import { useLiveJobs, useLiveQuery } from "../realtime/RealtimeProvider";
 import { Link, useNavigate, useParams } from "react-router";
 import { useState } from "react";
 import { jobsApi } from "../api/jobs";
@@ -11,6 +7,7 @@ import type { JobView } from "../api/types";
 import { useSignedIn } from "../auth/AuthProvider";
 import { friendlyError, statusLabel, useI18n } from "../i18n";
 import { usePlayer } from "../player/PlayerProvider";
+import { QueuePosition } from "./QueuePosition";
 
 const activeStatuses = new Set([
   "awaiting_upload",
@@ -22,22 +19,7 @@ const activeStatuses = new Set([
   "cancel_requested",
 ]);
 
-export function useJobs() {
-  const { api, user } = useSignedIn();
-  return useInfiniteQuery({
-    queryKey: [user.uid, "jobs"],
-    initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam, signal }) => jobsApi(api).list(pageParam, signal),
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    refetchInterval: (query) =>
-      document.visibilityState === "visible" &&
-      query.state.data?.pages.some((page) =>
-        page.items.some((job) => activeStatuses.has(job.status)),
-      )
-        ? 5000
-        : false,
-  });
-}
+export const useJobs = useLiveJobs;
 
 export function JobCard({ job, queue }: { job: JobView; queue?: JobView[] }) {
   const { t, date, lang } = useI18n();
@@ -60,6 +42,7 @@ export function JobCard({ job, queue }: { job: JobView; queue?: JobView[] }) {
           {statusLabel(job.status, lang)}
         </span>
       </div>
+      <QueuePosition job={job} />
       {job.processingProgress && (
         <div className="job-progress">
           <span>{statusLabel(job.processingProgress.phase, lang)}</span>
@@ -114,9 +97,6 @@ export function JobsPage() {
           <p className="eyebrow">{t("processing")}</p>
           <h1>{t("jobs")}</h1>
         </div>
-        <button type="button" onClick={() => void query.refetch()}>
-          {t("refresh")}
-        </button>
       </header>
       <div className="filter-row" role="group" aria-label={t("status")}>
         {(["all", "active", "ready", "failed"] as const).map((item) => (
@@ -175,18 +155,8 @@ export function JobDetailPage() {
   const { api, user } = useSignedIn();
   const { t, date, lang } = useI18n();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const player = usePlayer();
-  const query = useQuery({
-    queryKey: [user.uid, "job", id],
-    queryFn: ({ signal }) => jobsApi(api).detail(id, signal),
-    refetchInterval: (query) =>
-      document.visibilityState === "visible" &&
-      query.state.data &&
-      activeStatuses.has(query.state.data.status)
-        ? 4000
-        : false,
-  });
+  const query = useLiveQuery<JobView>([user.uid, "job", id], "job", { id });
   const [actionError, setActionError] = useState("");
   const mutate = useMutation({
     mutationFn: async (kind: "cancel" | "retry" | "rename" | "delete") => {
@@ -207,9 +177,6 @@ export function JobDetailPage() {
         await jobsApi(api).delete(id);
         navigate("/jobs");
       }
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: [user.uid] });
     },
     onError: (error) => setActionError(friendlyError(error, t)),
   });
@@ -257,6 +224,7 @@ export function JobDetailPage() {
         <div>
           <h2>{t("status")}</h2>
           <p>{statusLabel(job.status, lang)}</p>
+          <QueuePosition job={job} />
           <p>
             {t("created")}: {date(job.createdAt)}
           </p>

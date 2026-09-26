@@ -1,10 +1,10 @@
+import { useLiveQuery } from "@/realtime/hooks";
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, RotateCcw } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
-import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
 import {
@@ -12,7 +12,6 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
-  RefreshButton,
 } from "@/components/page";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
@@ -35,13 +34,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useVisibleInterval } from "@/hooks/use-visible-interval";
 import { formatDateTime } from "@/lib/format";
-import {
-  listWorkerInvitations,
-  listWorkerMachines,
-  revokeWorkerInvitation,
-} from "./worker-api";
+import { revokeWorkerInvitation } from "./worker-api";
 import { WorkerEnrollmentDialog } from "./worker-enrollment-dialog";
 import { WorkerPolicyPanel } from "./worker-policy-panel";
 import { workerContactState } from "./worker-status";
@@ -78,27 +72,18 @@ export function WorkerFleetPage() {
     cursor,
     limit: 25,
   };
-  const machines = useQuery({
+  const machines = useLiveQuery({
     queryKey: ["worker-machines", filters],
-    queryFn: () => listWorkerMachines(client, filters),
+    resource: "admin.workers",
+    params: filters,
     enabled: activeTab === "machines",
   });
-  const invitations = useQuery({
+  const invitations = useLiveQuery({
     queryKey: ["worker-invitations", invitationCursor],
-    queryFn: () =>
-      listWorkerInvitations(client, { cursor: invitationCursor, limit: 25 }),
+    resource: "admin.invitations",
+    params: { cursor: invitationCursor, limit: 25 },
     enabled: activeTab === "enrollment" && can("workers.enroll"),
   });
-  useVisibleInterval(
-    () => void machines.refetch(),
-    DASHBOARD_POLL_INTERVAL_MS.live,
-    activeTab === "machines",
-  );
-  useVisibleInterval(
-    () => void invitations.refetch(),
-    DASHBOARD_POLL_INTERVAL_MS.background,
-    activeTab === "enrollment" && can("workers.enroll"),
-  );
 
   const [revokeTarget, setRevokeTarget] = useState<WorkerInvitation | null>(
     null,
@@ -137,17 +122,6 @@ export function WorkerFleetPage() {
         description="Enroll qualified machines, watch current work and control bounded fleet capacity without exposing worker credentials."
         actions={
           <>
-            {activeTab === "machines" ? (
-              <RefreshButton
-                refreshing={machines.isFetching}
-                onRefresh={() => void machines.refetch()}
-              />
-            ) : activeTab === "enrollment" && can("workers.enroll") ? (
-              <RefreshButton
-                refreshing={invitations.isFetching}
-                onRefresh={() => void invitations.refetch()}
-              />
-            ) : null}
             {can("workers.enroll") ? (
               <WorkerEnrollmentDialog onCreated={refreshInvitations} />
             ) : null}

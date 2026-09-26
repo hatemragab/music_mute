@@ -14,6 +14,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -58,12 +61,15 @@ class UrlImportFailure(val code: String, val retryAfterSeconds: Long? = null) : 
 interface UrlImportsApi {
     suspend fun create(url: String, requestId: String): UrlImportView
     suspend fun detail(importId: String): UrlImportView
+    fun updates(importId: String): Flow<UrlImportView> = flow { emit(detail(importId)) }
 }
 
 class UrlImportsApiClient(
     private val auth: AuthApiClient,
+    private val realtime: RealtimeClient? = null,
     private val installationId: () -> String,
 ) : UrlImportsApi {
+    constructor(auth: AuthApiClient, installationId: () -> String) : this(auth, null, installationId)
     private val json = Json { ignoreUnknownKeys = true }
     override suspend fun create(url: String, requestId: String): UrlImportView {
         require(UUID.fromString(requestId).version() == 4)
@@ -75,6 +81,9 @@ class UrlImportsApiClient(
         require(importId.matches(Regex("[a-fA-F0-9]{24}")))
         return decode(authRequest("GET", "/media-imports/$importId", null, false, 200))
     }
+
+    override fun updates(importId: String): Flow<UrlImportView> =
+        realtime?.watch("import", mapOf("id" to importId))?.map(::decode) ?: super.updates(importId)
 
     private suspend fun authRequest(method: String, path: String, body: String?, access: Boolean, expected: Int): String = try {
         val headers = if (access) {
@@ -265,8 +274,18 @@ class UrlImportCoordinator(
                 .firstOrNull { it.requestId == requestId } ?: return
             if (record.status in UrlImportRecord.terminalStatuses || record.status == "attention") return
             try {
-                val view = if (record.importId == null) api.create(record.url, record.requestId)
-                    else api.detail(record.importId)
+                if (record.importId != null) {
+                    api.updates(record.importId).first { view ->
+                        if (owner != ticket || session() != ticket) throw CancellationException()
+                        store.updateUrlImport(ticket.uid, requestId) {
+                            it.copy(importId = view.importId, status = view.status, jobId = view.jobId,
+                                errorCode = view.error?.code, sourceTitle = view.sourceTitle ?: it.sourceTitle)
+                        }
+                        view.status in UrlImportRecord.terminalStatuses
+                    }
+                    return
+                }
+                val view = api.create(record.url, record.requestId)
                 if (owner != ticket || session() != ticket) return
                 store.updateUrlImport(ticket.uid, requestId) {
                     it.copy(importId = view.importId, status = view.status, jobId = view.jobId,
@@ -276,7 +295,6 @@ class UrlImportCoordinator(
                     return
                 }
                 if (view.status == "failed") return
-                delay(3_000)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: UrlImportFailure) {

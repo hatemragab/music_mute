@@ -1,3 +1,6 @@
+import { dispatchEligibility } from '../../jobs/dispatch-eligibility.js';
+
+import { closeQueueTiming } from '../../jobs/job-stage-timing.js';
 import { Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
@@ -285,31 +288,7 @@ export class WorkerClaimService {
           .filter((recipe) => slot.allowedRecipeIds.includes(recipe));
         if (eligibleRecipes.length === 0) throw workerError('WORKER_FORBIDDEN');
         const candidate = await this.oldestEligibleCandidate(
-          {
-            status: 'queued',
-            deletedAt: null,
-            queuedAt: trusted({ $ne: null }),
-            currentExecution: null,
-            inputObject: trusted({ $ne: null }),
-            recipeSnapshot: trusted({ $ne: null }),
-            'recipeSnapshot.recipeId': trusted({
-              $in: eligibleRecipes,
-            }),
-            'retryEligibility.eligible': true,
-            'retryEligibility.attemptsRemaining': trusted({ $gt: 0 }),
-            $expr: trusted({
-              $lt: [
-                '$attemptNumber',
-                '$admissionSnapshot.maxInfrastructureAttempts',
-              ],
-            }),
-            $or: [
-              { 'retryEligibility.nextAttemptAt': null },
-              {
-                'retryEligibility.nextAttemptAt': trusted({ $lte: new Date() }),
-              },
-            ],
-          },
+          dispatchEligibility(eligibleRecipes),
           session,
         );
         if (!candidate) return null;
@@ -378,6 +357,7 @@ export class WorkerClaimService {
             },
             {
               $set: {
+                ...closeQueueTiming(candidate, now),
                 status: 'processing',
                 currentExecution: execution,
                 workerProgress: null,

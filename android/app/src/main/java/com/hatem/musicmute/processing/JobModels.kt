@@ -114,9 +114,21 @@ data class Job(
     @Serializable(with = JobInstantSerializer::class) val serverTime: Instant? = null,
     val timing: JobTiming? = null,
     val stages: JobStages? = null,
+    val queue: ProcessingQueue? = null,
+    val processingProgress: ProcessingProgress? = null,
 ) {
     val knownStatus: JobStatus? get() = JobStatus.entries.find { it.wireValue == status }
 }
+
+@Serializable data class ProcessingQueue(
+    val state: String,
+    val position: Int? = null,
+    val jobsAhead: Int? = null,
+    val reason: String? = null,
+    val asOf: String,
+)
+
+@Serializable data class ProcessingProgress(val phase: String, val phasePercent: Double? = null, val stale: Boolean = false)
 
 @Serializable data class JobPage(val items: List<Job>, val nextCursor: String? = null)
 

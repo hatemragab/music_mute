@@ -28,6 +28,7 @@ struct ProcessingDetailView: View {
       VStack(alignment: .leading, spacing: 20) {
         Text(task?.title ?? String(localized: "processing_details"))
           .font(.system(.largeTitle, design: .rounded, weight: .bold))
+        ProcessingConnectionStatus(connection: history.connection)
         if let key = messageKey { Text(LocalizedStringKey(key)).foregroundStyle(.red) }
         if let key = history.messageKey { Text(LocalizedStringKey(key)).foregroundStyle(.red) }
         if let task {
@@ -46,6 +47,12 @@ struct ProcessingDetailView: View {
           }
           timing(task)
           if let job = history.detail {
+            ProcessingQueueStatus(job: job, connection: history.connection)
+            if history.connection == .live, let progress = job.processingProgress, !progress.stale,
+              let percent = progress.phasePercent, percent.isFinite
+            {
+              ProgressView(value: min(1, max(0, percent / 100)))
+            }
             if job.workerAvailable == false && shouldPollProcessingJob(job.status) {
               Text("processing_worker_offline").foregroundStyle(.secondary)
             }
@@ -64,7 +71,6 @@ struct ProcessingDetailView: View {
         } else if history.messageKey == nil {
           ProgressView()
         }
-        Button("processing_refresh") { Task { await history.refresh() } }.disabled(history.loading)
       }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
     }
     .accessibilityIdentifier("processingDetail")

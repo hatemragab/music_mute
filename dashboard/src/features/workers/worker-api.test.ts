@@ -32,6 +32,7 @@ import {
 } from "./worker-api";
 import { WorkerFleetPage } from "./worker-fleet-page";
 import { WorkerMachinePage } from "./worker-machine-page";
+import { RealtimeTestProvider } from "@/test/realtime-test-provider";
 
 const client = () =>
   ({
@@ -157,7 +158,9 @@ const adapter: AuthAdapter = {
 };
 
 function Allowed({ children }: { children: ReactNode }) {
-  return useAdminSession().state === "allowed" ? children : null;
+  return useAdminSession().state === "allowed"
+    ? createElement(RealtimeTestProvider, { children })
+    : null;
 }
 
 function renderPage(page: ReactNode, initialEntry: string) {

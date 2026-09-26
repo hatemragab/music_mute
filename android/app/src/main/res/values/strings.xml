@@ -342,4 +342,12 @@
     <string name="url_import_conflict">This import request conflicts with another link. Please try again.</string>
     <string name="url_import_expired">The import record expired. Start a new import.</string>
     <string name="url_import_allowance">Your account limit prevents this import. Check Account settings or try later.</string>
+    <string name="realtime_queue_position">#%1$d in queue</string>
+    <string name="realtime_account_wait">Waiting for your current job to finish</string>
+    <string name="realtime_retry_wait">Waiting to retry</string>
+    <string name="realtime_processing_paused">Processing is temporarily paused</string>
+    <string name="realtime_worker_wait">Waiting for processing capacity</string>
+    <string name="realtime_queue_unavailable">Queue position temporarily unavailable</string>
+    <string name="realtime_reconnecting">Reconnecting to live updates…</string>
+    <string name="realtime_live">Live updates</string>
 </resources>

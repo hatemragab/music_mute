@@ -54,9 +54,6 @@ fun PlaybackResultDetails(
             IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back)) }
             Text(stringResource(R.string.result_details_title), Modifier.weight(1f),
                 style = MaterialTheme.typography.titleLarge, fontSize = 20.sp)
-            IconButton(onRefresh, enabled = !refreshing) {
-                Icon(Icons.Outlined.Refresh, stringResource(R.string.processing_refresh))
-            }
         }
         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), verticalAlignment = Alignment.Top) {
             Box(Modifier.width(3.dp).fillMaxHeight()

@@ -128,7 +128,10 @@ const uidFor = (token) => {
   return token;
 };
 const firebase = {
-  verifySignature: async (token) => ({ uid: uidFor(token) }),
+  verifySignature: async (token) => ({
+    uid: uidFor(token),
+    exp: Math.floor(Date.now() / 1000) + 3600,
+  }),
   verifySession: async (token) => ({
     uid: uidFor(token),
     provider: 'google.com',
@@ -183,6 +186,9 @@ try {
   app = module.createNestApplication({ logger: false });
   configureHttp(app);
   await app.listen(requestedPort, '127.0.0.1');
+  const { RealtimeSocketService } =
+    await import('../../dist/realtime/realtime-socket.service.js');
+  app.get(RealtimeSocketService).attach(app.getHttpServer());
   const base = await app.getUrl();
   const accesses = app.get(getModelToken('AdminAccess'));
   await accesses.create({

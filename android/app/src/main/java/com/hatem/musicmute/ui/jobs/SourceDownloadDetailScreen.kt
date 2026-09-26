@@ -86,6 +86,5 @@ fun SourceDownloadDetailScreen(
         if (task.stage == AudioTaskStage.REVIEW) CreativePrimaryButton(onReview, Modifier.fillMaxWidth(), busy = busy) { Text(stringResource(R.string.creative_jobs_review)) }
         if (task.canCancel && task.stage != AudioTaskStage.CANCELLING) OutlinedButton(onCancel, Modifier.fillMaxWidth(), enabled = !busy) { Text(stringResource(R.string.auth_cancel)) }
         if (task.canRetry) CreativePrimaryButton(onRetry, Modifier.fillMaxWidth(), busy = busy) { Text(stringResource(R.string.retry)) }
-        OutlinedButton(onRefresh, Modifier.fillMaxWidth(), enabled = !busy) { Text(stringResource(R.string.processing_refresh)) }
     }
 }

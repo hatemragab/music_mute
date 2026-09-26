@@ -15,7 +15,11 @@ struct AudioStepTimeline: View {
             }
           }
           VStack(alignment: .leading, spacing: 3) {
-            Text(LocalizedStringKey(step.titleKey)).font(.subheadline.weight(.semibold))
+            Text(
+              String(localized: String.LocalizationValue(step.titleKey))
+                .trimmingCharacters(in: CharacterSet(charactersIn: "…"))
+            ).font(.subheadline.weight(.semibold))
+              .fixedSize(horizontal: false, vertical: true)
             if let date = step.occurredAt {
               Text(date, style: .time).font(.caption).foregroundStyle(.secondary)
             }

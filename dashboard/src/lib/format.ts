@@ -14,8 +14,9 @@ export const formatDuration = (seconds: number | null | undefined) => {
     return "No timing data";
   }
   if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainder = Math.round(seconds % 60);
+  const rounded = Math.round(seconds);
+  const minutes = Math.floor(rounded / 60);
+  const remainder = rounded % 60;
   return `${minutes}m ${remainder}s`;
 };
 

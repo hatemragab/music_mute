@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.processing.AudioTaskPresentation
 import com.hatem.musicmute.processing.AudioTaskStage
+import com.hatem.musicmute.ui.ProcessingConnectionStatus
 import com.hatem.musicmute.processing.JobHistoryState
 import com.hatem.musicmute.processing.UrlImportRecord
 import com.hatem.musicmute.ui.design.*
@@ -84,6 +85,7 @@ fun HomeScreen(
             verticalArrangement = Arrangement.Top,
         ) {
             item {
+                ProcessingConnectionStatus(history.connection)
                 Column(Modifier.fillMaxWidth()) {
                     val appName = stringResource(R.string.app_name)
                     val wordmark = buildAnnotatedString {
@@ -150,11 +152,14 @@ fun HomeScreen(
                 CreativeCard { CreativeFeedback(stringResource(R.string.creative_jobs_empty)) }
             }
             items(tasks, key = { it.importRequestId?.let { id -> "url:$id" } ?: it.operationId ?: requireNotNull(it.jobId) }) { task ->
+                Column {
                 JobCard(task, busy || actionBusy, { onOpen(task) }, { onCancel(task) }, {
                     val record = urlImports.firstOrNull { it.requestId == task.importRequestId }
                     if (task.importOnly && record != null) onUrlImportRetry(record) else onRetry(task)
                 },
                     { pendingDelete = task })
+                com.hatem.musicmute.ui.ProcessingQueueStatus(history.jobs.firstOrNull { it.id == task.jobId }, history.connection)
+                }
             }
             item {
                 Spacer(Modifier.height(CreativeTokens.ContentGap))

@@ -1,3 +1,4 @@
+import type { ImportMeasurements } from './job-stage-timing.js';
 import { Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
@@ -45,6 +46,7 @@ export class JobsService {
     requestId: string,
     metadata: JobMetadata = {},
     trimEnabled = true,
+    serverTiming?: ImportMeasurements,
   ) {
     if (typeof trimEnabled !== 'boolean') throw authError('INVALID_INPUT');
     const normalized = normalizeJobMetadata(metadata);
@@ -91,6 +93,10 @@ export class JobsService {
                   ? new Date(normalized.clientStartedAt)
                   : null,
                 processingAccumulatedMs: 0,
+                serverTimingStartedAt: serverTiming?.startedAt ?? new Date(),
+                importStageTimings: serverTiming?.stages ?? [],
+                queueAccumulatedMs: 0,
+                retryWaitAccumulatedMs: 0,
                 inputReservation: {
                   ...input,
                   key: `users/${owner.toHexString()}/jobs/${id.toHexString()}/input/${randomUUID()}.${input.extension}`,
@@ -195,7 +201,14 @@ export class JobsService {
           recipeSnapshot: { $ne: null },
         },
         {
-          $set: { inputObject: identity, queuedAt, status: 'queued' },
+          $set: {
+            inputObject: identity,
+            queuedAt,
+            queueTimingStartedAt: current.serverTimingStartedAt
+              ? queuedAt
+              : null,
+            status: 'queued',
+          },
           $inc: { revision: 1 },
         },
         { session, runValidators: true },

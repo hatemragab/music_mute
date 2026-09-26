@@ -1,4 +1,3 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import {
   useEffect,
@@ -28,7 +27,6 @@ export function AudioUpload({
   const { api, user } = useSignedIn();
   const { t, number } = useI18n();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [duration, setDuration] = useState(0);
   const [rights, setRights] = useState(false);
@@ -167,7 +165,6 @@ export function AudioUpload({
         await api.post(`/jobs/${created.id}/upload-completions`, {});
       }
       sessionStorage.removeItem(operationKey);
-      await queryClient.invalidateQueries({ queryKey: [user.uid, "jobs"] });
       navigate(`/jobs/${created.id}`);
     } catch (error) {
       if (!abort.signal.aborted) setError(friendlyError(error, t));

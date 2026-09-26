@@ -39,7 +39,7 @@ function requestValue(value: unknown): unknown {
   );
 }
 
-function responseValue(value: unknown, parentKey?: string): unknown {
+export function responseValue(value: unknown, parentKey?: string): unknown {
   if (Array.isArray(value))
     return value.map((item) => responseValue(item, parentKey));
   if (!isPlainObject(value)) return value;

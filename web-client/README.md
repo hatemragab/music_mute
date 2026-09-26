@@ -86,3 +86,10 @@ from Android's `ic_vocal.xml` brand mark; update `public/favicon.svg` and its
 192-pixel PNG together if the native mark changes. These measures support branded
 discovery; the signed-in application is not a substitute for a public product
 landing page, and indexing is controlled by search engines.
+
+## Realtime processing
+
+Processing updates use authenticated raw WebSocket snapshots with automatic
+reconnection. See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
+and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
+HTTP remains responsible for authentication, commands and file transfers.

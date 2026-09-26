@@ -99,6 +99,16 @@ export interface JobDetail extends JobSummary {
   measuredBytes?: number | null;
   policyVersion?: number;
   retryOfJobId: string | null;
+  serverStageTimings?: {
+    totalMs: number | null;
+    totalComplete: boolean;
+    stages: Array<{ stage: string; durationMs: number; complete: boolean }>;
+    attempts?: Array<{
+      attemptNumber: number;
+      stages: Array<{ stage: string; durationMs: number; complete: boolean }>;
+    }>;
+  } | null;
+  workerStageTimings?: Array<{ stage: string; durationMs: number }>;
   stageTimings: Array<{
     stage: string;
     startedAt: string | null;

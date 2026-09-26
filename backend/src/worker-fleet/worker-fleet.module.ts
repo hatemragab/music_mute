@@ -68,6 +68,11 @@ import { WorkerHintController } from './control/worker-hint.controller.js';
     WorkerMachineLifecycleService,
     WorkerFleetStartupService,
   ],
-  exports: [MongooseModule, WorkerAuthGuard, WorkerEnrollmentService],
+  exports: [
+    MongooseModule,
+    WorkerAuthGuard,
+    WorkerEnrollmentService,
+    WorkerControlService,
+  ],
 })
 export class WorkerFleetModule {}

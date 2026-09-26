@@ -1,3 +1,4 @@
+import { RealtimeSocketService } from './realtime/realtime-socket.service.js';
 import './observability/sentry.js';
 import 'reflect-metadata';
 import { ConsoleLogger } from '@nestjs/common';
@@ -19,6 +20,7 @@ async function bootstrap() {
   app.useLogger(new ConsoleLogger({ json: true }));
   configureHttp(app);
   app.get(WorkerHintService).attach(app.getHttpServer());
+  app.get(RealtimeSocketService).attach(app.getHttpServer());
   const config = app.get(ConfigService);
   await app.listen(
     config.getOrThrow<number>('PORT'),

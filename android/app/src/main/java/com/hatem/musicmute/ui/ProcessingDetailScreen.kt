@@ -76,6 +76,7 @@ fun ProcessingDetailScreen(
             }
             Text(stringResource(R.string.processing_details), style = MaterialTheme.typography.titleLarge)
         }
+        ProcessingConnectionStatus(state.connection)
         if (task != null) {
             CreativeCard(contentPadding = 16.dp, contentGap = CreativeTokens.CompactGap) {
             Text(task.displayName, style = MaterialTheme.typography.titleLarge)
@@ -139,9 +140,10 @@ fun ProcessingDetailScreen(
             }
         }
         val job = state.detail
+        ProcessingQueueStatus(job, state.connection)
         if (state.failure != null) CreativeFeedback(stringResource(processingFailureLabel(state.failure)), error = true)
         if (message != null) CreativeFeedback(stringResource(message))
-        // Polling refreshes existing content silently; only an empty initial load
+        // Live snapshots update existing content silently; only an empty initial load
         // needs a separate indicator. This keeps the timeline and actions steady.
         if (state.loading && task == null && job == null) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (job != null) {
@@ -165,7 +167,7 @@ fun ProcessingDetailScreen(
             if (task.canRetry) CreativePrimaryButton(onRetry, busy = busy) { Text(stringResource(R.string.retry)) }
             if (ready && (task.canPlay || availableOffline)) CompletedResultScreen(availableOffline, busy, onPlay, onDownload, onSave, onShare)
         }
-        TextButton(onClick = onRefresh, enabled = !state.loading) { Text(stringResource(R.string.processing_refresh)) }
+
     }
     if (renaming) RenameAudioSheet(task?.displayName.orEmpty(), busy, { renaming = false }, {
         if (it == task?.displayName) renaming = false

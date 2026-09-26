@@ -1,3 +1,5 @@
+import { useLiveQuery } from "@/realtime/hooks";
+import { RealtimeProvider, ConnectionIndicator } from "@/realtime/provider";
 import {
   Activity,
   AudioLines,
@@ -33,11 +35,6 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { useTheme } from "./theme";
-import { useQuery } from "@tanstack/react-query";
-import { useApiClient } from "@/auth/admin-session";
-import { useVisibleInterval } from "@/hooks/use-visible-interval";
-import { getAccountRecoverySummary } from "@/features/account-recovery/account-recovery-api";
-import { DASHBOARD_POLL_INTERVAL_MS } from "./polling";
 
 interface NavItem {
   label: string;
@@ -172,17 +169,22 @@ function Navigation({
 }
 
 export function AppShell() {
+  return (
+    <RealtimeProvider>
+      <ConnectedShell />
+    </RealtimeProvider>
+  );
+}
+
+function ConnectedShell() {
   const { session, signOut, can } = useAdminSession();
-  const client = useApiClient();
   const { theme, toggle } = useTheme();
-  const recovery = useQuery({
+  const recovery = useLiveQuery({
     queryKey: ["account-recovery-summary"],
-    queryFn: () => getAccountRecoverySummary(client),
+    resource: "admin.recovery_summary",
+    params: {},
     enabled: can("users.account-recovery.manage"),
   });
-  useVisibleInterval(() => {
-    if (can("users.account-recovery.manage")) void recovery.refetch();
-  }, DASHBOARD_POLL_INTERVAL_MS.background);
   const pendingRecoveryCount = recovery.data?.pendingCount ?? 0;
   return (
     <div className="min-h-svh bg-background text-foreground">
@@ -242,8 +244,7 @@ export function AppShell() {
               </SheetContent>
             </Sheet>
             <div className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">
-              <span className="size-2 rounded-full bg-emerald-500" />
-              <span>Admin session active</span>
+              <ConnectionIndicator />
             </div>
           </div>
           <div className="flex items-center gap-2">

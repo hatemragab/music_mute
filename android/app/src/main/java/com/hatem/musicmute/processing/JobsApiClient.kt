@@ -15,6 +15,7 @@ import kotlinx.serialization.descriptors.StructureKind
 import kotlinx.serialization.json.*
 
 interface JobsApi {
+    val realtime: RealtimeClient? get() = null
     suspend fun create(requestId: String, input: InputDeclaration): CreateReservation
     suspend fun createWithMetadata(
         requestId: String,
@@ -47,6 +48,7 @@ class JobsApiClient(
     private val installationId: () -> String,
     private val onUpdateRequired: () -> Unit = {},
     private val nowNanos: () -> Long = System::nanoTime,
+    override val realtime: RealtimeClient? = null,
 ) : JobsApi {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val requests = Mutex()

@@ -3,6 +3,19 @@
   "roles": ["owner", "release_manager", "support", "viewer"],
   "routes": [
     {
+      "controller": "AdminRealtimeTicketController",
+      "method": "POST",
+      "path": "/admin/realtime-tickets",
+      "permissions": [],
+      "roles": ["owner", "release_manager", "support", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": {},
+      "responseCategory": "realtime_ticket",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
       "controller": "AdminSessionController",
       "method": "GET",
       "path": "/admin/session",

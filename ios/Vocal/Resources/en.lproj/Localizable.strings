@@ -299,3 +299,12 @@
 "device_history_remove" = "Remove from history";
 "device_history_remove_title" = "Remove this entry?";
 "device_history_remove_body" = "This hides the entry but does not sign the device out. It will reappear if the installation connects again. To end access everywhere, use sign out on all devices.";
+
+"realtime_queue_position" = "#%lld in queue";
+"realtime_account_wait" = "Waiting for your current job to finish";
+"realtime_retry_wait" = "Waiting to retry";
+"realtime_processing_paused" = "Processing is temporarily paused";
+"realtime_worker_wait" = "Waiting for processing capacity";
+"realtime_queue_unavailable" = "Queue position temporarily unavailable";
+"realtime_reconnecting" = "Reconnecting to live updates…";
+"realtime_live" = "Live updates";

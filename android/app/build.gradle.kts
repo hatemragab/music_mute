@@ -138,6 +138,7 @@ android {
 kotlin { jvmToolchain(17) }
 
 dependencies {
+    implementation(libs.okhttp)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.common)
     implementation(libs.firebase.auth)

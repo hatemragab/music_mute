@@ -1,3 +1,7 @@
+import {
+  RealtimeProvider,
+  ConnectionIndicator,
+} from "./realtime/RealtimeProvider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { House, ListTodo, Library, Settings, UserRound } from "lucide-react";
@@ -22,6 +26,7 @@ import { SettingsPage } from "./settings/SettingsPage";
 import { AccountPage } from "./settings/AccountPage";
 import { accentFor, applyAccent } from "./settings/accent";
 import { useSignedIn } from "./auth/AuthProvider";
+import type { RealtimeClient } from "./realtime/client";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -64,54 +69,59 @@ function Navigation() {
   );
 }
 
-export function Shell() {
+export function Shell({
+  realtimeClient,
+}: { realtimeClient?: RealtimeClient } = {}) {
   const { t } = useI18n();
   const { user } = useSignedIn();
   useEffect(() => {
     applyAccent(accentFor(user.uid));
   }, [user.uid]);
   return (
-    <PlayerProvider>
-      <div className="app-shell">
-        <aside className="sidebar">
-          <Link to="/" className="brand">
-            <span className="brand-mark">M</span>
-            <span>{t("brand")}</span>
-          </Link>
-          <Navigation />
-          <div className="sidebar-bottom">
-            <Link to="/account">{t("account")}</Link>
-          </div>
-        </aside>
-        <div className="main-area">
-          <header className="mobile-header">
-            <Link className="brand" to="/">
+    <RealtimeProvider client={realtimeClient}>
+      <PlayerProvider>
+        <div className="app-shell">
+          <aside className="sidebar">
+            <Link to="/" className="brand">
               <span className="brand-mark">M</span>
               <span>{t("brand")}</span>
             </Link>
-            <Link to="/account" aria-label={t("account")}>
-              <UserRound size={24} aria-hidden="true" />
-            </Link>
-          </header>
-          <main className="content">
-            <Routes>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/jobs" element={<JobsPage />} />
-              <Route path="/jobs/:id" element={<JobDetailPage />} />
-              <Route path="/library" element={<LibraryPage />} />
-              <Route path="/player" element={<PlayerPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/account" element={<AccountPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </main>
-          <MiniPlayer />
-          <div className="mobile-nav">
             <Navigation />
+            <div className="sidebar-bottom">
+              <Link to="/account">{t("account")}</Link>
+            </div>
+          </aside>
+          <div className="main-area">
+            <header className="mobile-header">
+              <Link className="brand" to="/">
+                <span className="brand-mark">M</span>
+                <span>{t("brand")}</span>
+              </Link>
+              <Link to="/account" aria-label={t("account")}>
+                <UserRound size={24} aria-hidden="true" />
+              </Link>
+            </header>
+            <main className="content">
+              <ConnectionIndicator />
+              <Routes>
+                <Route path="/" element={<HomePage />} />
+                <Route path="/jobs" element={<JobsPage />} />
+                <Route path="/jobs/:id" element={<JobDetailPage />} />
+                <Route path="/library" element={<LibraryPage />} />
+                <Route path="/player" element={<PlayerPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/account" element={<AccountPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </main>
+            <MiniPlayer />
+            <div className="mobile-nav">
+              <Navigation />
+            </div>
           </div>
         </div>
-      </div>
-    </PlayerProvider>
+      </PlayerProvider>
+    </RealtimeProvider>
   );
 }
 

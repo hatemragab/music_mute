@@ -17,6 +17,7 @@ import {
 import { AdminAccessController } from '../src/admin/admin-access.controller.js';
 import { AdminAuditController } from '../src/admin/admin-audit.controller.js';
 import { AdminOperationsController } from '../src/admin/admin-operations.controller.js';
+import { AdminRealtimeTicketController } from '../src/realtime/realtime-ticket.controller.js';
 import { AdminSessionController } from '../src/admin/admin-session.controller.js';
 import { AdminUsersController } from '../src/admin-users/admin-users.controller.js';
 import { AdminAccountRecoveryController } from '../src/admin-users/admin-account-recovery.controller.js';
@@ -70,6 +71,7 @@ const inventory = JSON.parse(
   ),
 ) as { roles: AdminRole[]; routes: RouteFixture[] };
 const controllers: Type[] = [
+  AdminRealtimeTicketController,
   AdminSessionController,
   AdminAccessController,
   AdminAuditController,

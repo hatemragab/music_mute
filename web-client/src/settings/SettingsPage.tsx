@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useLiveQuery } from "../realtime/RealtimeProvider";
 import { Link } from "react-router";
 import { useState } from "react";
 import { useSignedIn } from "../auth/AuthProvider";
@@ -17,13 +17,9 @@ interface Usage {
   storage: { retainedBytes: number; limitBytes: number };
 }
 export function SettingsPage() {
-  const { api, user } = useSignedIn();
+  const { user } = useSignedIn();
   const { t, lang, setLang, number, date } = useI18n();
-  const usage = useQuery({
-    queryKey: [user.uid, "usage"],
-    queryFn: ({ signal }) => api.get<Usage>("/processing-usage", signal),
-    staleTime: 60_000,
-  });
+  const usage = useLiveQuery<Usage>([user.uid, "usage"], "usage");
   const [accent, setAccent] = useState(() => accentFor(user.uid));
   const apiOrigin = readConfig().apiOrigin;
   function selectAccent(color: string) {

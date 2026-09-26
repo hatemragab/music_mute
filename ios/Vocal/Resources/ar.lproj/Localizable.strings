@@ -299,3 +299,12 @@
 "device_history_remove" = "إزالة من السجل";
 "device_history_remove_title" = "إزالة هذا السجل؟";
 "device_history_remove_body" = "يخفي هذا الإجراء السجل دون تسجيل خروج الجهاز. سيظهر مجددًا إذا اتصل هذا التثبيت مرة أخرى. لإنهاء الوصول من كل الأجهزة، استخدم تسجيل الخروج من جميع الأجهزة.";
+
+"realtime_queue_position" = "رقم %lld في الانتظار";
+"realtime_account_wait" = "في انتظار انتهاء مهمتك الحالية";
+"realtime_retry_wait" = "في انتظار إعادة المحاولة";
+"realtime_processing_paused" = "المعالجة متوقفة مؤقتاً";
+"realtime_worker_wait" = "في انتظار توفر المعالجة";
+"realtime_queue_unavailable" = "رقم الانتظار غير متاح حالياً";
+"realtime_reconnecting" = "جارٍ الاتصال بالتحديثات المباشرة…";
+"realtime_live" = "تحديثات مباشرة";

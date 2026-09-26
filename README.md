@@ -8,8 +8,8 @@ isolation, and play, download, or share the voice-only result.
 
 This repository contains the mobile apps, end-user web client, API, worker, and
 administrator dashboard.
-New audio processing is temporarily unavailable while the processing architecture
-is redesigned. Existing job history and completed-result access remain available.
+Processing availability is controlled by the backend configuration and account
+policy. Source changes and local test results do not establish live availability.
 
 [Getting started](#getting-started) · [Architecture](#architecture) ·
 [Documentation](#documentation) · [Contributing](CONTRIBUTING.md) ·
@@ -22,6 +22,8 @@ is redesigned. Existing job history and completed-result access remain available
 - **Processing library:** retain job history and completed voice-only results.
 - **Private transfers:** authenticated APIs and short-lived S3 upload/download grants.
 - **Job coordination:** durable processing state, cancellation, and recovery support.
+- **Realtime updates:** raw WebSocket job snapshots and per-job queue position on
+  Android, iOS and web, plus live administrator views.
 - **Operations console:** a React dashboard for authorized administrators.
 - **Account controls:** Firebase authentication and coordinated account deletion.
 
@@ -32,6 +34,9 @@ flowchart LR
     Apps[Android and iOS apps] --> API[NestJS API]
     Web[End-user web client] --> API
     Dashboard[React admin dashboard] --> API
+    API -->|Raw WebSocket snapshots| Apps
+    API -->|Raw WebSocket snapshots| Web
+    API -->|Raw WebSocket snapshots| Dashboard
     API --> Firebase[Firebase Authentication]
     API --> MongoDB[(MongoDB)]
     API --> Redis[(Redis)]
@@ -85,18 +90,19 @@ the deployed API before releasing a client that requires the new routes.
 Both apps make local audio import the primary flow. Selected audio is reviewed with
 an explicit rights confirmation before upload and processing. YouTube remains a
 secondary feature with an explicit download action; original downloads stay private.
-New processing submissions currently return `PROCESSING_UNAVAILABLE`. The processed
-library retains job history and retrieves completed voice-only MP3 output on demand. See the
-[mobile processing tracker](docs/tasks/mobile-audio-processing.md) for implementation
-status, local test results and separate live-service validation requirements.
+Submission availability is determined by the server's current policy. The processed
+library retains job history and retrieves completed voice-only MP3 output on demand.
+See the [Android](android/README.md) and [iOS](ios/README.md) guides for native setup,
+and the [realtime ledger](docs/realtime-processing-queue/IMPLEMENTATION.md) for
+realtime implementation, local checks and separate release validation requirements.
 
 Account deletion is available in both apps with recent authentication, an exact
 15-day recovery deadline, durable request recovery, and account-scoped local
 cleanup. The backend immediately blocks new costly work, fences active work, and
 coordinates storage and identity deletion after the deadline. Public
 `/delete-account` and `/privacy` pages require
-operator-supplied publication settings. See the [implementation and validation record](docs/validation/2026-09-10-store-readiness.md)
-and [deletion operations guide](docs/account-deletion.md).
+operator-supplied publication settings. See the
+[deletion operations guide](docs/account-deletion.md) for cleanup and recovery behavior.
 
 Both apps use `com.hatem.musicmute`. This replaces the earlier development ID
 `com.hatem.vocal`; the operating systems treat them as separate apps, so old
@@ -112,9 +118,9 @@ Its CapRover package reads public browser configuration from environment variabl
 at container startup and excludes `.env` files. Production setup requires the
 dashboard domain in Firebase Authentication, its origin in the API CORS allowlist,
 and a deployed API exposing the current administration routes. See the
-[dashboard task package](docs/tasks/full-dashboard/dashboard/README.md) and
-[validation record](docs/validation/full-dashboard-local.md) for recorded evidence
-and remaining integration requirements.
+[dashboard guide](dashboard/README.md) for setup and the
+[realtime validation ledger](docs/realtime-processing-queue/IMPLEMENTATION.md) for
+realtime evidence and remaining integration requirements.
 
 ## End-user web client
 
@@ -215,16 +221,21 @@ boundary.
 
 ## Documentation
 
-| Guide                                                              | Contents                                                  |
-| ------------------------------------------------------------------ | --------------------------------------------------------- |
-| [Backend](backend/README.md)                                       | Local environments, API verification, and VPS preparation |
-| [API client contract](docs/api/client-contract.md)                 | Routes, credentials, wire format, errors, and API rules   |
-| [OpenAPI](backend/openapi.yaml)                                    | Current HTTP operations and schemas                       |
-| [Dashboard](dashboard/README.md)                                   | Administrator setup, checks, and packaging                |
-| [Web client](web-client/README.md)                                 | End-user browser setup, checks, and deployment            |
-| [Account deletion](docs/account-deletion.md)                       | Identity and storage cleanup operations                   |
-| [Mobile processing tracker](docs/tasks/mobile-audio-processing.md) | Implementation status and validation boundaries           |
-| [Contributing](CONTRIBUTING.md)                                    | Change scope, local checks, and pull requests             |
+For AI agents continuing the realtime work, start with the
+[AI handoff](docs/realtime-processing-queue/AI-HANDOFF.md). It links the source map,
+protocol, regression checks and verified-versus-unverified status. The original
+study is historical; use the implementation ledger for delivery evidence.
+
+| Guide                                                               | Contents                                                       |
+| ------------------------------------------------------------------- | -------------------------------------------------------------- |
+| [Backend](backend/README.md)                                        | Local environments, API verification, and VPS preparation      |
+| [API client contract](docs/api/client-contract.md)                  | Routes, credentials, wire format, errors, and API rules        |
+| [OpenAPI](backend/openapi.yaml)                                     | Current HTTP operations and schemas                            |
+| [Dashboard](dashboard/README.md)                                    | Administrator setup, checks, and packaging                     |
+| [Web client](web-client/README.md)                                  | End-user browser setup, checks, and deployment                 |
+| [Account deletion](docs/account-deletion.md)                        | Identity and storage cleanup operations                        |
+| [Realtime AI handoff](docs/realtime-processing-queue/AI-HANDOFF.md) | Architecture, source map, invariants and validation boundaries |
+| [Contributing](CONTRIBUTING.md)                                     | Change scope, local checks, and pull requests                  |
 
 ## Contributing and feedback
 

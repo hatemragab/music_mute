@@ -32,6 +32,13 @@ export type JobStatus =
   | "cancelled";
 
 export interface JobView {
+  queue?: {
+    state: "waiting" | "blocked" | "not_queued" | "unavailable";
+    position: number | null;
+    jobsAhead: number | null;
+    reason: string | null;
+    asOf: string;
+  };
   id: string;
   requestId: string;
   sourceTitle: string | null;

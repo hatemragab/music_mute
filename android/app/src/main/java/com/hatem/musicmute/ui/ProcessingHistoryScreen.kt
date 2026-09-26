@@ -43,9 +43,6 @@ fun ProcessingHistoryScreen(
                 Button(onClick = onImport, enabled = !preparing, modifier = Modifier.testTag("processing-import")) {
                     Text(stringResource(R.string.processing_import))
                 }
-                TextButton(onClick = onRefresh, enabled = !state.loading) {
-                    Text(stringResource(R.string.processing_refresh))
-                }
             }
             TextButton(onClick = onNotifications) { Text(stringResource(R.string.processing_notifications)) }
             Text(stringResource(R.string.processing_notifications_optional), style = MaterialTheme.typography.bodySmall)

@@ -216,12 +216,12 @@ fun VocalApp(
     val voiceTrackTitle = stringResource(R.string.voice_track)
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(route, lifecycleOwner, processingSession) {
-        fun update() { processingModel.history.setVisible(
+        fun update() { app.realtime.setForeground(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)); processingModel.history.setVisible(
             (route == Destination.Home.name || route == Destination.Library.name || detail) && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
         val observer = LifecycleEventObserver { _, _ -> update() }
         lifecycleOwner.lifecycle.addObserver(observer)
         update()
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer); processingModel.history.setVisible(false) }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer); processingModel.history.setVisible(false); app.realtime.setForeground(false) }
     }
     LaunchedEffect(processingSession, lifecycleOwner) {
         app.processingUsage.clear()

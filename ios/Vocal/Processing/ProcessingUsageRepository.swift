@@ -118,14 +118,36 @@ struct ProcessingUsage: Decodable, Equatable, Sendable {
   private let api: JobsAPI
   private var owner: String?
   private var receivedAt: Date?
+  private var live: Task<Void, Never>?
   init(api: JobsAPI) { self.api = api }
   func bind(_ owner: String?) {
+    live?.cancel()
+    live = nil
     self.owner = owner
     usage = nil
     receivedAt = nil
   }
   func refresh() async {
     guard let captured = owner else { return }
+    if let realtime = api.realtime {
+      guard live == nil else { return }
+      live = Task { [weak self] in
+        do {
+          for try await data in realtime.watch("usage") {
+            let value = try JSONDecoder.authDecoder().decode(ProcessingUsage.self, from: data)
+            try value.validate()
+            guard let self, !Task.isCancelled, self.owner == captured else { return }
+            self.usage = value
+            self.receivedAt = Date()
+          }
+        } catch {
+          guard let self, !Task.isCancelled, self.owner == captured else { return }
+          self.usage = nil
+          self.live = nil
+        }
+      }
+      return
+    }
     do {
       let value = try await api.processingUsage()
       try value.validate()
@@ -134,6 +156,7 @@ struct ProcessingUsage: Decodable, Equatable, Sendable {
       receivedAt = Date()
     } catch { if owner == captured { usage = nil } }
   }
+  deinit { live?.cancel() }
   func checkAvailability() throws {
     guard let usage, let receivedAt, abs(receivedAt.timeIntervalSinceNow) < 120 else { return }
     if usage.waitingJobs >= usage.maxWaitingJobs {

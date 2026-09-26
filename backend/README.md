@@ -264,3 +264,10 @@ Server imports still save original titles and URL attribution. This is a breakin
 retirement of old clients, with no compatibility route. See the
 [client contract](../docs/api/client-contract.md) and
 [validation record](../docs/mobile-url-acquisition-removal.md).
+
+## Realtime processing
+
+Processing updates use authenticated raw WebSocket snapshots with automatic
+reconnection. See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
+and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
+HTTP remains responsible for authentication, commands and file transfers.

@@ -3,16 +3,21 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, test, vi } from "vitest";
-import { ApiClient } from "../api/client";
+import { ApiClient, ApiError } from "../api/client";
 import { I18nProvider } from "../i18n";
 import { HomePage } from "./HomePage";
+import { RealtimeProvider } from "../realtime/RealtimeProvider";
+import { realtimeFixture } from "../../tests/realtime-fixture";
 
 const mockAuth = vi.hoisted(() => ({
   api: null as unknown,
   user: { uid: "test-user" },
   session: { access: { allowed: true } },
 }));
-vi.mock("../auth/AuthProvider", () => ({ useSignedIn: () => mockAuth }));
+vi.mock("../auth/AuthProvider", () => ({
+  useSignedIn: () => mockAuth,
+  useAuth: () => ({ retry: vi.fn() }),
+}));
 
 afterEach(() => {
   cleanup();
@@ -21,7 +26,22 @@ afterEach(() => {
   localStorage.clear();
 });
 
-function page() {
+function page(policyFailure = false) {
+  const { client } = realtimeFixture((resource) => {
+    if (resource === "policy") {
+      if (policyFailure) throw new ApiError(503, "SERVICE_UNAVAILABLE");
+      return { acceptNewJobs: true };
+    }
+    if (resource === "jobs") return { items: [], nextCursor: null };
+    if (resource === "import")
+      return {
+        importId: "0123456789abcdef01234567",
+        status: "queued",
+        jobId: null,
+        error: null,
+      };
+    throw new Error(`Unexpected subscription: ${resource}`);
+  });
   mockAuth.api = new ApiClient({
     origin: "https://api.example.com",
     token: async () => "test-token",
@@ -34,7 +54,9 @@ function page() {
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
         <MemoryRouter>
-          <HomePage />
+          <RealtimeProvider client={client}>
+            <HomePage />
+          </RealtimeProvider>
         </MemoryRouter>
       </I18nProvider>
     </QueryClientProvider>,
@@ -141,7 +163,7 @@ test("processing intake stays disabled when policy cannot be loaded", async () =
     throw new Error(`Unexpected route: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
-  page();
+  page(true);
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Start import" })).toBeDisabled(),
   );
