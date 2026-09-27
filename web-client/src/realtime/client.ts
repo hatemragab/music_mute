@@ -2,7 +2,7 @@ import { ApiError } from "../api/client";
 import { fromWire, toWire } from "../api/wire";
 
 export type ConnectionState =
-  "connecting" | "live" | "reconnecting" | "offline" | "paused" | "signedOut";
+  "connecting" | "live" | "reconnecting" | "offline" | "signedOut";
 interface Ticket {
   ticket: string;
   path: string;
@@ -56,7 +56,7 @@ export class RealtimeClient {
     this.stopped = false;
     window.addEventListener("online", this.resume);
     window.addEventListener("offline", this.resume);
-    document.addEventListener("visibilitychange", this.resume);
+    document.addEventListener("visibilitychange", this.visibilityChanged);
     this.resume();
   }
 
@@ -64,7 +64,7 @@ export class RealtimeClient {
     this.stopped = true;
     window.removeEventListener("online", this.resume);
     window.removeEventListener("offline", this.resume);
-    document.removeEventListener("visibilitychange", this.resume);
+    document.removeEventListener("visibilitychange", this.visibilityChanged);
     this.disconnect();
   }
 
@@ -94,7 +94,7 @@ export class RealtimeClient {
       if (this.stream) this.subscribe(entry);
     }
     entry.listeners.add(listener);
-    if (entry.last) listener(entry.last);
+    if (entry.last) this.notify(listener, entry.last);
     return () => {
       entry.listeners.delete(listener);
       if (!entry.listeners.size) {
@@ -141,12 +141,28 @@ export class RealtimeClient {
 
   private resume = (): void => {
     if (this.stopped) return;
-    if (!navigator.onLine || document.visibilityState === "hidden") {
+    if (!navigator.onLine) {
       this.disconnect();
-      this.setState(navigator.onLine ? "paused" : "offline");
+      this.setState("offline");
       return;
     }
     if (!this.socket && !this.ticketAbort && !this.retry) void this.connect();
+  };
+
+  private visibilityChanged = (): void => {
+    if (this.stopped || !this.socket) return;
+    clearTimeout(this.watchdog);
+    this.watchdog = undefined;
+    for (const entry of this.entries.values()) {
+      clearTimeout(entry.timeout);
+      entry.timeout = undefined;
+    }
+    if (document.visibilityState === "visible")
+      this.armWatchdog(this.stream ? 35_000 : 10_000);
+    if (document.visibilityState === "visible" && this.stream)
+      for (const entry of this.entries.values())
+        if (entry.sequence === 0 && !entry.last?.error)
+          this.armSubscriptionTimeout(entry);
   };
 
   private async connect(): Promise<void> {
@@ -241,7 +257,8 @@ export class RealtimeClient {
         entry.sequence = sequence;
         clearTimeout(entry.timeout);
         entry.last = { data: fromWire(frame.data) };
-        for (const listener of entry.listeners) listener(entry.last);
+        for (const listener of entry.listeners)
+          this.notify(listener, entry.last);
         if ([...this.entries.values()].every((item) => item.sequence > 0))
           this.setState("live");
       } else if (frame.type === "subscription_error") {
@@ -249,7 +266,8 @@ export class RealtimeClient {
           throw new Error();
         clearTimeout(entry.timeout);
         entry.last = { error: new ApiError(frame.status, frame.code) };
-        for (const listener of entry.listeners) listener(entry.last);
+        for (const listener of entry.listeners)
+          this.notify(listener, entry.last);
         if (frame.status >= 500) {
           this.disconnect();
           this.schedule();
@@ -264,17 +282,23 @@ export class RealtimeClient {
   private subscribe(entry: Entry): void {
     entry.sequence = 0;
     entry.last = undefined;
-    clearTimeout(entry.timeout);
-    entry.timeout = setTimeout(() => {
-      this.disconnect();
-      this.schedule();
-    }, 10_000);
+    this.armSubscriptionTimeout(entry);
     this.send({
       type: "subscribe",
       subscription_id: entry.id,
       resource: entry.resource,
       params: toWire(entry.params),
     });
+  }
+
+  private armSubscriptionTimeout(entry: Entry): void {
+    clearTimeout(entry.timeout);
+    entry.timeout = undefined;
+    if (document.visibilityState === "hidden") return;
+    entry.timeout = setTimeout(() => {
+      this.disconnect();
+      this.schedule();
+    }, 10_000);
   }
 
   private send(value: unknown): void {
@@ -284,10 +308,21 @@ export class RealtimeClient {
 
   private armWatchdog(ms: number): void {
     clearTimeout(this.watchdog);
+    this.watchdog = undefined;
+    if (document.visibilityState === "hidden") return;
     this.watchdog = setTimeout(() => {
       this.disconnect();
       this.schedule();
     }, ms);
+  }
+
+  private notify(listener: (result: Result) => void, result: Result): void {
+    try {
+      listener(result);
+    } catch {
+      // A view/cache listener must never be able to restart the shared transport.
+      console.error("Realtime listener failed");
+    }
   }
 
   private schedule(retryAfter?: number): void {
@@ -331,6 +366,12 @@ export class RealtimeClient {
   private setState(state: ConnectionState): void {
     if (state === this.state) return;
     this.state = state;
-    for (const listener of this.stateListeners) listener();
+    for (const listener of this.stateListeners) {
+      try {
+        listener();
+      } catch {
+        console.error("Realtime state listener failed");
+      }
+    }
   }
 }

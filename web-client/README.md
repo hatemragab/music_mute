@@ -102,7 +102,11 @@ landing page, and indexing is controlled by search engines.
 ## Realtime processing
 
 Processing updates use authenticated raw WebSocket snapshots with automatic
-reconnection. See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
+reconnection. One app-level socket is shared by all live views and remains open
+while the page is loaded, including across route changes and browser-tab switches.
+Background tabs suspend only client-side response deadlines; returning to the tab
+gives the existing connection a heartbeat grace window before recovery.
+See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
 and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
 HTTP remains responsible for authentication, commands and file transfers.
 

@@ -98,6 +98,13 @@ idempotent completion/failure. A machine opens one raw WebSocket using a
 command hints only wake reconciliation; they never replace HTTPS claiming,
 fallback polling or MongoDB ownership.
 
+The runtime owns one hint socket per machine process. A successful handshake
+cancels its connection deadline; short-lived failures use exponential backoff
+with jitter, while a stable connection resets that backoff. The API enforces a
+renewable Redis lease so the same machine identity cannot hold concurrent hint
+connections across API instances. Server ping/pong detects dead connections and
+the connection rotates hourly without changing the authenticated HTTP session.
+
 The service entry point reads a strict JSON config and a separate protected
 machine-credential file:
 

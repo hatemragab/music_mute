@@ -3,7 +3,10 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
-import { RealtimeSocketService } from './realtime-socket.service.js';
+import {
+  RealtimeSocketService,
+  refreshesOnHeartbeat,
+} from './realtime-socket.service.js';
 import type { RealtimeFeedEvent } from './realtime-feed.service.js';
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -80,6 +83,26 @@ const subscribe = JSON.stringify({
   subscription_id: 'detail',
   resource: 'job',
   params: { id: 'fixture' },
+});
+
+it('periodically refreshes only views with time or probe driven changes', () => {
+  expect(refreshesOnHeartbeat('admin.health')).toBe(true);
+  expect(refreshesOnHeartbeat('admin.workers')).toBe(true);
+  expect(refreshesOnHeartbeat('usage')).toBe(true);
+  expect(refreshesOnHeartbeat('job')).toBe(true);
+  expect(refreshesOnHeartbeat('job', { status: 'processing' })).toBe(true);
+  expect(refreshesOnHeartbeat('job', { status: 'ready' })).toBe(false);
+  expect(
+    refreshesOnHeartbeat('jobs', {
+      items: [{ status: 'ready' }, { status: 'cancelled' }],
+    }),
+  ).toBe(false);
+  expect(
+    refreshesOnHeartbeat('admin.jobs', {
+      items: [{ status: 'ready' }, { status: 'interrupted' }],
+    }),
+  ).toBe(true);
+  expect(refreshesOnHeartbeat('policy')).toBe(false);
 });
 
 it('sends complete snake_case snapshots and coalesces committed changes', async () => {

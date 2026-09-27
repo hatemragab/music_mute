@@ -153,8 +153,8 @@ worker traffic evidence. The worker hint socket accepts a single-use ticket in
 the `Sec-WebSocket-Protocol` header, rejects browser origins and URL query
 tickets, and independently limits upgrades by IP, machine and service. Its
 one-hop proxy IP behavior follows `TRUST_PROXY`. The socket accepts no client
-messages and is capped at two connections per machine per API instance and one
-hour per connection.
+messages and uses a renewable Redis lease to allow one connection per machine
+across API instances. Each connection rotates after one hour.
 
 Public APK grants retain a 10/IP/minute route limit and have an atomic
 `PUBLIC_RELEASE_GRANTS_PER_MINUTE` service ceiling (default 300). A signed S3
