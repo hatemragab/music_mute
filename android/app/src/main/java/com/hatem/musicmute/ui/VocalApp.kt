@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -157,6 +158,11 @@ fun VocalApp(
                 app.urlImports.submit(urlImportText, trimEnabled)
                 urlImportText = ""
                 urlImportError = null
+                Toast.makeText(
+                    context.applicationContext,
+                    R.string.url_import_submitted,
+                    Toast.LENGTH_SHORT,
+                ).show()
             } catch (error: UrlImportFailure) {
                 urlImportError = error.code
             } catch (_: Exception) {
@@ -382,7 +388,6 @@ fun VocalApp(
                     composable(Destination.Home.name) {
                         com.hatem.musicmute.ui.home.HomeScreen(
                             tasks = audioTasks, history = jobs, busy = processing.preparing,
-                            urlImports = urlImports,
                             trimEnabled = trimEnabled, onTrimEnabled = { trimEnabled = it },
                             urlImportText = urlImportText,
                             urlImportError = urlImportError,
@@ -400,13 +405,6 @@ fun VocalApp(
                                     if (extracted == null) urlImportError = "IMPORT_SINGLE_ITEM_REQUIRED"
                                     else urlImportText = extracted
                                     if (extracted != null) urlImportError = null
-                                }
-                            },
-                            onUrlImportRetry = { record ->
-                                scope.launch {
-                                    try { app.urlImports.retry(record) }
-                                    catch (error: UrlImportFailure) { urlImportError = error.code }
-                                    catch (_: Exception) { urlImportError = "SERVICE_UNAVAILABLE" }
                                 }
                             },
                             actionBusy = processing.busy,
@@ -428,25 +426,7 @@ fun VocalApp(
                                 if (task.operationId != null) processingModel.cancelOperation(task.operationId)
                                 else processingModel.cancelSelected()
                             },
-                            onRetry = { task ->
-                                processingModel.selectTask(task.operationId, task.jobId)
-                                if (task.jobId != null) processingModel.retrySelected()
-                                else task.operationId?.let(processingModel::resume)
-                            },
                             notificationsNeeded = !processingNotificationsPermitted(context),
-                            onPlayReady = { task ->
-                                val track = task.jobId?.let { id -> libraryEntries.firstOrNull { it.key.jobId == id } }
-                                if (track != null) playLibraryTrack(track)
-                                else if (task.jobId != null && processingSession != null) {
-                                    val key = LibraryKey(processingSession.uid, task.jobId)
-                                    app.audioPlayback.playQueue(
-                                        listOf(QueueTrack(key, task.displayName.ifBlank { voiceTrackTitle })),
-                                        key,
-                                    )
-                                    nav.navigate("player") { launchSingleTop = true }
-                                }
-                            },
-                            onOpenLibrary = { navigate(Destination.Library) },
                             miniPlayer = {
                                 MiniPlayer(app.audioPlayback.state, { nav.navigate("player") },
                                     app.audioPlayback::togglePlayback, app.audioPlayback::next,
@@ -531,7 +511,6 @@ fun VocalApp(
                                     catch (_: Exception) { snackbar.showSnackbar(context.getString(R.string.original_unavailable)) }
                                 }
                             },
-                            loop = app.audioPlayback::setSectionLoop,
                             queue = { showPlaybackQueue = true },
                             info = { currentTrackKey?.let(openAudioDetails) },
                             star = { currentTrackKey?.let(libraryModel::toggleStar) }))

@@ -2,6 +2,7 @@ package com.hatem.musicmute.ui.auth
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -39,13 +40,46 @@ internal fun EmailVerificationSheet(state: AuthUiState, email: String, cooldownU
 internal fun SignOutAllSheet(state: AuthUiState, onDismiss: () -> Unit, onConfirm: () -> Unit, dismissMessage: () -> Unit) {
     CreativeSheet(onDismiss, dismissible = !state.busy) {
         CreativeWave(Modifier.fillMaxWidth())
-        AccountSymbol(Icons.Outlined.Logout, Modifier.align(Alignment.CenterHorizontally))
+        AccountSymbol(Icons.AutoMirrored.Outlined.Logout, Modifier.align(Alignment.CenterHorizontally))
         Text(stringResource(R.string.auth_logout_all), style = MaterialTheme.typography.headlineSmall)
         Text(stringResource(R.string.auth_logout_all_description))
         AuthMessages(state, dismissMessage)
         CreativePrimaryButton(onConfirm, Modifier.fillMaxWidth().testTag("auth-confirm-logout-all"), busy = state.busy) { Text(stringResource(R.string.auth_logout_all)) }
         OutlinedButton(onDismiss, Modifier.fillMaxWidth(), enabled = !state.busy) { Text(stringResource(R.string.auth_cancel)) }
     }
+}
+
+@Composable
+internal fun SignOutDialog(
+    state: AuthUiState,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!state.busy) onDismiss() },
+        modifier = Modifier.testTag("auth-sign-out-dialog"),
+        icon = { Icon(Icons.AutoMirrored.Outlined.Logout, null) },
+        title = { Text(stringResource(R.string.auth_sign_out)) },
+        text = { Text(stringResource(R.string.auth_sign_out_description)) },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                enabled = !state.busy,
+                modifier = Modifier.testTag("auth-confirm-sign-out"),
+            ) {
+                Text(stringResource(R.string.auth_sign_out))
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !state.busy,
+                modifier = Modifier.testTag("auth-cancel-sign-out"),
+            ) {
+                Text(stringResource(R.string.auth_cancel))
+            }
+        },
+    )
 }
 
 @Composable

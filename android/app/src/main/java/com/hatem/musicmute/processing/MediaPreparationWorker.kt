@@ -59,8 +59,6 @@ class MediaPreparationWorker(context: Context, parameters: WorkerParameters) : C
                 withContext(Dispatchers.IO) {
                     temporary.parentFile?.listFiles()?.filter { it.isFile && it.name.startsWith(".export-") && it != temporary }?.forEach { it.delete() }
                 }
-                val target = AudioTaskNotificationTarget(owner, operationId, epoch, workRequestId = id.toString())
-                setForeground(AudioTaskNotifications(applicationContext).foreground(target, audioTaskNotificationProjection(operation, target)))
                 val fetched = try { app.jobsApi.mediaPolicy() } catch (error: JobsFailure) {
                     if (error.problem in setOf(JobsProblem.JOB_NOT_FOUND, JobsProblem.OFFLINE)) ProcessingMediaPolicy.STANDARD else throw error
                 }

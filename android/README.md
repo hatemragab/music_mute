@@ -198,12 +198,11 @@ Python runtime, JavaScript challenge engine or downloader update worker.
 - **Multiple tasks:** one local pipeline runs at a time; additional
   accepted tasks wait durably and remain independently cancellable.
 
-WorkManager queues local preparation and upload transfers when offline and runs real local
-transfers with silent foreground progress notifications when allowed. Notification
-permission is optional on Android 13+. Android may reschedule work after constraints
-change or the process stops; retryable interrupted state is reconciled with history.
-System scheduling, foreground-service time limits, battery restrictions, and
-force-stop behavior still apply; uninterrupted completion is not guaranteed.
+WorkManager queues local preparation and upload transfers when offline and runs them as
+ordinary scheduled background work without a data-sync foreground service. Android may
+reschedule work after constraints change or the process stops; retryable interrupted
+state is reconciled with history. System scheduling, battery restrictions, and force-stop
+behavior still apply; uninterrupted background completion is not guaranteed.
 
 ## Storage and integration boundaries
 
@@ -291,7 +290,7 @@ picker. No broad photo/storage permission is requested. Documents are persisted 
 owner-scoped URI references and prepared by unique WorkManager work; a lost provider
 grant requests reselection. Existing rights confirmation remains required. Local
 work is serialized, cancellable, and distinguished as inspecting, preparing, source
-download, and upload; waiting for a remote worker does not keep this foreground work
+download, and upload; waiting for a remote worker does not keep local WorkManager work
 alive. Android force-stop/background restrictions still apply.
 
 `ProcessingMediaPolicy` reads schema 2 and the `audio-cap-aac-lc-160-v1` profile.

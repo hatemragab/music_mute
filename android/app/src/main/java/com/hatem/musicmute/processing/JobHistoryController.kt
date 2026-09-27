@@ -24,6 +24,12 @@ data class JobHistoryState(
     val connection: RealtimeState = RealtimeState.PAUSED,
 )
 
+internal const val INITIAL_JOB_HISTORY_PAGE_SIZE = 10
+internal const val JOB_HISTORY_PAGE_SIZE = 5
+
+internal fun jobHistoryPageSize(cursor: String?): Int =
+    if (cursor == null) INITIAL_JOB_HISTORY_PAGE_SIZE else JOB_HISTORY_PAGE_SIZE
+
 fun shouldPollProcessingJob(status: String): Boolean = status in setOf(
     "awaiting_upload", "queued", "validating", "processing", "uploading_result",
     "interrupted", "cancel_requested",
@@ -271,7 +277,11 @@ class JobHistoryController(
         mutableState.update { it.copy(loading = cursor == null && it.jobs.isEmpty(), loadingMore = cursor != null) }
         liveTasks[cursor] = scope.launch {
             try {
-                realtime.watch("jobs", mapOf("limit" to "20") + (cursor?.let { mapOf("cursor" to it) } ?: emptyMap())).collect { body ->
+                realtime.watch(
+                    "jobs",
+                    mapOf("limit" to jobHistoryPageSize(cursor).toString()) +
+                        (cursor?.let { mapOf("cursor" to it) } ?: emptyMap()),
+                ).collect { body ->
                     val page = liveJson.decodeFromString<JobPage>(body)
                     if (ticket != epoch) return@collect
                     val prior = livePages[cursor]

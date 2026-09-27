@@ -1,7 +1,7 @@
 package com.hatem.musicmute.ui.player
 
 import com.hatem.musicmute.playback.PlaybackState
-import com.hatem.musicmute.playback.sectionLoopRange
+import com.hatem.musicmute.playback.RepeatMode
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -23,10 +23,16 @@ class PlaybackPresentationTest {
         assertEquals(1f, playbackProgress(Long.MAX_VALUE, 60_000), 0f)
     }
 
-    @Test fun sectionLoopStartsAtThePlayheadAndStopsAfterFifteenSeconds() {
-        assertEquals(12_000L to 27_000L, sectionLoopRange(12_000, 180_000))
-        assertEquals(170_000L to 180_000L, sectionLoopRange(170_000, 180_000))
-        assertNull(sectionLoopRange(179_500, 180_000))
-        assertNull(sectionLoopRange(-1, 180_000))
+    @Test fun repeatSongControlTogglesCurrentTrackRepeatOnly() {
+        assertEquals(RepeatMode.ONE, RepeatMode.OFF.toggleCurrentTrackRepeat())
+        assertEquals(RepeatMode.ONE, RepeatMode.ALL.toggleCurrentTrackRepeat())
+        assertEquals(RepeatMode.OFF, RepeatMode.ONE.toggleCurrentTrackRepeat())
+    }
+
+    @Test fun miniPlayerIsVisibleOnlyWhileATrackIsPlaying() {
+        assertFalse(PlaybackState().shouldShowMiniPlayer())
+        assertFalse(PlaybackState(trackId = "restored-track").shouldShowMiniPlayer())
+        assertFalse(PlaybackState(playing = true).shouldShowMiniPlayer())
+        assertTrue(PlaybackState(trackId = "active-track", playing = true).shouldShowMiniPlayer())
     }
 }

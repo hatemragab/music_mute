@@ -141,6 +141,7 @@
     <string name="auth_device_seen">Last seen: %1$s</string>
     <string name="auth_load_more">Load more</string>
     <string name="auth_sign_out">Sign out</string>
+    <string name="auth_sign_out_description">Are you sure you want to sign out on this device? You’ll need to sign in again to access your account. Your local audio stays on this device.</string>
     <string name="auth_logout_all">Sign out on all devices</string>
     <string name="auth_logout_all_description">All devices will need to sign in again when they reconnect. Your local audio stays on this device.</string>
     <string name="auth_processing_verification">Email verification will be needed for server processing. Your local audio remains available.</string>
@@ -328,7 +329,7 @@
     <string name="url_import_queued">Waiting to import…</string>
     <string name="url_import_validating">Checking audio…</string>
     <string name="url_import_uploading">Saving audio for processing…</string>
-    <string name="url_import_submitted">Imported. Processing has started.</string>
+    <string name="url_import_submitted">Import started. We’ll process it in the background.</string>
     <string name="url_import_failed">Import failed</string>
     <string name="url_import_attention">Import needs attention</string>
     <string name="url_import_invalid">Enter one valid link.</string>
@@ -350,6 +351,8 @@
     <string name="realtime_queue_unavailable">Queue position temporarily unavailable</string>
     <string name="realtime_reconnecting">Reconnecting to live updates…</string>
     <string name="realtime_live">Live updates</string>
+    <string name="realtime_connected_status">Live updates connected</string>
+    <string name="realtime_disconnected_status">Live updates disconnected</string>
     <string name="server_timings">Server timings</string>
     <string name="server_total">Server total</string>
     <string name="timing_partial">At least %1$s</string>

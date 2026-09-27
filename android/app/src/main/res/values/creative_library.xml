@@ -20,6 +20,10 @@
     <string name="creative_library_sort">Sort</string>
     <string name="creative_library_voice">Voice output</string>
     <string name="creative_library_offline">Available offline</string>
+    <string name="creative_library_offline_badge">Offline</string>
+    <string name="creative_library_online_badge">Online</string>
+    <string name="creative_library_downloading_badge">Downloading</string>
+    <string name="creative_library_unavailable_badge">Unavailable</string>
     <string name="creative_library_remote">Download to listen offline</string>
     <string name="creative_library_downloading">Downloading complete audio…</string>
     <string name="creative_library_failed">Audio unavailable. Check your connection or available storage and try again.</string>

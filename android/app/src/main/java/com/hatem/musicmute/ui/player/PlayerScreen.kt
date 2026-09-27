@@ -34,7 +34,6 @@ data class PlayerActions(
     val speed: (Float) -> Unit, val volume: (Float) -> Unit,
     val original: (Boolean) -> Unit = {},
     val saveOriginal: () -> Unit = {},
-    val loop: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -77,7 +76,7 @@ fun MiniPlayer(
     modifier: Modifier = Modifier,
     progress: @Composable () -> Unit = { PlaybackProgress(state, onSeek, compact = true) },
 ) {
-    if (state.trackId == null) return
+    if (!state.shouldShowMiniPlayer()) return
     Surface(
         modifier.widthIn(max = CreativeTokens.ContentWidth).fillMaxWidth()
             .padding(top = 8.dp, bottom = 20.dp),
@@ -115,13 +114,15 @@ fun MiniPlayer(
                     Icon(Icons.Outlined.Close, stringResource(R.string.creative_library_close))
                 }
             }
-            if (state.buffering) LinearProgressIndicator(Modifier.fillMaxWidth())
+            PlaybackActivityIndicator(state.buffering)
             if (state.failed) Text(stringResource(R.string.creative_library_failed),
                 color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
             progress()
         }
     }
 }
+
+internal fun PlaybackState.shouldShowMiniPlayer(): Boolean = trackId != null && playing
 
 @Composable internal fun AutoNextRow(enabled: Boolean, onChange: (Boolean) -> Unit) {
     val description = stringResource(R.string.creative_library_auto_next)
@@ -131,4 +132,5 @@ fun MiniPlayer(
     }
 }
 internal fun RepeatMode.nextMode() = when (this) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }
+internal fun RepeatMode.toggleCurrentTrackRepeat() = if (this == RepeatMode.ONE) RepeatMode.OFF else RepeatMode.ONE
 internal fun RepeatMode.label() = when (this) { RepeatMode.OFF -> R.string.creative_library_repeat_off; RepeatMode.ALL -> R.string.creative_library_repeat_all; RepeatMode.ONE -> R.string.creative_library_repeat_one }

@@ -6,12 +6,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.net.Uri
-import android.os.Build
 import android.text.format.Formatter
 import androidx.core.app.NotificationCompat
-import androidx.work.ForegroundInfo
 import com.hatem.musicmute.MainActivity
 import com.hatem.musicmute.R
 import java.security.MessageDigest
@@ -89,17 +86,8 @@ class AudioTaskNotificationThrottle {
     }
 }
 
-/** WorkManager owns the foreground service; this class only projects its notification. */
 class AudioTaskNotifications(private val context: Context) {
     private val manager = context.getSystemService(NotificationManager::class.java)
-
-    fun foreground(target: AudioTaskNotificationTarget, projection: AudioTaskNotificationProjection): ForegroundInfo {
-        val notification = build(target, projection)
-        val id = audioTaskNotificationId(target)
-        return if (Build.VERSION.SDK_INT >= 29)
-            ForegroundInfo(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        else ForegroundInfo(id, notification)
-    }
 
     fun updateIfVisible(target: AudioTaskNotificationTarget, projection: AudioTaskNotificationProjection) {
         val id = audioTaskNotificationId(target)
