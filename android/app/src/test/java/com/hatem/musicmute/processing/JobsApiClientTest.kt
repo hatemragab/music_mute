@@ -90,7 +90,7 @@ class JobsApiClientTest {
         assertEquals(false, api.detail(id).workerAvailable)
         api.cancel(id); api.retry(id, requestId); api.download(id, "output", requestId)
         assertEquals(listOf("POST", "POST", "POST", "GET", "GET", "POST", "POST", "POST"), requests.map { it[1] })
-        assertEquals(listOf("/jobs", "/jobs/$id/upload-grants", "/jobs/$id/upload-completions", "/jobs?limit=20&cursor=a%2B%2F%3D%3F%20%26&status=queued", "/jobs/$id", "/jobs/$id/cancellations", "/jobs/$id/retry-attempts", "/jobs/$id/download-grants"), requests.map { (it[0] as String).removePrefix("https://api.example.test") })
+        assertEquals(listOf("/jobs", "/jobs/$id/upload-grants", "/jobs/$id/upload-completions", "/jobs?limit=5&cursor=a%2B%2F%3D%3F%20%26&status=queued", "/jobs/$id", "/jobs/$id/cancellations", "/jobs/$id/retry-attempts", "/jobs/$id/download-grants"), requests.map { (it[0] as String).removePrefix("https://api.example.test") })
         requests.forEachIndexed { index, r ->
             val headers = r[2] as Map<*, *>
             assertEquals("Bearer token", headers["Authorization"])
@@ -101,6 +101,21 @@ class JobsApiClientTest {
         assertEquals("""{"request_id":"$requestId"}""", requests[1][3])
         assertEquals("""{"request_id":"$requestId"}""", requests[6][3])
         assertEquals("""{"artifact":"output","request_id":"$requestId"}""", requests[7][3])
+    }
+
+    @Test fun historyUsesTenJobsInitiallyAndFiveForLaterPages() = runTest {
+        val paths = mutableListOf<String>()
+        val api = client(AuthHttpTransport { url, _, _, _ ->
+            paths += url.removePrefix("https://api.example.test")
+            AuthHttpResponse(200, """{"items":[],"next_cursor":null}""")
+        })
+
+        api.list()
+        api.list("next")
+
+        assertEquals(listOf("/jobs?limit=10", "/jobs?limit=5&cursor=next"), paths)
+        assertEquals(10, jobHistoryPageSize(null))
+        assertEquals(5, jobHistoryPageSize("next"))
     }
 
     @Test fun statusesAndAbsentDatesAreSafeAndMalformedDataFails() = runTest {

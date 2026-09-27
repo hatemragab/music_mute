@@ -24,7 +24,7 @@ import com.hatem.musicmute.ui.settings.CreativeSettingsScreen
 @Preview(name = "Creative Home narrow large text", widthDp = 320, heightDp = 900, fontScale = 1.6f)
 @Composable
 private fun HomePreview() = VocalTheme {
-    Surface { HomeScreen(emptyList(), JobHistoryState(), false, {}, {}, {}, {}, {}, {}) }
+    Surface { HomeScreen(emptyList(), JobHistoryState(), false, {}, {}, {}, {}, {}) }
 }
 
 private val savedTrack = LibraryEntry(
@@ -35,7 +35,7 @@ private val savedTrack = LibraryEntry(
 private val queueTrack = QueueTrack(savedTrack.key, savedTrack.title)
 private val previewPlayback = PlaybackState(
     trackId = "processing:68c000000000000000000001", queue = listOf(queueTrack), orderedQueue = listOf(queueTrack),
-    currentIndex = 0, positionMs = 42_000, durationMs = 182_000,
+    currentIndex = 0, positionMs = 42_000, durationMs = 182_000, playing = true,
 )
 private val libraryActions = LibraryActions({}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {})
 private val playerActions = PlayerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})

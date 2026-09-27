@@ -20,6 +20,10 @@
     <string name="creative_library_sort">ترتيب</string>
     <string name="creative_library_voice">الصوت المعالج</string>
     <string name="creative_library_offline">متاح دون اتصال</string>
+    <string name="creative_library_offline_badge">دون اتصال</string>
+    <string name="creative_library_online_badge">عبر الإنترنت</string>
+    <string name="creative_library_downloading_badge">جارٍ التنزيل</string>
+    <string name="creative_library_unavailable_badge">غير متاح</string>
     <string name="creative_library_remote">نزّل للاستماع دون اتصال</string>
     <string name="creative_library_downloading">جارٍ تنزيل الصوت كاملاً…</string>
     <string name="creative_library_failed">الصوت غير متاح. تحقق من الاتصال أو مساحة التخزين وحاول مجدداً.</string>

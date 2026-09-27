@@ -3,6 +3,11 @@
     <string name="creative_home_photos">Video file</string>
     <string name="creative_jobs_details_unavailable">Task details aren’t available yet. Refresh or return to Home.</string>
     <string name="creative_jobs_home_title">Make room for your voice.</string>
+    <string name="creative_home_import_audio">Import audio</string>
+    <string name="creative_home_limit_audio">Audio only</string>
+    <string name="creative_home_limit_duration">20 min</string>
+    <string name="creative_home_limit_size">50 MB</string>
+    <string name="creative_jobs_recent">Recent jobs</string>
     <string name="creative_jobs_audio_only">Only prepared audio is uploaded</string>
     <string name="creative_jobs_heading">Processing jobs</string>
     <string name="creative_jobs_empty">Your jobs will appear here. Import audio to create your first voice result.</string>

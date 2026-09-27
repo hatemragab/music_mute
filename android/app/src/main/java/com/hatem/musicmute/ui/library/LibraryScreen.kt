@@ -12,6 +12,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Sort
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -80,7 +81,7 @@ fun LibraryScreen(state: LibraryUiState, actions: LibraryActions, miniPlayer: @C
                 }
             }
             items(state.entries, key = { "${it.key.ownerUid}/${it.key.jobId}" }) { entry ->
-                LibraryAudioCard(entry, { actions.play(entry) }, { actions.star(entry.key) }, { menu = entry })
+                LibraryAudioCard(entry, { actions.play(entry) }, { menu = entry })
             }
         }
         miniPlayer()
@@ -92,6 +93,9 @@ fun LibraryScreen(state: LibraryUiState, actions: LibraryActions, miniPlayer: @C
             Text(offlineLabel(entry.offlineStatus), color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (entry.offlineStatus == OfflineStatus.DOWNLOADING) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (entry.offlineStatus !in setOf(OfflineStatus.AVAILABLE, OfflineStatus.DOWNLOADING)) TextButton({ actions.download(entry.key); menu = null }) { Text(stringResource(R.string.creative_library_download)) }
+            TextButton({ actions.star(entry.key); menu = null }) {
+                Text(stringResource(if (entry.starred) R.string.creative_library_unstar else R.string.creative_library_star))
+            }
             TextButton({ actions.details(entry.key); menu = null }) { Text(stringResource(R.string.creative_library_info)) }
             Text(stringResource(R.string.creative_library_hide_body), style = MaterialTheme.typography.bodySmall)
             TextButton({ actions.hidden(entry.key, !entry.hidden); menu = null }) { Text(stringResource(if (entry.hidden) R.string.creative_library_restore else R.string.creative_library_hide)) }
@@ -171,10 +175,10 @@ private fun LibraryToolbar(state: LibraryUiState, actions: LibraryActions) {
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-fun LibraryAudioCard(entry: LibraryEntry, onPlay: () -> Unit, onStar: () -> Unit, onMore: () -> Unit) {
+fun LibraryAudioCard(entry: LibraryEntry, onPlay: () -> Unit, onMore: () -> Unit) {
     Surface(
-        Modifier.fillMaxWidth().padding(bottom = 8.dp),
-        shape = RoundedCornerShape(16.dp),
+        Modifier.fillMaxWidth().padding(bottom = 4.dp),
+        shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
     ) {
@@ -182,25 +186,46 @@ fun LibraryAudioCard(entry: LibraryEntry, onPlay: () -> Unit, onStar: () -> Unit
             onClick = onPlay, onClickLabel = stringResource(R.string.creative_library_play),
             onLongClick = onMore, onLongClickLabel = stringResource(R.string.creative_library_more),
         ).padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
-                    Icon(Icons.Outlined.MusicNote, null, Modifier.size(44.dp).padding(10.dp),
-                        tint = MaterialTheme.colorScheme.primary)
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                LibraryMusicIcon(entry.offlineStatus)
+                Column(
+                    Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            entry.title,
+                            Modifier.weight(1f, fill = false),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        if (entry.starred) {
+                            Icon(
+                                Icons.Filled.Star,
+                                stringResource(R.string.creative_library_starred),
+                                Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                    entry.durationMs?.let {
+                        Text(
+                            audioTime(it),
+                            maxLines = 1,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-                Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodyMedium)
-                    Text(offlineLabel(entry.offlineStatus), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (entry.offlineStatus == OfflineStatus.AVAILABLE) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                entry.durationMs?.let {
-                    Text(audioTime(it), style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                CreativeStarButton(entry.starred, onStar,
-                    stringResource(if (entry.starred) R.string.creative_library_unstar else R.string.creative_library_star))
             }
             if (entry.offlineStatus == OfflineStatus.DOWNLOADING) {
                 Spacer(Modifier.height(8.dp))
@@ -209,6 +234,46 @@ fun LibraryAudioCard(entry: LibraryEntry, onPlay: () -> Unit, onStar: () -> Unit
                 if (total != null && total > 0) LinearProgressIndicator(progress = { (entry.downloadedBytes.toFloat() / total).coerceIn(0f, 1f) }, modifier = bar)
                 else LinearProgressIndicator(modifier = bar)
             }
+        }
+    }
+}
+
+@Composable
+private fun LibraryMusicIcon(status: OfflineStatus) {
+    Box(Modifier.size(44.dp)) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            shape = RoundedCornerShape(13.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.primary,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.MusicNote, null, Modifier.size(22.dp))
+            }
+        }
+        LibraryAvailabilityBadge(status, Modifier.align(Alignment.BottomEnd))
+    }
+}
+
+@Composable
+private fun LibraryAvailabilityBadge(status: OfflineStatus, modifier: Modifier = Modifier) {
+    if (status == OfflineStatus.REMOTE_ONLY) return
+    val description = offlineLabel(status)
+    val icon = when (status) {
+        OfflineStatus.AVAILABLE -> Icons.Outlined.Check
+        OfflineStatus.DOWNLOADING -> Icons.Outlined.Download
+        OfflineStatus.FAILED -> Icons.Outlined.ErrorOutline
+        OfflineStatus.REMOTE_ONLY -> return
+    }
+    val failed = status == OfflineStatus.FAILED
+    Surface(
+        modifier = modifier.size(16.dp),
+        shape = RoundedCornerShape(50),
+        color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        contentColor = if (failed) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, description, Modifier.size(10.dp))
         }
     }
 }

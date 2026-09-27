@@ -141,6 +141,7 @@
     <string name="auth_device_seen">آخر ظهور: %1$s</string>
     <string name="auth_load_more">تحميل المزيد</string>
     <string name="auth_sign_out">تسجيل الخروج</string>
+    <string name="auth_sign_out_description">هل أنت متأكد من تسجيل الخروج من هذا الجهاز؟ ستحتاج إلى تسجيل الدخول مجدداً للوصول إلى حسابك. تبقى ملفاتك الصوتية المحلية على هذا الجهاز.</string>
     <string name="auth_logout_all">تسجيل الخروج من كل الأجهزة</string>
     <string name="auth_logout_all_description">ستحتاج كل الأجهزة إلى تسجيل الدخول مجدداً عند الاتصال. تبقى ملفاتك الصوتية المحلية على هذا الجهاز.</string>
     <string name="auth_processing_verification">ستحتاج معالجة الصوت على الخادم إلى تأكيد البريد. تظل ملفاتك الصوتية المحلية متاحة.</string>
@@ -328,7 +329,7 @@
     <string name="url_import_queued">في انتظار الاستيراد…</string>
     <string name="url_import_validating">جارٍ فحص الصوت…</string>
     <string name="url_import_uploading">جارٍ حفظ الصوت للمعالجة…</string>
-    <string name="url_import_submitted">اكتمل الاستيراد وبدأت المعالجة.</string>
+    <string name="url_import_submitted">بدأ الاستيراد. سنواصل المعالجة في الخلفية.</string>
     <string name="url_import_failed">فشل الاستيراد</string>
     <string name="url_import_attention">يتطلب الاستيراد انتباهك</string>
     <string name="url_import_invalid">أدخل رابطًا واحدًا صالحًا.</string>
@@ -350,6 +351,8 @@
     <string name="realtime_queue_unavailable">رقم الانتظار غير متاح حالياً</string>
     <string name="realtime_reconnecting">جارٍ الاتصال بالتحديثات المباشرة…</string>
     <string name="realtime_live">تحديثات مباشرة</string>
+    <string name="realtime_connected_status">التحديثات المباشرة متصلة</string>
+    <string name="realtime_disconnected_status">التحديثات المباشرة غير متصلة</string>
     <string name="server_timings">أوقات الخادم</string>
     <string name="server_total">إجمالي وقت الخادم</string>
     <string name="timing_partial">على الأقل %1$s</string>

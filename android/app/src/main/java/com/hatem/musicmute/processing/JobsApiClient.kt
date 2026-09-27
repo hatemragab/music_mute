@@ -104,7 +104,8 @@ class JobsApiClient(
     override suspend fun list(cursor: String?, status: String?): JobPage {
         if (cursor != null && cursor.length > 512) invalidInput()
         if (status != null && JobStatus.entries.none { it.wireValue == status }) invalidInput()
-        val query = "?limit=20" + (cursor?.let { "&cursor=${encode(it)}" } ?: "") +
+        val query = "?limit=${jobHistoryPageSize(cursor)}" +
+            (cursor?.let { "&cursor=${encode(it)}" } ?: "") +
             (status?.let { "&status=${encode(it)}" } ?: "")
         return decode(request("GET", "/jobs$query"))
     }

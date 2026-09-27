@@ -40,8 +40,6 @@ data class PlaybackState(
     val orderedQueue: List<QueueTrack> = emptyList(),
     val speed: Float = 1f,
     val volume: Float = 1f,
-    val loopStartMs: Long? = null,
-    val loopEndMs: Long? = null,
 )
 
 class AudioPlaybackController(context: Context) : QueueCommands {
@@ -65,9 +63,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
     private var cachedQueue = emptyList<QueueTrack>()
     private var cachedOrder = emptyList<QueueTrack>()
     private var libraryTitles: Map<LibraryKey, String> = emptyMap()
-    private var loopTrackId: String? = null
-    private var loopStartMs: Long? = null
-    private var loopEndMs: Long? = null
     private val listener =
         object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
@@ -103,7 +98,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         )
         scope.launch {
             while (true) {
-                controller?.let(::enforceSectionLoop)
                 refresh()
                 delay(500)
             }
@@ -254,37 +248,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         refresh()
     }
 
-    /** Loops the next 15 seconds from the current position. A second call clears it. */
-    fun setSectionLoop(enabled: Boolean) {
-        val player = controller ?: return
-        if (!enabled) {
-            loopStartMs = null
-            loopEndMs = null
-            refresh()
-            return
-        }
-        val range = sectionLoopRange(player.currentPosition, player.duration.takeUnless { it == C.TIME_UNSET } ?: 0)
-        if (range == null) {
-            refresh()
-            return
-        }
-        loopTrackId = player.currentMediaItem?.mediaId
-        loopStartMs = range.first
-        loopEndMs = range.second
-        refresh()
-    }
-
-    private fun enforceSectionLoop(player: MediaController) {
-        val start = loopStartMs ?: return
-        val end = loopEndMs ?: return
-        if (player.currentMediaItem?.mediaId != loopTrackId) {
-            loopStartMs = null
-            loopEndMs = null
-            return
-        }
-        if (player.currentPosition >= end) player.seekTo(start)
-    }
-
     fun reportMissingFile() {
         mutableState.update { it.copy(failed = true) }
     }
@@ -308,11 +271,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
             }
         }
         val currentItem = player.currentMediaItem
-        if (currentItem?.mediaId != loopTrackId) {
-            loopTrackId = currentItem?.mediaId
-            loopStartMs = null
-            loopEndMs = null
-        }
         mutableState.update { old ->
             old.copy(
                 trackId = currentItem?.mediaId,
@@ -332,8 +290,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
                 orderedQueue = cachedOrder,
                 speed = player.playbackParameters.speed,
                 volume = player.volume,
-                loopStartMs = loopStartMs,
-                loopEndMs = loopEndMs,
             )
         }
     }

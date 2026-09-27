@@ -34,6 +34,7 @@ data class AudioTaskPresentation(
     val importRequestId: String? = null,
     val importOnly: Boolean = false,
     val serverStageTimings: ServerStageTimings? = null,
+    val createdAtMillis: Long = 0,
 )
 
 fun audioTaskPresentations(
@@ -57,12 +58,7 @@ fun audioTaskPresentations(
         !(record.status == "submitted" && (record.jobObserved || record.createdAtMillis == 0L)) }.forEach { record ->
         merged += importPresentation(record)
     }
-    return merged.sortedByDescending { task ->
-        jobs.firstOrNull { it.id == task.jobId }?.createdAt?.toEpochMilli()
-            ?: operations.firstOrNull { it.operationId == task.operationId }?.acceptedAtMillis
-            ?: imports.firstOrNull { it.requestId == task.importRequestId }?.createdAtMillis
-            ?: 0
-    }
+    return merged.sortedByDescending(AudioTaskPresentation::createdAtMillis)
 }
 
 private fun importPresentation(record: UrlImportRecord): AudioTaskPresentation {
@@ -86,6 +82,7 @@ private fun importPresentation(record: UrlImportRecord): AudioTaskPresentation {
         canCancel = false, canRetry = stage == AudioTaskStage.FAILED,
         canDelete = false, canPlay = false, errorCode = record.errorCode,
         importRequestId = record.requestId, importOnly = true,
+        createdAtMillis = record.createdAtMillis,
     )
 }
 
@@ -149,6 +146,7 @@ private fun presentation(
         problem = if (stage == AudioTaskStage.FAILED || stage == AudioTaskStage.WAITING) operation?.problem else null,
         localProblem = if (stage == AudioTaskStage.FAILED) operation?.localProblem else null,
         lastReachedStage = lastReachedStage(stage, operation, job),
+        createdAtMillis = job?.createdAt?.toEpochMilli() ?: operation?.acceptedAtMillis ?: 0,
     )
 }
 

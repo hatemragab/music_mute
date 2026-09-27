@@ -11,6 +11,7 @@ class AudioTaskPresentationTest {
         val importing = audioTaskPresentations(emptyList(), emptyList(), 200, listOf(record)).single()
         assertEquals(AudioTaskStage.DOWNLOADING_SOURCE, importing.stage)
         assertEquals("عنوان 🎵", importing.displayName)
+        assertEquals(100, importing.createdAtMillis)
         assertFalse(importing.canCancel)
         assertNull(importing.jobId)
         val ready = job("ready").copy(sourceTitle = record.sourceTitle, displayName = record.sourceTitle)
@@ -138,6 +139,23 @@ class AudioTaskPresentationTest {
         assertEquals(AudioTaskStage.UNKNOWN, tasks[1].stage)
         assertFalse(tasks[1].canDelete)
         assertNull(tasks[1].operationId)
+    }
+
+    @Test fun everyJobStateKeepsNewestFirstCreationOrder() {
+        val olderReady = job("ready").copy(
+            id = "68c000000000000000000010",
+            createdAt = Instant.ofEpochMilli(1_000),
+        )
+        val newerFailed = job("failed").copy(
+            id = "68c000000000000000000011",
+            createdAt = Instant.ofEpochMilli(2_000),
+        )
+
+        val tasks = audioTaskPresentations(emptyList(), listOf(olderReady, newerFailed), 0)
+
+        assertEquals(listOf(newerFailed.id, olderReady.id), tasks.map { it.jobId })
+        assertEquals(listOf(AudioTaskStage.FAILED, AudioTaskStage.READY), tasks.map { it.stage })
+        assertEquals(listOf(2_000L, 1_000L), tasks.map { it.createdAtMillis })
     }
 
     @Test fun activeLocalTransferAndCancellationOverrideOnlyNonterminalServerState() {

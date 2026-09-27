@@ -2,12 +2,10 @@ package com.hatem.musicmute.processing
 
 import android.content.Context
 import android.os.Build
-import android.os.SystemClock
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
-import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -18,10 +16,6 @@ import com.hatem.musicmute.BuildConfig
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 interface ProcessingWorkerHost { val processingRepository: ProcessingRepository }
@@ -70,23 +64,6 @@ class WorkManagerProcessingScheduler(context: Context) : ProcessingScheduler {
 }
 
 class AudioUploadWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
-    override suspend fun getForegroundInfo(): ForegroundInfo {
-        val target = target()
-        val repository = (applicationContext as? ProcessingWorkerHost)?.processingRepository
-        val operation = if (repository?.isCurrentSession(target.ownerUid, target.epoch) == true)
-            repository.store.get(target.ownerUid, target.operationId) else null
-        val state = operation ?: ProcessingOperation(target.operationId, target.ownerUid, target.operationId)
-        return AudioTaskNotifications(applicationContext).foreground(target.copy(jobId = operation?.jobId),
-            audioTaskNotificationProjection(state, target))
-    }
-
-    private fun target() = AudioTaskNotificationTarget(
-        inputData.getString(WorkManagerProcessingScheduler.KEY_OWNER).orEmpty(),
-        inputData.getString(WorkManagerProcessingScheduler.KEY_OPERATION) ?: id.toString(),
-        inputData.getLong(WorkManagerProcessingScheduler.KEY_EPOCH, Long.MIN_VALUE),
-        workRequestId = id.toString(),
-    )
-
     override suspend fun doWork(): Result {
         val owner = inputData.getString(WorkManagerProcessingScheduler.KEY_OWNER) ?: return Result.failure()
         val operation = inputData.getString(WorkManagerProcessingScheduler.KEY_OPERATION) ?: return Result.failure()
@@ -101,33 +78,12 @@ class AudioUploadWorker(context: Context, parameters: WorkerParameters) : Corout
         if (app.updateAdmission.isBlocked()) return Result.retry()
         return try {
             app.audioPipelineCoordinator.withLocalSlot(owner, epoch) {
-                setForeground(getForegroundInfo())
-                coroutineScope {
-                    val notifications = AudioTaskNotifications(applicationContext)
-                    val throttle = AudioTaskNotificationThrottle()
-                    val reporter = launch {
-                        repository.store.operations(owner).catch { error ->
-                            if (error is CancellationException) throw error
-                        }.collect { operations ->
-                            if (!repository.isCurrentSession(owner, epoch)) return@collect
-                            val current = operations.find { it.operationId == operation } ?: return@collect
-                            val target = target().copy(jobId = current.jobId)
-                            val projection = audioTaskNotificationProjection(current, target)
-                            if (throttle.shouldUpdate(projection, SystemClock.elapsedRealtime()))
-                                notifications.updateIfVisible(target, projection)
-                        }
-                    }
-                    try {
-                        when (repository.runUpload(owner, operation, epoch, runAttemptCount)) {
-                            ProcessingRunResult.COMPLETE -> Result.success()
-                            ProcessingRunResult.RETRY -> Result.retry()
-                            ProcessingRunResult.PAUSED -> {
-                                captureFailure(app, owner, operation, epoch)
-                                Result.failure()
-                            }
-                        }
-                    } finally {
-                        reporter.cancelAndJoin()
+                when (repository.runUpload(owner, operation, epoch, runAttemptCount)) {
+                    ProcessingRunResult.COMPLETE -> Result.success()
+                    ProcessingRunResult.RETRY -> Result.retry()
+                    ProcessingRunResult.PAUSED -> {
+                        captureFailure(app, owner, operation, epoch)
+                        Result.failure()
                     }
                 }
             }
