@@ -1,9 +1,12 @@
 # Realtime protocol v1
 
-The client opens one native RFC 6455 WebSocket per authenticated foreground
-session. HTTP remains responsible for authentication, commands, signed grants,
-file transfers and explicitly requested non-live resources. There is no HTTP
-polling fallback for live resources. Existing REST routes remain compatible.
+The client opens one native RFC 6455 WebSocket per authenticated app session.
+Browser clients keep that shared connection while the page remains loaded,
+including when the user switches browser tabs; route and visibility changes do
+not create another socket. Native clients retain their platform foreground
+session fencing. HTTP remains responsible for authentication, commands, signed
+grants, file transfers and explicitly requested non-live resources. There is no
+HTTP polling fallback for live resources. Existing REST routes remain compatible.
 
 ## Establishing a session
 
@@ -102,8 +105,11 @@ without writes. Clients hide queue numbers while reconnecting.
 - Server sends `ping` with `server_time` every 30 seconds; clients answer
   `{"type":"pong"}`. Client watchdog is 65 seconds, initial ready deadline 10
   seconds; browser subscription deadline is 10 seconds, native first snapshot
-  deadline 15 seconds, and browser one-shot reads time out at 15 seconds. Reconnect uses exponential
-  backoff with jitter capped around 30 seconds. Browser retries honor Retry-After.
+  deadline 15 seconds, and browser one-shot reads time out at 15 seconds. Browser
+  watchdog and subscription deadlines are suspended while the document is hidden;
+  returning visible gives the existing socket one heartbeat grace window before
+  recovery. Reconnect uses exponential backoff with jitter capped around 30
+  seconds. Browser retries honor Retry-After.
 - `subscription_error` includes `stream_id`, `subscription_id`, `status`, `code`.
   Retry transient failures through the socket. Definitive missing/access errors
   are surfaced. Session rejection clears privileged view state.
@@ -126,7 +132,12 @@ connections per process, 3,000 upgrades globally/minute, 60 upgrades per IP/minu
 120 control messages/30 seconds, four concurrent reads/connection, 8 KiB inbound
 frames, 256 KiB snapshots and 1 MiB buffered outbound data. No compression.
 Invalidations coalesce for one second. Time-dependent reads are refreshed from the
-server heartbeat; existing health sampling and overview caches are reused.
+server heartbeat; active job views continue that refresh for elapsed and progress
+staleness fields, while fully terminal job views and change-driven policy views do
+not reread periodically. Existing health sampling and overview caches are reused.
+The API emits one-minute, aggregate-only socket metrics for connection/rejection/
+close categories, snapshot read latency, outbound bytes and backpressure. Those
+records contain no identity, resource parameters or payload data.
 
 Deploy backend first, then web/native clients. Mongo must be a replica set or
 sharded deployment with change-stream privileges. Standalone Mongo can support
@@ -134,7 +145,9 @@ legacy REST but cannot provide this realtime feed. Keep Redis available. Reverse
 proxies must forward WebSocket Upgrade/Connection and subprotocol headers, with an
 idle timeout longer than the heartbeat/watchdog. Allow only configured browser
 origins. Both web servers include the exact API WSS origin in CSP. The existing
-worker-hint socket shares the upgrade dispatcher and keeps its own protocol.
+worker-hint socket shares the upgrade dispatcher and keeps its own protocol,
+including its one-use ticket, server heartbeat and Redis-backed single-machine
+connection lease.
 
 No index migration or persisted job schema change is introduced. Rollback clients
 before removing backend websocket support; older clients can keep using REST.

@@ -162,6 +162,85 @@ single-host fixture is not evidence for the 3,000-connection production limit.
   media grants, explicit security revalidation and file transfers remain HTTP.
 - Nothing committed, pushed, published or deployed.
 
+## Browser connection lifetime correction — 2026-09-27
+
+Branch `hatem/keep-live-socket` is based on `origin/main` at `c1891ddb`. The
+public web client and administrator dashboard no longer close their shared
+session socket when the document becomes hidden. Route changes and browser-tab
+switches now retain the existing connection; offline/network loss, server or
+watchdog closure, session expiry, logout and app unmount retain their existing
+recovery behavior. Browser watchdog and initial-snapshot deadlines are suspended
+while hidden, then rearmed with a grace window when visible. View/cache listener
+failures are isolated from protocol handling so they cannot restart the transport.
+Regression tests assert that hidden-tab and repeated start or online signals still
+issue one ticket and construct one socket per app session.
+
+Backend heartbeat refresh now targets only resources whose representation changes
+from elapsed time or live probes. Active job and job-list subscriptions retain the
+refresh needed for server timing and progress-staleness fields; once a job or every
+item in a page is terminal, refresh becomes change-driven. Policy subscriptions
+use committed-change invalidation, and the queue projection retains exact retry
+and worker-liveness deadlines. One-minute aggregate socket telemetry records
+active/accepted/rejected/closed counts, bounded read latency, snapshots, bytes and
+maximum buffered output. It contains no identity, resource name, subscription
+parameters or payload data.
+
+Backend `pnpm run verify` passed formatting, lint, types, secret and transfer
+checks, 935 unit tests / 131 files, 148 HTTP tests / 25 files and the production
+build. Both browser clients passed targeted realtime tests (7 each), typecheck,
+lint, full unit suites (web 93; dashboard 82), production builds, web server tests
+(7), dashboard deployment tests (11), web Chrome tests (5), and dashboard Chrome
+tests (34). The Chrome realtime fixtures keep the document hidden for two minutes
+past the former watchdog deadline and verify that ticket and physical connection
+counts remain one. The dashboard-wide format check remains blocked by pre-existing
+formatting in `src/observability/sentry.test.ts`; all files changed by this
+correction pass Prettier. These are local and fixture checks, not deployment or
+production connection proof.
+
+### CLI worker hint socket follow-up
+
+The same branch also corrects the CLI worker hint transport. The client now
+cancels its ten-second handshake deadline once the socket opens, keeps a single
+connection loop, closes erroring transports, isolates local wake-listener
+failures and applies jittered exponential backoff that resets only after a stable
+connection. A Redis compare-and-renew lease permits one active hint connection
+per machine identity across API instances; clean closure releases it, heartbeat
+renewal fails closed, and dead connections remain bounded by lease expiry. Hint
+broadcasts also enforce bounded output buffering and isolate send failures.
+
+The worker hint tests now cover two simulated minutes on one opened socket,
+duplicate starts, increasing retry delays and listener isolation. A real local
+12.5-second WebSocket run reproduced two tickets/connections before the fix and
+one ticket/connection with no closure afterward. Backend tests cover duplicate
+machine rejection (`429` plus `Retry-After`) and reconnect after lease release.
+Worker protocol sync, changed-file format, lint, typecheck, 398 TypeScript tests,
+73 Python engine tests passed (one skipped) and the worker build passed. The worker-wide format gate
+remains blocked by unchanged `worker/pnpm-lock.yaml`; its Git object is identical
+to `HEAD`. Backend `pnpm run verify` remains green with 935 unit tests, 148 HTTP
+tests and its production build. No worker binary, API image or production service
+was published or deployed.
+
+### Socket review corrections — 2026-09-27
+
+Review identified malformed worker hints that could throw outside the parse
+guard, close codes rejected by Node's native WebSocket, and a browser tab-return
+deadline being restarted after a definitive subscription error. Both browser
+clients now preserve that completed error response. The worker validates hint
+objects and string types without coercion and uses the supported private close
+code 4000 for invalid hints and transport errors. Retry delays release abort
+listeners, shutdown fences pending ticket responses, and reconnect waits for the
+previous socket's close event even after a handshake timeout.
+
+Regression coverage includes malformed JSON shapes, delayed socket closure,
+shutdown during ticket acquisition, a real local native WebSocket malformed-hint
+exchange, and two API instances sharing a fake Redis machine lease. The latter
+is a local service test, not live Redis failover or multi-host deployment proof.
+Backend `pnpm run verify` passed with 936 unit and 148 HTTP tests. Web and
+dashboard full unit suites passed (94 and 83), as did their realtime Chrome
+fixtures (one and two), typecheck, lint and builds. Worker `pnpm test` passed
+409 tests (two skipped); typecheck, lint and build also passed. The unchanged
+worker lockfile and dashboard Sentry test formatting limitations noted above
+remain. No production deployment or production soak test was performed.
 
 ## Direct-main integration — 2026-09-26
 

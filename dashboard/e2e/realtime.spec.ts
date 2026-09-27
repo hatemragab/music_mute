@@ -40,6 +40,26 @@ test("job changes arrive as socket snapshots without HTTP status polling", async
   await page.clock.install();
   await page.goto(`/jobs/${FIXTURE_IDS.job}`);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.fastForward(120_000);
+  expect(server.realtimeTicketCount()).toBe(1);
+  expect(server.realtimeConnectionCount()).toBe(1);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.fastForward(30_000);
+  expect(server.realtimeTicketCount()).toBe(1);
+  expect(server.realtimeConnectionCount()).toBe(1);
   title = "Updated only through WebSocket";
   await server.publishRealtime();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();

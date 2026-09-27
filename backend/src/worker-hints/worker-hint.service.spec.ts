@@ -35,6 +35,12 @@ class FakeRedis extends EventEmitter {
     return value;
   }
 
+  async eval(script: string, _keyCount: number, key: string, expected: string) {
+    if (this.values.get(key) !== expected) return 0;
+    if (script.includes("redis.call('DEL'")) this.values.delete(key);
+    return 1;
+  }
+
   async publish(channel: string, message: string) {
     this.subscriber?.emit('message', channel, message);
     return 1;
@@ -56,6 +62,65 @@ afterEach(async () => {
 });
 
 describe('worker hint websocket', () => {
+  it('shares the machine lease across API instances and releases it on close', async () => {
+    const redis = new FakeRedis();
+    const instances = await Promise.all(
+      [0, 1].map(async () => {
+        const service = new WorkerHintService(
+          redis as unknown as Redis,
+          {
+            reserve: async () => ({ allowed: true, retryAfterSeconds: 0 }),
+          } as never,
+          {
+            bucket: (scope: string, identifier: string) =>
+              `${scope}:${identifier}`,
+          } as never,
+          { get: () => 'false' } as never,
+        );
+        const server = createServer();
+        service.attach(server);
+        await new Promise<void>((resolve) =>
+          server.listen(0, '127.0.0.1', resolve),
+        );
+        cleanup.push(async () => {
+          await service.onModuleDestroy();
+          await new Promise<void>((resolve) => server.close(() => resolve()));
+        });
+        return { service, port: (server.address() as AddressInfo).port };
+      }),
+    );
+    const connect = async (index: number) => {
+      const instance = instances[index]!;
+      const ticket = await instance.service.mintTicket('shared-machine');
+      const socket = new WebSocket(
+        `ws://127.0.0.1:${instance.port}${ticket.path}`,
+        ['musicmute.worker-hint.v1', `ticket.${ticket.ticket}`],
+      );
+      socket.on('error', () => undefined);
+      return socket;
+    };
+    const first = await connect(0);
+    cleanup.push(async () => first.close());
+    await once(first, 'open');
+    const duplicate = await connect(1);
+    const [, response] = await once(duplicate, 'unexpected-response');
+    expect(response.statusCode).toBe(429);
+    response.destroy();
+    const closed = once(first, 'close');
+    first.close();
+    await closed;
+    await vi.waitFor(() =>
+      expect(
+        [...redis.values.keys()].some((key) =>
+          key.startsWith('worker-socket-connection:'),
+        ),
+      ).toBe(false),
+    );
+    const replacement = await connect(1);
+    cleanup.push(async () => replacement.close());
+    await once(replacement, 'open');
+  });
+
   it('uses the same one-hop proxy identity as HTTP without trusting it when disabled', () => {
     const request = {
       socket: { remoteAddress: '172.18.0.2' },
@@ -114,6 +179,44 @@ describe('worker hint websocket', () => {
     const [, response] = await once(replay, 'unexpected-response');
     expect((response as { statusCode: number }).statusCode).toBe(401);
     (response as { destroy(): void }).destroy();
+
+    const duplicateTicket = await service.mintTicket(
+      '32410a14-e85a-4a1d-bb99-61fa54b07eaa',
+    );
+    const duplicate = new WebSocket(url, [
+      'musicmute.worker-hint.v1',
+      `ticket.${duplicateTicket.ticket}`,
+    ]);
+    duplicate.on('error', () => undefined);
+    const [, duplicateResponse] = await once(duplicate, 'unexpected-response');
+    expect((duplicateResponse as { statusCode: number }).statusCode).toBe(429);
+    expect(
+      (duplicateResponse as { headers: Record<string, string> }).headers[
+        'retry-after'
+      ],
+    ).toBe('30');
+    (duplicateResponse as { destroy(): void }).destroy();
+
+    const closed = once(socket, 'close');
+    socket.close();
+    await closed;
+    await vi.waitFor(() =>
+      expect(
+        [...redis.values.keys()].some((key) =>
+          key.startsWith('worker-socket-connection:'),
+        ),
+      ).toBe(false),
+    );
+    const replacementTicket = await service.mintTicket(
+      '32410a14-e85a-4a1d-bb99-61fa54b07eaa',
+    );
+    const replacement = new WebSocket(url, [
+      'musicmute.worker-hint.v1',
+      `ticket.${replacementTicket.ticket}`,
+    ]);
+    cleanup.push(async () => replacement.close());
+    await once(replacement, 'open');
+
     expect(reserve).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({

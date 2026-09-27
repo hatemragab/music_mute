@@ -26,10 +26,13 @@ export async function installDashboardFixture(
   fixture: DashboardFixture = createDashboardFixture(),
 ) {
   let ticketToken: string | null = null;
+  let ticketCount = 0;
+  let connectionCount = 0;
   const publishers = new Set<() => Promise<void>>();
   await page.routeWebSocket(
     `${E2E_API_ORIGIN.replace(/^http/, "ws")}/realtime/socket`,
     (socket) => {
+      connectionCount++;
       const token = ticketToken;
       const subscriptions = new Map<
         string,
@@ -111,6 +114,7 @@ export async function installDashboardFixture(
       ? authorization.slice("Bearer ".length)
       : null;
     if (new URL(request.url()).pathname === "/admin/realtime-tickets") {
+      ticketCount++;
       ticketToken = token;
       await route.fulfill({
         status: 201,
@@ -152,5 +156,7 @@ export async function installDashboardFixture(
   return Object.assign(fixture, {
     publishRealtime: () =>
       Promise.all([...publishers].map((publish) => publish())),
+    realtimeTicketCount: () => ticketCount,
+    realtimeConnectionCount: () => connectionCount,
   });
 }

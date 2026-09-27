@@ -4,6 +4,8 @@ test("public history receives pushed queue changes without polling", async ({
   page,
 }) => {
   let socket: WebSocketRoute;
+  let ticketCount = 0;
+  let connectionCount = 0;
   const subscriptions = new Map<
     string,
     { resource: string; sequence: number }
@@ -44,8 +46,9 @@ test("public history receives pushed queue changes without polling", async ({
         }),
       );
   };
-  await page.route("http://127.0.0.1:3000/realtime-tickets", (route) =>
-    route.fulfill({
+  await page.route("http://127.0.0.1:3000/realtime-tickets", (route) => {
+    ticketCount++;
+    return route.fulfill({
       status: 201,
       headers: { "access-control-allow-origin": "*" },
       body: JSON.stringify({
@@ -53,9 +56,10 @@ test("public history receives pushed queue changes without polling", async ({
         path: "/realtime/socket",
         protocol: "musicmute.realtime.v1",
       }),
-    }),
-  );
+    });
+  });
   await page.routeWebSocket("ws://127.0.0.1:3000/realtime/socket", (route) => {
+    connectionCount++;
     socket = route;
     route.onMessage((raw) => {
       const command = JSON.parse(String(raw));
@@ -89,6 +93,27 @@ test("public history receives pushed queue changes without polling", async ({
   await page.goto("/tests/preview.html?network-realtime");
   await expect(page.getByText("Queued audio fixture").first()).toBeVisible();
   await expect(page.getByText(/#3/).first()).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.fastForward(120_000);
+  expect(ticketCount).toBe(1);
+  expect(connectionCount).toBe(1);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  socket.send(JSON.stringify({ type: "ping" }));
+  await page.clock.fastForward(30_000);
+  expect(ticketCount).toBe(1);
+  expect(connectionCount).toBe(1);
   position = 1;
   publish();
   await expect(page.getByText(/#1/).first()).toBeVisible();

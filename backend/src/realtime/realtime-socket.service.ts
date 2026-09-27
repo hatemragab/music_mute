@@ -2,6 +2,7 @@ import {
   HttpException,
   Inject,
   Injectable,
+  Logger,
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -16,6 +17,7 @@ import { RateBudgetService } from '../rate-limits/rate-budget.service.js';
 import { RateLimitKeys } from '../rate-limits/rate-limit-keys.js';
 import { SECURITY_REDIS } from '../rate-limits/security-redis.provider.js';
 import { workerSocketClientIp } from '../worker-hints/worker-hint.service.js';
+import { TERMINAL_JOB_STATUSES } from '../jobs/job-lifecycle-policy.js';
 import {
   REALTIME_PATH,
   REALTIME_PROTOCOL,
@@ -25,16 +27,19 @@ import {
 import { RealtimeFeedService } from './realtime-feed.service.js';
 import {
   parseRealtimeCommand,
+  type RealtimeResource,
   type RealtimeSubscription,
 } from './realtime-protocol.js';
 import { RealtimeResourcesService } from './realtime-resources.service.js';
 import { affectsRealtimeResource } from './realtime-dependencies.js';
+import { RealtimeSocketMetrics } from './realtime-socket-metrics.js';
 
 interface Subscription {
   request: RealtimeSubscription;
   sequence: number;
   dirty: boolean;
   running: boolean;
+  refreshOnHeartbeat: boolean;
   timer?: NodeJS.Timeout;
 }
 interface Client {
@@ -56,8 +61,50 @@ redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3])
 redis.call('EXPIRE', KEYS[1], 120)
 return 1`;
 
+const HEARTBEAT_REFRESH_RESOURCES = new Set<RealtimeResource>([
+  // These views change from elapsed time or live probes even without a database write.
+  'usage',
+  'admin.overview',
+  'admin.health',
+  'admin.workers',
+  'admin.worker',
+  'admin.recoveries',
+  'admin.recovery_summary',
+]);
+
+const JOB_RESOURCES = new Set<RealtimeResource>([
+  'jobs',
+  'job',
+  'admin.jobs',
+  'admin.job',
+]);
+
+function isTerminalJob(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || !('status' in value)) return false;
+  return TERMINAL_JOB_STATUSES.includes(
+    (value as { status: (typeof TERMINAL_JOB_STATUSES)[number] }).status,
+  );
+}
+
+export function refreshesOnHeartbeat(
+  resource: RealtimeResource,
+  data?: unknown,
+): boolean {
+  if (HEARTBEAT_REFRESH_RESOURCES.has(resource)) return true;
+  if (!JOB_RESOURCES.has(resource)) return false;
+  if (data === undefined) return true;
+  if (resource === 'jobs' || resource === 'admin.jobs') {
+    if (!data || typeof data !== 'object' || !('items' in data)) return true;
+    const items = (data as { items?: unknown }).items;
+    return !Array.isArray(items) || items.some((item) => !isTerminalJob(item));
+  }
+  return !isTerminalJob(data);
+}
+
 @Injectable()
 export class RealtimeSocketService implements OnModuleDestroy {
+  private readonly logger = new Logger(RealtimeSocketService.name);
+  private readonly metrics = new RealtimeSocketMetrics();
   private readonly server = new WebSocketServer({
     noServer: true,
     maxPayload: 8192,
@@ -69,6 +116,7 @@ export class RealtimeSocketService implements OnModuleDestroy {
   private detach?: () => void;
   private detachFeed?: () => void;
   private heartbeat?: NodeJS.Timeout;
+  private metricsTimer?: NodeJS.Timeout;
 
   constructor(
     private readonly auth: RealtimeAuthService,
@@ -107,12 +155,15 @@ export class RealtimeSocketService implements OnModuleDestroy {
       for (const client of this.clients) void this.check(client);
     }, 30_000);
     this.heartbeat.unref();
+    this.metricsTimer = setInterval(() => this.reportMetrics(), 60_000);
+    this.metricsTimer.unref();
   }
 
   async onModuleDestroy(): Promise<void> {
     this.detach?.();
     this.detachFeed?.();
     clearInterval(this.heartbeat);
+    clearInterval(this.metricsTimer);
     for (const client of this.clients) {
       client.socket.terminate();
       this.dispose(client);
@@ -211,11 +262,15 @@ export class RealtimeSocketService implements OnModuleDestroy {
           subscriptions: new Map(),
         };
         this.clients.add(client);
+        this.metrics.accepted();
         ws.on('error', () => undefined);
         ws.on('pong', () => {
           client.alive = true;
         });
-        ws.on('close', () => this.dispose(client));
+        ws.on('close', (code) => {
+          this.metrics.closed(code);
+          this.dispose(client);
+        });
         ws.on('message', (data, binary) => {
           if (binary || ++client.controls > 120) {
             ws.close(1008, 'invalid request');
@@ -247,6 +302,7 @@ export class RealtimeSocketService implements OnModuleDestroy {
               sequence: 0,
               dirty: true,
               running: false,
+              refreshOnHeartbeat: refreshesOnHeartbeat(command.resource),
             };
             client.subscriptions.set(command.subscription_id, subscription);
             void this.flush(client, subscription);
@@ -286,6 +342,8 @@ export class RealtimeSocketService implements OnModuleDestroy {
     client.pendingReads++;
     subscription.running = true;
     subscription.dirty = false;
+    const startedAt = Date.now();
+    let readFailed = true;
     try {
       if (!this.feed.healthy) {
         client.socket.close(1013, 'updates unavailable');
@@ -298,16 +356,25 @@ export class RealtimeSocketService implements OnModuleDestroy {
       );
       // Revocation or unsubscribe during the read must fence its response too.
       await this.auth.validate(client.principal);
+      readFailed = false;
       if (!this.current(client, subscription)) return;
-      this.send(client, {
-        type: 'snapshot',
-        protocol_version: 1,
-        stream_id: client.streamId,
-        subscription_id: subscription.request.subscription_id,
-        sequence: ++subscription.sequence,
-        server_time: new Date().toISOString(),
-        data: responseValue(data),
-      });
+      subscription.refreshOnHeartbeat = refreshesOnHeartbeat(
+        subscription.request.resource,
+        data,
+      );
+      this.send(
+        client,
+        {
+          type: 'snapshot',
+          protocol_version: 1,
+          stream_id: client.streamId,
+          subscription_id: subscription.request.subscription_id,
+          sequence: ++subscription.sequence,
+          server_time: new Date().toISOString(),
+          data: responseValue(data),
+        },
+        true,
+      );
     } catch (error) {
       if (!this.current(client, subscription)) return;
       const status = error instanceof HttpException ? error.getStatus() : 503;
@@ -332,6 +399,7 @@ export class RealtimeSocketService implements OnModuleDestroy {
         code,
       });
     } finally {
+      this.metrics.read(Date.now() - startedAt, readFailed);
       client.pendingReads--;
       subscription.running = false;
       if (subscription.dirty && this.current(client, subscription))
@@ -377,24 +445,8 @@ export class RealtimeSocketService implements OnModuleDestroy {
         type: 'ping',
         server_time: new Date().toISOString(),
       });
-      // These projections include wall-clock windows or dependency health, not only DB changes.
       for (const subscription of client.subscriptions.values())
-        if (
-          [
-            'jobs',
-            'job',
-            'admin.jobs',
-            'admin.job',
-            'admin.health',
-            'admin.overview',
-            'admin.recoveries',
-            'admin.recovery_summary',
-            'admin.workers',
-            'admin.worker',
-            'usage',
-            'policy',
-          ].includes(subscription.request.resource)
-        )
+        if (subscription.refreshOnHeartbeat)
           this.invalidate(client, subscription);
     } catch (error) {
       client.socket.close(
@@ -406,17 +458,20 @@ export class RealtimeSocketService implements OnModuleDestroy {
     }
   }
 
-  private send(client: Client, value: unknown): void {
+  private send(client: Client, value: unknown, snapshot = false): void {
     if (client.socket.readyState !== WebSocket.OPEN) return;
     const message = JSON.stringify(value);
-    if (
-      Buffer.byteLength(message) > 256 * 1024 ||
-      client.socket.bufferedAmount > 1024 * 1024
-    ) {
+    const bytes = Buffer.byteLength(message);
+    if (bytes > 256 * 1024 || client.socket.bufferedAmount > 1024 * 1024) {
       client.socket.close(1013, 'snapshot capacity exceeded');
       return;
     }
+    this.metrics.sent(bytes, client.socket.bufferedAmount, snapshot);
     client.socket.send(message);
+  }
+
+  private reportMetrics(): void {
+    this.logger.log(this.metrics.drain(this.clients.size));
   }
 
   private dispose(client: Client): void {
@@ -431,6 +486,7 @@ export class RealtimeSocketService implements OnModuleDestroy {
 
   private reject(socket: Duplex, status: number): void {
     if (socket.destroyed || socket.writableEnded) return;
+    this.metrics.rejected(status);
     socket.end(
       `HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
     );
