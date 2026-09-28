@@ -6,6 +6,7 @@ import {
 } from "../src/test/dashboard-fixtures";
 import { fromWireCase, toWireCase } from "../src/api/wire-case";
 import { installDashboardFixture, setDashboardRole } from "./helpers/session";
+import { E2E_APP_ORIGIN } from "./helpers/urls";
 
 test("owner can open every dashboard area without runtime errors", async ({
   page,
@@ -365,8 +366,22 @@ test("owner uploads a direct APK, publishes verified policy, and saves settings"
   fixture.releases[0].bytes = null;
   fixture.releases[0].sha256Hex = null;
   await installDashboardFixture(page, fixture);
+  const uploadErrors: string[] = [];
+  page.on("pageerror", (error) => uploadErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") uploadErrors.push(message.text());
+  });
   await page.route("https://upload.fixture.invalid/", (route) =>
-    route.fulfill({ status: 204, body: "" }),
+    route.fulfill({
+      status: 204,
+      headers: {
+        "access-control-allow-origin": E2E_APP_ORIGIN,
+        "access-control-allow-methods": "PUT, OPTIONS",
+        "access-control-allow-headers":
+          "Content-Type, If-None-Match, X-Amz-Checksum-Sha256",
+      },
+      body: "",
+    }),
   );
 
   await page.goto(`/releases/${FIXTURE_IDS.release}`);
@@ -377,9 +392,22 @@ test("owner uploads a direct APK, publishes verified policy, and saves settings"
   });
   await page.getByRole("button", { name: "Hash and upload" }).click();
   // The first upload also compiles and starts the hash worker on hosted runners.
-  await expect(page.getByText("verified", { exact: true }).last()).toBeVisible({
-    timeout: 15_000,
-  });
+  try {
+    await expect(
+      page.getByText("verified", { exact: true }).last(),
+    ).toBeVisible({
+      timeout: 15_000,
+    });
+  } catch (error) {
+    throw new Error(
+      `Fixture APK upload failed: ${JSON.stringify({
+        errors: uploadErrors,
+        artifactState: fixture.releases[0].artifactState,
+        page: await page.locator("main").innerText(),
+      })}`,
+      { cause: error },
+    );
+  }
   expect(fixture.releases[0].artifactState).toBe("verified");
 
   await page.goto(`/update-policy?releaseId=${FIXTURE_IDS.release}`);
