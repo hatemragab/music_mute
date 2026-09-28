@@ -18,7 +18,7 @@ The primary checkout's concurrent work was preserved.
   delivery records. Counts exclude subsequently purged accounts.
 - Paginated broadcast history over the existing authenticated raw WebSocket, with
   per-device pending, FCM-accepted, exhausted, invalid and skipped counts. No polling.
-- Additive OpenAPI/HTTP and realtime contracts; no dependency or environment changes.
+- Additive OpenAPI/HTTP and realtime contracts; no added dependencies or environment changes.
 
 ## Commands and observed results
 
@@ -74,5 +74,10 @@ role and lowercase-state conventions remain authoritative.
 The first PR run stopped before dashboard tests because the hosted Homebrew runner
 requires explicit trust for third-party formulae. The workflow now trusts only
 MongoDB's existing `mongodb-community@8.0` formula and its `mongodb-database-tools`
-dependency before installation. It does not disable Homebrew trust enforcement or
-change production permissions. See the [Homebrew command reference](https://docs.brew.sh/Manpage#trust-options-target-).
+dependency and declared `mongodb-enterprise` conflict before installation. The
+enterprise formula is only loaded for conflict checking, not installed. This keeps
+Homebrew trust enforcement enabled and does not change production permissions. See the [Homebrew command reference](https://docs.brew.sh/Manpage#trust-options-target-).
+
+The first full CI backend audit identified GHSA-3pph-fpjx-jg34 in the existing
+Multer 2.3.0 override. The override and lockfile are updated to patched 2.4.0;
+no audit suppression or forced resolution was used.
