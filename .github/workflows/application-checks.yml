@@ -67,7 +67,11 @@ jobs:
       - run: npm install --global pnpm@10.14.0
       - run: pnpm --dir ../backend install --frozen-lockfile
       - run: npm ci --ignore-scripts
-      - run: brew tap mongodb/brew && brew install mongodb-community@8.0 redis
+      - name: Install isolated database test dependencies
+        run: |
+          brew tap mongodb/brew
+          brew trust --formula mongodb/brew/mongodb-community@8.0 mongodb/brew/mongodb-database-tools
+          brew install mongodb-community@8.0 redis
       - run: echo "$(brew --prefix mongodb-community@8.0)/bin" >> "$GITHUB_PATH"
       - run: npx playwright install chrome
       - run: npm run format:check && npm run lint && npm run typecheck && npm test && npm run test:deployment && npm run test:e2e

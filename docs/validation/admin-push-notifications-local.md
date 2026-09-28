@@ -68,3 +68,11 @@ API preflight used the official [Zalando guidelines](https://opensource.zalando.
 on 2026-09-29: OpenAPI (101), endpoint security (104), compatibility (106),
 snake_case (118), pagination (159) and problem responses (176). Repository receipt,
 role and lowercase-state conventions remain authoritative.
+
+## CI setup compatibility
+
+The first PR run stopped before dashboard tests because the hosted Homebrew runner
+requires explicit trust for third-party formulae. The workflow now trusts only
+MongoDB's existing `mongodb-community@8.0` formula and its `mongodb-database-tools`
+dependency before installation. It does not disable Homebrew trust enforcement or
+change production permissions. See the [Homebrew command reference](https://docs.brew.sh/Manpage#trust-options-target-).
