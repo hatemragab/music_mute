@@ -391,13 +391,10 @@ test("owner uploads a direct APK, publishes verified policy, and saves settings"
     buffer: Buffer.from("synthetic APK bytes for browser flow"),
   });
   await page.getByRole("button", { name: "Hash and upload" }).click();
-  // The first upload also compiles and starts the hash worker on hosted runners.
   try {
     await expect(
       page.getByText("verified", { exact: true }).last(),
-    ).toBeVisible({
-      timeout: 15_000,
-    });
+    ).toBeVisible();
   } catch (error) {
     throw new Error(
       `Fixture APK upload failed: ${JSON.stringify({

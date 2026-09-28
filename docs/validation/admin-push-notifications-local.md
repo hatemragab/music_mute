@@ -85,7 +85,16 @@ Multer 2.3.0 override. The override and lockfile are updated to patched 2.4.0;
 no audit suppression or forced resolution was used.
 
 The full hosted browser suite also exposed an outdated owner navigation expectation
-and two timing-sensitive checks. The owner expectation now includes Push
+and two browser initialization issues. The owner expectation now includes Push
 notifications, worker accessibility waits for the specific loaded page heading,
-and APK verification allows a bounded 15 seconds for initial hash-worker startup
-and the upload flow. No tests or accessibility rules were disabled.
+and Vite pre-optimizes the existing hash-worker dependencies. Cold-cache diagnostic
+logs showed those imports discovered during upload, causing React module disposal
+and a form reset before completion on hosted runners. A longer wait did not fix it;
+the default assertion timeout is retained. The cross-origin upload fixture also
+uses explicit CORS headers and records useful failure diagnostics. No tests or
+accessibility rules were disabled.
+
+After pre-optimization, `CI=true npm run test:e2e -- full-dashboard.spec.ts
+--workers=1` passed all 13 scenarios with a fresh generated Vite cache. Diagnostic
+logs contained no mid-run dependency discovery or React module disposal. Dashboard
+formatting, lint and type checks passed again.
