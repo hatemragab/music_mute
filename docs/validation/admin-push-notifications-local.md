@@ -44,6 +44,7 @@ From `dashboard/`:
   with the standard isolated backend startup/login fixture. Broadcast requests and
   socket snapshots in this browser test are mocked. It verifies reviewed sending,
   live history without HTTP polling, and a narrow viewport without overflow.
+- Full `npm run test:e2e`: all 35 Chrome browser tests passed after the CI test fixes.
 - Desktop and narrow-view screenshots were inspected under ignored `test-results/`.
 
 `git diff --check` passed. OpenAPI YAML and the new local schema/response references
@@ -82,3 +83,9 @@ or disable trust enforcement for other taps. See the
 The first full CI backend audit identified GHSA-3pph-fpjx-jg34 in the existing
 Multer 2.3.0 override. The override and lockfile are updated to patched 2.4.0;
 no audit suppression or forced resolution was used.
+
+The full hosted browser suite also exposed an outdated owner navigation expectation
+and two timing-sensitive checks. The owner expectation now includes Push
+notifications, worker accessibility waits for the specific loaded page heading,
+and APK verification allows a bounded 15 seconds for initial hash-worker startup
+and the upload flow. No tests or accessibility rules were disabled.

@@ -376,9 +376,10 @@ test("owner uploads a direct APK, publishes verified policy, and saves settings"
     buffer: Buffer.from("synthetic APK bytes for browser flow"),
   });
   await page.getByRole("button", { name: "Hash and upload" }).click();
-  await expect(
-    page.getByText("verified", { exact: true }).last(),
-  ).toBeVisible();
+  // The first upload also compiles and starts the hash worker on hosted runners.
+  await expect(page.getByText("verified", { exact: true }).last()).toBeVisible({
+    timeout: 15_000,
+  });
   expect(fixture.releases[0].artifactState).toBe("verified");
 
   await page.goto(`/update-policy?releaseId=${FIXTURE_IDS.release}`);
