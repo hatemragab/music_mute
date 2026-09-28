@@ -154,28 +154,19 @@ import XCTest
     model.setVisible(false)
   }
 
-  func testManualRefreshDuringCacheLoadDoesNotLoseVisiblePolling() async {
+  func testOwnerBindingStartsEmptyUntilFreshHistoryArrives() async {
     let api = HistoryAPIFixture()
-    var calls = 0
-    api.page = { _ in
-      calls += 1
-      return JobPage(items: [], nextCursor: nil)
-    }
-    var pending: CheckedContinuation<[Job], Error>?
-    let model = ProcessingHistoryModel(
-      api: api,
-      loadCached: { _ in
-        try await withCheckedThrowingContinuation { pending = $0 }
-      })
-    model.setVisible(true)
-    let bind = Task { await model.bindOwner("owner") }
-    while pending == nil { await Task.yield() }
+    api.page = { _ in JobPage(items: [self.job("old")], nextCursor: nil) }
+    let model = ProcessingHistoryModel(api: api)
+    await model.bindOwner("owner")
     await model.refresh()
-    pending?.resume(returning: [])
-    await bind.value
-    await Task.yield()
-    XCTAssertEqual(calls, 1, "cache completion must not duplicate the fresh network page")
-    model.setVisible(false)
+    XCTAssertEqual(model.jobs.map(\.id), ["old"])
+    await model.bindOwner(nil)
+    await model.bindOwner("owner")
+    XCTAssertTrue(model.jobs.isEmpty)
+    api.page = { _ in JobPage(items: [self.job("fresh")], nextCursor: nil) }
+    await model.refresh()
+    XCTAssertEqual(model.jobs.map(\.id), ["fresh"])
   }
 
   func testPaginationDeduplicatesAndOfflineRefreshRetainsHistory() async {

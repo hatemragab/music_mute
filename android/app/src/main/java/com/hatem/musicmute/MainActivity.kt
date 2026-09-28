@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
     private val openHistory = MutableStateFlow(false)
+    private val openPlayer = MutableStateFlow(false)
     private val openProcessing = MutableStateFlow(false)
     private val processingJob = MutableStateFlow<String?>(null)
     private val processingOperation = MutableStateFlow<String?>(null)
@@ -45,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         openHistory.value = intent.getBooleanExtra(OPEN_HISTORY, false)
+        openPlayer.value = intent.getBooleanExtra(OPEN_PLAYER, false)
         openProcessing.value = intent.getBooleanExtra(OPEN_PROCESSING, false)
         audioTaskIntent.value = intent
         if (savedInstanceState == null) sharedUrlText.value = sharedText(intent)
@@ -106,6 +108,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             val requestedHistory by openHistory.collectAsStateWithLifecycle()
+            val requestedPlayer by openPlayer.collectAsStateWithLifecycle()
             val requestedOperation by processingOperation.collectAsStateWithLifecycle()
             val sharedText by sharedUrlText.collectAsStateWithLifecycle()
             LaunchedEffect(Unit) {
@@ -156,6 +159,8 @@ class MainActivity : AppCompatActivity() {
                     ) { onAccount ->
                         VocalApp(state, model, processing, processingSession, app.processingArtifacts.progress,
                             requestedHistory,
+                            openPlayer = requestedPlayer,
+                            onPlayerOpened = { openPlayer.value = false; intent.removeExtra(OPEN_PLAYER) },
                             sharedUrlText = sharedText,
                             onSharedUrlConsumed = { sharedUrlText.value = null },
                             openProcessing = requestedProcessing, openProcessingJob = requestedJob,
@@ -176,6 +181,7 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         openHistory.value = intent.getBooleanExtra(OPEN_HISTORY, false)
+        openPlayer.value = intent.getBooleanExtra(OPEN_PLAYER, false)
         openProcessing.value = intent.getBooleanExtra(OPEN_PROCESSING, false)
         audioTaskIntent.value = intent
         sharedUrlText.value = sharedText(intent)
@@ -186,6 +192,7 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         val app = application as VocalApplication
         app.processingPush.onForeground()
+        app.realtime.setForeground(true)
         app.updateCoordinator.setForeground(true)
     }
 
@@ -195,11 +202,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        (application as VocalApplication).realtime.setForeground(false)
         (application as VocalApplication).updateCoordinator.setForeground(false)
         super.onStop()
     }
 
     companion object {
+        private const val OPEN_PLAYER = "open_player"
         private const val OPEN_HISTORY = "open_download_history"
         private const val OPEN_PROCESSING = "open_processing"
 
@@ -209,6 +218,12 @@ class MainActivity : AppCompatActivity() {
 
         fun processingPendingIntent(context: Context): PendingIntent = PendingIntent.getActivity(
             context, 1, Intent(context, MainActivity::class.java).putExtra(OPEN_PROCESSING, true)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        fun playerPendingIntent(context: Context): PendingIntent = PendingIntent.getActivity(
+            context, 2, Intent(context, MainActivity::class.java).putExtra(OPEN_PLAYER, true)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )

@@ -39,7 +39,7 @@
     <string name="original_track">Original audio</string>
     <string name="original_description">Voice and background music.</string>
     <string name="listen">Listen</string>
-    <string name="save_voice">Save voice track</string>
+    <string name="save_voice">Save voice only</string>
     <string name="coming_later_title">Coming in a later version</string>
     <string name="got_it">Got it</string>
     <string name="library_description">A quiet home for your voice tracks.</string>
@@ -252,6 +252,7 @@
     <string name="account_deletion_accepted">Deletion scheduled. You are signed out. Sign in again before the exact deadline shown if you want to request account recovery.</string>
     <string name="account_privacy">Privacy policy</string>
     <string name="account_deletion_help">Account deletion help</string>
+    <string name="account_support">Support</string>
     <string name="audio_review_title">Review audio</string>
     <string name="audio_review_metadata">%1$d bytes · %2$.1f seconds</string>
     <string name="audio_cloud_disclosure">Create vocals-only audio. Remove music uploads this audio to private cloud storage for processing. Results and history stay in your account until you delete them.</string>

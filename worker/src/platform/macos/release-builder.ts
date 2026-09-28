@@ -52,6 +52,8 @@ export async function buildMacRelease(
   await assertDirectory(nodeRoot, "Node root");
   await assertDirectory(pythonRoot, "Python root");
   await assertDirectory(mediaRoot, "media root");
+  await assertRegularFile(join(workerRoot, "LICENSE"), "worker license");
+  await assertRegularFile(join(nodeRoot, "LICENSE"), "Node license");
   await assertDirectory(join(mediaRoot, "licenses"), "media licenses");
   await assertRegularFile(
     join(mediaRoot, "SOURCE-MANIFEST.json"),
@@ -101,6 +103,10 @@ export async function buildMacRelease(
       join(workerRoot, "package.json"),
       join(temporary, "app", "package.json"),
     );
+    await copyFile(
+      join(workerRoot, "LICENSE"),
+      join(temporary, "app", "LICENSE"),
+    );
     await installProductionDependencies(workerRoot, join(temporary, "app"));
     await uploadWorkerSourceMaps(
       workerRoot,
@@ -111,7 +117,7 @@ export async function buildMacRelease(
       join(nodeRoot, "bin", "node"),
       join(temporary, "runtime", "node", "bin", "node"),
     );
-    await copyOptionalFile(
+    await copyFile(
       join(nodeRoot, "LICENSE"),
       join(temporary, "runtime", "node", "LICENSE"),
     );
@@ -148,19 +154,6 @@ async function copyTree(source: string, destination: string): Promise<void> {
     verbatimSymlinks: true,
     filter: (path) => shouldCopyReleaseTreeEntry(source, path),
   });
-}
-
-async function copyOptionalFile(
-  source: string,
-  destination: string,
-): Promise<void> {
-  try {
-    await assertRegularFile(source, "optional release file");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw error;
-  }
-  await copyFile(source, destination);
 }
 
 async function copyFile(source: string, destination: string): Promise<void> {

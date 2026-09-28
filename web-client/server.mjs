@@ -39,7 +39,24 @@ export function publicConfig(env = process.env) {
     parsed.hash
   )
     throw new Error("PUBLIC_API_ORIGIN must be an HTTPS origin.");
-  return { apiOrigin: parsed.origin, firebase };
+  const enabled = env.PUBLIC_SENTRY_ENABLED ?? "false";
+  if (!["true", "false"].includes(enabled))
+    throw new Error("PUBLIC_SENTRY_ENABLED must be true or false.");
+  const sentry = { enabled: enabled === "true", dsn: "" };
+  if (sentry.enabled) {
+    const dsn = new URL(env.PUBLIC_SENTRY_DSN || "");
+    if (
+      dsn.protocol !== "https:" ||
+      !dsn.username ||
+      dsn.password ||
+      dsn.search ||
+      dsn.hash ||
+      !/^\/\d+$/.test(dsn.pathname)
+    )
+      throw new Error("PUBLIC_SENTRY_DSN must be a public HTTPS project DSN.");
+    sentry.dsn = dsn.href;
+  }
+  return { apiOrigin: parsed.origin, firebase, sentry };
 }
 
 export function createWebServer({
@@ -76,6 +93,9 @@ export function createWebServer({
     mediaOrigins.push(`https://${match[1]}.s3-accelerate.amazonaws.com`);
   }
   const mediaSources = mediaOrigins.join(" ");
+  const telemetryOrigin = config.sentry.enabled
+    ? new URL(config.sentry.dsn).origin
+    : "";
   const csp = [
     "default-src 'self'",
     "base-uri 'self'",
@@ -86,11 +106,12 @@ export function createWebServer({
     "worker-src 'self' blob:",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https://www.gstatic.com https://accounts.google.com",
-    `connect-src 'self' ${config.apiOrigin} ${config.apiOrigin.replace(/^https:/, "wss:").replace(/^http:/, "ws:")} ${mediaSources} https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://firebaseinstallations.googleapis.com`,
-    `media-src 'self' ${mediaSources}`,
+    `connect-src 'self' ${telemetryOrigin} ${config.apiOrigin} ${config.apiOrigin.replace(/^https:/, "wss:").replace(/^http:/, "ws:")} ${mediaSources} https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://firebaseinstallations.googleapis.com`,
+    `media-src 'self' blob: ${mediaSources}`,
     `frame-src https://${config.firebase.authDomain} https://accounts.google.com`,
   ].join("; ");
   return createHttpServer(async (request, response) => {
+    response.setHeader("Strict-Transport-Security", "max-age=31536000");
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Referrer-Policy", "no-referrer");
     response.setHeader("X-Frame-Options", "DENY");

@@ -33,7 +33,7 @@ final class AccountDeletionTests: XCTestCase {
     let staging = root.appendingPathComponent("staging")
     let store = ProcessingStore(root: root.appendingPathComponent("store"), stagingRoot: staging)
     for uid in ["owner-a", "owner-b"] {
-      try await store.saveJobs([], ownerUid: uid)
+      try await store.saveLibraryJobs([], ownerUid: uid)
       let directory = staging.appendingPathComponent(ProcessingStore.ownerDirectoryName(uid))
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
       try Data([1]).write(to: directory.appendingPathComponent("input.mp3"))
@@ -49,10 +49,10 @@ final class AccountDeletionTests: XCTestCase {
         atPath: staging.appendingPathComponent(ProcessingStore.ownerDirectoryName("owner-b")).path))
     XCTAssertEqual(try Data(contentsOf: original), Data([2]))
     do {
-      try await store.saveJobs([], ownerUid: "owner-a")
+      try await store.saveLibraryJobs([], ownerUid: "owner-a")
       XCTFail("Late writes must stay fenced")
     } catch { XCTAssertEqual(error as? ProcessingStoreFailure, .missingOperation) }
-    let foreign = try await store.cachedJobs(ownerUid: "owner-b")
+    let foreign = try await store.libraryJobs(ownerUid: "owner-b")
     XCTAssertTrue(foreign.isEmpty)
   }
 }

@@ -31,6 +31,17 @@ class JobArtifactRepositoryTest {
     private val mp3 = "valid-mp3-bytes".toByteArray()
     private var session: ProcessingSession? = ProcessingSession("owner", 1)
 
+    @Test fun transferProgressUsesMonotonicTimeForRemainingEstimate() {
+        assertNull(artifactTransferProgress(0, 1_000, "output", 0, 500_000_000).estimatedRemainingMs)
+        val progress = artifactTransferProgress(250, 1_000, "output", 0, 1_000_000_000)
+        assertEquals(250L, progress.bytes)
+        assertEquals(1_000L, progress.totalBytes)
+        assertEquals("output", progress.artifact)
+        assertEquals(3_000L, progress.estimatedRemainingMs)
+        assertEquals(0L, artifactTransferProgress(1_000, 1_000, "output", 0, 1_000_000_000).estimatedRemainingMs)
+        assertNull(artifactTransferProgress(250, null, "output", 0, 1_000_000_000).estimatedRemainingMs)
+    }
+
     @Test fun recreatedRepositoryResolvesFullOfflineFileWithoutAnyNetwork() = runTest {
         val first = repository(FakeApi(), ArtifactDownloader { _, file, _ -> file.writeBytes(mp3) }, backgroundScope)
         first.ensureOutput(id)
@@ -49,7 +60,7 @@ class JobArtifactRepositoryTest {
             false, true, displayName = "Saved voice")
         val firstProcess = SupervisorJob()
         val store = ProcessingStore(metadataRoot, CoroutineScope(firstProcess + Dispatchers.IO))
-        store.saveSnapshots("owner", listOf(original))
+        store.updateLibraryJobs("owner", listOf(original))
         store.updateLibraryFlags("owner", id, starred = true)
         repository(FakeApi(), ArtifactDownloader { _, file, _ -> file.writeBytes(mp3) }, backgroundScope).ensureOutput(id)
         firstProcess.cancelAndJoin()

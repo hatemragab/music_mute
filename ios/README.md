@@ -4,11 +4,17 @@ Native Swift/SwiftUI app with bundle identifier `com.hatem.musicmute`, targeting
 and newer. Select one owned or permitted audio/video file, review its prepared audio size and duration,
 confirm permission, and explicitly start cloud processing for vocals-only MP3 output.
 Local Files/Photos preparation, cloud upload, job history and result playback remain.
-Device-side URL downloading, YouTubeKit, its background source transfer session,
-and the legacy download-history UI have been removed. Home also supports server-side link imports with a bundled verified-site list,
+Home supports server-side link imports with a bundled site list,
 local URL checks, rights confirmation, durable retry identity and import progress.
 See [the shared site policy](../docs/url-imports/supported-sites.md).
 Source metadata on existing server jobs remains readable.
+
+URL audio is acquired by a private SaaS adapter, returned to NestJS for validation
+and S3 upload, then processed by the existing worker. iOS never receives SaaS
+credentials or provider delivery URLs. The shared catalog enables multiple sites;
+an eligible separate audio stream must be available on each link. Existing native
+installations require a rebuild to receive new catalog entries. See
+[provider architecture](../video_providers/README.md).
 
 Open `MusicMute.xcodeproj` in Xcode 26.0.1 or newer. Regenerate with XcodeGen after
 changing `project.yml`. Only Firebase and Sentry remain as Swift package roots.
@@ -33,9 +39,10 @@ The app requires a backend bootstrap after Firebase sign-in. Supply the public A
 the `MUSICMUTE_API_BASE_URL` Xcode build setting; the client uses root-mounted resource paths. The value must not
 contain a path, query, credentials, or fragment. Release builds accept HTTPS only. Debug builds
 default to `http://127.0.0.1:3000` for local development and also accept explicit HTTP loopback
-origins for isolated fixtures. The checked-in Release setting is empty because this repository
-does not establish an authorized deployed origin; an unconfigured Release build shows a setup
-error and does not bypass the auth gate.
+origins for isolated fixtures. Release defaults to `https://api.music-mute.com`, with
+privacy and deletion links on the same production host. An invalid or empty override
+still shows a setup error and never bypasses the auth gate. Validate the final archive
+and provider configuration before distributing it.
 
 The app uses root-mounted routes such as `POST /auth/sessions` and `GET /jobs`.
 The Swift transport converts between idiomatic model names and snake_case API
@@ -124,7 +131,7 @@ hides private history, and stops private playback.
 Optional FCM/APNs registration waits for permission and an APNs token; taps re-fetch
 authenticated job detail. Simulator fixtures disable live push transport. Real
 Firebase/APNs provisioning and deployed backend/S3/Z440 behavior require separate
-operational validation. See the [processing task record](../docs/tasks/mobile-audio-processing.md).
+operational validation. See the [current client contract](../docs/api/client-contract.md).
 
 The Android project, reserved backend directory, and existing tracked deletions are
 preserved. No signing credentials, commit, push, publishing, or deployment were used.
@@ -195,3 +202,26 @@ Processing updates use authenticated raw WebSocket snapshots with automatic
 reconnection. See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
 and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
 HTTP remains responsible for authentication, commands and file transfers.
+
+### Home job history storage
+
+Home job history is held in memory and loaded from WebSocket snapshots; it is
+not restored from disk. Existing persisted history is reduced to completed
+library tracks when the account store opens. Library media/metadata, preferences,
+and pending import/upload recovery records remain on device. Switching tabs
+continues using the shared live session rather than restarting the connection.
+
+## Current jobs and Library (2026-09-28)
+
+Home and the processing list hide terminal cloud jobs (`ready`, `failed`,
+`cancelled`); unfinished local reviews and recoverable local imports stay
+accessible. Creation date and time are shown on Home job cards. Filtering is
+presentation only: no deletion request, database mutation or media cleanup is
+performed, and the administrator dashboard retains job history.
+
+Library has explicit cursor-based Load more with loading/error feedback. Native
+Library storage preserves previously discovered completed audio; browser Library
+requests `status=ready`, retains loaded pages, and bounds live subscriptions to
+the newest page plus nine tail pages. See
+[release evidence](../docs/client-current-jobs-release-2026-09-28.md) for validation
+and distribution status.

@@ -75,8 +75,9 @@ import XCTest
     XCTAssertEqual(saved.jobStatus, "ready")
   }
 
-  func testRetryResponseLossReusesPersistedUUIDAndRetainsOldFailedJob() async throws {
-    try await store.saveJobs([processingJob(id: api.id, status: "failed")], ownerUid: "owner-a")
+  func testRetryResponseLossReusesPersistedUUIDWithoutCachingFailedJob() async throws {
+    try await store.saveLibraryJobs(
+      [processingJob(id: api.id, status: "failed")], ownerUid: "owner-a")
     api.failRetryOnce = true
     do {
       _ = try await repository.retry(jobId: api.id)
@@ -92,9 +93,8 @@ import XCTest
     let again = try await restarted.retry(jobId: api.id)
     XCTAssertEqual(again.id, result.id)
     XCTAssertEqual(api.retries.count, 2)
-    let jobs = try await store.cachedJobs(ownerUid: "owner-a")
-    XCTAssertEqual(jobs.first?.id, api.id)
-    XCTAssertEqual(jobs.first?.status, "failed")
+    let jobs = try await store.libraryJobs(ownerUid: "owner-a")
+    XCTAssertTrue(jobs.isEmpty)
   }
 
   func testInvalidInputRetryIsNotRepeatedAndInterruptedJobCannotRetry() async throws {

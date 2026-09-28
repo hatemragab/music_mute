@@ -67,7 +67,7 @@ struct URLImportRecord: Codable, Equatable, Sendable {
     }
   }
 
-  func submit(_ raw: String, trimEnabled: Bool = false) async {
+  func submit(_ raw: String, trimEnabled: Bool = true) async {
     guard !busy, record == nil || record?.terminal == true, let uid = owner else { return }
     let ticket = epoch
     do {

@@ -11,6 +11,7 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
+import kotlin.math.ceil
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -30,7 +31,34 @@ import kotlinx.coroutines.withContext
 fun outputCacheKey(uid: String, jobId: String): String = MessageDigest.getInstance("SHA-256")
     .digest("$uid:$jobId".toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
-data class ArtifactProgress(val bytes: Long, val totalBytes: Long?)
+data class ArtifactProgress(
+    val bytes: Long,
+    val totalBytes: Long?,
+    val artifact: String = "output",
+    val estimatedRemainingMs: Long? = null,
+)
+
+internal fun artifactTransferProgress(
+    bytes: Long,
+    totalBytes: Long?,
+    artifact: String,
+    startedAtNanos: Long,
+    nowNanos: Long,
+): ArtifactProgress {
+    val received = bytes.coerceAtLeast(0)
+    val total = totalBytes?.takeIf { it > 0 }
+    val remaining = total?.minus(received)?.coerceAtLeast(0)
+    val elapsedNanos = (nowNanos - startedAtNanos).coerceAtLeast(0)
+    val estimate = when {
+        remaining == null -> null
+        remaining == 0L -> 0L
+        received == 0L || elapsedNanos < 500_000_000L -> null
+        else -> ceil(remaining.toDouble() * elapsedNanos.toDouble() / received / 1_000_000.0)
+            .toLong()
+            .coerceAtLeast(1)
+    }
+    return ArtifactProgress(received, total, artifact, estimate)
+}
 enum class ArtifactProblem { NOT_READY, INVALID_OUTPUT, TRANSFER, STORAGE, EXPIRED_GRANT }
 class ArtifactException(val problem: ArtifactProblem) : IOException(problem.name)
 
@@ -44,6 +72,7 @@ class JobArtifactRepository(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val now: () -> Instant = Instant::now,
     private val isPlayableAudio: (File) -> Boolean = { isPlayableProcessingAudio(it) },
+    private val elapsedNanos: () -> Long = System::nanoTime,
 ) {
     private val downloads = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[CoroutineJob]))
     private data class Request(val session: ProcessingSession, val jobId: String, val revision: Long, val artifact: String = "output")
@@ -96,7 +125,9 @@ class JobArtifactRepository(
                 finally {
                     synchronized(lock) {
                         requests.remove(request)
-                        if (current(request)) mutableProgress.value = mutableProgress.value - request.jobId
+                        if (current(request) && mutableProgress.value[request.jobId]?.artifact == request.artifact) {
+                            mutableProgress.value = mutableProgress.value - request.jobId
+                        }
                     }
                 }
             }.also { requests[request] = it }
@@ -211,10 +242,17 @@ class JobArtifactRepository(
                     continue
                 }
                 try {
+                    val startedAtNanos = elapsedNanos()
                     downloader.download(grant.url, partial) { bytes, total ->
                         synchronized(lock) {
                             if (current(request)) mutableProgress.value = mutableProgress.value +
-                                (request.jobId to ArtifactProgress(bytes, total))
+                                (request.jobId to artifactTransferProgress(
+                                    bytes,
+                                    total,
+                                    request.artifact,
+                                    startedAtNanos,
+                                    elapsedNanos(),
+                                ))
                         }
                     }
                 } catch (error: ArtifactHttpException) {

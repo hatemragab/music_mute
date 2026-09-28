@@ -63,7 +63,7 @@ fun HomeScreen(
     onLoadMore: () -> Unit,
     onOpen: (AudioTaskPresentation) -> Unit,
     onCancel: (AudioTaskPresentation) -> Unit,
-    trimEnabled: Boolean = false,
+    trimEnabled: Boolean = true,
     onTrimEnabled: (Boolean) -> Unit = {},
     urlImportText: String = "",
     urlImportError: String? = null,
@@ -78,9 +78,11 @@ fun HomeScreen(
     actionBusy: Boolean = false,
     notificationsNeeded: Boolean = false,
 ) {
+    val visibleTasks = tasks.filter { it.visibleOnHome }
     var notificationDismissed by rememberSaveable { mutableStateOf(false) }
     var linkSource by rememberSaveable { mutableStateOf(true) }
     var showSites by rememberSaveable { mutableStateOf(false) }
+    var showTrimInfo by rememberSaveable { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
     val importBusy = busy || actionBusy || urlImportBusy
     val startUrlImport = {
@@ -121,6 +123,7 @@ fun HomeScreen(
                     trimEnabled = trimEnabled,
                     enabled = !importBusy,
                     onShowSites = { showSites = true },
+                    onShowTrimInfo = { showTrimInfo = true },
                     onTrimEnabled = onTrimEnabled,
                 )
                 Spacer(Modifier.height(24.dp))
@@ -131,7 +134,7 @@ fun HomeScreen(
                 )
                 Spacer(Modifier.height(12.dp))
             }
-            if (tasks.any { it.active } && notificationsNeeded && !notificationDismissed) item {
+            if (visibleTasks.any { it.active } && notificationsNeeded && !notificationDismissed) item {
                 CreativeCard(contentPadding = 12.dp, contentGap = 8.dp) {
                     Text(stringResource(R.string.listener_notify_title), style = MaterialTheme.typography.titleMedium)
                     Text(stringResource(R.string.listener_notify_body), style = MaterialTheme.typography.bodyMedium,
@@ -148,10 +151,10 @@ fun HomeScreen(
                 if (busy) CreativeFeedback(stringResource(R.string.processing_preparing))
                 message?.let { CreativeFeedback(it) }
             }
-            if (tasks.isEmpty() && !history.loading && history.failure == null && !busy) item {
+            if (visibleTasks.isEmpty() && !history.loading && history.failure == null && !busy) item {
                 CreativeCard { CreativeFeedback(stringResource(R.string.creative_jobs_empty)) }
             }
-            items(tasks, key = { it.importRequestId?.let { id -> "url:$id" } ?: it.operationId ?: requireNotNull(it.jobId) }) { task ->
+            items(visibleTasks, key = { it.importRequestId?.let { id -> "url:$id" } ?: it.operationId ?: requireNotNull(it.jobId) }) { task ->
                 Column {
                     JobCard(
                         task = task,
@@ -168,15 +171,7 @@ fun HomeScreen(
                 history.failure?.let {
                     CreativeFeedback(stringResource(processingFailureLabel(it)), error = true,
                         actionLabel = stringResource(R.string.retry),
-                        onAction = if (history.nextCursor != null && tasks.isNotEmpty()) onLoadMore else onRefresh)
-                }
-                if (history.nextCursor != null) OutlinedButton(
-                    onClick = onLoadMore, enabled = !history.loadingMore && !history.loading,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    if (history.loadingMore) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.creative_jobs_load_more))
+                        onAction = if (history.nextCursor != null && visibleTasks.isNotEmpty()) onLoadMore else onRefresh)
                 }
             }
         }
@@ -187,6 +182,14 @@ fun HomeScreen(
         Text(stringResource(R.string.url_import_supported, com.hatem.musicmute.processing.SupportedAudioSites.names.joinToString(", ")),
             style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         CreativePrimaryButton(onClick = { showSites = false }, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.creative_library_close))
+        }
+    }
+    if (showTrimInfo) CreativeSheet(onDismiss = { showTrimInfo = false }) {
+        Text(stringResource(R.string.trim_silence), style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(R.string.listener_trim_description),
+            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        CreativePrimaryButton(onClick = { showTrimInfo = false }, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.creative_library_close))
         }
     }
@@ -339,46 +342,61 @@ private fun ImportUtilitiesCard(
     trimEnabled: Boolean,
     enabled: Boolean,
     onShowSites: () -> Unit,
+    onShowTrimInfo: () -> Unit,
     onTrimEnabled: (Boolean) -> Unit,
 ) {
     CreativeCard(contentPadding = 0.dp, contentGap = 0.dp, shape = RoundedCornerShape(16.dp)) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 64.dp),
+            Modifier.fillMaxWidth().heightIn(min = 56.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(
                 onClick = onShowSites,
                 enabled = enabled,
-                modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 64.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
             ) {
                 Icon(Icons.Outlined.Info, null, Modifier.size(CreativeTokens.SmallIcon))
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.listener_supported_sites), Modifier.weight(1f))
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.listener_supported_sites), Modifier.weight(1f),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(16.dp))
             }
-            VerticalDivider(Modifier.height(40.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            VerticalDivider(Modifier.height(32.dp), color = MaterialTheme.colorScheme.outlineVariant)
             Row(
-                Modifier.weight(1f).heightIn(min = 64.dp)
+                Modifier.weight(1f).heightIn(min = 56.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = onShowTrimInfo,
+                    modifier = Modifier.size(CreativeTokens.TouchTarget),
+                ) {
+                    Icon(Icons.Outlined.Info, stringResource(R.string.listener_trim_info),
+                        Modifier.size(CreativeTokens.SmallIcon), tint = MaterialTheme.colorScheme.primary)
+                }
+                Row(
+                    Modifier.weight(1f).heightIn(min = 56.dp)
                     .toggleable(
                         value = trimEnabled,
                         enabled = enabled,
                         role = Role.Switch,
                         onValueChange = onTrimEnabled,
                     )
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    stringResource(R.string.trim_silence),
-                    Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(
-                        alpha = if (enabled) 1f else CreativeTokens.DisabledAlpha,
-                    ),
-                )
-                Switch(checked = trimEnabled, onCheckedChange = null, enabled = enabled)
+                    .padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.listener_trim_short),
+                        Modifier.weight(1f),
+                        maxLines = 1,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(
+                            alpha = if (enabled) 1f else CreativeTokens.DisabledAlpha,
+                        ),
+                    )
+                    Switch(checked = trimEnabled, onCheckedChange = null, enabled = enabled)
+                }
             }
         }
     }

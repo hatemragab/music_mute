@@ -30,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -37,6 +38,11 @@ import com.hatem.musicmute.R
 import com.hatem.musicmute.library.*
 import com.hatem.musicmute.state.LibraryUiState
 import com.hatem.musicmute.ui.design.*
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
 data class LibraryActions(
     val query: (String) -> Unit, val filter: (LibraryFilter) -> Unit, val sort: (LibrarySort) -> Unit,
@@ -47,7 +53,15 @@ data class LibraryActions(
 )
 
 @Composable
-fun LibraryScreen(state: LibraryUiState, actions: LibraryActions, miniPlayer: @Composable () -> Unit = {}) {
+fun LibraryScreen(
+    state: LibraryUiState,
+    actions: LibraryActions,
+    hasMore: Boolean = false,
+    loadingMore: Boolean = false,
+    loadMoreFailed: Boolean = false,
+    onLoadMore: () -> Unit = {},
+    miniPlayer: @Composable () -> Unit = {},
+) {
     var menu by remember { mutableStateOf<LibraryEntry?>(null) }
     Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.TopCenter) {
     Column(Modifier.widthIn(max = CreativeTokens.ContentWidth).fillMaxSize().padding(horizontal = CreativeTokens.PagePadding)) {
@@ -82,6 +96,17 @@ fun LibraryScreen(state: LibraryUiState, actions: LibraryActions, miniPlayer: @C
             }
             items(state.entries, key = { "${it.key.ownerUid}/${it.key.jobId}" }) { entry ->
                 LibraryAudioCard(entry, { actions.play(entry) }, { menu = entry })
+            }
+            if (loadMoreFailed) item {
+                CreativeFeedback(stringResource(R.string.processing_error_service), error = true,
+                    actionLabel = stringResource(R.string.retry),
+                    onAction = if (hasMore) onLoadMore else actions.refresh)
+            }
+            if (hasMore) item {
+                OutlinedButton(onClick = onLoadMore, enabled = !loadingMore, modifier = Modifier.fillMaxWidth()) {
+                    if (loadingMore) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text(stringResource(R.string.creative_jobs_load_more))
+                }
             }
         }
         miniPlayer()
@@ -217,13 +242,33 @@ fun LibraryAudioCard(entry: LibraryEntry, onPlay: () -> Unit, onMore: () -> Unit
                             )
                         }
                     }
-                    entry.durationMs?.let {
-                        Text(
-                            audioTime(it),
-                            maxLines = 1,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    val createdAt = libraryCreatedAt(entry.createdAtEpochMs)
+                    if (entry.durationMs != null || createdAt != null) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            entry.durationMs?.let {
+                                Text(
+                                    audioTime(it),
+                                    maxLines = 1,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            createdAt?.let { created ->
+                                Text(
+                                    created,
+                                    Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.End,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -310,5 +355,17 @@ internal fun libraryProblemLabel(problem: LibraryProblem?): Int = when (problem)
 
 fun audioTime(ms: Long): String {
     val seconds = ms.coerceAtLeast(0) / 1000
-    return "%d:%02d".format(java.util.Locale.getDefault(), seconds / 60, seconds % 60)
+    return "%d:%02d".format(Locale.getDefault(), seconds / 60, seconds % 60)
+}
+
+fun libraryCreatedAt(
+    epochMs: Long,
+    zone: ZoneId = ZoneId.systemDefault(),
+    locale: Locale = Locale.getDefault(),
+): String? {
+    if (epochMs <= 0L) return null
+    return DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+        .withLocale(locale)
+        .withZone(zone)
+        .format(Instant.ofEpochMilli(epochMs))
 }

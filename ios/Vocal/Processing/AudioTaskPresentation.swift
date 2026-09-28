@@ -32,6 +32,10 @@ struct AudioTaskPresentation: Equatable, Identifiable, Sendable {
   var serverStageTimings: ServerStageTimings?
   var outputMessageKey: String?
 
+  var visibleOnHome: Bool {
+    isActive || statusKey == "import_review_title" || (jobID == nil && canRetry)
+  }
+
   static func merge(
     pipelines: [AudioPipelineIntent], uploads: [UploadOperation], jobs: [Job]
   ) -> [AudioTaskPresentation] {
@@ -80,7 +84,7 @@ struct AudioTaskPresentation: Equatable, Identifiable, Sendable {
       isActive: stage.isActive, isReady: stage == .ready,
       canCancel: stage.isActive && stage != .cancelling,
       canRetry: stage == .failed, canDelete: [.ready, .failed, .cancelled].contains(stage),
-      createdAt: intent?.clientStartedAt ?? job?.createdAt ?? upload?.createdAt ?? Date(),
+      createdAt: job?.createdAt ?? intent?.clientStartedAt ?? upload?.createdAt ?? Date(),
       totalSeconds: job?.serverStageTimings?.totalMs.map { Double($0) / 1_000 },
       totalApproximate: job?.serverStageTimings.map { !$0.totalComplete } ?? true,
       processingSeconds: processingSeconds,

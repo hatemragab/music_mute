@@ -43,7 +43,8 @@ data class PlaybackState(
 )
 
 class AudioPlaybackController(context: Context) : QueueCommands {
-    private val dependencies = context.applicationContext as? PlaybackDependencies
+    private val appContext = context.applicationContext
+    private val dependencies = appContext as? PlaybackDependencies
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableState = MutableStateFlow(PlaybackState())
     val state = mutableState.asStateFlow()
@@ -134,7 +135,7 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         }
         val player = controller
         if (player == null) { pendingQueue = queue to startKey; return }
-        player.setMediaItems(queue.map { it.mediaItem() }, queue.indexOfFirst { it.key == startKey }, 0)
+        player.setMediaItems(queue.map { it.mediaItem(appContext) }, queue.indexOfFirst { it.key == startKey }, 0)
         player.prepare(); player.play()
         mutableState.update { it.copy(failed = false) }
         refresh()
@@ -230,7 +231,7 @@ class AudioPlaybackController(context: Context) : QueueCommands {
                 val target = comparisonPosition(player.currentPosition, original, job.trimEnabled, job.comparisonRanges)
                 val playing = player.playWhenReady
                 val index = player.currentMediaItemIndex
-                player.replaceMediaItem(index, track.mediaItem(original))
+                player.replaceMediaItem(index, track.mediaItem(appContext, original))
                 player.seekTo(index, target)
                 player.prepare()
                 player.playWhenReady = playing

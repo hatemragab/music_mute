@@ -17,7 +17,7 @@ class SupportedAudioSitesTest {
         for (case in Json.decodeFromString<List<Case>>(source)) {
             assertEquals(case.url, case.accepted, runCatching { SupportedAudioSites.canonical(case.url) }.isSuccess)
         }
-        assertEquals(9, SupportedAudioSites.names.size)
+        assertEquals(12, SupportedAudioSites.names.size)
     }
 
     @Test fun unsupportedLinksNeverAcquireTokensOrReachTransport() = runTest {

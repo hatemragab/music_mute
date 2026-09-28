@@ -5,6 +5,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AudioTaskPresentationTest {
+    @Test fun homeHidesTerminalJobsWithoutRemovingLibraryOrDetailData() {
+        for (status in listOf("ready", "failed", "cancelled")) {
+            val tasks = audioTaskPresentations(emptyList(), listOf(job(status)), 0)
+            assertEquals(1, tasks.size)
+            assertFalse(tasks.single().visibleOnHome)
+        }
+        for (status in listOf("awaiting_upload", "queued", "validating", "processing", "uploading_result", "interrupted", "cancel_requested")) {
+            assertTrue(audioTaskPresentations(emptyList(), listOf(job(status)), 0).single().visibleOnHome)
+        }
+        val failedImport = UrlImportRecord("owner", "https://example.com/media", "request", status = "failed")
+        assertTrue(audioTaskPresentations(emptyList(), emptyList(), 0, listOf(failedImport)).single().visibleOnHome)
+    }
+
     @Test fun importBecomesOneNamedJobAndDoesNotReappearAfterDeletion() {
         val record = UrlImportRecord("owner", "https://example.com/media", "import-request",
             status = "downloading", sourceTitle = "عنوان 🎵", createdAtMillis = 100)

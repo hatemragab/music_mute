@@ -46,6 +46,7 @@ class UrlConnectionArtifactDownloader(
                         if (client.responseCode != 200) throw ArtifactHttpException(client.responseCode)
                         val expected = client.contentLengthLong.takeIf { it >= 0 }
                         var received = 0L
+                        progress(received, expected)
                         client.inputStream.use { input ->
                             val sink = synchronized(gate) {
                                 if (!continuation.isActive) return@submit

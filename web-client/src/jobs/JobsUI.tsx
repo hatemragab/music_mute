@@ -1,4 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
+import { Music2 } from "lucide-react";
 import { useLiveJobs, useLiveQuery } from "../realtime/RealtimeProvider";
 import { Link, useNavigate, useParams } from "react-router";
 import { useState } from "react";
@@ -7,9 +8,11 @@ import type { JobView } from "../api/types";
 import { useSignedIn } from "../auth/AuthProvider";
 import { friendlyError, statusLabel, useI18n } from "../i18n";
 import { usePlayer } from "../player/PlayerProvider";
+import { downloadJobArtifact } from "./artifacts";
+import { trackTitle } from "../player/playback";
 import { QueuePosition } from "./QueuePosition";
 
-const activeStatuses = new Set([
+export const activeStatuses = new Set([
   "awaiting_upload",
   "queued",
   "validating",
@@ -28,12 +31,12 @@ export function JobCard({ job, queue }: { job: JobView; queue?: JobView[] }) {
     <article className="job-card">
       <div className="job-card-top">
         <span className="job-icon" aria-hidden="true">
-          ♫
+          <Music2 />
         </span>
         <div className="job-card-name">
           <h3>
             <Link to={`/jobs/${job.id}`} dir="auto">
-              {job.displayName || job.sourceTitle || job.id}
+              {trackTitle(job, t("untitledTrack"))}
             </Link>
           </h3>
           <small>{date(job.createdAt)}</small>
@@ -77,18 +80,8 @@ export function JobCard({ job, queue }: { job: JobView; queue?: JobView[] }) {
 export function JobsPage() {
   const { t } = useI18n();
   const query = useJobs();
-  const [filter, setFilter] = useState<"all" | "active" | "ready" | "failed">(
-    "all",
-  );
-  const jobs = query.data?.pages.flatMap((page) => page.items) ?? [];
-  const shown = jobs.filter(
-    (job) =>
-      filter === "all" ||
-      (filter === "active"
-        ? activeStatuses.has(job.status)
-        : filter === "failed"
-          ? ["failed", "cancelled"].includes(job.status)
-          : job.status === "ready"),
+  const shown = (query.data?.pages.flatMap((page) => page.items) ?? []).filter(
+    (job) => activeStatuses.has(job.status),
   );
   return (
     <div className="page-stack">
@@ -98,26 +91,6 @@ export function JobsPage() {
           <h1>{t("jobs")}</h1>
         </div>
       </header>
-      <div className="filter-row" role="group" aria-label={t("status")}>
-        {(["all", "active", "ready", "failed"] as const).map((item) => (
-          <button
-            key={item}
-            type="button"
-            className={filter === item ? "selected" : ""}
-            onClick={() => setFilter(item)}
-          >
-            {t(
-              item === "all"
-                ? "filterAll"
-                : item === "active"
-                  ? "filterActive"
-                  : item === "ready"
-                    ? "filterReady"
-                    : "filterFailed",
-            )}
-          </button>
-        ))}
-      </div>
       {query.isPending && <p>{t("loading")}</p>}
       {query.isError && (
         <p role="alert" className="notice">
@@ -132,7 +105,7 @@ export function JobsPage() {
           <JobCard
             key={job.id}
             job={job}
-            queue={jobs.filter((item) => item.canDownloadOutput)}
+            queue={shown.filter((item) => item.canDownloadOutput)}
           />
         ))}
       </div>
@@ -182,12 +155,7 @@ export function JobDetailPage() {
   });
   async function download(artifact: "input" | "output") {
     try {
-      const grant = await jobsApi(api).grant(id, artifact, crypto.randomUUID());
-      const anchor = document.createElement("a");
-      anchor.href = grant.url;
-      anchor.rel = "noopener noreferrer";
-      anchor.target = "_blank";
-      anchor.click();
+      await downloadJobArtifact(api, id, artifact);
     } catch (error) {
       setActionError(friendlyError(error, t));
     }
@@ -214,7 +182,7 @@ export function JobDetailPage() {
       <header className="page-heading">
         <div>
           <p className="eyebrow">{t("details")}</p>
-          <h1 dir="auto">{job.displayName || job.sourceTitle || job.id}</h1>
+          <h1 dir="auto">{trackTitle(job, t("untitledTrack"))}</h1>
         </div>
         <span className={`status status-${job.status}`}>
           {statusLabel(job.status, lang)}

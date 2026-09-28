@@ -60,7 +60,9 @@ struct ProcessingRootView: View {
           model.downloadSelected(stage: .exporting) { share = ProcessingExport(url: $0) }
         },
         onRename: model.renameSelected,
-        onDelete: model.deleteSelected,
+        onDelete: {
+          model.deleteSelected { showingDetail = false }
+        },
         onCancel: model.cancelSelected, onRetry: model.retrySelected,
         original: player.original, onOriginal: model.selectOriginal,
         onSaveOriginal: { model.downloadOriginal { export = ProcessingExport(url: $0) } }

@@ -34,6 +34,14 @@ where each client permits it. Each browser client origin must be listed in the
 backend's `CORS_ORIGINS`; CORS does not authenticate it. Native apps and workers
 do not rely on CORS.
 
+The following release resources are public, root-mounted, and require no bearer
+token: `GET /privacy`, `GET /delete-account`, `GET /support`, and
+`GET /public-policy`. The first three return fixed, script-free HTML. The metadata
+resource returns a schema-versioned JSON object containing the canonical absolute
+URLs, public contact, policy revision, and account-deletion timing. None accepts an
+account identifier or performs deletion; account mutation remains authenticated at
+`DELETE /users/me`.
+
 Routes name resources using lowercase kebab-case segments and plural collections
 where appropriate. For example, create a job with `POST /jobs`, cancel one with
 `POST /jobs/{id}/cancellations`, and request a result URL with
@@ -56,14 +64,30 @@ Firebase bearer token and `X-Installation-Id` processing-access checks as job
 creation. HTTP 202 returns `import_id`, `status`, nullable `job_id`/`error`, and
 timestamps. Reuse the request ID for retries of the same URL.
 
-Poll owner-scoped `GET /media-imports/{import_id}` until `submitted` or `failed`.
-After `submitted`, follow `GET /jobs/{job_id}` for worker progress and results.
+Monthly processing admission uses **used + reserved seconds before the new file**.
+If that total is below the monthly limit, the full file is accepted even when its
+duration exceeds the remaining allowance: one minute remaining can admit a
+four-minute song. At or above the limit, new local-file jobs and URL imports
+return `PROCESSING_ALLOWANCE_EXHAUSTED` before issuing an upload grant or calling
+the acquisition provider. The entire measured duration is accounted, and
+remaining allowance is clamped to zero. Already accepted files finish normally.
+
+URL imports create a temporary duration hold before provider acquisition so
+concurrent requests cannot bypass admission. The hold uses the per-file cap (up
+to 1200 seconds) because duration is unknown; this does **not** require that many
+seconds remaining. Job creation atomically exchanges the hold for measured
+duration, and failed/interrupted imports release it. Existing per-file size,
+duration, authentication and transfer protections remain in force.
+
+Use owner-scoped realtime import snapshots until `submitted` or `failed`.
+After `submitted`, subscribe to the job for worker progress and results.
+HTTP detail reads remain available for explicit non-live reads.
 Android sends only the source URL; the backend acquires validated native audio
 and uses the existing S3 pipeline. Existing file-upload calls remain available.
 
-Public single-item links are resolved by yt-dlp, including YouTube and Facebook.
-There is no fixed provider allowlist. Site support and native audio availability
-are evaluated for each link. Only separate audio streams are downloaded; sources
+Public single-item links are resolved by the private SaaS acquisition adapter.
+The current VideoScale adapter supports YouTube only; other sites return
+`IMPORT_UNSUPPORTED_PROVIDER`. Only separate audio streams are downloaded; sources
 requiring video acquisition return `IMPORT_UNSUPPORTED_AUDIO_SOURCE`. Playlists,
 live streams, private-network URLs, and account-cookie access are unsupported.
 
@@ -71,7 +95,7 @@ Clients must handle `IMPORT_DISABLED`, `IMPORT_UNSUPPORTED_PROVIDER`,
 `IMPORT_SINGLE_ITEM_REQUIRED`, `IMPORT_UNSUPPORTED_AUDIO_SOURCE`, size/duration
 errors, and retryable capacity or dependency errors. Source duration is checked
 against independently measured audio. Internal service credentials and delivery
-URLs are never returned to clients. See [deployment and validation](../../ytdlp_test/README.md).
+URLs are never returned to clients. See [deployment and validation](../../video_providers/videoscale/README.md).
 
 ## Authentication and ownership
 
@@ -192,12 +216,15 @@ API preflight: https://opensource.zalando.com/restful-api-guidelines/ read on
 
 ### Imported source titles
 
-Media import responses include nullable `source_title`. The private audio downloader
-passes the provider title using a bounded UTF-8/base64 response header. The API
+Media import responses include nullable `source_title`. The private SaaS adapter
+may include `title` in the bounded structured `X-Import-Extra-Data-Base64` header.
+There is no separate title header. The API
 removes control characters and limits the title to 200 Unicode code points before
 saving it on the import and the resulting job (`source_title` and initial
 `display_name`). Missing metadata remains nullable; previously imported titles are
-not reconstructed automatically. Existing clients may ignore this additive field.
+not reconstructed automatically. Metadata is saved as sanitized nullable MongoDB
+`extra_data` without extra paid requests and is not added to public job projections.
+The current provider responses do not include titles; do not promise one.
 
 Android presents acquisition and processing as one job card. Submitted imports are
 acknowledged locally once their job appears, preventing stale cards after history

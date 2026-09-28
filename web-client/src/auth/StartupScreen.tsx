@@ -1,5 +1,6 @@
 import { useAuth } from "./AuthProvider";
 import { friendlyError, useI18n } from "../i18n";
+import { SoloSignalMark } from "../brand/SoloSignalMark";
 
 export function StartupScreen() {
   const { state, retry } = useAuth();
@@ -11,9 +12,7 @@ export function StartupScreen() {
     <main className="startup-page">
       <div className="startup-topbar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            M
-          </span>
+          <SoloSignalMark className="brand-mark" />
           <span>{t("brand")}</span>
         </div>
         <div className="auth-language" role="group" aria-label={t("language")}>
@@ -39,7 +38,7 @@ export function StartupScreen() {
           aria-hidden="true"
         >
           <span className="startup-orbit" />
-          <span className="startup-emblem">M</span>
+          <SoloSignalMark className="startup-emblem" />
           <span className="startup-bars">
             <i />
             <i />

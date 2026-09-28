@@ -2,7 +2,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import { watchDeployment } from "./deployment-update";
+import { ErrorBoundary } from "./ErrorBoundary";
+import { initializeMonitoring, reportBrowserFailure } from "./observability";
 
+initializeMonitoring();
 watchDeployment();
 
 const root = createRoot(document.getElementById("root")!);
@@ -10,11 +13,14 @@ void import("./App")
   .then(({ default: App }) =>
     root.render(
       <StrictMode>
-        <App />
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
       </StrictMode>,
     ),
   )
-  .catch(() => {
+  .catch((error: unknown) => {
+    reportBrowserFailure(error);
     const arabic = navigator.language.toLowerCase().startsWith("ar");
     document.documentElement.lang = arabic ? "ar" : "en";
     document.documentElement.dir = arabic ? "rtl" : "ltr";

@@ -3,6 +3,8 @@ import SwiftUI
 struct SettingsView: View {
   @ObservedObject var preferences: AppPreferences
   @ObservedObject var auth: AuthSessionModel
+  var usageRepository: ProcessingUsageRepository?
+  @State private var customAccent = ""
   var body: some View {
     Form {
       Section("auth_account") {
@@ -23,12 +25,50 @@ struct SettingsView: View {
           Text("dark").tag(Appearance.dark)
         }.pickerStyle(.inline).labelsHidden().accessibilityIdentifier("appearancePicker")
       }
+      Section("settings_accent") {
+        HStack(spacing: 14) {
+          ForEach(["#FF814A", "#62A8FF", "#71D7B1", "#BB86FC", "#FF6B9D"], id: \.self) {
+            value in
+            Button {
+              preferences.setAccent(value)
+            } label: {
+              Circle().fill(accentColor(value)).frame(width: 36, height: 36)
+                .overlay {
+                  if preferences.accentHex == value {
+                    Image(systemName: "checkmark").font(.caption.bold()).foregroundStyle(.black)
+                  }
+                }
+            }.buttonStyle(.plain).accessibilityLabel(Text("\(value)"))
+          }
+        }
+        HStack {
+          TextField("#FF814A", text: $customAccent)
+            .textInputAutocapitalization(.characters).autocorrectionDisabled()
+          Button("settings_apply") { preferences.setAccent(customAccent) }
+            .disabled(AppPreferences.normalizedAccent(customAccent) == nil)
+        }
+      }
       Section("language") {
         Picker("language", selection: $preferences.language) {
           Text("follow_system").tag(AppLanguage.system)
           Text("english").tag(AppLanguage.en)
           Text("arabic").tag(AppLanguage.ar)
         }.pickerStyle(.inline).labelsHidden().accessibilityIdentifier("languagePicker")
+      }
+      Section("settings_processing") {
+        if let usageRepository {
+          NavigationLink("settings_usage") {
+            Form {
+              ProcessingUsageView(repository: usageRepository)
+              Text("processing_limits").font(.caption).foregroundStyle(.secondary)
+            }.navigationTitle("settings_usage")
+          }
+        }
+      }
+      Section("settings_help") {
+        Link("settings_support", destination: URL(string: "mailto:support@music-mute.com")!)
+        Link("privacy_policy", destination: URL(string: "https://api.music-mute.com/privacy")!)
+        Link("settings_terms", destination: URL(string: "https://api.music-mute.com/terms")!)
       }
       Section("about") {
         LabeledContent(
@@ -37,10 +77,16 @@ struct SettingsView: View {
             ?? "0.1.0")
         Text("about_body").font(.subheadline).foregroundStyle(.secondary)
       }
-      Section("future_flow") {
-        Text("future_flow_body").font(.subheadline).foregroundStyle(.secondary)
-      }
     }.navigationTitle("settings_title").scrollContentBackground(.hidden)
+      .onAppear { customAccent = preferences.accentHex }
+  }
+
+  private func accentColor(_ value: String) -> Color {
+    let hex = UInt64(value.dropFirst(), radix: 16) ?? 0
+    return Color(
+      red: Double((hex >> 16) & 0xff) / 255,
+      green: Double((hex >> 8) & 0xff) / 255,
+      blue: Double(hex & 0xff) / 255)
   }
 }
 

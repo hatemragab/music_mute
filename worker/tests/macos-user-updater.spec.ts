@@ -1,4 +1,5 @@
 import {
+  createHash,
   createPublicKey,
   generateKeyPairSync,
   sign,
@@ -55,6 +56,12 @@ import {
 } from "../src/platform/macos/update-metadata.js";
 import { withMacUserCommandLock } from "../src/platform/macos/command-lock.js";
 
+import { installedCapacityIdentity } from "../src/runtime/capacity-identity.js";
+import {
+  loadRuntimeConfig,
+  readMaintenanceConnection,
+} from "../src/runtime/runtime-config.js";
+
 const roots: string[] = [];
 const startupService = {
   status: async () => ({ loaded: true, running: true, pid: process.pid }),
@@ -71,10 +78,19 @@ afterEach(async () => {
 });
 
 describe("macOS transactional updater", () => {
-  it.skipIf(process.platform !== "darwin").each(["stopped", "activated"])(
-    "a fresh process recovers an updater killed after %s",
-    async (boundary) => {
+  it.skipIf(process.platform !== "darwin").each([
+    { boundary: "stopped", twoSlots: false },
+    { boundary: "activated", twoSlots: false },
+    { boundary: "stopped", twoSlots: true },
+    { boundary: "activated", twoSlots: true },
+  ])(
+    "a fresh process recovers after $boundary (two slots=$twoSlots)",
+    async ({ boundary, twoSlots }) => {
       const fixture = await updateFixture();
+      if (twoSlots) await enableTwoSlots(fixture.layout);
+      const originalConfig = JSON.parse(
+        await readFile(fixture.layout.configPath, "utf8"),
+      );
       const nativeLabel =
         process.env.MUSICMUTE_TEST_LAUNCHD === "true"
           ? `com.musicmute.recovery-test.${randomUUID()}`
@@ -157,6 +173,12 @@ describe("macOS transactional updater", () => {
         expect(await readlink(fixture.layout.currentLink)).toBe(
           "releases/0.1.0",
         );
+        expect(
+          JSON.parse(await readFile(fixture.layout.configPath, "utf8")),
+        ).toEqual(originalConfig);
+        expect(
+          (await loadRuntimeConfig(fixture.layout.configPath)).slots,
+        ).toHaveLength(twoSlots ? 2 : 1);
         expect(
           (await loadLocalLifecycle(fixture.layout.lifecyclePath)).intent,
         ).toBe("paused");
@@ -572,7 +594,7 @@ describe("macOS transactional updater", () => {
     ).rejects.toThrow("bootstrap failed");
     expect(
       JSON.parse(await readFile(fixture.layout.updateStatePath, "utf8")),
-    ).toEqual(journal);
+    ).toMatchObject({ status: "rolled-back", recovery: journal.recovery });
     expect(
       await recoverInterruptedMacUpdate(fixture.layout, fixture.launchAgent),
     ).toBe(true);
@@ -695,6 +717,192 @@ describe("macOS transactional updater", () => {
     });
   });
 });
+
+it.each([true, false])(
+  "updates two-slot installations safely (running=%s)",
+  async (running) => {
+    const fixture = await updateFixture();
+    await enableTwoSlots(fixture.layout);
+    if (!running) await fixture.launchAgent.bootout();
+    await setLocalLifecycleIntent(fixture.layout.lifecyclePath, "paused");
+    const result = await updateMacUserWorker({
+      layout: fixture.layout,
+      uid: process.getuid!(),
+      candidate: async () => fixture.candidate,
+      now: fixture.now,
+      fetch: fixture.fetch,
+      qualify: async () => "report.json",
+      launchAgent: fixture.launchAgent,
+      confirmStarted: async () => true,
+      health: async () => {
+        await loadRuntimeConfig(fixture.layout.configPath);
+        return true;
+      },
+    });
+    expect(result).toMatchObject({
+      status: "updated",
+      capacityRequalificationRequired: true,
+    });
+    const config = await loadRuntimeConfig(fixture.layout.configPath);
+    expect(config.validatedMaxWorkersPerGpu).toBe(1);
+    expect(config.slots).toHaveLength(1);
+    expect(config.slots[0]!.workerId).toBe(workerId);
+    expect((await fixture.launchAgent.status()).running).toBe(running);
+    expect(
+      (await loadLocalLifecycle(fixture.layout.lifecyclePath)).intent,
+    ).toBe("paused");
+  },
+);
+
+it("does not start a loaded but stopped service after update", async () => {
+  const fixture = await updateFixture();
+  fixture.launchAgent.status.mockResolvedValueOnce({
+    loaded: true,
+    running: false,
+  });
+  await updateMacUserWorker({
+    layout: fixture.layout,
+    uid: process.getuid!(),
+    candidate: async () => fixture.candidate,
+    now: fixture.now,
+    fetch: fixture.fetch,
+    qualify: async () => "report.json",
+    launchAgent: fixture.launchAgent,
+  });
+  expect(fixture.launchAgent.bootout).toHaveBeenCalledOnce();
+  expect(fixture.launchAgent.bootstrap).not.toHaveBeenCalled();
+  expect((await fixture.launchAgent.status()).running).toBe(false);
+});
+
+it("restores the complete two-slot configuration and approval after failed activation", async () => {
+  const fixture = await updateFixture();
+  await enableTwoSlots(fixture.layout);
+  const original = JSON.parse(
+    await readFile(fixture.layout.configPath, "utf8"),
+  );
+  const receipt = await readFile(fixture.layout.capacityValidationPath, "utf8");
+  const bootstrap = fixture.launchAgent.bootstrap.getMockImplementation()!;
+  fixture.launchAgent.bootstrap.mockImplementation(async () => {
+    if ((await readlink(fixture.layout.currentLink)) === "releases/0.1.0") {
+      const journal = JSON.parse(
+        await readFile(fixture.layout.updateStatePath, "utf8"),
+      );
+      expect(journal.status).toBe("rolled-back");
+      expect(Object.keys(journal.recovery).sort()).toEqual([
+        "intent",
+        "previousVersion",
+        "serviceWasLoaded",
+      ]);
+    }
+    await bootstrap();
+  });
+  await expect(
+    updateMacUserWorker({
+      layout: fixture.layout,
+      uid: process.getuid!(),
+      candidate: async () => fixture.candidate,
+      now: fixture.now,
+      fetch: fixture.fetch,
+      qualify: async () => "report.json",
+      launchAgent: fixture.launchAgent,
+      confirmStarted: async () => true,
+      health: async () => false,
+    }),
+  ).rejects.toThrow("Updated worker failed runtime doctor");
+  expect(JSON.parse(await readFile(fixture.layout.configPath, "utf8"))).toEqual(
+    original,
+  );
+  expect(await readFile(fixture.layout.capacityValidationPath, "utf8")).toBe(
+    receipt,
+  );
+  expect(
+    (await loadRuntimeConfig(fixture.layout.configPath)).slots,
+  ).toHaveLength(2);
+});
+
+it("allows update checks and recovery updates with expired capacity evidence", async () => {
+  const fixture = await updateFixture();
+  await enableTwoSlots(fixture.layout, true);
+  await expect(loadRuntimeConfig(fixture.layout.configPath)).rejects.toThrow(
+    "Capacity benchmark evidence did not pass",
+  );
+  await expect(
+    checkMacUserUpdate(fixture.layout, {
+      candidate: async () => fixture.candidate,
+      now: fixture.now,
+    }),
+  ).resolves.toMatchObject({ updateAvailable: true });
+  expect(
+    Object.keys(
+      await readMaintenanceConnection(fixture.layout.configPath),
+    ).sort(),
+  ).toEqual(["allowInsecureLoopback", "backendBaseUrl", "credential"]);
+  await fixture.launchAgent.bootout();
+  await updateMacUserWorker({
+    layout: fixture.layout,
+    uid: process.getuid!(),
+    candidate: async () => fixture.candidate,
+    now: fixture.now,
+    fetch: fixture.fetch,
+    qualify: async () => "report.json",
+    launchAgent: fixture.launchAgent,
+  });
+  expect(
+    (await loadRuntimeConfig(fixture.layout.configPath))
+      .validatedMaxWorkersPerGpu,
+  ).toBe(1);
+});
+
+async function enableTwoSlots(
+  layout: ReturnType<typeof createMacUserLayout>,
+  expired = false,
+) {
+  const config = JSON.parse(await readFile(layout.configPath, "utf8"));
+  config.validatedMaxWorkersPerGpu = 2;
+  config.slots.push({
+    ...config.slots[0],
+    workerId: "718bd89b-bd03-43f7-adb7-9cb5ff415919",
+    slotIndex: 1,
+  });
+  const model = Buffer.from("synthetic-model");
+  const modelDigest = createHash("sha256").update(model).digest("hex");
+  await mkdir(join(config.modelCacheRoot, modelDigest), { recursive: true });
+  await writeFile(
+    join(config.modelCacheRoot, modelDigest, "Kim_Vocal_2.onnx"),
+    model,
+  );
+  const identity = await installedCapacityIdentity({
+    ...config,
+    modelDigest,
+    fixturePath: join(layout.stateRoot, "qualification.wav"),
+  });
+  const validatedAt = Date.now() - (expired ? 8 : 0) * 86400000;
+  await writeFile(
+    layout.capacityValidationPath,
+    JSON.stringify({
+      schemaVersion: 2,
+      status: "PASS",
+      machineId,
+      validatedMaxWorkersPerGpu: 2,
+      baselineSeconds: 10,
+      concurrentWallSeconds: 15,
+      concurrentWorkerSeconds: [14, 15],
+      throughputSpeedup: 1.3,
+      ...identity,
+      validatedAt: new Date(validatedAt).toISOString(),
+      expiresAt: new Date(validatedAt + 86400000).toISOString(),
+      recipeIds: [
+        ...new Set(
+          (config.slots as { recipeIds: string[] }[]).flatMap(
+            (slot) => slot.recipeIds,
+          ),
+        ),
+      ].sort(),
+    }),
+    { mode: 0o600 },
+  );
+  await writeFile(layout.configPath, JSON.stringify(config), { mode: 0o600 });
+}
 
 async function updateFixture() {
   const root = await mkdtemp(join(tmpdir(), "musicmute-update-"));

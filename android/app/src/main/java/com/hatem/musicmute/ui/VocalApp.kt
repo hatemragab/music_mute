@@ -99,6 +99,8 @@ fun VocalApp(
     onProcessingOpened: () -> Unit = {},
     onProcessingNotifications: () -> Unit = {},
     onAccount: () -> Unit = {},
+    openPlayer: Boolean = false,
+    onPlayerOpened: () -> Unit = {},
     onHistoryOpened: () -> Unit = {},
 ) {
     val nav = rememberNavController()
@@ -117,7 +119,7 @@ fun VocalApp(
     var urlImportText by rememberSaveable { mutableStateOf("") }
     var urlImportError by remember { mutableStateOf<String?>(null) }
     var urlImportBusy by remember { mutableStateOf(false) }
-    var trimEnabled by rememberSaveable(processingSession) { mutableStateOf(false) }
+    var trimEnabled by rememberSaveable(processingSession) { mutableStateOf(true) }
     var confirmUrlImport by remember { mutableStateOf(false) }
     LaunchedEffect(sharedUrlText) {
         if (sharedUrlText != null) {
@@ -236,13 +238,14 @@ fun VocalApp(
     }
     val voiceTrackTitle = stringResource(R.string.voice_track)
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(route, lifecycleOwner, processingSession) {
-        fun update() { app.realtime.setForeground(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)); processingModel.history.setVisible(
-            (route == Destination.Home.name || route == Destination.Library.name || detail) && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    // History belongs to the authenticated app, not the selected navigation tab.
+    DisposableEffect(lifecycleOwner, processingSession, processingModel.history) {
+        fun update() { processingModel.history.setVisible(
+            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
         val observer = LifecycleEventObserver { _, _ -> update() }
         lifecycleOwner.lifecycle.addObserver(observer)
         update()
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer); processingModel.history.setVisible(false); app.realtime.setForeground(false) }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer); processingModel.history.setVisible(false) }
     }
     LaunchedEffect(processingSession, lifecycleOwner) {
         app.processingUsage.clear()
@@ -274,6 +277,30 @@ fun VocalApp(
         if (uri != null && original != null && original.second == processingSession)
             processingModel.export(original.first, uri, original.second)
     }
+    val saveVoiceToDevice: (LibraryKey, String) -> Unit = { key, title ->
+        val onReady: (File, String) -> Unit = { file, name ->
+            processingSession?.let { pendingOutput = file to it; exportOutput.launch(name) }
+        }
+        processingModel.downloadLibraryTrack(key, title, onReady)
+    }
+    val saveOriginalToDevice: (LibraryKey) -> Unit = { key ->
+        val owner = app.processingSession()
+        if (owner != null) scope.launch {
+            try {
+                val job = app.comparisonJob(key)
+                val file = app.processingArtifacts.ensureOriginal(key.jobId)
+                if (app.processingSession() == owner) {
+                    pendingOriginal = file to owner
+                    val name = (job.displayName ?: job.sourceTitle ?: "Audio")
+                        .replace(Regex("[^\\p{L}\\p{N} ._-]"), "_").take(100)
+                    exportOriginal.launch("$name-original.${job.input.extension}")
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+            catch (_: Exception) {
+                snackbar.showSnackbar(context.getString(R.string.original_unavailable))
+            }
+        }
+    }
     val openImport: () -> Unit = {
         nav.navigate(Destination.Home.name) { launchSingleTop = true }
         importAudio.launch(arrayOf("audio/*", "video/*"))
@@ -298,6 +325,12 @@ fun VocalApp(
             onHistoryOpened()
         }
     }
+    LaunchedEffect(openPlayer) {
+        if (openPlayer) {
+            nav.navigate("player") { launchSingleTop = true }
+            onPlayerOpened()
+        }
+    }
     if (confirmUrlImport) {
         UrlImportConfirmationSheet(urlImportText, urlImportBusy,
             onDismiss = { confirmUrlImport = false },
@@ -318,7 +351,7 @@ fun VocalApp(
     BoxWithConstraints {
         val wide = maxWidth >= 600.dp
         val navigate: (Destination) -> Unit = { destination ->
-            nav.navigate(destination.name) {
+            if (route != destination.name) nav.navigate(destination.name) {
                 popUpTo(Destination.Home.name) { saveState = true }
                 launchSingleTop = true
                 // Home anchors the stack. Restoring its saved state can reopen the
@@ -477,6 +510,10 @@ fun VocalApp(
                                 libraryModel.clearProblem(); libraryModel.refreshLocal(); processingModel.history.refresh()
                             }, openPlayer = { nav.navigate("player") },
                             togglePlayback = app.audioPlayback::togglePlayback, next = app.audioPlayback::next),
+                            hasMore = jobs.nextCursor != null,
+                            loadingMore = jobs.loading || jobs.loadingMore,
+                            loadMoreFailed = jobs.failure != null,
+                            onLoadMore = processingModel.history::loadMore,
                             miniPlayer = {
                                 MiniPlayer(app.audioPlayback.state, { nav.navigate("player") },
                                     app.audioPlayback::togglePlayback, app.audioPlayback::next,
@@ -494,26 +531,16 @@ fun VocalApp(
                             repeat = app.audioPlayback::setRepeat, autoNext = app.audioPlayback::setAutoNext,
                             speed = app.audioPlayback::setSpeed, volume = app.audioPlayback::setVolume,
                             original = app.audioPlayback::selectOriginal,
-                            saveOriginal = {
-                                val key = currentTrackKey
-                                val owner = app.processingSession()
-                                if (key != null && owner != null) scope.launch {
-                                    try {
-                                        val job = app.comparisonJob(key)
-                                        val file = app.processingArtifacts.ensureOriginal(key.jobId)
-                                        if (app.processingSession() == owner) {
-                                            pendingOriginal = file to owner
-                                            val name = (job.displayName ?: job.sourceTitle ?: "Audio")
-                                                .replace(Regex("[^\\p{L}\\p{N} ._-]"), "_").take(100)
-                                            exportOriginal.launch("$name-original.${job.input.extension}")
-                                        }
-                                    } catch (error: kotlinx.coroutines.CancellationException) { throw error }
-                                    catch (_: Exception) { snackbar.showSnackbar(context.getString(R.string.original_unavailable)) }
+                            saveVoice = {
+                                currentTrackKey?.let { key ->
+                                    saveVoiceToDevice(key, currentLibraryEntry?.title ?: voiceTrackTitle)
                                 }
                             },
+                            saveOriginal = { currentTrackKey?.let(saveOriginalToDevice) },
                             queue = { showPlaybackQueue = true },
                             info = { currentTrackKey?.let(openAudioDetails) },
-                            star = { currentTrackKey?.let(libraryModel::toggleStar) }))
+                            star = { currentTrackKey?.let(libraryModel::toggleStar) }),
+                            artifactProgress = artifactProgress)
                     }
                     composable(JobDetailRoute, arguments = listOf(navArgument("operationId") { nullable = true; defaultValue = null })) { jobBackStack ->
                         val jobId = jobBackStack.arguments?.getString("jobId")
@@ -557,12 +584,8 @@ fun VocalApp(
                             }, onDownload = {
                                 resultKey?.let { processingModel.downloadLibraryTrack(it, resultTitle) }
                             },
-                            onSave = {
-                                val onReady: (File, String) -> Unit = { file, name ->
-                                    processingSession?.let { pendingOutput = file to it; exportOutput.launch(name) }
-                                }
-                                resultKey?.let { processingModel.downloadLibraryTrack(it, resultTitle, onReady) }
-                            },
+                            onSaveVoice = { resultKey?.let { saveVoiceToDevice(it, resultTitle) } },
+                            onSaveOriginal = { resultKey?.let(saveOriginalToDevice) },
                             onShare = {
                                 val onReady: (Intent) -> Unit = { context.startActivity(Intent.createChooser(it, null)) }
                                 resultKey?.let { processingModel.shareLibraryTrack(it, resultTitle, onReady) }

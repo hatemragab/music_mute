@@ -8,10 +8,7 @@ test("signed-out layout stays usable in English and Arabic at target widths", as
   for (const width of [360, 390, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
-    await page.evaluate(() =>
-      localStorage.setItem("musicmute.web.language", "en"),
-    );
-    await page.reload();
+    await page.getByRole("button", { name: "English", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Continue with Google" }),
@@ -95,6 +92,7 @@ test("authenticated preview covers responsive home, jobs, library and settings i
   ] as const) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/tests/preview.html");
+    await expect(page.locator("h1")).toBeVisible();
     await page.evaluate(
       (value) => localStorage.setItem("musicmute.web.language", value),
       language,
@@ -102,8 +100,7 @@ test("authenticated preview covers responsive home, jobs, library and settings i
     await page.reload();
     await expect(
       page.getByRole("heading", {
-        name:
-          language === "ar" ? "استوديوك أينما كنت" : "Your studio, anywhere",
+        name: language === "ar" ? "ابدأ مقطعًا جديدًا" : "Start a new track",
       }),
     ).toBeVisible();
     expect(
@@ -117,9 +114,7 @@ test("authenticated preview covers responsive home, jobs, library and settings i
     });
     const navigation =
       width < 700 ? page.locator(".mobile-nav") : page.locator(".sidebar");
-    await navigation
-      .getByRole("link", { name: language === "ar" ? "المهام" : "Jobs" })
-      .click();
+    await page.locator(".section-heading").getByRole("link").click();
     await expect(
       page.getByRole("heading", {
         name: language === "ar" ? "المهام" : "Jobs",
@@ -141,6 +136,61 @@ test("authenticated preview covers responsive home, jobs, library and settings i
     ).toBeVisible();
     await page.screenshot({
       path: `test-results/screenshots/library-${width}-${language}.png`,
+      fullPage: true,
+    });
+    await expect(
+      page
+        .getByRole("button", {
+          name: language === "ar" ? "تنزيل مقطع الصوت" : "Download Vocal track",
+        })
+        .first(),
+    ).toBeVisible();
+    await page
+      .getByRole("button", {
+        name: language === "ar" ? "تشغيل" : "Play",
+        exact: true,
+      })
+      .first()
+      .click();
+    const miniPlayer = page.getByRole("complementary", {
+      name: language === "ar" ? "المشغل" : "Player",
+    });
+    await expect(miniPlayer).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await miniPlayer.getByRole("link").first().click();
+    await expect(
+      page.getByRole("heading", {
+        name: language === "ar" ? "المشغل" : "Player",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: language === "ar" ? "إضافة للمفضلة" : "Favorite",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: language === "ar" ? "حفظ الصوت الأصلي" : "Save original audio",
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", {
+        name: language === "ar" ? "التفاصيل" : "Details",
+      }),
+    ).toBeVisible();
+    await expect(page.getByText("6abaade2a3f12dc9ed43c129")).toHaveCount(0);
+    await expect(
+      page.getByText(language === "ar" ? "مقطع بدون عنوان" : "Untitled track"),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/screenshots/player-${width}-${language}.png`,
       fullPage: true,
     });
     await navigation

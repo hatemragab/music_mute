@@ -4,7 +4,7 @@ struct AudioImportReview: View {
   let intent: AudioPipelineIntent
   let confirm: (Bool) async throws -> Void
   let cancel: () async -> Void
-  @State private var trimEnabled = false
+  @State private var trimEnabled = true
   @State private var rightsConfirmed = false
   @State private var submitting = false
   @State private var failed = false

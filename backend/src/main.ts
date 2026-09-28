@@ -9,6 +9,9 @@ import { configureHttp } from './http/configure-http.js';
 import { startupFailureReason } from './startup-error.js';
 import { WorkerHintService } from './worker-hints/worker-hint.service.js';
 import { captureBackendStartupFailure } from './observability/sentry.js';
+import { installFatalDiagnostics } from './observability/fatal-errors.js';
+
+installFatalDiagnostics();
 
 async function bootstrap() {
   const { AppModule } = await import('./app.module.js');

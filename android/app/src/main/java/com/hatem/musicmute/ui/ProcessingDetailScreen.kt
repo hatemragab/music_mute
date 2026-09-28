@@ -45,7 +45,8 @@ fun ProcessingDetailScreen(
     onRetry: () -> Unit,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
-    onSave: () -> Unit,
+    onSaveVoice: () -> Unit,
+    onSaveOriginal: () -> Unit,
     onShare: () -> Unit,
     onRename: (String) -> Unit,
     onDelete: () -> Unit,
@@ -69,7 +70,7 @@ fun ProcessingDetailScreen(
         artifactProgress = artifactProgress,
         message = (message ?: state.failure?.let(::processingFailureLabel))?.let { stringResource(it) },
         onBack = onBack, onRefresh = onRefresh, onPlay = onPlay, onDownload = onDownload,
-        onSave = onSave, onShare = onShare,
+        onSaveVoice = onSaveVoice, onSaveOriginal = onSaveOriginal, onShare = onShare,
         onRename = { renaming = true }, onDelete = { deleting = true },
     ) else CreativePage(Modifier.testTag("processing-detail")) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -159,7 +160,10 @@ fun ProcessingDetailScreen(
                 OutlinedButton(onClick = onCancel, enabled = !busy) { Text(stringResource(R.string.auth_cancel)) }
             if (job.status == "failed") CreativePrimaryButton(onClick = onRetry, busy = busy) { Text(stringResource(R.string.retry)) }
             if (job.status == "ready" && (job.canDownloadOutput || availableOffline)) {
-                CompletedResultScreen(availableOffline, busy, onPlay, onDownload, onSave, onShare)
+                CompletedResultScreen(
+                    availableOffline, busy, onPlay, onDownload,
+                    onSaveVoice, onSaveOriginal, onShare,
+                )
             }
             if (job.status == "ready" && !job.canDownloadOutput && !availableOffline) CreativeFeedback(stringResource(R.string.creative_jobs_wait_output))
         } else if (task == null && state.failure == null && !state.loading) {
@@ -168,7 +172,10 @@ fun ProcessingDetailScreen(
         else if (task != null) {
             if (task.canCancel && task.stage != AudioTaskStage.CANCELLING) OutlinedButton(onCancel, enabled = !busy) { Text(stringResource(R.string.auth_cancel)) }
             if (task.canRetry) CreativePrimaryButton(onRetry, busy = busy) { Text(stringResource(R.string.retry)) }
-            if (ready && (task.canPlay || availableOffline)) CompletedResultScreen(availableOffline, busy, onPlay, onDownload, onSave, onShare)
+            if (ready && (task.canPlay || availableOffline)) CompletedResultScreen(
+                availableOffline, busy, onPlay, onDownload,
+                onSaveVoice, onSaveOriginal, onShare,
+            )
         }
 
     }

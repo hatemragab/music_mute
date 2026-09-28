@@ -10,10 +10,17 @@ struct HomeView: View {
   var importPhoto: (URL) -> Void = { _ in }
   var reportImportFailure: (Error) -> Void = { _ in }
   var showProcessing: () -> Void = {}
+  var tasks: [AudioTaskPresentation] = []
+  var jobs: [Job] = []
+  var connection: RealtimeState = .paused
+  var onSelectTask: (AudioTaskPresentation) -> Void = { _ in }
+  var onCancelTask: (AudioTaskPresentation) -> Void = { _ in }
+  var onRetryTask: (AudioTaskPresentation) -> Void = { _ in }
   var showHistory: () -> Void
   @State private var importing = false
   @State private var importingPhoto = false
   var body: some View {
+    let visibleTasks = tasks.filter(\.visibleOnHome)
     ScrollView {
       VStack(alignment: .leading, spacing: 24) {
         HStack(spacing: 12) {
@@ -28,13 +35,7 @@ struct HomeView: View {
           )
           .background(VocalStyle.teal.opacity(0.10), in: Capsule())
         }
-        VStack(alignment: .leading, spacing: 16) {
-          Text("hero_eyebrow").font(.caption.bold()).foregroundStyle(VocalStyle.teal)
-          Text("hero_title").font(.system(.largeTitle, design: .rounded, weight: .bold)).fixedSize(
-            horizontal: false, vertical: true)
-          Text("hero_body").foregroundStyle(.secondary)
-          Waveform(color: VocalStyle.teal.opacity(0.65)).frame(height: 58).padding(.top, 8)
-        }.padding(.vertical, 8)
+        Text("home_start").font(.title2.bold())
         if let urlImports { URLImportCard(model: urlImports, openJob: openImportedJob) }
         VocalCard {
           Button {
@@ -55,12 +56,23 @@ struct HomeView: View {
           Text("owned_audio_guidance").foregroundStyle(.secondary)
           Text("quality_notice").font(.caption).foregroundStyle(.secondary)
         }
-        VocalCard {
-          Label("processing_title", systemImage: "waveform.badge.mic").font(.headline)
-          Text("processing_description").foregroundStyle(.secondary)
-          Button("processing_import", action: showProcessing).frame(minHeight: 48)
+        HStack {
+          Text("home_recent").font(.title2.bold())
+          Spacer()
+          Button("home_see_all", action: showProcessing).frame(minHeight: 44)
             .accessibilityIdentifier("openProcessing")
-          Text("processing_limits").font(.caption).foregroundStyle(.secondary)
+        }
+        ProcessingConnectionStatus(connection: connection)
+        if visibleTasks.isEmpty {
+          VocalCard { Text("processing_empty").foregroundStyle(.secondary) }
+        } else {
+          ForEach(visibleTasks.prefix(4)) { task in
+            AudioTaskCard(
+              task: task, onOpen: { onSelectTask(task) },
+              onCancel: { onCancelTask(task) }, onRetry: { onRetryTask(task) })
+            ProcessingQueueStatus(
+              job: jobs.first { $0.id == task.jobID }, connection: connection)
+          }
         }
       }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
     }.scrollDismissesKeyboard(.interactively)

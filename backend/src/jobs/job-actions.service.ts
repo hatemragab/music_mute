@@ -265,6 +265,7 @@ export class JobActionsService {
               requestHash: hash,
               retryOfJobId: original._id,
               sourceTitle: original.sourceTitle ?? null,
+              extra_data: original.extra_data ?? null,
               displayName: original.displayName ?? original.sourceTitle ?? null,
               sourceKind: original.sourceKind ?? null,
               sourceUrl: original.sourceUrl ?? null,

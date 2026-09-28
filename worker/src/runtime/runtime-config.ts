@@ -78,6 +78,19 @@ export async function readBenchmarkMachineIdentity(
   return (await readRuntimeConfig(path, process, false)).machineId;
 }
 
+/** Maintenance must remain possible after capacity evidence expires. This
+ * deliberately exposes only connection credentials, never admission settings.
+ */
+export async function readMaintenanceConnection(
+  path: string,
+): Promise<
+  Pick<RuntimeConfig, "backendBaseUrl" | "credential" | "allowInsecureLoopback">
+> {
+  const { backendBaseUrl, credential, allowInsecureLoopback } =
+    await readRuntimeConfig(path, process, false);
+  return { backendBaseUrl, credential, allowInsecureLoopback };
+}
+
 async function readRuntimeConfig(
   path: string,
   host: { platform: NodeJS.Platform; arch: string },

@@ -147,7 +147,7 @@ private struct ProductionVocalView: View {
       var jobs: [Job] = []
       do {
         owned = try await repository.store.pipelines(ownerUid: uid)
-        jobs = try await repository.store.cachedJobs(ownerUid: uid)
+        jobs = try await repository.store.libraryJobs(ownerUid: uid)
       } catch ProcessingStoreFailure.missingOperation {
         owned = []
         jobs = []
@@ -179,7 +179,7 @@ private struct ProductionVocalView: View {
 
 private struct ProductionContentView: View {
   @ObservedObject private var preferences: AppPreferences
-  @ObservedObject private var player: AudioPlayer
+  private let player: AudioPlayer
   @ObservedObject private var auth: AuthSessionModel
   @ObservedObject private var processing: ProcessingModel
   @ObservedObject private var artifacts: JobArtifactRepository
@@ -237,51 +237,79 @@ private struct ProductionContentView: View {
 
 struct VocalRootView: View {
   @ObservedObject var preferences: AppPreferences
-  @ObservedObject var player: AudioPlayer
+  let player: AudioPlayer
   @ObservedObject var auth: AuthSessionModel
   @ObservedObject var processing: ProcessingModel
   @ObservedObject var artifacts: JobArtifactRepository
   @ObservedObject var push: PushRegistrationCoordinator
   var requestNotifications: () -> Void
+  var libraryOwnerUID: String? = nil
   @Environment(\.colorScheme) private var scheme
   @Environment(\.scenePhase) private var scenePhase
   @State private var tab = 0
+  @State private var showingProcessing = false
+  @State private var showingPlayer = false
+  @StateObject private var libraryPreferences = LibraryPreferencesStore()
   var body: some View {
     TabView(selection: $tab) {
       NavigationStack {
         HomeView(
           urlImports: processing.urlImports,
-          openImportedJob: { _ in
-            tab = 2
-            Task { await processing.history.refreshAfterChange() }
+          openImportedJob: { id in
+            processing.selectedJobID = id
+            Task { await processing.history.select(id) }
+            showingProcessing = true
           },
           beginImport: processing.beginSourceImport,
           importAudio: { processing.importAudio($0) },
           photoSourceLimit: processing.photoSourceLimit, importPhoto: processing.importPhoto,
           reportImportFailure: processing.reportImportFailure,
-          showProcessing: { tab = 2 }
-        ) { tab = 2 }
+          showProcessing: { showingProcessing = true },
+          tasks: AudioTaskPresentation.merge(
+            pipelines: processing.pipeline.pipelines,
+            uploads: processing.repository.operations, jobs: processing.history.jobs),
+          jobs: processing.history.jobs, connection: processing.history.connection,
+          onSelectTask: { task in
+            processing.select(task)
+            showingProcessing = true
+          }, onCancelTask: processing.cancel, onRetryTask: processing.retry
+        ) { showingProcessing = true }
         .background(
-          VocalStyle.background(scheme))
+          VocalStyle.background(scheme)
+        )
+        .navigationDestination(isPresented: $showingProcessing) { processingView }
       }
       .tabItem { Label("home_tab", systemImage: "house") }.tag(0)
       NavigationStack {
-        ProcessingRootView(
-          model: processing, repository: processing.repository, player: player,
-          outputProgress: artifacts.progress.mapValues { progress in
-            progress.totalBytes.map { Double(progress.receivedBytes) / Double($0) }
-          }, requestNotifications: requestNotifications
+        LibraryView(
+          history: processing.history, model: processing, artifacts: artifacts,
+          preferences: libraryPreferences, onOpenDetails: openDetails
         )
         .background(VocalStyle.background(scheme))
       }
-      .tabItem { Label("processing_title", systemImage: "waveform") }.tag(2)
+      .tabItem { Label("library_title", systemImage: "music.note.list") }.tag(1)
       NavigationStack {
-        SettingsView(preferences: preferences, auth: auth).background(VocalStyle.background(scheme))
+        SettingsView(
+          preferences: preferences, auth: auth,
+          usageRepository: processing.usageRepository
+        )
+        .background(VocalStyle.background(scheme))
       }
-      .tabItem { Label("settings_tab", systemImage: "slider.horizontal.3") }.tag(3)
-    }.tint(scheme == .dark ? VocalStyle.mint : VocalStyle.teal)
-      .task(id: tab == 2 && scenePhase == .active) {
-        processing.history.setVisible(tab == 2 && scenePhase == .active)
+      .tabItem { Label("settings_tab", systemImage: "slider.horizontal.3") }.tag(2)
+    }.tint(preferences.accentColor)
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        MiniPlayerView(model: processing, player: player) { showingPlayer = true }
+      }
+      .sheet(isPresented: $showingPlayer) {
+        PlayerView(
+          model: processing, player: player, preferences: libraryPreferences,
+          onOpenDetails: openDetails)
+      }
+      .task(id: libraryOwnerUID ?? auth.identity?.uid ?? "") {
+        libraryPreferences.bind(libraryOwnerUID ?? auth.identity?.uid ?? "")
+      }
+      .task(id: scenePhase == .active) {
+        processing.history.setVisible(scenePhase == .active)
       }
       .onDisappear { processing.history.setVisible(false) }
       .task(
@@ -291,12 +319,38 @@ struct VocalRootView: View {
         guard processing.sessionReady, scenePhase == .active, !auth.isOffline else { return }
         if let job = try? await push.resolvePendingTap() {
           processing.selectedJobID = job.id
-          tab = 2
+          await processing.history.select(job.id)
+          tab = 0
+          showingProcessing = true
         }
       }
       .onChange(of: push.refreshHint) { _, _ in
-        guard tab == 2, scenePhase == .active else { return }
+        guard scenePhase == .active else { return }
         Task { await processing.history.refreshAfterChange() }
       }
+  }
+
+  private func openDetails(_ job: Job) {
+    if let task = AudioTaskPresentation.merge(
+      pipelines: processing.pipeline.pipelines,
+      uploads: processing.repository.operations, jobs: processing.history.jobs
+    ).first(where: { $0.jobID == job.id }) {
+      processing.select(task)
+    } else {
+      processing.selectedJobID = job.id
+      Task { await processing.history.select(job.id) }
+    }
+    tab = 0
+    showingProcessing = true
+  }
+
+  private var processingView: some View {
+    ProcessingRootView(
+      model: processing, repository: processing.repository, player: player,
+      outputProgress: artifacts.progress.mapValues { progress in
+        progress.totalBytes.map { Double(progress.receivedBytes) / Double($0) }
+      }, requestNotifications: requestNotifications
+    )
+    .background(VocalStyle.background(scheme))
   }
 }

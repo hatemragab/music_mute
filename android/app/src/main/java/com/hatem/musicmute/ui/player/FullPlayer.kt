@@ -49,6 +49,7 @@ internal fun FullPlayer(
     entry: LibraryEntry?,
     actions: PlayerActions,
     progress: @Composable () -> Unit = { PlaybackProgress(state, actions.seek) },
+    downloadProgress: @Composable () -> Unit = {},
 ) {
     var panel by rememberSaveable { mutableStateOf<String?>(null) }
     // Restore unity gain when replacing the previous in-app volume control.
@@ -86,7 +87,8 @@ internal fun FullPlayer(
             original = state.original,
             entry = entry,
             saveEnabled = !state.switching,
-            onSaveOriginal = actions.saveOriginal,
+            saveLabel = playerSaveLabel(state.original),
+            onSave = if (state.original) actions.saveOriginal else actions.saveVoice,
             onStar = actions.star,
             modifier = Modifier.playerVerticalGestures(actions.back, {}).testTag("player-gesture-area"),
         )
@@ -97,6 +99,7 @@ internal fun FullPlayer(
         )
         if (state.comparisonFailed) Text(stringResource(R.string.original_unavailable), color = MaterialTheme.colorScheme.error)
         PlaybackActivityIndicator(state.buffering || state.switching)
+        downloadProgress()
         if (state.failed) CreativeFeedback(stringResource(libraryProblemLabel(entry?.problem)), error = true,
             actionLabel = stringResource(R.string.retry), onAction = actions.toggle)
         progress()
@@ -154,7 +157,8 @@ private fun PlayerHero(
     original: Boolean,
     entry: LibraryEntry?,
     saveEnabled: Boolean,
-    onSaveOriginal: () -> Unit,
+    saveLabel: Int,
+    onSave: () -> Unit,
     onStar: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -195,14 +199,14 @@ private fun PlayerHero(
                     )
                 }
                 TextButton(
-                    onClick = onSaveOriginal,
+                    onClick = onSave,
                     enabled = saveEnabled,
                     modifier = Modifier.heightIn(min = CreativeTokens.TouchTarget),
                     contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
                 ) {
                     Icon(Icons.Outlined.Download, null, Modifier.size(CreativeTokens.SmallIcon))
                     Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.save_original), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(saveLabel), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
         }

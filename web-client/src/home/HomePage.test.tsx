@@ -4,8 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, test, vi } from "vitest";
 import { ApiClient, ApiError } from "../api/client";
-import { I18nProvider } from "../i18n";
+import { friendlyError, I18nProvider } from "../i18n";
 import { HomePage } from "./HomePage";
+import * as audioPreparation from "./audio-preparation";
 import { RealtimeProvider } from "../realtime/RealtimeProvider";
 import { realtimeFixture } from "../../tests/realtime-fixture";
 
@@ -21,24 +22,36 @@ vi.mock("../auth/AuthProvider", () => ({
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   sessionStorage.clear();
   localStorage.clear();
 });
 
-function page(policyFailure = false) {
+function page(
+  policyFailure = false,
+  importStatus = "queued",
+  importErrorCode = "IMPORT_SOURCE_UNAVAILABLE",
+) {
   const { client } = realtimeFixture((resource) => {
     if (resource === "policy") {
       if (policyFailure) throw new ApiError(503, "SERVICE_UNAVAILABLE");
-      return { acceptNewJobs: true };
+      return {
+        acceptNewJobs: true,
+        limits: {
+          maxDurationSeconds: 1200,
+          maxPreparedAudioBytes: 50_000_000,
+          maxLocalSourceBytes: 200_000_000,
+        },
+      };
     }
     if (resource === "jobs") return { items: [], nextCursor: null };
     if (resource === "import")
       return {
         importId: "0123456789abcdef01234567",
-        status: "queued",
+        status: importStatus,
         jobId: null,
-        error: null,
+        error: importStatus === "failed" ? { code: importErrorCode } : null,
       };
     throw new Error(`Unexpected subscription: ${resource}`);
   });
@@ -62,6 +75,60 @@ function page(policyFailure = false) {
     </QueryClientProvider>,
   );
 }
+
+test.each(["en", "ar"])(
+  "failed import stops loading and can be dismissed without auto-resubmission (%s)",
+  async (lang) => {
+    localStorage.setItem("musicmute.web.language", lang);
+    sessionStorage.setItem(
+      "musicmute.web.import.test-user",
+      "0123456789abcdef01234567",
+    );
+    sessionStorage.setItem(
+      "musicmute.web.import.test-user.request",
+      "old request",
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = page(false, "failed");
+    await screen.findByRole("alert");
+    expect(container.querySelector(".spinner")).toBeNull();
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Request failed");
+    expect(container.querySelector(".import-state")).not.toHaveTextContent(
+      "Importing source…",
+    );
+    await userEvent.click(screen.getByRole("button", { name: /Close|إغلاق/ }));
+    expect(sessionStorage.getItem("musicmute.web.import.test-user")).toBeNull();
+    expect(
+      sessionStorage.getItem("musicmute.web.import.test-user.request"),
+    ).toBeNull();
+    expect(container.querySelector(".import-state")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
+test("active imports retain a spinner", async () => {
+  sessionStorage.setItem(
+    "musicmute.web.import.test-user",
+    "0123456789abcdef01234567",
+  );
+  const { container } = page(false, "downloading");
+  await screen.findByText(/Importing source/);
+  expect(container.querySelector(".spinner")).not.toBeNull();
+});
+
+test.each([
+  ["IMPORT_SOURCE_UNAVAILABLE", "importSourceUnavailable"],
+  ["IMPORT_UPSTREAM_REFUSED", "importUpstreamRefused"],
+  ["IMPORT_DEPENDENCY_FAILED", "importDependencyFailed"],
+  ["IMPORT_INVALID_AUDIO", "importInvalidAudio"],
+  ["IMPORT_DISK_FULL", "importDiskFull"],
+  ["IMPORT_UNSUPPORTED_AUDIO_SOURCE", "importNoAudio"],
+])("maps %s without showing raw provider messages", (code, key) => {
+  expect(
+    friendlyError({ code, message: "secret provider URL" }, (value) => value),
+  ).toBe(key);
+});
 
 test("URL intake requires rights and sends the reviewed trim option", async () => {
   const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
@@ -89,6 +156,7 @@ test("URL intake requires rights and sends the reviewed trim option", async () =
   );
   page();
   const user = userEvent.setup();
+  expect(screen.getByRole("checkbox", { name: "Trim silence" })).toBeChecked();
   await user.type(
     screen.getByRole("textbox", { name: "Public media URL" }),
     "https://www.youtube.com/watch?v=UXqq0ZvbOnk",
@@ -108,6 +176,20 @@ test("URL intake requires rights and sends the reviewed trim option", async () =
     trim_enabled: false,
   });
   expect(requests[0].body.request_id).toMatch(/^[a-f0-9-]{36}$/);
+});
+
+test("audio upload starts with trimming enabled", async () => {
+  vi.spyOn(audioPreparation, "inspectDuration").mockResolvedValue(5);
+  page();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("tab", { name: "Upload audio" }));
+  await user.upload(
+    screen.getByLabelText("Choose audio file"),
+    new File(["audio"], "sample.mp3", { type: "audio/mpeg" }),
+  );
+  expect(
+    await screen.findByRole("checkbox", { name: "Trim silence" }),
+  ).toBeChecked();
 });
 
 test("ambiguous import write reuses its request ID on retry", async () => {

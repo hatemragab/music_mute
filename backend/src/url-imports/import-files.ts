@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { decodeExtraData, type JobExtraData } from '../jobs/job-extra-data.js';
 import { createWriteStream } from 'node:fs';
 import {
   lstat,
@@ -10,9 +11,14 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { Readable, Transform } from 'node:stream';
+import { Transform } from 'node:stream';
+import {
+  request as httpRequest,
+  type ClientRequest,
+  type IncomingMessage,
+} from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { pipeline } from 'node:stream/promises';
-import type { ReadableStream } from 'node:stream/web';
 import { importError, type ImportErrorCode } from './import-errors.js';
 
 const OWNED_DIRECTORY = /^import-[0-9a-f-]{36}$/;
@@ -146,7 +152,12 @@ export class ImportFiles {
     maxBytes: number,
     signal: AbortSignal,
     request?: { method: string; headers: Record<string, string>; body: string },
-  ): Promise<{ bytes: number; sha256: string; sourceTitle?: string }> {
+  ): Promise<{
+    bytes: number;
+    sha256: string;
+    sourceTitle?: string;
+    extraData?: JobExtraData | null;
+  }> {
     if (
       !Number.isSafeInteger(maxBytes) ||
       maxBytes < 1 ||
@@ -160,15 +171,48 @@ export class ImportFiles {
       controller.signal,
       AbortSignal.timeout(request ? 780_000 : 120_000),
     ]);
+    let outgoing: ClientRequest | undefined;
+    let response: IncomingMessage | undefined;
     try {
-      const response = await fetch(url, {
-        ...request,
-        signal: transferSignal,
-        redirect: 'error',
-        headers: { ...request?.headers, 'Accept-Encoding': 'identity' },
+      const target = new URL(url);
+      if (
+        !['http:', 'https:'].includes(target.protocol) ||
+        target.username ||
+        target.password
+      )
+        throw importError('IMPORT_DEPENDENCY_FAILED');
+      transferSignal.throwIfAborted();
+      // Native streams avoid Undici's fatal paused-parser assertion on FIN.
+      // No pooling, redirect following, or automatic retry of a paid POST.
+      response = await new Promise<IncomingMessage>((resolve, reject) => {
+        outgoing = (target.protocol === 'https:' ? httpsRequest : httpRequest)(
+          target,
+          {
+            method: request?.method ?? 'GET',
+            signal: transferSignal,
+            agent: false,
+            headers: {
+              ...request?.headers,
+              'Accept-Encoding': 'identity',
+              ...(request
+                ? { 'Content-Length': String(Buffer.byteLength(request.body)) }
+                : {}),
+            },
+          },
+          (incoming) => {
+            incoming.on('error', () => undefined); // Cover the handoff to pipeline.
+            resolve(incoming);
+          },
+        );
+        outgoing.on('error', reject);
+        outgoing.end(request?.body);
       });
-      if (!response.ok || !response.body) {
-        const code = response.headers.get('x-import-error');
+      const header = (name: string): string | null => {
+        const value = response?.headers[name];
+        return typeof value === 'string' ? value : null;
+      };
+      if (response.statusCode !== 200) {
+        const code = header('x-import-error');
         const safeCodes: ImportErrorCode[] = [
           'IMPORT_INVALID_URL',
           'IMPORT_SINGLE_ITEM_REQUIRED',
@@ -185,20 +229,20 @@ export class ImportFiles {
         if (request && safeCodes.includes(code as ImportErrorCode))
           throw importError(code as ImportErrorCode);
         throw importError(
-          response.status === 403 || response.status === 429
+          response.statusCode === 403 || response.statusCode === 429
             ? 'IMPORT_UPSTREAM_REFUSED'
             : 'IMPORT_DEPENDENCY_FAILED',
         );
       }
-      const declared = response.headers.get('content-length');
+      const declared = header('content-length');
       if (
         declared !== null &&
         (!/^\d+$/.test(declared) || Number(declared) > maxBytes)
       )
         throw importError('IMPORT_TOO_LARGE', maxBytes);
       if (
-        response.headers.get('content-encoding') &&
-        response.headers.get('content-encoding') !== 'identity'
+        header('content-encoding') &&
+        header('content-encoding') !== 'identity'
       )
         throw importError('IMPORT_UNSUPPORTED_AUDIO_SOURCE');
       let bytes = 0;
@@ -215,43 +259,30 @@ export class ImportFiles {
         },
       });
       await pipeline(
-        Readable.fromWeb(response.body as ReadableStream<Uint8Array>),
+        response,
         counter,
         createWriteStream(path, { flags: 'wx', mode: 0o600 }),
         { signal: transferSignal },
       );
-      if (bytes === 0) throw importError('IMPORT_INVALID_AUDIO');
-      const encodedTitle = request
-        ? response.headers.get('x-import-title-base64')
+      if (
+        bytes === 0 ||
+        !response.complete ||
+        (declared !== null && bytes !== Number(declared))
+      )
+        throw importError('IMPORT_INVALID_AUDIO');
+      const extraData = request
+        ? decodeExtraData(header('x-import-extra-data-base64'))
         : null;
-      const sourceTitle = decodeImportTitle(encodedTitle);
       return {
         bytes,
         sha256: hash.digest('base64'),
-        ...(sourceTitle ? { sourceTitle } : {}),
+        ...(request ? { extraData } : {}),
+        ...(extraData?.title ? { sourceTitle: extraData.title } : {}),
       };
     } finally {
+      response?.destroy();
+      outgoing?.destroy();
       controller.abort();
     }
-  }
-}
-
-export function decodeImportTitle(encoded: string | null): string | undefined {
-  if (
-    !encoded ||
-    encoded.length > 1100 ||
-    !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)
-  )
-    return undefined;
-  try {
-    const title = new TextDecoder('utf-8', { fatal: true }).decode(
-      Buffer.from(encoded, 'base64'),
-    );
-    return (
-      [...title.replace(/\p{Cc}/gu, '').trim()].slice(0, 200).join('') ||
-      undefined
-    );
-  } catch {
-    return undefined;
   }
 }

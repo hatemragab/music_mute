@@ -45,19 +45,20 @@ android {
     defaultConfig {
         fun publicPage(property: String): String {
             val value = providers.gradleProperty(property).orElse("").get()
-            require(value.isBlank() || runCatching {
+            require(value.isNotBlank() && runCatching {
                 URI(value).let { it.scheme == "https" && !it.host.isNullOrBlank() && it.rawUserInfo == null && it.rawQuery == null && it.rawFragment == null }
-            }.getOrDefault(false)) { "$property must be an HTTPS public page URL" }
+            }.getOrDefault(false)) { "$property must be a nonempty HTTPS public page URL" }
             return buildConfigString(value)
         }
         buildConfigField("String", "PRIVACY_URL", publicPage("privacyUrl"))
         buildConfigField("String", "DELETION_URL", publicPage("deletionUrl"))
+        buildConfigField("String", "SUPPORT_URL", publicPage("supportUrl"))
         applicationId = "com.hatem.musicmute"
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "com.hatem.musicmute.processing.MediaPreparationTestRunner"
-        versionCode = 10
-        versionName = "0.1.9"
+        versionCode = 11
+        versionName = "0.1.10"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
     }
 

@@ -3,6 +3,7 @@
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { printWorkerVersion } from "./version.js";
 import {
   sanitizeDiagnostic,
   WorkerChildProcess,
@@ -83,7 +84,16 @@ const macUserCommands = new Set([
   "uninstall",
 ]);
 
-if (command === "--help" || command === "help") {
+if (command === "--version" || command === "version" || command === "-v") {
+  try {
+    await printWorkerVersion(process.argv.slice(3));
+  } catch {
+    console.error(
+      "Unable to read worker version. Usage: mw --version [--json]",
+    );
+    process.exitCode = 2;
+  }
+} else if (command === "--help" || command === "help" || command === "-h") {
   console.log(MAC_USER_USAGE);
 } else if (command !== undefined && macUserCommands.has(command)) {
   try {

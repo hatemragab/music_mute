@@ -5,7 +5,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { randomUUID } from 'node:crypto';
-import { Types, trusted, type Model } from 'mongoose';
+import { Types, trusted, type Model, type ClientSession } from 'mongoose';
 import { ProcessingAdmissionFence } from '../admin-settings/processing-settings.schema.js';
 import { ProcessingTransactions } from '../processing/processing-transactions.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
@@ -47,9 +47,9 @@ export class ImportsService {
     await this.restrictions.assertAllowed(userId, 'job_create');
   }
 
-  async assertEligible(userId: Types.ObjectId) {
+  async assertEligible(userId: Types.ObjectId, session?: ClientSession) {
     await this.assertAccountAllowed(userId);
-    const usage = await this.usage.readUsage(userId);
+    const usage = await this.usage.readUsage(userId, session);
     if (usage.availability.status !== 'available')
       throw jobError(
         usage.availability.reason === 'monthly_limit_reached'
@@ -66,14 +66,64 @@ export class ImportsService {
           ? 'UPLOAD_BYTE_LIMIT_REACHED'
           : 'UPLOAD_GRANT_LIMIT_REACHED',
       );
+    const maxDuration = Math.min(
+      1200,
+      usage.effectiveLimits.maxDurationSeconds,
+    );
     return {
       maxBytes: Math.min(
         50_000_000,
         usage.effectiveLimits.maxPreparedAudioBytes,
         usage.uploads.monthlyRemainingBytes,
       ),
-      maxDuration: Math.min(1200, usage.effectiveLimits.maxDurationSeconds),
+      maxDuration,
     };
+  }
+
+  async reserveAcquisition(record: MediaImport) {
+    return this.transactions.run(async (session) => {
+      // Conflict with recovery before committing a hold or starting paid work.
+      const active = await this.records.updateOne(
+        {
+          _id: record._id,
+          executionId: record.executionId,
+          status: 'downloading',
+        },
+        { $set: { acquisitionReservedAt: new Date() } },
+        { session },
+      );
+      if (active.matchedCount !== 1)
+        throw importError('IMPORT_DEPENDENCY_FAILED');
+      const limits = await this.assertEligible(record.userId, session);
+      await this.usage.reserveForImport(
+        record._id,
+        record.userId,
+        limits.maxDuration,
+        session,
+      );
+      return limits;
+    });
+  }
+
+  async failAcquisition(
+    record: MediaImport,
+    error: { code: string; message: string },
+  ) {
+    await this.transactions.run(async (session) => {
+      await this.records.updateOne(
+        { _id: record._id, status: trusted({ $in: ACTIVE_IMPORT_STATES }) },
+        {
+          $set: {
+            status: 'failed',
+            finishedAt: new Date(),
+            error,
+            expiresAt: new Date(Date.now() + 7 * 86400_000),
+          },
+        },
+        { session },
+      );
+      await this.usage.releaseImport(record._id, record.userId, session);
+    });
   }
 
   async create(

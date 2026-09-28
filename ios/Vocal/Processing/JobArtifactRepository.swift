@@ -160,6 +160,26 @@ struct JobArtifactProgress: Equatable, Sendable {
     }
   }
 
+  func isCached(jobId: String) async -> Bool {
+    guard jobId.range(of: "^[0-9a-fA-F]{24}$", options: .regularExpression) != nil else {
+      return false
+    }
+    onSessionChanged()
+    guard let fence = sessionProvider() else { return false }
+    let id = jobId.lowercased()
+    let file = root.appendingPathComponent(ProcessingStore.ownerDirectoryName(fence.uid))
+      .appendingPathComponent(id, isDirectory: true)
+      .appendingPathComponent(original ? "input.audio" : "output.mp3")
+    guard !deletedJobIDs.contains(id) else { return false }
+    do {
+      let cached = try await validCache(file) != nil
+      try check(fence, jobId: id)
+      return cached
+    } catch {
+      return false
+    }
+  }
+
   /// Deletes only this account/job's app-private cache. Exports made by other apps are untouched.
   func removeCached(jobId: String) async {
     guard jobId.range(of: "^[0-9a-fA-F]{24}$", options: .regularExpression) != nil,

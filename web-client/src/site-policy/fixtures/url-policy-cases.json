@@ -1,4 +1,16 @@
 [
+  { "url": "https://www.instagram.com/p/Example/", "accepted": true },
+  { "url": "https://vm.tiktok.com/Example/", "accepted": true },
+  { "url": "https://player.vimeo.com/video/123456", "accepted": true },
+  { "url": "https://instagram.com/creator/", "accepted": false },
+  { "url": "https://tiktok.com/@creator", "accepted": false },
+  { "url": "https://vimeo.com/showcase/123", "accepted": false },
+  {
+    "url": "https://instagram.com.evil.example/reel/Example",
+    "accepted": false
+  },
+  { "url": "https://user@instagram.com/reel/Example", "accepted": false },
+  { "url": "https://tiktok.com:443/@creator/video/123", "accepted": false },
   {
     "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk",
     "accepted": true
@@ -149,15 +161,15 @@
   },
   {
     "url": "https://vimeo.com/123456789",
-    "accepted": false
+    "accepted": true
   },
   {
     "url": "https://www.instagram.com/reel/Example",
-    "accepted": false
+    "accepted": true
   },
   {
     "url": "https://www.tiktok.com/@creator/video/123",
-    "accepted": false
+    "accepted": true
   },
   {
     "url": "https://www.tumblr.com/blog/123",

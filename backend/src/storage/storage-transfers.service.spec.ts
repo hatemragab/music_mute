@@ -5,7 +5,10 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { ConfigService } from '@nestjs/config';
-import type { StorageClient } from '../infrastructure/storage.module.js';
+import {
+  browserSafeS3Config,
+  type StorageClient,
+} from '../infrastructure/storage.module.js';
 import type { ObjectIdentity } from '../jobs/job.types.js';
 import { StorageTransfersService } from './storage-transfers.service.js';
 import type { StoragePreflightService } from './storage-preflight.service.js';
@@ -21,6 +24,7 @@ const object: ObjectIdentity = {
 function fixture() {
   const client = new S3Client({
     region: 'us-east-1',
+    ...browserSafeS3Config,
     credentials: {
       accessKeyId: 'fixture-access-key',
       secretAccessKey: 'fixture-secret-key',
@@ -45,6 +49,7 @@ describe('StorageTransfersService', () => {
     const accelerated = new S3Client({
       region: 'us-east-1',
       useAccelerateEndpoint: true,
+      ...browserSafeS3Config,
       credentials: {
         accessKeyId: 'fixture-access-key',
         secretAccessKey: 'fixture-secret-key',
@@ -67,6 +72,7 @@ describe('StorageTransfersService', () => {
       const download = new URL((await service.createDownloadGrant(object)).url);
       expect(download.hostname).toBe(url.hostname);
       expect(download.searchParams.get('versionId')).toBe('pinned');
+      expect(download.searchParams.has('x-amz-checksum-mode')).toBe(false);
       send.mockResolvedValueOnce({
         VersionId: 'pinned',
         ContentLength: object.bytes,

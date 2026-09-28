@@ -143,7 +143,7 @@ enum AudioPipelineFailure: Error, Equatable {
     return eventID
   }
 
-  func confirmProcessing(_ operationID: UUID, rightsConfirmed: Bool, trimEnabled: Bool = false)
+  func confirmProcessing(_ operationID: UUID, rightsConfirmed: Bool, trimEnabled: Bool = true)
     async throws
   {
     guard rightsConfirmed, let fence = session,

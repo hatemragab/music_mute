@@ -120,7 +120,7 @@ async function releaseFixture(root: string, version: string): Promise<void> {
   await writeFile(join(root, "app", "engine", "module.py"), "VALUE = 1\n");
   await writeFile(
     join(root, "app", "package.json"),
-    '{"name":"@musicmute/worker","version":"0.1.0"}\n',
+    '{"name":"@music-mute/worker","version":"0.1.0"}\n',
   );
   await mkdir(join(root, "runtime", "licenses", "ffmpeg"), { recursive: true });
   await mkdir(join(root, "runtime", "licenses", "lame"), { recursive: true });

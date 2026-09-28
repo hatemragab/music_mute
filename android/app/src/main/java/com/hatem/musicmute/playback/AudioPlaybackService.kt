@@ -143,7 +143,7 @@ class AudioPlaybackService : MediaSessionService() {
         })
         session =
             MediaSession.Builder(this, player)
-                .setSessionActivity(MainActivity.historyPendingIntent(this))
+                .setSessionActivity(MainActivity.playerPendingIntent(this))
                 .setCallback(object : MediaSession.Callback {
                     override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
                         MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailableSessionCommands(
@@ -177,7 +177,7 @@ class AudioPlaybackService : MediaSessionService() {
                 autoNext = saved.autoNext
                 shuffleSeed = saved.shuffleSeed
                 player.repeatMode = saved.repeat.playerMode()
-                player.setMediaItems(saved.tracks.map { it.mediaItem() }, saved.index, saved.positionMs)
+                player.setMediaItems(saved.tracks.map { it.mediaItem(this@AudioPlaybackService) }, saved.index, saved.positionMs)
                 player.setShuffleOrder(DefaultShuffleOrder(saved.order.takeIf { it.sorted() == saved.tracks.indices.toList() }
                     ?.toIntArray() ?: queueOrder(saved.tracks.size, saved.shuffle, shuffleSeed, saved.index).toIntArray(), shuffleSeed))
                 player.shuffleModeEnabled = saved.shuffle

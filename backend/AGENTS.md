@@ -37,7 +37,22 @@ direct request. Never read or print real dotenv values, AWS keys or connection U
 - Keep production credentials out of source, images, tests, fixtures and logs.
 - Do not add framework boilerplate, dummy feature handlers or speculative utilities.
 
-## Commands
+## URL acquisition
+
+Follow [provider architecture](../video_providers/README.md). Keep
+`AudioAcquisitionClient` independent of vendor APIs; use only the generic
+acquisition URL/key configuration. The private adapter returns audio bytes and
+optional structured metadata. NestJS validates/hash-counts temporary audio,
+enforces limits, uploads to S3 and submits the existing job.
+Store only included sanitized metadata as nullable `extra_data`; no paid lookup
+or separate title-header protocol. Preserve cleanup, ownership and admission
+checks. Do not restore extraction runtimes, migration hooks or old-provider env
+aliases. Keep provider-specific source/tests/deployment under `video_providers/`.
+Run `pnpm run verify`, `pnpm run test:imports:integration` and
+`pnpm run test:processing:integration` for affected behavior, sequentially to
+avoid conflicting builds in `dist`.
+
+## Verification commands
 
 From backend/: `pnpm install --frozen-lockfile`, `pnpm run start:dev` with external MongoDB and Redis URLs.
 After edits: `pnpm run format`, `pnpm run verify`.

@@ -88,7 +88,7 @@ describe('processing admission', () => {
     ).resolves.toMatchObject({
       policyVersion: 2,
       settingsRevision: 4,
-      maxWaitingJobs: 3,
+      maxWaitingJobs: 20,
       maxProcessingJobs: 1,
       maxInfrastructureAttempts: 3,
       maxClientInputAttempts: 5,
@@ -110,10 +110,10 @@ describe('processing admission', () => {
     );
   });
 
-  it('allows a waiting job while one job is processing', async () => {
+  it('allows the twentieth waiting job while one job is processing', async () => {
     const f = fixture();
     f.countDocuments
-      .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(2) })
+      .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(19) })
       .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(1) });
 
     await expect(
@@ -124,14 +124,14 @@ describe('processing admission', () => {
         new Types.ObjectId(),
         metadata,
       ),
-    ).resolves.toMatchObject({ maxWaitingJobs: 3, maxProcessingJobs: 1 });
+    ).resolves.toMatchObject({ maxWaitingJobs: 20, maxProcessingJobs: 1 });
     expect(f.usage.reserveForJob).toHaveBeenCalledOnce();
   });
 
-  it('rejects the fourth waiting job with safe capacity guidance', async () => {
+  it('rejects the twenty-first waiting job with safe capacity guidance', async () => {
     const f = fixture();
     f.countDocuments
-      .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(3) })
+      .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(20) })
       .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(1) });
 
     await expect(
@@ -148,8 +148,8 @@ describe('processing admission', () => {
         nextResetAt: null,
         action: 'wait_for_job_to_finish',
         capacity: {
-          waitingJobs: 3,
-          maxWaitingJobs: 3,
+          waitingJobs: 20,
+          maxWaitingJobs: 20,
           processingJobs: 1,
           maxProcessingJobs: 1,
         },

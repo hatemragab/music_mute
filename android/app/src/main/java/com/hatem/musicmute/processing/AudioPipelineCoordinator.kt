@@ -69,7 +69,7 @@ class AudioPipelineCoordinator(
         }
     }
 
-    suspend fun acceptDocument(operationId: String, name: String, uri: String, trimEnabled: Boolean = false): ProcessingOperation {
+    suspend fun acceptDocument(operationId: String, name: String, uri: String, trimEnabled: Boolean = true): ProcessingOperation {
         repository.requireUpdateAllowed()
         val owner = requireSession()
         preflightAvailability()

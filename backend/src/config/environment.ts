@@ -1,4 +1,5 @@
 import Joi from 'joi';
+import { PUBLIC_POLICY_DEFAULTS } from './public-policy.js';
 
 export const AUTH_RATE_LIMIT_DEFAULTS = {
   AUTH_UID_PER_MINUTE: 120,
@@ -109,10 +110,10 @@ const schema = Joi.object({
   URL_IMPORT_FFPROBE_PATH: Joi.string()
     .pattern(/^\//)
     .default('/usr/bin/ffprobe'),
-  YTDLP_API_URL: Joi.string()
+  AUDIO_ACQUISITION_API_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .optional(),
-  YTDLP_API_KEY: Joi.string().min(32).max(256).optional(),
+  AUDIO_ACQUISITION_API_KEY: Joi.string().min(32).max(256).optional(),
   APK_AAPT2_PATH: Joi.string().pattern(/^\//).max(4096).optional(),
   APK_APKSIGNER_PATH: Joi.string().pattern(/^\//).max(4096).optional(),
   APK_EXPECTED_PACKAGE_ID: Joi.string()
@@ -155,13 +156,28 @@ const schema = Joi.object({
     .optional(),
   PROCESSING_URL_SECONDS: Joi.number().integer().min(60).max(600).default(600),
   CORS_ORIGINS: Joi.string().allow('').default(''),
+  PUBLIC_SITE_ORIGIN: Joi.string()
+    .uri({ scheme: ['https'] })
+    .default(PUBLIC_POLICY_DEFAULTS.publicOrigin),
   PUBLIC_SUPPORT_EMAIL: Joi.string()
     .email({ tlds: { allow: false } })
     .max(254)
-    .optional(),
-  PUBLIC_DEVELOPER_NAME: Joi.string().trim().min(1).max(160).optional(),
-  PUBLIC_DELETION_TIMEFRAME: Joi.string().trim().min(1).max(1000).optional(),
-  PUBLIC_RETENTION_NOTICE: Joi.string().trim().min(1).max(4000).optional(),
+    .default(PUBLIC_POLICY_DEFAULTS.supportEmail),
+  PUBLIC_DEVELOPER_NAME: Joi.string()
+    .trim()
+    .min(1)
+    .max(160)
+    .default(PUBLIC_POLICY_DEFAULTS.developerName),
+  PUBLIC_DELETION_TIMEFRAME: Joi.string()
+    .trim()
+    .min(1)
+    .max(2000)
+    .default(PUBLIC_POLICY_DEFAULTS.deletionTimeframe),
+  PUBLIC_RETENTION_NOTICE: Joi.string()
+    .trim()
+    .min(1)
+    .max(4000)
+    .default(PUBLIC_POLICY_DEFAULTS.retentionNotice),
   TRUST_PROXY: Joi.string().valid('false', '1').default('false'),
   RATE_LIMIT: Joi.number().integer().min(1).max(10000).default(60),
   PUBLIC_RELEASE_GRANTS_PER_MINUTE: allowance(300),
@@ -277,6 +293,16 @@ export function validateEnvironment(
     );
   }
   const env = result.value as Record<string, unknown>;
+  const publicSiteOrigin = new URL(String(env.PUBLIC_SITE_ORIGIN));
+  if (
+    publicSiteOrigin.origin !== env.PUBLIC_SITE_ORIGIN ||
+    publicSiteOrigin.username ||
+    publicSiteOrigin.password ||
+    publicSiteOrigin.pathname !== '/' ||
+    publicSiteOrigin.search ||
+    publicSiteOrigin.hash
+  )
+    throw new Error('Invalid environment: PUBLIC_SITE_ORIGIN');
   if (
     env.S3_TRANSFER_ACCELERATION_ENABLED === true &&
     String(env.S3_BUCKET).includes('.')
@@ -290,11 +316,11 @@ export function validateEnvironment(
     throw new Error('URL importing requires audio processing');
   if (
     env.URL_IMPORT_PROCESSOR_ENABLED === true &&
-    (!env.YTDLP_API_URL || !env.YTDLP_API_KEY)
+    (!env.AUDIO_ACQUISITION_API_URL || !env.AUDIO_ACQUISITION_API_KEY)
   )
-    throw new Error('URL importing requires yt-dlp configuration');
-  if (env.YTDLP_API_URL) {
-    const downloader = new URL(String(env.YTDLP_API_URL));
+    throw new Error('URL importing requires audio acquisition configuration');
+  if (env.AUDIO_ACQUISITION_API_URL) {
+    const downloader = new URL(String(env.AUDIO_ACQUISITION_API_URL));
     if (
       downloader.username ||
       downloader.password ||
@@ -302,7 +328,9 @@ export function validateEnvironment(
       downloader.hash ||
       downloader.pathname !== '/'
     )
-      throw new Error('YTDLP_API_URL must be a base URL without credentials');
+      throw new Error(
+        'AUDIO_ACQUISITION_API_URL must be a base URL without credentials',
+      );
   }
   const production = env.APP_ENV === 'production';
   if (production !== (env.NODE_ENV === 'production'))

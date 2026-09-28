@@ -1,7 +1,7 @@
 {
-  "name": "@musicmute/worker",
-  "version": "0.1.0-mvp.36",
-  "private": true,
+  "name": "@music-mute/worker",
+  "version": "0.1.0-rc.1",
+  "private": false,
   "description": "MusicMute machine supervisor and native processing child",
   "license": "Apache-2.0",
   "repository": {
@@ -14,12 +14,13 @@
     "dist/protocol/",
     "engine/musicmute_engine/*.py",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "RELEASING.md"
   ],
   "type": "module",
   "engines": {
-    "node": ">=24 <25",
-    "pnpm": ">=10 <11"
+    "node": ">=24.18.0 <25"
   },
   "packageManager": "pnpm@10.14.0",
   "bin": {
@@ -32,10 +33,14 @@
     "format:check": "prettier --check .",
     "lint": "oxlint --deny-warnings src/ tests/ protocol/ scripts/",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/build.mjs",
     "test": "vitest run",
     "test:engine": "node scripts/run-engine-tests.mjs",
-    "verify": "pnpm run protocol:check && pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm test && pnpm run test:engine && pnpm run build"
+    "verify": "pnpm run protocol:check && pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm test && pnpm run test:packaging && pnpm run test:engine && pnpm run build",
+    "test:packaging": "node --test scripts/*.test.mjs",
+    "prepack": "pnpm run build && node scripts/check-package.mjs",
+    "test:package": "pnpm run prepack && node scripts/test-package.mjs",
+    "prepublishOnly": "pnpm run verify && pnpm run test:package && pnpm audit --prod"
   },
   "devDependencies": {
     "@sentry/cli": "2.58.6",
@@ -49,5 +54,14 @@
   },
   "dependencies": {
     "@sentry/node": "11.0.0"
+  },
+  "homepage": "https://github.com/hatemragab/music_mute/tree/main/worker",
+  "bugs": {
+    "url": "https://github.com/hatemragab/music_mute/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "tag": "next"
   }
 }

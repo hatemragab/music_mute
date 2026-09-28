@@ -18,6 +18,8 @@ struct AudioTaskCard: View {
           VStack(alignment: .leading, spacing: 5) {
             Text(task.title).font(.system(.headline, design: .rounded, weight: .bold))
               .foregroundStyle(.primary).lineLimit(2)
+            Text(task.createdAt, format: .dateTime.year().month(.abbreviated).day().hour().minute())
+              .font(.caption).foregroundStyle(.secondary)
             Text(LocalizedStringKey(task.statusKey)).font(.subheadline.weight(.semibold))
               .foregroundStyle(task.isReady ? VocalStyle.teal : .secondary)
               .fixedSize(horizontal: false, vertical: true)

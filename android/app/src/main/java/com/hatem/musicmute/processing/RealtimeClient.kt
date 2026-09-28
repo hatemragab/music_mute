@@ -28,6 +28,7 @@ class RealtimeClient(
     private val mutableState = MutableStateFlow(RealtimeState.PAUSED)
     val state = mutableState.asStateFlow()
     private var owner: ProcessingSession? = null
+    private var sessionRejected = false
     private var foreground = false
     private var generation = 0L
     private var nextId = 0L
@@ -45,17 +46,19 @@ class RealtimeClient(
         subscriptions.values.forEach { it.emit(Result.failure(JobsFailure(JobsProblem.UNAUTHENTICATED))) }
         subscriptions.clear()
         owner = value
+        sessionRejected = false
         attempt = 0
         resume()
     }
 
     fun setForeground(value: Boolean) {
         foreground = value
-        if (!value) { disconnect(); mutableState.value = RealtimeState.PAUSED } else resume()
+        if (!value) { disconnect(); mutableState.value = if (sessionRejected) RealtimeState.SIGNED_OUT else RealtimeState.PAUSED } else resume()
     }
 
     fun watch(resource: String, params: Map<String, String> = emptyMap()): Flow<String> = callbackFlow<String> {
         val id = withContext(Dispatchers.Main.immediate) {
+            if (sessionRejected) throw JobsFailure(JobsProblem.UNAUTHENTICATED)
             val id = "s${++nextId}"
             if (subscriptions.size >= 16) throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE)
             val entry = Subscription(id, resource, params, { result -> result.fold({ trySend(it) }, { close(it) }) })
@@ -64,7 +67,9 @@ class RealtimeClient(
             resume()
             id
         }
-        awaitClose { scope.launch { subscriptions.remove(id); snapshotDeadlines.remove(id)?.cancel(); send(buildJsonObject { put("type", "unsubscribe"); put("subscription_id", id) }); if (subscriptions.isEmpty()) disconnect() } }
+        // Screens may briefly have no collectors during navigation. The Activity and
+        // authenticated session own the transport, not individual subscriptions.
+        awaitClose { scope.launch { subscriptions.remove(id); snapshotDeadlines.remove(id)?.cancel(); send(buildJsonObject { put("type", "unsubscribe"); put("subscription_id", id) }) } }
     }.buffer(kotlinx.coroutines.channels.Channel.CONFLATED)
 
     fun resync() {
@@ -73,7 +78,7 @@ class RealtimeClient(
     }
 
     private fun resume() {
-        if (!foreground || owner == null || subscriptions.isEmpty() || socket != null || connecting?.isActive == true || retry?.isActive == true) return
+        if (!foreground || owner == null || sessionRejected || socket != null || connecting?.isActive == true || retry?.isActive == true) return
         val epoch = ++generation
         val session = owner
         mutableState.value = if (attempt == 0) RealtimeState.CONNECTING else RealtimeState.RECONNECTING
@@ -98,6 +103,7 @@ class RealtimeClient(
             catch (error: Exception) {
                 if (epoch != generation) return@launch
                 if (error is AuthFailure && (error.httpStatus in setOf(401, 403) || error.problem in setOf(AuthProblem.UNAUTHENTICATED, AuthProblem.ACCOUNT_DISABLED, AuthProblem.REAUTH_REQUIRED))) {
+                    sessionRejected = true
                     mutableState.value = RealtimeState.SIGNED_OUT
                     subscriptions.values.toList().forEach { it.emit(Result.failure(JobsFailure(JobsProblem.UNAUTHENTICATED))) }
                 } else reconnect()

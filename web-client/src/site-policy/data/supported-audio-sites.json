@@ -2,9 +2,55 @@
   "schemaVersion": 1,
   "ytDlpVersion": "2026.09.16.232951",
   "ytDlpSha256": "f8ca14db511702a5dbfc5a527056312907ddd0914d0b4036f108d6849e17ef61",
-  "qualification": "Separate audio format observed; per-link availability and full production acquisition are not guaranteed.",
+  "qualification": "Enabled public item URLs; VideoScale audio availability is checked per request. Historical extractor evidence is not current SaaS qualification.",
   "blockedQueryKeys": ["list", "playlist", "in"],
   "sites": [
+    {
+      "id": "instagram",
+      "name": "Instagram",
+      "rules": [
+        {
+          "host": "(?:www\\.|m\\.)?instagram\\.com",
+          "path": "/(?:p|reel|reels)/[A-Za-z0-9_-]+/?",
+          "requiredQuery": {}
+        }
+      ],
+      "evidence": null
+    },
+    {
+      "id": "tiktok",
+      "name": "TikTok",
+      "rules": [
+        {
+          "host": "(?:www\\.|m\\.)?tiktok\\.com",
+          "path": "/@[A-Za-z0-9_.]+/video/[0-9]+/?",
+          "requiredQuery": {}
+        },
+        {
+          "host": "(?:vm|vt)\\.tiktok\\.com",
+          "path": "/[A-Za-z0-9]+/?",
+          "requiredQuery": {}
+        }
+      ],
+      "evidence": null
+    },
+    {
+      "id": "vimeo",
+      "name": "Vimeo",
+      "rules": [
+        {
+          "host": "(?:www\\.)?vimeo\\.com",
+          "path": "/[0-9]+/?",
+          "requiredQuery": {}
+        },
+        {
+          "host": "player\\.vimeo\\.com",
+          "path": "/video/[0-9]+/?",
+          "requiredQuery": {}
+        }
+      ],
+      "evidence": null
+    },
     {
       "id": "youtube",
       "name": "YouTube",

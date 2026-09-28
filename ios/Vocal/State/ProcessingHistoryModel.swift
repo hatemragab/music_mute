@@ -63,8 +63,7 @@ func processingErrorKey(_ error: Error) -> String {
   @Published private(set) var loadingMore = false
   @Published private(set) var messageKey: String?
   private let api: any JobsAPI
-  private let loadCached: (String) async throws -> [Job]
-  private let saveCached: (String, [Job]) async throws -> Void
+  private let updateLibrary: (String, [Job]) async throws -> Void
   private var owner: String?
   private var epoch: UInt64 = 0
   private var pageVersion: UInt64 = 0
@@ -89,13 +88,11 @@ func processingErrorKey(_ error: Error) -> String {
 
   init(
     api: any JobsAPI,
-    loadCached: @escaping (String) async throws -> [Job] = { _ in [] },
-    saveCached: @escaping (String, [Job]) async throws -> Void = { _, _ in },
+    updateLibrary: @escaping (String, [Job]) async throws -> Void = { _, _ in },
     now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
   ) {
     self.api = api
-    self.loadCached = loadCached
-    self.saveCached = saveCached
+    self.updateLibrary = updateLibrary
     self.now = now
   }
 
@@ -128,20 +125,7 @@ func processingErrorKey(_ error: Error) -> String {
     lastSuccessfulRefreshAt = nil
     freshIds = []
     refreshPending = false
-    guard let uid else { return }
-    let ticket = epoch
-    let version = pageVersion
-    defer {
-      if ticket == epoch, visible, polling == nil { setVisible(true) }
-    }
-    do {
-      let cached = try await loadCached(uid)
-      guard ticket == epoch, version == pageVersion else { return }
-      jobs = cached
-      await onJobsChanged(jobs)
-    } catch {
-      if ticket == epoch { messageKey = "processing_error_storage" }
-    }
+    if uid != nil, visible { setVisible(true) }
   }
 
   func refresh() async {
@@ -179,7 +163,7 @@ func processingErrorKey(_ error: Error) -> String {
       nextCursor = page.nextCursor
       retryDelay = 10
       retryNotBefore = 0
-      try await saveCached(uid, jobs)
+      try await updateLibrary(uid, jobs)
       await onJobsChanged(jobs)
       guard ticket == epoch else { return }
       reading = false
@@ -212,7 +196,7 @@ func processingErrorKey(_ error: Error) -> String {
       guard !Task.isCancelled, ticket == epoch, version == pageVersion else { return }
       jobs = deduplicated(jobs + page.items)
       nextCursor = page.nextCursor
-      try await saveCached(uid, jobs)
+      try await updateLibrary(uid, jobs)
       await onJobsChanged(jobs)
       guard ticket == epoch else { return }
       reading = false
@@ -245,6 +229,7 @@ func processingErrorKey(_ error: Error) -> String {
             self.detail = value
             self.jobs = self.jobs.map { $0.id == id ? value : $0 }
             self.messageKey = nil
+            if let owner = self.owner { try await self.updateLibrary(owner, self.jobs) }
             await self.onJobsChanged(self.jobs)
           }
         } catch is CancellationError {} catch {
@@ -252,7 +237,7 @@ func processingErrorKey(_ error: Error) -> String {
           if (error as? JobsFailure) == .notFound {
             self.detail = nil
             self.jobs.removeAll { $0.id == id }
-            if let owner = self.owner { try? await self.saveCached(owner, self.jobs) }
+            if let owner = self.owner { try? await self.updateLibrary(owner, self.jobs) }
             await self.onJobsChanged(self.jobs)
             await self.onJobMissing(id)
           }
@@ -292,7 +277,7 @@ func processingErrorKey(_ error: Error) -> String {
       if (error as? JobsFailure) == .notFound {
         detail = nil
         jobs.removeAll { $0.id == id }
-        if let owner { try? await saveCached(owner, jobs) }
+        if let owner { try? await updateLibrary(owner, jobs) }
         await onJobsChanged(jobs)
         await onJobMissing(id)
       }
@@ -381,7 +366,7 @@ func processingErrorKey(_ error: Error) -> String {
           self.loading = false
           self.loadingMore = false
           self.messageKey = nil
-          try await self.saveCached(owner, self.jobs)
+          try await self.updateLibrary(owner, self.jobs)
           await self.onJobsChanged(self.jobs)
         }
       } catch is CancellationError {} catch {

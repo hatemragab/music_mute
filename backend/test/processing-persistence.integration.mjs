@@ -27,6 +27,12 @@ test('processing documents commit together and abort without partial job or erro
     userId,
     requestId: randomUUID(),
     requestHash: 'a'.repeat(64),
+    extra_data: {
+      schema_version: 1,
+      provider: 'fixture',
+      audio_codec: 'mp3',
+      raw: 'must-not-persist',
+    },
     inputReservation: {
       key: `users/${userId}/jobs/${jobId}/input/test.mp3`,
       extension: 'mp3',
@@ -77,6 +83,11 @@ test('processing documents commit together and abort without partial job or erro
     );
   });
   assert.equal(await jobs.countDocuments({ _id: jobId }), 1);
+  assert.deepEqual((await jobs.findById(jobId).lean()).extra_data, {
+    schema_version: 1,
+    provider: 'fixture',
+    audio_codec: 'mp3',
+  });
   assert.equal(await errors.countDocuments({ jobId }), 1);
   const boundedUsageModels = new Set([
     'AccountUsagePeriod',

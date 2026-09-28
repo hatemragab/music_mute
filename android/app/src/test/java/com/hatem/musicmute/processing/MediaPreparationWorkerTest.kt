@@ -37,6 +37,7 @@ class MediaPreparationWorkerTest {
         val first = coordinator().acceptDocument(id, "meeting.mp4", "content://provider/document/1")
         val duplicate = coordinator().acceptDocument(UUID.randomUUID().toString(), "meeting.mp4", "content://provider/document/1")
         assertEquals(first.operationId, duplicate.operationId)
+        assertTrue(first.trimEnabled)
         assertEquals(listOf(id), scheduler.scheduled)
         assertEquals("content://provider/document/1", store.get("owner", id)?.sourceUri)
         coordinator().resumePendingSources()

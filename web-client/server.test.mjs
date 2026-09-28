@@ -23,14 +23,60 @@ test("rejects unsafe API origins", () =>
 test("serves runtime config without caching and a health response", async () => {
   const config = await fetch(`${origin}/config.js`);
   assert.equal(config.status, 200);
+  assert.equal(
+    config.headers.get("strict-transport-security"),
+    "max-age=31536000",
+  );
   assert.equal(config.headers.get("cache-control"), "no-store");
   assert.match(await config.text(), /api\.example\.com/);
   assert.match(
     config.headers.get("content-security-policy"),
-    /media-src 'self' https:\/\/music-remover\.s3\.us-east-2\.amazonaws\.com/,
+    /media-src 'self' blob: https:\/\/music-remover\.s3\.us-east-2\.amazonaws\.com/,
   );
   const health = await fetch(`${origin}/healthz`);
   assert.equal(await health.text(), "ok");
+});
+
+test("monitoring is opt-in and validates public project DSNs", () => {
+  assert.deepEqual(publicConfig(env).sentry, { enabled: false, dsn: "" });
+  for (const dsn of [
+    "http://key@example.com/123",
+    "https://key:secret@example.com/123",
+    "https://key@example.com/123?token=secret",
+    "https://key@example.com/path",
+    "",
+  ]) {
+    assert.throws(() =>
+      publicConfig({
+        ...env,
+        PUBLIC_SENTRY_ENABLED: "true",
+        PUBLIC_SENTRY_DSN: dsn,
+      }),
+    );
+  }
+  assert.throws(() => publicConfig({ ...env, PUBLIC_SENTRY_ENABLED: "yes" }));
+});
+
+test("monitoring permits only its configured ingest origin in CSP", async () => {
+  const monitored = createWebServer({
+    env: {
+      ...env,
+      PUBLIC_SENTRY_ENABLED: "true",
+      PUBLIC_SENTRY_DSN: "https://public@ingest.example.com/123",
+    },
+  });
+  await new Promise((resolve) => monitored.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${monitored.address().port}/healthz`,
+    );
+    assert.match(
+      response.headers.get("content-security-policy"),
+      /connect-src 'self' https:\/\/ingest\.example\.com /,
+    );
+  } finally {
+    await new Promise((resolve) => monitored.close(resolve));
+  }
 });
 test("deep links serve HTML and missing assets return 404", async () => {
   const deep = await fetch(`${origin}/jobs/0123456789abcdef01234567`);
@@ -78,7 +124,7 @@ test("opt-in acceleration allows only this bucket and keeps regional grants vali
     const policy = response.headers.get("content-security-policy");
     assert.ok(
       policy.includes(
-        "media-src 'self' https://music-remover.s3.us-east-2.amazonaws.com https://music-remover.s3-accelerate.amazonaws.com",
+        "media-src 'self' blob: https://music-remover.s3.us-east-2.amazonaws.com https://music-remover.s3-accelerate.amazonaws.com",
       ),
     );
     assert.ok(!policy.includes("*.amazonaws"));

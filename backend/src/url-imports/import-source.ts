@@ -94,7 +94,7 @@ export function parseImportSource(value: string): ImportSource {
     /^[\d.]+$/.test(host)
   )
     throw importError('IMPORT_INVALID_URL');
-  // yt-dlp determines site support. Its guarded transport checks DNS and every
-  // connection, including redirects; this parser never fetches a user URL.
+  // The private acquisition adapter determines qualified source support and
+  // guards outgoing connections; this parser never fetches a user URL.
   return { provider: host, url: url.toString() };
 }

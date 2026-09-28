@@ -1,40 +1,24 @@
 import { Link } from "react-router";
+import { Download, Music2, Star } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useSignedIn } from "../auth/AuthProvider";
-import { useI18n } from "../i18n";
+import { friendlyError, useI18n } from "../i18n";
+import { downloadJobArtifact } from "../jobs/artifacts";
 import { useJobs } from "../jobs/JobsUI";
+import { trackTitle } from "../player/playback";
 import { usePlayer } from "../player/PlayerProvider";
-
-interface Preferences {
-  favorites: string[];
-  hidden: string[];
-}
-function readPreferences(uid: string): Preferences {
-  try {
-    const value = JSON.parse(
-      localStorage.getItem(`musicmute.web.library.${uid}`) || "null",
-    ) as Preferences | null;
-    return {
-      favorites: Array.isArray(value?.favorites) ? value.favorites : [],
-      hidden: Array.isArray(value?.hidden) ? value.hidden : [],
-    };
-  } catch {
-    return { favorites: [], hidden: [] };
-  }
-}
+import { useLibraryPreferences } from "./preferences";
 
 export function LibraryPage() {
-  const { user } = useSignedIn();
+  const { api, user } = useSignedIn();
   const { t, date } = useI18n();
   const player = usePlayer();
-  const query = useJobs();
-  const [preferences, setPreferences] = useState(() =>
-    readPreferences(user.uid),
-  );
+  const query = useJobs("ready");
+  const { preferences, toggle } = useLibraryPreferences(user.uid);
+  const [actionError, setActionError] = useState("");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<"newest" | "title">("newest");
-  const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [showHidden, setShowHidden] = useState(false);
+  const [filter, setFilter] = useState<"all" | "favorites" | "removed">("all");
   const all = useMemo(
     () =>
       query.data?.pages
@@ -49,8 +33,9 @@ export function LibraryPage() {
           const name = job.displayName || job.sourceTitle || "";
           return (
             name.toLocaleLowerCase().includes(search.toLocaleLowerCase()) &&
-            (!favoritesOnly || preferences.favorites.includes(job.id)) &&
-            (showHidden
+            (filter !== "favorites" ||
+              preferences.favorites.includes(job.id)) &&
+            (filter === "removed"
               ? preferences.hidden.includes(job.id)
               : !preferences.hidden.includes(job.id))
           );
@@ -62,20 +47,15 @@ export function LibraryPage() {
               )
             : Date.parse(right.createdAt) - Date.parse(left.createdAt),
         ),
-    [all, search, sort, favoritesOnly, showHidden, preferences],
+    [all, search, sort, filter, preferences],
   );
-  function toggle(key: keyof Preferences, id: string) {
-    const next = {
-      ...preferences,
-      [key]: preferences[key].includes(id)
-        ? preferences[key].filter((value) => value !== id)
-        : [...preferences[key], id],
-    };
-    setPreferences(next);
-    localStorage.setItem(
-      `musicmute.web.library.${user.uid}`,
-      JSON.stringify(next),
-    );
+  async function download(jobId: string) {
+    setActionError("");
+    try {
+      await downloadJobArtifact(api, jobId, "output");
+    } catch (error) {
+      setActionError(friendlyError(error, t));
+    }
   }
   return (
     <div className="page-stack">
@@ -108,28 +88,34 @@ export function LibraryPage() {
           </select>
         </label>
       </div>
-      <div className="filter-row">
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={favoritesOnly}
-            onChange={(event) => setFavoritesOnly(event.target.checked)}
-          />
-          {t("showFavorites")}
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={showHidden}
-            onChange={(event) => setShowHidden(event.target.checked)}
-          />
-          {t("showHidden")}
-        </label>
+      <div className="filter-row" role="group" aria-label={t("library")}>
+        {(["all", "favorites", "removed"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            className={filter === value ? "selected" : ""}
+            aria-pressed={filter === value}
+            onClick={() => setFilter(value)}
+          >
+            {t(
+              value === "all"
+                ? "filterAll"
+                : value === "favorites"
+                  ? "showFavorites"
+                  : "removed",
+            )}
+          </button>
+        ))}
       </div>
       {query.isPending && <p>{t("loading")}</p>}
       {query.isError && (
         <p role="alert" className="notice">
           {t("requestFailed")}
+        </p>
+      )}
+      {actionError && (
+        <p role="alert" className="notice">
+          {actionError}
         </p>
       )}
       {!query.isPending && shown.length === 0 && (
@@ -139,12 +125,12 @@ export function LibraryPage() {
         {shown.map((job) => (
           <article key={job.id} className="library-item">
             <div className="library-cover" aria-hidden="true">
-              ♫
+              <Music2 />
             </div>
             <div className="library-meta">
               <h2>
                 <Link to={`/jobs/${job.id}`} dir="auto">
-                  {job.displayName || job.sourceTitle || job.id}
+                  {trackTitle(job, t("untitledTrack"))}
                 </Link>
               </h2>
               <small>{date(job.createdAt)}</small>
@@ -160,13 +146,27 @@ export function LibraryPage() {
                 aria-pressed={preferences.favorites.includes(job.id)}
                 onClick={() => toggle("favorites", job.id)}
               >
-                ★
+                <Star
+                  aria-hidden="true"
+                  fill={
+                    preferences.favorites.includes(job.id)
+                      ? "currentColor"
+                      : "none"
+                  }
+                />
               </button>
               <button
                 type="button"
                 onClick={() => void player.play(job, shown)}
               >
                 {t("play")}
+              </button>
+              <button
+                type="button"
+                aria-label={`${t("download")} ${t("outputTrack")}`}
+                onClick={() => void download(job.id)}
+              >
+                <Download aria-hidden="true" />
               </button>
               <button type="button" onClick={() => toggle("hidden", job.id)}>
                 {t(preferences.hidden.includes(job.id) ? "restore" : "hide")}

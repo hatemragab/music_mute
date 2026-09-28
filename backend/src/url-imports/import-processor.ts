@@ -1,5 +1,5 @@
 import { elapsedMs, type StageMeasurement } from '../jobs/job-stage-timing.js';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
@@ -14,7 +14,7 @@ import { Job } from '../jobs/job.schema.js';
 import { PREPARATION_PROFILE_ID } from '../jobs/job.types.js';
 import { IMPORT_QUEUE, ImportsService } from './imports.service.js';
 import { MediaImport, type ImportState } from './media-import.schema.js';
-import { YtdlpClient } from './ytdlp-client.js';
+import { AudioAcquisitionClient } from './audio-acquisition-client.js';
 import { ImportFiles } from './import-files.js';
 import { probeImport } from './import-probe.js';
 import { importError, safeImportError } from './import-errors.js';
@@ -22,12 +22,13 @@ import { importError, safeImportError } from './import-errors.js';
 @Injectable()
 @Processor(IMPORT_QUEUE, { autorun: false, concurrency: 1, maxStalledCount: 0 })
 export class ImportProcessor extends WorkerHost {
+  private readonly logger = new Logger(ImportProcessor.name);
   readonly files: ImportFiles;
   readonly shutdown = new AbortController();
 
   constructor(
     private readonly imports: ImportsService,
-    private readonly downloader: YtdlpClient,
+    private readonly downloader: AudioAcquisitionClient,
     private readonly jobs: JobsService,
     private readonly actions: JobActionsService,
     private readonly config: ConfigService,
@@ -81,6 +82,12 @@ export class ImportProcessor extends WorkerHost {
     ): Promise<T> => {
       const entry: StageMeasurement = { stage, durationMs: 0, complete: false };
       stages.push(entry);
+      this.logger.log({
+        event: 'import-stage',
+        acquisition_id: executionId,
+        stage,
+        state: 'started',
+      });
       await saveTimings();
       const start = performance.now();
       try {
@@ -89,11 +96,18 @@ export class ImportProcessor extends WorkerHost {
         return result;
       } finally {
         entry.durationMs = Math.round(performance.now() - start);
+        this.logger.log({
+          event: 'import-stage',
+          acquisition_id: executionId,
+          stage,
+          state: entry.complete ? 'completed' : 'failed',
+          duration_ms: entry.durationMs,
+        });
         await saveTimings();
       }
     };
     try {
-      const limits = await this.imports.assertEligible(record.userId);
+      const limits = await this.imports.reserveAcquisition(record);
       await this.files.withFile(async (path, signal) => {
         const downloaded = await measure('source-download', () =>
           this.downloader.download(
@@ -102,6 +116,7 @@ export class ImportProcessor extends WorkerHost {
             path,
             limits,
             signal,
+            executionId,
           ),
         );
         await this.stage(record, 'validating', signal);
@@ -113,7 +128,11 @@ export class ImportProcessor extends WorkerHost {
             this.config.getOrThrow<string>('URL_IMPORT_FFPROBE_PATH'),
           ),
         );
-        const { sourceTitle: downloadedTitle, ...audio } = downloaded;
+        const {
+          sourceTitle: downloadedTitle,
+          extraData,
+          ...audio
+        } = downloaded;
         const sourceTitle = record.sourceTitle ?? downloadedTitle;
         if (sourceTitle) {
           const savedTitle = await this.imports.records.updateOne(
@@ -142,6 +161,14 @@ export class ImportProcessor extends WorkerHost {
           },
           record.trimEnabled ?? true,
           { startedAt: record.createdAt, stages },
+          extraData
+            ? {
+                ...extraData,
+                duration_seconds: measured.durationSeconds,
+                file_bytes: audio.bytes,
+              }
+            : null,
+          record._id,
         );
         timingJobId = reserved.id;
         const saved = await this.imports.records.updateOne(
@@ -190,6 +217,11 @@ export class ImportProcessor extends WorkerHost {
         await this.finish(record, 'submitted', reserved.id);
       }, this.shutdown.signal);
     } catch (error) {
+      this.logger.warn({
+        event: 'import-failure',
+        acquisition_id: executionId,
+        code: safeImportError(error).code,
+      });
       await this.reconcileFailure(record, error);
     }
   }
@@ -228,22 +260,7 @@ export class ImportProcessor extends WorkerHost {
       record.jobRequestId,
     );
     // Existing cancelled-job storage maintenance reclaims only this reservation's S3 key.
-    await this.imports.records.updateOne(
-      {
-        _id: record._id,
-        status: trusted({
-          $in: ['queued', 'downloading', 'validating', 'uploading'] as const,
-        }),
-      },
-      {
-        $set: {
-          status: 'failed',
-          finishedAt: new Date(),
-          error: safeImportError(error),
-          expiresAt: new Date(Date.now() + 7 * 86400_000),
-        },
-      },
-    );
+    await this.imports.failAcquisition(record, safeImportError(error));
   }
 
   private async finish(

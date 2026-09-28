@@ -5,6 +5,7 @@ import {
   type AttemptMeasurements,
 } from './job-stage-timing.js';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { normalizeExtraData, type JobExtraData } from './job-extra-data.js';
 import { Schema as MongoSchema, type Types } from 'mongoose';
 import { AUDIO_TYPES, JOB_FAILURE_CODES, JOB_STATUSES } from './job.types.js';
 import type {
@@ -334,6 +335,13 @@ export class Job {
     validate: (v: string | null) => v === null || isAudioName(v),
   })
   sourceTitle!: string | null;
+
+  @Prop({
+    type: MongoSchema.Types.Mixed,
+    default: null,
+    set: normalizeExtraData,
+  })
+  extra_data!: JobExtraData | null;
   @Prop({
     type: String,
     default: null,

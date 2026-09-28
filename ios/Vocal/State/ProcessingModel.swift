@@ -1,6 +1,10 @@
 import CryptoKit
 import Foundation
 
+enum PlaybackRepeatMode: String, CaseIterable {
+  case off, all, one
+}
+
 @MainActor final class ProcessingModel: ObservableObject {
   @Published private(set) var photoSourceLimit = ProcessingMediaPolicy.standard.maxSourceBytes!
   @Published private(set) var preparing = false
@@ -10,6 +14,12 @@ import Foundation
   @Published var selectedJobID: String?
   @Published var selectedOperationID: UUID?
   @Published private(set) var sessionReady = false
+  @Published private(set) var libraryJobs: [Job] = []
+  @Published private(set) var playbackQueue: [Job] = []
+  @Published private(set) var currentPlaybackJobID: String?
+  @Published var shufflePlayback = false
+  @Published var repeatPlayback = PlaybackRepeatMode.off
+  @Published var autoPlayNext = true
   let urlImports: URLImportsModel
   let usageRepository: ProcessingUsageRepository
   private let api: JobsAPI
@@ -58,8 +68,9 @@ import Foundation
     self.reportFailure = reportFailure
     history = ProcessingHistoryModel(
       api: api,
-      loadCached: { try await repository.store.cachedJobs(ownerUid: $0) },
-      saveCached: { uid, jobs in try await repository.store.saveJobs(jobs, ownerUid: uid) })
+      updateLibrary: { uid, jobs in
+        try await repository.store.updateLibraryJobs(jobs, ownerUid: uid)
+      })
     pipeline.beforePreparation = { [weak self] in
       guard let self else { throw CancellationError() }
       await self.refreshAvailability()
@@ -67,7 +78,15 @@ import Foundation
     }
     history.onJobsChanged = { [weak self, weak pipeline] jobs in
       await pipeline?.reconcile(jobs)
-      await self?.usageRepository.refresh()
+      guard let self else { return }
+      if let session = self.repository.session {
+        let tracks = (try? await self.repository.store.libraryJobs(ownerUid: session.uid)) ?? []
+        guard self.repository.session == session else { return }
+        self.libraryJobs = tracks
+      }
+      let snapshots = Dictionary(uniqueKeysWithValues: jobs.map { ($0.id, $0) })
+      self.playbackQueue = self.playbackQueue.compactMap { snapshots[$0.id] ?? $0 }
+      await self.usageRepository.refresh()
     }
     urlImports.onSubmitted = { [weak self] _ in
       await self?.history.refreshAfterChange()
@@ -76,6 +95,9 @@ import Foundation
     history.onFailure = { [weak self] id, error in
       await self?.reportDiagnostic(error, stage: .refreshingJob, jobID: id)
     }
+    player.onFinished = { [weak self] in self?.advanceAfterPlayback() }
+    player.onNext = { [weak self] in self?.playNext() }
+    player.onPrevious = { [weak self] in self?.playPrevious() }
   }
 
   func bindOwner(_ uid: String?) async {
@@ -100,6 +122,9 @@ import Foundation
     selectedOperationID = nil
     busy = false
     preparing = false
+    playbackQueue = []
+    libraryJobs = []
+    currentPlaybackJobID = nil
     if let id = privatePlaybackID, player.currentID == id { player.stopAndClear() }
     privatePlaybackID = nil
     await urlImports.bindOwner(nil)
@@ -111,6 +136,11 @@ import Foundation
     await repository.resumePendingMutations()
     guard ticket == epoch else { return }
     sessionDidChange()
+    if let uid {
+      let tracks = (try? await repository.store.libraryJobs(ownerUid: uid)) ?? []
+      guard ticket == epoch else { return }
+      libraryJobs = tracks
+    }
     await history.bindOwner(uid)
     guard ticket == epoch, uid != nil else { return }
     await urlImports.bindOwner(uid)
@@ -262,6 +292,16 @@ import Foundation
     downloadSelected(stage: .fetchingOutput, onReady: onReady)
   }
 
+  func download(_ job: Job, onReady: ((URL) -> Void)? = nil) {
+    guard job.status == "ready", job.canDownloadOutput else { return }
+    perform(stage: .fetchingOutput, jobID: job.id) { uid, ticket in
+      let file = try await self.outputFile(job.id, job.preferredName)
+      try self.check(uid, ticket)
+      self.messageKey = "processing_downloaded"
+      onReady?(file)
+    }
+  }
+
   func downloadSelected(
     stage: ClientErrorStage, onReady: ((URL) -> Void)? = nil
   ) {
@@ -275,16 +315,27 @@ import Foundation
   }
 
   func playSelected() {
-    guard let job = history.detail, let uid = ownerUid else { return }
+    guard let job = history.detail else { return }
+    play(job, queue: history.jobs.filter { $0.status == "ready" && $0.canDownloadOutput })
+  }
+
+  func play(_ job: Job, queue: [Job]? = nil) {
+    guard let uid = ownerUid, job.status == "ready", job.canDownloadOutput else { return }
     let id = playbackID(uid: uid, jobID: job.id)
-    if player.currentID == id && player.playing {
-      player.pause()
+    let candidates = (queue ?? playbackQueue).filter {
+      $0.status == "ready" && $0.canDownloadOutput
+    }
+    playbackQueue = deduplicatedPlaybackQueue(
+      candidates.contains(where: { $0.id == job.id }) ? candidates : [job] + candidates)
+    if player.currentID == id {
+      player.playing ? player.pause() : player.resume()
       return
     }
     perform(stage: .playback, operationID: selectedOperationID, jobID: job.id) { uid, ticket in
       let file = try await self.outputFile(job.id, job.preferredName)
       try self.check(uid, ticket)
       self.privatePlaybackID = id
+      self.currentPlaybackJobID = job.id
       self.player.toggle(id: id, title: job.preferredName, file: file)
       self.originalPrefetch?.cancel()
       self.originalPrefetch = Task { [weak self] in
@@ -292,13 +343,17 @@ import Foundation
         do {
           try self.check(uid, ticket)
           _ = try await self.originalFile(job.id, job.preferredName)
-        } catch { /* Voice remains playable; an explicit switch can retry. */  }
+        } catch {
+          // Voice remains playable; an explicit switch can retry.
+        }
       }
     }
   }
 
   func selectOriginal(_ original: Bool) {
-    guard let job = history.detail, selectedHasPlayback, player.original != original, !busy else {
+    guard let job = currentPlaybackJob, player.original != original, !busy,
+      !original || job.canDownloadInput
+    else {
       return
     }
     let expectedID = player.currentID
@@ -314,9 +369,37 @@ import Foundation
     }
   }
 
+  func playNext() {
+    guard let target = nextPlaybackJob(wrapping: repeatPlayback == .all) else { return }
+    play(target, queue: playbackQueue)
+  }
+
+  func playPrevious() {
+    if player.position > 3 {
+      player.seek(to: 0)
+      return
+    }
+    guard let currentPlaybackJobID,
+      let index = playbackQueue.firstIndex(where: { $0.id == currentPlaybackJobID })
+    else { return }
+    let target =
+      index > 0 ? playbackQueue[index - 1] : (repeatPlayback == .all ? playbackQueue.last : nil)
+    if let target { play(target, queue: playbackQueue) }
+  }
+
+  func removeFromPlaybackQueue(_ id: String) {
+    guard id != currentPlaybackJobID else { return }
+    playbackQueue.removeAll { $0.id == id }
+  }
+
   func downloadOriginal(onReady: @escaping (URL) -> Void) {
     guard let job = history.detail else { return }
-    perform(stage: .exporting, operationID: selectedOperationID, jobID: job.id) { uid, ticket in
+    downloadOriginal(job, onReady: onReady)
+  }
+
+  func downloadOriginal(_ job: Job, onReady: @escaping (URL) -> Void) {
+    guard job.status == "ready", job.canDownloadInput else { return }
+    perform(stage: .exporting, jobID: job.id) { uid, ticket in
       let file = try await self.originalFile(job.id, job.preferredName)
       try self.check(uid, ticket)
       onReady(file)
@@ -364,7 +447,7 @@ import Foundation
     }
   }
 
-  func deleteSelected() {
+  func deleteSelected(onDeleted: @escaping () -> Void = {}) {
     guard let task = selectedTask, task.canDelete else { return }
     perform(stage: .refreshingJob, operationID: task.operationID, jobID: task.jobID) {
       uid, ticket in
@@ -374,17 +457,29 @@ import Foundation
         if self.player.currentID == self.playbackID(uid: uid, jobID: jobID) {
           self.player.stopAndClear()
           self.privatePlaybackID = nil
+          self.currentPlaybackJobID = nil
         }
+        self.playbackQueue.removeAll { $0.id == jobID }
+        self.libraryJobs.removeAll { $0.id == jobID }
         await self.removeOutput(jobID)
+        // The server deletion is authoritative. Leave a now-missing detail immediately,
+        // even if local pipeline cleanup still has work to finish.
+        self.selectedJobID = nil
+        self.selectedOperationID = nil
+        await self.history.select(nil)
+        onDeleted()
       }
       if let operationID = task.operationID {
         try await self.pipeline.remove(
           operationID, serverDeletionConfirmed: task.jobID != nil)
       }
       try self.check(uid, ticket)
-      self.selectedJobID = nil
-      self.selectedOperationID = nil
-      await self.history.select(nil)
+      if task.jobID == nil {
+        self.selectedJobID = nil
+        self.selectedOperationID = nil
+        await self.history.select(nil)
+        onDeleted()
+      }
       await self.history.refreshAfterChange()
     }
   }
@@ -441,7 +536,11 @@ import Foundation
     if player.currentID == playbackID(uid: uid, jobID: jobID) {
       player.stopAndClear()
       privatePlaybackID = nil
+      currentPlaybackJobID = nil
     }
+    playbackQueue.removeAll { $0.id == jobID }
+    libraryJobs.removeAll { $0.id == jobID }
+    try? await repository.store.saveLibraryJobs(libraryJobs, ownerUid: uid)
     await removeOutput(jobID)
     if let operation = pipeline.pipelines.first(where: { $0.jobId == jobID }) {
       try? await pipeline.remove(operation.operationId, serverDeletionConfirmed: true)
@@ -477,6 +576,41 @@ import Foundation
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
         bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
       ))
+  }
+
+  var currentPlaybackJob: Job? {
+    guard let currentPlaybackJobID else { return nil }
+    return playbackQueue.first { $0.id == currentPlaybackJobID }
+      ?? history.jobs.first { $0.id == currentPlaybackJobID }
+  }
+
+  private func nextPlaybackJob(wrapping: Bool) -> Job? {
+    guard !playbackQueue.isEmpty else { return nil }
+    if shufflePlayback, playbackQueue.count > 1 {
+      return playbackQueue.filter { $0.id != currentPlaybackJobID }.randomElement()
+    }
+    guard let currentPlaybackJobID,
+      let index = playbackQueue.firstIndex(where: { $0.id == currentPlaybackJobID })
+    else { return playbackQueue.first }
+    return playbackQueue.indices.contains(index + 1)
+      ? playbackQueue[index + 1] : (wrapping ? playbackQueue.first : nil)
+  }
+
+  private func advanceAfterPlayback() {
+    if repeatPlayback == .one {
+      player.seek(to: 0)
+      player.resume()
+      return
+    }
+    guard autoPlayNext,
+      let target = nextPlaybackJob(wrapping: repeatPlayback == .all)
+    else { return }
+    play(target, queue: playbackQueue)
+  }
+
+  private func deduplicatedPlaybackQueue(_ jobs: [Job]) -> [Job] {
+    var ids = Set<String>()
+    return jobs.filter { ids.insert($0.id).inserted }
   }
 }
 

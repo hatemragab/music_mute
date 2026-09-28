@@ -1,0 +1,89 @@
+openapi: 3.1.0
+info:
+  title: MusicMute private audio acquisition
+  version: 1.0.0
+  x-audience: component-internal
+  description: Provider-neutral binary acquisition. Never automatically retry POST; upstream task creation is not idempotent. NestJS validates audio and duration before S3 upload.
+security:
+  - service_key: []
+paths:
+  /health:
+    get:
+      security: []
+      responses:
+        "200":
+          description: Process healthy; not an upstream availability check.
+  /audio-imports:
+    post:
+      parameters:
+        - in: header
+          name: X-Import-Request-ID
+          required: false
+          description: Opaque execution UUID for internal log correlation only. Not an idempotency key and never forwarded to the vendor. Invalid or absent values are replaced with a generated identifier.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [url, max_bytes, max_duration_seconds]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  maxLength: 2048
+                  description: Public single-item URL from the enabled site catalog, including YouTube, Instagram/Reels, TikTok, Vimeo, SoundCloud and Facebook/Reels. Separate audio must be available; playlists, profiles and arbitrary destinations are rejected.
+                max_bytes:
+                  {
+                    type: integer,
+                    format: int64,
+                    minimum: 1,
+                    maximum: 50000000,
+                  }
+                max_duration_seconds:
+                  {
+                    type: number,
+                    format: double,
+                    exclusiveMinimum: 0,
+                    maximum: 1200,
+                  }
+      responses:
+        "200":
+          description: Audio-only bytes. No redirects; Content-Length is measured. Cache-Control no-store. Metadata is optional and must not be trusted for admission.
+          headers:
+            X-Import-Extra-Data-Base64:
+              description: At most 4096 ASCII characters; base64 UTF-8 JSON with schema_version 1, provider and allowlisted audio metadata. Optional sanitized title/channel may come from included metadata or best-effort official oEmbed lookup. Title supplies the import source title; there is no separate title header. Lookup failure never fails audio acquisition. See README for fields. Missing or invalid means null.
+              schema: { type: string, maxLength: 4096 }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/problem" }
+        "401": { $ref: "#/components/responses/problem" }
+        "404": { $ref: "#/components/responses/problem" }
+        "413": { $ref: "#/components/responses/problem" }
+        "415": { $ref: "#/components/responses/problem" }
+        "422": { $ref: "#/components/responses/problem" }
+        "502": { $ref: "#/components/responses/problem" }
+        "503": { $ref: "#/components/responses/problem" }
+components:
+  securitySchemes:
+    service_key: { type: http, scheme: bearer }
+  responses:
+    problem:
+      description: Sanitized problem JSON; code is a stable IMPORT_* identifier. 503 includes Retry-After but does not authorize automatic task resubmission.
+      headers:
+        X-Import-Error:
+          description: Same stable IMPORT_* code as the body, consumed by the bounded binary client.
+          schema: { type: string }
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            required: [type, title, status, code]
+            properties:
+              type: { type: string }
+              title: { type: string }
+              status: { type: integer }
+              code: { type: string }

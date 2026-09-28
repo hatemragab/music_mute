@@ -286,11 +286,24 @@ actor ProcessingStore {
     try load(ownerUid).operations.first { $0.operationId == id }
   }
 
-  func cachedJobs(ownerUid: String) throws -> [Job] { try load(ownerUid).jobs }
+  func libraryJobs(ownerUid: String) throws -> [Job] { try load(ownerUid).jobs }
 
-  func saveJobs(_ jobs: [Job], ownerUid: String) throws {
+  func saveLibraryJobs(_ jobs: [Job], ownerUid: String) throws {
     var snapshot = try load(ownerUid)
-    snapshot.jobs = jobs
+    snapshot.jobs = jobs.filter { $0.status == "ready" }
+    try persist(snapshot)
+  }
+
+  /// Live history pages advance the library without replacing older completed tracks.
+  func updateLibraryJobs(_ jobs: [Job], ownerUid: String) throws {
+    var snapshot = try load(ownerUid)
+    for job in jobs where job.status == "ready" {
+      if let index = snapshot.jobs.firstIndex(where: { $0.id == job.id }) {
+        if job.updatedAt >= snapshot.jobs[index].updatedAt { snapshot.jobs[index] = job }
+      } else {
+        snapshot.jobs.append(job)
+      }
+    }
     try persist(snapshot)
   }
 
@@ -435,6 +448,11 @@ actor ProcessingStore {
         Set(snapshot.operations.map(\.operationId)).count == snapshot.operations.count
       else { throw ProcessingStoreFailure.corruptStore }
       snapshot.version = 2
+      // Discard legacy Home history while preserving completed library tracks and all other data.
+      if snapshot.jobs.contains(where: { $0.status != "ready" }) {
+        snapshot.jobs.removeAll { $0.status != "ready" }
+        try persist(snapshot)
+      }
       snapshots[owner] = snapshot
       return snapshot
     } catch { throw ProcessingStoreFailure.corruptStore }

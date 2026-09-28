@@ -1,7 +1,9 @@
 package com.hatem.musicmute.ui.player
 
+import com.hatem.musicmute.R
 import com.hatem.musicmute.playback.PlaybackState
 import com.hatem.musicmute.playback.RepeatMode
+import com.hatem.musicmute.processing.ArtifactProgress
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -34,5 +36,18 @@ class PlaybackPresentationTest {
         assertFalse(PlaybackState(trackId = "restored-track").shouldShowMiniPlayer())
         assertFalse(PlaybackState(playing = true).shouldShowMiniPlayer())
         assertTrue(PlaybackState(trackId = "active-track", playing = true).shouldShowMiniPlayer())
+    }
+
+    @Test fun downloadPresentationClampsProgressAndRoundsRemainingTimeUp() {
+        assertEquals(25, ArtifactProgress(250, 1_000).downloadPercent())
+        assertEquals(0f, ArtifactProgress(-1, 1_000).downloadFraction()!!, 0f)
+        assertEquals(100, ArtifactProgress(1_500, 1_000).downloadPercent())
+        assertNull(ArtifactProgress(10, null).downloadPercent())
+        assertEquals(2_000L, ArtifactProgress(10, 100, estimatedRemainingMs = 1_001).displayRemainingMs())
+    }
+
+    @Test fun saveLabelFollowsTheSelectedTrack() {
+        assertEquals(R.string.save_voice, playerSaveLabel(original = false))
+        assertEquals(R.string.save_original, playerSaveLabel(original = true))
     }
 }

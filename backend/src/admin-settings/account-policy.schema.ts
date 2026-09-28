@@ -30,7 +30,7 @@ export const DEFAULT_ACCOUNT_POLICY_VALUES: Readonly<AccountPolicyValues> =
     dailyUploadGrants: 30,
     monthlyUploadGrants: 200,
     monthlyConfirmedUploadBytes: 1_000_000_000,
-    maxWaitingJobs: 3,
+    maxWaitingJobs: 20,
     maxProcessingJobs: 1,
     maxInfrastructureAttempts: 3,
     maxClientInputAttempts: 5,

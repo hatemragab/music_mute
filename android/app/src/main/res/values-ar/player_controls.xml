@@ -7,4 +7,8 @@
     <string name="player_volume">مستوى الصوت</string>
     <string name="player_volume_percent">%1$d%%</string>
     <string name="player_volume_hint">اضبط صوت هذا المشغّل. استخدم أزرار الصوت في هاتفك لتغيير مستوى صوت الجهاز.</string>
+    <string name="player_downloading_voice">جارٍ تنزيل مسار الصوت</string>
+    <string name="player_downloading_original">جارٍ تنزيل المسار الأصلي</string>
+    <string name="player_download_estimating">جارٍ تقدير الوقت المتبقي…</string>
+    <string name="player_download_remaining">متبقٍ %1$s</string>
 </resources>

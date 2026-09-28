@@ -3,6 +3,7 @@ import {
   mkdtemp,
   mkdir,
   readdir,
+  readFile,
   rm,
   symlink,
   utimes,
@@ -11,7 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { ImportFiles, decodeImportTitle } from './import-files.js';
+import { ImportFiles } from './import-files.js';
 
 describe('bounded temporary imports', () => {
   let root: string;
@@ -36,6 +37,17 @@ describe('bounded temporary imports', () => {
         res.writeHead(200, { 'Content-Length': '100' });
         res.end('x'.repeat(100));
         return;
+      }
+      if (req.url === '/metadata') {
+        res.setHeader(
+          'X-Import-Extra-Data-Base64',
+          Buffer.from(
+            JSON.stringify({
+              schema_version: 1,
+              title: '  عنوان 🎵\r\nTest  ',
+            }),
+          ).toString('base64'),
+        );
       }
       res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
       res.write('audio');
@@ -64,6 +76,28 @@ describe('bounded temporary imports', () => {
     });
     expect(await readdir(files.root)).toEqual([]);
   });
+  it('uses only sanitized adapter metadata for the source title', async () => {
+    const request = { method: 'POST', headers: {}, body: '{}' };
+    const result = await files.withFile((path, signal) =>
+      files.download(`${origin}/metadata`, path, 20, signal, request),
+    );
+    expect(result.sourceTitle).toBe('عنوان 🎵Test');
+    expect(result.extraData).toEqual({
+      schema_version: 1,
+      title: 'عنوان 🎵Test',
+    });
+    const untrusted = await files.withFile((path, signal) =>
+      files.download(`${origin}/metadata`, path, 20, signal),
+    );
+    expect(untrusted.sourceTitle).toBeUndefined();
+    expect(untrusted.extraData).toBeUndefined();
+    const absent = await files.withFile((path, signal) =>
+      files.download(`${origin}/audio`, path, 20, signal, request),
+    );
+    expect(absent.sourceTitle).toBeUndefined();
+    expect(absent.extraData).toBeNull();
+    expect(await readdir(files.root)).toEqual([]);
+  });
   it.each(['/audio', '/large', '/redirect', '/refused'])(
     'aborts rejected transfers and deletes partial files: %s',
     async (path) => {
@@ -82,6 +116,90 @@ describe('bounded temporary imports', () => {
         throw new Error('submission failed');
       }),
     ).rejects.toThrow('submission failed');
+    expect(await readdir(files.root)).toEqual([]);
+  });
+  it('streams closing multi-megabyte responses without fetch, retry, or corruption', async () => {
+    const audio = Buffer.alloc(3_597_607, 0x61);
+    let submissions = 0;
+    server.removeAllListeners('request');
+    server.on('request', (req, res) => {
+      submissions++;
+      req.resume();
+      res.writeHead(200, {
+        'Content-Length': audio.length,
+        Connection: 'close',
+      });
+      res.end(audio);
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('Must not use Undici'));
+    try {
+      for (let i = 0; i < 12; i++) {
+        await files.withFile(async (path, signal) => {
+          const result = await files.download(origin, path, 5_000_000, signal, {
+            method: 'POST',
+            headers: {},
+            body: '{}',
+          });
+          expect(result.bytes).toBe(audio.length);
+          expect(result.sha256).toBe(
+            createHash('sha256').update(audio).digest('base64'),
+          );
+          expect((await readFile(path)).equals(audio)).toBe(true);
+        });
+      }
+      expect(submissions).toBe(12);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(await readdir(files.root)).toEqual([]);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+  it('rejects truncated bodies without replaying the POST and cleans scratch', async () => {
+    let submissions = 0;
+    server.removeAllListeners('request');
+    server.on('request', (req, res) => {
+      submissions++;
+      req.resume();
+      res.writeHead(200, { 'Content-Length': 100, Connection: 'close' });
+      res.end('short');
+    });
+    await expect(
+      files.withFile((path, signal) =>
+        files.download(origin, path, 200, signal, {
+          method: 'POST',
+          headers: {},
+          body: '{}',
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(submissions).toBe(1);
+    expect(await readdir(files.root)).toEqual([]);
+  });
+  it('cancels a stalled response body and cleans scratch without replay', async () => {
+    const cancellation = new AbortController();
+    let submissions = 0;
+    server.removeAllListeners('request');
+    server.on('request', (req, res) => {
+      submissions++;
+      req.resume();
+      res.writeHead(200, { 'Content-Length': 100 });
+      res.write('partial');
+      cancellation.abort();
+    });
+    await expect(
+      files.withFile(
+        (path, signal) =>
+          files.download(origin, path, 200, signal, {
+            method: 'POST',
+            headers: {},
+            body: '{}',
+          }),
+        cancellation.signal,
+      ),
+    ).rejects.toThrow();
+    expect(submissions).toBe(1);
     expect(await readdir(files.root)).toEqual([]);
   });
   it('rejects low disk before acquisition', async () => {
@@ -138,19 +256,5 @@ describe('bounded temporary imports', () => {
     expect(await files.sweep()).toBe(2);
     expect(await readdir(files.root)).toHaveLength(1);
     expect(await readdir(directories[2])).toEqual(['source.audio']);
-  });
-});
-
-describe('import source title metadata', () => {
-  it('preserves Unicode, strips controls and bounds code points', () => {
-    const encode = (value: string) => Buffer.from(value).toString('base64');
-    expect(decodeImportTitle(encode('  عنوان 🎵\r\nTest  '))).toBe(
-      'عنوان 🎵Test',
-    );
-    expect([...decodeImportTitle(encode('🎵'.repeat(201)))!]).toHaveLength(200);
-    expect(decodeImportTitle(null)).toBeUndefined();
-    expect(decodeImportTitle('invalid!')).toBeUndefined();
-    expect(decodeImportTitle('/w==')).toBeUndefined();
-    expect(decodeImportTitle('A'.repeat(1101))).toBeUndefined();
   });
 });

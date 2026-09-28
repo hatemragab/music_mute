@@ -29,4 +29,7 @@
     <string name="listener_source_file">ملف</string>
     <string name="listener_choose_file">اختر صوتًا أو فيديو</string>
     <string name="listener_supported_sites">المواقع المدعومة</string>
+    <string name="listener_trim_short">قص</string>
+    <string name="listener_trim_info">معلومات عن قص الصمت</string>
+    <string name="listener_trim_description">يزيل القص فترات الصمت الطويلة من المقطع الصوتي المعالَج، بما فيها الفترات في وسط المقطع. أوقفه إذا أردت الإبقاء على التوقيت الأصلي لهذه الفترات.</string>
 </resources>

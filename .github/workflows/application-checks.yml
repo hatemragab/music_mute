@@ -1,0 +1,76 @@
+name: Application release checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: application-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.18.0'
+      - run: npm install --global pnpm@10.14.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify
+      - run: pnpm audit --prod
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web-client
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.18.0'
+      - run: npm ci --ignore-scripts
+      - run: npm run format:check && npm run lint && npm run typecheck && npm test && npm run build && npm run test:server
+      - run: npx playwright install --with-deps chrome firefox webkit
+      - run: npm run test:e2e
+      - run: npm run test:e2e
+        env:
+          TEST_BROWSER: firefox
+      - run: npm run test:e2e
+        env:
+          TEST_BROWSER: webkit
+      - run: npm audit --omit=dev
+  dashboard:
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.18.0'
+      - run: npm install --global pnpm@10.14.0
+      - run: pnpm --dir ../backend install --frozen-lockfile
+      - run: npm ci --ignore-scripts
+      - run: brew tap mongodb/brew && brew install mongodb-community@8.0 redis
+      - run: echo "$(brew --prefix mongodb-community@8.0)/bin" >> "$GITHUB_PATH"
+      - run: npx playwright install chrome
+      - run: npm run format:check && npm run lint && npm run typecheck && npm test && npm run test:deployment && npm run test:e2e
+      - run: npm audit --omit=dev
+# Native distribution remains an explicit local gate: the authorized simulator
+# is user-owned and cannot be substituted with a hosted CI device. See the ledger.

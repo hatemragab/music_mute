@@ -11,6 +11,12 @@ import {
 import { useSignedIn } from "../auth/AuthProvider";
 import { jobsApi } from "../api/jobs";
 import type { JobView } from "../api/types";
+import {
+  chooseNextIndex,
+  passageLoop,
+  type LoopSpan,
+  type RepeatMode,
+} from "./playback";
 
 interface PlayerContextValue {
   current: JobView | null;
@@ -21,8 +27,11 @@ interface PlayerContextValue {
   queue: JobView[];
   speed: number;
   volume: number;
-  repeat: boolean;
+  repeat: RepeatMode;
   shuffle: boolean;
+  autoNext: boolean;
+  original: boolean;
+  loop: LoopSpan | null;
   play: (job: JobView, queue?: JobView[]) => Promise<void>;
   toggle: () => Promise<void>;
   seek: (time: number) => void;
@@ -30,8 +39,12 @@ interface PlayerContextValue {
   previous: () => Promise<void>;
   setSpeed: (speed: number) => void;
   setVolume: (volume: number) => void;
-  setRepeat: (repeat: boolean) => void;
+  setRepeat: (repeat: RepeatMode) => void;
   setShuffle: (shuffle: boolean) => void;
+  setAutoNext: (autoNext: boolean) => void;
+  toggleLoop: () => void;
+  selectOriginal: (original: boolean) => Promise<void>;
+  removeFromQueue: (jobId: string) => void;
 }
 const Context = createContext<PlayerContextValue | null>(null);
 
@@ -46,17 +59,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [speed, setSpeedState] = useState(1);
   const [volume, setVolumeState] = useState(1);
-  const [repeat, setRepeat] = useState(false);
+  const [repeat, setRepeat] = useState<RepeatMode>("off");
   const [shuffle, setShuffle] = useState(false);
+  const [autoNext, setAutoNext] = useState(true);
+  const [original, setOriginal] = useState(false);
+  const [loop, setLoop] = useState<LoopSpan | null>(null);
   const grant = useRef<{
     jobId: string;
+    artifact: "input" | "output";
     url: string;
     expiresAt: number;
   } | null>(null);
   const currentRef = useRef<JobView | null>(null);
   const queueRef = useRef<JobView[]>([]);
-  const repeatRef = useRef(false);
+  const repeatRef = useRef<RepeatMode>("off");
   const shuffleRef = useRef(false);
+  const autoNextRef = useRef(true);
+  const loopRef = useRef<LoopSpan | null>(null);
   const speedRef = useRef(1);
   const generation = useRef(0);
   const recovered = useRef(false);
@@ -65,12 +84,24 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const start = useCallback(
-    async (job: JobView, list = queueRef.current, resumeAt = 0) => {
+    async (
+      job: JobView,
+      list = queueRef.current,
+      resumeAt = 0,
+      artifact: "input" | "output" = "output",
+      shouldPlay = true,
+    ) => {
       const operation = ++generation.current;
-      if (job.id !== currentRef.current?.id) recovered.current = false;
+      if (
+        job.id !== currentRef.current?.id ||
+        grant.current?.artifact !== artifact
+      )
+        recovered.current = false;
       setError(null);
       setCurrent(job);
       setQueue(list.length ? list : [job]);
+      setOriginal(artifact === "input");
+      if (job.id !== currentRef.current?.id) setLoop(null);
       try {
         const element = audio.current;
         if (!element) throw new Error("PLAYBACK_UNAVAILABLE");
@@ -78,15 +109,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         if (
           !selected ||
           selected.jobId !== job.id ||
+          selected.artifact !== artifact ||
           selected.expiresAt < Date.now() + 30_000
         ) {
           const result = await jobsApi(api).grant(
             job.id,
-            "output",
+            artifact,
             crypto.randomUUID(),
           );
           selected = {
             jobId: job.id,
+            artifact,
             url: result.url,
             expiresAt: Date.parse(result.expiresAt),
           };
@@ -104,7 +137,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             },
             { once: true },
           );
-        await element.play();
+        if (shouldPlay) await element.play();
+        else element.pause();
       } catch (error) {
         if (generation.current === operation)
           setError(error instanceof Error ? error.message : "PLAYBACK_FAILED");
@@ -118,13 +152,29 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     queueRef.current = queue;
     repeatRef.current = repeat;
     shuffleRef.current = shuffle;
-  }, [current, queue, repeat, shuffle]);
+    autoNextRef.current = autoNext;
+    loopRef.current = loop;
+  }, [current, queue, repeat, shuffle, autoNext, loop]);
   useEffect(() => {
     const element = new Audio();
     audio.current = element;
-    const onTime = () => setTime(element.currentTime || 0);
-    const onDuration = () =>
-      setDuration(Number.isFinite(element.duration) ? element.duration : 0);
+    const onTime = () => {
+      const span = loopRef.current;
+      if (
+        span &&
+        span.end - span.start > 0.2 &&
+        element.currentTime >= span.end - 0.05 &&
+        element.currentTime > span.start
+      ) {
+        element.currentTime = span.start;
+      }
+      setTime(element.currentTime || 0);
+    };
+    const onDuration = () => {
+      const duration = Number.isFinite(element.duration) ? element.duration : 0;
+      setDuration(duration);
+      if (duration > 0) setError(null);
+    };
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onError = () => {
@@ -135,17 +185,41 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         currentRef.current
       ) {
         recovered.current = true;
-        void start(currentRef.current, queueRef.current, element.currentTime);
-      } else setError("PLAYBACK_FAILED");
+        void start(
+          currentRef.current,
+          queueRef.current,
+          element.currentTime,
+          grant.current.artifact,
+          true,
+        );
+      } else if (element.error?.code !== MediaError.MEDIA_ERR_ABORTED) {
+        element.pause();
+        setError("PLAYBACK_FAILED");
+      }
     };
     const onEnd = () => {
       const list = queueRef.current;
+      const span = loopRef.current;
+      if (span && currentRef.current) {
+        element.currentTime = span.start;
+        void element.play();
+        return;
+      }
       const index = list.findIndex(
         (item) => item.id === currentRef.current?.id,
       );
-      const target = shuffleRef.current
-        ? list[Math.floor(Math.random() * list.length)]
-        : (list[index + 1] ?? (repeatRef.current ? list[0] : undefined));
+      if (repeatRef.current === "one" && currentRef.current) {
+        void start(currentRef.current, list);
+        return;
+      }
+      if (!autoNextRef.current) return;
+      const nextIndex = chooseNextIndex(
+        list.length,
+        index,
+        repeatRef.current === "all" ? "all" : "off",
+        shuffleRef.current,
+      );
+      const target = list[nextIndex];
       if (target) void start(target, list);
     };
     element.addEventListener("timeupdate", onTime);
@@ -182,6 +256,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       volume,
       repeat,
       shuffle,
+      autoNext,
+      original,
+      loop,
       play: start,
       toggle: async () => {
         if (playing) audio.current?.pause();
@@ -198,7 +275,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       },
       next: async () => {
         const index = queue.findIndex((job) => job.id === current?.id);
-        const job = queue[index + 1] ?? (repeat ? queue[0] : undefined);
+        const job =
+          queue[chooseNextIndex(queue.length, index, repeat, shuffle)];
         if (job) await start(job, queue);
       },
       previous: async () => {
@@ -222,6 +300,36 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       },
       setRepeat,
       setShuffle,
+      setAutoNext,
+      toggleLoop: () => {
+        if (loop) {
+          setLoop(null);
+          return;
+        }
+        const span = passageLoop(
+          audio.current?.currentTime ?? time,
+          audio.current?.duration || duration,
+        );
+        if (span) setLoop(span);
+      },
+      selectOriginal: async (nextOriginal) => {
+        if (!current || original === nextOriginal) return;
+        if (nextOriginal && !current.canDownloadInput) {
+          setError("ORIGINAL_UNAVAILABLE");
+          return;
+        }
+        await start(
+          current,
+          queue,
+          audio.current?.currentTime ?? time,
+          nextOriginal ? "input" : "output",
+          playing,
+        );
+      },
+      removeFromQueue: (jobId) => {
+        if (jobId !== current?.id)
+          setQueue((items) => items.filter((item) => item.id !== jobId));
+      },
     }),
     [
       current,
@@ -234,6 +342,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       volume,
       repeat,
       shuffle,
+      autoNext,
+      original,
+      loop,
       start,
     ],
   );

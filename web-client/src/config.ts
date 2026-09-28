@@ -1,4 +1,5 @@
 export interface PublicConfig {
+  sentry?: { enabled: boolean; dsn: string };
   apiOrigin: string;
   firebase: {
     apiKey: string;

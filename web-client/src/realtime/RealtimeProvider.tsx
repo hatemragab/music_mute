@@ -145,11 +145,14 @@ export function useLiveQuery<T>(
   return { ...query, error, isError: Boolean(error) };
 }
 
-export function useLiveJobs() {
+export function useLiveJobs(status?: "ready") {
   const { user } = useSignedIn();
   const client = useRealtime();
   const cache = useQueryClient();
-  const queryKey = useMemo(() => [user.uid, "jobs"], [user.uid]);
+  const queryKey = useMemo(
+    () => [user.uid, "jobs", status ?? "all"],
+    [user.uid, status],
+  );
   const [failure, setFailure] = useState<ApiError | null>(null);
   const query = useInfiniteQuery({
     queryKey,
@@ -157,11 +160,14 @@ export function useLiveJobs() {
     queryFn: ({ pageParam, signal }) =>
       client.read<JobListView>(
         "jobs",
-        { limit: "20", ...(pageParam ? { cursor: pageParam } : {}) },
+        {
+          limit: "20",
+          ...(status ? { status } : {}),
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
         signal,
       ),
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    maxPages: 10,
     staleTime: Infinity,
     retry: false,
     refetchOnMount: false,
@@ -171,47 +177,54 @@ export function useLiveJobs() {
   const cursors = JSON.stringify(query.data?.pageParams ?? [null]);
   useEffect(() => {
     const pages = JSON.parse(cursors) as Array<string | null>;
+    // Retain loaded tracks; keep the newest page and nine tail pages live.
     const cleanups = pages.map((cursor, index) =>
-      client.watch(
-        "jobs",
-        { limit: "20", ...(cursor ? { cursor } : {}) },
-        (result) => {
-          if (result.error) {
-            setFailure(result.error);
-            return;
-          }
-          setFailure(null);
-          const page = result.data as JobListView;
-          cache.setQueryData<InfiniteData<JobListView, string | undefined>>(
-            queryKey,
-            (current) => {
-              if (!current)
-                return index === 0
-                  ? { pages: [page], pageParams: [undefined] }
-                  : current;
-              if (
-                index >= current.pages.length ||
-                current.pageParams[index] !== (cursor ?? undefined)
-              )
-                return current;
-              const changedBoundary =
-                current.pages[index]?.nextCursor !== page.nextCursor;
-              const next = current.pages.map((value, at) =>
-                at === index ? page : value,
-              );
-              return {
-                pages: changedBoundary ? next.slice(0, index + 1) : next,
-                pageParams: changedBoundary
-                  ? current.pageParams.slice(0, index + 1)
-                  : current.pageParams,
-              };
+      index > 0 && index < pages.length - 9
+        ? () => {}
+        : client.watch(
+            "jobs",
+            {
+              limit: "20",
+              ...(status ? { status } : {}),
+              ...(cursor ? { cursor } : {}),
             },
-          );
-        },
-      ),
+            (result) => {
+              if (result.error) {
+                setFailure(result.error);
+                return;
+              }
+              setFailure(null);
+              const page = result.data as JobListView;
+              cache.setQueryData<InfiniteData<JobListView, string | undefined>>(
+                queryKey,
+                (current) => {
+                  if (!current)
+                    return index === 0
+                      ? { pages: [page], pageParams: [undefined] }
+                      : current;
+                  if (
+                    index >= current.pages.length ||
+                    current.pageParams[index] !== (cursor ?? undefined)
+                  )
+                    return current;
+                  const changedBoundary =
+                    current.pages[index]?.nextCursor !== page.nextCursor;
+                  const next = current.pages.map((value, at) =>
+                    at === index ? page : value,
+                  );
+                  return {
+                    pages: changedBoundary ? next.slice(0, index + 1) : next,
+                    pageParams: changedBoundary
+                      ? current.pageParams.slice(0, index + 1)
+                      : current.pageParams,
+                  };
+                },
+              );
+            },
+          ),
     );
     return () => cleanups.forEach((cleanup) => cleanup());
-  }, [client, cache, queryKey, cursors]);
+  }, [client, cache, queryKey, cursors, status]);
   const error = failure ?? query.error;
   return { ...query, error, isError: Boolean(error) };
 }

@@ -7,4 +7,8 @@
     <string name="player_volume">Audio volume</string>
     <string name="player_volume_percent">%1$d%%</string>
     <string name="player_volume_hint">Adjust this player’s volume. Use your phone’s volume buttons to change the device volume.</string>
+    <string name="player_downloading_voice">Downloading voice track</string>
+    <string name="player_downloading_original">Downloading original track</string>
+    <string name="player_download_estimating">Estimating time left…</string>
+    <string name="player_download_remaining">%1$s left</string>
 </resources>

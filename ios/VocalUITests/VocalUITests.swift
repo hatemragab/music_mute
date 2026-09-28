@@ -27,9 +27,11 @@ final class VocalUITests: XCTestCase {
       "UICTContentSizeCategoryAccessibilityXL",
     ]
     app.launch()
-    XCTAssertTrue(app.tabBars.buttons["معالجة الصوت"].waitForExistence(timeout: 10))
+    let processing = app.buttons["openProcessing"]
+    XCTAssertTrue(processing.waitForExistence(timeout: 10))
     attach(app, name: "Arabic dark large text home")
-    app.tabBars.buttons["معالجة الصوت"].tap()
+    reveal(processing, app: app)
+    processing.tap()
     XCTAssertTrue(app.staticTexts["معالجة الصوت"].waitForExistence(timeout: 5))
     attach(app, name: "Arabic dark large text history")
   }

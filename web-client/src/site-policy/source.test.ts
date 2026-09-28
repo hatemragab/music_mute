@@ -10,9 +10,20 @@ test.each(cases)("offline site policy: $url", ({ url, accepted }) => {
   else expect(() => supportedAudioUrl(url)).toThrow();
 });
 
-test("every enabled site has pinned separate-audio evidence", () => {
-  expect(supportedAudioSites).toHaveLength(9);
+test("enabled platforms retain historical evidence without inventing SaaS proof", () => {
+  expect(supportedAudioSites).toHaveLength(12);
+  expect(supportedAudioSites).toEqual(
+    expect.arrayContaining([
+      "YouTube",
+      "Instagram",
+      "TikTok",
+      "Vimeo",
+      "SoundCloud",
+      "Facebook",
+    ]),
+  );
   for (const site of catalog.sites) {
+    if (!site.evidence) continue;
     expect(site.evidence.vcodec).toBe("none");
     expect(site.evidence.acodec).toBeTruthy();
     expect(site.evidence.acodec).not.toBe("none");

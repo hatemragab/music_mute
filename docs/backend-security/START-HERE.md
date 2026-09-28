@@ -47,7 +47,7 @@ Do not read a later task as authorization to start it.
 | Media                   | Maximum 20 minutes and 50,000,000 prepared bytes                                 |
 | Upload grants           | 30 per UTC day and 200 per UTC calendar month                                    |
 | Upload bytes            | 1,000,000,000 confirmed bytes per UTC calendar month                             |
-| Queue                   | One processing job plus at most three waiting jobs per account                   |
+| Queue                   | One processing job plus at most twenty waiting jobs per account by default       |
 | Picking                 | Oldest eligible queued job; no advanced fairness engine for launch               |
 | Infrastructure failures | At most three total processing attempts; no user charge on failure               |
 | Client/input failures   | At most five newly issued attempts for the same logical audio                    |

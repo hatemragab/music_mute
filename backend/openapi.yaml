@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MusicMute HTTP API
-  version: 0.1.0
+  version: 0.2.0
   description: MusicMute HTTP contract for native apps, the administrator dashboard, public clients, and worker runtimes. This specification is versioned independently of the backend package. The worker hint WebSocket upgrade is outside Nest controllers and is described by x-websocket-upgrade.
   contact:
     name: MusicMute support
@@ -126,7 +126,7 @@ paths:
       tags: [jobs]
       operationId: ImportsController.create
       summary: Import one supported native audio source
-      description: Asynchronous native-audio acquisition through the private yt-dlp service into existing S3 processing. Requires existing processing access. Public single-item links from supported sites are evaluated without a fixed provider allowlist. Only separate audio streams are downloaded; no video acquisition, playlists, live streams, private-network access, or account cookies. A repeated request_id with the same canonical URL returns the same import; different input returns 409. Queue capacity includes active and waiting imports. Independently measured audio must satisfy account limits.
+      description: Asynchronous native-audio acquisition through a private provider-neutral adapter into existing S3 processing. Requires existing processing access. The selected adapter determines qualified public single-item source support; the initial VideoScale adapter supports YouTube. Only separate audio streams are downloaded; no video acquisition, playlists, private-network access, or account cookies. A repeated request_id with the same canonical URL returns the same import; different input returns 409. Queue capacity includes active and waiting imports. Monthly processing admission checks used plus reserved seconds before the new file. Any positive remaining allowance admits the complete file even if its duration crosses the monthly limit; accounts at or above the limit receive PROCESSING_ALLOWANCE_EXHAUSTED before provider acquisition. A temporary duration hold protects admission against concurrent requests and is atomically exchanged for measured duration; failure/recovery releases it. Independently measured audio must satisfy account limits. Included sanitized metadata is stored privately as nullable job extra_data without additional metadata requests.
       security:
         - FirebaseBearer: []
       x-source: src/url-imports/imports.controller.ts
@@ -4871,8 +4871,8 @@ paths:
       tags:
         - public
       operationId: PublicPagesController.deleteAccount
-      summary: GET /delete-account
-      description: fixed HTML with bounded, escaped operator configuration
+      summary: Read the external account-deletion resource
+      description: Public, actionable account-deletion instructions with the in-app path, support request path, recovery period, deleted data, and limited retention. Repository-owned defaults are used when optional publication overrides are absent.
       security: []
       x-source: src/public-pages/public-pages.controller.ts
       x-auth-policy: P
@@ -4888,9 +4888,7 @@ paths:
             Cache-Control:
               schema:
                 type: string
-                const: no-store
-        '400':
-          $ref: '#/components/responses/Problem400'
+                const: no-store, no-transform
         '429':
           $ref: '#/components/responses/Problem429'
         '500':
@@ -5131,7 +5129,7 @@ paths:
         - jobs
       operationId: JobsController.create
       summary: POST /jobs
-      description: policy version/profile/source enums, UUIDv4 request ID, declared bytes 1–50M, bounded duration/hash/title/URL
+      description: policy version/profile/source enums, UUIDv4 request ID, declared bytes 1–50M, bounded duration/hash/title/URL. Monthly allowance admission checks used plus reserved seconds before the new file. Any positive remaining allowance admits the entire file; at or above the limit the request returns PROCESSING_ALLOWANCE_EXHAUSTED before issuing an upload grant. Accepted files may cross the monthly limit and finish normally.
       security:
         - FirebaseBearer: []
       x-source: src/jobs/jobs.controller.ts
@@ -5672,8 +5670,8 @@ paths:
       tags:
         - public
       operationId: PublicPagesController.privacy
-      summary: GET /privacy
-      description: fixed HTML with bounded, escaped operator configuration
+      summary: Read the MusicMute privacy policy
+      description: Public privacy policy covering account, device, diagnostic, audio, provider, security, retention, and deletion behavior. Repository-owned defaults are used when optional publication overrides are absent.
       security: []
       x-source: src/public-pages/public-pages.controller.ts
       x-auth-policy: P
@@ -5689,9 +5687,125 @@ paths:
             Cache-Control:
               schema:
                 type: string
+                const: no-store, no-transform
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '500':
+          $ref: '#/components/responses/Problem500'
+        '503':
+          $ref: '#/components/responses/Problem503'
+      x-audience:
+        - public
+  /public-policy:
+    get:
+      tags:
+        - public
+      operationId: PublicPagesController.publicPolicy
+      summary: Read public policy metadata
+      description: Machine-readable, non-personal publication metadata for release tooling and first-party clients. This resource does not accept account identifiers or deletion requests.
+      security: []
+      x-source: src/public-pages/public-pages.controller.ts
+      x-auth-policy: P
+      x-rate-policy: G
+      responses:
+        '200':
+          description: Current public policy metadata.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
                 const: no-store
-        '400':
-          $ref: '#/components/responses/Problem400'
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - schema_version
+                  - policy_version
+                  - updated_at
+                  - app_name
+                  - developer_name
+                  - support_email
+                  - urls
+                  - account_deletion
+                properties:
+                  schema_version:
+                    type: integer
+                    format: int32
+                    const: 1
+                  policy_version:
+                    type: string
+                    pattern: '^\d{4}-\d{2}-\d{2}$'
+                    examples: ['2026-09-27']
+                  updated_at:
+                    type: string
+                    format: date-time
+                  app_name:
+                    type: string
+                    const: MusicMute
+                  developer_name:
+                    type: string
+                    minLength: 1
+                    maxLength: 160
+                  support_email:
+                    type: string
+                    format: email
+                    maxLength: 254
+                  urls:
+                    type: object
+                    additionalProperties: false
+                    required: [privacy, account_deletion, support]
+                    properties:
+                      privacy: { type: string, format: uri }
+                      account_deletion: { type: string, format: uri }
+                      support: { type: string, format: uri }
+                  account_deletion:
+                    type: object
+                    additionalProperties: false
+                    required:
+                      - available_in_app
+                      - external_request_available
+                      - recovery_period_days
+                      - replay_fence_hours
+                    properties:
+                      available_in_app: { type: boolean, const: true }
+                      external_request_available: { type: boolean, const: true }
+                      recovery_period_days:
+                        { type: integer, format: int32, const: 15 }
+                      replay_fence_hours:
+                        { type: integer, format: int32, const: 24 }
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '500':
+          $ref: '#/components/responses/Problem500'
+        '503':
+          $ref: '#/components/responses/Problem503'
+      x-audience:
+        - public
+  /support:
+    get:
+      tags:
+        - public
+      operationId: PublicPagesController.support
+      summary: Read MusicMute support instructions
+      description: Public support contact instructions with privacy-safe diagnostic guidance and links to the privacy and account-deletion resources.
+      security: []
+      x-source: src/public-pages/public-pages.controller.ts
+      x-auth-policy: P
+      x-rate-policy: G
+      responses:
+        '200':
+          description: Support instructions and monitored contact destination.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store, no-transform
+          content:
+            text/html:
+              schema:
+                type: string
         '429':
           $ref: '#/components/responses/Problem429'
         '500':
@@ -8709,6 +8823,7 @@ components:
           type: integer
           minimum: 1
         max_waiting_jobs:
+          description: Maximum waiting jobs per account; defaults to 20 when no global account policy is stored.
           type: integer
           minimum: 0
         max_processing_jobs:

@@ -20,7 +20,9 @@ import SwiftUI
     installationStore: InstallationStore(
       file: FileManager.default.temporaryDirectory.appendingPathComponent("preview-auth.json")),
     api: nil)
-  NavigationStack { SettingsView(preferences: AppPreferences(), auth: auth) }
-    .environment(\.locale, Locale(identifier: "ar")).environment(\.layoutDirection, .rightToLeft)
-    .preferredColorScheme(.dark)
+  NavigationStack {
+    SettingsView(preferences: AppPreferences(), auth: auth, usageRepository: nil)
+  }
+  .environment(\.locale, Locale(identifier: "ar")).environment(\.layoutDirection, .rightToLeft)
+  .preferredColorScheme(.dark)
 }

@@ -13,7 +13,7 @@
   PWA in this version. Normal Firebase session persistence and lightweight
   preferences are allowed; they are not an offline application mode.
 - Intake is URL imports plus local AUDIO only. No local video picker/extraction,
-  video rendering/muxing, or browser implementation of yt-dlp.
+  video rendering/muxing, browser extraction or direct SaaS provider calls.
 - English and Arabic with complete RTL support; retain Android accent selection.
 - Intended public origin: `https://app.music-mute.com`, on existing CapRover.
   Configuration work already completed is described separately; hosting is not
@@ -34,7 +34,7 @@ patterns, not a runtime dependency or an administrator login gate for end users.
 
 Allowed future edits: `web-client/**`, the narrowly required backend modules,
 backend contract tests/OpenAPI, and directly related existing API documentation.
-Do not change Android, iOS, dashboard, workers, or downloader implementation.
+Do not change Android, iOS, dashboard, workers, or private provider adapters.
 If a genuine compatibility blocker requires a change outside that scope,
 document the exact issue and obtain expanded scope instead of hiding it.
 Do not restructure the repository into a monorepo workspace.

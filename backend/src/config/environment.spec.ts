@@ -4,6 +4,7 @@ import {
   environmentFile,
   validateEnvironment,
 } from './environment.js';
+import { PUBLIC_POLICY_DEFAULTS } from './public-policy.js';
 
 const local = {
   APP_ENV: 'local',
@@ -50,8 +51,42 @@ describe('environment boundary', () => {
       APP_IOS_CURRENT_VERSION_NAME: '0.1.0',
       APP_IOS_CURRENT_BUILD_NUMBER: 1,
       APP_RELEASE_DOWNLOAD_SECONDS: 300,
+      PUBLIC_SITE_ORIGIN: PUBLIC_POLICY_DEFAULTS.publicOrigin,
+      PUBLIC_SUPPORT_EMAIL: PUBLIC_POLICY_DEFAULTS.supportEmail,
+      PUBLIC_DEVELOPER_NAME: PUBLIC_POLICY_DEFAULTS.developerName,
+      PUBLIC_DELETION_TIMEFRAME: PUBLIC_POLICY_DEFAULTS.deletionTimeframe,
+      PUBLIC_RETENTION_NOTICE: PUBLIC_POLICY_DEFAULTS.retentionNotice,
       ...AUTH_RATE_LIMIT_DEFAULTS,
       ...ADMIN_RATE_LIMIT_DEFAULTS,
+    });
+  });
+  it.each([
+    'http://api.music-mute.com',
+    'https://user:password@api.music-mute.com',
+    'https://api.music-mute.com/privacy',
+    'https://api.music-mute.com?source=play',
+    'https://api.music-mute.com/#privacy',
+  ])('rejects an unsafe public site origin %s', (PUBLIC_SITE_ORIGIN) => {
+    expect(() => validateEnvironment({ ...local, PUBLIC_SITE_ORIGIN })).toThrow(
+      'Invalid environment: PUBLIC_SITE_ORIGIN',
+    );
+  });
+  it('accepts bounded public policy overrides', () => {
+    expect(
+      validateEnvironment({
+        ...local,
+        PUBLIC_SITE_ORIGIN: 'https://policy.example.test',
+        PUBLIC_SUPPORT_EMAIL: 'privacy@example.test',
+        PUBLIC_DEVELOPER_NAME: 'Example Developer',
+        PUBLIC_DELETION_TIMEFRAME: 'Example deletion timeframe.',
+        PUBLIC_RETENTION_NOTICE: 'Example retention notice.',
+      }),
+    ).toMatchObject({
+      PUBLIC_SITE_ORIGIN: 'https://policy.example.test',
+      PUBLIC_SUPPORT_EMAIL: 'privacy@example.test',
+      PUBLIC_DEVELOPER_NAME: 'Example Developer',
+      PUBLIC_DELETION_TIMEFRAME: 'Example deletion timeframe.',
+      PUBLIC_RETENTION_NOTICE: 'Example retention notice.',
     });
   });
   it('validates acceleration opt-in and rejects dotted bucket names', () => {

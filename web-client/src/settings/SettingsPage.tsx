@@ -128,6 +128,13 @@ export function SettingsPage() {
           >
             {t("deleteAccount")}
           </a>
+          <a
+            href={`${apiOrigin}/support`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t("support")}
+          </a>
         </div>
       </section>
     </div>

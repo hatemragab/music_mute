@@ -24,7 +24,8 @@
       VocalRootView(
         preferences: preferences, player: graph.player,
         auth: graph.auth, processing: graph.processing,
-        artifacts: graph.artifacts, push: graph.push, requestNotifications: {}
+        artifacts: graph.artifacts, push: graph.push, requestNotifications: {},
+        libraryOwnerUID: graph.ownerUID
       )
       .environment(\.locale, preferences.locale)
       .environment(\.layoutDirection, preferences.direction)
@@ -52,6 +53,7 @@
   @MainActor private final class ProcessingFixtureGraph: ObservableObject {
     let preferences: AppPreferences
     let player = AudioPlayer()
+    let ownerUID: String
     let importDirectory: URL
     let auth: AuthSessionModel
     let processing: ProcessingModel
@@ -68,10 +70,22 @@
         return args[index + 1]
       }
       let id = value("--processing-fixture-id").flatMap(UUID.init(uuidString:)) ?? UUID()
+      ownerUID = "processing-ui-fixture-\(id.uuidString)"
       let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("VocalProcessingUITests/" + id.uuidString)
-      importDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("UITestImports/" + id.uuidString, isDirectory: true)
+      let importRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("UITestImports", isDirectory: true)
+      // Files keeps every prior fixture visible across launches. Reset only the
+      // harness-owned children while retaining the indexed root folder.
+      try? FileManager.default.createDirectory(
+        at: importRoot, withIntermediateDirectories: true)
+      for staleFixture
+        in (try? FileManager.default.contentsOfDirectory(
+          at: importRoot, includingPropertiesForKeys: nil)) ?? []
+      {
+        try? FileManager.default.removeItem(at: staleFixture)
+      }
+      importDirectory = importRoot.appendingPathComponent(id.uuidString, isDirectory: true)
       try? FileManager.default.createDirectory(
         at: importDirectory, withIntermediateDirectories: true)
       try? processingFixtureMP3().write(
@@ -86,7 +100,8 @@
         api: nil)
       let api = ProcessingFixtureJobs(
         offline: args.contains("--processing-fixture-offline"),
-        offlineAfterCache: args.contains("--processing-fixture-offline-after-cache"))
+        offlineAfterCache: args.contains("--processing-fixture-offline-after-cache"),
+        paginated: args.contains("--processing-fixture-paginated"))
       self.api = api
       let inputRoot = root.appendingPathComponent("Inputs")
       let repository = ProcessingRepository(
@@ -125,11 +140,13 @@
     private var created: [UUID: String] = [:]
     private let offline: Bool
     private let offlineAfterCache: Bool
+    private let paginated: Bool
     @Published private(set) var createdCount = 0
     @Published private(set) var outputRequestCount = 0
-    init(offline: Bool, offlineAfterCache: Bool = false) {
+    init(offline: Bool, offlineAfterCache: Bool = false, paginated: Bool = false) {
       self.offline = offline
       self.offlineAfterCache = offlineAfterCache
+      self.paginated = paginated
       for (index, status) in ["ready", "processing", "failed", "interrupted"].enumerated() {
         let id = String(format: "%024d", index + 1)
         jobs[id] = Self.job(id, status: status)
@@ -163,6 +180,13 @@
     }
     func list(cursor: String?, status: String?) async throws -> JobPage {
       if offline || (offlineAfterCache && outputRequestCount >= 2) { throw AuthFailure.offline }
+      if paginated {
+        if cursor == nil {
+          return JobPage(items: jobs.values.sorted { $0.id < $1.id }, nextCursor: "older")
+        }
+        return JobPage(
+          items: [Self.job(String(format: "%024d", 6), status: "ready")], nextCursor: nil)
+      }
       return JobPage(items: jobs.values.sorted { $0.id < $1.id }, nextCursor: nil)
     }
     func detail(id: String) async throws -> Job {

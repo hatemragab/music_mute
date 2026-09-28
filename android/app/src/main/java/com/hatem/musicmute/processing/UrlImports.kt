@@ -205,7 +205,7 @@ class UrlImportCoordinator(
         }
     }
 
-    suspend fun submit(text: String, trimEnabled: Boolean = false) {
+    suspend fun submit(text: String, trimEnabled: Boolean = true) {
         val ticket = owner?.takeIf { it == session() } ?: throw UrlImportFailure("UNAUTHENTICATED")
         val url = UrlImportSource.canonical(text)
         val record = store.addUrlImport(ticket.uid,

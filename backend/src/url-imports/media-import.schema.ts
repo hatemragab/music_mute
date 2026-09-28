@@ -63,6 +63,7 @@ export class MediaImport {
   input!: InputDeclaration | null;
   @Prop({ type: String, default: null }) executionId!: string | null;
   @Prop({ type: Date, default: null }) deadlineAt!: Date | null;
+  @Prop({ type: Date, default: null }) acquisitionReservedAt!: Date | null;
   @Prop({ type: { code: String, message: String }, _id: false, default: null })
   error!: { code: string; message: string } | null;
   @Prop({ type: Date, default: null }) expiresAt!: Date | null;

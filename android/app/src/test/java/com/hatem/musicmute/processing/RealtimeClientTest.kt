@@ -61,6 +61,47 @@ class RealtimeClientTest {
         assertTrue(first.cancelled); assertEquals(2, received.size)
         client.setForeground(false)
     }
+    @Test fun keepsOneSocketAcrossTabsAndCollectorGapsUntilBackgroundOrLogout() = runTest(dispatcher) {
+        var tickets = 0
+        val sockets = mutableListOf<Socket>()
+        val auth = AuthApiClient(AuthConfiguration("https://api.example.test", false), { "owner" }, { "fixture-token" },
+            AuthHttpTransport { _, _, _, _ ->
+                tickets++
+                AuthHttpResponse(201, """{"ticket":"${"a".repeat(43)}","path":"/realtime/socket","protocol":"musicmute.realtime.v1"}""")
+            })
+        val client = RealtimeClient(auth, backgroundScope, { "installation" }, openSocket = { request, listener -> Socket(request, listener).also { sockets.add(it) } })
+        client.bindSession(ProcessingSession("owner", 1))
+        client.setForeground(true)
+        runCurrent()
+        val first = sockets.single()
+        first.frame("""{"type":"ready","protocol_version":1,"stream_id":"one"}""")
+        runCurrent()
+        repeat(5) {
+            val collector = backgroundScope.launch { client.watch("jobs").collect {} }
+            runCurrent()
+            collector.cancelAndJoin()
+            runCurrent()
+            advanceTimeBy(20_000)
+            first.frame("""{"type":"ping"}""")
+            runCurrent()
+            client.setForeground(true)
+            assertFalse(first.cancelled)
+            assertEquals(1, tickets)
+        }
+        client.setForeground(false)
+        runCurrent()
+        assertTrue(first.cancelled)
+        client.setForeground(true)
+        runCurrent()
+        assertEquals(2, tickets)
+        client.bindSession(null)
+        runCurrent()
+        assertTrue(sockets.last().cancelled)
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertEquals(2, tickets)
+    }
+
     @Test fun forbiddenTicketStopsReconnect() = runTest(dispatcher) {
         var tickets = 0
         val auth = AuthApiClient(AuthConfiguration("https://api.example.test", false), { "owner" }, { "fixture-token" },
@@ -69,6 +110,12 @@ class RealtimeClientTest {
         client.bindSession(ProcessingSession("owner", 1)); client.setForeground(true)
         backgroundScope.launch { runCatching { client.watch("jobs").collect {} } }
         runCurrent(); advanceTimeBy(60_000); runCurrent()
+        assertEquals(RealtimeState.SIGNED_OUT, client.state.value)
+        assertEquals(1, tickets)
+        client.setForeground(false)
+        client.setForeground(true)
+        backgroundScope.launch { runCatching { client.watch("jobs").collect {} } }
+        runCurrent()
         assertEquals(RealtimeState.SIGNED_OUT, client.state.value)
         assertEquals(1, tickets)
         client.bindSession(null)

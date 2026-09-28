@@ -5,9 +5,10 @@ import { jobsApi } from "../api/jobs";
 import type { MediaImportView, ProcessingPolicyView } from "../api/types";
 import { useSignedIn } from "../auth/AuthProvider";
 import { friendlyError, statusLabel, useI18n } from "../i18n";
-import { JobCard, useJobs } from "../jobs/JobsUI";
+import { activeStatuses, JobCard, useJobs } from "../jobs/JobsUI";
 import { supportedAudioSites, supportedAudioUrl } from "../site-policy/source";
 import { AudioUpload } from "./AudioUpload";
+import { SoloSignalMark } from "../brand/SoloSignalMark";
 
 export function HomePage() {
   const { api, user, session } = useSignedIn();
@@ -88,18 +89,22 @@ export function HomePage() {
       setBusy(false);
     }
   }
-  const recent = jobs.data?.pages[0]?.items.slice(0, 3) ?? [];
+  const recent =
+    jobs.data?.pages
+      .flatMap((page) => page.items)
+      .filter((job) => activeStatuses.has(job.status))
+      .slice(0, 3) ?? [];
   const allowed = session.access.allowed && policy.data?.acceptNewJobs === true;
   return (
     <div className="page-stack">
-      <section className="hero">
+      <header className="home-summary">
+        <SoloSignalMark className="home-mark" />
         <div>
           <p className="eyebrow">{t("brand")}</p>
-          <h1>{t("welcome")}</h1>
+          <h1>{t("startNewTrack")}</h1>
           <p>{t("welcomeBody")}</p>
         </div>
-        <div className="wave-art" aria-hidden="true" />
-      </section>
+      </header>
       {!navigator.onLine && (
         <p className="notice" role="status">
           {t("networkOffline")}
@@ -199,8 +204,13 @@ export function HomePage() {
         )}
         {importId && (
           <div className="import-state" role="status">
-            <span className="spinner" />
-            {t("importPending")} ·{" "}
+            {importQuery.data?.status !== "failed" &&
+              importQuery.data?.status !== "submitted" && (
+                <>
+                  <span className="spinner" aria-hidden="true" />
+                  {t("importPending")} ·{" "}
+                </>
+              )}
             {importQuery.data?.status
               ? statusLabel(importQuery.data.status, lang)
               : t("loading")}
@@ -223,7 +233,7 @@ export function HomePage() {
       </section>
       <section>
         <div className="section-heading">
-          <h2>{t("jobs")}</h2>
+          <h2>{t("recentActivity")}</h2>
           <Link to="/jobs">{t("all")} →</Link>
         </div>
         {jobs.isPending ? (

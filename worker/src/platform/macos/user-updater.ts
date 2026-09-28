@@ -19,7 +19,10 @@ import {
   loadLocalLifecycle,
   setLocalLifecycleIntent,
 } from "../../runtime/local-lifecycle.js";
-import { loadRuntimeConfig } from "../../runtime/runtime-config.js";
+import {
+  loadRuntimeConfig,
+  readMaintenanceConnection,
+} from "../../runtime/runtime-config.js";
 import { inspectInstalledMacRuntime } from "./install-preflight.js";
 import {
   MacLaunchAgentController,
@@ -107,6 +110,7 @@ interface UpdateState {
     previousVersion: string;
     intent: "active" | "paused" | "draining";
     serviceWasLoaded: boolean;
+    runtimeConfig?: Record<string, unknown>;
   };
 }
 
@@ -170,7 +174,7 @@ export async function checkMacUserUpdate(
     download?: boolean;
   } = {},
 ): Promise<MacUserUpdateCheck> {
-  const config = await loadRuntimeConfig(layout.configPath);
+  const config = await readMaintenanceConnection(layout.configPath);
   const installation = await readPrivateRecord(layout.installationStatePath);
   const currentVersion = requiredText(
     installation.releaseVersion,
@@ -265,6 +269,7 @@ export async function updateMacUserWorker(options: {
   status: "current" | "updated";
   releaseVersion: string;
   sequence: number;
+  capacityRequalificationRequired?: boolean;
 }> {
   await recoverInterruptedMacUpdate(
     options.layout,
@@ -328,7 +333,13 @@ export async function updateMacUserWorker(options: {
   const previousLifecycle = await loadLocalLifecycle(
     options.layout.lifecyclePath,
   );
-  const serviceWasLoaded = (await launchAgent.status()).loaded;
+  const previousService = await launchAgent.status();
+  // A loaded but stopped job is deliberately stopped as far as activation is
+  // concerned. Qualification may load a temporary job but must not start it later.
+  const serviceWasLoaded = previousService.loaded && previousService.running;
+  const previousConfig = await readPrivateRecord(options.layout.configPath);
+  const capacityRequalificationRequired =
+    previousConfig.validatedMaxWorkersPerGpu === 2;
   const previousTarget = await readlink(options.layout.currentLink);
   if (previousTarget !== `releases/${checked.currentVersion}`)
     throw new Error("Installed release and active pointer disagree");
@@ -343,6 +354,7 @@ export async function updateMacUserWorker(options: {
       previousVersion: checked.currentVersion,
       intent: previousLifecycle.intent,
       serviceWasLoaded,
+      runtimeConfig: previousConfig,
     },
     updatedAt: new Date().toISOString(),
   };
@@ -355,8 +367,8 @@ export async function updateMacUserWorker(options: {
         runtimeStatusPath: options.layout.runtimeStatusPath,
         force: options.force === true,
       });
-      await launchAgent.bootout();
     }
+    if (previousService.loaded) await launchAgent.bootout();
     const fixturePath = join(options.layout.stateRoot, "qualification.wav");
     const fixtureSha256 = await sha256(fixturePath);
     const qualify = options.qualify ?? qualifyMacUserRelease;
@@ -374,6 +386,25 @@ export async function updateMacUserWorker(options: {
       updatedAt: new Date().toISOString(),
     });
     await activateMacUserRelease(options.layout, staged.releaseVersion);
+    // Approval is release-bound. Keep the old receipt untouched for rollback;
+    // it cannot authorize the new release. Retain one existing slot per GPU.
+    if (capacityRequalificationRequired) {
+      const seen = new Set<string>();
+      const slots = (
+        previousConfig.slots as { gpuId: string; slotIndex: number }[]
+      ).filter((slot) => {
+        if (seen.has(slot.gpuId)) return false;
+        seen.add(slot.gpuId);
+        return true;
+      });
+      await writePrivateRecord(options.layout.configPath, {
+        ...previousConfig,
+        validatedMaxWorkersPerGpu: 1,
+        slots,
+      });
+    }
+    // A stopped service must also have a valid configuration before committing.
+    await loadRuntimeConfig(options.layout.configPath);
     await writeLaunchAgentPlist(options.layout);
     await setLocalLifecycleIntent(
       options.layout.lifecyclePath,
@@ -412,6 +443,9 @@ export async function updateMacUserWorker(options: {
       status: "updated",
       releaseVersion: staged.releaseVersion,
       sequence: checked.sequence,
+      ...(capacityRequalificationRequired
+        ? { capacityRequalificationRequired: true }
+        : {}),
     };
   } catch (error) {
     await recoverInterruptedMacUpdate(
@@ -434,7 +468,12 @@ export async function recoverInterruptedMacUpdate(
   serviceStartup = false,
 ): Promise<boolean> {
   const state = await loadUpdateState(layout.updateStatePath);
-  if (state.status !== "staged" && state.status !== "activating") return false;
+  if (
+    state.status !== "staged" &&
+    state.status !== "activating" &&
+    !(state.status === "rolled-back" && state.recovery !== undefined)
+  )
+    return false;
   const recovery = state.recovery;
   if (!recovery || !state.candidateVersion)
     throw new Error("Interrupted legacy update requires operator recovery");
@@ -457,6 +496,8 @@ export async function recoverInterruptedMacUpdate(
     await launchAgent.bootout();
   }
   await rollbackMacUserRelease(layout, `releases/${recovery.previousVersion}`);
+  if (recovery.runtimeConfig !== undefined)
+    await writePrivateRecord(layout.configPath, recovery.runtimeConfig);
   await writeLaunchAgentPlist(layout);
   const installation = await readPrivateRecord(layout.installationStatePath);
   await writePrivateRecord(layout.installationStatePath, {
@@ -465,13 +506,8 @@ export async function recoverInterruptedMacUpdate(
     updatedAt: new Date().toISOString(),
   });
   await setLocalLifecycleIntent(layout.lifecyclePath, recovery.intent);
-  if (!serviceStartup && recovery.serviceWasLoaded) {
-    await launchAgent.bootstrap(layout.plistPath);
-    if (!(await waitForLoadedService(launchAgent)))
-      throw new Error("Recovered LaunchAgent failed to start");
-  }
   const { recovery: _recovery, ...restored } = state;
-  await writeUpdateState(layout.updateStatePath, {
+  const rolledBack: UpdateState = {
     ...restored,
     status: "rolled-back",
     quarantinedVersions: [
@@ -479,7 +515,24 @@ export async function recoverInterruptedMacUpdate(
     ],
     updatedAt: new Date().toISOString(),
     failure,
+  };
+  // Restored older binaries must never see a journal with fields their strict
+  // parser does not know. Config is durable now; retain only legacy-compatible
+  // restart intent until bootstrap succeeds, so a failed start remains retryable.
+  await writeUpdateState(layout.updateStatePath, {
+    ...rolledBack,
+    recovery: {
+      previousVersion: recovery.previousVersion,
+      intent: recovery.intent,
+      serviceWasLoaded: recovery.serviceWasLoaded,
+    },
   });
+  if (!serviceStartup && recovery.serviceWasLoaded) {
+    await launchAgent.bootstrap(layout.plistPath);
+    if (!(await waitForLoadedService(launchAgent)))
+      throw new Error("Recovered LaunchAgent failed to start");
+  }
+  await writeUpdateState(layout.updateStatePath, rolledBack);
   return true;
 }
 
@@ -583,12 +636,24 @@ async function loadUpdateState(path: string): Promise<UpdateState> {
         Array.isArray(recovery) ||
         Object.keys(recovery).some(
           (key) =>
-            !["previousVersion", "intent", "serviceWasLoaded"].includes(key),
+            ![
+              "previousVersion",
+              "intent",
+              "serviceWasLoaded",
+              "runtimeConfig",
+            ].includes(key),
         ) ||
         typeof recovery.previousVersion !== "string" ||
         !/^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u.test(recovery.previousVersion) ||
         !["active", "paused", "draining"].includes(String(recovery.intent)) ||
-        typeof recovery.serviceWasLoaded !== "boolean"
+        typeof recovery.serviceWasLoaded !== "boolean" ||
+        (recovery.runtimeConfig !== undefined &&
+          (recovery.runtimeConfig === null ||
+            typeof recovery.runtimeConfig !== "object" ||
+            Array.isArray(recovery.runtimeConfig) ||
+            (recovery.runtimeConfig as Record<string, unknown>)
+              .schemaVersion !== 1 ||
+            "credential" in recovery.runtimeConfig))
       )
         throw new TypeError("Update recovery state is invalid");
     }
@@ -609,6 +674,8 @@ async function writeUpdateState(
   path: string,
   state: UpdateState,
 ): Promise<void> {
+  if (Buffer.byteLength(JSON.stringify(state, null, 2), "utf8") + 1 > 64 * 1024)
+    throw new TypeError("Update recovery journal is too large");
   await writePrivateRecord(path, state as unknown as Record<string, unknown>);
 }
 

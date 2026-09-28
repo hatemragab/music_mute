@@ -12,7 +12,7 @@ import XCTest
     let file = try XCTUnwrap(
       Bundle(for: Self.self).url(forResource: "url-policy-cases", withExtension: "json"))
     let cases = try JSONDecoder().decode([Case].self, from: Data(contentsOf: file))
-    XCTAssertEqual(SupportedAudioSites.names.count, 9)
+    XCTAssertEqual(SupportedAudioSites.names.count, 12)
     for item in cases {
       XCTAssertEqual((try? SupportedAudioSites.canonical(item.url)) != nil, item.accepted, item.url)
     }
@@ -43,7 +43,7 @@ import XCTest
     for _ in 0..<200 where model.busy { try await Task.sleep(for: .milliseconds(10)) }
     XCTAssertEqual(api.requests.count, 1)
     XCTAssertNotNil(model.messageKey)
-    XCTAssertEqual(model.record?.trimEnabled, false)
+    XCTAssertEqual(model.record?.trimEnabled, true)
     await model.bindOwner(nil)
     let reopened = ProcessingStore(root: root, stagingRoot: root.appendingPathComponent("staging"))
     let restored = URLImportsModel(api: api, store: reopened)
@@ -56,7 +56,7 @@ import XCTest
     XCTAssertEqual(api.requests.count, 2)
     XCTAssertEqual(api.requests.first, api.requests.last)
     XCTAssertEqual(restored.record?.status, "submitted")
-    XCTAssertEqual(restored.record?.trimEnabled, false)
+    XCTAssertEqual(restored.record?.trimEnabled, true)
     XCTAssertEqual(restored.record?.jobId, "68c000000000000000000002")
   }
 

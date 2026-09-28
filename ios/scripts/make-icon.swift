@@ -3,20 +3,35 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-// Deterministic opaque 1024-pixel waveform icon, independent of display scale.
+// Deterministic opaque 1024-pixel Solo Signal icon, independent of display scale.
+let canvasSize: CGFloat = 1024
+let designScale = canvasSize / 108
 let context = CGContext(
-  data: nil, width: 1024, height: 1024, bitsPerComponent: 8, bytesPerRow: 0,
+  data: nil, width: Int(canvasSize), height: Int(canvasSize), bitsPerComponent: 8, bytesPerRow: 0,
   space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
-context.setFillColor(CGColor(red: 0.055, green: 0.14, blue: 0.12, alpha: 1))
-context.fill(CGRect(x: 0, y: 0, width: 1024, height: 1024))
-let heights: [CGFloat] = [180, 330, 530, 280, 620, 410, 240]
-context.setFillColor(CGColor(red: 0.58, green: 0.88, blue: 0.76, alpha: 1))
-for (index, height) in heights.enumerated() {
+context.setFillColor(CGColor(red: 18 / 255, green: 60 / 255, blue: 55 / 255, alpha: 1))
+context.fill(CGRect(x: 0, y: 0, width: canvasSize, height: canvasSize))
+
+let bars: [(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, opacity: CGFloat)] = [
+  (21, 46, 6, 16, 0.24),
+  (30.5, 39.5, 7, 29, 0.38),
+  (40, 32, 8, 44, 0.56),
+  (48, 19, 12, 70, 1),
+  (60, 32, 8, 44, 0.56),
+  (70.5, 39.5, 7, 29, 0.38),
+  (81, 46, 6, 16, 0.24),
+]
+for bar in bars {
+  context.setFillColor(
+    CGColor(red: 150 / 255, green: 230 / 255, blue: 199 / 255, alpha: bar.opacity))
   context.addPath(
     CGPath(
       roundedRect: CGRect(
-        x: 182 + CGFloat(index) * 96, y: (1024 - height) / 2, width: 66, height: height),
-      cornerWidth: 33, cornerHeight: 33, transform: nil))
+        x: bar.x * designScale, y: bar.y * designScale,
+        width: bar.width * designScale, height: bar.height * designScale),
+      cornerWidth: bar.width * designScale / 2,
+      cornerHeight: bar.width * designScale / 2,
+      transform: nil))
   context.fillPath()
 }
 let destination = CGImageDestinationCreateWithURL(

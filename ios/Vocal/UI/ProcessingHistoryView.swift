@@ -16,7 +16,9 @@ struct ProcessingHistoryView: View {
 
   var body: some View {
     let tasks = AudioTaskPresentation.merge(
-      pipelines: pipeline.pipelines, uploads: repository.operations, jobs: history.jobs)
+      pipelines: pipeline.pipelines, uploads: repository.operations, jobs: history.jobs
+    )
+    .filter(\.visibleOnHome)
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 20) {
         Text("processing_title").font(.largeTitle.bold())

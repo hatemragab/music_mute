@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.library.LibraryEntry
 import com.hatem.musicmute.playback.*
+import com.hatem.musicmute.processing.ArtifactProgress
 import com.hatem.musicmute.ui.design.*
 import com.hatem.musicmute.ui.library.*
 
@@ -33,6 +34,7 @@ data class PlayerActions(
     val queue: () -> Unit, val info: () -> Unit, val star: () -> Unit,
     val speed: (Float) -> Unit, val volume: (Float) -> Unit,
     val original: (Boolean) -> Unit = {},
+    val saveVoice: () -> Unit = {},
     val saveOriginal: () -> Unit = {},
 )
 
@@ -43,10 +45,22 @@ fun PlayerScreen(state: PlaybackState, entry: LibraryEntry?, actions: PlayerActi
 
 // Only controls subscribe here; ticking position is collected by PlaybackProgress.
 @Composable
-fun PlayerScreen(playback: StateFlow<PlaybackState>, entry: LibraryEntry?, actions: PlayerActions) {
+fun PlayerScreen(
+    playback: StateFlow<PlaybackState>,
+    entry: LibraryEntry?,
+    actions: PlayerActions,
+    artifactProgress: StateFlow<Map<String, ArtifactProgress>>? = null,
+) {
     val controls = remember(playback) { playback.controls() }
     val state by controls.collectAsStateWithLifecycle(remember(playback) { playback.value.withoutPosition() })
-    FullPlayer(state, entry, actions, progress = { PlaybackProgress(playback, actions.seek) })
+    val jobId = state.queue.getOrNull(state.currentIndex)?.key?.jobId
+    FullPlayer(
+        state,
+        entry,
+        actions,
+        progress = { PlaybackProgress(playback, actions.seek) },
+        downloadProgress = { PlayerDownloadProgress(jobId, artifactProgress) },
+    )
 }
 
 @Composable

@@ -48,8 +48,7 @@ class ProcessingViewModel(
     private val errorOutbox: ClientErrorOutbox,
 ) : ViewModel() {
     val history = JobHistoryController(api, viewModelScope,
-        loadCached = { repository.store.snapshots(it).first() },
-        saveCached = { uid, jobs -> repository.store.saveSnapshots(uid, jobs) },
+        onJobsChanged = { uid, jobs -> repository.store.updateLibraryJobs(uid, jobs) },
         onMissing = { jobId ->
             session()?.let { current ->
                 playback.removeTrack(com.hatem.musicmute.library.LibraryKey(current.uid, jobId))
@@ -87,7 +86,7 @@ class ProcessingViewModel(
         }
     }
 
-    fun importAudio(uri: Uri, trimEnabled: Boolean = false) {
+    fun importAudio(uri: Uri, trimEnabled: Boolean = true) {
         val operationId = UUID.randomUUID().toString()
         performIntake(operationId) { ticket ->
         val name = withContext(Dispatchers.IO) {

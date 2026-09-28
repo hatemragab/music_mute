@@ -6,16 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MusicMute: AI vocal-isolation service. Mono-repo of independent components; there is **no root package install** — every component owns its dependencies and commands, and all commands run from the component directory.
 
-| Dir           | What it is                                                      |
-| ------------- | --------------------------------------------------------------- |
-| `backend/`    | NestJS 11 API (Node 24, pnpm 10, ESM). HTTP only — no queues.   |
-| `worker/`     | Machine supervisor (Node) + isolated Python processing child.   |
-| `android/`    | Kotlin/Jetpack Compose app (`com.hatem.musicmute`).             |
-| `ios/`        | Swift/SwiftUI app; `project.yml` (XcodeGen) is source of truth. |
-| `dashboard/`  | React 19 + Vite admin console (npm, not pnpm).                  |
-| `web-client/` | React 19 + Vite end-user browser app (npm, not pnpm).           |
-| `ytdlp_test/` | Server-side URL audio acquisition service (Python).             |
-| `docs/`       | Contracts, security reviews, task packages, validation records. |
+| Dir                           | What it is                                                                                             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `backend/`                    | NestJS 11 API, raw WebSockets, Mongo worker scheduling and BullMQ URL imports (Node 24, pnpm 10, ESM). |
+| `worker/`                     | Machine supervisor (Node) + isolated Python processing child.                                          |
+| `android/`                    | Kotlin/Jetpack Compose app (`com.hatem.musicmute`).                                                    |
+| `ios/`                        | Swift/SwiftUI app; `project.yml` (XcodeGen) is source of truth.                                        |
+| `dashboard/`                  | React 19 + Vite admin console (npm, not pnpm).                                                         |
+| `web-client/`                 | React 19 + Vite end-user browser app (npm, not pnpm).                                                  |
+| `video_providers/videoscale/` | Private SaaS audio adapter, contract, tests and deployment docs (Python).                              |
+| `docs/`                       | Contracts, security reviews, task packages, validation records.                                        |
 
 ## Commands
 
@@ -97,21 +97,35 @@ Only that one simulator is authorized for runtime/UI checks; do not substitute d
 
 ## Architecture
 
-Request path: **native apps / end-user web / dashboard → TLS proxy → NestJS API → MongoDB, Redis, S3, Firebase Auth**. Workers claim jobs from the API over authenticated HTTPS; a WebSocket hint channel only _wakes_ reconciliation and never carries job authority. Audio bytes move via short-lived signed S3 URLs, never through the API or the worker control pipe.
+Request path: **native apps / end-user web / dashboard → TLS proxy → NestJS API → MongoDB, Redis, S3, Firebase Auth**. Workers claim jobs from the API over authenticated HTTPS; a WebSocket hint channel only _wakes_ reconciliation and never carries job authority. Local uploads and result downloads use signed S3 grants. URL-import audio travels from SaaS through a private adapter to NestJS validation and S3; it never travels through the worker control pipe.
 
-- `backend/src/`: feature modules — `auth`/`users`/`devices` (identity), `admin*` (dashboard APIs), `jobs`/`processing`/`processing-usage` (durable job history, currently-gated new processing), `url-imports` (server-side link acquisition), `worker-fleet`/`worker-hints` (machine enrollment, claiming, leases), `storage` (presigned grants), `rate-limits` (shared Redis counters), `infrastructure` (Mongo/S3), `http` (global policies).
+- `backend/src/`: feature modules — `auth`/`users`/`devices` (identity), `admin*` (dashboard APIs), `jobs`/`processing`/`processing-usage` (durable jobs and policy-controlled processing), `url-imports` (server-side link acquisition), `worker-fleet`/`worker-hints` (machine enrollment, claiming, leases), `storage` (presigned grants), `rate-limits` (shared Redis counters), `infrastructure` (Mongo/S3), `http` (global policies).
 - `web-client/`: standalone end-user app. Public Firebase Web SDK and API settings are read at runtime; signed media bytes transfer directly between the browser and S3. The root entry page is public, while authenticated routes carry noindex headers.
 - `worker/src/`: Node supervisor (`runtime`, `agent`, `enrollment`, `platform`, `cli`). The Python child (`worker/engine/`) does inference only — it never receives backend or S3 credentials. macOS LaunchAgent / Windows Service; Linux and CUDA disabled.
 - Wire contract: **root-mounted routes, snake_case JSON/query names, no version prefix**. `docs/api/client-contract.md` + `backend/openapi.yaml` are canonical; mobile clients adapt idiomatic local names at the HTTP layer.
 - `worker/protocol/v1/` is _generated_ from the backend's canonical protocol. Edit the backend source, then `pnpm protocol:sync` in worker; `protocol:check` fails on drift.
-- New processing submissions currently return `PROCESSING_UNAVAILABLE` while the processing architecture is redesigned; job history and completed-result access remain live.
+- Processing availability follows current backend configuration, account policy and worker capacity; do not assume submissions are globally disabled.
+
+### URL imports and provider swaps
+
+Read [provider architecture](video_providers/README.md),
+[provider AGENTS](video_providers/AGENTS.md) and the selected provider's README.
+Vendor endpoints/credentials live only in a private adapter. NestJS's
+`AudioAcquisitionClient` uses the uniform binary contract and generic
+`AUDIO_ACQUISITION_API_URL` / `AUDIO_ACQUISITION_API_KEY`.
+Save included metadata as sanitized nullable MongoDB `extra_data`; no paid
+enrichment. Preserve audio-only validation, bounded scratch and cleanup.
+Swap providers by deploying a contract-compatible adapter and updating env,
+not by adding vendor branches to NestJS. No extraction fallback, migration
+bridge or old-device compatibility layer. Current VideoScale support is YouTube
+only. Record local checks separately from live deployment evidence.
 
 ## Rules that bite
 
 From `backend/AGENTS.md` and component guides — these are enforced boundaries, not style preferences:
 
 - Backend is ESM: relative imports need `.js` suffixes; use `import type` for types (notably Mongoose `Connection`, which is not an ESM runtime named export). Tests run through SWC decorator metadata, so DI/validation behave like the real build.
-- Do not reintroduce workers or job queues inside the backend without explicit authorization. Do not commit, push, deploy, create cloud resources, or touch real data without a direct request.
+- Reuse the existing Mongo worker-claim scheduler and separate BullMQ import queue; do not add a second scheduler. Do not commit, push, deploy, create cloud resources, or touch real data without a direct request.
 - Never read or print real dotenv values, AWS keys, or connection URIs. Firebase config files (`google-services.json`, `GoogleService-Info.plist`), keystores, and `.env*` are local-only and git-ignored — never force-add. `pnpm run verify` includes a tracked-file credential scan.
 - The web app's `PUBLIC_*` values are browser-visible identifiers, not backend secrets; never copy API service credentials into that app. Read `web-client/README.md` and root `AGENTS.md` before web edits.
 - Production DB changes are limited to collections/indexes declared by Mongoose schemas; no automatic index drops or document migrations.

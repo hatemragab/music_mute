@@ -1,6 +1,7 @@
 package com.hatem.musicmute.ui.home
 
-import android.text.format.DateUtils
+import java.text.DateFormat
+import java.util.Date
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -70,7 +71,7 @@ fun JobCard(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                relativeCreatedAt(task)?.let {
+                formattedCreatedAt(task)?.let {
                     Text(
                         it,
                         style = MaterialTheme.typography.bodySmall,
@@ -269,12 +270,8 @@ private fun cardSupportingText(task: AudioTaskPresentation): String? {
     }
 }
 
-private fun relativeCreatedAt(task: AudioTaskPresentation): String? {
+private fun formattedCreatedAt(task: AudioTaskPresentation): String? {
     if (task.createdAtMillis <= 0) return null
-    return DateUtils.getRelativeTimeSpanString(
-        task.createdAtMillis,
-        System.currentTimeMillis(),
-        DateUtils.MINUTE_IN_MILLIS,
-        DateUtils.FORMAT_ABBREV_RELATIVE,
-    ).toString()
+    return DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+        .format(Date(task.createdAtMillis))
 }

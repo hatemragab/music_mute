@@ -47,7 +47,8 @@ fun PlaybackResultDetails(
     onRefresh: () -> Unit,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
-    onSave: () -> Unit,
+    onSaveVoice: () -> Unit,
+    onSaveOriginal: () -> Unit,
     onShare: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
@@ -97,8 +98,11 @@ fun PlaybackResultDetails(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 ) {
-                    ResultActionRow(Icons.Outlined.Download, stringResource(R.string.audio_export),
-                        enabled = !busy, onClick = onSave)
+                    ResultActionRow(Icons.Outlined.Download, stringResource(R.string.save_voice),
+                        enabled = !busy, onClick = onSaveVoice)
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                    ResultActionRow(Icons.Outlined.Download, stringResource(R.string.save_original),
+                        enabled = !busy, onClick = onSaveOriginal)
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                     ResultActionRow(Icons.Outlined.Share, stringResource(R.string.audio_task_share),
                         enabled = !busy, onClick = onShare)

@@ -2,7 +2,6 @@ import { useLiveQuery } from "@/realtime/hooks";
 import { RealtimeProvider, ConnectionIndicator } from "@/realtime/provider";
 import {
   Activity,
-  AudioLines,
   BriefcaseBusiness,
   ChevronRight,
   CircleGauge,
@@ -24,6 +23,7 @@ import { NavLink, Outlet } from "react-router";
 
 import type { Permission } from "@/api/contracts";
 import { useAdminSession } from "@/auth/admin-session";
+import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -196,9 +196,7 @@ function ConnectedShell() {
       </a>
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r bg-sidebar lg:flex lg:flex-col">
         <div className="flex h-16 items-center gap-3 px-5">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <AudioLines aria-hidden="true" className="size-5" />
-          </div>
+          <BrandMark className="size-9 rounded-lg shadow-sm" />
           <div>
             <div className="font-semibold tracking-tight">MusicMute</div>
             <div className="text-xs text-muted-foreground">
@@ -237,7 +235,8 @@ function ConnectedShell() {
               <SheetContent side="left" className="w-72 p-4">
                 <SheetHeader className="mb-5">
                   <SheetTitle className="flex items-center gap-2">
-                    <AudioLines aria-hidden="true" /> MusicMute Operations
+                    <BrandMark className="size-6 rounded-md" /> MusicMute
+                    Operations
                   </SheetTitle>
                 </SheetHeader>
                 <Navigation pendingRecoveryCount={pendingRecoveryCount} />

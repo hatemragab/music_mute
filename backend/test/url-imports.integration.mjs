@@ -19,7 +19,7 @@ import {
   IMPORT_QUEUE,
 } from '../dist/url-imports/imports.service.js';
 import { ProcessingTransactions } from '../dist/processing/processing-transactions.js';
-import { YtdlpClient } from '../dist/url-imports/ytdlp-client.js';
+import { AudioAcquisitionClient } from '../dist/url-imports/audio-acquisition-client.js';
 import { ImportProcessor } from '../dist/url-imports/import-processor.js';
 import { ImportRuntime } from '../dist/url-imports/import-runtime.js';
 import {
@@ -30,6 +30,8 @@ import {
 let services, connection, queue, records, imports, redis;
 const owner = new Types.ObjectId();
 const usage = {
+  reserveForImport: async () => {},
+  releaseImport: async () => {},
   readUsage: async () => ({
     availability: { status: 'available' },
     uploads: {
@@ -110,8 +112,16 @@ test('native acquisition cleans upload/finalization failures and preserves commi
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Length', String(audio.length));
       res.setHeader(
-        'X-Import-Title-Base64',
-        Buffer.from('عنوان المصدر 🎵').toString('base64'),
+        'X-Import-Extra-Data-Base64',
+        Buffer.from(
+          JSON.stringify({
+            schema_version: 1,
+            provider: 'fixture',
+            audio_codec: 'mp3',
+            title: 'عنوان المصدر 🎵',
+            download_url: 'https://secret.invalid',
+          }),
+        ).toString('base64'),
       );
       res.end(audio);
     } else if (req.method === 'PUT') {
@@ -132,8 +142,8 @@ test('native acquisition cleans upload/finalization failures and preserves commi
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
   const config = new ConfigService({
-    YTDLP_API_URL: `${origin}/`,
-    YTDLP_API_KEY: 'fixture-key',
+    AUDIO_ACQUISITION_API_URL: `${origin}/`,
+    AUDIO_ACQUISITION_API_KEY: 'fixture-key',
     URL_IMPORT_TEMP_ROOT: join(services.directory, 'import-audio'),
     URL_IMPORT_MIN_FREE_BYTES: 0,
     URL_IMPORT_FFPROBE_PATH: process.env.FFPROBE_BINARY || 'ffprobe',
@@ -147,6 +157,7 @@ test('native acquisition cleans upload/finalization failures and preserves commi
       _metadata,
       trimEnabled,
       serverTiming,
+      extraData,
     ) => {
       assert.ok(serverTiming.startedAt instanceof Date);
       assert.ok(
@@ -160,6 +171,12 @@ test('native acquisition cleans upload/finalization failures and preserves commi
       assert.equal(trimEnabled, expectedTrim);
       assert.equal(_metadata.sourceTitle, 'عنوان المصدر 🎵');
       assert.equal(input.sourceTitle, undefined);
+      assert.equal(input.extraData, undefined);
+      assert.equal(extraData.provider, 'fixture');
+      assert.equal(extraData.title, 'عنوان المصدر 🎵');
+      assert.equal(extraData.download_url, undefined);
+      assert.equal(extraData.duration_seconds, input.durationSeconds);
+      assert.equal(extraData.file_bytes, audio.length);
       assert.equal(input.extension, 'mp3');
       assert.equal(input.bytes, audio.length);
       assert.ok(input.durationSeconds > 0 && input.durationSeconds < 1);
@@ -186,7 +203,7 @@ test('native acquisition cleans upload/finalization failures and preserves commi
   };
   const processor = new ImportProcessor(
     imports,
-    new YtdlpClient(config),
+    new AudioAcquisitionClient(config),
     jobs,
     {
       cancelPendingUpload: async () => {
@@ -431,6 +448,124 @@ test('recovery enqueues a durable outbox record and terminates an expired interr
   assert.equal(releases, 1);
   await runtime.reconcile();
   assert.equal(releases, 1);
+});
+
+test('stalled executions recover before deadline and preserve confirmed jobs without reacquisition', async () => {
+  const prefix = `isolated-recovery-${randomUUID()}`;
+  const recoveryQueue = new Queue(IMPORT_QUEUE, { connection: redis, prefix });
+  const crashed = new Worker(IMPORT_QUEUE, async () => {}, {
+    connection: redis,
+    prefix,
+    autorun: false,
+    lockDuration: 1000,
+  });
+  let replacement;
+  const interrupted = [];
+  const confirmedId = new Types.ObjectId();
+  let executions = 0,
+    cancellations = 0;
+  try {
+    for (const status of [
+      'downloading',
+      'validating',
+      'uploading',
+      'uploading',
+    ]) {
+      const record = await records.create({
+        userId: owner,
+        requestId: randomUUID(),
+        jobRequestId: randomUUID(),
+        sourceUrl: 'https://youtu.be/aqz-KE-bpKQ',
+        provider: 'youtube',
+        status,
+        executionId: randomUUID(),
+        deadlineAt: new Date(Date.now() + 900000),
+      });
+      interrupted.push(record);
+      await recoveryQueue.add(
+        'import',
+        { importId: record._id.toHexString() },
+        {
+          jobId: record._id.toHexString(),
+          attempts: 1,
+        },
+      );
+      assert.ok(await crashed.getNextJob(randomUUID()));
+    }
+    await crashed.close(true); // Simulate loss of the worker and its lock renewals.
+    replacement = new Worker(
+      IMPORT_QUEUE,
+      async () => {
+        executions++;
+      },
+      {
+        connection: redis,
+        prefix,
+        stalledInterval: 1000,
+        maxStalledCount: 0,
+      },
+    );
+    await until(
+      async () => (await recoveryQueue.getFailedCount()) === 4,
+      'stalled import failures',
+      15000,
+    );
+    const config = new ConfigService({
+      URL_IMPORT_TEMP_ROOT: join(services.directory, 'terminal-recovery-audio'),
+      URL_IMPORT_MIN_FREE_BYTES: 0,
+      URL_IMPORT_MAX_OUTSTANDING: 100,
+    });
+    const processor = new ImportProcessor(
+      imports,
+      {},
+      {},
+      {
+        cancelPendingUpload: async () => {
+          cancellations++;
+        },
+      },
+      config,
+      {
+        findOne: (filter) => ({
+          lean: async () =>
+            filter.requestId === interrupted[3].jobRequestId
+              ? {
+                  _id: confirmedId,
+                  inputObject: { key: 'synthetic-confirmed-input' },
+                }
+              : null,
+        }),
+      },
+    );
+    // Limit the recovery read to this test's records, retaining real Mongo writes.
+    const scoped = Object.create(imports);
+    scoped.records = {
+      find: () =>
+        records.find({
+          _id: { $in: interrupted.map((r) => r._id) },
+          status: { $in: ['downloading', 'validating', 'uploading'] },
+        }),
+    };
+    const runtime = new ImportRuntime(config, scoped, processor, recoveryQueue);
+    await runtime.reconcile();
+    for (const record of interrupted.slice(0, 3)) {
+      const result = await records.findById(record._id).lean();
+      assert.equal(result.status, 'failed');
+      assert.equal(result.error.code, 'IMPORT_DEPENDENCY_FAILED');
+      assert.ok(result.finishedAt < result.deadlineAt);
+    }
+    const confirmed = await records.findById(interrupted[3]._id).lean();
+    assert.equal(confirmed.status, 'submitted');
+    assert.equal(confirmed.jobId.toHexString(), confirmedId.toHexString());
+    assert.equal(cancellations, 3);
+    assert.equal(executions, 0);
+    await runtime.reconcile();
+    assert.equal(cancellations, 3);
+  } finally {
+    await crashed.close(true);
+    await replacement?.close();
+    await recoveryQueue.close();
+  }
 });
 
 test('trim choice persists and participates in import idempotency', async () => {

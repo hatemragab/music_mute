@@ -5,7 +5,45 @@ import XCTest
 @testable import Vocal
 
 final class ProcessingStoreTests: XCTestCase {
-  func testOwnerIsolationAndRestartPreserveImmutableIntentAndJobCache() async throws {
+  func testLegacyHistoryMigrationPreservesLibraryAndUploadIntent() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let staging = root.appendingPathComponent("staging")
+    let storeRoot = root.appendingPathComponent("store")
+    let store = ProcessingStore(root: storeRoot, stagingRoot: staging)
+    let prepared = try processingPrepared(root: staging, owner: "owner-a")
+    let operation = try await store.createOperation(prepared: prepared)
+    let file = storeRoot.appendingPathComponent(ProcessingStore.ownerDirectoryName("owner-a"))
+      .appendingPathComponent("processing.json")
+    var legacy = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+    legacy["jobs"] = try JSONSerialization.jsonObject(
+      with: JSONEncoder().encode([
+        processingJob(id: "ready", status: "ready"),
+        processingJob(id: "running", status: "processing"),
+        processingJob(id: "failed", status: "failed"),
+      ]))
+    try JSONSerialization.data(withJSONObject: legacy).write(to: file)
+    let restored = ProcessingStore(root: storeRoot, stagingRoot: staging)
+    let library = try await restored.libraryJobs(ownerUid: "owner-a")
+    let operations = try await restored.operations(ownerUid: "owner-a")
+    XCTAssertEqual(library.map(\.id), ["ready"])
+    XCTAssertEqual(operations, [operation])
+    try await restored.updateLibraryJobs(
+      [
+        processingJob(id: "new", status: "ready"),
+        processingJob(id: "active", status: "processing"),
+      ], ownerUid: "owner-a")
+    let reopened = ProcessingStore(root: storeRoot, stagingRoot: staging)
+    let retained = try await reopened.libraryJobs(ownerUid: "owner-a")
+    XCTAssertEqual(Set(retained.map(\.id)), ["ready", "new"])
+    let persisted = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+    let jobs = try XCTUnwrap(persisted["jobs"] as? [[String: Any]])
+    XCTAssertTrue(jobs.allSatisfy { $0["status"] as? String == "ready" })
+  }
+
+  func testOwnerIsolationAndRestartPreserveImmutableIntentAndLibrary() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let staging = root.appendingPathComponent("staging")
@@ -16,12 +54,13 @@ final class ProcessingStoreTests: XCTestCase {
     XCTAssertEqual(first.requestId, repeated.requestId)
     let restoredURL = try await store.inputURL(for: first)
     XCTAssertEqual(restoredURL, prepared.fileURL)
-    try await store.saveJobs([processingJob(id: "68c000000000000000000001")], ownerUid: "owner-a")
+    try await store.saveLibraryJobs(
+      [processingJob(id: "68c000000000000000000001", status: "ready")], ownerUid: "owner-a")
     let restored = ProcessingStore(root: root.appendingPathComponent("store"), stagingRoot: staging)
     let operations = try await restored.operations(ownerUid: "owner-a")
     let foreign = try await restored.operations(ownerUid: "owner-b")
-    let jobs = try await restored.cachedJobs(ownerUid: "owner-a")
-    let foreignJobs = try await restored.cachedJobs(ownerUid: "owner-b")
+    let jobs = try await restored.libraryJobs(ownerUid: "owner-a")
+    let foreignJobs = try await restored.libraryJobs(ownerUid: "owner-b")
     XCTAssertEqual(operations, [first])
     XCTAssertTrue(foreign.isEmpty)
     XCTAssertEqual(jobs.count, 1)

@@ -73,19 +73,17 @@ export class ImportRuntime
       .limit(this.config.getOrThrow<number>('URL_IMPORT_MAX_OUTSTANDING'))
       .lean();
     for (const record of pending) {
-      if (record.status === 'queued') {
-        const queued = await this.queue.getJob(record._id.toHexString());
-        if (
-          queued &&
-          ['failed', 'completed'].includes(await queued.getState())
-        ) {
-          await this.processor.reconcileFailure(
-            record,
-            importError('IMPORT_DEPENDENCY_FAILED'),
-          );
-        } else if (!queued) {
-          await this.imports.enqueue(record._id.toHexString());
-        }
+      const queued = await this.queue.getJob(record._id.toHexString());
+      const queueState = queued ? await queued.getState() : 'unknown';
+      if (queueState === 'failed' || queueState === 'completed') {
+        // BullMQ has finished this execution, including a crash/stalled attempt.
+        // Never replay acquisition; reconciliation preserves confirmed jobs.
+        await this.processor.reconcileFailure(
+          record,
+          importError('IMPORT_DEPENDENCY_FAILED'),
+        );
+      } else if (record.status === 'queued') {
+        if (!queued) await this.imports.enqueue(record._id.toHexString());
       } else if (
         record.deadlineAt &&
         record.deadlineAt.getTime() + 60_000 < Date.now()

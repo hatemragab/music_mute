@@ -12,7 +12,7 @@ import {
   IMPORT_QUEUE,
   ImportsService,
 } from '../url-imports/imports.service.js';
-import { YtdlpClient } from '../url-imports/ytdlp-client.js';
+import { AudioAcquisitionClient } from '../url-imports/audio-acquisition-client.js';
 import { ImportProcessor } from '../url-imports/import-processor.js';
 import { ImportRuntime } from '../url-imports/import-runtime.js';
 import { FirebaseModule } from '../auth/firebase.module.js';
@@ -82,7 +82,7 @@ import { AccountDeletionMaintenanceService } from '../users/account-deletion-mai
   exports: [JobsQueryService, ImportsService],
   providers: [
     ImportsService,
-    YtdlpClient,
+    AudioAcquisitionClient,
     ImportProcessor,
     ImportRuntime,
     AccountDeletionCleanupService,

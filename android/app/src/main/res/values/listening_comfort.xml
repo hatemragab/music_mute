@@ -29,4 +29,7 @@
     <string name="listener_source_file">File</string>
     <string name="listener_choose_file">Choose audio or video</string>
     <string name="listener_supported_sites">Supported sites</string>
+    <string name="listener_trim_short">Trim</string>
+    <string name="listener_trim_info">About Trim</string>
+    <string name="listener_trim_description">Trim removes long silent gaps from the processed voice track, including pauses in the middle. Turn it off to keep the original timing of those pauses.</string>
 </resources>

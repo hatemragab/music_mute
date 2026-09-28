@@ -6,10 +6,15 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Public } from '../auth/auth.decorators.js';
+import {
+  PUBLIC_POLICY_DEFAULTS,
+  PUBLIC_POLICY_PATHS,
+} from '../config/public-policy.js';
 
 interface PublicPageConfiguration {
   email: string;
   developer: string;
+  origin: string;
   timeframe: string;
   retention: string;
 }
@@ -27,39 +32,93 @@ function escapeHtml(value: string): string {
   });
 }
 
-function page(title: string, developer: string, content: string): string {
+function hasUnsafeControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+    return (
+      code === 127 || (code < 32 && code !== 9 && code !== 10 && code !== 13)
+    );
+  });
+}
+
+function configuredText(
+  config: ConfigService,
+  key: string,
+  fallback: string,
+  maximum: number,
+): string {
+  const configured = config.get<unknown>(key);
+  if (configured === undefined) return fallback;
+  if (
+    typeof configured !== 'string' ||
+    !configured.trim() ||
+    configured.length > maximum ||
+    hasUnsafeControlCharacter(configured)
+  ) {
+    throw new ServiceUnavailableException(
+      'Public account information is not configured',
+    );
+  }
+  return configured.trim();
+}
+
+function page(
+  title: string,
+  description: string,
+  configuration: PublicPageConfiguration,
+  content: string,
+): string {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
+<meta name="description" content="${escapeHtml(description)}">
 <title>${escapeHtml(title)} · MusicMute</title>
 <style>
-:root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.65; }
+:root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; line-height: 1.65; }
+* { box-sizing: border-box; }
 body { margin: 0; background: Canvas; color: CanvasText; }
-main { max-width: 48rem; margin: auto; padding: 2rem 1.25rem 4rem; }
-h1,h2 { line-height: 1.2; } h1 { font-size: clamp(2rem, 6vw, 3rem); }
-h2 { margin-top: 2rem; } a { color: LinkText; overflow-wrap: anywhere; }
+main { width: min(100% - 2rem, 52rem); margin: auto; padding: 3rem 0 4rem; }
+header { padding-bottom: 1.5rem; border-bottom: 1px solid color-mix(in srgb, CanvasText 18%, transparent); }
+h1,h2,h3 { line-height: 1.2; text-wrap: balance; }
+h1 { margin: .25rem 0 .75rem; font-size: clamp(2.1rem, 7vw, 3.5rem); }
+h2 { margin-top: 0; } h3 { margin-bottom: .25rem; }
+p,li { max-width: 72ch; } a { color: LinkText; overflow-wrap: anywhere; }
 a:focus-visible { outline: 3px solid currentColor; outline-offset: 4px; }
-.notice { padding: 1rem; border: 1px solid currentColor; border-radius: .5rem; }
+.eyebrow { margin: 0; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.summary { font-size: 1.1rem; }
+.card { margin-top: 1.25rem; padding: 1.25rem; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); border-radius: .9rem; }
+.notice { padding: 1rem; border-inline-start: .3rem solid LinkText; background: color-mix(in srgb, LinkText 8%, Canvas); }
 .policy { white-space: pre-line; overflow-wrap: anywhere; }
-nav { display: flex; gap: 1rem; flex-wrap: wrap; } li { margin-block: .5rem; }
+.button { display: inline-block; padding: .7rem 1rem; border: 1px solid currentColor; border-radius: .6rem; font-weight: 700; text-decoration: none; }
+nav { display: flex; gap: 1rem; flex-wrap: wrap; }
+footer { margin-top: 2.5rem; padding-top: 1.25rem; border-top: 1px solid color-mix(in srgb, CanvasText 18%, transparent); }
+li { margin-block: .45rem; }
 </style>
 </head>
 <body><main>
-<header><p>MusicMute · ${escapeHtml(developer)}</p><h1>${escapeHtml(title)}</h1></header>
+<header><p class="eyebrow">MusicMute · ${escapeHtml(configuration.developer)}</p><h1>${escapeHtml(title)}</h1><p class="summary">${escapeHtml(description)}</p><p>Last updated ${escapeHtml(PUBLIC_POLICY_DEFAULTS.policyVersion)}</p></header>
 ${content}
-<footer><nav aria-label="Policies"><a href="/privacy">Privacy</a><a href="/delete-account">Delete account</a></nav></footer>
+<footer><nav aria-label="Public resources"><a href="${PUBLIC_POLICY_PATHS.privacy}">Privacy</a><a href="${PUBLIC_POLICY_PATHS.accountDeletion}">Delete account</a><a href="${PUBLIC_POLICY_PATHS.support}">Support</a></nav></footer>
 </main></body></html>`;
 }
 
-function contact(configuration: PublicPageConfiguration): string {
-  const subject = encodeURIComponent('MusicMute account deletion request');
-  const body = encodeURIComponent(
-    'I request deletion of my MusicMute account. Please send ownership-verification instructions. I will not send passwords, authentication tokens, or recovery codes.',
-  );
-  return `<a href="mailto:${escapeHtml(configuration.email)}?subject=${subject}&amp;body=${body}">Email ${escapeHtml(configuration.email)}</a>`;
+function emailLink(
+  configuration: PublicPageConfiguration,
+  subject: string,
+  body: string,
+  label: string,
+): string {
+  return `<a class="button" href="mailto:${escapeHtml(configuration.email)}?subject=${encodeURIComponent(subject)}&amp;body=${encodeURIComponent(body)}">${escapeHtml(label)}</a>`;
+}
+
+function publicUrl(
+  configuration: PublicPageConfiguration,
+  path: string,
+): string {
+  return new URL(path, `${configuration.origin}/`).toString();
 }
 
 @Public()
@@ -68,27 +127,12 @@ export class PublicPagesController {
   constructor(private readonly config: ConfigService) {}
 
   private configuration(): PublicPageConfiguration {
-    const field = (key: string, maximum: number): string => {
-      const value = this.config.get<unknown>(key);
-      if (
-        typeof value !== 'string' ||
-        !value.trim() ||
-        value.length > maximum ||
-        Array.from(value).some((character) => {
-          const code = character.charCodeAt(0);
-          return (
-            code === 127 ||
-            (code < 32 && code !== 9 && code !== 10 && code !== 13)
-          );
-        })
-      ) {
-        throw new ServiceUnavailableException(
-          'Public account information is not configured',
-        );
-      }
-      return value.trim();
-    };
-    const email = field('PUBLIC_SUPPORT_EMAIL', 254);
+    const email = configuredText(
+      this.config,
+      'PUBLIC_SUPPORT_EMAIL',
+      PUBLIC_POLICY_DEFAULTS.supportEmail,
+      254,
+    );
     if (
       !/^[a-z0-9._%+-]{1,64}@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(
         email,
@@ -98,54 +142,99 @@ export class PublicPagesController {
         'Public account information is not configured',
       );
     }
+    const origin = configuredText(
+      this.config,
+      'PUBLIC_SITE_ORIGIN',
+      PUBLIC_POLICY_DEFAULTS.publicOrigin,
+      2048,
+    );
+    try {
+      const url = new URL(origin);
+      if (
+        url.protocol !== 'https:' ||
+        url.origin !== origin ||
+        url.username ||
+        url.password ||
+        url.pathname !== '/' ||
+        url.search ||
+        url.hash
+      ) {
+        throw new Error('Unsafe public origin');
+      }
+    } catch {
+      throw new ServiceUnavailableException(
+        'Public account information is not configured',
+      );
+    }
     return {
       email,
-      developer: field('PUBLIC_DEVELOPER_NAME', 160),
-      timeframe: field('PUBLIC_DELETION_TIMEFRAME', 2000),
-      retention: field('PUBLIC_RETENTION_NOTICE', 4000),
+      origin,
+      developer: configuredText(
+        this.config,
+        'PUBLIC_DEVELOPER_NAME',
+        PUBLIC_POLICY_DEFAULTS.developerName,
+        160,
+      ),
+      timeframe: configuredText(
+        this.config,
+        'PUBLIC_DELETION_TIMEFRAME',
+        PUBLIC_POLICY_DEFAULTS.deletionTimeframe,
+        2000,
+      ),
+      retention: configuredText(
+        this.config,
+        'PUBLIC_RETENTION_NOTICE',
+        PUBLIC_POLICY_DEFAULTS.retentionNotice,
+        4000,
+      ),
     };
   }
 
   @Get('delete-account')
   @Header('Content-Type', 'text/html; charset=utf-8')
-  @Header('Cache-Control', 'no-store')
+  @Header('Cache-Control', 'no-store, no-transform')
   @Header(
     'Content-Security-Policy',
     "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   )
   deleteAccount(): string {
     const configuration = this.configuration();
+    const deletionContact = emailLink(
+      configuration,
+      'MusicMute account deletion request',
+      'I request deletion of my MusicMute account. Please send ownership-verification instructions. I will not send passwords, authentication tokens, recovery codes, or audio files.',
+      `Request deletion by email: ${configuration.email}`,
+    );
     return page(
       'Delete your MusicMute account',
-      configuration.developer,
+      'Request deletion without reinstalling or opening the app, and understand what will be deleted or retained.',
+      configuration,
       `
-<p>You can request account deletion here without reinstalling or opening the app.</p>
-<section aria-labelledby="request"><h2 id="request">Request deletion by email</h2>
-<p>${contact(configuration)}</p>
+<section class="card" aria-labelledby="request"><h2 id="request">Request deletion</h2>
+<p>${deletionContact}</p>
 <ol>
-<li>Send a message with the subject “MusicMute account deletion request”. If possible, use the email associated with your MusicMute account. If you cannot access that email, explain that you need account-recovery help.</li>
-<li>Support will provide ownership-verification instructions. A supplied email address or message alone does not authorize deletion.</li>
-<li>After ownership is verified, support submits the request to the same account-deletion process used by the app and provides the request reference.</li>
+<li>Send the request from the email associated with your MusicMute account when possible.</li>
+<li>Support sends ownership-verification instructions. An email address alone does not authorize deletion.</li>
+<li>After ownership is verified, support submits the request to the same deletion process used by the app and sends the request reference.</li>
 </ol>
-<p class="notice">Never email passwords, ID tokens, access tokens, recovery codes, or audio files. Support does not need these to receive your request.</p>
-<p>If your email app does not open, copy <strong>${escapeHtml(configuration.email)}</strong> into your email service and follow the instructions above.</p></section>
-<section aria-labelledby="app"><h2 id="app">Delete from the app</h2>
-<p>Open Account settings, choose Delete account, authenticate again with a linked sign-in method, then confirm. Account access ends immediately and permanent deletion is automatically scheduled for exactly 15 days later. Email verification for processing is not required to request deletion. A disabled account can use the support route above.</p></section>
-<section aria-labelledby="scope"><h2 id="scope">What deletion covers</h2>
-<p>When the 15-day recovery period ends, deletion removes the account/profile, associated cloud input audio and vocals-only results, processing history, and account-linked device and push records. The deletion process stops new account work before storage cleanup.</p>
-<p>The app clears its private account copies when it receives an accepted deletion response. Other offline installations may retain private local copies until they reconnect or their local app data is cleared. Files originally selected from a document provider and copies you exported to your own storage stay under your control.</p></section>
-<section aria-labelledby="timing"><h2 id="timing">Acceptance, completion and retention</h2>
-<p>Acceptance ends account access and starts a 15-day recovery period. Account data and cloud media are retained but inaccessible during this period so recovery remains possible. Sign in again before the deadline to send an authenticated recovery request, optionally explain why, and wait for administrator review. If approved, the scheduled deletion is cancelled. After the deadline, permanent cleanup starts automatically and the media can no longer be recovered.</p>
+<p class="notice">Never send passwords, ID tokens, access tokens, recovery codes, or audio files. Support does not need them.</p>
+<p>If the email button does not open, write to <strong>${escapeHtml(configuration.email)}</strong> with the subject “MusicMute account deletion request”.</p></section>
+<section class="card" aria-labelledby="app"><h2 id="app">Delete from the app</h2>
+<p>Open Account, choose Delete account, authenticate again with a linked sign-in method, and confirm. The authenticated route is the fastest option. A disabled account can use the email route above.</p></section>
+<section class="card" aria-labelledby="scope"><h2 id="scope">Data that is deleted</h2>
+<p>Permanent cleanup removes the MusicMute account and profile, private cloud input and result audio, processing jobs and history, account-linked installation and push records, and the Firebase identity used by MusicMute. It does not delete the user’s Google or Apple account.</p>
+<p>The app clears account-owned private copies after it receives an accepted deletion response. An offline installation may retain private local copies until it reconnects or its app data is cleared. Files originally selected from another provider and copies exported by the user remain under that user or provider’s control.</p></section>
+<section class="card" aria-labelledby="timing"><h2 id="timing">Timing, recovery, and limited retention</h2>
+<p>Acceptance blocks account access and new processing immediately and starts an exact ${PUBLIC_POLICY_DEFAULTS.recoveryPeriodDays}-day recovery period. Before the deadline, sign in to submit an authenticated recovery request for review. After the deadline, permanent cleanup starts automatically and recovery is unavailable.</p>
 <h3>Processing timeframe</h3><p class="policy">${escapeHtml(configuration.timeframe)}</p>
-<p>A pseudonymous security replay fence is retained for 24 hours after deletion to prevent stale authentication from recreating the account.</p>
-<h3>Logs and backup retention</h3><p class="policy">${escapeHtml(configuration.retention)}</p>
-<p>Contact support with your request reference for status assistance. Do not send authentication credentials.</p></section>`,
+<h3>Retention after deletion</h3><p class="policy">${escapeHtml(configuration.retention)}</p>
+<p>Contact support with the deletion request reference for status assistance.</p></section>`,
     );
   }
 
   @Get('privacy')
   @Header('Content-Type', 'text/html; charset=utf-8')
-  @Header('Cache-Control', 'no-store')
+  @Header('Cache-Control', 'no-store, no-transform')
   @Header(
     'Content-Security-Policy',
     "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
@@ -153,29 +242,96 @@ export class PublicPagesController {
   privacy(): string {
     const configuration = this.configuration();
     return page(
-      'MusicMute privacy',
-      configuration.developer,
+      'MusicMute privacy policy',
+      'How MusicMute collects, uses, protects, retains, and deletes account, device, diagnostic, and audio information.',
+      configuration,
       `
-<p>This notice describes MusicMute, operated by ${escapeHtml(configuration.developer)}. For privacy or account requests, contact <a href="mailto:${escapeHtml(configuration.email)}">${escapeHtml(configuration.email)}</a>.</p>
-<section aria-labelledby="account"><h2 id="account">Account and device information</h2>
-<p>Firebase Authentication handles sign-in identity and credentials. MusicMute uses the Firebase identity, profile name, account email when available, email-verification status, and linked sign-in providers to authenticate and manage your account.</p>
-<p>Account-linked installation identifiers, device and operating-system information, app versions, and optional push registration tokens support access checks, session management, notifications, and troubleshooting. Account and job records are stored in MongoDB.</p></section>
-<section aria-labelledby="audio"><h2 id="audio">Audio and processing</h2>
-<p>Import audio you own or have permission to process. The app prepares a private local copy and shows a review before you confirm cloud processing. Selecting a file alone does not authorize upload.</p>
-<p>New cloud-processing submissions are temporarily unavailable while the processing architecture is redesigned. Existing vocals-only results, source metadata, filenames, duration, size, and processing status continue to support your account history and downloads.</p>
-<p>The app caches private input/result files locally and lets you explicitly play, save, or share results. Original imported files and copies exported to your chosen storage remain under your control.</p></section>
-<section aria-labelledby="links"><h2 id="links">Import from a link</h2>
-<p>After you confirm an import, MusicMute's server retrieves an available audio-only stream from the public link and submits it for processing. The mobile app does not download source media from the linked site. Source metadata and the resulting audio remain associated with your account.</p>
-<p>Rights confirmation is a statement by the user. MusicMute does not verify copyright ownership or grant permission to download or process third-party material.</p></section>
-<section aria-labelledby="operations"><h2 id="operations">Operations and security</h2>
-<p>Operational logs, bounded error reports and request/security metadata support service reliability, abuse prevention, and recovery. Infrastructure services may process network and request metadata. Firebase/Google supports identity and messaging; MongoDB holds account/job records; S3 holds private media.</p>
-<p>These public pages use no analytics scripts, tracking pixels, or public account lookup form. Sending a support email uses your chosen email provider and the configured support mailbox.</p></section>
-<section aria-labelledby="retention"><h2 id="retention">Retention and deletion</h2>
-<p>Cloud media and history remain associated with your account until you delete the relevant items or the 15-day account-deletion recovery period ends. During that recovery period the account is inaccessible, but you may sign in to submit an authenticated recovery request. Ordinary sign-out does not itself erase retained media.</p>
-<p>A pseudonymous security replay fence is retained for 24 hours after deletion to prevent stale authentication from recreating the account.</p>
+<section class="card" aria-labelledby="operator"><h2 id="operator">Operator and contact</h2>
+<p>MusicMute is operated by ${escapeHtml(configuration.developer)}. For privacy, support, or account questions, email <a href="mailto:${escapeHtml(configuration.email)}">${escapeHtml(configuration.email)}</a>.</p></section>
+<section class="card" aria-labelledby="collection"><h2 id="collection">Information MusicMute handles</h2>
+<ul>
+<li><strong>Account information:</strong> Firebase user ID, profile name, email when available, verification state, and linked sign-in providers.</li>
+<li><strong>Audio and user content:</strong> audio selected for processing, prepared original audio, voice-only results, filenames, duration, size, processing history, source URLs, and source metadata.</li>
+<li><strong>Device and service information:</strong> MusicMute installation identifier, Firebase installation and messaging identifiers, push token, device model, operating system, app version and build, IP address, request metadata, and security/session records.</li>
+<li><strong>Diagnostics:</strong> bounded crash, error, performance, and processing diagnostics needed to operate, secure, and troubleshoot the service.</li>
+</ul>
+<p>When a video is selected locally, MusicMute prepares audio on the device and uploads the prepared audio; it does not upload the original video file. Selecting a file or link alone does not authorize a cloud submission.</p></section>
+<section class="card" aria-labelledby="uses"><h2 id="uses">Why the information is used</h2>
+<p>MusicMute uses this information to authenticate accounts, enforce account and usage policy, prepare and process audio, deliver private results, maintain history, send requested processing notifications, support playback and export, prevent abuse, diagnose failures, provide support, and complete account deletion.</p>
+<p>MusicMute does not sell personal information and does not use account or audio data for advertising.</p></section>
+<section class="card" aria-labelledby="links"><h2 id="links">Imports from public links</h2>
+<p>After the user confirms an import, MusicMute’s server retrieves an available audio-only stream from a supported public link and submits the prepared audio for processing. The mobile app does not fetch provider media. Source URL and metadata, prepared audio, and results remain associated with the account.</p>
+<p>Users must import only material they own or are permitted to process. Rights confirmation is a statement by the user; MusicMute does not verify ownership or grant permission to download or process third-party material.</p></section>
+<section class="card" aria-labelledby="providers"><h2 id="providers">Service providers and disclosure</h2>
+<p>Firebase/Google processes authentication and messaging data. MongoDB stores account and job records. Private S3-compatible storage holds account media. Sentry receives privacy-filtered crash and diagnostic events when enabled. Hosting, network, and security providers may process IP addresses and request metadata to deliver and protect the service.</p>
+<p>These providers process data for MusicMute’s service purposes. MusicMute may also disclose limited information when required by law or to protect users, the service, or others. These public pages contain no analytics scripts, advertising trackers, or account lookup form.</p></section>
+<section class="card" aria-labelledby="security"><h2 id="security">Security and transfer</h2>
+<p>Release clients use HTTPS. Cloud media is private and transferred through authenticated, short-lived grants. Access is account-scoped, and credentials or signed transfer URLs must not be shared. No system can guarantee absolute security.</p></section>
+<section class="card" aria-labelledby="retention"><h2 id="retention">Retention, local copies, and deletion</h2>
+<p>Cloud media and history remain associated with the account until the user deletes the relevant item or account, subject to processing cleanup and the deletion lifecycle below. Signing out does not erase retained cloud or local data.</p>
+<p>An accepted account-deletion request blocks access immediately and starts an exact ${PUBLIC_POLICY_DEFAULTS.recoveryPeriodDays}-day recovery period. Permanent cleanup starts after that deadline.</p>
 <p class="policy">${escapeHtml(configuration.retention)}</p>
 <p class="policy">${escapeHtml(configuration.timeframe)}</p>
-<p>Use <a href="/delete-account">account deletion</a> for in-app and support-assisted options, scope, and completion details. Acceptance and completion are different stages; deletion from backups follows the retention policy above.</p></section>`,
+<p>Use the <a href="${PUBLIC_POLICY_PATHS.accountDeletion}">account deletion page</a> to request deletion outside the app or review the in-app process. The page explains the data removed, the exact recovery period, and limited retention.</p></section>
+<section class="card" aria-labelledby="changes"><h2 id="changes">Policy changes</h2>
+<p>Material changes will be published at this same URL with a new last-updated date. Continued use after an effective change is subject to the updated notice and applicable law.</p></section>`,
     );
+  }
+
+  @Get('support')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  @Header('Cache-Control', 'no-store, no-transform')
+  @Header(
+    'Content-Security-Policy',
+    "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  )
+  support(): string {
+    const configuration = this.configuration();
+    const supportContact = emailLink(
+      configuration,
+      'MusicMute support request',
+      'I need help with MusicMute. App version/build: __. Device and operating system: __. What happened: __. I will not send passwords, authentication tokens, recovery codes, or private audio.',
+      `Email MusicMute support: ${configuration.email}`,
+    );
+    return page(
+      'MusicMute support',
+      'Contact MusicMute about account access, processing, privacy, or deletion without sending credentials or private media.',
+      configuration,
+      `
+<section class="card" aria-labelledby="contact"><h2 id="contact">Contact support</h2><p>${supportContact}</p>
+<p>Include the app version and build, device and operating-system version, the approximate time of the problem, and a short description. Include a deletion request reference or processing job ID only when it is relevant.</p>
+<p class="notice">Do not send passwords, ID tokens, access tokens, recovery codes, signed download URLs, private audio, or screenshots containing personal data.</p></section>
+<section class="card" aria-labelledby="account"><h2 id="account">Account and privacy requests</h2>
+<p>For account deletion, use the dedicated <a href="${PUBLIC_POLICY_PATHS.accountDeletion}">account deletion page</a>. For collection, use, providers, retention, and security information, read the <a href="${PUBLIC_POLICY_PATHS.privacy}">privacy policy</a>.</p></section>`,
+    );
+  }
+
+  @Get('public-policy')
+  @Header('Content-Type', 'application/json; charset=utf-8')
+  @Header('Cache-Control', 'no-store')
+  publicPolicy() {
+    const configuration = this.configuration();
+    return {
+      schema_version: 1,
+      policy_version: PUBLIC_POLICY_DEFAULTS.policyVersion,
+      updated_at: PUBLIC_POLICY_DEFAULTS.policyUpdatedAt,
+      app_name: PUBLIC_POLICY_DEFAULTS.appName,
+      developer_name: configuration.developer,
+      support_email: configuration.email,
+      urls: {
+        privacy: publicUrl(configuration, PUBLIC_POLICY_PATHS.privacy),
+        account_deletion: publicUrl(
+          configuration,
+          PUBLIC_POLICY_PATHS.accountDeletion,
+        ),
+        support: publicUrl(configuration, PUBLIC_POLICY_PATHS.support),
+      },
+      account_deletion: {
+        available_in_app: true,
+        external_request_available: true,
+        recovery_period_days: PUBLIC_POLICY_DEFAULTS.recoveryPeriodDays,
+        replay_fence_hours: PUBLIC_POLICY_DEFAULTS.replayFenceHours,
+      },
+    };
   }
 }

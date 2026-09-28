@@ -155,14 +155,13 @@ export async function prepareAudio(
   }
 }
 
-export async function sha256Hex(blob: Blob): Promise<string> {
+export async function sha256Base64(blob: Blob): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
     await blob.arrayBuffer(),
   );
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
+  // The API and S3 checksum header require padded base64 of the raw digest.
+  return btoa(String.fromCharCode(...new Uint8Array(digest)));
 }
 
 export interface UploadGrant {

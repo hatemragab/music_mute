@@ -520,7 +520,7 @@ async function releaseFixture(root: string, version: string): Promise<void> {
   await writeFile(join(root, "app", "engine", "module.py"), "VALUE = 1\n");
   await writeFile(
     join(root, "app", "package.json"),
-    '{"name":"@musicmute/worker","version":"0.1.0"}\n',
+    '{"name":"@music-mute/worker","version":"0.1.0"}\n',
   );
   for (const [path, value] of [
     ["runtime/licenses/ffmpeg/COPYING.LGPLv2.1", "license\n"],

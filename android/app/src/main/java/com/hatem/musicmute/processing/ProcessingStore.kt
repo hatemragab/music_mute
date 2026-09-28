@@ -2,6 +2,7 @@ package com.hatem.musicmute.processing
 
 import androidx.datastore.core.CorruptionException
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.DataMigration
 import androidx.datastore.core.DataStoreFactory
 import androidx.datastore.core.Serializer
 import java.io.File
@@ -150,7 +151,14 @@ class ProcessingStore(
     private fun store(uid: String): DataStore<ProcessingDocument> {
         require(uid.isNotBlank())
         return stores.computeIfAbsent(uid) {
-            DataStoreFactory.create(ProcessingSerializer, scope = scope) {
+            DataStoreFactory.create(ProcessingSerializer, migrations = listOf(object : DataMigration<ProcessingDocument> {
+                override suspend fun shouldMigrate(currentData: ProcessingDocument) = currentData.snapshots.isNotEmpty()
+                override suspend fun migrate(currentData: ProcessingDocument): ProcessingDocument {
+                    validateOwner(uid, currentData)
+                    return currentData.copy(library = mergeLibrary(currentData, emptyList()), snapshots = emptyList())
+                }
+                override suspend fun cleanUp() = Unit
+            }), scope = scope) {
                 File(processingOwnerDirectory(root, uid), "processing.json")
             }
         }
@@ -159,11 +167,6 @@ class ProcessingStore(
     fun operations(uid: String): Flow<List<ProcessingOperation>> = store(uid).data.map { document ->
         validateOwner(uid, document)
         document.operations
-    }
-
-    fun snapshots(uid: String): Flow<List<Job>> = store(uid).data.map { document ->
-        validateOwner(uid, document)
-        document.snapshots
     }
 
     fun urlImports(uid: String): Flow<List<UrlImportRecord>> = store(uid).data.map { document ->
@@ -227,11 +230,11 @@ class ProcessingStore(
         return document.operations.find { it.operationId == operationId }
     }
 
-    suspend fun saveSnapshots(uid: String, jobs: List<Job>) {
+    suspend fun updateLibraryJobs(uid: String, jobs: List<Job>) {
         store(uid).updateData { current ->
             validateOwner(uid, current)
             current.copy(
-                snapshots = jobs.distinctBy { it.id },
+                snapshots = emptyList(),
                 library = mergeLibrary(current, jobs),
                 schemaVersion = 3,
             )

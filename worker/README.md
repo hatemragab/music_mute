@@ -1,5 +1,10 @@
 # MusicMute worker runtime
 
+> **Release candidate:** `0.1.0-rc.1` prepares the public Apple
+> Silicon macOS package. [RELEASING.md](RELEASING.md) describes artifact checks,
+> native acceptance and separately authorized publication/catalog promotion.
+> The npm CLI and managed service runtime are separate artifacts.
+
 > **macOS per-user implementation:** the no-admin installer, logged-in-user
 > LaunchAgent, lifecycle commands, direct-owner model download, signed manual
 > updater, rollback, and self-unpair paths are the only supported macOS runtime.
@@ -175,11 +180,27 @@ GPU execution or production readiness; those remain D4/D5 platform gates.
 The public MVP entry point is a current-user install with no `sudo`:
 
 ```bash
-npm install -g @musicmute/worker
+npm install -g @music-mute/worker
 mw install --label "Studio Mac"
 ```
 
 The package installs `mw` as its CLI command.
+
+Registry installation requires publication first. During the candidate period,
+install `@music-mute/worker@next` after that tag is published. Use an Apple Silicon
+Mac, Node.js >=24.18.0 <25 and a user-writable npm prefix. pnpm is a development
+tool, not an end-user requirement; Python and FFmpeg come with the private runtime.
+Minimum supported macOS/RAM and clean-machine acceptance must be recorded for
+the final runtime; qualification does not imply support for untested hardware.
+An administrator creates the one-use code in Workers → Enrollment in the dashboard.
+Public availability of the CLI does not grant admission to the fleet.
+
+`mw --version [--json]` reports the CLI and installed runtime versions separately
+without model loading or network access. Upgrade the CLI with
+`npm install -g @music-mute/worker@next` during the candidate period (`@latest`
+after stable release). Run `mw update --check` and `mw update` separately for
+the managed runtime. Both updates are manual. Removing the npm package alone
+does not stop or uninstall the LaunchAgent.
 
 The command reads the one-use enrollment code from `/dev/tty` with echo
 disabled, uses `https://api.music-mute.com`, downloads the service
@@ -234,7 +255,13 @@ verified candidate, checks the private Node/FFmpeg versions, qualifies MPS,
 switches the release pointer atomically, restores whether the agent was running,
 and, for a running service, runs the packaged
 runtime doctor, and restores the known-good release if either startup or the
-doctor fails. Failed candidates are locally quarantined. Mutating CLI commands
+doctor fails. Failed candidates are locally quarantined. Two-worker installations transition
+to one worker per GPU until the candidate is separately qualified. The updater
+journals the previous configuration and restores it on rollback, leaving the old
+capacity receipt intact. Stopped installations also undergo configuration validation.
+An expired capacity receipt blocks two-worker admission but does not block update
+checks. Successful activation does not promise automatic rollback for later crashes;
+the persisted restart budget may require operator recovery. Mutating CLI commands
 hold an owner-only process lock; a concurrent operation fails without changing
 state, and a lock left by a dead process is recovered safely. `uninstall`
 preserves state by default; `uninstall --purge` requires a backend-confirmed
@@ -585,6 +612,16 @@ errors receive bounded recovery; exhausted child recovery and unsafe workspace
 cleanup remain admission blockers. See the
 [ranked reliability audit](../docs/worker-rebuild/validation/PRODUCTION-RELIABILITY-AUDIT.md)
 for reproduction cases, local test evidence and remaining production gates.
+
+## Telemetry and privacy
+
+Packaged runtimes enable the existing Sentry CLI/engine error reporters by default.
+The reporters sanitize diagnostic data and do not intentionally send source media,
+credentials, signed URLs or personal filesystem paths. Backend diagnostic forwarding
+is a separate authenticated channel. Neither local capture nor an HTTP response
+alone establishes operator-visible delivery. See the release acceptance checklist.
+The `MUSICMUTE_SENTRY_ENABLED=false` service environment disables Sentry; setting it
+only in an interactive shell does not change an already-installed LaunchAgent.
 
 ## Optional silence trimming (2026-09-26)
 

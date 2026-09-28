@@ -25,6 +25,12 @@ and `app/build/outputs/apk/play/debug/app-play-debug.apk` for Play distribution.
 Reports are in `app/build/reports/`.
 Machine-specific configuration and build output are ignored.
 
+Realtime is owned by the authenticated Activity session, not a navigation tab.
+Home, Library, Player and Settings share the same foreground connection; history
+subscriptions survive tab switches. Reselecting the active tab does not navigate
+or refresh. Backgrounding the Activity or signing out closes the connection.
+Rejected sessions stay stopped until a new session is bound.
+
 The production `app/google-services.json` is also local-only and ignored. Download
 it before Debug or Release builds using the repository-root Firebase command in
 [`../README.md`](../README.md); never force-add it. The checked-in
@@ -123,7 +129,7 @@ simulator or device for runtime proof.
 ## App updates
 
 Android has separate `direct` and `play` distribution variants with the same
-production application ID and signing configuration. Version `0.1.9` is build 10.
+production application ID and signing configuration. Version `0.1.10` is build 11.
 The direct variant uses the built-in version dialog, download service, progress
 callbacks, FileProvider and installer-intent helper from
 [azhon/AppUpdate 4.3.6](https://github.com/azhon/AppUpdate) (Apache-2.0).
@@ -162,13 +168,14 @@ in-app prompt and verified download flow.
 
 ## Link acquisition
 
-URL imports use `POST /media-imports`. Acquisition, audio-only validation, temporary
-file cleanup and S3 upload run on the server. Android contains no extractor,
-Python runtime, JavaScript challenge engine or downloader update worker.
+URL imports use `POST /media-imports`. A private SaaS adapter returns audio to
+NestJS for validation, temporary-file cleanup and private S3 upload. Android
+receives neither vendor credentials nor delivery URLs. See
+[provider architecture](../video_providers/README.md).
 
 ## App behavior
 
-- **Server URL imports:** Home accepts one public media link from YouTube, Facebook or another supported site,
+- **Server URL imports:** Home accepts public media links using its bundled site catalog,
   including a pasted or Android-shared text link. After rights confirmation the app
   sends only the canonical URL and a durable request ID to `POST /media-imports`.
   It never downloads or reuploads that source. Per-account import state survives
@@ -219,9 +226,8 @@ Use the server import form for URLs. User audio files are not deleted.
 
 The Gradle validation command above covers JVM tests, lint, and APK assembly.
 The 2026-09-09 auth run passed Debug/Release/AuthE2e assembly, lint (no errors,
-24 warnings), and all 43 JVM tests, including 11 focused auth cases. See the
-[mobile auth validation report](../docs/validation/mobile-auth-2026-09-09.md) for
-connected-device results, emulator limits, and outstanding live OAuth checks.
+24 warnings), and all 43 JVM tests, including 11 focused auth cases.
+That dated local result does not establish current device or live OAuth behavior.
 `git diff --check` passed.
 Tests include URL validation, demo progression/cancel/retry, preference persistence,
 audio-only request options, output validation, path confinement, persistent history,
@@ -257,13 +263,15 @@ sign-out. A minimal no-backup journal records a requested or accepted deletion;
 an uncertain response is never treated as completed deletion. Accepted local
 cleanup retries after restart if filesystem cleanup fails.
 
-Set public HTTPS page URLs using `-PprivacyUrl=https://...` and
-`-PdeletionUrl=https://...` after real pages are available. These optional values
-are validated during configuration (no credentials, query or fragment); configured
-links appear both in Account and on the signed-out screen. Empty values omit
-links. A verified public deletion route, developer identity, monitored contact,
-retention commitments and deployed backend are release blockers until supplied
-and independently verified. No URLs or deletion deadlines are invented.
+The checked-in release defaults use `https://api.music-mute.com/privacy`,
+`https://api.music-mute.com/delete-account`, and
+`https://api.music-mute.com/support`. Override them only with
+`-PprivacyUrl=https://...`, `-PdeletionUrl=https://...`, and
+`-PsupportUrl=https://...` for another verified deployment. Values are mandatory
+and validated during configuration (HTTPS, no credentials, query, or fragment);
+links appear in Account and on the signed-out screen. A built-in URL does not
+prove the backend is deployed or the support mailbox is monitored, so verify all
+public pages before uploading the bundle.
 
 Android device/UI testing remains outside the authorized device scope. JVM tests,
 lint and APK assembly do not prove provider reauthentication, document pickers,
@@ -272,9 +280,12 @@ background cancellation, playback cleanup, or real-account deletion on a device.
 The 2026-09-10 account-deletion/owned-audio implementation passed
 `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease`: 153
 JVM tests in 28 suites, no failures; lint reported no errors and 38 warnings.
-Release manifest inspection retained `dataSync` for transfers and `mediaPlayback`
-for audio, with no broad storage permission. This is local build/source evidence,
-not Android runtime proof, production deletion proof, or Play approval.
+That 2026-09-10 validation covered the manifest at that checkpoint. The current
+merged Play manifest declares `mediaPlayback` for audio, explicitly removes
+WorkManager's foreground service, and does not request
+`FOREGROUND_SERVICE_DATA_SYNC` or broad storage permission. Reinspect the merged
+manifest for every release; local source/build evidence is not Android runtime
+proof, production deletion proof, or Play approval.
 
 Review follow-up also passed `:app:lintRelease :app:testReleaseUnitTest :app:bundleRelease`.
 The deletion request bounds token acquisition plus HTTP to 20 seconds; accepted
@@ -377,3 +388,48 @@ Processing updates use authenticated raw WebSocket snapshots with automatic
 reconnection. See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
 and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
 HTTP remains responsible for authentication, commands and file transfers.
+
+### Home job history storage
+
+Home job history is held in memory and loaded from WebSocket snapshots; it is
+not restored from disk. Existing persisted history is reduced to completed
+library tracks when the account store opens. Library media/metadata, preferences,
+and pending import/upload recovery records remain on device. Switching tabs
+continues using the shared live session rather than restarting the connection.
+
+## Current jobs and Library (2026-09-28)
+
+Home and the processing list hide terminal cloud jobs (`ready`, `failed`,
+`cancelled`); unfinished local reviews and recoverable local imports stay
+accessible. Creation date and time are shown on Home job cards. Filtering is
+presentation only: no deletion request, database mutation or media cleanup is
+performed, and the administrator dashboard retains job history.
+
+Library has explicit cursor-based Load more with loading/error feedback. Native
+Library storage preserves previously discovered completed audio; browser Library
+requests `status=ready`, retains loaded pages, and bounds live subscriptions to
+the newest page plus nine tail pages. See
+[release evidence](../docs/client-current-jobs-release-2026-09-28.md) for validation
+and distribution status.
+
+## System playback cards and island-style surfaces
+
+Playback uses Media3's media session and standard media notification. The card
+supplies the track title, localized Original audio / Voice only label, MusicMute
+artwork and the existing transport controls. Tapping it opens Player (after the
+normal authentication/update gates), where speed, queue and other player options
+remain available. No overlay or accessibility permission is needed.
+
+The operating system/manufacturer chooses whether to display a media island,
+lock-screen card or notification, and which controls fit. This is media-session
+integration, not a guarantee of a custom island on every Android phone. Android's
+[Live Updates](https://developer.android.com/develop/ui/views/notifications/live-update)
+do not accept MediaStyle or custom RemoteViews, so playback does not request
+promoted Live Updates. Processing notifications remain separate.
+
+Local checks: `:app:testDirectDebugUnitTest`, `:app:lintDirectDebug`,
+`:app:assembleDirectDebug` and `:app:compileDirectDebugAndroidTestKotlin`.
+The existing opt-in instrumentation runner also accepts `-e check playbackCard`
+to verify metadata, bitmap decoding and distinct tap PendingIntents. That check
+requires an explicitly authorized Android device; compiling it does not execute
+it. OEM island appearance and cold/warm tap navigation need device validation.

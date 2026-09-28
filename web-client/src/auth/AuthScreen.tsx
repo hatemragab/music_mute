@@ -8,6 +8,7 @@ import {
 import { useState, type FormEvent } from "react";
 import { auth } from "./AuthProvider";
 import { friendlyError, useI18n } from "../i18n";
+import { SoloSignalMark } from "../brand/SoloSignalMark";
 
 type Mode = "login" | "register" | "reset";
 export function AuthScreen() {
@@ -73,9 +74,7 @@ export function AuthScreen() {
         </button>
       </div>
       <div className="auth-intro">
-        <div className="brand-mark" aria-hidden="true">
-          M
-        </div>
+        <SoloSignalMark className="brand-mark" />
         <h1>{t("brand")}</h1>
         <p>{t("tagline")}</p>
         <div className="wave-art" aria-hidden="true" />

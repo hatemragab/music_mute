@@ -67,7 +67,7 @@ class DefaultLibraryRepository(
                             records.map { record ->
                                 val job = record.job
                                 val key = LibraryKey(session.uid, job.id)
-                                val transfer = progress[job.id]
+                                val transfer = progress[job.id]?.takeIf { it.artifact == "output" }
                                 val problem = problems[key]
                                 LibraryEntry(
                                     key = key,

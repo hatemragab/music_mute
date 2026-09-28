@@ -203,7 +203,7 @@ import XCTest
     XCTAssertEqual(
       Set(try body(received[0]).keys),
       ["policy_version", "preparation_profile_id", "source", "request_id", "input", "trim_enabled"])
-    XCTAssertEqual(try body(received[0])["trim_enabled"] as? Bool, false)
+    XCTAssertEqual(try body(received[0])["trim_enabled"] as? Bool, true)
     let declaration = try XCTUnwrap(try body(received[0])["input"] as? [String: Any])
     XCTAssertEqual(
       Set(declaration.keys), ["extension", "content_type", "bytes", "duration_seconds", "sha256"])

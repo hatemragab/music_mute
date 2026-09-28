@@ -12,7 +12,7 @@ import { friendlyError, useI18n } from "../i18n";
 import {
   inspectDuration,
   prepareAudio,
-  sha256Hex,
+  sha256Base64,
   uploadWithProgress,
   type UploadGrant,
 } from "./audio-preparation";
@@ -110,7 +110,7 @@ export function AudioUpload({
         (policy?.limits.maxPreparedAudioBytes ?? 50_000_000)
       )
         throw new Error("PREPARED_AUDIO_TOO_LARGE");
-      const sha256 = await sha256Hex(prepared.blob);
+      const sha256 = await sha256Base64(prepared.blob);
       const operationKey = `musicmute.web.upload.${user.uid}`;
       const fingerprint = `${sha256}:${prepared.blob.size}:${trim}`;
       let requestId: string = crypto.randomUUID();

@@ -15,7 +15,6 @@
 - Confirmed `origin/codex/worker-clean-slate` remains at `a786a1773a3c72fb09d1b02def1ae39330561892`.
 - `git ls-files -- .local.env backend/.local.env` returned no tracked secret file.
 - Added only local Git exclusions for `.local.env` and `backend/.local.env`; no environment values were read or printed.
-- Unrelated local files `bundled-yt-dlp`, `old-extractor-test.webm`, and `youtube-diagnostic.webm` remain untracked and outside this branch's intended change list.
 - Repository push-trigger inspection found no tracked GitHub Actions workflow; this does not authorize deployment or publication.
 
 ## A2 — retained contract reconciliation: PASS

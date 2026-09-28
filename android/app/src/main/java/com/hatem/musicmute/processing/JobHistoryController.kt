@@ -39,8 +39,7 @@ fun shouldPollProcessingJob(status: String): Boolean = status in setOf(
 class JobHistoryController(
     private val api: JobsApi,
     private val scope: CoroutineScope,
-    private val loadCached: suspend (String) -> List<Job> = { emptyList() },
-    private val saveCached: suspend (String, List<Job>) -> Unit = { _, _ -> },
+    private val onJobsChanged: suspend (String, List<Job>) -> Unit = { _, _ -> },
     private val onMissing: suspend (String) -> Unit = {},
     private val now: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
@@ -83,22 +82,7 @@ class JobHistoryController(
         freshIds = emptySet()
         refreshPending = false
         mutableState.value = JobHistoryState()
-        if (uid != null) {
-            val ticket = epoch
-            val version = pageVersion
-            scope.launch {
-                try {
-                    val cached = loadCached(uid)
-                    if (ticket == epoch && version == pageVersion)
-                        mutableState.update { it.copy(jobs = cached) }
-                } catch (error: CancellationException) { throw error }
-                catch (_: Exception) {
-                    if (ticket == epoch) mutableState.update { it.copy(failure = JobsProblem.SERVICE_UNAVAILABLE) }
-                } finally {
-                    if (ticket == epoch && visible && pollTask == null) setVisible(true)
-                }
-            }
-        }
+        if (uid != null && visible) setVisible(true)
     }
 
     fun refresh() {
@@ -126,7 +110,7 @@ class JobHistoryController(
                 mutableState.update { it.copy(jobs = jobs, nextCursor = page.nextCursor, loading = false) }
                 retryDelay = 10_000L
                 retryNotBefore = 0L
-                saveCached(uid, jobs)
+                onJobsChanged(uid, jobs)
                 state.value.selectedId?.let { select(it, force = true) }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
@@ -158,7 +142,7 @@ class JobHistoryController(
                 if (ticket != epoch || version != pageVersion) return@launch
                 val jobs = (state.value.jobs + page.items).distinctBy { it.id }
                 mutableState.update { it.copy(jobs = jobs, nextCursor = page.nextCursor) }
-                saveCached(uid, jobs)
+                onJobsChanged(uid, jobs)
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { if (ticket == epoch && version == pageVersion) report(error) }
             finally {
@@ -190,7 +174,7 @@ class JobHistoryController(
                     if (ticket == epoch && version == detailVersion) {
                         if (error is JobsFailure && error.problem == JobsProblem.JOB_NOT_FOUND) {
                             mutableState.update { it.copy(detail = null, jobs = it.jobs.filterNot { job -> job.id == id }) }
-                            saveCached(selectedOwner, state.value.jobs)
+                            onJobsChanged(selectedOwner, state.value.jobs)
                             onMissing(id)
                         }
                         report(error)
@@ -222,7 +206,7 @@ class JobHistoryController(
                     if (error is JobsFailure && error.problem == JobsProblem.JOB_NOT_FOUND) {
                         val retained = state.value.jobs.filterNot { it.id == id }
                         mutableState.update { it.copy(detail = null, jobs = retained) }
-                        saveCached(selectedOwner, retained)
+                        onJobsChanged(selectedOwner, retained)
                         try {
                             onMissing(id)
                         } catch (_: Exception) {
@@ -292,7 +276,7 @@ class JobHistoryController(
                     livePages[cursor] = page
                     val jobs = livePages.values.flatMap { it.items }.distinctBy { it.id }
                     mutableState.update { it.copy(jobs = jobs, nextCursor = livePages.values.last().nextCursor, loading = false, loadingMore = false, failure = null) }
-                    saveCached(uid, jobs)
+                    onJobsChanged(uid, jobs)
                 }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { if (ticket == epoch) { liveTasks.remove(cursor); report(error); mutableState.update { it.copy(loading = false, loadingMore = false) } } }

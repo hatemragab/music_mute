@@ -1,5 +1,9 @@
 import { defineConfig } from "@playwright/test";
 
+const browser = process.env.TEST_BROWSER ?? "chrome";
+if (!["chrome", "firefox", "webkit"].includes(browser))
+  throw new Error("Unsupported TEST_BROWSER");
+
 export default defineConfig({
   testDir: "./tests",
   testMatch: "*.spec.ts",
@@ -8,12 +12,13 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: "http://127.0.0.1:4173",
-    browserName: "chromium",
-    launchOptions: {
-      executablePath:
-        process.env.CHROME_EXECUTABLE ||
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    },
+    browserName:
+      browser === "chrome" ? "chromium" : (browser as "firefox" | "webkit"),
+    ...(browser === "chrome"
+      ? process.env.CHROME_EXECUTABLE
+        ? { launchOptions: { executablePath: process.env.CHROME_EXECUTABLE } }
+        : { channel: "chrome" }
+      : {}),
   },
   webServer: {
     command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort",

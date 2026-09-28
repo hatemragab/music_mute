@@ -4,6 +4,30 @@ import XCTest
 @testable import Vocal
 
 final class AudioTaskPresentationTests: XCTestCase {
+  func testHomeHidesTerminalJobsButRetainsTheirDetailAndLibraryPresentation() throws {
+    for status in ["ready", "failed", "cancelled"] {
+      let tasks = AudioTaskPresentation.merge(
+        pipelines: [], uploads: [], jobs: [processingJob(id: "finished", status: status)])
+      XCTAssertEqual(tasks.count, 1)
+      XCTAssertFalse(try XCTUnwrap(tasks.first).visibleOnHome)
+    }
+    for status in [
+      "awaiting_upload", "queued", "validating", "processing", "uploading_result", "interrupted",
+      "cancel_requested",
+    ] {
+      let tasks = AudioTaskPresentation.merge(
+        pipelines: [], uploads: [], jobs: [processingJob(id: "active", status: status)])
+      XCTAssertTrue(try XCTUnwrap(tasks.first).visibleOnHome)
+    }
+    let review = AudioPipelineIntent(
+      operationId: UUID(), ownerUid: "owner", sourceKind: .file,
+      sourceTitle: "Review", displayName: "Review", clientStartedAt: Date(), updatedAt: Date(),
+      phase: .awaitingConfirmation)
+    XCTAssertTrue(
+      try XCTUnwrap(AudioTaskPresentation.merge(pipelines: [review], uploads: [], jobs: []).first)
+        .visibleOnHome)
+  }
+
   func testServerMeasurementsDriveTimelineAndDoNotTickOnTheClient() throws {
     let fixture = processingJob(id: "68c000000000000000000001", status: "processing")
     let job = Job(

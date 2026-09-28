@@ -8,7 +8,12 @@ import MediaPlayer
   @Published private(set) var loading = false
   @Published private(set) var position: Double = 0
   @Published private(set) var duration: Double = 0
+  @Published private(set) var speed: Float = 1
+  @Published private(set) var volume: Float = 1
   @Published var failed = false
+  var onFinished: (() -> Void)?
+  var onNext: (() -> Void)?
+  var onPrevious: (() -> Void)?
   private var player: AVAudioPlayer?
   private var title = ""
   private var timer: Timer?
@@ -40,6 +45,22 @@ import MediaPlayer
         commands.playCommand,
         commands.playCommand.addTarget { [weak self] _ in
           Task { @MainActor in self?.resume() }
+          return .success
+        }
+      ))
+    remoteTargets.append(
+      (
+        commands.nextTrackCommand,
+        commands.nextTrackCommand.addTarget { [weak self] _ in
+          Task { @MainActor in self?.onNext?() }
+          return .success
+        }
+      ))
+    remoteTargets.append(
+      (
+        commands.previousTrackCommand,
+        commands.previousTrackCommand.addTarget { [weak self] _ in
+          Task { @MainActor in self?.onPrevious?() }
           return .success
         }
       ))
@@ -87,6 +108,9 @@ import MediaPlayer
       do {
         let audio = try AVAudioPlayer(contentsOf: file)
         audio.delegate = self
+        audio.enableRate = true
+        audio.rate = speed
+        audio.volume = volume
         guard audio.prepareToPlay() else { throw CocoaError(.fileReadCorruptFile) }
         player = audio
         currentID = id
@@ -115,6 +139,9 @@ import MediaPlayer
     let wasPlaying = playing
     pause()
     audio.delegate = self
+    audio.enableRate = true
+    audio.rate = speed
+    audio.volume = volume
     player = audio
     self.original = original
     duration = audio.duration
@@ -175,6 +202,18 @@ import MediaPlayer
     player?.currentTime = position
     updateNowPlaying()
   }
+  func setSpeed(_ value: Float) {
+    guard value.isFinite else { return }
+    speed = min(2, max(0.5, value))
+    player?.enableRate = true
+    player?.rate = speed
+    updateNowPlaying()
+  }
+  func setVolume(_ value: Float) {
+    guard value.isFinite else { return }
+    volume = min(1, max(0, value))
+    player?.volume = volume
+  }
   nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
     Task { @MainActor in
       guard self.player === player else { return }
@@ -184,6 +223,7 @@ import MediaPlayer
       self.timer?.invalidate()
       self.timer = nil
       self.updateNowPlaying()
+      if flag { self.onFinished?() }
     }
   }
   nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
@@ -198,7 +238,7 @@ import MediaPlayer
     MPNowPlayingInfoCenter.default().nowPlayingInfo = [
       MPMediaItemPropertyTitle: title, MPMediaItemPropertyPlaybackDuration: duration,
       MPNowPlayingInfoPropertyElapsedPlaybackTime: position,
-      MPNowPlayingInfoPropertyPlaybackRate: playing ? 1.0 : 0.0,
+      MPNowPlayingInfoPropertyPlaybackRate: playing ? speed : 0.0,
       MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
     ]
   }

@@ -18,4 +18,50 @@ final class CoreTests: XCTestCase {
     XCTAssertEqual(audioTime(.infinity), "0:00")
   }
 
+  @MainActor func testAccentValidationAndPersistence() {
+    XCTAssertEqual(AppPreferences.normalizedAccent(" #ff814a "), "#FF814A")
+    XCTAssertNil(AppPreferences.normalizedAccent("orange"))
+    XCTAssertNil(AppPreferences.normalizedAccent("#12345"))
+    let name = "AppPreferencesTests-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: name)!
+    defer { defaults.removePersistentDomain(forName: name) }
+    let preferences = AppPreferences(defaults: defaults)
+    XCTAssertEqual(preferences.appearance, .system)
+    preferences.setAccent("#62a8ff")
+    XCTAssertEqual(AppPreferences(defaults: defaults).accentHex, "#62A8FF")
+  }
+
+  @MainActor func testPlaybackControlsClampUnsafeValues() {
+    let player = AudioPlayer()
+    player.setSpeed(-2)
+    player.setVolume(4)
+    XCTAssertEqual(player.speed, 0.5)
+    XCTAssertEqual(player.volume, 1)
+    player.setSpeed(1.25)
+    player.setVolume(0.35)
+    XCTAssertEqual(player.speed, 1.25)
+    XCTAssertEqual(player.volume, 0.35, accuracy: 0.001)
+  }
+
+  @MainActor func testLibraryPreferencesStayOwnerScopedAndPersisted() {
+    let name = "LibraryPreferencesTests-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: name)!
+    defer { defaults.removePersistentDomain(forName: name) }
+    let preferences = LibraryPreferencesStore(defaults: defaults)
+
+    preferences.bind("owner-a")
+    preferences.toggleFavorite("job-1")
+    preferences.toggleHidden("job-2")
+    XCTAssertEqual(preferences.favorites, ["job-1"])
+    XCTAssertEqual(preferences.hidden, ["job-2"])
+
+    preferences.bind("owner-b")
+    XCTAssertTrue(preferences.favorites.isEmpty)
+    XCTAssertTrue(preferences.hidden.isEmpty)
+
+    preferences.bind("owner-a")
+    XCTAssertEqual(preferences.favorites, ["job-1"])
+    XCTAssertEqual(preferences.hidden, ["job-2"])
+  }
+
 }

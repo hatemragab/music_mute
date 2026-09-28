@@ -7,10 +7,10 @@
     <string name="creative_home_limit_audio">صوت فقط</string>
     <string name="creative_home_limit_duration">٢٠ دقيقة</string>
     <string name="creative_home_limit_size">٥٠ م.ب.</string>
-    <string name="creative_jobs_recent">المهام الأخيرة</string>
+    <string name="creative_jobs_recent">المهام الحالية</string>
     <string name="creative_jobs_audio_only">يتم رفع الصوت المجهز فقط</string>
     <string name="creative_jobs_heading">مهام المعالجة</string>
-    <string name="creative_jobs_empty">ستظهر مهامك هنا. استورد ملفًا صوتيًا لإنشاء أول نتيجة صوتية.</string>
+    <string name="creative_jobs_empty">لا توجد مهام قيد التنفيذ. الصوت المكتمل في مكتبتك.</string>
     <string name="creative_jobs_load_more">تحميل المزيد</string>
     <string name="creative_jobs_open_result">فتح</string>
     <string name="creative_jobs_bring_audio">أضف صوتك.</string>

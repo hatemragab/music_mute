@@ -45,6 +45,7 @@ class ArtifactDownloadTransportTest {
         val truncated = UrlConnectionArtifactDownloader { FakeConnection(200, byteArrayOf(1, 2), expected = 8) }
         try { truncated.download("https://storage.invalid/output", File(temporary.root, "partial")) { bytes, total -> progress += bytes to total }; fail("Truncated body accepted") }
         catch (error: ArtifactException) { assertEquals(ArtifactProblem.TRANSFER, error.problem) }
+        assertEquals(0L to 8L, progress.first())
         assertEquals(2L to 8L, progress.last())
     }
 

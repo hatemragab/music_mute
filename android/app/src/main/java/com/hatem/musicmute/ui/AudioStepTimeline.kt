@@ -103,7 +103,7 @@ private fun ServerTimingRow(label: String, durationMs: Long, complete: Boolean) 
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         val duration = String.format(java.util.Locale.getDefault(), "%.1f s", durationMs / 1000.0)
         Text(if (complete) duration else stringResource(R.string.timing_partial, duration),
-            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace))
+            style = MaterialTheme.typography.bodyMedium)
     }
 }
 

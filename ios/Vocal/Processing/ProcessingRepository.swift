@@ -86,7 +86,7 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
     await publish(captured)
   }
 
-  func submit(prepared: PreparedInput, trimEnabled: Bool = false) async throws -> UploadOperation {
+  func submit(prepared: PreparedInput, trimEnabled: Bool = true) async throws -> UploadOperation {
     let fence = try requireSession(owner: prepared.ownerUid)
     let operation = try await store.createOperation(prepared: prepared)
     _ = try await store.update(id: operation.operationId, ownerUid: fence.uid) {
@@ -199,10 +199,10 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
     let fence = try requireSession()
     let job = try await api.rename(id: jobId, displayName: displayName)
     try check(fence)
-    var jobs = try await store.cachedJobs(ownerUid: fence.uid)
+    var jobs = try await store.libraryJobs(ownerUid: fence.uid)
     if let index = jobs.firstIndex(where: { $0.id == job.id }) {
       jobs[index] = job
-      try await store.saveJobs(jobs, ownerUid: fence.uid)
+      try await store.saveLibraryJobs(jobs, ownerUid: fence.uid)
     }
     return job
   }
@@ -211,8 +211,8 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
     let fence = try requireSession()
     try await api.delete(id: jobId)
     try check(fence)
-    let jobs = try await store.cachedJobs(ownerUid: fence.uid).filter { $0.id != jobId }
-    try await store.saveJobs(jobs, ownerUid: fence.uid)
+    let jobs = try await store.libraryJobs(ownerUid: fence.uid).filter { $0.id != jobId }
+    try await store.saveLibraryJobs(jobs, ownerUid: fence.uid)
   }
 
   private func cancellation(operationId: UUID, fence: SessionFence) async throws -> JobMutation {

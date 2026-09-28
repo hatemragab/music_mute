@@ -1,0 +1,63 @@
+{
+  "notice": "Sanitized selected fields from 2026-09-27; IDs and delivery URL are synthetic. Not a complete provider schema.",
+  "formats_selected": [
+    {
+      "format_id": "140",
+      "ext": "m4a",
+      "acodec": "mp4a.40.2",
+      "vcodec": "none",
+      "abr": 129.481,
+      "asr": 44100,
+      "audio_channels": 2,
+      "filesize": 10271496,
+      "protocol": "https"
+    },
+    {
+      "format_id": "250",
+      "ext": "webm",
+      "acodec": "opus",
+      "vcodec": "none",
+      "abr": 65.377,
+      "asr": 48000,
+      "audio_channels": 2,
+      "filesize": 5186043,
+      "protocol": "https"
+    }
+  ],
+  "create_http_202": {
+    "format_id": "140",
+    "proxy_service": "youtube",
+    "site": "youtube",
+    "status": "queued",
+    "task_id": "00000000-0000-4000-8000-000000000001"
+  },
+  "status_processing_http_200": {
+    "progress": 100.0,
+    "site": "youtube",
+    "status": "processing"
+  },
+  "status_completed_http_200": {
+    "download_url": "/api/download/00000000-0000-4000-8000-000000000001",
+    "progress": 100,
+    "site": "youtube",
+    "status": "completed"
+  },
+  "result_http_200": {
+    "download_url": "http://storage.example.invalid/redacted-audio.m4a"
+  },
+  "unknown_task_http_404": {
+    "error": "Task not found"
+  },
+  "measured_artifact": {
+    "bytes": 10264232,
+    "duration_seconds": 634.625,
+    "audio_streams": 1,
+    "video_streams": 0,
+    "codec": "aac",
+    "sample_rate_hz": 44100,
+    "channels": 2,
+    "bitrate_bits_per_second": 127999,
+    "embedded_title_present": false,
+    "full_decode_exit_code": 0
+  }
+}

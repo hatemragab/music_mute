@@ -22,19 +22,43 @@ class LibraryStoreTest {
     )
 
     @Test
+    fun legacyHistoryIsRemovedWhileLibraryAndPendingImportsSurvive() = runTest {
+        val root = kotlin.io.path.createTempDirectory().toFile()
+        val pending = com.hatem.musicmute.processing.UrlImportRecord("owner", "https://youtube.com/watch?v=test", "request")
+        val document = com.hatem.musicmute.processing.ProcessingDocument(
+            snapshots = listOf(job("ready"), job("running", "processing"), job("failed", "failed")),
+            urlImports = listOf(pending),
+            library = listOf(StoredLibraryTrack(job("saved"), starred = true)),
+        )
+        val file = java.io.File(com.hatem.musicmute.processing.processingOwnerDirectory(root, "owner"), "processing.json")
+        file.parentFile!!.mkdirs()
+        file.writeText(kotlinx.serialization.json.Json.encodeToString(com.hatem.musicmute.processing.ProcessingDocument.serializer(), document))
+        val store = ProcessingStore(root, backgroundScope)
+        assertEquals(setOf("ready", "saved"), store.library("owner").first().map { it.job.id }.toSet())
+        assertEquals(listOf(pending), store.urlImports("owner").first())
+        val migrated = kotlinx.serialization.json.Json.decodeFromString(com.hatem.musicmute.processing.ProcessingDocument.serializer(), file.readText())
+        assertTrue(migrated.snapshots.isEmpty())
+        assertTrue(migrated.library.single { it.job.id == "saved" }.starred)
+        store.updateLibraryJobs("owner", listOf(job("new-running", "processing")))
+        val updated = kotlinx.serialization.json.Json.decodeFromString(com.hatem.musicmute.processing.ProcessingDocument.serializer(), file.readText())
+        assertTrue(updated.snapshots.isEmpty())
+        assertEquals(setOf("ready", "saved"), updated.library.map { it.job.id }.toSet())
+    }
+
+    @Test
     fun explicitRenameWinsOverAnOlderCachedPageWithTheSameTimestamp() = runTest {
         val store = ProcessingStore(kotlin.io.path.createTempDirectory().toFile(), backgroundScope)
         val original = job("renamed")
-        store.saveSnapshots("owner", listOf(original))
+        store.updateLibraryJobs("owner", listOf(original))
         store.updateLibraryJob("owner", original.copy(displayName = "Updated title"))
-        store.saveSnapshots("owner", listOf(original))
+        store.updateLibraryJobs("owner", listOf(original))
         assertEquals("Updated title", store.library("owner").first().single().job.displayName)
     }
 
     @Test
     fun twoConcurrentStarTogglesCancelEachOtherWithoutWaitingForUiEmission() = runTest {
         val store = ProcessingStore(kotlin.io.path.createTempDirectory().toFile(), backgroundScope)
-        store.saveSnapshots("owner", listOf(job("starred")))
+        store.updateLibraryJobs("owner", listOf(job("starred")))
         coroutineScope { repeat(2) { launch { store.toggleLibraryStar("owner", "starred") } } }
         assertFalse(store.library("owner").first().single().starred)
     }
@@ -42,9 +66,9 @@ class LibraryStoreTest {
     @Test
     fun completedCatalogSurvivesFirstPageRefreshAndKeepsLocalChoices() = runTest {
         val store = ProcessingStore(kotlin.io.path.createTempDirectory().toFile(), backgroundScope)
-        store.saveSnapshots("owner", listOf(job("old"), job("running", "processing")))
+        store.updateLibraryJobs("owner", listOf(job("old"), job("running", "processing")))
         store.updateLibraryFlags("owner", "old", starred = true, hidden = true)
-        store.saveSnapshots("owner", listOf(job("new")))
+        store.updateLibraryJobs("owner", listOf(job("new")))
         val entries = store.library("owner").first()
         assertEquals(setOf("old", "new"), entries.map { it.job.id }.toSet())
         assertTrue(entries.single { it.job.id == "old" }.starred)
@@ -55,9 +79,9 @@ class LibraryStoreTest {
     @Test
     fun confirmedDeletionCannotBeResurrectedByAnOlderSnapshot() = runTest {
         val store = ProcessingStore(kotlin.io.path.createTempDirectory().toFile(), backgroundScope)
-        store.saveSnapshots("owner", listOf(job("removed")))
+        store.updateLibraryJobs("owner", listOf(job("removed")))
         store.removeLibraryJob("owner", "removed")
-        store.saveSnapshots("owner", listOf(job("removed")))
+        store.updateLibraryJobs("owner", listOf(job("removed")))
         assertTrue(store.library("owner").first().isEmpty())
     }
 
@@ -66,7 +90,7 @@ class LibraryStoreTest {
         val root = kotlin.io.path.createTempDirectory().toFile()
         val firstJob = SupervisorJob()
         val store = ProcessingStore(root, CoroutineScope(firstJob + Dispatchers.IO))
-        store.saveSnapshots("owner", listOf(job("persisted")))
+        store.updateLibraryJobs("owner", listOf(job("persisted")))
         store.updateLibraryFlags("owner", "persisted", starred = true)
         firstJob.cancelAndJoin()
         val reopened = ProcessingStore(root, backgroundScope)

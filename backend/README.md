@@ -3,17 +3,29 @@
 NestJS backend for the MusicMute native apps. Includes Firebase authentication,
 profiles, installation/version tracking, voluntary verification, password recovery,
 shared Redis limits, processing-access policy and logout-all. MongoDB, external
-Redis and S3 provide the infrastructure foundation. Existing audio history,
+Redis and S3 provide the infrastructure foundation. Audio-processing availability
+is controlled by backend policy and capacity. Existing audio history,
 completed-result access, cancellation, deletion, and notifications remain supported.
-New audio processing is temporarily unavailable while the processing architecture
-is redesigned.
 
 - [API client contract](../docs/api/client-contract.md)
 - [OpenAPI HTTP contract](openapi.yaml)
-- [URL imports: private downloader, configuration, cleanup, and verification](../ytdlp_test/README.md)
+- [URL imports: private provider adapter, configuration, cleanup, and verification](../video_providers/videoscale/README.md)
 - [Administrator dashboard setup](../dashboard/README.md)
 - [Zalando guideline index](../docs/backend-security/zalando-guidelines-index.md)
 - [Exhaustive route and security matrix](../docs/backend-security/route-matrix.md)
+
+## Default queue capacity
+
+Each account defaults to 20 waiting jobs (`awaiting_upload` plus `queued`) and
+one processing job. Admission rejects a new job with `PROCESSING_LIMIT_REACHED`
+(HTTP 409) when its waiting capacity is full. Existing monthly and storage limits
+still apply. Saved global account policies take precedence: deployments with a
+saved limit of 3 require an explicit administrator update of `max_waiting_jobs`
+to 20; changing the source default does not migrate stored policies.
+
+API preflight: [Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+read on 2026-09-28; rules 106 (compatibility) and 151 (success/error responses).
+Existing routes, authorization and response shapes are preserved.
 
 ## Requirements and local run
 
@@ -38,18 +50,29 @@ server. Production Compose also runs only the API.
 - Health endpoints do not claim AWS connectivity. Enabled audio processing
   separately checks S3 privacy, versioning and retention prerequisites at startup.
 - Readiness also does not validate Firebase credentials or provider settings.
+- Public release resources are `GET /privacy`, `GET /delete-account`,
+  `GET /support`, and `GET /public-policy`. They use repository-owned defaults,
+  require no authentication, contain no account lookup, and remain available when
+  optional publication overrides are absent.
 
 ## Environments
 
 For CapRover, use the repository-root `captain-definition` and set Container HTTP
-Port to **80**. See [CapRover deployment](docs/caprover.md) for build commands,
-environment variables, credentials and external Redis setup.
+Port to **80**. Configure runtime variables as described below; private acquisition
+app setup is in the [provider guide](../video_providers/videoscale/README.md).
 
 `APP_ENV=local` loads `.env.local`. Production and test ignore dotenv files, so
 CapRover's process environment is the only production configuration source.
 `NODE_ENV=production` must match `APP_ENV=production`. Actual environment files
 and service-account JSON files are ignored by Git; only safe examples are tracked.
 The production example intentionally contains invalid placeholders, not credentials.
+
+`PUBLIC_SITE_ORIGIN`, `PUBLIC_SUPPORT_EMAIL`, `PUBLIC_DEVELOPER_NAME`,
+`PUBLIC_DELETION_TIMEFRAME`, and `PUBLIC_RETENTION_NOTICE` may replace the public
+policy defaults. The origin must be an exact HTTPS origin without credentials,
+path, query, or fragment. Overrides are bounded and escaped; malformed values fail
+startup or page rendering without exposing the submitted value. Verify that the
+published support mailbox is monitored before store submission.
 
 MongoDB uses `MONGODB_URI`: a database-specific local URI in development and an
 Atlas `mongodb+srv` URI with certificate verification in production. Configure
@@ -60,8 +83,8 @@ Atlas already provides transaction support; standalone local MongoDB is insuffic
 
 After connecting, startup awaits Mongoose model initialization so collections and missing schema
 indexes are created before the API accepts traffic. The database user therefore
-needs index-management permission. The explicit
-[index operations](docs/auth-operations.md) remain available for audits.
+needs index-management permission. Audit declared schema indexes before any
+separately authorized database maintenance.
 
 `AWS_REGION` and `S3_BUCKET` prepare the S3 integration. `StorageClient` uses the
 AWS SDK v3 standard credential chain. Locally use an AWS profile; on the VPS use
@@ -199,7 +222,8 @@ forces API and Redis restarts, and checks outage responses and reconnect. It nev
 to configured Atlas/S3 accounts or existing local databases. Temporary test data
 and owned child processes are cleaned up afterward.
 
-See [VPS operations](docs/vps.md).
+For provider runtime isolation and scratch limits, see
+[provider operations](../video_providers/videoscale/README.md).
 
 The [API client contract](../docs/api/client-contract.md) and
 [OpenAPI](openapi.yaml) define the current authentication, account, and device
@@ -254,16 +278,38 @@ API preflight: https://opensource.zalando.com/restful-api-guidelines/ read on
 2026-09-26; rules 101 (OpenAPI), 104 (security), 106 (compatibility), 118
 (snake_case), and 176 (problem responses). Existing auth and errors are preserved.
 
-## Mobile intake after downloader removal
+## Client intake
 
 `POST /jobs` accepts prepared local files (`audio_file` or `video_file`,
 `source_kind: file`). It rejects the removed device URL-upload flow and
 `source_url` request fields. All link acquisition uses `POST /media-imports`.
 The public media policy no longer publishes device source-download bounds.
-Server imports still save original titles and URL attribution. This is a breaking
-retirement of old clients, with no compatibility route. See the
-[client contract](../docs/api/client-contract.md) and
-[validation record](../docs/mobile-url-acquisition-removal.md).
+Server imports save included titles and URL attribution. There is no old-device
+compatibility route. See the [client contract](../docs/api/client-contract.md).
+
+## Private SaaS acquisition
+
+Follow [provider architecture](../video_providers/README.md).
+`AudioAcquisitionClient` calls a private adapter through
+`AUDIO_ACQUISITION_API_URL` and `AUDIO_ACQUISITION_API_KEY`.
+Only the adapter holds the vendor credential and knows its task/download APIs.
+Audio bytes return through the adapter to NestJS for independent validation,
+bounded scratch storage, private S3 upload and normal worker submission.
+Included sanitized metadata is nullable MongoDB `extra_data`; no paid metadata
+request is made. Source titles use its optional `title` field.
+Replace providers by deploying another adapter with the same contract and
+changing these settings; no migration bridge or vendor-specific NestJS code.
+VideoScale enables the shared public-item site catalog; separate audio is checked
+per request, with live E2E evidence currently limited to YouTube. Run build-producing checks
+sequentially and distinguish local checks from the dated live evidence.
+
+Import maintenance reconciles terminal BullMQ executions in downloading,
+validating and uploading states every 30 seconds, preserving confirmed jobs
+without replaying acquisition. Unknown states retain the deadline fallback.
+Stage logs correlate with adapter diagnostics by opaque execution UUID. Fatal
+Node errors emit bounded code locations before the normal exit; infrastructure
+must retain logs across container deletion. See
+[reliability notes](../video_providers/videoscale/docs/IMPORT-RELIABILITY.md).
 
 ## Realtime processing
 
@@ -278,3 +324,16 @@ See [transfer performance](../docs/audio-transfer-performance/README.md) for con
 bucket checks, server/worker diagnostics, the synthetic benchmark and the opt-in
 `S3_TRANSFER_ACCELERATION_ENABLED` flag (default false). Regional management and
 private immutable grants remain required.
+
+### Monthly admission and URL import reservations
+
+New local jobs and URL imports are admitted while used plus reserved monthly
+processing seconds are below the limit. An accepted file runs in full even if
+its duration crosses that limit; subsequent submissions are blocked. URL imports
+reserve a temporary per-file-cap hold before acquisition, then atomically exchange
+it for measured job duration. The hold does not require a full file's allowance
+remaining. Failed/stalled imports release it. Measured duration reconciliation
+honors existing admission instead of rejecting an already accepted file.
+Existing authentication, per-file caps and transfer limits remain unchanged.
+Run `pnpm run test:imports:integration` for isolated Mongo concurrency, recovery,
+pre-acquisition rejection and one-minute-remaining regression coverage.

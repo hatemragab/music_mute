@@ -11,6 +11,23 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class JobHistoryControllerTest {
+    @Test fun rebindingOwnerWaitsForFreshHistoryInsteadOfRestoringJobs() = runTest {
+        val api = HistoryTestApi().apply { page = { JobPage(listOf(job("old"))) } }
+        val controller = JobHistoryController(api, this, now = { testScheduler.currentTime })
+        controller.bindOwner("owner")
+        controller.refresh()
+        runCurrent()
+        assertEquals(listOf("old"), controller.state.value.jobs.map { it.id })
+        controller.bindOwner(null)
+        controller.bindOwner("owner")
+        assertTrue(controller.state.value.jobs.isEmpty())
+        api.page = { JobPage(listOf(job("fresh"))) }
+        controller.refresh()
+        runCurrent()
+        assertEquals(listOf("fresh"), controller.state.value.jobs.map { it.id })
+        controller.close()
+    }
+
     @Test fun mutationDuringRefreshSchedulesOneFollowupForNewJob() = runTest {
         val pending = CompletableDeferred<JobPage>()
         var calls = 0
@@ -223,7 +240,7 @@ class JobHistoryControllerTest {
             fetch = { throw JobsFailure(JobsProblem.JOB_NOT_FOUND) }
         }
         val controller = JobHistoryController(api, this,
-            saveCached = { _, jobs -> saved += jobs.map { it.id } })
+            onJobsChanged = { _, jobs -> saved += jobs.map { it.id } })
         controller.bindOwner("owner")
         controller.refresh()
         runCurrent()

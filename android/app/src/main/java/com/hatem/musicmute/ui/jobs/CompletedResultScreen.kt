@@ -16,14 +16,16 @@ fun CompletedResultScreen(
     busy: Boolean,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
-    onSave: () -> Unit,
+    onSaveVoice: () -> Unit,
+    onSaveOriginal: () -> Unit,
     onShare: () -> Unit,
 ) {
     CreativeCard {
         if (availableOffline) Text(stringResource(R.string.creative_jobs_offline), color = MaterialTheme.colorScheme.primary)
         CreativePrimaryButton(onPlay, Modifier.fillMaxWidth().testTag("processing-play"), busy = busy) { Text(stringResource(R.string.creative_jobs_open_player)) }
         if (!availableOffline) OutlinedButton(onDownload, Modifier.fillMaxWidth(), enabled = !busy) { Text(stringResource(R.string.creative_jobs_keep_offline)) }
-        OutlinedButton(onSave, Modifier.fillMaxWidth(), enabled = !busy) { Text(stringResource(R.string.audio_export)) }
+        OutlinedButton(onSaveVoice, Modifier.fillMaxWidth(), enabled = !busy) { Text(stringResource(R.string.save_voice)) }
+        OutlinedButton(onSaveOriginal, Modifier.fillMaxWidth(), enabled = !busy) { Text(stringResource(R.string.save_original)) }
         OutlinedButton(onShare, Modifier.fillMaxWidth(), enabled = !busy) { Text(stringResource(R.string.audio_task_share)) }
         CreativeFeedback(stringResource(R.string.processing_output_notice))
     }

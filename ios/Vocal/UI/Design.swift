@@ -1,19 +1,16 @@
 import SwiftUI
 
 enum VocalStyle {
-  static let teal = Color(
-    uiColor: UIColor { traits in
-      traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.57, green: 0.85, blue: 0.75, alpha: 1)
-        : UIColor(red: 0.08, green: 0.51, blue: 0.45, alpha: 1)
-    })
-  static let mint = Color(red: 0.57, green: 0.85, blue: 0.75)
+  // Keep the legacy name while sharing Android's current accent across existing views.
+  static let teal = Color(red: 1, green: 0.506, blue: 0.29)
+  static let mint = teal
   static func background(_ scheme: ColorScheme) -> Color {
     scheme == .dark
-      ? Color(red: 0.055, green: 0.085, blue: 0.08) : Color(red: 0.97, green: 0.965, blue: 0.94)
+      ? Color(red: 0.063, green: 0.067, blue: 0.082)
+      : Color(red: 0.97, green: 0.965, blue: 0.94)
   }
   static func card(_ scheme: ColorScheme) -> Color {
-    scheme == .dark ? Color(red: 0.10, green: 0.14, blue: 0.13) : .white
+    scheme == .dark ? Color(red: 0.098, green: 0.106, blue: 0.129) : .white
   }
 }
 
@@ -21,13 +18,21 @@ struct Waveform: View {
   var color: Color = VocalStyle.teal
   var body: some View {
     GeometryReader { geometry in
-      HStack(alignment: .center, spacing: min(5, geometry.size.width / 35)) {
-        ForEach(
-          Array(
-            [0.22, 0.44, 0.7, 0.4, 0.95, 0.62, 0.35, 0.8, 0.5, 0.3, 0.65, 0.4, 0.2].enumerated()),
-          id: \.offset
-        ) { _, value in
-          Capsule().fill(color).frame(height: geometry.size.height * value)
+      let bars: [(height: CGFloat, opacity: Double, width: CGFloat)] = [
+        (0.23, 0.24, 1),
+        (0.42, 0.38, 1),
+        (0.63, 0.56, 1),
+        (1, 1, 1.7),
+        (0.63, 0.56, 1),
+        (0.42, 0.38, 1),
+        (0.23, 0.24, 1),
+      ]
+      let barWidth = max(2, min(geometry.size.width / 18, 9))
+      HStack(alignment: .center, spacing: min(5, geometry.size.width / 28)) {
+        ForEach(Array(bars.enumerated()), id: \.offset) { _, bar in
+          Capsule().fill(color.opacity(bar.opacity)).frame(
+            width: barWidth * bar.width,
+            height: geometry.size.height * bar.height)
         }
       }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }.accessibilityHidden(true)
@@ -48,8 +53,8 @@ struct PrimaryButtonStyle: ButtonStyle {
   @Environment(\.isEnabled) private var enabled
   func makeBody(configuration: Configuration) -> some View {
     configuration.label.font(.headline).frame(maxWidth: .infinity, minHeight: 52)
-      .foregroundStyle(.white).background(
-        Color(red: 0.08, green: 0.51, blue: 0.45).opacity(
+      .foregroundStyle(.black).background(
+        VocalStyle.teal.opacity(
           enabled ? (configuration.isPressed ? 0.75 : 1) : 0.4),
         in: RoundedRectangle(cornerRadius: 16))
   }

@@ -24,7 +24,7 @@ struct JobSourceMetadata: Codable, Equatable, Sendable {
     sourceTitle: String? = nil, sourceKind: JobSourceKind? = nil,
     clientStartedAt: Date? = nil, sourceURL: String? = nil,
     policyVersion: Int? = nil, preparationProfileId: String? = nil, source: String? = nil,
-    trimEnabled: Bool = false
+    trimEnabled: Bool = true
   ) {
     self.trimEnabled = trimEnabled
     self.policyVersion = policyVersion

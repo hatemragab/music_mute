@@ -1,5 +1,6 @@
-import { AlertCircle, AudioLines, LoaderCircle, RefreshCw } from "lucide-react";
+import { AlertCircle, LoaderCircle, RefreshCw } from "lucide-react";
 
+import { BrandMark } from "@/components/brand-mark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,9 +21,7 @@ export function SignInPage() {
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,var(--brand-glow),transparent_36%),radial-gradient(circle_at_bottom_right,var(--brand-glow-soft),transparent_32%)]" />
       <Card className="relative w-full max-w-md border-border/80 bg-card/95 shadow-2xl shadow-primary/5 backdrop-blur">
         <CardHeader className="space-y-4">
-          <div className="flex size-12 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
-            <AudioLines aria-hidden="true" className="size-6" />
-          </div>
+          <BrandMark className="size-12 rounded-xl shadow-lg shadow-primary/20" />
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
               MusicMute Operations

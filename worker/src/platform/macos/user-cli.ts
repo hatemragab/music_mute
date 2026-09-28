@@ -23,7 +23,7 @@ import {
   WorkerControlPlaneClient,
   type WorkerMachineStatus,
 } from "../../runtime/control-plane-client.js";
-import { loadRuntimeConfig } from "../../runtime/runtime-config.js";
+import { readMaintenanceConnection } from "../../runtime/runtime-config.js";
 import { readHiddenTerminalLine } from "./secret-prompt.js";
 import { WorkerEnrollmentError } from "../../enrollment/enrollment-client.js";
 import {
@@ -93,6 +93,7 @@ interface MacUserHost {
 }
 
 export const MAC_USER_USAGE = `Usage:
+  mw --version [--json]
   mw install --label <name> [--group-id <id>] [--new-code] [--json]
   mw install [--json]  # recover a preserved paired installation
   mw status [--local] [--watch] [--json]
@@ -523,7 +524,7 @@ async function runUnlocked(
       const operation =
         context.unpair ??
         (async (forced: boolean) => {
-          const config = await loadRuntimeConfig(layout.configPath);
+          const config = await readMaintenanceConnection(layout.configPath);
           return await new WorkerControlPlaneClient({
             baseUrl: config.backendBaseUrl,
             credential: config.credential,
@@ -1321,7 +1322,7 @@ async function readRemoteStatus(
     const request = (
       remoteStatus ??
       (async () => {
-        const config = await loadRuntimeConfig(layout.configPath);
+        const config = await readMaintenanceConnection(layout.configPath);
         return await new WorkerControlPlaneClient({
           baseUrl: config.backendBaseUrl,
           credential: config.credential,
@@ -1810,6 +1811,11 @@ function formatActionResult(
     0,
     new Set(["action", "schemaVersion", "status"]),
   );
+  if (value.capacityRequalificationRequired === true)
+    lines.push(
+      "",
+      "Updated with one worker per GPU. Benchmark the new release before enabling a second worker; backend approval is still required.",
+    );
   return lines.join("\n");
 }
 

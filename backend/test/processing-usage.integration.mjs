@@ -323,15 +323,15 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   ]);
   assert.equal(
     outcomes.filter((outcome) => outcome.status === 'fulfilled').length,
-    1,
+    2,
   );
   assert.equal(
     outcomes.filter((outcome) => outcome.status === 'rejected').length,
-    1,
+    0,
   );
   const current = await usage.readUsage(owner);
-  assert.equal(current.processing.reservedSeconds, 40);
-  assert.equal(current.processing.remainingSeconds, 20);
+  assert.equal(current.processing.reservedSeconds, 80);
+  assert.equal(current.processing.remainingSeconds, 0);
 
   const secondAccount = new Types.ObjectId();
   await users.create({
@@ -711,7 +711,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   const reduced = await usage.readUsage(owner);
   assert.equal(reduced.effectivePolicySource, 'account_override');
   assert.equal(reduced.processing.limitSeconds, 10);
-  assert.equal(reduced.processing.reservedSeconds, 40);
+  assert.equal(reduced.processing.reservedSeconds, 80);
   assert.equal(reduced.processing.remainingSeconds, 0);
   assert.deepEqual(reduced.availability, {
     status: 'blocked',
@@ -719,7 +719,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   });
 });
 
-test('account admission atomically accepts only three waiting jobs', async (t) => {
+test('account admission atomically accepts only twenty waiting jobs', async (t) => {
   const native = await IsolatedServices.create();
   t.after(() => native.stop());
   const { mongoUri } = await native.startDatabases({ replicaSet: true });
@@ -829,30 +829,30 @@ test('account admission atomically accepts only three waiting jobs', async (t) =
   };
 
   const outcomes = await Promise.allSettled(
-    Array.from({ length: 4 }, () => createWaitingJob()),
+    Array.from({ length: 21 }, () => createWaitingJob()),
   );
   assert.equal(
     outcomes.filter((outcome) => outcome.status === 'fulfilled').length,
-    3,
+    20,
   );
   const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
   assert.equal(rejected.reason.getResponse().code, 'PROCESSING_LIMIT_REACHED');
   assert.deepEqual(rejected.reason.getResponse().capacity, {
-    waitingJobs: 3,
-    maxWaitingJobs: 3,
+    waitingJobs: 20,
+    maxWaitingJobs: 20,
     processingJobs: 0,
     maxProcessingJobs: 1,
   });
   assert.equal(
     await jobs.countDocuments({ userId: owner, status: 'awaiting_upload' }),
-    3,
+    20,
   );
   assert.equal(
     await connection.model('ProcessingReservation').countDocuments({
       accountId: owner,
       state: 'reserved',
     }),
-    3,
+    20,
   );
 
   const claimable = await jobs

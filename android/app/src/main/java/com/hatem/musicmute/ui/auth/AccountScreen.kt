@@ -159,7 +159,11 @@ internal fun AccountScreen(
 @Composable
 internal fun AccountPublicLinks() {
     val context = LocalContext.current
-    listOf(BuildConfig.PRIVACY_URL to R.string.account_privacy, BuildConfig.DELETION_URL to R.string.account_deletion_help).forEach { (url, label) ->
+    listOf(
+        BuildConfig.PRIVACY_URL to R.string.account_privacy,
+        BuildConfig.DELETION_URL to R.string.account_deletion_help,
+        BuildConfig.SUPPORT_URL to R.string.account_support,
+    ).forEach { (url, label) ->
         if (url.isNotBlank()) TextButton(onClick = {
             runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
         }) { Text(stringResource(label)) }

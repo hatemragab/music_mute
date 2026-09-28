@@ -5,7 +5,19 @@ Firebase Authentication and signed S3 transfers. It is separate from the admin
 dashboard. The Android app is the visual and journey reference; approved browser
 adaptations are recorded in [`tasks/`](tasks/README.md).
 
-## Local development
+## URL imports
+
+URL imports go through NestJS and a private SaaS adapter, not browser extraction
+or direct vendor calls. NestJS validates the returned audio and uploads it to
+private S3 for processing. The catalog includes YouTube, Instagram/Reels, TikTok,
+Vimeo, SoundCloud and Facebook/Reels. Actual separate audio availability is
+checked per request; enabled sites are not universal acquisition guarantees. Live import/job updates use
+WebSocket snapshots. See [provider architecture](../video_providers/README.md).
+Failed imports stop their loading indicator and show localized source/service
+errors. Closing a failed import allows a deliberate new submission; the UI does
+not automatically retry provider downloads.
+
+## Development setup
 
 Use Node 24 and npm. Install with `npm ci --ignore-scripts`, copy
 `.env.local.example` to an ignored `.env.local`, and fill in the **public Firebase
@@ -45,9 +57,12 @@ desktop Google Chrome and synthetic fixtures; it writes screenshots to ignored
 only by Vite from `tests/preview.html`; the production Docker image excludes it.
 Real Firebase/production API integration requires a dedicated test identity.
 The API web-platform support was deployed on 2026-09-26 and verified by health,
-isolated integration tests and browser-origin CORS preflight; authenticated
-production journeys have not been exercised. Backend verification lives in
-`backend/`.
+isolated integration tests and browser-origin CORS preflight. On 2026-09-27,
+a generated WAV completed real authenticated browser preparation, signed S3
+upload, worker processing and playback. Account lifecycle and the remaining
+production journeys are still pending; see the
+[implementation ledger](../docs/production-readiness-implementation-2026-09-27.md).
+Backend verification lives in `backend/`.
 
 ## Startup recovery
 
@@ -137,3 +152,41 @@ This takes effect for tabs that have loaded a build containing the monitor. Tabs
 opened before its first deployment still need one manual refresh. Reusing the same
 built image keeps the same version; changing only runtime configuration does not
 trigger a reload.
+
+## Production failure recovery and monitoring
+
+The root React boundary shows an English/Arabic reload action after a render
+failure. It does not silently retry mutations or claim an unfinished upload was
+saved. Runtime monitoring is opt-in: set `PUBLIC_SENTRY_ENABLED=true` and
+`PUBLIC_SENTRY_DSN` to the web project's public HTTPS DSN. With monitoring disabled,
+no SDK client is initialized. Error envelopes allow only a generic failure label,
+build identity and same-origin asset paths/line numbers; messages, user context,
+request URLs, query strings, breadcrumbs, replay and tracing are excluded. Reporting
+is capped at ten events per minute per page. Source-map uploads remain a separate
+release step requiring a build-only credential.
+
+The server sends host-only HSTS (`max-age=31536000`). CapRover terminates HTTPS
+and must preserve the header. CSP permits `blob:` only for media and workers,
+including local audio inspection; production-server browser coverage guards this.
+Upload checksums use canonical padded base64 SHA-256, matching API/S3 admission.
+
+Run `npm run build` before browser tests that exercise the production server.
+`TEST_BROWSER=firefox npm run test:e2e` and `TEST_BROWSER=webkit npm run test:e2e`
+exercise the same fixtures with Playwright's installed engines; install them with
+`npx playwright install firefox webkit`. WebKit engine results are not a claim of
+physical Safari/iPhone certification. Default browser tests still use installed Chrome.
+
+## Current jobs and Library (2026-09-28)
+
+Home and the processing list hide terminal cloud jobs (`ready`, `failed`,
+`cancelled`); unfinished local reviews and recoverable local imports stay
+accessible. Creation date and time are shown on Home job cards. Filtering is
+presentation only: no deletion request, database mutation or media cleanup is
+performed, and the administrator dashboard retains job history.
+
+Library has explicit cursor-based Load more with loading/error feedback. Native
+Library storage preserves previously discovered completed audio; browser Library
+requests `status=ready`, retains loaded pages, and bounds live subscriptions to
+the newest page plus nine tail pages. See
+[release evidence](../docs/client-current-jobs-release-2026-09-28.md) for validation
+and distribution status.

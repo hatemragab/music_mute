@@ -29,6 +29,18 @@ policy. Source changes and local test results do not establish live availability
 
 ## Architecture
 
+URL imports use private SaaS adapters:
+`client → NestJS → private adapter → SaaS`, then
+`audio bytes → adapter → NestJS validation → private S3 → worker`.
+VideoScale accepts the enabled public item sites, including YouTube, Instagram,
+TikTok, Vimeo, SoundCloud and Facebook/Reels; usable separate audio is required.
+Only YouTube has recorded live end-to-end proof. Provider-specific APIs and
+credentials stay outside NestJS; switch vendors with a contract-compatible
+adapter and generic URL/key settings. Included metadata is saved as nullable
+`extra_data` without paid enrichment. Both adapter and backend scratch are
+bounded and cleaned up. See [provider architecture](video_providers/README.md)
+for the contract, security boundaries, setup and verification.
+
 ```mermaid
 flowchart LR
     Apps[Android and iOS apps] --> API[NestJS API]
@@ -100,9 +112,11 @@ Account deletion is available in both apps with recent authentication, an exact
 15-day recovery deadline, durable request recovery, and account-scoped local
 cleanup. The backend immediately blocks new costly work, fences active work, and
 coordinates storage and identity deletion after the deadline. Public
-`/delete-account` and `/privacy` pages require
-operator-supplied publication settings. See the
-[deletion operations guide](docs/account-deletion.md) for cleanup and recovery behavior.
+`/delete-account`, `/privacy`, `/support`, and `/public-policy` resources ship
+with repository-owned publication defaults and allow validated operator overrides.
+See the [deletion operations guide](docs/account-deletion.md) for cleanup and
+recovery behavior and the
+[Google Play release guide](docs/google-play-release.md) for store declarations.
 
 Both apps use `com.hatem.musicmute`. This replaces the earlier development ID
 `com.hatem.vocal`; the operating systems treat them as separate apps, so old
@@ -155,8 +169,8 @@ device/session synchronization; iOS also requires APNs provisioning/token setup.
 Client SDK integration does not establish live provider configuration or delivery.
 Local files use the backend's short-lived signed S3 upload grants. URL imports
 use `/media-imports`: the server acquires audio and uploads it to S3. Mobile
-source downloaders and their packages are removed. See
-[the removal and validation record](docs/mobile-url-acquisition-removal.md).
+clients never acquire provider media or hold SaaS credentials. See
+[the provider flow](video_providers/README.md).
 
 The production Android and iOS configuration files are local-only and ignored by
 Git. They contain client identifiers that are shipped in the apps and therefore

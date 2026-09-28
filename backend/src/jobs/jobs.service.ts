@@ -1,4 +1,5 @@
 import type { ImportMeasurements } from './job-stage-timing.js';
+import { normalizeExtraData, type JobExtraData } from './job-extra-data.js';
 import { Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
@@ -47,6 +48,8 @@ export class JobsService {
     metadata: JobMetadata = {},
     trimEnabled = true,
     serverTiming?: ImportMeasurements,
+    extraData: JobExtraData | null = null,
+    importReservationId?: Types.ObjectId,
   ) {
     if (typeof trimEnabled !== 'boolean') throw authError('INVALID_INPUT');
     const normalized = normalizeJobMetadata(metadata);
@@ -70,6 +73,14 @@ export class JobsService {
             .session(session)
             .lean();
           if (repeated) return repeated;
+          // Exchange the import hold for the measured job reservation atomically.
+          if (importReservationId)
+            await this.usage.releaseImport(
+              importReservationId,
+              owner,
+              session,
+              true,
+            );
           const admissionSnapshot = await this.admission.assertNewWork(
             owner,
             input,
@@ -86,6 +97,7 @@ export class JobsService {
                 requestId,
                 requestHash: hash,
                 sourceTitle: normalized.sourceTitle ?? null,
+                extra_data: normalizeExtraData(extraData),
                 displayName: normalized.sourceTitle ?? null,
                 sourceKind: normalized.sourceKind ?? null,
                 sourceUrl: normalized.sourceUrl ?? null,

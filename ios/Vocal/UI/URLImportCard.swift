@@ -6,7 +6,7 @@ struct URLImportCard: View {
   @State private var source = ""
   @FocusState private var sourceFocused: Bool
   @State private var rights = false
-  @State private var trimEnabled = false
+  @State private var trimEnabled = true
   @State private var localError: String?
 
   var body: some View {
@@ -59,7 +59,7 @@ struct URLImportCard: View {
     .onChange(of: model.owner) { _, _ in
       source = ""
       rights = false
-      trimEnabled = false
+      trimEnabled = true
       localError = nil
     }
   }

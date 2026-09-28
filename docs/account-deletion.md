@@ -3,6 +3,14 @@
 MusicMute uses one account-deletion lifecycle across the backend, Android, iOS,
 the administrator dashboard, and the public deletion page.
 
+The external request resource is `GET https://api.music-mute.com/delete-account`.
+It works without authentication or an installed app, identifies MusicMute, gives
+an actionable support-email route, lists the data deleted and retained, and links
+the privacy and support resources. `GET /public-policy` publishes the same URLs,
+policy revision, and deletion timing as bounded JSON for release tooling. Public
+requests never accept an email, token, or deletion mutation; support verifies
+ownership before using the authenticated deletion workflow.
+
 ## User-visible contract
 
 - A deletion request requires the authenticated owner and authentication no more
@@ -49,6 +57,13 @@ authorization. They are not completed by local tests.
 
 - [ ] Verify the deployed API returns one stable operation ID and an exact 15-day
       deadline for duplicate requests.
+- [ ] Verify `/privacy`, `/delete-account`, `/support`, and `/public-policy` return
+      HTTP 200 from an unauthenticated external connection with a `no-store`
+      cache policy; check that the public URLs and displayed developer identity
+      match the Play Console listing.
+- [ ] Send and receive a sanitized test message through the published support
+      mailbox. A syntactically valid address or rendered `mailto:` link does not
+      prove mailbox delivery or monitoring.
 - [ ] Verify costly endpoints reject the deleting account and recovery remains
       available before the deadline.
 - [ ] Verify Firebase session revocation, disablement, and deletion in the intended

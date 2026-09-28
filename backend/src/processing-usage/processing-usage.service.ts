@@ -211,6 +211,45 @@ export class ProcessingUsageService {
     };
   }
 
+  /** Hold capacity before provider submission; any positive remaining allowance admits one full file. */
+  async reserveForImport(
+    importId: Types.ObjectId,
+    accountId: Types.ObjectId,
+    duration: number,
+    session: ClientSession,
+    now = new Date(),
+  ) {
+    this.assertTransaction(session);
+    const existing = await this.reservations
+      .findById(importId)
+      .session(session)
+      .lean();
+    // A claimed import may submit only once, even after a crash or failure.
+    if (existing) throw jobError('IDEMPOTENCY_CONFLICT');
+    await this.reserveForJob(importId, accountId, duration, session, now);
+  }
+
+  async releaseImport(
+    importId: Types.ObjectId,
+    accountId: Types.ObjectId,
+    session: ClientSession,
+    required = false,
+  ) {
+    this.assertTransaction(session);
+    const reservation = await this.reservations
+      .findOne({ _id: importId, accountId, state: 'reserved' })
+      .session(session)
+      .lean();
+    if (!reservation) {
+      if (required) throw jobError('UPLOAD_RESERVATION_EXPIRED');
+      return;
+    }
+    await this.settleJob(
+      { _id: importId, userId: accountId, status: 'cancelled' },
+      session,
+    );
+  }
+
   async reserveForJob(
     jobId: Types.ObjectId,
     accountId: Types.ObjectId,
@@ -247,13 +286,10 @@ export class ProcessingUsageService {
         {
           _id: periodId,
           $expr: {
-            $lte: [
+            // Admit based on usage BEFORE this file. The accepted file may cross the limit.
+            $lt: [
               {
-                $add: [
-                  '$processingUsedSeconds',
-                  '$processingReservedSeconds',
-                  processingSeconds,
-                ],
+                $add: ['$processingUsedSeconds', '$processingReservedSeconds'],
               },
               effective.values.monthlyProcessingSeconds,
             ],
@@ -714,22 +750,10 @@ export class ProcessingUsageService {
     const delta = processingSeconds - reservation.processingSeconds;
     if (delta === 0) return;
     const periodId = usagePeriodId(job.userId, reservation.periodKey);
-    const filter: Record<string, unknown> = { _id: periodId };
-    if (delta > 0)
-      filter.$expr = {
-        $lte: [
-          {
-            $add: [
-              '$processingUsedSeconds',
-              '$processingReservedSeconds',
-              delta,
-            ],
-          },
-          reservation.acceptedLimitSeconds,
-        ],
-      };
+    // An admitted file is processed in full even when its measured duration
+    // crosses the monthly limit. Future admissions see the adjusted total.
     const updated = await this.periods.updateOne(
-      filter,
+      { _id: periodId },
       {
         $inc: { processingReservedSeconds: delta, revision: 1 },
         $set: { lastMutationAt: new Date() },
@@ -742,7 +766,11 @@ export class ProcessingUsageService {
     await reservation.save({ session });
   }
 
-  async settleJob(job: Job, session: ClientSession, now = new Date()) {
+  async settleJob(
+    job: Pick<Job, '_id' | 'userId' | 'status'>,
+    session: ClientSession,
+    now = new Date(),
+  ) {
     this.assertTransaction(session);
     const reservation = await this.reservations
       .findById(job._id)

@@ -4,7 +4,7 @@ import {
 } from "./realtime/RealtimeProvider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { House, ListTodo, Library, Settings, UserRound } from "lucide-react";
+import { House, Library, Settings, UserRound } from "lucide-react";
 import {
   BrowserRouter,
   Link,
@@ -28,6 +28,7 @@ import { accentFor, applyAccent } from "./settings/accent";
 import { useSignedIn } from "./auth/AuthProvider";
 import type { RealtimeClient } from "./realtime/client";
 import { StartupScreen } from "./auth/StartupScreen";
+import { SoloSignalMark } from "./brand/SoloSignalMark";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -47,7 +48,6 @@ function Navigation() {
   const { t } = useI18n();
   const items = [
     { path: "/", label: "home", Icon: House },
-    { path: "/jobs", label: "jobs", Icon: ListTodo },
     { path: "/library", label: "library", Icon: Library },
     { path: "/settings", label: "settings", Icon: Settings },
   ] as const;
@@ -84,7 +84,7 @@ export function Shell({
         <div className="app-shell">
           <aside className="sidebar">
             <Link to="/" className="brand">
-              <span className="brand-mark">M</span>
+              <SoloSignalMark className="brand-mark" />
               <span>{t("brand")}</span>
             </Link>
             <Navigation />
@@ -95,7 +95,7 @@ export function Shell({
           <div className="main-area">
             <header className="mobile-header">
               <Link className="brand" to="/">
-                <span className="brand-mark">M</span>
+                <SoloSignalMark className="brand-mark" />
                 <span>{t("brand")}</span>
               </Link>
               <Link to="/account" aria-label={t("account")}>

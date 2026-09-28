@@ -1,5 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108">
+  <title>MusicMute Solo Signal</title>
   <rect width="108" height="108" fill="#123c37" />
-  <path d="M30 48v12M42 37v34M54 28v52M66 39v30M78 47v14"
-        fill="none" stroke="#96e6c7" stroke-width="6" stroke-linecap="round" />
+  <g fill="none" stroke="#96e6c7" stroke-linecap="round">
+    <path d="M24 49v10M84 49v10" stroke-width="6" opacity=".24" />
+    <path d="M34 43v22M74 43v22" stroke-width="7" opacity=".38" />
+    <path d="M44 36v36M64 36v36" stroke-width="8" opacity=".56" />
+    <path d="M54 25v58" stroke-width="12" />
+  </g>
 </svg>

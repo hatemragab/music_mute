@@ -26,15 +26,30 @@ links the protocol, tests and dated validation evidence.
   and [IMPLEMENTATION.md](docs/realtime-processing-queue/IMPLEMENTATION.md) for dated
   evidence. Local implementation does not establish deployment or production health.
 
-## Repository map
+## URL imports: private SaaS adapters
 
-| Directory          | Responsibility                                      | Guide                                          |
-| ------------------ | --------------------------------------------------- | ---------------------------------------------- |
-| `web-client/`      | End-user browser app (React, TypeScript, Vite, npm) | [`web-client/README.md`](web-client/README.md) |
-| `dashboard/`       | Administrator browser console; separate auth and UI | [`dashboard/README.md`](dashboard/README.md)   |
-| `backend/`         | NestJS API (pnpm); also read `backend/AGENTS.md`    | [`backend/README.md`](backend/README.md)       |
-| `android/`, `ios/` | Native apps and visual/product references           | Their component READMEs                        |
-| `worker/`          | Processing machines                                 | [`worker/README.md`](worker/README.md)         |
+Read [provider architecture](video_providers/README.md) and
+[provider instructions](video_providers/AGENTS.md) before changing URL imports.
+Clients submit to NestJS; a private adapter acquires audio from SaaS and returns
+bytes to NestJS for validation, private S3 upload and the existing worker flow.
+Only the adapter receives vendor credentials. NestJS uses generic
+`AUDIO_ACQUISITION_API_URL` / `AUDIO_ACQUISITION_API_KEY` settings.
+Keep included metadata in nullable, sanitized MongoDB `extra_data`, with no paid
+enrichment. Preserve bounded scratch cleanup and never expose provider URLs.
+Provider swaps require another contract-compatible adapter, not NestJS vendor
+branches. No extraction fallback, old-device compatibility or migration bridge
+is wanted for this flow. See the provider docs for current support and dated proof.
+
+## Component map
+
+| Directory          | Responsibility                                         | Guide                                                    |
+| ------------------ | ------------------------------------------------------ | -------------------------------------------------------- |
+| `web-client/`      | End-user browser app (React, TypeScript, Vite, npm)    | [`web-client/README.md`](web-client/README.md)           |
+| `dashboard/`       | Administrator browser console; separate auth and UI    | [`dashboard/README.md`](dashboard/README.md)             |
+| `backend/`         | NestJS API (pnpm); also read `backend/AGENTS.md`       | [`backend/README.md`](backend/README.md)                 |
+| `android/`, `ios/` | Native apps and visual/product references              | Their component READMEs                                  |
+| `worker/`          | Processing machines                                    | [`worker/README.md`](worker/README.md)                   |
+| `video_providers/` | Private SaaS audio adapters and provider documentation | [`video_providers/README.md`](video_providers/README.md) |
 
 The end-user web app lives entirely in `web-client/`. It follows the Android
 dark visual language and English/Arabic RTL journeys, but uses browser auth,

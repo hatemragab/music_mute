@@ -13,9 +13,11 @@ state on account change or logout.
 ## URL import
 
 Use existing `POST /media-imports` and owner-scoped import reads. Submit the URL,
-request ID, and supported options exactly as OpenAPI requires; poll until a job
-is assigned or failure is final, then follow that job. Do not download provider
-media in the browser or add third-party downloader services. Handle disabled
+request ID, and supported options exactly as OpenAPI requires; subscribe to
+existing realtime snapshots until a job is assigned or failure is final, then
+follow that job. Do not download provider media or call vendor APIs in the browser.
+NestJS delegates acquisition to a private SaaS adapter, validates audio and uploads
+it to S3. See [provider architecture](../../video_providers/README.md). Handle disabled
 imports, unsupported/single-item sources, invalid/private URLs, capacity and
 size/duration failures. Preserve source title and attribution.
 
@@ -52,10 +54,9 @@ and prevent duplicate submissions on reload or repeated clicks.
 ## Jobs and library
 
 Map all server statuses and errors from current source/OpenAPI; show real phase
-progress or indeterminate progress rather than fabricated percentages. Use
-visibility-aware bounded polling with cleanup, backoff and rate-limit handling.
-Do not introduce a new client WebSocket endpoint: the existing worker hint socket
-is not an end-user job channel. Implement supported cancel/retry/rename/delete
+progress or indeterminate progress rather than fabricated percentages. Reuse the
+authenticated end-user WebSocket snapshot transport and reconnect recovery;
+do not add polling or reuse the separate worker hint socket. Implement supported cancel/retry/rename/delete
 operations and their confirmation/reconciliation semantics.
 
 Use server-backed history/results across the same account. Favorites and hidden
