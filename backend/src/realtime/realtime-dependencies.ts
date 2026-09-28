@@ -25,6 +25,10 @@ const dependencies: Record<RealtimeResource, readonly string[]> = {
   'admin.overview': ['audio_jobs', 'app_releases', 'media_imports'],
   'admin.health': ['admin_alerts', 'app_releases'],
   'admin.alerts': ['admin_alerts'],
+  'admin.notifications': [
+    'notification_campaigns',
+    'notification_campaign_deliveries',
+  ],
   'admin.workers': ['worker_machines', 'worker_slots', 'worker_attempts'],
   'admin.worker': [
     'worker_machines',

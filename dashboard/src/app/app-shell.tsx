@@ -2,6 +2,7 @@ import { useLiveQuery } from "@/realtime/hooks";
 import { RealtimeProvider, ConnectionIndicator } from "@/realtime/provider";
 import {
   Activity,
+  BellRing,
   BriefcaseBusiness,
   ChevronRight,
   CircleGauge,
@@ -56,6 +57,12 @@ export const NAV_ITEMS: NavItem[] = [
     to: "/jobs",
     permission: "jobs.read",
     icon: BriefcaseBusiness,
+  },
+  {
+    label: "Push notifications",
+    to: "/notifications",
+    permission: "notifications.read",
+    icon: BellRing,
   },
   { label: "Users", to: "/users", permission: "users.read", icon: Users },
   {

@@ -981,6 +981,50 @@
       "responseCategory": "resource",
       "validationOwner": "dto",
       "successStatus": 200
+    },
+    {
+      "controller": "AdminNotificationsController",
+      "method": "GET",
+      "path": "/admin/notifications",
+      "permissions": ["notifications.read"],
+      "roles": ["owner"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "page",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminNotificationsController",
+      "method": "GET",
+      "path": "/admin/notifications/:id",
+      "permissions": ["notifications.read"],
+      "roles": ["owner"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminNotificationsController",
+      "method": "POST",
+      "path": "/admin/notifications",
+      "permissions": ["notifications.send"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "title": "Fixture announcement",
+        "body": "Fixture message",
+        "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
     }
   ]
 }
