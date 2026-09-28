@@ -119,3 +119,19 @@ gives the existing connection a heartbeat grace window before recovery.
 See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
 and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
 HTTP remains responsible for authentication, commands and file transfers.
+
+## Push notifications
+
+Owners can open **Push notifications**, compose an 80-character title and
+500-character message, review the preview, provide an audit reason, reauthenticate,
+and queue a broadcast to all eligible registered native devices. Broadcasts cannot
+be recalled. The page streams cursor-paginated FCM history over the shared socket.
+History includes content, creator, reason, timestamps and per-device pending,
+FCM-accepted, failed, invalid and skipped counts. No device tokens are exposed.
+An unresolved operation receipt disables further sending in that page session.
+
+This is broadcast history from this dashboard, not an inbox of job-result pushes.
+FCM acceptance does not prove device delivery or reading. Current Android clients
+show notification payloads in the background; they do not show announcement banners
+in the foreground. iOS display depends on APNs setup and notification permission.
+Web users without a native push registration are not reachable by this feature.

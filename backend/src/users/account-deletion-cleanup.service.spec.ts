@@ -248,6 +248,7 @@ describe('account deletion cleanup', () => {
     expect(f.connection.collection.mock.calls.map(([name]) => name)).toEqual(
       expect.arrayContaining([
         'audio_notification_outbox',
+        'notification_campaign_deliveries',
         'user_devices',
         'device_installation_owners',
         'push_registrations',

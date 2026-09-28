@@ -9,6 +9,7 @@ export const REALTIME_RESOURCES = [
   'admin.overview',
   'admin.health',
   'admin.alerts',
+  'admin.notifications',
   'admin.workers',
   'admin.worker',
   'admin.diagnostics',

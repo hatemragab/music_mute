@@ -13,6 +13,7 @@ export function realtimeResourcePath(
     "admin.job": `/admin/jobs/${encodeURIComponent(id ?? "")}`,
     "admin.overview": "/admin/overview",
     "admin.health": "/admin/health",
+    "admin.notifications": "/admin/notifications",
     "admin.alerts": "/admin/alerts",
     "admin.workers": "/admin/worker-fleet/machines",
     "admin.worker": `/admin/worker-fleet/machines/${encodeURIComponent(id ?? "")}`,

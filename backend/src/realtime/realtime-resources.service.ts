@@ -1,3 +1,4 @@
+import { AdminNotificationsService } from '../admin-notifications/admin-notifications.service.js';
 import { Injectable, ValidationPipe } from '@nestjs/common';
 import { QueueProjectionService } from './queue-projection.service.js';
 import { Types } from 'mongoose';
@@ -32,6 +33,7 @@ const permissions: Partial<Record<RealtimeResource, AdminPermission>> = {
   'admin.overview': 'overview.read',
   'admin.health': 'health.read',
   'admin.alerts': 'health.read',
+  'admin.notifications': 'notifications.read',
   'admin.workers': 'workers.read',
   'admin.worker': 'workers.read',
   'admin.diagnostics': 'workers.logs.read',
@@ -63,6 +65,7 @@ export class RealtimeResourcesService {
     private readonly recoveries: AdminAccountRecoveryService,
     private readonly uploads: ReleaseUploadService,
     private readonly queues: QueueProjectionService,
+    private readonly notifications: AdminNotificationsService,
   ) {}
 
   async read(
@@ -120,6 +123,8 @@ export class RealtimeResourcesService {
       case 'admin.health':
         this.empty(params);
         return this.health.read();
+      case 'admin.notifications':
+        return this.notifications.list(params);
       case 'admin.alerts':
         return this.alerts.list(params);
       case 'admin.workers':

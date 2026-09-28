@@ -8,6 +8,8 @@ export const ADMIN_ROLES = [
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export const PERMISSIONS = [
+  "notifications.read",
+  "notifications.send",
   "overview.read",
   "jobs.read",
   "jobs.manage",

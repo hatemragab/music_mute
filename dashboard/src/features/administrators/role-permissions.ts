@@ -9,6 +9,8 @@ export const ROLE_DETAILS: Record<
     description:
       "Full operational access, administrator management, audit, settings and releases.",
     permissions: [
+      "notifications.read",
+      "notifications.send",
       "overview.read",
       "jobs.read",
       "jobs.manage",

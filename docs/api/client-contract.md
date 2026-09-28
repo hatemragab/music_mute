@@ -286,3 +286,21 @@ Worker progress, completion, and failure requests accept optional bounded
 `execution_timings` snapshots. Deploy backend support before updating workers.
 The existing client `timing` and administrator `stage_timings` fields remain
 backward compatible; new UIs use `server_stage_timings` for authoritative totals.
+
+### Administrator announcement broadcasts
+
+Owner-only `POST /admin/notifications` accepts `{operation_id, title, body, reason}`
+with fresh authentication. Title/body limits are 80/500 characters after trimming;
+reason is required and limited to 500 characters. A UUID-v4 operation ID identifies
+one immutable command. A repeated command returns the same campaign; changed
+content under that ID conflicts. Creation returns 201 with the campaign snapshot,
+not a delivery receipt. Reconcile uncertain responses through `/admin/operations/:id`
+and read its `resource_id` at `GET /admin/notifications/:id` before another send.
+
+`GET /admin/notifications` uses `cursor` and `limit` (1–50/default 20), returning
+`items` and `next_cursor`. The dashboard uses `admin.notifications` socket snapshots.
+Both reads require `notifications.read`; sending requires `notifications.send`.
+History includes broadcast content, audit context, state/timestamps and per-device
+outcomes. Native registrations and active ownership are rechecked; web-only users
+are not reachable. FCM acceptance does not mean delivery or reading. Full schemas
+and problem responses are in OpenAPI. All responses are private/no-store.

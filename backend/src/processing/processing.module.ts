@@ -79,7 +79,7 @@ import { AccountDeletionMaintenanceService } from '../users/account-deletion-mai
     PushRegistrationController,
     ClientErrorsController,
   ],
-  exports: [JobsQueryService, ImportsService],
+  exports: [JobsQueryService, ImportsService, PushRegistrationsService],
   providers: [
     ImportsService,
     AudioAcquisitionClient,
