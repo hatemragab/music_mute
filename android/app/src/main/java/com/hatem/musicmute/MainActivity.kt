@@ -36,6 +36,9 @@ import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
     private val openHistory = MutableStateFlow(false)
+    private val entryAction = MutableStateFlow<String?>(null)
+    private val playbackSearch = MutableStateFlow<String?>(null)
+    private val sharedAudio = MutableStateFlow<android.net.Uri?>(null)
     private val openPlayer = MutableStateFlow(false)
     private val openProcessing = MutableStateFlow(false)
     private val processingJob = MutableStateFlow<String?>(null)
@@ -47,6 +50,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         openHistory.value = intent.getBooleanExtra(OPEN_HISTORY, false)
         openPlayer.value = intent.getBooleanExtra(OPEN_PLAYER, false)
+        entryAction.value = intent.action?.removePrefix("com.hatem.musicmute.")?.takeIf { it in setOf("IMPORT_AUDIO", "IMPORT_LINK", "LIBRARY") }
+        sharedAudio.value = incomingAudio(intent)
+        playbackSearch.value = if (intent.action == android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+            intent.getStringExtra(android.app.SearchManager.QUERY).orEmpty().take(200) else null
         openProcessing.value = intent.getBooleanExtra(OPEN_PROCESSING, false)
         audioTaskIntent.value = intent
         if (savedInstanceState == null) sharedUrlText.value = sharedText(intent)
@@ -109,6 +116,9 @@ class MainActivity : AppCompatActivity() {
             }
             val requestedHistory by openHistory.collectAsStateWithLifecycle()
             val requestedPlayer by openPlayer.collectAsStateWithLifecycle()
+            val requestedEntry by entryAction.collectAsStateWithLifecycle()
+            val requestedAudio by sharedAudio.collectAsStateWithLifecycle()
+            val requestedSearch by playbackSearch.collectAsStateWithLifecycle()
             val requestedOperation by processingOperation.collectAsStateWithLifecycle()
             val sharedText by sharedUrlText.collectAsStateWithLifecycle()
             LaunchedEffect(Unit) {
@@ -159,6 +169,12 @@ class MainActivity : AppCompatActivity() {
                     ) { onAccount ->
                         VocalApp(state, model, processing, processingSession, app.processingArtifacts.progress,
                             requestedHistory,
+                            playbackSearch = requestedSearch,
+                            onPlaybackSearchConsumed = { consumed -> if (playbackSearch.value == consumed) { playbackSearch.value = null; intent.action = Intent.ACTION_MAIN; intent.removeExtra(android.app.SearchManager.QUERY) } },
+                            entryAction = requestedEntry,
+                            sharedAudio = requestedAudio,
+                            onEntryConsumed = { entryAction.value = null; intent.action = Intent.ACTION_MAIN },
+                            onSharedAudioConsumed = { consumed -> if (sharedAudio.value == consumed) { sharedAudio.value = null; intent.removeExtra(Intent.EXTRA_STREAM); intent.clipData = null; intent.action = Intent.ACTION_MAIN } },
                             openPlayer = requestedPlayer,
                             onPlayerOpened = { openPlayer.value = false; intent.removeExtra(OPEN_PLAYER) },
                             sharedUrlText = sharedText,
@@ -182,6 +198,10 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         openHistory.value = intent.getBooleanExtra(OPEN_HISTORY, false)
         openPlayer.value = intent.getBooleanExtra(OPEN_PLAYER, false)
+        entryAction.value = intent.action?.removePrefix("com.hatem.musicmute.")?.takeIf { it in setOf("IMPORT_AUDIO", "IMPORT_LINK", "LIBRARY") }
+        sharedAudio.value = incomingAudio(intent)
+        playbackSearch.value = if (intent.action == android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+            intent.getStringExtra(android.app.SearchManager.QUERY).orEmpty().take(200) else null
         openProcessing.value = intent.getBooleanExtra(OPEN_PROCESSING, false)
         audioTaskIntent.value = intent
         sharedUrlText.value = sharedText(intent)
@@ -211,6 +231,20 @@ class MainActivity : AppCompatActivity() {
         private const val OPEN_PLAYER = "open_player"
         private const val OPEN_HISTORY = "open_download_history"
         private const val OPEN_PROCESSING = "open_processing"
+
+        @Suppress("DEPRECATION")
+        internal fun incomingAudio(intent: Intent?): android.net.Uri? =
+            if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("audio/") == true)
+                (intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+                    ?: intent.clipData?.takeIf { it.itemCount == 1 }?.getItemAt(0)?.uri)?.takeIf { it.scheme == "content" }
+            else null
+
+        fun entryPendingIntent(context: Context, action: String): PendingIntent = PendingIntent.getActivity(
+            context, 40 + listOf("IMPORT_AUDIO", "IMPORT_LINK", "LIBRARY").indexOf(action),
+            Intent(context, MainActivity::class.java).setAction("com.hatem.musicmute.$action")
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
 
         internal fun sharedText(intent: Intent?): String? =
             if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain")

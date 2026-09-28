@@ -58,7 +58,7 @@ fun PlayerScreen(
         state,
         entry,
         actions,
-        progress = { PlaybackProgress(playback, actions.seek) },
+        progress = { WaveformProgress(playback, actions.seek) },
         downloadProgress = { PlayerDownloadProgress(jobId, artifactProgress) },
     )
 }

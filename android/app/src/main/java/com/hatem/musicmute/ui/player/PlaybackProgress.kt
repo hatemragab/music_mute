@@ -44,6 +44,7 @@ internal fun PlaybackProgress(
     state: PlaybackState,
     onSeek: (Long) -> Unit,
     compact: Boolean = false,
+    peaks: List<Float> = emptyList(),
 ) {
     // Original/voice may have different timelines even though they share a track ID.
     var seeking by remember(state.trackId, state.original, state.switching) { mutableStateOf<Float?>(null) }
@@ -83,7 +84,8 @@ internal fun PlaybackProgress(
                     activeColor = if (enabled) activeTrackColor else activeTrackColor.copy(alpha = 0.38f),
                     inactiveColor = if (enabled) inactiveTrackColor else inactiveTrackColor.copy(alpha = 0.38f),
                     rightToLeft = layoutDirection == LayoutDirection.Rtl,
-                    modifier = Modifier.fillMaxWidth().height(trackHeight),
+                    modifier = Modifier.fillMaxWidth().height(if (peaks.isEmpty()) trackHeight else 48.dp),
+                    peaks = peaks,
                 )
             },
         )
@@ -114,8 +116,19 @@ private fun StableSeekTrack(
     inactiveColor: Color,
     rightToLeft: Boolean,
     modifier: Modifier = Modifier,
+    peaks: List<Float> = emptyList(),
 ) {
     Canvas(modifier) {
+        if (peaks.isNotEmpty()) {
+            val step = size.width / peaks.size
+            peaks.forEachIndexed { index, peak ->
+                val x = if (rightToLeft) size.width - (index + 0.5f) * step else (index + 0.5f) * step
+                val height = (peak.coerceIn(0f, 1f) * size.height).coerceAtLeast(2.dp.toPx())
+                drawLine(if (index.toFloat() / peaks.size < fraction) activeColor else inactiveColor,
+                    Offset(x, (size.height - height) / 2), Offset(x, (size.height + height) / 2), strokeWidth = (step * 0.7f).coerceAtLeast(1f))
+            }
+            return@Canvas
+        }
         val cornerRadius = CornerRadius(size.height / 2f)
         drawRoundRect(color = inactiveColor, cornerRadius = cornerRadius)
         val activeWidth = size.width * fraction.coerceIn(0f, 1f)

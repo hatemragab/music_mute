@@ -77,12 +77,17 @@ fun HomeScreen(
     onPhotos: () -> Unit = {},
     actionBusy: Boolean = false,
     notificationsNeeded: Boolean = false,
+    linkRequest: Int = 0,
 ) {
     val visibleTasks = tasks.filter { it.visibleOnHome }
     var notificationDismissed by rememberSaveable { mutableStateOf(false) }
     var linkSource by rememberSaveable { mutableStateOf(true) }
     var showSites by rememberSaveable { mutableStateOf(false) }
     var showTrimInfo by rememberSaveable { mutableStateOf(false) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(linkRequest) {
+        if (linkRequest > 0) { linkSource = true; listState.scrollToItem(0) }
+    }
     val keyboard = LocalSoftwareKeyboardController.current
     val importBusy = busy || actionBusy || urlImportBusy
     val startUrlImport = {
@@ -94,6 +99,7 @@ fun HomeScreen(
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         LazyColumn(
             Modifier.weight(1f).widthIn(max = CreativeTokens.ContentWidth).fillMaxWidth(),
+            state = listState,
             contentPadding = PaddingValues(CreativeTokens.PagePadding),
             verticalArrangement = Arrangement.Top,
         ) {
