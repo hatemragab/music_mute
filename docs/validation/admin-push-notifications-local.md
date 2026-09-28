@@ -71,12 +71,13 @@ role and lowercase-state conventions remain authoritative.
 
 ## CI setup compatibility
 
-The first PR run stopped before dashboard tests because the hosted Homebrew runner
-requires explicit trust for third-party formulae. The workflow now trusts only
-MongoDB's existing `mongodb-community@8.0` formula and its `mongodb-database-tools`
-dependency and declared `mongodb-enterprise` conflict before installation. The
-enterprise formula is only loaded for conflict checking, not installed. This keeps
-Homebrew trust enforcement enabled and does not change production permissions. See the [Homebrew command reference](https://docs.brew.sh/Manpage#trust-options-target-).
+The hosted Homebrew runner requires explicit trust for third-party formulae.
+The workflow explicitly trusts the official `mongodb/brew` tap before installing
+MongoDB 8 and Redis. Formula-specific trust was insufficient because installation
+also loads dependency, conflict and version metadata from the same tap. This trust
+applies only to the ephemeral test runner; it does not change production permissions
+or disable trust enforcement for other taps. See the
+[Homebrew command reference](https://docs.brew.sh/Manpage#trust-options-target-).
 
 The first full CI backend audit identified GHSA-3pph-fpjx-jg34 in the existing
 Multer 2.3.0 override. The override and lockfile are updated to patched 2.4.0;

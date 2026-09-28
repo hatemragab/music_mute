@@ -70,7 +70,7 @@ jobs:
       - name: Install isolated database test dependencies
         run: |
           brew tap mongodb/brew
-          brew trust --formula mongodb/brew/mongodb-community@8.0 mongodb/brew/mongodb-database-tools mongodb/brew/mongodb-enterprise
+          brew trust mongodb/brew
           brew install mongodb-community@8.0 redis
       - run: echo "$(brew --prefix mongodb-community@8.0)/bin" >> "$GITHUB_PATH"
       - run: npx playwright install chrome
