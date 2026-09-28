@@ -3,7 +3,8 @@
 ## Scope and delivery
 
 Implementation lives only on `hatem/android-listening-features`, based on
-`main` commit `1ac92dad`. The primary checkout and production were not changed.
+`main` commit `1ac92dad`. The primary checkout was not changed. The initial implementation was local;
+the separately authorized optional APK release is recorded below.
 No dependencies or runtime permission prompts were added. The playback service
 is now exported for media discovery, with Media3 controller authorization and
 current-owner/update admission checks before returning or playing media.
@@ -25,7 +26,8 @@ Run from `android/` with JDK 17 and SDK 36:
 - Android framework test sources compiled. They were **not executed**.
 - `git diff --check` passed.
 - Build uses the existing ignored local Firebase client config. It is not included
-  in the branch. No signing credentials were copied or changed.
+  in the branch. Signing inputs were reused only as ignored local files for the authorized
+  release build; no credentials were committed or changed.
 
 The new JVM tests cover loop/clip boundaries, sleep duration bounds, bookmark
 owner/job/source isolation, corruption recovery, size limits and atomic storage.
@@ -69,5 +71,30 @@ instructions authorize only the named iPhone simulator for device/UI tests; it
 cannot validate these Android features. Required release checks remain in
 TASKS.md: cold/warm intents, temporary grant lifetime, widget resizing, background
 playback/timer/loop behavior, waveform/clip fidelity, Auto integration, TalkBack,
-large fonts, Arabic RTL and OEM system resumption. No production deployment or
-store approval is claimed.
+large fonts, Arabic RTL and OEM system resumption. The optional direct APK release does not establish device validation or
+store approval.
+
+## Signed release build — 0.1.11 (12)
+
+User authorized a release-mode APK and optional publication through Chrome and
+the administrator dashboard. Version advanced from 0.1.10 (11) to 0.1.11 (12).
+
+- `:app:assembleDirectRelease :app:lintDirectRelease`: passed with JDK 17 / SDK 36.
+- `apksigner verify --print-certs`: passed; existing MusicMute upload certificate.
+- `aapt dump badging`: package `com.hatem.musicmute`, build 12, version 0.1.11,
+  min SDK 26 / target SDK 36; no debuggable flag.
+- APK size: 7,075,855 bytes.
+- APK SHA-256: `0607546b3145e99c9e567a9ce2016b2426acd94b5dd13c816f6ad191864870e2`.
+- Signer SHA-256: `417ee3745623721dd420d8056b0cc0a97d0ca5c571fa8da771f1eeed009f4b6d`.
+- `node backend/scripts/check-tracked-secrets.mjs` and `git diff --check`: passed.
+
+### Dashboard publication
+
+Published through Chrome at `https://dashboard.music-mute.com` on 2026-09-29.
+Release ID: `6abad867fc53ac195144d3c7`. The server verified the uploaded APK
+with the matching local SHA-256 and signer above. Publication read-back showed
+**published**, policy revision **2**, Android direct release set to this ID,
+and minimum supported build still **11**. The preview showed installed build
+11 → **optional** target 12, build 12 → no update. Existing builds below 11
+remain required by the pre-existing minimum; iOS policy was unchanged.
+No app installation or Android device test was performed.
