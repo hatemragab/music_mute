@@ -124,3 +124,10 @@ Local checks passed with JDK 17 / SDK 36:
 
 The silence adjustment has not been published as an APK or tested by listening
 on an Android device. The signed build 12 publication above predates this fix.
+
+## Integration with main — 2026-09-30
+
+The player download-progress change on main was integrated before PR merge.
+The PlayerScreen conflict was resolved by retaining waveform seeking alongside
+main's combined transfer/activity progress slot. The integrated JVM suites passed:
+303 direct tests and 283 Play tests, with zero failures/errors/skips.
