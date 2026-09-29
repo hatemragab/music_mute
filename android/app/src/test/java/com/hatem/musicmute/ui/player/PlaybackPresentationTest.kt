@@ -50,4 +50,15 @@ class PlaybackPresentationTest {
         assertEquals(R.string.save_voice, playerSaveLabel(original = false))
         assertEquals(R.string.save_original, playerSaveLabel(original = true))
     }
+
+    @Test fun downloadValuesFollowReceivedBytesForBothAudioVariants() {
+        for (artifact in listOf("input", "output")) {
+            val values = listOf(0L, 250L, 680L, 1_000L).map {
+                ArtifactProgress(it, 1_000, artifact).downloadPercent()
+            }
+            assertEquals(listOf(0, 25, 68, 100), values)
+            assertNull(ArtifactProgress(680, 0, artifact).downloadFraction())
+            assertNull(ArtifactProgress(680, -1, artifact).downloadPercent())
+        }
+    }
 }
