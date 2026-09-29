@@ -59,7 +59,7 @@ fun PlayerScreen(
         entry,
         actions,
         progress = { PlaybackProgress(playback, actions.seek) },
-        downloadProgress = { PlayerDownloadProgress(jobId, artifactProgress) },
+        activityProgress = { PlayerDownloadProgress(jobId, artifactProgress, state.buffering || state.switching) },
     )
 }
 

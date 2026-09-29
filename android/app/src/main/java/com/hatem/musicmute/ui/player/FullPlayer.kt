@@ -49,7 +49,7 @@ internal fun FullPlayer(
     entry: LibraryEntry?,
     actions: PlayerActions,
     progress: @Composable () -> Unit = { PlaybackProgress(state, actions.seek) },
-    downloadProgress: @Composable () -> Unit = {},
+    activityProgress: @Composable () -> Unit = { PlaybackActivityIndicator(state.buffering || state.switching) },
 ) {
     var panel by rememberSaveable { mutableStateOf<String?>(null) }
     // Restore unity gain when replacing the previous in-app volume control.
@@ -98,8 +98,7 @@ internal fun FullPlayer(
             onOriginalChange = actions.original,
         )
         if (state.comparisonFailed) Text(stringResource(R.string.original_unavailable), color = MaterialTheme.colorScheme.error)
-        PlaybackActivityIndicator(state.buffering || state.switching)
-        downloadProgress()
+        activityProgress()
         if (state.failed) CreativeFeedback(stringResource(libraryProblemLabel(entry?.problem)), error = true,
             actionLabel = stringResource(R.string.retry), onAction = actions.toggle)
         progress()
