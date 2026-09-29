@@ -1,3 +1,4 @@
+import { AdminNotificationsModule } from '../admin-notifications/admin-notifications.module.js';
 import { RealtimeSocketService } from './realtime-socket.service.js';
 import { QueueProjectionService } from './queue-projection.service.js';
 import { ProcessingPersistenceModule } from '../processing/processing-persistence.module.js';
@@ -37,6 +38,7 @@ import {
     AudioProcessingModule,
     ReleasesModule,
     WorkerFleetModule,
+    AdminNotificationsModule,
   ],
   controllers: [RealtimeTicketController, AdminRealtimeTicketController],
   providers: [

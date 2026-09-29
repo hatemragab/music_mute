@@ -154,3 +154,25 @@ before removing backend websocket support; older clients can keep using REST.
 Production proxy, privileges, fleet-scale latency and multi-device behavior still
 require an authorized staging/production exercise. Local fixtures are not live
 release proof. No deployment or production configuration changes were performed.
+
+### Administrator announcement history
+
+`admin.notifications` requires `notifications.read` (owner only) and accepts
+`cursor` (24-character campaign ID) and `limit` (1–50, default 20). It returns the
+same full snapshot as `GET /admin/notifications`, newest IDs first, with `items`
+and `next_cursor`. Each item contains title/body, creator/reason, timestamps,
+`state`, `targets_frozen`, and per-device `counts` (`pending`, `sent`, `failed`,
+`invalid`, `ineligible`). `sent` means FCM accepted the submission, not device
+receipt. Changes to `notification_campaigns` and `notification_campaign_deliveries`
+invalidate the resource; existing user/admin authorization fences still apply.
+Creation remains an audited HTTP command. There is no browser polling.
+
+### Worker observation time (2026-09-29)
+
+`admin.worker` and the compatible HTTP machine-detail response now include
+`as_of`, an additive UTC server timestamp for the bounded snapshot. The dashboard
+uses it to assess last-contact freshness without relying on the browser clock.
+Older responses without it display freshness as unknown. Existing command metrics
+remain bounded name/value/unit arrays; updated workers report additional numeric
+resource metrics through the same command-result route. No new socket resource or
+polling path is introduced.

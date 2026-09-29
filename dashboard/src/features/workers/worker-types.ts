@@ -116,6 +116,7 @@ export interface WorkerCommand {
 }
 
 export interface WorkerMachineDetail {
+  asOf?: string;
   machine: WorkerMachine;
   slots: WorkerSlot[];
   attempts: WorkerAttemptSummary[];

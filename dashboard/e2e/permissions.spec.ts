@@ -18,6 +18,7 @@ const expectedNavigation: Record<AdminRole, string[]> = {
     "Health & alerts",
     "Activity",
     "Administrators",
+    "Push notifications",
   ],
   release_manager: ["Overview", "Releases", "Update policy"],
   support: [

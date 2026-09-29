@@ -7,6 +7,12 @@ import { LoadingState } from "@/components/page";
 import { PermissionBoundary } from "@/components/permission-boundary";
 import { AppShell, NAV_ITEMS } from "./app-shell";
 
+const NotificationsPage = lazy(() =>
+  import("@/features/notifications/notifications-page").then((module) => ({
+    default: module.NotificationsPage,
+  })),
+);
+
 const AdministratorsPage = lazy(() =>
   import("@/features/administrators/administrators-page").then((module) => ({
     default: module.AdministratorsPage,
@@ -124,6 +130,14 @@ export function AppRouter() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<HomeRedirect />} />
+        <Route
+          path="notifications"
+          element={
+            <Guard permission="notifications.read">
+              <NotificationsPage />
+            </Guard>
+          }
+        />
         <Route
           path="overview"
           element={

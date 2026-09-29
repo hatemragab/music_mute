@@ -36,6 +36,10 @@ export default defineConfig(({ command, mode }) => {
   );
   return {
     base: "./",
+    // Worker-only imports otherwise trigger dependency optimization mid-upload.
+    optimizeDeps: {
+      include: ["@noble/hashes/sha2.js", "@noble/hashes/utils.js"],
+    },
     envDir: false,
     define: Object.fromEntries(
       publicEnvironmentKeys.map((key) => [

@@ -30,6 +30,8 @@ const COLLECTIONS = [
   'release_uploads',
   'app_releases',
   'admin_alerts',
+  'notification_campaigns',
+  'notification_campaign_deliveries',
 ];
 
 export type RealtimeFeedEvent = { healthy: boolean; collection?: string };
