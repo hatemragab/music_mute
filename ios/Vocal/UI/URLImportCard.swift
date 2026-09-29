@@ -44,6 +44,13 @@ struct URLImportCard: View {
       if let record = model.record {
         Text(LocalizedStringKey(statusKey(record.status))).font(.caption)
         if let key = record.messageKey { Text(LocalizedStringKey(key)).foregroundStyle(.red) }
+        if record.status == "failed", record.jobId == nil {
+          Button("processing_delete", role: .destructive) {
+            Task { await model.removeFailedImport() }
+          }
+          .disabled(model.busy)
+          .accessibilityIdentifier("deleteFailedURLImport")
+        }
         if let job = record.jobId, record.status == "submitted" {
           Button("url_import_open_job") { openJob(job) }
         } else if !model.busy && !record.terminal {

@@ -41,6 +41,7 @@ fun JobCard(
     busy: Boolean,
     onOpen: () -> Unit,
     onCancel: () -> Unit,
+    onDelete: () -> Unit = {},
 ) {
     val canOpen = !task.importOnly && (task.jobId != null || task.operationId != null)
     if (task.stage == AudioTaskStage.READY) {
@@ -97,6 +98,7 @@ fun JobCard(
             task = task,
             busy = busy,
             onCancel = onCancel,
+            onDelete = onDelete,
         )
     }
 }
@@ -243,7 +245,14 @@ private fun JobActions(
     task: AudioTaskPresentation,
     busy: Boolean,
     onCancel: () -> Unit,
+    onDelete: () -> Unit,
 ) {
+    if (task.importOnly && task.canDelete) {
+        TextButton(onClick = onDelete, enabled = !busy,
+            modifier = Modifier.heightIn(min = CreativeTokens.TouchTarget)) {
+            Text(stringResource(R.string.audio_task_delete))
+        }
+    }
     val canCancel = task.canCancel && task.stage != AudioTaskStage.CANCELLING
     if (!canCancel) return
     TextButton(

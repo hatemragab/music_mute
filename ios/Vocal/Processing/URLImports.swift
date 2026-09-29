@@ -26,6 +26,7 @@ struct URLImportRecord: Codable, Equatable, Sendable {
   var status = "pending"
   var jobId: String?
   var messageKey: String?
+  var failedAt: Date? = nil
   var terminal: Bool { ["submitted", "failed"].contains(status) }
 }
 
@@ -90,6 +91,23 @@ struct URLImportRecord: Codable, Equatable, Sendable {
   func restore() async {
     active = true
     await bindOwner(owner)
+  }
+
+  func removeFailedImport() async {
+    guard !busy, let uid = owner, let current = record, current.status == "failed",
+      current.jobId == nil
+    else { return }
+    let ticket = epoch
+    busy = true
+    defer { if ticket == epoch { busy = false } }
+    do {
+      try await store.removeFailedURLImport(requestId: current.requestId, ownerUid: uid)
+      guard ticket == epoch else { return }
+      record = nil
+      messageKey = nil
+    } catch {
+      if ticket == epoch { messageKey = "processing_error_storage" }
+    }
   }
 
   func pause() {

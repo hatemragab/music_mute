@@ -171,4 +171,64 @@ class UrlImportsTest {
         assertEquals(25, pending.size)
         assertEquals(25, pending.map { it.requestId }.distinct().size)
     }
+
+    @Test fun removalIsDurableAndCannotRemoveActiveOrAnotherOwnersImport() = runTest {
+        val root = kotlin.io.path.createTempDirectory("url-import-remove-").toFile()
+        val storeJob = SupervisorJob()
+        val store = ProcessingStore(root, CoroutineScope(storeJob + Dispatchers.IO))
+        val failed = UrlImportRecord("owner", source, UUID.randomUUID().toString())
+        store.addUrlImport("owner", failed)
+        store.updateUrlImport("owner", failed.requestId) { it.copy(status = "attention", errorCode = "PROCESSING_LIMIT_REACHED") }
+        val active = failed.copy(url = "$source-other", requestId = UUID.randomUUID().toString())
+        store.addUrlImport("owner", active)
+        val ticket = ProcessingSession("owner", 1)
+        val api = object : UrlImportsApi {
+            override suspend fun create(url: String, requestId: String): UrlImportView = error("unexpected submission")
+            override suspend fun detail(importId: String): UrlImportView = error("unexpected read")
+        }
+        val coordinator = UrlImportCoordinator(store, api, backgroundScope, { ticket })
+        coordinator.bindSession(ticket)
+        val saved = store.urlImports("owner").first().first { it.requestId == failed.requestId }
+        assertTrue(audioTaskPresentations(emptyList(), emptyList(), 0, listOf(saved)).single().canDelete)
+        assertTrue(runCatching { coordinator.remove(saved.copy(ownerUid = "other")) }.isFailure)
+        coordinator.remove(active)
+        coordinator.remove(saved)
+        coordinator.bindSession(null)
+        storeJob.cancelAndJoin()
+        val restored = ProcessingStore(root, backgroundScope)
+        assertEquals(listOf(active.requestId), restored.urlImports("owner").first().map { it.requestId })
+    }
+
+    @Test fun failuresExpireWithoutDroppingActiveOrSubmittedRecovery() = runTest {
+        val store = ProcessingStore(kotlin.io.path.createTempDirectory("url-import-expire-").toFile(), backgroundScope)
+        val start = System.currentTimeMillis()
+        val failed = UrlImportRecord("owner", source, UUID.randomUUID().toString())
+        store.addUrlImport("owner", failed)
+        store.updateUrlImport("owner", failed.requestId) { it.copy(status = "failed", failedAtMillis = start) }
+        val active = failed.copy(url = "$source-active", requestId = UUID.randomUUID().toString())
+        store.addUrlImport("owner", active)
+        val submitted = failed.copy(url = "$source-submitted", requestId = UUID.randomUUID().toString())
+        store.addUrlImport("owner", submitted)
+        store.updateUrlImport("owner", submitted.requestId) { it.copy(status = "submitted", jobId = jobId) }
+        store.pruneFailedUrlImports("owner", start + UrlImportRecord.FAILURE_RETENTION_MILLIS - 1)
+        assertEquals(3, store.urlImports("owner").first().size)
+        store.pruneFailedUrlImports("owner", start + UrlImportRecord.FAILURE_RETENTION_MILLIS)
+        assertEquals(setOf(active.requestId, submitted.requestId), store.urlImports("owner").first().map { it.requestId }.toSet())
+    }
+
+    @Test fun legacyFailuresGetOneRetentionWindowAndAreActuallyRemovedFromStorage() = runTest {
+        val root = kotlin.io.path.createTempDirectory("url-import-legacy-").toFile()
+        val file = java.io.File(processingOwnerDirectory(root, "owner"), "processing.json")
+        file.parentFile!!.mkdirs()
+        val request = UUID.randomUUID().toString()
+        file.writeText("""{"urlImports":[{"ownerUid":"owner","url":"$source","requestId":"$request","status":"failed"}]}""")
+        val store = ProcessingStore(root, backgroundScope)
+        store.pruneFailedUrlImports("owner", 1000)
+        assertEquals(1000, store.urlImports("owner").first().single().failedAtMillis)
+        store.pruneFailedUrlImports("owner", 2000)
+        assertEquals(1000, store.urlImports("owner").first().single().failedAtMillis)
+        store.pruneFailedUrlImports("owner", 1000 + UrlImportRecord.FAILURE_RETENTION_MILLIS)
+        assertTrue(store.urlImports("owner").first().isEmpty())
+        assertFalse(file.readText().contains(request))
+    }
 }
