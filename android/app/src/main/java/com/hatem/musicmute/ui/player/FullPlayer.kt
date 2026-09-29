@@ -132,6 +132,11 @@ internal fun FullPlayer(
             onQueue = actions.queue,
             onRepeatCurrentTrack = { actions.repeat(state.repeatMode.toggleCurrentTrackRepeat()) },
         )
+        OutlinedButton({ panel = "tools" }, Modifier.fillMaxWidth()) {
+            Icon(Icons.Outlined.Tune, null)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.listen_tools))
+        }
         val upcoming = upcomingTracks(
             state.orderedQueue,
             state.queue.getOrNull(state.currentIndex)?.key,
@@ -146,7 +151,8 @@ internal fun FullPlayer(
         )
     }
     if (panel != null && state.trackId != null) {
-        PlayerSpeedSheet(state, actions) { panel = null }
+        if (panel == "tools") ListeningToolsSheet { panel = null }
+        else PlayerSpeedSheet(state, actions) { panel = null }
     }
 }
 

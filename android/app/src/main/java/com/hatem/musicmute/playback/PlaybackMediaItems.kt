@@ -10,6 +10,7 @@ import androidx.media3.common.Player
 import com.hatem.musicmute.library.LibraryKey
 
 internal const val AUTO_NEXT_COMMAND = "com.hatem.musicmute.AUTO_NEXT"
+internal const val LISTENING_COMMAND = "com.hatem.musicmute.LISTENING"
 internal const val AUTO_NEXT_KEY = "autoNext"
 
 internal fun QueueTrack.mediaItem(context: Context, original: Boolean = this.original): MediaItem = MediaItem.Builder()
@@ -17,6 +18,8 @@ internal fun QueueTrack.mediaItem(context: Context, original: Boolean = this.ori
     .setUri(Uri.Builder().scheme("musicmute").authority(if (original) "input" else "output").appendPath(key.ownerUid).appendPath(key.jobId).build())
     .setMediaMetadata(MediaMetadata.Builder()
         .setTitle(title)
+        .setIsPlayable(true)
+        .setIsBrowsable(false)
         .setArtist(context.getString(if (original) R.string.original_track else R.string.voice_track))
         .setAlbumTitle(context.getString(R.string.app_name))
         .setArtworkData(playbackArtwork(context), MediaMetadata.PICTURE_TYPE_FRONT_COVER)

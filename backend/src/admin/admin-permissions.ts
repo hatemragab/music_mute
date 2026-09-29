@@ -2,6 +2,8 @@ import type { AdminPermission, AdminRole } from './admin.types.js';
 
 const permissions: Readonly<Record<AdminRole, readonly AdminPermission[]>> = {
   owner: [
+    'notifications.read',
+    'notifications.send',
     'overview.read',
     'jobs.read',
     'jobs.manage',

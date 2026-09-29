@@ -410,6 +410,7 @@ describe('worker control plane', () => {
 
     const result = await f.service.machineDetail(actor, machineId);
 
+    expect(result.asOf).toBeInstanceOf(Date);
     expect(result.commands).toEqual([
       expect.objectContaining({ state: 'expired' }),
     ]);

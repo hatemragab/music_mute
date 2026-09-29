@@ -41,6 +41,11 @@ data class PlaybackState(
     val orderedQueue: List<QueueTrack> = emptyList(),
     val speed: Float = 1f,
     val volume: Float = 1f,
+    val skipSilence: Boolean = false,
+    val loopStart: Long = -1,
+    val loopEnd: Long = -1,
+    val sleepAt: Long = 0,
+    val sleepEnd: Boolean = false,
 )
 
 class AudioPlaybackController(context: Context) : QueueCommands {
@@ -270,6 +275,12 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         }
     }
 
+    fun listeningAction(action: String, configure: Bundle.() -> Unit = {}) {
+        controller?.sendCustomCommand(SessionCommand(LISTENING_COMMAND, Bundle.EMPTY), Bundle().apply {
+            putString("action", action); configure()
+        })
+    }
+
     fun seek(positionMs: Long) {
         controller?.seekTo(positionMs.coerceAtLeast(0))
         refresh()
@@ -317,6 +328,11 @@ class AudioPlaybackController(context: Context) : QueueCommands {
                 orderedQueue = cachedOrder,
                 speed = player.playbackParameters.speed,
                 volume = player.volume,
+                skipSilence = player.sessionExtras.getBoolean("skipSilence"),
+                loopStart = player.sessionExtras.getLong("loopStart", -1),
+                loopEnd = player.sessionExtras.getLong("loopEnd", -1),
+                sleepAt = player.sessionExtras.getLong("sleepAt"),
+                sleepEnd = player.sessionExtras.getBoolean("sleepEnd"),
             )
         }
     }

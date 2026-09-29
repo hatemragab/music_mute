@@ -289,6 +289,7 @@ export class WorkerControlService {
           .lean(),
       ]);
     return {
+      asOf: new Date(),
       machine: presentMachine(machine),
       slots,
       attempts: attempts.map((attempt) => ({

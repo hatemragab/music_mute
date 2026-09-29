@@ -129,7 +129,7 @@ simulator or device for runtime proof.
 ## App updates
 
 Android has separate `direct` and `play` distribution variants with the same
-production application ID and signing configuration. Version `0.1.10` is build 11.
+production application ID and signing configuration. Version `0.1.11` is build 12.
 The direct variant uses the built-in version dialog, download service, progress
 callbacks, FileProvider and installer-intent helper from
 [azhon/AppUpdate 4.3.6](https://github.com/azhon/AppUpdate) (Apache-2.0).
@@ -460,3 +460,44 @@ Arabic labels explain why repeat one or disabled auto-next leaves Up next empty.
 Local queue regressions are in `QueueEditingTest`, `QueueDisplayTest` and
 `PlaybackQueueTest`. Android gesture, accessibility and uninterrupted playback
 runtime checks still require an explicitly authorized Android device.
+## Listening features
+
+The [plan](tasks/listening-features/PLAN.md),
+[task checklist](tasks/listening-features/TASKS.md) and
+[validation record](tasks/listening-features/VALIDATION.md) track this feature branch.
+
+- Add MusicMute from the launcher widget picker. Resize the playback widget to
+  reveal Import audio. Tap the title/artwork to open Player. Play/pause and Next
+  use the existing media service; widget updates are event-driven, with no polling.
+- Long-press the app icon for Import audio, Import link and Library. Shared single
+  `audio/*` content URIs are copied into bounded owner-private storage and enter
+  the existing review/rights-confirmation flow. They never auto-submit to cloud.
+- MediaLibraryService exposes completed, visible, current-account tracks for
+  Android Auto browsing/search and Android system resumption. External media IDs
+  are resolved against the account library; external URIs are never played.
+  Authentication/update restoration is awaited before returning resume media.
+  Initial restoration alone does not prepare, download or autoplay the queue.
+- Player displays cached real waveform peaks for the selected original/voice
+  source, with the normal accessible seek slider and retry fallback. Decoding
+  runs off the UI thread, streams PCM and stops on cancellation or a 120-second
+  watchdog. Waveforms are limited to sources of at most three hours.
+- Listening tools offers optional Skip silence, 15/30/60-minute sleep timers,
+  end-of-track stopping, and an optional final five-second fade for timed stops.
+  Skip silence preserves short pauses (at least one second for mono/stereo audio)
+  and quiet speech. Longer near-silent gaps retain half their middle section,
+  with natural padding and up to two seconds kept per gap. Retained audio keeps
+  its volume. This only changes playback; saved/exported files are unaffected.
+  Timers and loops live in the playback service and continue while backgrounded.
+  They reset with the playback service/account; they are not reboot alarms.
+- Bookmarks persist per account, job and original/voice timeline (100 per source,
+  80-character notes). The A–B range loops until cleared or the source changes.
+  Choosing end-of-track sleep clears a passage loop so the track can finish.
+- Share a selected Voice only passage as PCM WAV: 0.5 seconds to five minutes,
+  at most 64 MB. This is a local export, not an extra server job. Only temporary
+  read grants are shared. Cancel closes/deletes an incomplete export. Old clips
+  are pruned on subsequent exports; all listening cache files clear on sign-out.
+  Unsupported PCM encodings or decoder failures show retryable UI feedback.
+
+No overlays, accessibility-service permission, new runtime permissions or new
+package dependencies were added. Widgets/Auto/system resumption are controlled by
+Android and its host; device/host testing remains required before release.

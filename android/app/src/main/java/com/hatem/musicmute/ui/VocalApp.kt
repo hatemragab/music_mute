@@ -64,6 +64,7 @@ import com.hatem.musicmute.ui.design.CreativePage
 import com.hatem.musicmute.ui.design.CreativeFeedback
 import com.hatem.musicmute.ui.design.rememberCreativeMotionEnabled
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -99,6 +100,12 @@ fun VocalApp(
     onProcessingOpened: () -> Unit = {},
     onProcessingNotifications: () -> Unit = {},
     onAccount: () -> Unit = {},
+    playbackSearch: String? = null,
+    onPlaybackSearchConsumed: (String) -> Unit = {},
+    entryAction: String? = null,
+    sharedAudio: android.net.Uri? = null,
+    onEntryConsumed: () -> Unit = {},
+    onSharedAudioConsumed: (android.net.Uri) -> Unit = {},
     openPlayer: Boolean = false,
     onPlayerOpened: () -> Unit = {},
     onHistoryOpened: () -> Unit = {},
@@ -116,6 +123,7 @@ fun VocalApp(
     val context = LocalContext.current
     val app = context.applicationContext as VocalApplication
     val urlImports by app.urlImports.records.collectAsStateWithLifecycle()
+    var linkRequest by rememberSaveable { mutableIntStateOf(0) }
     var urlImportText by rememberSaveable { mutableStateOf("") }
     var urlImportError by remember { mutableStateOf<String?>(null) }
     var urlImportBusy by remember { mutableStateOf(false) }
@@ -261,6 +269,46 @@ fun VocalApp(
     }
     val importAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) processingModel.importAudio(uri, trimEnabled)
+    }
+    LaunchedEffect(entryAction) {
+        when (entryAction) {
+            "LIBRARY" -> nav.navigate(Destination.Library.name) { launchSingleTop = true }
+            "IMPORT_AUDIO" -> { nav.navigate(Destination.Home.name) { launchSingleTop = true }; importAudio.launch(arrayOf("audio/*")) }
+            "IMPORT_LINK" -> { linkRequest++; nav.navigate(Destination.Home.name) { launchSingleTop = true } }
+            else -> return@LaunchedEffect
+        }
+        onEntryConsumed()
+    }
+    LaunchedEffect(playbackSearch, processingSession) {
+        val query = playbackSearch ?: return@LaunchedEffect
+        val owner = processingSession ?: return@LaunchedEffect
+        try {
+            val tracks = app.processingStore.library(owner.uid).first().filter { !it.hidden && it.job.status == "ready" }
+                .map { QueueTrack(LibraryKey(owner.uid, it.job.id), it.job.displayName ?: it.job.sourceTitle ?: voiceTrackTitle) }
+                .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) }.take(100)
+            if (app.processingSession() == owner) {
+                if (tracks.isNotEmpty()) {
+                    app.audioPlayback.playQueue(tracks, tracks.first().key)
+                    nav.navigate("player") { launchSingleTop = true }
+                } else snackbar.showSnackbar(context.getString(R.string.listen_search_empty))
+            }
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (_: Exception) { snackbar.showSnackbar(context.getString(R.string.listen_tools_error)) }
+        finally { onPlaybackSearchConsumed(query) }
+    }
+    LaunchedEffect(sharedAudio, processingSession) {
+        val uri = sharedAudio ?: return@LaunchedEffect
+        val owner = processingSession ?: return@LaunchedEffect
+        try {
+            val active = app.processingStore.operations(owner.uid).first().filter { it.phase != ProcessingPhase.COMPLETE }.mapNotNull { it.sourceUri }.toSet()
+            val staged = stageSharedAudio(context, uri, owner, app::processingSession, active)
+            if (app.processingSession() == owner) {
+                processingModel.importAudio(staged, trimEnabled)
+                nav.navigate(Destination.Home.name) { launchSingleTop = true }
+            }
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (_: Exception) { snackbar.showSnackbar(context.getString(R.string.listen_share_error)) }
+        finally { onSharedAudioConsumed(uri) }
     }
     val processingNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { onProcessingNotifications() }
     var pendingOutput by remember { mutableStateOf<Pair<File, ProcessingSession>?>(null) }
@@ -424,6 +472,7 @@ fun VocalApp(
                         com.hatem.musicmute.ui.home.HomeScreen(
                             tasks = audioTasks, history = jobs, busy = processing.preparing,
                             trimEnabled = trimEnabled, onTrimEnabled = { trimEnabled = it },
+                            linkRequest = linkRequest,
                             urlImportText = urlImportText,
                             urlImportError = urlImportError,
                             urlImportBusy = urlImportBusy,

@@ -1,4 +1,4 @@
-import type { ApiClient } from "@/api/api-client";
+import { type ApiClient, submitWithReceiptReadBack } from "@/api/api-client";
 import type { RevisionCommand } from "@/api/contracts";
 import { withQuery } from "@/api/query-string";
 import type {
@@ -96,25 +96,49 @@ export const changeWorkerMachineState = (
     input,
   );
 
+interface WorkerCommandReceipt {
+  commandId: string;
+  deferred: boolean | null;
+  replayed: boolean;
+}
+
+const submitWorkerCommand = (
+  client: ApiClient,
+  machineId: string,
+  kind: "diagnostic-runs" | "benchmark-runs",
+  input: RevisionCommand &
+    ({ checks: string[] } | { recipeId: string; iterations: number }),
+) =>
+  submitWithReceiptReadBack<WorkerCommandReceipt>({
+    client,
+    operationId: input.operationId,
+    submit: () =>
+      client.post(
+        `/admin/worker-fleet/machines/${encodeURIComponent(machineId)}/${kind}`,
+        input,
+      ),
+    readResult: async (receipt) => {
+      const detail = await getWorkerMachine(client, machineId);
+      const command = detail.commands.find(
+        (item) => item.commandId === receipt.resourceId,
+      );
+      if (!command)
+        throw new Error("Command is outside the recent history window.");
+      return { commandId: command.commandId, deferred: null, replayed: true };
+    },
+  });
+
 export const requestWorkerDoctor = (
   client: ApiClient,
   machineId: string,
   input: RevisionCommand & { checks: string[] },
-) =>
-  client.post<{ commandId: string; deferred: boolean; replayed: boolean }>(
-    `/admin/worker-fleet/machines/${encodeURIComponent(machineId)}/diagnostic-runs`,
-    input,
-  );
+) => submitWorkerCommand(client, machineId, "diagnostic-runs", input);
 
 export const requestWorkerBenchmark = (
   client: ApiClient,
   machineId: string,
   input: RevisionCommand & { recipeId: string; iterations: number },
-) =>
-  client.post<{ commandId: string; deferred: boolean; replayed: boolean }>(
-    `/admin/worker-fleet/machines/${encodeURIComponent(machineId)}/benchmark-runs`,
-    input,
-  );
+) => submitWorkerCommand(client, machineId, "benchmark-runs", input);
 
 export const getWorkerFleetPolicy = (client: ApiClient) =>
   client.get<WorkerFleetPolicy>("/admin/worker-fleet/policy");

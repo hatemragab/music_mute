@@ -361,3 +361,42 @@ new usage. Audit records retain before/after values; deployment alone resets no 
 API guideline preflight: [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/),
 read 2026-09-29: rules 101, 104, 106, 118, 149, 151 and 176 (OpenAPI,
 authorization, compatibility, snake_case, HTTP semantics and problem responses).
+
+## Administrator announcements
+
+`POST /admin/notifications` queues a system announcement; `GET /admin/notifications`
+(cursor, limit 1–50/default 20) and `GET /admin/notifications/:id` expose safe history.
+Only owners receive `notifications.read` and `notifications.send`. Creation requires
+fresh authentication, the sensitive admin rate limit, an operation UUID v4 and an
+audit reason. Existing transaction receipts prevent duplicate commands and fence
+revoked administrator access. Persisted notification content may appear on lock
+screens; do not include private user data. All responses are no-store.
+
+The new `notification_campaigns` and `notification_campaign_deliveries` collections
+are initialized with declared indexes; no existing collection/index is migrated.
+The dispatcher runs independently of audio processing admission. It freezes at most
+100 registration references per pass, excluding bindings updated after creation,
+and rechecks active account/session/installation ownership before each send.
+It handles four sends per renewable 60-second lease, at most ten passes per
+five-second maintenance tick per API process. Tokens remain only in registrations.
+Transient errors retry up to eight attempts using the existing backoff; known
+invalid destinations deactivate only the exact current binding. Startup/restart and
+multiple replicas recover through durable leases and per-binding attempt records.
+History counts are per device, not unique users, and grow while targets are frozen.
+New per-account deliveries use the shared account-deletion transaction fence.
+Account purging removes its delivery records; historical aggregate counts therefore
+exclude purged accounts. Broadcast content and administrator audit history remain.
+
+FCM submission is at least once: a crash or timeout after provider acceptance but
+before its durable receipt can produce a duplicate. Stable event IDs and collapse
+identifiers reduce duplicate presentation; there is no delivery/read receipt claim.
+Current native foreground behavior is unchanged. Existing Firebase Admin messaging
+and APNs configuration is required. Nothing in local tests establishes live delivery.
+Run `pnpm run build && node --test test/admin-notifications.integration.mjs` for
+isolated replica-set tests, and `pnpm run verify` for static/unit/HTTP checks.
+
+API guideline preflight: https://opensource.zalando.com/restful-api-guidelines/
+read on 2026-09-29. Rules 101 (OpenAPI), 104 (endpoint security), 106
+(compatibility), 118 (snake_case), 159 (pagination), 176 (problem responses)
+shape the additive contract. Existing lowercase states and receipt conventions
+are retained for consistency.

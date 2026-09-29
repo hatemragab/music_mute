@@ -381,7 +381,16 @@ separately. It does not override local or backend pause and drain settings.
 
 Dashboard Doctor and Benchmark requests use the same running per-user worker
 and never invoke `sudo`, install system packages, or modify the LaunchAgent.
-Doctor runs only the requested bounded checks and reports sanitized metrics.
+Doctor runs the requested bounded checks and reports sanitized metrics. Service
+and storage checks retain their results if the engine probe fails. Model/provider/
+FFmpeg checks share one packaged probe; a failure marks the requested engine checks
+as failed or incomplete, without claiming an independent diagnosis. Service checks
+include supervisor/host uptime, supervisor resident/heap memory, host total/free
+memory and CPU parallelism; storage checks include available and total scratch
+volume bytes. These are numeric point-in-time observations without private paths,
+credentials or hostnames. Dashboard Runtime snapshot uses only service/storage and
+does not start the Python probe. Existing workers can still accept those check
+names but must be updated to report the additional metrics.
 Dashboard Benchmark is deferred while a job is active; once idle, it
 temporarily stops the private processing child, runs the one frozen Kim Vocal 2
 recipe exactly once against the installed qualification fixture,

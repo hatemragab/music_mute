@@ -1,0 +1,35 @@
+<resources>
+    <string name="listen_tools">أدوات الاستماع</string>
+    <string name="listen_widget_empty">افتح مشغّل الصوت</string>
+    <string name="listen_widget_sign_in">افتح MusicMute للمتابعة</string>
+    <string name="listen_widget_description">شغّل الصوت واستورد الملفات من الشاشة الرئيسية</string>
+    <string name="listen_import_audio">استيراد صوت</string>
+    <string name="listen_import_link">استيراد رابط</string>
+    <string name="listen_share_error">تعذّر استيراد الصوت المشترك. افتح MusicMute واختر الملف مجددًا.</string>
+    <string name="listen_skip_silence">تخطّي الصمت</string>
+    <string name="listen_sleep">مؤقّت النوم</string>
+    <string name="listen_timer_active">مؤقّت النوم مفعّل</string>
+    <string name="listen_minutes">%1$d دقيقة</string>
+    <string name="listen_fade">خفض الصوت خلال آخر ٥ ثوانٍ من المؤقّت</string>
+    <string name="listen_end_track">نهاية المقطع</string>
+    <string name="listen_cancel_timer">إلغاء المؤقّت</string>
+    <string name="listen_range">الجزء المحدّد</string>
+    <string name="listen_mark_a">ابدأ من هنا</string>
+    <string name="listen_mark_b">انتهِ هنا</string>
+    <string name="listen_loop">تكرار الجزء</string>
+    <string name="listen_clear_loop">إيقاف التكرار</string>
+    <string name="listen_loop_active">تكرار %1$s – %2$s</string>
+    <string name="listen_clip_hint">شارك من نصف ثانية إلى ٥ دقائق من الصوت المعزول بصيغة WAV. اختر الصوت المعزول أولًا.</string>
+    <string name="listen_share_clip">مشاركة مقطع صوتي</string>
+    <string name="listen_bookmarks">العلامات المرجعية</string>
+    <string name="listen_bookmark_label">ملاحظة (اختياري)</string>
+    <string name="listen_add_bookmark">حفظ هذه اللحظة</string>
+    <string name="listen_remove_bookmark">إزالة</string>
+    <string name="listen_no_bookmarks">احفظ لحظة للعودة إليها لاحقًا.</string>
+    <string name="listen_tools_error">تعذّر إكمال الإجراء. تأكّد من تنزيل الصوت وحاول مجددًا.</string>
+    <string name="listen_waveform_loading">جارٍ قراءة الموجة الصوتية…</string>
+    <string name="listen_waveform_retry">الموجة الصوتية غير متاحة · إعادة المحاولة</string>
+    <string name="listen_search_empty">لا يوجد صوت مطابق في مكتبتك.</string>
+    <string name="listen_remove_bookmark_at">إزالة العلامة عند %1$s</string>
+    <string name="listen_more_audio">المزيد من المقاطع</string>
+</resources>

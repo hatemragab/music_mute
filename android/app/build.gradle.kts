@@ -54,11 +54,12 @@ android {
         buildConfigField("String", "DELETION_URL", publicPage("deletionUrl"))
         buildConfigField("String", "SUPPORT_URL", publicPage("supportUrl"))
         applicationId = "com.hatem.musicmute"
+        resValue("string", "shortcut_target_package", "com.hatem.musicmute")
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "com.hatem.musicmute.processing.MediaPreparationTestRunner"
-        versionCode = 11
-        versionName = "0.1.10"
+        versionCode = 12
+        versionName = "0.1.11"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
     }
 
@@ -107,6 +108,7 @@ android {
             initWith(getByName("debug"))
             buildConfigField("boolean", "SENTRY_ENABLED", "false")
             applicationIdSuffix = ".authtest"
+            resValue("string", "shortcut_target_package", "com.hatem.musicmute.authtest")
             matchingFallbacks += "debug"
             buildConfigField("String", "AUTH_API_URL", "\"http://127.0.0.1:48080\"")
             buildConfigField("String", "AUTH_EMULATOR_HOST", "\"127.0.0.1\"")
