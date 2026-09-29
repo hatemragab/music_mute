@@ -10,8 +10,8 @@ provides live snapshots; adding polling or another transport would regress it.
 The most useful missing capability is explaining worker condition and commands:
 
 | Gap | Source evidence | Implementation |
-| Overview numbers lack direct operational paths | overview-page.tsx | Add permission-aware shortcuts to failed jobs, workers, health and push history |
 | --- | --- | --- |
+| Overview numbers lack direct operational paths | overview-page.tsx | Add permission-aware shortcuts to failed jobs, workers, health and push history |
 | Doctor always requests everything | worker-machine-page.tsx | Add runtime/storage and engine presets using existing allowed checks |
 | Results hide collected metrics | CommandHistory only renders summary/state | Show bounded, formatted metrics and requested checks, expiry and completion |
 | A failed check discards good results | remote-command-executor.ts catches whole doctor | Preserve partial results and mark failed/incomplete probes |
