@@ -457,6 +457,10 @@ The [plan](tasks/listening-features/PLAN.md),
   watchdog. Waveforms are limited to sources of at most three hours.
 - Listening tools offers optional Skip silence, 15/30/60-minute sleep timers,
   end-of-track stopping, and an optional final five-second fade for timed stops.
+  Skip silence preserves short pauses (at least one second for mono/stereo audio)
+  and quiet speech. Longer near-silent gaps retain half their middle section,
+  with natural padding and up to two seconds kept per gap. Retained audio keeps
+  its volume. This only changes playback; saved/exported files are unaffected.
   Timers and loops live in the playback service and continue while backgrounded.
   They reset with the playback service/account; they are not reboot alarms.
 - Bookmarks persist per account, job and original/voice timeline (100 per source,

@@ -98,3 +98,29 @@ and minimum supported build still **11**. The preview showed installed build
 11 → **optional** target 12, build 12 → no update. Existing builds below 11
 remain required by the pre-existing minimum; iOS policy was unchanged.
 No app installation or Android device test was performed.
+
+## Gentler playback silence skipping — 2026-09-29
+
+The playback service now supplies a tuned Media3 silence processor instead of
+the default processor. Mono/stereo pauses of at least one second are preserved;
+the threshold is lowered from 1024 to 256 PCM16 amplitude units to protect quieter
+speech. Sustained near-silence retains half its middle section, padding and up to
+two seconds per gap, with no volume reduction on retained samples. The tuning
+accounts for the pinned Media3 1.8.0 silence-buffer frame/byte sizing behavior.
+Saved files, waveform data and clip exports are unchanged.
+
+Synthetic PCM regression tests exercise mono/stereo at 16, 44.1 and 48 kHz,
+short speech pauses, long gaps, positive/negative quiet samples, preserved gain,
+decoder-sized chunks, end-of-stream draining and processor reset/disable behavior.
+
+Local checks passed with JDK 17 / SDK 36:
+
+- `:app:testDirectDebugUnitTest`: 302 tests, zero failures/errors/skips.
+- `:app:testPlayDebugUnitTest`: 282 tests, zero failures/errors/skips.
+- `:app:lintDirectDebug :app:lintPlayDebug`: passed with existing warnings.
+- `:app:assembleDirectDebug :app:assemblePlayDebug`: passed.
+- `:app:compileDirectDebugAndroidTestKotlin`: passed; not executed on a device.
+- `git diff --check` and `node backend/scripts/check-tracked-secrets.mjs`: passed.
+
+The silence adjustment has not been published as an APK or tested by listening
+on an Android device. The signed build 12 publication above predates this fix.

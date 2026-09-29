@@ -97,7 +97,8 @@ class AudioPlaybackService : MediaLibraryService() {
             }
         }
         val player =
-            ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(sources)).build().apply {
+            ExoPlayer.Builder(this, ListeningRenderersFactory(this))
+                .setMediaSourceFactory(DefaultMediaSourceFactory(sources)).build().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(C.USAGE_MEDIA)
