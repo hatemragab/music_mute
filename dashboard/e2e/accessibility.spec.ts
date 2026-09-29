@@ -120,9 +120,14 @@ test("overview is accessible in both themes with reduced motion", async ({
 test("worker fleet list and detail have no detectable accessibility violations", async ({
   page,
 }) => {
-  for (const path of ["/workers", `/workers/${FIXTURE_IDS.workerMachine}`]) {
+  for (const [path, heading] of [
+    ["/workers", "Worker fleet"],
+    [`/workers/${FIXTURE_IDS.workerMachine}`, "Windows Z440"],
+  ]) {
     await page.goto(path);
-    await expect(page.locator("main h1")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: heading, exact: true }),
+    ).toBeVisible();
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
   }

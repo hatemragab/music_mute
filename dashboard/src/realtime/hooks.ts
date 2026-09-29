@@ -1,3 +1,4 @@
+import type { NotificationCampaign } from "@/features/notifications/notifications-api";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { ApiError } from "@/api/api-client";
@@ -20,6 +21,7 @@ import type {
 } from "@/features/workers/worker-types";
 import { RealtimeClient } from "./client";
 interface Resources {
+  "admin.notifications": Page<NotificationCampaign>;
   "admin.jobs": Page<JobSummary>;
   "admin.job": JobDetail;
   "admin.overview": OverviewSnapshot;

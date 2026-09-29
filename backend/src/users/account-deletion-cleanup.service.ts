@@ -29,6 +29,7 @@ const ACTIVE_JOB_STATUSES = [
 
 const ACCOUNT_RECORD_COLLECTIONS = [
   ['audio_notification_outbox', 'userId'],
+  ['notification_campaign_deliveries', 'userId'],
   ['user_devices', 'userId'],
   ['device_installation_owners', 'userId'],
   ['push_registrations', 'userId'],

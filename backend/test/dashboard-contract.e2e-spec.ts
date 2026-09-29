@@ -1,3 +1,4 @@
+import { AdminNotificationsController } from '../src/admin-notifications/admin-notifications.controller.js';
 import 'reflect-metadata';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -71,6 +72,7 @@ const inventory = JSON.parse(
   ),
 ) as { roles: AdminRole[]; routes: RouteFixture[] };
 const controllers: Type[] = [
+  AdminNotificationsController,
   AdminRealtimeTicketController,
   AdminSessionController,
   AdminAccessController,

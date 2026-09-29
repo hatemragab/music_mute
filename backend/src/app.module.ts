@@ -1,3 +1,4 @@
+import { AdminNotificationsModule } from './admin-notifications/admin-notifications.module.js';
 import { Module } from '@nestjs/common';
 import { InfrastructureModule } from './infrastructure/infrastructure.module.js';
 import { SecurityModule } from './http/security.module.js';
@@ -39,6 +40,7 @@ import { RealtimeModule } from './realtime/realtime.module.js';
     AdminHealthModule,
     WorkerFleetModule,
     RealtimeModule,
+    AdminNotificationsModule,
   ],
   controllers: [HealthController],
 })

@@ -1,6 +1,8 @@
 export type AdminRole = 'owner' | 'release_manager' | 'support' | 'viewer';
 
 export type AdminPermission =
+  | 'notifications.read'
+  | 'notifications.send'
   | 'overview.read'
   | 'jobs.read'
   | 'jobs.manage'

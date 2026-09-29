@@ -18,6 +18,7 @@ function fixture() {
     {} as never,
     {} as never,
     { enrich: async (items: unknown) => items } as never,
+    {} as never,
   );
   const owner = {
     audience: 'owner',

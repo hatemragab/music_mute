@@ -39,6 +39,8 @@ jobs:
           pnpm install --frozen-lockfile --ignore-scripts
           python -m venv .venv
           .venv/bin/python -m pip install --no-deps -r ../tools/worker-gpu-feasibility/requirements-mps-base.lock.txt
+      - name: Install engine fixture media tools
+        run: brew install ffmpeg
       - name: Verify source and engine fixtures
         run: pnpm run verify
       - name: Verify packed consumer and production Node dependencies

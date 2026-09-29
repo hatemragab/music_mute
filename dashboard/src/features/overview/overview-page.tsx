@@ -1,5 +1,7 @@
 import { useLiveQuery } from "@/realtime/hooks";
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
+import { Button } from "@/components/ui/button";
 
 import { useAdminSession } from "@/auth/admin-session";
 import { withQuery } from "@/api/query-string";
@@ -74,6 +76,39 @@ export function OverviewPage() {
       ) : overview.data ? (
         <>
           <OverviewCards data={overview.data} />
+          <nav
+            aria-label="Operations shortcuts"
+            className="flex flex-wrap gap-2"
+          >
+            {can("jobs.read") && (
+              <Button variant="outline" asChild>
+                <Link
+                  to={withQuery("/jobs", {
+                    status: "failed",
+                    from: range.from.slice(0, 10),
+                    to: range.to.slice(0, 10),
+                  })}
+                >
+                  Review failed jobs
+                </Link>
+              </Button>
+            )}
+            {can("workers.read") && (
+              <Button variant="outline" asChild>
+                <Link to="/workers">Inspect worker capacity</Link>
+              </Button>
+            )}
+            {can("health.read") && (
+              <Button variant="outline" asChild>
+                <Link to="/health">Review system health</Link>
+              </Button>
+            )}
+            {can("notifications.read") && (
+              <Button variant="outline" asChild>
+                <Link to="/notifications">Review push history</Link>
+              </Button>
+            )}
+          </nav>
           <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
             <Card>
               <CardContent className="p-5">

@@ -898,6 +898,152 @@ paths:
           $ref: '#/components/responses/Problem503'
       x-audience:
         - administrator
+  /admin/notifications:
+    get:
+      tags: [admin]
+      operationId: AdminNotificationsController.list
+      summary: Read announcement history
+      description: Owner only. FCM acceptance is not device delivery. Uses durable operation receipts and bounded background dispatch.
+      security:
+        - FirebaseBearer: []
+      x-source: src/admin-notifications/admin-notifications.controller.ts
+      x-auth-policy: A(`notifications.read`)
+      x-rate-policy: G + Ax read
+      x-required-permissions: [notifications.read]
+      x-audience: [administrator]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string, pattern: '^[a-fA-F0-9]{24}$' }
+      responses:
+        '200':
+          description: Current announcement history.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationCampaignPage'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '500':
+          $ref: '#/components/responses/Problem500'
+        '503':
+          $ref: '#/components/responses/Problem503'
+    post:
+      tags: [admin]
+      operationId: AdminNotificationsController.create
+      summary: Queue an announcement for all eligible user devices
+      description: Owner only. FCM acceptance is not device delivery. Uses durable operation receipts and bounded background dispatch.
+      security:
+        - FirebaseBearer: []
+      x-source: src/admin-notifications/admin-notifications.controller.ts
+      x-auth-policy: A(`notifications.send`) + fresh authentication
+      x-rate-policy: G + Ax sensitive
+      x-required-permissions: [notifications.send]
+      x-audience: [administrator]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [operation_id, title, body, reason]
+              properties:
+                operation_id:
+                  {
+                    type: string,
+                    format: uuid,
+                    description: UUID v4 retained for the same command. Changed content with the same ID conflicts.,
+                  }
+                title: { type: string, minLength: 1, maxLength: 80 }
+                body: { type: string, minLength: 1, maxLength: 500 }
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '201':
+          description: Durably queued campaign; replay returns its current state.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationCampaign'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '500':
+          $ref: '#/components/responses/Problem500'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /admin/notifications/{id}:
+    get:
+      tags: [admin]
+      operationId: AdminNotificationsController.detail
+      summary: Read announcement history
+      description: Owner only. FCM acceptance is not device delivery. Uses durable operation receipts and bounded background dispatch.
+      security:
+        - FirebaseBearer: []
+      x-source: src/admin-notifications/admin-notifications.controller.ts
+      x-auth-policy: A(`notifications.read`)
+      x-rate-policy: G + Ax read
+      x-required-permissions: [notifications.read]
+      x-audience: [administrator]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-fA-F0-9]{24}$' }
+      responses:
+        '200':
+          description: Current announcement history.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationCampaign'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '500':
+          $ref: '#/components/responses/Problem500'
+        '503':
+          $ref: '#/components/responses/Problem503'
   /admin/alerts:
     get:
       tags:
@@ -7550,6 +7696,52 @@ components:
       scheme: bearer
       description: Worker invitation, installation, or machine credential as specified per operation by x-worker-principal.
   schemas:
+    NotificationCampaignPage:
+      type: object
+      required: [items, next_cursor, as_of]
+      properties:
+        as_of: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/NotificationCampaign' }
+        next_cursor: { type: [string, 'null'] }
+    NotificationCampaign:
+      type: object
+      required:
+        [
+          id,
+          title,
+          body,
+          reason,
+          actor_uid,
+          audience,
+          state,
+          targets_frozen,
+          counts,
+          created_at,
+          completed_at,
+        ]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        body: { type: string }
+        reason: { type: string }
+        actor_uid: { type: string }
+        audience: { type: string, enum: [all_users] }
+        state: { type: string, enum: [queued, sending, completed] }
+        targets_frozen: { type: boolean }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: [string, 'null'], format: date-time }
+        counts:
+          type: object
+          description: Per-device submissions. Sent means accepted by FCM, not delivered/read. Counts may grow until targets_frozen.
+          required: [pending, sent, failed, invalid, ineligible]
+          properties:
+            pending: { type: integer, format: int64, minimum: 0 }
+            sent: { type: integer, format: int64, minimum: 0 }
+            failed: { type: integer, format: int64, minimum: 0 }
+            invalid: { type: integer, format: int64, minimum: 0 }
+            ineligible: { type: integer, format: int64, minimum: 0 }
     MediaImportView:
       type: object
       required: [import_id, status, job_id, error, created_at, updated_at]
@@ -15758,6 +15950,10 @@ components:
       type: object
       additionalProperties: true
       properties:
+        as_of:
+          type: string
+          format: date-time
+          description: Server observation time for this bounded machine snapshot.
         machine:
           type: object
           additionalProperties: true
