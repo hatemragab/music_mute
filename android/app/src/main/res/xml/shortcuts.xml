@@ -1,0 +1,11 @@
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="import_audio" android:enabled="true" android:icon="@drawable/ic_vocal_monochrome" android:shortcutShortLabel="@string/listen_import_audio">
+        <intent android:action="com.hatem.musicmute.IMPORT_AUDIO" android:targetPackage="@string/shortcut_target_package" android:targetClass="com.hatem.musicmute.MainActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="import_link" android:enabled="true" android:icon="@drawable/ic_vocal_monochrome" android:shortcutShortLabel="@string/listen_import_link">
+        <intent android:action="com.hatem.musicmute.IMPORT_LINK" android:targetPackage="@string/shortcut_target_package" android:targetClass="com.hatem.musicmute.MainActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="library" android:enabled="true" android:icon="@drawable/ic_vocal_monochrome" android:shortcutShortLabel="@string/creative_library_tab">
+        <intent android:action="com.hatem.musicmute.LIBRARY" android:targetPackage="@string/shortcut_target_package" android:targetClass="com.hatem.musicmute.MainActivity" />
+    </shortcut>
+</shortcuts>

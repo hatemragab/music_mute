@@ -25,19 +25,36 @@ import java.io.File
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
+import android.os.SystemClock
 import com.hatem.musicmute.MainActivity
 import com.hatem.musicmute.VocalApplication
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-class AudioPlaybackService : MediaSessionService() {
-    private var session: MediaSession? = null
+class AudioPlaybackService : MediaLibraryService() {
+    private var session: MediaLibrarySession? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val checkpoints = Channel<Pair<ProcessingSession, QueueSnapshot>>(Channel.CONFLATED)
     private var owner: ProcessingSession? = null
     private var autoNext = true
+    private var listeningLoop: AudioRange? = null
+    private var listeningIdentity: String? = null
+    private var sleepAt: Long? = null
+    private var sleepEnd = false
+    private var sleepFade = false
+    private var fadeVolume: Float? = null
+    private var skipSilence = false
+
+    private fun clearSleep(player: Player) {
+        fadeVolume?.let { player.volume = it }
+        fadeVolume = null
+        sleepAt = null
+        sleepEnd = false
+    }
     private var shuffleSeed = Random.nextLong()
     private var queueIdentity = emptyList<String>()
     private var restoring = false
@@ -47,7 +64,7 @@ class AudioPlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        if ((application as? VocalApplication)?.updateAdmission?.isBlocked() == true) {
+        if ((application as? VocalApplication)?.updateAdmission?.isRequired() == true) {
             stopSelf()
             return
         }
@@ -80,7 +97,8 @@ class AudioPlaybackService : MediaSessionService() {
             }
         }
         val player =
-            ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(sources)).build().apply {
+            ExoPlayer.Builder(this, ListeningRenderersFactory(this))
+                .setMediaSourceFactory(DefaultMediaSourceFactory(sources)).build().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(C.USAGE_MEDIA)
@@ -111,8 +129,25 @@ class AudioPlaybackService : MediaSessionService() {
             }
             override fun onEvents(p: Player, events: Player.Events) {
                 if (p.playbackState == Player.STATE_READY) failedItems.clear()
-                player.pauseAtEndOfMediaItems = !autoNext && p.repeatMode != Player.REPEAT_MODE_ONE
+                val identity = p.currentMediaItem?.let { "${it.mediaId}:${it.localConfiguration?.uri}" }
+                if (identity != listeningIdentity) {
+                    listeningIdentity = identity
+                    listeningLoop = null
+                    publishExtras()
+                    session?.notifyChildrenChanged("musicmute-recent", if (p.currentMediaItem == null) 0 else 1, null)
+                }
+                player.pauseAtEndOfMediaItems = sleepEnd || listeningLoop != null || (!autoNext && p.repeatMode != Player.REPEAT_MODE_ONE)
+                val visible = owner != null && dependencies?.currentPlaybackSession() == owner &&
+                    p.currentMediaItem?.queueTrack()?.key?.ownerUid == owner?.uid
+                PlaybackWidget.update(this@AudioPlaybackService,
+                    if (visible) p.currentMediaItem?.mediaMetadata?.title?.toString() else null, visible && p.isPlaying)
                 checkpoint()
+            }
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
+                    if (sleepEnd) { clearSleep(player); publishExtras() }
+                    else listeningLoop?.takeIf { it.valid(player.duration) }?.let { player.seekTo(it.startMs); player.play() }
+                }
             }
             override fun onPlayerError(error: PlaybackException) {
                 val diagnostic = classifyPlaybackFailure(error)
@@ -141,28 +176,71 @@ class AudioPlaybackService : MediaSessionService() {
                 player.seekToDefaultPosition(next); player.prepare(); player.play()
             }
         })
-        session =
-            MediaSession.Builder(this, player)
-                .setSessionActivity(MainActivity.playerPendingIntent(this))
-                .setCallback(object : MediaSession.Callback {
-                    override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
-                        MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailableSessionCommands(
-                            MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
-                                .add(SessionCommand(AUTO_NEXT_COMMAND, Bundle.EMPTY)).build()).build()
-                    override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo, command: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
-                        if (command.customAction != AUTO_NEXT_COMMAND) return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
-                        autoNext = args.getBoolean(AUTO_NEXT_KEY, true)
-                        player.pauseAtEndOfMediaItems = !autoNext && player.repeatMode != Player.REPEAT_MODE_ONE
-                        publishExtras(); checkpoint()
-                        return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        val libraryCallback = object : PlaybackLibraryCallback(this, scope, { owner }, { ownerRestore.canCheckpoint(it) }) {
+            override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
+                if (!allowedController(controller)) return MediaSession.ConnectionResult.reject()
+                val builder = MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                if (controller.packageName == packageName) builder.setAvailableSessionCommands(
+                    MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+                        .add(SessionCommand(AUTO_NEXT_COMMAND, Bundle.EMPTY))
+                        .add(SessionCommand(LISTENING_COMMAND, Bundle.EMPTY)).build())
+                return builder.build()
+            }
+            override fun onPlayerCommandRequest(session: MediaSession, controller: MediaSession.ControllerInfo, command: Int): Int {
+                val admission = (application as? VocalApplication)?.updateAdmission
+                if (admission?.isRequired() == true) return SessionError.ERROR_PERMISSION_DENIED
+                // An empty session may accept a resume request; the async resumption callback
+                // waits for both auth and update restoration before returning any media.
+                if (session.player.mediaItemCount == 0 && command in setOf(Player.COMMAND_PLAY_PAUSE, Player.COMMAND_PREPARE))
+                    return SessionResult.RESULT_SUCCESS
+                return if (admission?.isBlocked() == true || owner == null || dependencies?.currentPlaybackSession() != owner)
+                    SessionError.ERROR_PERMISSION_DENIED else SessionResult.RESULT_SUCCESS
+            }
+
+            override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo, command: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
+                if (controller.packageName != packageName || owner == null || dependencies?.currentPlaybackSession() != owner ||
+                    (application as? VocalApplication)?.updateAdmission?.isBlocked() == true)
+                    return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                when (command.customAction) {
+                    AUTO_NEXT_COMMAND -> autoNext = args.getBoolean(AUTO_NEXT_KEY, true)
+                    LISTENING_COMMAND -> when (args.getString("action")) {
+                        "silence" -> { skipSilence = args.getBoolean("enabled"); player.skipSilenceEnabled = skipSilence }
+                        "loop" -> {
+                            val range = AudioRange(args.getLong("start", -1), args.getLong("end", -1))
+                            if (!range.valid(player.duration)) return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+                            if (sleepEnd) clearSleep(player)
+                            listeningLoop = range
+                            player.seekTo(range.startMs)
+                        }
+                        "clearLoop" -> listeningLoop = null
+                        "sleep" -> {
+                            clearSleep(player)
+                            sleepAt = sleepDeadline(SystemClock.elapsedRealtime(), args.getInt("minutes"))
+                            sleepEnd = args.getBoolean("endOfTrack")
+                            if (sleepEnd) listeningLoop = null
+                            sleepFade = args.getBoolean("fade")
+                        }
+                        else -> return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
                     }
-                })
-                .build()
+                    else -> return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
+                }
+                player.pauseAtEndOfMediaItems = sleepEnd || listeningLoop != null || (!autoNext && player.repeatMode != Player.REPEAT_MODE_ONE)
+                publishExtras(); checkpoint()
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+        }
+        session = MediaLibrarySession.Builder(this, player, libraryCallback)
+            .setSessionActivity(MainActivity.playerPendingIntent(this)).build()
         publishExtras()
         scope.launch { dependencies?.playbackSessions?.collectLatest { current ->
             if (!ownerRestore.attach(current)) return@collectLatest
             val old = owner
             owner = current
+            listeningLoop = null
+            clearSleep(player)
+            skipSilence = false
+            player.skipSilenceEnabled = false
+            publishExtras()
             restoring = true
             // The initial null -> authenticated attachment must restore before any timer/event save.
             // Subsequent transitions remove the prior session's in-memory and durable queue.
@@ -171,6 +249,8 @@ class AudioPlaybackService : MediaSessionService() {
                 withContext(Dispatchers.IO) { dependencies?.playbackQueueStore?.clear(old.uid) }
             }
             if (current == null) { restoring = false; return@collectLatest }
+            (application as? VocalApplication)?.updateCoordinator?.state?.first { !it.restoring }
+            if ((application as? VocalApplication)?.updateAdmission?.isBlocked() == true) return@collectLatest
             val saved = withContext(Dispatchers.IO) { dependencies?.playbackQueueStore?.load(current.uid) }
             if (dependencies?.currentPlaybackSession() != current) return@collectLatest
             if (saved != null && player.mediaItemCount == 0) {
@@ -187,10 +267,43 @@ class AudioPlaybackService : MediaSessionService() {
             restoring = false
             ownerRestore.restored(current)
         } }
+        scope.launch {
+            (application as? VocalApplication)?.libraryRepository?.entries?.collectLatest { entries ->
+                val expected = owner ?: return@collectLatest
+                if (dependencies?.currentPlaybackSession() == expected) {
+                    session?.notifyChildrenChanged("musicmute-library", entries.count { !it.hidden && it.key.ownerUid == expected.uid }, null)
+                }
+            }
+        }
         scope.launch { while (isActive) { delay(2000); checkpoint() } }
+        scope.launch {
+            while (isActive) {
+                val fading = sleepFade && sleepAt?.let { it - SystemClock.elapsedRealtime() in 1..5000 } == true
+                delay(if (listeningLoop != null || fading) 100 else 1000)
+                if (owner == null || dependencies?.currentPlaybackSession() != owner) continue
+                if (player.isPlaying) loopSeek(player.currentPosition, listeningLoop, player.duration)?.let(player::seekTo)
+                val remaining = sleepAt?.minus(SystemClock.elapsedRealtime())
+                if (remaining != null && remaining <= 0) {
+                    player.pause(); clearSleep(player); publishExtras(); checkpoint()
+                } else if (sleepFade && remaining != null && remaining < 5000 && player.isPlaying) {
+                    if (fadeVolume == null) fadeVolume = player.volume
+                    player.volume = requireNotNull(fadeVolume) * (remaining / 5000f).coerceIn(0f, 1f)
+                }
+                if (sleepEnd && player.playbackState == Player.STATE_ENDED) {
+                    player.pause(); clearSleep(player); publishExtras()
+                }
+            }
+        }
     }
 
-    private fun publishExtras() { session?.setSessionExtras(Bundle().apply { putBoolean(AUTO_NEXT_KEY, autoNext) }) }
+    private fun publishExtras() { session?.setSessionExtras(Bundle().apply {
+        putBoolean(AUTO_NEXT_KEY, autoNext)
+        putBoolean("skipSilence", skipSilence)
+        putLong("loopStart", listeningLoop?.startMs ?: -1)
+        putLong("loopEnd", listeningLoop?.endMs ?: -1)
+        putLong("sleepAt", sleepAt ?: 0)
+        putBoolean("sleepEnd", sleepEnd)
+    }) }
 
     private fun checkpoint() {
         val expected = owner ?: return
@@ -210,10 +323,14 @@ class AudioPlaybackService : MediaSessionService() {
         checkpoints.trySend(expected to snapshot)
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
+    private fun allowedController(controllerInfo: MediaSession.ControllerInfo): Boolean =
+        controllerInfo.packageName == packageName || controllerInfo.isTrusted ||
+            session?.isAutoCompanionController(controllerInfo) == true || session?.isAutomotiveController(controllerInfo) == true
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
         session.takeIf {
-            (application as? VocalApplication)?.updateAdmission?.isBlocked() != true &&
-                (controllerInfo.packageName == packageName || controllerInfo.isTrusted)
+            (application as? VocalApplication)?.updateAdmission?.isRequired() != true &&
+                allowedController(controllerInfo)
         }
 
     override fun onDestroy() {
@@ -222,6 +339,7 @@ class AudioPlaybackService : MediaSessionService() {
             release()
         }
         session = null
+        PlaybackWidget.update(this, null, false)
         checkpoints.close()
         scope.cancel()
         super.onDestroy()

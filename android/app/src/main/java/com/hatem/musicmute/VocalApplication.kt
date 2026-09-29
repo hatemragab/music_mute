@@ -45,6 +45,8 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
     override val playbackQueueStore by lazy {
         com.hatem.musicmute.playback.PlaybackQueueStore(File(noBackupFilesDir, "playback"))
     }
+    val bookmarks by lazy { com.hatem.musicmute.playback.BookmarkStore(File(noBackupFilesDir, "bookmarks")) }
+    val localAudioTools by lazy { com.hatem.musicmute.playback.LocalAudioTools(this) }
     val audioPlayback by lazy { com.hatem.musicmute.playback.AudioPlaybackController(this) }
     override suspend fun resolvePlaybackFile(key: com.hatem.musicmute.library.LibraryKey): File {
         val expected = processingSession() ?: throw java.io.IOException("Playback account changed")
@@ -247,12 +249,13 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
         audioPipelineCoordinator.onSessionChanged(uid)
         processingArtifacts.purgeOwner(uid)
         kotlinx.coroutines.withContext(Dispatchers.IO) {
-            listOf(processingStagingRoot, File(filesDir, "processed_audio_share")).forEach { root ->
+            listOf(processingStagingRoot, File(filesDir, "processed_audio_share"), File(filesDir, "shared_audio_intake")).forEach { root ->
                 purgePrivateOwnerDirectory(root, uid)
             }
         }
         processingStore.clearOwner(uid)
-        kotlinx.coroutines.withContext(Dispatchers.IO) { playbackQueueStore.clear(uid) }
+        kotlinx.coroutines.withContext(Dispatchers.IO) { playbackQueueStore.clear(uid); bookmarks.clear(uid) }
+        localAudioTools.clear(uid)
         val notifications = getSystemService(android.app.NotificationManager::class.java)
         notifications.activeNotifications.filter { it.notification.group == audioTaskNotificationGroup(uid) }
             .forEach { notifications.cancel(it.tag, it.id) }
@@ -337,6 +340,8 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
                     realtime.bindSession(mutableProcessingSession.value)
                     urlImports.bindSession(mutableProcessingSession.value)
                     processingArtifacts.onSessionChanged()
+                    com.hatem.musicmute.playback.PlaybackWidget.update(this@VocalApplication, null, false)
+                    if (previousUid != null) applicationScope.launch { localAudioTools.clear(previousUid) }
                     try {
                         processingRepository.onSessionChanged()
                         audioPipelineCoordinator.onSessionChanged(previousUid)

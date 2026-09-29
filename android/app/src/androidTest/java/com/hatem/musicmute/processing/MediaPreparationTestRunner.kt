@@ -13,20 +13,23 @@ import kotlinx.coroutines.runBlocking
 class MediaPreparationTestRunner : Instrumentation() {
     private var sourceUri: String? = null
     private var playbackCard = false
+    private var listeningFeatures = false
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
         sourceUri = arguments?.getString("sourceUri")
         playbackCard = arguments?.getString("check") == "playbackCard"
+        listeningFeatures = arguments?.getString("check") == "listeningFeatures"
         start()
     }
 
     override fun onStart() {
-        if (playbackCard) {
+        if (playbackCard || listeningFeatures) {
             val report = Bundle()
             try {
-                com.hatem.musicmute.playback.checkPlaybackCard(targetContext)
-                report.putString("result", "PASS: playback metadata, artwork and distinct tap intents")
+                if (listeningFeatures) runBlocking { com.hatem.musicmute.playback.checkListeningFeatures(targetContext) }
+                else com.hatem.musicmute.playback.checkPlaybackCard(targetContext)
+                report.putString("result", "PASS: requested playback framework checks")
                 finish(Activity.RESULT_OK, report)
             } catch (error: Exception) {
                 report.putString("failure", error.stackTraceToString())
