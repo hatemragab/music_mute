@@ -341,7 +341,9 @@ fun VocalApp(
             onDismiss = { showPlaybackQueue = false }, onSelect = app.audioPlayback::selectQueueTrack,
             onRemove = app.audioPlayback::removeTrack, onAutoNext = app.audioPlayback::setAutoNext,
             onShuffle = app.audioPlayback::setShuffle, onRepeat = app.audioPlayback::setRepeat,
-            orderedTracks = voicePlayback.orderedQueue, onToggle = app.audioPlayback::togglePlayback)
+            orderedTracks = voicePlayback.orderedQueue, onToggle = app.audioPlayback::togglePlayback,
+            onMove = app.audioPlayback::moveQueueTrack, onPlayNext = app.audioPlayback::playNext,
+            onClear = app.audioPlayback::clearQueuedTracks)
     }
     val backFromJob: () -> Unit = {
         processingModel.clearSelection()
@@ -450,6 +452,15 @@ fun VocalApp(
                             onPhotos = { importVideo.launch(arrayOf("video/*")) },
                             onRefresh = processingModel.history::refresh,
                             onLoadMore = processingModel.history::loadMore,
+                            onDelete = { task ->
+                                val record = urlImports.firstOrNull { it.requestId == task.importRequestId }
+                                if (record != null) scope.launch {
+                                    try { app.urlImports.remove(record) }
+                                    catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                                    catch (error: UrlImportFailure) { urlImportError = error.code }
+                                    catch (_: Exception) { urlImportError = "SERVICE_UNAVAILABLE" }
+                                }
+                            },
                             onOpen = { task ->
                                 processingModel.selectTask(task.operationId, task.jobId)
                                 nav.navigate(taskDetailRoute(task.operationId, task.jobId)) { launchSingleTop = true }
@@ -509,11 +520,14 @@ fun VocalApp(
                             home = { navigate(Destination.Home) }, refresh = {
                                 libraryModel.clearProblem(); libraryModel.refreshLocal(); processingModel.history.refresh()
                             }, openPlayer = { nav.navigate("player") },
-                            togglePlayback = app.audioPlayback::togglePlayback, next = app.audioPlayback::next),
+                            togglePlayback = app.audioPlayback::togglePlayback, next = app.audioPlayback::next,
+                            rename = processingModel::renameLibraryTrack),
                             hasMore = jobs.nextCursor != null,
                             loadingMore = jobs.loading || jobs.loadingMore,
                             loadMoreFailed = jobs.failure != null,
                             onLoadMore = processingModel.history::loadMore,
+                            renameBusy = processing.busy,
+                            renameMessage = processing.message?.let { stringResource(it) },
                             miniPlayer = {
                                 MiniPlayer(app.audioPlayback.state, { nav.navigate("player") },
                                     app.audioPlayback::togglePlayback, app.audioPlayback::next,

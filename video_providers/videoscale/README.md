@@ -8,7 +8,7 @@ evidence live here. NestJS has a provider-neutral client only.
 ## Contract and limits
 
 See [OpenAPI](openapi.yaml). `POST /audio-imports` accepts `url`, `max_bytes`
-(up to 50 MB decimal), and `max_duration_seconds` (up to 1200). It returns measured
+(up to 100 MB decimal), and `max_duration_seconds` (up to 1800). It returns measured
 binary audio with optional `X-Import-Extra-Data-Base64` metadata. Only public,
 single-item links are enabled for YouTube, Instagram (including Reels), TikTok,
 Vimeo, SoundCloud and Facebook (including Reels), plus the existing catalog's

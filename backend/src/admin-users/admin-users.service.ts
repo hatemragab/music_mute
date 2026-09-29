@@ -1,3 +1,10 @@
+import {
+  ACTIVE_IMPORT_STATES,
+  MediaImport,
+} from '../url-imports/media-import.schema.js';
+import { AdminOperationsService } from '../admin/admin-operations.service.js';
+import { ProcessingAdmissionFence } from '../admin-settings/processing-settings.schema.js';
+import type { ResetAccountUsageDto } from './reset-account-usage.dto.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -27,6 +34,10 @@ export class AdminUsersService implements OnModuleInit {
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
     private readonly usage: ProcessingUsageService,
     private readonly policies: AccountPolicyService,
+    private readonly operations: AdminOperationsService,
+    @InjectModel(MediaImport.name) private readonly imports: Model<MediaImport>,
+    @InjectModel(ProcessingAdmissionFence.name)
+    private readonly fences: Model<ProcessingAdmissionFence>,
   ) {}
 
   async onModuleInit() {
@@ -128,6 +139,52 @@ export class AdminUsersService implements OnModuleInit {
       ...(await this.usage.readUsage(owner)),
       policyOverride: await this.policies.currentOverride(owner),
     };
+  }
+
+  async resetUsage(actor: AdminActor, id: string, dto: ResetAccountUsageDto) {
+    const owner = this.objectId(id);
+    await this.operations.run(
+      actor,
+      {
+        operationId: dto.operationId,
+        route: 'POST /admin/users/:id/account-usage-resets',
+        request: {
+          id,
+          expectedRevision: dto.expectedRevision,
+          periodKey: dto.periodKey,
+          dayKey: dto.dayKey,
+        },
+        action: 'users.account_usage.reset',
+        resourceType: 'user',
+        reason: dto.reason,
+      },
+      async (session) => {
+        await this.fences.updateOne(
+          { _id: `user:${id}` },
+          { $inc: { revision: 1 } },
+          { upsert: true, session, setDefaultsOnInsert: true },
+        );
+        if (!(await this.users.exists({ _id: owner }).session(session)))
+          throw adminError('RESOURCE_NOT_FOUND');
+        await this.fences.updateOne(
+          { _id: 'url-import-admission' },
+          { $inc: { revision: 1 } },
+          { upsert: true, session, setDefaultsOnInsert: true },
+        );
+        if (
+          await this.imports
+            .exists({
+              userId: owner,
+              status: trusted({ $in: ACTIVE_IMPORT_STATES }),
+            })
+            .session(session)
+        )
+          throw adminError('USAGE_RESET_ACTIVE_WORK');
+        const result = await this.usage.resetUsage(owner, dto, session);
+        return { ...result, resourceId: id, value: null };
+      },
+    );
+    return this.accountUsage(id);
   }
 
   async putPolicyOverride(

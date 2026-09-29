@@ -29,6 +29,7 @@ describe("Windows release builder", () => {
     expect(await verifyWindowsRelease(fixture.outputRoot)).toEqual(manifest);
     const paths = manifest.entries.map((entry) => entry.path);
     expect(paths).toContain("runtime/node/LICENSE");
+    expect(paths).toContain("installer/windows-service-functions.ps1");
     expect(paths).toContain("runtime/python/Lib/site-packages/runtime.dll");
     expect(paths).not.toContain("runtime/node/npm/ignored.js");
     expect(paths).not.toContain(
@@ -78,6 +79,10 @@ async function inputs() {
     [
       join(workerRoot, "scripts", "manage-windows-service.ps1"),
       "Write-Output 'installer'\n",
+    ],
+    [
+      join(workerRoot, "scripts", "windows-service-functions.ps1"),
+      "function Stop-ManagedService {}\n",
     ],
     [join(nodeRoot, "node.exe"), "node\n"],
     [join(nodeRoot, "LICENSE"), "Node license\n"],

@@ -30,6 +30,47 @@ class SeparatorError(RuntimeError):
     """Raised when the qualified separation adapter cannot safely run."""
 
 
+def _load_verified_mdx(separator: Any, model_path: Path) -> None:
+    """Load our verified model directly, without upstream catalog downloads.
+
+    These parameters belong to MODEL_SHA256 in recipes.py. UVR identifies that
+    model with tail-MD5 970b3f9492014d18fefeedfe4773cb42 in its MDX model data:
+    https://github.com/TRvlvr/application_data/blob/main/mdx_model_data/model_data_new.json
+    MD5 is provenance only; verify_model enforces the full SHA-256 before here.
+    Keep the pinned upstream device, separation and cleanup implementation.
+    """
+    from audio_separator.separator.architectures.mdx_separator import MDXSeparator
+
+    common = {
+        name: getattr(separator, name)
+        for name in (
+            "logger", "log_level", "torch_device", "torch_device_cpu",
+            "torch_device_mps", "onnx_execution_provider", "output_format",
+            "output_bitrate", "output_dir", "normalization_threshold",
+            "amplification_threshold", "output_single_stem", "invert_using_spec",
+            "sample_rate", "use_soundfile", "use_autocast", "use_native_fp16",
+            "use_torch_compile",
+        )
+    }
+    common.update(
+        model_name=Path(MODEL_FILENAME).stem,
+        model_path=str(model_path),
+        model_data={
+            "compensate": 1.009,
+            "mdx_dim_f_set": 3072,
+            "mdx_dim_t_set": 8,
+            "mdx_n_fft_scale_set": KIM_VOCAL_2_N_FFT,
+            "primary_stem": "Vocals",
+        },
+    )
+    model = MDXSeparator(common_config=common, arch_config=separator.arch_specific_params["MDX"])
+    if not model._execution_policy_resolved:
+        model.resolve_execution_policy("mdx")
+    separator.model_instance = model
+    separator.model_filename = MODEL_FILENAME
+    separator.model_filenames = [MODEL_FILENAME]
+
+
 def _write_vocal_wav(model: Any, stem_path: str, audio: Any) -> None:
     import soundfile as sf
     from audio_separator.separator.uvr_lib_v5 import spec_utils
@@ -93,6 +134,57 @@ def _separate_primary_vocals(model: Any, audio_file_path: str, custom_output_nam
     return [model.primary_stem_output_path]
 
 
+def _instrument_directml_progress(model: Any) -> None:
+    """Observe the pinned one-window DirectML path without changing its math."""
+    original_demix = model.demix
+    original_run_model = model.run_model
+    active = False
+    completed = 0
+    total = 0
+
+    def demix(_model: Any, mix: Any, is_match_mix: bool = False) -> Any:
+        nonlocal active, completed, total
+        if is_match_mix:
+            return original_demix(mix, is_match_mix=True)
+        model.initialize_model_settings()
+        generated = model.chunk_size - 2 * model.trim
+        step = int((1 - model.overlap) * model.chunk_size)
+        if generated <= 0 or step <= 0:
+            raise SeparatorError("Kim DirectML window geometry is invalid")
+        padding = generated + model.trim - (mix.shape[-1] % generated)
+        length = model.trim + mix.shape[-1] + padding
+        total = (length + step - 1) // step
+        completed = 0
+        active = True
+        try:
+            output = original_demix(mix, is_match_mix=False)
+            if completed != total:
+                raise SeparatorError("Kim DirectML window count changed")
+            model.grouped_windows = completed
+            model.grouped_model_calls = completed
+            model.grouped_max_batch = 1
+            return output
+        finally:
+            active = False
+
+    def run_model(_model: Any, mix: Any, is_match_mix: bool = False) -> Any:
+        nonlocal completed
+        output = original_run_model(mix, is_match_mix=is_match_mix)
+        if active and not is_match_mix:
+            if mix.shape[0] != 1:
+                raise SeparatorError("Kim DirectML requires one window per call")
+            completed += 1
+            if completed > total:
+                raise SeparatorError("Kim DirectML progress exceeds the input")
+            callback = getattr(model, "on_window_progress", None)
+            if callback is not None:
+                callback(completed, total)
+        return output
+
+    model.demix = MethodType(demix, model)
+    model.run_model = MethodType(run_model, model)
+
+
 class KimSeparator:
     def __init__(
         self,
@@ -150,13 +242,15 @@ class KimSeparator:
                         "enable_denoise": False,
                     },
                 )
-                separator.load_model(model_filename=MODEL_FILENAME)
+                _load_verified_mdx(separator, self.model_path)
                 # Pin PCM WAV output: upstream otherwise inherits MPEG subtypes
                 # from MP3 input, which soundfile cannot use for WAV output.
                 separator.model_instance.write_audio = MethodType(
                     _write_vocal_wav, separator.model_instance
                 )
                 model = separator.model_instance
+                if self.provider == "directml":
+                    _instrument_directml_progress(model)
                 if getattr(model, "primary_stem_name", None) == "Vocals" and getattr(model, "output_single_stem", None) == "Vocals":
                     model.separate = MethodType(_separate_primary_vocals, model)
                 self._profile_sessions.extend(sessions)

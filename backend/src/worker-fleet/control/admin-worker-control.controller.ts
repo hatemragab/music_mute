@@ -15,6 +15,7 @@ import {
 } from '../../admin/admin.decorators.js';
 import type { AuthRequest } from '../../auth/auth-request.js';
 import {
+  ApproveWorkerCapacityDto,
   AdminWorkerListQueryDto,
   AdminWorkerPageQueryDto,
   RequestWorkerBenchmarkDto,
@@ -66,6 +67,18 @@ export class AdminWorkerControlController {
     @Body() dto: RequestWorkerBenchmarkDto,
   ) {
     return this.control.requestBenchmark(request.adminActor!, id, dto);
+  }
+
+  @Post('machines/:id/capacity-approvals')
+  @RequireAdminPermission('workers.manage')
+  @RequireFreshAdminAuth()
+  @LimitAdmin('sensitive')
+  approveCapacity(
+    @Req() request: AuthRequest,
+    @Param('id') id: string,
+    @Body() dto: ApproveWorkerCapacityDto,
+  ) {
+    return this.control.approveCapacity(request.adminActor!, id, dto);
   }
 
   @Get('machines/:id/diagnostics')

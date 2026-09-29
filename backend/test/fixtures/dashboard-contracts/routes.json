@@ -3,6 +3,25 @@
   "roles": ["owner", "release_manager", "support", "viewer"],
   "routes": [
     {
+      "controller": "AdminWorkerControlController",
+      "method": "POST",
+      "path": "/admin/worker-fleet/machines/:id/capacity-approvals",
+      "permissions": ["workers.manage"],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expected_revision": 0,
+        "gpu_id": "gpu0",
+        "qualification_confirmed": true,
+        "reason": "Reviewed native qualification evidence"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 201
+    },
+    {
       "controller": "AdminRealtimeTicketController",
       "method": "POST",
       "path": "/admin/realtime-tickets",
@@ -977,6 +996,25 @@
         "lease_seconds": 60,
         "processing_deadline_seconds": 900,
         "reason": "Synthetic contract fixture"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "dto",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminUsersController",
+      "method": "POST",
+      "path": "/admin/users/:id/account-usage-resets",
+      "permissions": ["users.processing.manage"],
+      "roles": ["owner", "support"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "expected_revision": 0,
+        "period_key": "2026-09",
+        "day_key": "2026-09-29",
+        "operation_id": "7f107510-108d-4c25-a091-ecf28e43bd7b",
+        "reason": "Fixture reset"
       },
       "responseCategory": "resource",
       "validationOwner": "dto",

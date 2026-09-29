@@ -21,7 +21,8 @@ from official_metadata import OfficialMetadata, merge_metadata
 API_HOST = 'gate.apiscrape.net'
 API_PORT = 16262
 STORAGE_HOST = 's3.fr-par.scw.cloud'
-MAX_BYTES = 50_000_000
+MAX_BYTES = 100_000_000
+MAX_DURATION_SECONDS = 1800
 TASK_ID = re.compile(r'^[a-fA-F0-9-]{36}$')
 
 
@@ -495,7 +496,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise Failure('IMPORT_INVALID_REQUEST', 400)
             limit, duration = body['max_bytes'], body['max_duration_seconds']
             if (type(limit) is not int or not 1 <= limit <= MAX_BYTES
-                    or not finite(duration) or not 0 < duration <= 1200):
+                    or not finite(duration) or not 0 < duration <= MAX_DURATION_SECONDS):
                 raise Failure('IMPORT_INVALID_REQUEST', 400)
             url = source_url(body['url'])
             acquired = self.server.slots.acquire(blocking=False)

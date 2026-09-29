@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -67,7 +68,7 @@ class ChildArgumentsTests(unittest.TestCase):
         ):
             result = run(
                 "00000000-0000-4000-8000-000000000001",
-                model_cache_root=Path("/var/lib/musicmute/models"),
+                model_cache_root=Path(tempfile.gettempdir()).resolve() / "musicmute-models",
                 provider="mps",
             )
 
@@ -80,14 +81,14 @@ class ChildArgumentsTests(unittest.TestCase):
                 "--incarnation",
                 "00000000-0000-4000-8000-000000000001",
                 "--model-cache-root",
-                "/var/lib/musicmute/models",
+                str(Path(tempfile.gettempdir()).resolve() / "musicmute-models"),
                 "--provider",
                 "mps",
             ]
         )
 
         self.assertEqual(
-            str(arguments.model_cache_root), "/var/lib/musicmute/models"
+            str(arguments.model_cache_root), str(Path(tempfile.gettempdir()).resolve() / "musicmute-models")
         )
         self.assertEqual(arguments.provider, "mps")
         self.assertEqual(arguments.directml_device_id, 0)

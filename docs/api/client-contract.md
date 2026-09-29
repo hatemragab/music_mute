@@ -74,7 +74,7 @@ remaining allowance is clamped to zero. Already accepted files finish normally.
 
 URL imports create a temporary duration hold before provider acquisition so
 concurrent requests cannot bypass admission. The hold uses the per-file cap (up
-to 1200 seconds) because duration is unknown; this does **not** require that many
+to 1800 seconds) because duration is unknown; this does **not** require that many
 seconds remaining. Job creation atomically exchanges the hold for measured
 duration, and failed/interrupted imports release it. Existing per-file size,
 duration, authentication and transfer protections remain in force.
@@ -286,3 +286,11 @@ Worker progress, completion, and failure requests accept optional bounded
 `execution_timings` snapshots. Deploy backend support before updating workers.
 The existing client `timing` and administrator `stage_timings` fields remain
 backward compatible; new UIs use `server_stage_timings` for authoritative totals.
+
+### Expanded media capability
+
+`GET /processing-policy?schema_version=2&media_limits_version=2` opts into
+30-minute / 100-MB prepared audio ceilings, bounded by the saved global policy.
+Omitting `media_limits_version` retains 20-minute / 50-MB ceilings for installed
+native clients. Account allowances apply equally to all clients; URL imports use
+the effective account policy. Existing job admission snapshots remain authoritative.

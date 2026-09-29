@@ -57,129 +57,135 @@ describe("qualified enrollment report", () => {
     );
   });
 
-  it("derives the Mac report from a verified release, doctor and host GPU", async () => {
-    const root = await temporaryRoot();
-    const release = join(root, "release");
-    await macRelease(release);
-    await writeMacReleaseManifest(release, "0.1.0");
-    const diagnostics = join(root, "diagnostics.json");
-    await writeFile(diagnostics, JSON.stringify(doctor("darwin")));
-    const qualificationPath = join(root, "qualification.json");
-    await writeFile(
-      qualificationPath,
-      JSON.stringify(
-        qualification("darwin-arm64", await releaseDigest(release)),
-      ),
-    );
-    const command = vi.fn(
-      async (_executable: string, _arguments: readonly string[]) =>
-        JSON.stringify({
-          SPDisplaysDataType: [
+  it.skipIf(process.platform !== "darwin")(
+    "derives the Mac report from a verified release, doctor and host GPU",
+    async () => {
+      const root = await temporaryRoot();
+      const release = join(root, "release");
+      await macRelease(release);
+      await writeMacReleaseManifest(release, "0.1.0");
+      const diagnostics = join(root, "diagnostics.json");
+      await writeFile(diagnostics, JSON.stringify(doctor("darwin")));
+      const qualificationPath = join(root, "qualification.json");
+      await writeFile(
+        qualificationPath,
+        JSON.stringify(
+          qualification("darwin-arm64", await releaseDigest(release)),
+        ),
+      );
+      const command = vi.fn(
+        async (_executable: string, _arguments: readonly string[]) =>
+          JSON.stringify({
+            SPDisplaysDataType: [
+              {
+                sppci_model: "Apple M4 Pro",
+                sppci_cores: "16",
+                spdisplays_ndrvs: [{ _name: "External display" }],
+              },
+            ],
+          }),
+      );
+
+      const report = await createEnrollmentReport({
+        releaseRoot: release,
+        diagnosticsPath: diagnostics,
+        qualificationPath,
+        label: "Mac mini worker",
+        host: {
+          platform: "darwin",
+          arch: "arm64",
+          release: "25.6.0",
+          cpu: "Apple M4 Pro",
+          memoryBytes: 25_769_803_776,
+        },
+        command,
+      });
+
+      expect(command).toHaveBeenCalledWith("/usr/sbin/system_profiler", [
+        "SPDisplaysDataType",
+        "-json",
+      ]);
+      expect(report).toMatchObject({
+        label: "Mac mini worker",
+        hardware: {
+          os: "Darwin",
+          architecture: "arm64",
+          gpus: [
             {
-              sppci_model: "Apple M4 Pro",
-              sppci_cores: "16",
-              spdisplays_ndrvs: [{ _name: "External display" }],
+              id: "gpu0",
+              name: "Apple M4 Pro",
+              driverVersion: "25.6.0",
             },
           ],
-        }),
-    );
-
-    const report = await createEnrollmentReport({
-      releaseRoot: release,
-      diagnosticsPath: diagnostics,
-      qualificationPath,
-      label: "Mac mini worker",
-      host: {
-        platform: "darwin",
-        arch: "arm64",
-        release: "25.6.0",
-        cpu: "Apple M4 Pro",
-        memoryBytes: 25_769_803_776,
-      },
-      command,
-    });
-
-    expect(command).toHaveBeenCalledWith("/usr/sbin/system_profiler", [
-      "SPDisplaysDataType",
-      "-json",
-    ]);
-    expect(report).toMatchObject({
-      label: "Mac mini worker",
-      hardware: {
-        os: "Darwin",
-        architecture: "arm64",
-        gpus: [
+        },
+        runtime: {
+          workerVersion: "0.1.0",
+          protocolVersion: 1,
+          modelDigest,
+          providerRuntimeVersion: "torch 2.14.0",
+        },
+        capabilities: [
           {
-            id: "gpu0",
-            name: "Apple M4 Pro",
-            driverVersion: "25.6.0",
+            platform: "darwin-arm64",
+            provider: "mps",
+            gpuId: "gpu0",
+            maxSlots: 1,
           },
         ],
-      },
-      runtime: {
-        workerVersion: "0.1.0",
-        protocolVersion: 1,
-        modelDigest,
-        providerRuntimeVersion: "torch 2.14.0",
-      },
-      capabilities: [
-        {
-          platform: "darwin-arm64",
-          provider: "mps",
-          gpuId: "gpu0",
-          maxSlots: 1,
-        },
-      ],
-    });
-    expect(report.capabilities[0]?.recipeIds).toEqual([
-      "kim-vocals-v2",
-      "kim-vocals-v2-trim",
-    ]);
-    expect(report.runtime.manifestDigest).toBe(
-      createHash("sha256")
-        .update(await readFile(join(release, "release-manifest.json")))
-        .digest("hex"),
-    );
-  });
+      });
+      expect(report.capabilities[0]?.recipeIds).toEqual([
+        "kim-vocals-v2",
+        "kim-vocals-v2-trim",
+      ]);
+      expect(report.runtime.manifestDigest).toBe(
+        createHash("sha256")
+          .update(await readFile(join(release, "release-manifest.json")))
+          .digest("hex"),
+      );
+    },
+  );
 
-  it("uses the service-qualified runtime diagnostics without a second input file", async () => {
-    const root = await temporaryRoot();
-    const release = join(root, "release");
-    await macRelease(release);
-    await writeMacReleaseManifest(release, "0.1.0");
-    const qualificationPath = join(root, "qualification.json");
-    await writeFile(
-      qualificationPath,
-      JSON.stringify({
-        ...qualification("darwin-arm64", await releaseDigest(release)),
-        runtimeDiagnostics: doctor("darwin"),
-      }),
-    );
-
-    const report = await createEnrollmentReport({
-      releaseRoot: release,
-      qualificationPath,
-      label: "Mac mini worker",
-      host: {
-        platform: "darwin",
-        arch: "arm64",
-        release: "25.6.0",
-        cpu: "Apple M4 Pro",
-        memoryBytes: 25_769_803_776,
-      },
-      command: async () =>
+  it.skipIf(process.platform !== "darwin")(
+    "uses the service-qualified runtime diagnostics without a second input file",
+    async () => {
+      const root = await temporaryRoot();
+      const release = join(root, "release");
+      await macRelease(release);
+      await writeMacReleaseManifest(release, "0.1.0");
+      const qualificationPath = join(root, "qualification.json");
+      await writeFile(
+        qualificationPath,
         JSON.stringify({
-          SPDisplaysDataType: [{ sppci_model: "Apple M4 Pro" }],
+          ...qualification("darwin-arm64", await releaseDigest(release)),
+          runtimeDiagnostics: doctor("darwin"),
         }),
-    });
+      );
 
-    expect(report.runtime.providerRuntimeVersion).toBe("torch 2.14.0");
-    expect(report.capabilities[0]).toMatchObject({
-      platform: "darwin-arm64",
-      provider: "mps",
-      maxSlots: 1,
-    });
-  });
+      const report = await createEnrollmentReport({
+        releaseRoot: release,
+        qualificationPath,
+        label: "Mac mini worker",
+        host: {
+          platform: "darwin",
+          arch: "arm64",
+          release: "25.6.0",
+          cpu: "Apple M4 Pro",
+          memoryBytes: 25_769_803_776,
+        },
+        command: async () =>
+          JSON.stringify({
+            SPDisplaysDataType: [{ sppci_model: "Apple M4 Pro" }],
+          }),
+      });
+
+      expect(report.runtime.providerRuntimeVersion).toBe("torch 2.14.0");
+      expect(report.capabilities[0]).toMatchObject({
+        platform: "darwin-arm64",
+        provider: "mps",
+        maxSlots: 1,
+      });
+    },
+  );
 
   it("selects only the verified Windows RX 580 capability", async () => {
     const root = await temporaryRoot();
@@ -247,44 +253,47 @@ describe("qualified enrollment report", () => {
     });
   });
 
-  it("rejects doctor-only or CPU-fallback qualification evidence", async () => {
-    const root = await temporaryRoot();
-    const release = join(root, "release");
-    await macRelease(release);
-    await writeMacReleaseManifest(release, "0.1.0");
-    const diagnostics = join(root, "diagnostics.json");
-    await writeFile(diagnostics, JSON.stringify(doctor("darwin")));
-    const qualificationPath = join(root, "qualification.json");
-    await writeFile(
-      qualificationPath,
-      JSON.stringify({
-        ...qualification("darwin-arm64", await releaseDigest(release)),
-        providerDispatch: {
-          expectedProvider: "MPS",
-          profileCount: 0,
-          acceleratedNodeEvents: 6,
-          cpuNodeEvents: 1,
-          proven: false,
-        },
-      }),
-    );
-
-    await expect(
-      createEnrollmentReport({
-        releaseRoot: release,
-        diagnosticsPath: diagnostics,
+  it.skipIf(process.platform !== "darwin")(
+    "rejects doctor-only or CPU-fallback qualification evidence",
+    async () => {
+      const root = await temporaryRoot();
+      const release = join(root, "release");
+      await macRelease(release);
+      await writeMacReleaseManifest(release, "0.1.0");
+      const diagnostics = join(root, "diagnostics.json");
+      await writeFile(diagnostics, JSON.stringify(doctor("darwin")));
+      const qualificationPath = join(root, "qualification.json");
+      await writeFile(
         qualificationPath,
-        label: "Mac mini worker",
-        host: {
-          platform: "darwin",
-          arch: "arm64",
-          release: "25.6.0",
-          cpu: "Apple M4 Pro",
-          memoryBytes: 25_769_803_776,
-        },
-      }),
-    ).rejects.toThrow("Accelerated provider dispatch was not proven");
-  });
+        JSON.stringify({
+          ...qualification("darwin-arm64", await releaseDigest(release)),
+          providerDispatch: {
+            expectedProvider: "MPS",
+            profileCount: 0,
+            acceleratedNodeEvents: 6,
+            cpuNodeEvents: 1,
+            proven: false,
+          },
+        }),
+      );
+
+      await expect(
+        createEnrollmentReport({
+          releaseRoot: release,
+          diagnosticsPath: diagnostics,
+          qualificationPath,
+          label: "Mac mini worker",
+          host: {
+            platform: "darwin",
+            arch: "arm64",
+            release: "25.6.0",
+            cpu: "Apple M4 Pro",
+            memoryBytes: 25_769_803_776,
+          },
+        }),
+      ).rejects.toThrow("Accelerated provider dispatch was not proven");
+    },
+  );
 });
 
 async function temporaryRoot(): Promise<string> {

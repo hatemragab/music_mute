@@ -5,4 +5,18 @@
     <string name="queue_shuffle_on">Shuffle on</string>
     <string name="queue_shuffle_off">Shuffle off</string>
     <string name="queue_auto_next">Auto-next</string>
+    <string name="queue_clear">Clear</string>
+    <string name="queue_clear_title">Clear queued audio?</string>
+    <string name="queue_clear_message">The current audio will keep playing. Your Library and downloaded files will be kept.</string>
+    <string name="queue_cancel">Cancel</string>
+    <string name="queue_reorder_hint">Hold a drag handle to reorder. Tap ⋮ for more actions.</string>
+    <string name="queue_manual_order_hint">Reordering turns shuffle off and keeps your chosen order.</string>
+    <string name="queue_repeat_one_hint">Repeat one is on. Use Play next to continue with another track.</string>
+    <string name="queue_auto_next_off_hint">Auto-next is off. Use Play next to continue with another track.</string>
+    <string name="queue_move_up">Move up</string>
+    <string name="queue_move_down">Move down</string>
+    <string name="queue_play_next">Play next</string>
+    <string name="queue_drag">Reorder %1$s</string>
+    <string name="queue_track_actions">Queue actions for %1$s</string>
+    <string name="queue_edit_failed">Could not update the queue. Please try again.</string>
 </resources>

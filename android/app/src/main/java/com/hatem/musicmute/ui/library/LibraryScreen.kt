@@ -50,6 +50,7 @@ data class LibraryActions(
     val download: (LibraryKey) -> Unit, val hidden: (LibraryKey, Boolean) -> Unit,
     val home: () -> Unit, val refresh: () -> Unit, val openPlayer: () -> Unit,
     val togglePlayback: () -> Unit, val next: () -> Unit,
+    val rename: (LibraryKey, String, () -> Unit) -> Unit,
 )
 
 @Composable
@@ -60,9 +61,20 @@ fun LibraryScreen(
     loadingMore: Boolean = false,
     loadMoreFailed: Boolean = false,
     onLoadMore: () -> Unit = {},
+    renameBusy: Boolean = false,
+    renameMessage: String? = null,
     miniPlayer: @Composable () -> Unit = {},
 ) {
-    var menu by remember { mutableStateOf<LibraryEntry?>(null) }
+    var menu by remember { mutableStateOf<LibraryKey?>(null) }
+    var renaming by remember { mutableStateOf<LibraryKey?>(null) }
+    var removing by remember { mutableStateOf<LibraryKey?>(null) }
+    var renameAttempted by remember { mutableStateOf(false) }
+    LaunchedEffect(state.entries) {
+        val keys = state.entries.map { it.key }.toSet()
+        if (menu !in keys) menu = null
+        if (renaming !in keys) renaming = null
+        if (removing !in keys) removing = null
+    }
     Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.TopCenter) {
     Column(Modifier.widthIn(max = CreativeTokens.ContentWidth).fillMaxSize().padding(horizontal = CreativeTokens.PagePadding)) {
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(vertical = 16.dp)) {
@@ -95,7 +107,7 @@ fun LibraryScreen(
                 }
             }
             items(state.entries, key = { "${it.key.ownerUid}/${it.key.jobId}" }) { entry ->
-                LibraryAudioCard(entry, { actions.play(entry) }, { menu = entry })
+                LibraryAudioCard(entry, { actions.play(entry) }, { menu = entry.key })
             }
             if (loadMoreFailed) item {
                 CreativeFeedback(stringResource(R.string.processing_error_service), error = true,
@@ -112,18 +124,47 @@ fun LibraryScreen(
         miniPlayer()
     }
     }
-    menu?.let { entry ->
-        CreativeSheet({ menu = null }) {
-            Text(entry.title, style = MaterialTheme.typography.titleLarge)
-            Text(offlineLabel(entry.offlineStatus), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (entry.offlineStatus == OfflineStatus.DOWNLOADING) LinearProgressIndicator(Modifier.fillMaxWidth())
-            if (entry.offlineStatus !in setOf(OfflineStatus.AVAILABLE, OfflineStatus.DOWNLOADING)) TextButton({ actions.download(entry.key); menu = null }) { Text(stringResource(R.string.creative_library_download)) }
-            TextButton({ actions.star(entry.key); menu = null }) {
-                Text(stringResource(if (entry.starred) R.string.creative_library_unstar else R.string.creative_library_star))
-            }
-            TextButton({ actions.details(entry.key); menu = null }) { Text(stringResource(R.string.creative_library_info)) }
+    state.entries.firstOrNull { it.key == menu }?.let { entry ->
+        LibraryTrackActionsSheet(
+            entry = entry,
+            onDismiss = { menu = null },
+            onPlay = { menu = null; actions.play(entry) },
+            onStar = { menu = null; actions.star(entry.key) },
+            onRename = { menu = null; renameAttempted = false; renaming = entry.key },
+            onDetails = { menu = null; actions.details(entry.key) },
+            onDownload = { menu = null; actions.download(entry.key) },
+            onRemoveOrRestore = {
+                menu = null
+                if (entry.hidden) actions.hidden(entry.key, false) else removing = entry.key
+            },
+            renameEnabled = !renameBusy,
+        )
+    }
+    state.entries.firstOrNull { it.key == renaming }?.let { entry ->
+        RenameAudioSheet(
+            title = entry.title,
+            busy = renameBusy,
+            onDismiss = { renaming = null },
+            onRename = { title ->
+                renameAttempted = true
+                actions.rename(entry.key, title) { renaming = null }
+            },
+            message = renameMessage.takeIf { renameAttempted },
+        )
+    }
+    state.entries.firstOrNull { it.key == removing }?.let { entry ->
+        CreativeSheet(onDismiss = { removing = null }) {
+            Text(stringResource(R.string.creative_library_hide_title), style = MaterialTheme.typography.titleLarge)
+            Text(entry.title, style = MaterialTheme.typography.titleMedium)
             Text(stringResource(R.string.creative_library_hide_body), style = MaterialTheme.typography.bodySmall)
-            TextButton({ actions.hidden(entry.key, !entry.hidden); menu = null }) { Text(stringResource(if (entry.hidden) R.string.creative_library_restore else R.string.creative_library_hide)) }
+            CreativePrimaryButton(
+                onClick = { removing = null; actions.hidden(entry.key, true) },
+                modifier = Modifier.fillMaxWidth(),
+                destructive = true,
+            ) { Text(stringResource(R.string.creative_library_hide)) }
+            OutlinedButton(onClick = { removing = null }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.auth_cancel))
+            }
         }
     }
 }

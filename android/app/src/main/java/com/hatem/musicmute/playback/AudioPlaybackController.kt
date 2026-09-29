@@ -27,6 +27,7 @@ data class PlaybackState(
     val original: Boolean = false,
     val switching: Boolean = false,
     val comparisonFailed: Boolean = false,
+    val queueEditFailed: Boolean = false,
     val playing: Boolean = false,
     val buffering: Boolean = false,
     val positionMs: Long = 0,
@@ -180,6 +181,31 @@ class AudioPlaybackController(context: Context) : QueueCommands {
             for (index in player.mediaItemCount - 1 downTo 0) if (player.getMediaItemAt(index).queueTrack()?.key == key) player.removeMediaItem(index)
         }
         refresh()
+    }
+
+    fun moveQueueTrack(key: LibraryKey, target: LibraryKey) = editQueue(QueueEdit.MOVE, key, target)
+    fun playNext(key: LibraryKey) = editQueue(QueueEdit.PLAY_NEXT, key)
+    fun clearQueuedTracks() = editQueue(QueueEdit.CLEAR)
+
+    private fun editQueue(edit: QueueEdit, key: LibraryKey? = null, target: LibraryKey? = null) {
+        val expected = dependencies?.currentPlaybackSession() ?: return
+        if (key != null && key.ownerUid != expected.uid || target != null && target.ownerUid != expected.uid) return
+        val player = controller ?: return
+        val result = player.sendCustomCommand(SessionCommand(EDIT_QUEUE_COMMAND, Bundle.EMPTY), Bundle().apply {
+            putString("edit", edit.name)
+            putString("owner", expected.uid)
+            putLong("epoch", expected.epoch)
+            putString("job", key?.jobId)
+            putString("target", target?.jobId)
+            putStringArrayList("order", ArrayList(state.value.orderedQueue.map { it.key.jobId }))
+        })
+        result.addListener({
+            if (!released && dependencies?.currentPlaybackSession() == expected) {
+                val success = runCatching { result.get().resultCode == androidx.media3.session.SessionResult.RESULT_SUCCESS }.getOrDefault(false)
+                mutableState.update { it.copy(queueEditFailed = !success) }
+                refresh()
+            }
+        }, ContextCompat.getMainExecutor(appContext))
     }
 
     fun selectQueueTrack(key: LibraryKey) {

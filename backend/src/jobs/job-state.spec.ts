@@ -18,18 +18,18 @@ describe('processing input boundaries', () => {
     expect(() =>
       assertInputDeclaration({
         ...input,
-        bytes: 50_000_000,
-        durationSeconds: 1_200,
+        bytes: 100_000_000,
+        durationSeconds: 1_800,
       }),
     ).not.toThrow();
   });
-  it.each([0, -1, 50_000_001, 50_000_002, 1.5, NaN, Infinity])(
+  it.each([0, -1, 100_000_001, 100_000_002, 1.5, NaN, Infinity])(
     'rejects invalid byte count %s',
     (bytes) => {
       expect(() => assertInputDeclaration({ ...input, bytes })).toThrow();
     },
   );
-  it.each([0, -1, 1_200.001, 1_201, NaN, Infinity])(
+  it.each([0, -1, 1_800.001, 1_801, NaN, Infinity])(
     'rejects invalid duration %s',
     (durationSeconds) => {
       expect(() =>
@@ -78,6 +78,6 @@ describe('captured duration limits', () => {
     expect(() => assertMeasuredDuration(299.9, 300)).not.toThrow();
     expect(() => assertMeasuredDuration(300, 300)).not.toThrow();
     expect(() => assertMeasuredDuration(300.001, 300)).toThrow();
-    expect(() => assertMeasuredDuration(1_200)).not.toThrow();
+    expect(() => assertMeasuredDuration(1_800)).not.toThrow();
   });
 });

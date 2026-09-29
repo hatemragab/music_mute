@@ -1,3 +1,7 @@
+import {
+  MAX_AUDIO_DURATION_SECONDS,
+  MAX_PREPARED_AUDIO_BYTES,
+} from './media-limits.js';
 /** Trusted acquisition metadata only. Never persist provider URLs or raw payloads. */
 const strings = {
   provider: 64,
@@ -17,9 +21,9 @@ const numbers = {
   bitrate_kbps: 10000,
   sample_rate_hz: 384000,
   audio_channels: 32,
-  provider_file_bytes: 50_000_000,
-  duration_seconds: 1200,
-  file_bytes: 50_000_000,
+  provider_file_bytes: MAX_PREPARED_AUDIO_BYTES,
+  duration_seconds: MAX_AUDIO_DURATION_SECONDS,
+  file_bytes: MAX_PREPARED_AUDIO_BYTES,
 } as const;
 export type JobExtraData = { schema_version: 1 } & Partial<
   Record<keyof typeof strings, string> & Record<keyof typeof numbers, number>

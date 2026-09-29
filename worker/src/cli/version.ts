@@ -2,6 +2,7 @@ import { lstat, readFile, readlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createMacUserLayout } from "../platform/macos/user-paths.js";
+import { createWindowsServiceLayout } from "../platform/windows/service-definition.js";
 
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u;
 
@@ -11,6 +12,7 @@ export async function workerVersions(
     packagePath?: string;
     home?: string;
     platform?: NodeJS.Platform;
+    windowsActiveReleasePath?: string;
   } = {},
 ) {
   const packagePath =
@@ -26,8 +28,38 @@ export async function workerVersions(
   let runtimeState:
     "not-installed" | "installed" | "unavailable" | "unsupported" =
     "not-installed";
-  if ((options.platform ?? process.platform) !== "darwin")
-    runtimeState = "unsupported";
+  const platform = options.platform ?? process.platform;
+  if (platform === "win32") {
+    try {
+      const path =
+        options.windowsActiveReleasePath ??
+        createWindowsServiceLayout().activeReleasePath;
+      const info = await lstat(path);
+      if (
+        !info.isFile() ||
+        info.isSymbolicLink() ||
+        info.size < 2 ||
+        info.size > 4096
+      )
+        throw new TypeError("Unsafe Windows release marker");
+      const state = JSON.parse(await readFile(path, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      if (
+        typeof state.releaseVersion !== "string" ||
+        !VERSION.test(state.releaseVersion)
+      )
+        throw new TypeError("Invalid Windows release marker");
+      runtimeVersion = state.releaseVersion;
+      runtimeState = "installed";
+    } catch (error) {
+      runtimeState =
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+          ? "not-installed"
+          : "unavailable";
+    }
+  } else if (platform !== "darwin") runtimeState = "unsupported";
   else {
     const layout = createMacUserLayout(options.home ?? homedir());
     try {

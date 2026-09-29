@@ -96,7 +96,12 @@ export class WorkerInstallationArtifactsService {
       return {
         schemaVersion: 1,
         platform,
-        release: presentArtifact(release, grants[0], release.version),
+        release: {
+          ...presentArtifact(release, grants[0], release.version),
+          ...(release.update === undefined
+            ? {}
+            : { signed: signedRelease(release, platform) }),
+        },
         model: catalog.model,
         fixture: presentArtifact(catalog.fixture, grants[1]),
       };
@@ -128,24 +133,7 @@ export class WorkerInstallationArtifactsService {
       return {
         schemaVersion: 1,
         platform,
-        signed: {
-          keyId: release.update.keyId,
-          metadata: {
-            schemaVersion: 1,
-            sequence: release.update.sequence,
-            platform,
-            releaseVersion: release.version,
-            publishedAt: release.update.publishedAt,
-            expiresAt: release.update.expiresAt,
-            release: {
-              filename: release.filename,
-              bytes: release.bytes,
-              sha256: release.sha256,
-              contentType: release.contentType,
-            },
-          },
-          signature: release.update.signature,
-        },
+        signed: signedRelease(release, platform),
         ...(grant === undefined ? {} : { grant }),
       };
     } catch (error) {
@@ -379,6 +367,29 @@ function toObjectIdentity(artifact: CatalogArtifact): ObjectIdentity {
     bytes: artifact.bytes,
     sha256: Buffer.from(artifact.sha256, 'hex').toString('base64'),
     contentType: artifact.contentType,
+  };
+}
+
+function signedRelease(release: CatalogRelease, platform: WorkerPlatform) {
+  if (release.update === undefined)
+    throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+  return {
+    keyId: release.update.keyId,
+    metadata: {
+      schemaVersion: 1,
+      sequence: release.update.sequence,
+      platform,
+      releaseVersion: release.version,
+      publishedAt: release.update.publishedAt,
+      expiresAt: release.update.expiresAt,
+      release: {
+        filename: release.filename,
+        bytes: release.bytes,
+        sha256: release.sha256,
+        contentType: release.contentType,
+      },
+    },
+    signature: release.update.signature,
   };
 }
 

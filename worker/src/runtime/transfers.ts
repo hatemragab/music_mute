@@ -77,14 +77,22 @@ export class WorkerTransferClient {
   ): Promise<void> {
     validateGrantUrl(grant, this.allowInsecureLoopback, "DOWNLOAD_FAILED");
     if (Date.parse(grant.expiresAt) <= Date.now())
-      throw new TransferError("DOWNLOAD_FAILED", true);
+      throw new TransferError(
+        "DOWNLOAD_FAILED",
+        true,
+        "download-grant-expired",
+      );
     const target = resolve(destination);
     if (
       !isAbsolute(destination) ||
       basename(target) !== basename(destination) ||
       dirname(target) === target
     )
-      throw new TransferError("DOWNLOAD_FAILED", false);
+      throw new TransferError(
+        "DOWNLOAD_FAILED",
+        false,
+        "download-path-invalid",
+      );
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const idle = new AbortController();
     let idleTimer: ReturnType<typeof setTimeout>;
@@ -119,13 +127,25 @@ export class WorkerTransferClient {
         );
       const encoding = response.headers.get("content-encoding");
       if (encoding && encoding.toLowerCase() !== "identity")
-        throw new TransferError("DOWNLOAD_FAILED", false);
+        throw new TransferError(
+          "DOWNLOAD_FAILED",
+          false,
+          "download-content-encoding",
+        );
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.split(";", 1)[0] !== expected.contentType)
-        throw new TransferError("DOWNLOAD_FAILED", false);
+        throw new TransferError(
+          "DOWNLOAD_FAILED",
+          false,
+          "download-content-type",
+        );
       const declared = response.headers.get("content-length");
       if (declared && Number(declared) !== expected.bytes)
-        throw new TransferError("DOWNLOAD_FAILED", false);
+        throw new TransferError(
+          "DOWNLOAD_FAILED",
+          false,
+          "download-size-mismatch",
+        );
       handle = await open(target, "wx", 0o600);
       created = true;
       requestSignal.throwIfAborted();
@@ -141,7 +161,11 @@ export class WorkerTransferClient {
         bytes += value.byteLength;
         if (bytes > expected.bytes) {
           await reader.cancel();
-          throw new TransferError("DOWNLOAD_FAILED", false);
+          throw new TransferError(
+            "DOWNLOAD_FAILED",
+            false,
+            "download-size-mismatch",
+          );
         }
         digest.update(value);
         let offset = 0;
@@ -153,7 +177,11 @@ export class WorkerTransferClient {
             value.byteLength - offset,
           );
           if (bytesWritten < 1)
-            throw new TransferError("DOWNLOAD_FAILED", true);
+            throw new TransferError(
+              "DOWNLOAD_FAILED",
+              true,
+              "download-write-stalled",
+            );
           offset += bytesWritten;
         }
       }
@@ -165,12 +193,21 @@ export class WorkerTransferClient {
       requestSignal.throwIfAborted();
       const actualDigest = digest.digest();
       const expectedDigest = Buffer.from(expected.sha256, "base64");
+      if (bytes !== expected.bytes)
+        throw new TransferError(
+          "DOWNLOAD_FAILED",
+          false,
+          "download-size-mismatch",
+        );
       if (
-        bytes !== expected.bytes ||
         expectedDigest.length !== actualDigest.length ||
         !timingSafeEqual(actualDigest, expectedDigest)
       )
-        throw new TransferError("DOWNLOAD_FAILED", false);
+        throw new TransferError(
+          "DOWNLOAD_FAILED",
+          false,
+          "download-checksum-mismatch",
+        );
     } catch (error) {
       await closeTransferHandle(handle, "DOWNLOAD_FAILED");
       if (created) await unlink(target).catch(() => undefined);

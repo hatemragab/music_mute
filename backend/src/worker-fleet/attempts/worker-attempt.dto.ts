@@ -1,3 +1,4 @@
+import { MAX_AUDIO_DURATION_SECONDS } from '../../jobs/media-limits.js';
 import { EXECUTION_TIMING_STAGES } from '../../jobs/job-stage-timing.js';
 import {
   ArrayMaxSize,
@@ -75,14 +76,14 @@ export class WorkerOutputGrantDto extends WorkerAttemptOwnershipDto {
   @Equals('audio/mpeg') contentType!: 'audio/mpeg';
   @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0.001)
-  @Max(1200)
+  @Max(MAX_AUDIO_DURATION_SECONDS)
   measuredDurationSeconds!: number;
 }
 
 export class CompleteWorkerAttemptDto extends TimedWorkerAttemptDto {
   @ValidateIf((_object: unknown, value: unknown) => value !== undefined)
   @IsArray()
-  @ArrayMaxSize(2001)
+  @ArrayMaxSize(3001)
   comparisonRanges?: number[][];
   @IsString() @MaxLength(1024) versionId!: string;
   @IsIn(WORKER_RECIPE_IDS) recipeId!: WorkerRecipeId;

@@ -231,8 +231,8 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
     results: list[dict[str, object]] = []
     saved_audio_artifacts: list[dict[str, object]] = []
     upload_candidate: dict[str, object] | None = None
-    started = time.monotonic()
-    preload_started = time.monotonic()
+    started = time.perf_counter()
+    preload_started = time.perf_counter()
     emit("preload-start")
     pipeline.preload(
         arguments.model_cache.resolve(strict=True),
@@ -244,11 +244,13 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
         import torch
 
         torch.mps.synchronize()
-    preload_seconds = time.monotonic() - preload_started
+    preload_seconds = time.perf_counter() - preload_started
     emit("preload-complete", seconds=preload_seconds)
     if not math.isfinite(preload_seconds) or preload_seconds <= 0:
         raise QualificationError("Qualification preload timing is invalid")
     profile_paths: tuple[Path, ...] = ()
+    measured_started: float | None = None
+    measured_wall_seconds: float | None = None
     try:
         selected_recipe = getattr(arguments, "recipe_id", None)
         for index, recipe_id in enumerate(selected_recipe_ids(arguments)):
@@ -259,13 +261,18 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
                 if index <= getattr(arguments, "warmup_runs", 0)
                 else "measured"
             )
+            if benchmark_mode and role == "measured" and measured_started is None:
+                before_measurement = getattr(arguments, "before_measurement", None)
+                if before_measurement is not None:
+                    before_measurement()
+                measured_started = time.perf_counter()
             emit("run-start", index=index + 1, role=role, recipeId=recipe_id)
             attempt_id = str(uuid.uuid4())
             attempt = qualification_root / attempt_id
             attempt.mkdir(mode=0o700)
             local_input = attempt / f"input{qualified_fixture.suffix.lower()}"
             shutil.copyfile(qualified_fixture, local_input)
-            recipe_started = time.monotonic()
+            recipe_started = time.perf_counter()
             request = ProcessRequest.from_payload(
                 {
                     "attemptId": attempt_id,
@@ -283,7 +290,7 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
                     "recipe": recipe_snapshot(recipe_id),
                 }
             )
-            memory_before = mps_memory_snapshot() if benchmark_mode else None
+            memory_before = mps_memory_snapshot() if benchmark_mode and arguments.provider == "mps" else None
             result = pipeline.process(request, lambda stage: emit("run-stage", index=index + 1, stage=stage))
             grouping = None
             if benchmark_mode:
@@ -300,13 +307,13 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
                     raise QualificationError("Benchmark window grouping evidence is invalid")
             if benchmark_mode and arguments.provider == "mps":
                 torch.mps.synchronize()
-            memory_after = mps_memory_snapshot() if benchmark_mode else None
+            memory_after = mps_memory_snapshot() if benchmark_mode and arguments.provider == "mps" else None
             output = Path(result["outputPath"]).resolve(strict=True)
             if not output.is_relative_to(qualification_root):
                 raise QualificationError("Qualification result path is unsafe")
             if system != "Windows":
                 output.chmod(0o600)
-            elapsed = time.monotonic() - recipe_started
+            elapsed = time.perf_counter() - recipe_started
             if not math.isfinite(elapsed) or elapsed <= 0:
                 raise QualificationError("Qualification benchmark is invalid")
             results.append(
@@ -355,6 +362,13 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
                     "resultBytes": result["bytes"],
                     "contentType": "audio/mpeg",
                 }
+        if measured_started is not None:
+            measured_wall_seconds = time.perf_counter() - measured_started
+            if not math.isfinite(measured_wall_seconds) or measured_wall_seconds <= 0:
+                raise QualificationError("Measured benchmark duration is invalid")
+            after_measurement = getattr(arguments, "after_measurement", None)
+            if after_measurement is not None:
+                after_measurement(measured_wall_seconds)
         if len(captured) != 1:
             raise QualificationError("Qualification did not use one stable Kim runtime")
         if arguments.provider == "mps":
@@ -369,7 +383,7 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
         for path in profile_paths:
             path.unlink(missing_ok=True)
 
-    total_seconds = time.monotonic() - started
+    total_seconds = time.perf_counter() - started
     if not math.isfinite(total_seconds) or total_seconds <= 0:
         raise QualificationError("Qualification benchmark is invalid")
     if upload_candidate is None:
@@ -391,7 +405,8 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
         "uploadCandidate": upload_candidate,
         "preloadSeconds": preload_seconds,
         "totalSeconds": total_seconds,
-        **({"savedAudioArtifacts": saved_audio_artifacts} if benchmark_mode else {}),
+        **({"savedAudioArtifacts": saved_audio_artifacts,
+            "measuredWallSeconds": measured_wall_seconds} if benchmark_mode else {}),
     }
 
 

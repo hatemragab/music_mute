@@ -27,6 +27,10 @@ import {
   runMacUserCommand,
 } from "../platform/macos/user-cli.js";
 import {
+  WINDOWS_USER_USAGE,
+  runWindowsUserCommand,
+} from "../platform/windows/user-cli.js";
+import {
   WINDOWS_USAGE,
   runWindowsCommand,
   windowsCommandErrorSummary,
@@ -38,14 +42,16 @@ import {
   runInstallationPreparationCommand,
 } from "../enrollment/cli.js";
 import { createMacUserLayout } from "../platform/macos/user-paths.js";
+import { createWindowsServiceLayout } from "../platform/windows/service-definition.js";
+import { windowsOperationPending } from "../platform/windows/user-maintenance.js";
 import {
   MacUpdateStartupRecovered,
   recoverMacUpdateAtStartup,
 } from "../platform/macos/user-updater.js";
 import {
-  appendMacFatalError,
-  maintainMacUserLogs,
-} from "../platform/macos/operational-logs.js";
+  appendWorkerFatalError,
+  maintainWorkerLogs,
+} from "../platform/shared/operational-logs.js";
 import {
   captureWorkerFailure,
   captureWorkerRuntimeEvent,
@@ -60,6 +66,8 @@ import {
 } from "../runtime/restart-budget.js";
 
 const command = process.argv[2];
+const userUsage =
+  process.platform === "win32" ? WINDOWS_USER_USAGE : MAC_USER_USAGE;
 if (command === "run") initializeWorkerSentry();
 const macUserCommands = new Set([
   "install",
@@ -80,6 +88,7 @@ const macUserCommands = new Set([
   "update",
   "benchmark",
   "benchmark-file",
+  "capacity",
   "unpair",
   "uninstall",
 ]);
@@ -94,13 +103,19 @@ if (command === "--version" || command === "version" || command === "-v") {
     process.exitCode = 2;
   }
 } else if (command === "--help" || command === "help" || command === "-h") {
-  console.log(MAC_USER_USAGE);
-} else if (command !== undefined && macUserCommands.has(command)) {
+  console.log(userUsage);
+} else if (
+  command !== undefined &&
+  (macUserCommands.has(command) ||
+    (process.platform === "win32" && command === "recover"))
+) {
   try {
-    process.exitCode = await runMacUserCommand(command, process.argv.slice(3));
+    process.exitCode = await (
+      process.platform === "win32" ? runWindowsUserCommand : runMacUserCommand
+    )(command, process.argv.slice(3));
   } catch (error) {
     console.error(
-      `MusicMute worker command: FAILED (${error instanceof Error ? error.message : "unknown error"})\n${MAC_USER_USAGE}`,
+      `MusicMute worker command: FAILED (${error instanceof Error ? error.message : "unknown error"})\n${userUsage}`,
     );
     process.exitCode = error instanceof TypeError ? 2 : 1;
   }
@@ -189,7 +204,7 @@ if (command === "--version" || command === "version" || command === "-v") {
         resolve(configPath) === resolve(logLayout.configPath)
       )
         await recoverMacUpdateAtStartup(logLayout);
-      if (logLayout !== null) await maintainMacUserLogs(logLayout);
+      if (logLayout !== null) await maintainWorkerLogs(logLayout);
       const config = await loadRuntimeConfig(configPath);
       const supervisor = new MachineSupervisor(
         config.slots.map((slot) => ({
@@ -264,6 +279,14 @@ if (command === "--version" || command === "version" || command === "-v") {
           ffmpegPath: config.ffmpegPath,
           ffprobePath: config.ffprobePath,
           commandExecutor,
+          ...(process.platform === "win32"
+            ? {
+                maintenancePending: () =>
+                  windowsOperationPending(
+                    createWindowsServiceLayout(dirname(dirname(configPath))),
+                  ),
+              }
+            : {}),
           hintClientFactory: (onHint) => new WorkerHintClient(control, onHint),
           onEvent: (event) => {
             if (event.kind === "attempt-succeeded") {
@@ -273,7 +296,7 @@ if (command === "--version" || command === "version" || command === "-v") {
             console.log(JSON.stringify(event));
             if (logLayout !== null && Date.now() >= nextLogMaintenanceAt) {
               nextLogMaintenanceAt = Date.now() + 60_000;
-              void maintainMacUserLogs(logLayout).catch(() => undefined);
+              void maintainWorkerLogs(logLayout).catch(() => undefined);
             }
           },
         },
@@ -296,7 +319,7 @@ if (command === "--version" || command === "version" || command === "-v") {
         });
         await captureWorkerFailure(error);
         if (logLayout !== null)
-          await appendMacFatalError(
+          await appendWorkerFatalError(
             logLayout.stderrPath,
             "runtime",
             error,
@@ -324,7 +347,7 @@ if (command === "--version" || command === "version" || command === "-v") {
   }
 } else {
   console.error(
-    `Usage: mw <install | status | start | stop | restart | logs | job | errors | explain | perf | diagnostics | doctor | benchmark | benchmark-file | pause | drain | resume | update | unpair | uninstall | protocol-doctor | prepare-installation ... | enroll ... | run --config <absolute-path> | package-macos ... | windows ...>`,
+    `Usage: mw <install | status | start | stop | restart | logs | job | errors | explain | perf | diagnostics | doctor | capacity | benchmark | benchmark-file | pause | drain | resume | update | unpair | uninstall | protocol-doctor | prepare-installation ... | enroll ... | run --config <absolute-path> | package-macos ... | windows ...>`,
   );
   process.exitCode = 2;
 }

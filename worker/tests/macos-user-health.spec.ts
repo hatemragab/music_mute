@@ -27,83 +27,93 @@ afterEach(async () => {
   );
 });
 
-describe("macOS user runtime health", () => {
-  it("quick doctor reads local state without verifying release or launching the runtime doctor", async () => {
-    const layout = await healthyFixture();
-    await writeLocalRuntimeStatus(layout.runtimeStatusPath, []);
-    const runtimeDoctor = vi.fn(async () => undefined);
-    const releaseVerifier = vi.fn(async () => undefined);
-    const result = await inspectMacUserHealth(
-      layout,
-      { status: async () => ({ loaded: true, running: true }) },
-      { depth: "quick", runtimeDoctor, releaseVerifier },
-    );
-    expect(runtimeDoctor).not.toHaveBeenCalled();
-    expect(releaseVerifier).not.toHaveBeenCalled();
-    expect(result.healthy).toBe(true);
-    expect(result.checks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: "runtime-snapshot", status: "passed" }),
-        expect.objectContaining({ name: "runtime-doctor", status: "not-run" }),
-        expect.objectContaining({
-          name: "release-manifest",
-          status: "not-run",
-        }),
-      ]),
-    );
-  });
-
-  it("keeps doctor caches and executable discovery outside the immutable release", () => {
-    const layout = createMacUserLayout("/Users/tester");
-    expect(macUserPythonEnvironment(layout)).toMatchObject({
-      NUMBA_CACHE_DIR: join(layout.cacheRoot, "numba"),
-      PYTHONDONTWRITEBYTECODE: "1",
-      PYTHONNOUSERSITE: "1",
-      PYTHONUNBUFFERED: "1",
-      XDG_CACHE_HOME: layout.cacheRoot,
+// These fixtures exercise Darwin paths, UID ownership and POSIX permissions.
+describe.skipIf(process.platform !== "darwin")(
+  "macOS user runtime health",
+  () => {
+    it("quick doctor reads local state without verifying release or launching the runtime doctor", async () => {
+      const layout = await healthyFixture();
+      await writeLocalRuntimeStatus(layout.runtimeStatusPath, []);
+      const runtimeDoctor = vi.fn(async () => undefined);
+      const releaseVerifier = vi.fn(async () => undefined);
+      const result = await inspectMacUserHealth(
+        layout,
+        { status: async () => ({ loaded: true, running: true }) },
+        { depth: "quick", runtimeDoctor, releaseVerifier },
+      );
+      expect(runtimeDoctor).not.toHaveBeenCalled();
+      expect(releaseVerifier).not.toHaveBeenCalled();
+      expect(result.healthy).toBe(true);
+      expect(result.checks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "runtime-snapshot",
+            status: "passed",
+          }),
+          expect.objectContaining({
+            name: "runtime-doctor",
+            status: "not-run",
+          }),
+          expect.objectContaining({
+            name: "release-manifest",
+            status: "not-run",
+          }),
+        ]),
+      );
     });
-    expect(macUserPythonEnvironment(layout).PATH).toBe(
-      `${dirname(layout.ffmpegPath)}:${dirname(layout.nodePath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
-    );
-  });
 
-  it("requires a running LaunchAgent and a passing private runtime doctor", async () => {
-    const layout = await healthyFixture();
-    const runtimeDoctor = vi.fn(async () => undefined);
-    const healthy = await inspectMacUserHealth(
-      layout,
-      { status: async () => ({ loaded: true, running: true }) },
-      { runtimeDoctor, releaseVerifier: async () => undefined },
-    );
-    expect(healthy.healthy).toBe(true);
-    expect(runtimeDoctor).toHaveBeenCalledOnce();
-    expect(healthy.checks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: "config-contract", ok: true }),
-        expect.objectContaining({ name: "runtime-doctor", ok: true }),
-        expect.objectContaining({ name: "launchctl", ok: true }),
-      ]),
-    );
+    it("keeps doctor caches and executable discovery outside the immutable release", () => {
+      const layout = createMacUserLayout("/Users/tester");
+      expect(macUserPythonEnvironment(layout)).toMatchObject({
+        NUMBA_CACHE_DIR: join(layout.cacheRoot, "numba"),
+        PYTHONDONTWRITEBYTECODE: "1",
+        PYTHONNOUSERSITE: "1",
+        PYTHONUNBUFFERED: "1",
+        XDG_CACHE_HOME: layout.cacheRoot,
+      });
+      expect(macUserPythonEnvironment(layout).PATH).toBe(
+        `${dirname(layout.ffmpegPath)}:${dirname(layout.nodePath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
+      );
+    });
 
-    const unhealthy = await inspectMacUserHealth(
-      layout,
-      { status: async () => ({ loaded: true, running: false }) },
-      {
-        runtimeDoctor: async () => {
-          throw new Error("broken runtime");
+    it("requires a running LaunchAgent and a passing private runtime doctor", async () => {
+      const layout = await healthyFixture();
+      const runtimeDoctor = vi.fn(async () => undefined);
+      const healthy = await inspectMacUserHealth(
+        layout,
+        { status: async () => ({ loaded: true, running: true }) },
+        { runtimeDoctor, releaseVerifier: async () => undefined },
+      );
+      expect(healthy.healthy).toBe(true);
+      expect(runtimeDoctor).toHaveBeenCalledOnce();
+      expect(healthy.checks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "config-contract", ok: true }),
+          expect.objectContaining({ name: "runtime-doctor", ok: true }),
+          expect.objectContaining({ name: "launchctl", ok: true }),
+        ]),
+      );
+
+      const unhealthy = await inspectMacUserHealth(
+        layout,
+        { status: async () => ({ loaded: true, running: false }) },
+        {
+          runtimeDoctor: async () => {
+            throw new Error("broken runtime");
+          },
+          releaseVerifier: async () => undefined,
         },
-        releaseVerifier: async () => undefined,
-      },
-    );
-    expect(unhealthy.healthy).toBe(false);
-    expect(unhealthy.checks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: "runtime-doctor", ok: false }),
-        expect.objectContaining({ name: "launchctl", ok: false }),
-      ]),
-    );
-  });
-});
+      );
+      expect(unhealthy.healthy).toBe(false);
+      expect(unhealthy.checks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "runtime-doctor", ok: false }),
+          expect.objectContaining({ name: "launchctl", ok: false }),
+        ]),
+      );
+    });
+  },
+);
 
 async function healthyFixture() {
   const root = await mkdtemp(join(tmpdir(), "musicmute-health-"));

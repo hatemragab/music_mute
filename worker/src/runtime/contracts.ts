@@ -718,13 +718,13 @@ function comparisonRanges(value: unknown): number[][] | undefined {
   const ranges = map.chunks.flat().map((value: unknown) => {
     const range = record(value, "edit range");
     return [
-      integer(range.sourceStart, "sourceStart", 0, 52920000),
-      integer(range.sourceEnd, "sourceEnd", 1, 52920000),
+      integer(range.sourceStart, "sourceStart", 0, 79380000),
+      integer(range.sourceEnd, "sourceEnd", 1, 79380000),
     ];
   });
   if (
     ranges.length < 1 ||
-    ranges.length > 2001 ||
+    ranges.length > 3001 ||
     ranges.some(
       (range, i) =>
         range[1]! <= range[0]! || (i > 0 && range[0]! < ranges[i - 1]![1]!),

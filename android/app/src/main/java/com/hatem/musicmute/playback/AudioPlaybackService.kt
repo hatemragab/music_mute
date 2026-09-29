@@ -148,8 +148,52 @@ class AudioPlaybackService : MediaSessionService() {
                     override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
                         MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailableSessionCommands(
                             MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
-                                .add(SessionCommand(AUTO_NEXT_COMMAND, Bundle.EMPTY)).build()).build()
+                                .add(SessionCommand(AUTO_NEXT_COMMAND, Bundle.EMPTY))
+                                .add(SessionCommand(EDIT_QUEUE_COMMAND, Bundle.EMPTY)).build()).build()
                     override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo, command: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
+                        if (command.customAction == EDIT_QUEUE_COMMAND) {
+                            val expected = owner
+                            val edit = QueueEdit.entries.firstOrNull { it.name == args.getString("edit") }
+                            if (controller.packageName != packageName || expected == null || restoring ||
+                                dependencies?.currentPlaybackSession() != expected ||
+                                args.getString("owner") != expected.uid || args.getLong("epoch", -1) != expected.epoch || edit == null)
+                                return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                            val order = buildList {
+                                var index = player.currentTimeline.getFirstWindowIndex(player.shuffleModeEnabled)
+                                val visited = mutableSetOf<Int>()
+                                while (index in 0 until player.mediaItemCount && visited.add(index)) {
+                                    player.getMediaItemAt(index).queueTrack()?.let(::add)
+                                    index = player.currentTimeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+                                }
+                            }
+                            if (order.size != player.mediaItemCount || order.any { it.key.ownerUid != expected.uid })
+                                return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                            // Drag events may arrive before the previous playlist change is observed.
+                            if (edit == QueueEdit.MOVE && args.getStringArrayList("order") != order.map { it.key.jobId })
+                                return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+                            val desired = editedQueue(order, player.currentMediaItem?.queueTrack()?.key, edit,
+                                args.getString("job")?.let { LibraryKey(expected.uid, it) },
+                                args.getString("target")?.let { LibraryKey(expected.uid, it) },
+                                wrap = player.repeatMode == Player.REPEAT_MODE_ALL)
+                                ?: return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+                            // Materialize the visible order with moves, preserving current media/position.
+                            if (edit != QueueEdit.CLEAR) player.shuffleModeEnabled = false
+                            val keep = desired.mapTo(mutableSetOf()) { it.key }
+                            for (index in player.mediaItemCount - 1 downTo 0) {
+                                if (player.getMediaItemAt(index).queueTrack()?.key !in keep) player.removeMediaItem(index)
+                            }
+                            desired.forEachIndexed { to, track ->
+                                val from = (to until player.mediaItemCount).first { player.getMediaItemAt(it).queueTrack()?.key == track.key }
+                                if (from != to) player.moveMediaItem(from, to)
+                            }
+                            if (edit == QueueEdit.PLAY_NEXT) {
+                                autoNext = true
+                                if (player.repeatMode == Player.REPEAT_MODE_ONE) player.repeatMode = Player.REPEAT_MODE_OFF
+                                player.pauseAtEndOfMediaItems = false
+                            }
+                            publishExtras(); checkpoint()
+                            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                        }
                         if (command.customAction != AUTO_NEXT_COMMAND) return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
                         autoNext = args.getBoolean(AUTO_NEXT_KEY, true)
                         player.pauseAtEndOfMediaItems = !autoNext && player.repeatMode != Player.REPEAT_MODE_ONE

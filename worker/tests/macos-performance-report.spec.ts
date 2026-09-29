@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import { buildPerformanceReport } from "../src/platform/macos/performance-report.js";
-import type { OperationalEvent } from "../src/platform/macos/operational-logs.js";
+import { buildPerformanceReport } from "../src/platform/shared/performance-report.js";
+import type { OperationalEvent } from "../src/platform/shared/operational-logs.js";
 
 const incarnation = "6f82355c-17bd-4253-af31-cd624f4a03fe";
 const modelDigest = "a".repeat(64);

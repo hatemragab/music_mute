@@ -1,3 +1,4 @@
+import { assertWindowsAdministratorDataFile } from "../windows/private-data.js";
 import { randomUUID } from "node:crypto";
 import {
   chmod,
@@ -33,19 +34,28 @@ export async function writeConfirmedUnpairReceipt(
   };
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
-  const handle = await open(temporary, "wx", 0o600);
   try {
-    await handle.writeFile(`${JSON.stringify(receipt, null, 2)}\n`, "utf8");
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  try {
+    const handle = await open(temporary, "wx", 0o600);
+    try {
+      await handle.writeFile(`${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    if (process.platform === "win32")
+      await assertWindowsAdministratorDataFile(temporary);
     await rename(temporary, path);
-    await chmod(path, 0o600);
-  } catch (error) {
+    if (process.platform !== "win32") {
+      await chmod(path, 0o600);
+      const directory = await open(dirname(path), "r");
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
+    }
+  } finally {
     await rm(temporary, { force: true });
-    throw error;
   }
   return receipt;
 }
@@ -60,9 +70,11 @@ export async function loadConfirmedUnpairReceipt(
       info.isSymbolicLink() ||
       info.size < 2 ||
       info.size > 4096 ||
-      (info.mode & 0o077) !== 0
+      (process.platform !== "win32" && (info.mode & 0o077) !== 0)
     )
       throw new TypeError("Confirmed unpair receipt is unsafe");
+    if (process.platform === "win32")
+      await assertWindowsAdministratorDataFile(path);
     const value = JSON.parse(await readFile(path, "utf8")) as unknown;
     if (value === null || typeof value !== "object" || Array.isArray(value))
       throw new TypeError("Confirmed unpair receipt is invalid");

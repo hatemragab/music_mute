@@ -509,6 +509,22 @@ class ServerTests(unittest.TestCase):
                 self.assertEqual(response.status, 400)
             acquire.assert_not_called()
 
+    def test_expanded_media_caps_are_inclusive_and_bounded(self):
+        def acquire(_self, url, limit, out):
+            self.assertEqual(limit, 100_000_000)
+            out.write(b'audio')
+            return 5, metadata(FORMAT)
+        body = {'url': 'https://youtu.be/aqz-KE-bpKQ',
+                'max_bytes': 100_000_000, 'max_duration_seconds': 1800}
+        with patch('service.Provider.acquire', autospec=True, side_effect=acquire) as call:
+            with self.request(body) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.read(), b'audio')
+            for field, value in [('max_bytes', 100_000_001), ('max_duration_seconds', 1800.001)]:
+                with self.request({**body, field: value}) as response:
+                    self.assertEqual(response.status, 400)
+            self.assertEqual(call.call_count, 1)
+
     def test_log_correlation_accepts_only_bounded_ids(self):
         for request_id in ['00000000-0000-4000-8000-000000000001', 'secret-url-not-an-id']:
             with patch('service.Provider.acquire', side_effect=RuntimeError('secret response body')), \

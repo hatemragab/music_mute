@@ -29,6 +29,7 @@ import { LeaseAuthority, OwnershipLostError } from "./lease-authority.js";
 import {
   loadLocalLifecycle,
   localLifecycleAllowsClaims,
+  type LocalLifecycleState,
 } from "./local-lifecycle.js";
 import { writeLocalRuntimeStatus } from "./local-runtime-status.js";
 import type { RuntimeJobSummary } from "./local-runtime-status.js";
@@ -80,6 +81,7 @@ export interface WorkerRuntimeOptions {
   diagnostics?: RuntimeDiagnostics;
   resources?: Pick<RuntimeResourceGate, "assertAvailable">;
   commandExecutor?: RuntimeCommandExecutor;
+  maintenancePending?: () => Promise<boolean>;
   onEvent?: (event: RuntimeEvent) => void;
   hintClientFactory?: (onHint: () => void) => RuntimeHintClient;
 }
@@ -326,6 +328,7 @@ export class WorkerRuntime {
   private machineId = "";
   private childState:
     "loading" | "warming" | "ready" | "unavailable" | "stopped" = "loading";
+  private observedLifecycle?: LocalLifecycleState;
   private cachedPolicy?: {
     machineStatus: ConfigResponse["machineStatus"];
     claimAllowed: boolean;
@@ -507,6 +510,13 @@ export class WorkerRuntime {
   async reconcileOnce(): Promise<number> {
     this.assertStarted();
     if (this.stopping.signal.aborted) return 0;
+    // Only the serialized claim loop acknowledges intent. A progress/status
+    // callback must never acknowledge drain while a claim is still in flight.
+    await this.observeLocalLifecycle();
+    if (await this.options.maintenancePending?.()) {
+      await this.publishLocalStatus();
+      return 0;
+    }
     if (Date.now() < this.reconcileNotBefore) return 0;
     let config: ConfigResponse;
     try {
@@ -532,14 +542,10 @@ export class WorkerRuntime {
     );
     if (idle.length === 0) return 0;
     if (!config.claimAllowed) return 0;
-    if (this.options.localLifecyclePath !== undefined) {
-      const lifecycle = await loadLocalLifecycle(
-        this.options.localLifecyclePath,
-      );
-      if (!localLifecycleAllowsClaims(lifecycle)) return 0;
-    }
     let claimed = 0;
     for (const slot of idle) {
+      if (!(await this.observeLocalLifecycle())) return claimed;
+      if (await this.options.maintenancePending?.()) return claimed;
       const requestId = this.pendingClaims.get(slot.workerId) ?? randomUUID();
       this.pendingClaims.set(slot.workerId, requestId);
       let response: Awaited<ReturnType<RuntimeControlPlane["claim"]>>;
@@ -662,12 +668,29 @@ export class WorkerRuntime {
     }
   }
 
+  private async observeLocalLifecycle(): Promise<boolean> {
+    if (this.options.localLifecyclePath === undefined) return true;
+    this.observedLifecycle = await loadLocalLifecycle(
+      this.options.localLifecyclePath,
+    );
+    await this.publishLocalStatus();
+    return localLifecycleAllowsClaims(this.observedLifecycle);
+  }
+
   private async publishLocalStatus(): Promise<void> {
     if (this.options.localRuntimeStatusPath === undefined) return;
     const path = this.options.localRuntimeStatusPath;
     const attemptIds = [...this.activeAttemptIds.values()];
     const coverage = this.diagnostics.coverage?.();
     const details = {
+      ...(this.observedLifecycle === undefined
+        ? {}
+        : {
+            observedLifecycle: {
+              revision: this.observedLifecycle.revision,
+              intent: this.observedLifecycle.intent,
+            },
+          }),
       currentAttempts: [...this.activeJobs].map(([workerId, attempt]) => ({
         workerId,
         ...attempt,

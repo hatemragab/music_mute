@@ -6,7 +6,7 @@ import {
   explainError,
   investigateErrors,
   investigateJob,
-} from "../src/platform/macos/investigation.js";
+} from "../src/platform/shared/investigation.js";
 import { createMacUserLayout } from "../src/platform/macos/user-paths.js";
 
 const roots: string[] = [];

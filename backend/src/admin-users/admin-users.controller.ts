@@ -1,3 +1,4 @@
+import { ResetAccountUsageDto } from './reset-account-usage.dto.js';
 import {
   Body,
   Controller,
@@ -5,6 +6,8 @@ import {
   Get,
   Header,
   Param,
+  Post,
+  HttpCode,
   Put,
   Query,
   Req,
@@ -40,6 +43,20 @@ export class AdminUsersController {
   @Header('Cache-Control', 'no-store')
   usage(@Param('id') id: string) {
     return this.users.accountUsage(id);
+  }
+
+  @Post(':id/account-usage-resets')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @RequireAdminPermission('users.processing.manage')
+  @RequireFreshAdminAuth()
+  @LimitAdmin('sensitive')
+  resetUsage(
+    @Req() request: AuthRequest,
+    @Param('id') id: string,
+    @Body() body: ResetAccountUsageDto,
+  ) {
+    return this.users.resetUsage(request.adminActor!, id, body);
   }
 
   @Put(':id/account-policy-override')

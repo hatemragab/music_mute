@@ -1,4 +1,8 @@
 import {
+  MAX_AUDIO_DURATION_SECONDS,
+  MAX_PREPARED_AUDIO_BYTES,
+} from './media-limits.js';
+import {
   StageMeasurementSchema,
   AttemptMeasurementsSchema,
   type StageMeasurement,
@@ -88,13 +92,14 @@ const inputReservation = new MongoSchema<InputReservation>(
       type: Number,
       required: true,
       min: 1,
-      max: 50_000_000,
+      max: MAX_PREPARED_AUDIO_BYTES,
       validate: Number.isInteger,
     },
     durationSeconds: {
       type: Number,
       required: true,
-      validate: (v: number) => Number.isFinite(v) && v > 0 && v <= 1_200,
+      validate: (v: number) =>
+        Number.isFinite(v) && v > 0 && v <= MAX_AUDIO_DURATION_SECONDS,
     },
     sha256: { type: String, required: true, validate: isSha256 },
   },
@@ -108,13 +113,13 @@ const admissionSnapshot = new MongoSchema<AdmissionSnapshot>(
       type: Number,
       required: true,
       min: Number.MIN_VALUE,
-      max: 1_200,
+      max: MAX_AUDIO_DURATION_SECONDS,
     },
     maxInputBytes: {
       type: Number,
       required: true,
       min: 1,
-      max: 50_000_000,
+      max: MAX_PREPARED_AUDIO_BYTES,
       validate: Number.isSafeInteger,
     },
     preparationProfileId: { type: String, required: true, maxlength: 100 },
@@ -425,7 +430,10 @@ export class Job {
     type: Number,
     default: null,
     validate: (value: number | null) =>
-      value === null || (Number.isFinite(value) && value > 0 && value <= 1_200),
+      value === null ||
+      (Number.isFinite(value) &&
+        value > 0 &&
+        value <= MAX_AUDIO_DURATION_SECONDS),
   })
   measuredDurationSeconds!: number | null;
   @Prop({ type: Date, default: null }) uploadingResultAt!: Date | null;

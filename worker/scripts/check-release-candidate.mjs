@@ -4,8 +4,9 @@ import { lstat, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { verifyMacRelease } from "../dist/src/platform/macos/release-manifest.js";
-import { verifyMacUpdateMetadata } from "../dist/src/platform/macos/update-metadata.js";
-import { BUILT_IN_MAC_UPDATE_TRUST } from "../dist/src/platform/macos/user-updater.js";
+import { verifyWindowsRelease } from "../dist/src/platform/windows/release-manifest.js";
+import { verifyUpdateMetadata } from "../dist/src/platform/shared/update-metadata.js";
+import { BUILT_IN_UPDATE_TRUST } from "../dist/src/platform/shared/update-trust.js";
 import { prepareInstallationRelease } from "../dist/src/enrollment/release-archive.js";
 
 // Read-only pre-promotion gate. Never signs, uploads, enrolls or activates.
@@ -20,15 +21,21 @@ if (
   !/^\d+$/u.test(sequence ?? "")
 )
   throw new Error(
-    "Usage: node scripts/check-release-candidate.mjs <runtime-directory> <runtime.tar.gz> <package-evidence.json> <signed-update.json> <minimum-sequence>",
+    "Usage: node scripts/check-release-candidate.mjs <runtime-directory> <runtime.tar.gz|runtime.zip> <package-evidence.json> <signed-update.json> <minimum-sequence>",
   );
 const minimumSequence = Number(sequence);
 if (!Number.isSafeInteger(minimumSequence) || minimumSequence < 1)
   throw new Error("A positive minimum catalog sequence is required");
-const manifest = await verifyMacRelease(resolve(runtimeRoot));
 const signed = JSON.parse(await readFile(signedPath, "utf8"));
-const metadata = verifyMacUpdateMetadata(signed, {
-  publicKeys: BUILT_IN_MAC_UPDATE_TRUST,
+const platform = signed?.metadata?.platform;
+if (platform !== "darwin-arm64" && platform !== "windows-amd64")
+  throw new Error("Candidate platform is unsupported");
+const verifyRelease =
+  platform === "darwin-arm64" ? verifyMacRelease : verifyWindowsRelease;
+const manifest = await verifyRelease(resolve(runtimeRoot));
+const metadata = verifyUpdateMetadata(signed, {
+  platform,
+  publicKeys: BUILT_IN_UPDATE_TRUST,
   minimumSequence,
 });
 const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
@@ -75,10 +82,10 @@ try {
   const prepared = await prepareInstallationRelease({
     archivePath: resolve(archive),
     outputRoot: temporary,
-    platform: "darwin-arm64",
+    platform,
     releaseVersion: manifest.releaseVersion,
   });
-  const archivedManifest = await verifyMacRelease(prepared.path);
+  const archivedManifest = await verifyRelease(prepared.path);
   if (JSON.stringify(archivedManifest) !== JSON.stringify(manifest))
     throw new Error("Runtime directory differs from the signed archive");
 } finally {
@@ -88,6 +95,7 @@ console.log(
   JSON.stringify(
     {
       status: "passed",
+      platform,
       version: manifest.releaseVersion,
       sequence: metadata.sequence,
       productionAcceptance: "requires-separate-evidence",

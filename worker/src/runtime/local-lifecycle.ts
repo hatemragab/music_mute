@@ -11,6 +11,7 @@ import {
 import { dirname, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
 import { withDarwinFileLock } from "./darwin-file-lock.js";
+import { withNativeLock } from "./native-lock.js";
 
 const MAXIMUM_BYTES = 4096;
 const VALID_INTENTS = ["active", "paused", "draining"] as const;
@@ -34,7 +35,7 @@ export async function loadLocalLifecycle(
     info.isSymbolicLink() ||
     info.size < 2 ||
     info.size > MAXIMUM_BYTES ||
-    (info.mode & 0o077) !== 0
+    (process.platform !== "win32" && (info.mode & 0o077) !== 0)
   )
     throw new TypeError("Local lifecycle file is unsafe");
   let decoded: unknown;
@@ -67,6 +68,18 @@ export async function setLocalLifecycleIntent(
     throw new TypeError("Local lifecycle intent is invalid");
   assertAbsolute(path);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  if (process.platform === "win32")
+    return await withNativeLock(`${path}.lock.guard`, async () => {
+      const previous = await loadLocalLifecycle(path);
+      const next: LocalLifecycleState = {
+        schemaVersion: 1,
+        intent,
+        revision: previous.revision + 1,
+        updatedAt: new Date().toISOString(),
+      };
+      await writeState(path, next, false);
+      return next;
+    });
   if (process.platform === "darwin")
     return await withDarwinFileLock(`${path}.lock.guard`, async () => {
       await recoverDeadLifecycleLock(`${path}.lock`);

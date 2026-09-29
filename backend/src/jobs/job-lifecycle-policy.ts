@@ -119,7 +119,7 @@ export const SAFE_JOB_FAILURE_MESSAGES: Readonly<
 > = Object.freeze({
   UPLOAD_EXPIRED: 'The upload reservation expired before it was completed.',
   INVALID_AUDIO: 'The file does not contain supported playable audio.',
-  INPUT_TOO_LONG: 'Audio must be 20 minutes or less.',
+  INPUT_TOO_LONG: 'Audio exceeds the allowed duration.',
   INPUT_CHECKSUM_MISMATCH: 'The audio file failed its integrity check.',
   SEPARATOR_FAILED: 'Voice separation failed. You can retry this job.',
   OUTPUT_INVALID: 'The voice-only result could not be validated.',

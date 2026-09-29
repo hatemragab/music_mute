@@ -297,6 +297,7 @@ async function runtimeFixture(
     }>;
   },
   pollMs = 100,
+  maintenancePending?: () => Promise<boolean>,
 ) {
   const root = await mkdtemp(join(tmpdir(), "musicmute-runtime-"));
   roots.push(root);
@@ -321,14 +322,15 @@ async function runtimeFixture(
       ...(useLocalLifecycle ? { localLifecyclePath } : {}),
       ...(useLocalStatus ? { localRuntimeStatusPath } : {}),
       modelCacheRoot: join(root, "models"),
-      ffmpegPath: "/usr/local/bin/ffmpeg",
-      ffprobePath: "/usr/local/bin/ffprobe",
+      ffmpegPath: join(root, "ffmpeg"),
+      ffprobePath: join(root, "ffprobe"),
       leaseRenewIntervalMs: 100,
       leaseSafetyMarginMs: 100,
       idlePollMinimumMs: pollMs,
       idlePollMaximumMs: pollMs,
       resources,
       ...(commandExecutor === undefined ? {} : { commandExecutor }),
+      ...(maintenancePending === undefined ? {} : { maintenancePending }),
       onEvent: (event) => events.push(event),
     },
     f.control,
@@ -346,6 +348,82 @@ async function runtimeFixture(
 }
 
 describe("worker runtime ownership", () => {
+  it("stays ready but defers reconciliation and claims until maintenance commits", async () => {
+    const pending = vi.fn(async () => true);
+    const f = await runtimeFixture(
+      fixture(),
+      undefined,
+      true,
+      true,
+      undefined,
+      100,
+      pending,
+    );
+    await f.runtime.start();
+    try {
+      const startupReads = f.control.config.mock.calls.length;
+      expect(await f.runtime.reconcileOnce()).toBe(0);
+      expect(f.control.config).toHaveBeenCalledTimes(startupReads);
+      expect(f.control.claim).not.toHaveBeenCalled();
+      expect(
+        (await loadLocalRuntimeStatus(f.localRuntimeStatusPath)).childState,
+      ).toBe("ready");
+      pending.mockResolvedValue(false);
+      expect(await f.runtime.reconcileOnce()).toBe(1);
+      await f.runtime.waitForIdle();
+      expect(f.control.complete).toHaveBeenCalledOnce();
+    } finally {
+      await f.runtime.stop();
+    }
+  });
+
+  it("fails closed when maintenance state cannot be read", async () => {
+    const f = await runtimeFixture(
+      fixture(),
+      undefined,
+      false,
+      false,
+      undefined,
+      100,
+      async () => {
+        throw new Error("Maintenance journal unreadable");
+      },
+    );
+    await f.runtime.start();
+    try {
+      await expect(f.runtime.reconcileOnce()).rejects.toThrow(
+        "journal unreadable",
+      );
+      expect(f.control.claim).not.toHaveBeenCalled();
+    } finally {
+      await f.runtime.stop();
+    }
+  });
+
+  it("rechecks maintenance immediately before a claim", async () => {
+    const pending = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    const f = await runtimeFixture(
+      fixture(),
+      undefined,
+      false,
+      false,
+      undefined,
+      100,
+      pending,
+    );
+    await f.runtime.start();
+    try {
+      expect(await f.runtime.reconcileOnce()).toBe(0);
+      expect(pending).toHaveBeenCalledTimes(2);
+      expect(f.control.claim).not.toHaveBeenCalled();
+    } finally {
+      await f.runtime.stop();
+    }
+  });
+
   it("starts diagnostic forwarding only after establishing the machine session", async () => {
     const f = fixture();
     const send = vi.fn(async (batch: { sequenceEnd: number }) => ({
@@ -923,6 +1001,46 @@ describe("worker runtime ownership", () => {
     await expect(f.runtime.reconcileOnce()).resolves.toBe(1);
     expect(f.control.claim).toHaveBeenCalledOnce();
     await f.runtime.waitForIdle();
+    await f.runtime.stop();
+  });
+
+  it("acknowledges drain only after an in-flight claim returns", async () => {
+    const f = await runtimeFixture(
+      fixture({ hang: true }),
+      undefined,
+      true,
+      true,
+    );
+    const claim = f.control.claim.getMockImplementation()!;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.control.claim.mockImplementation(async (...args) => {
+      await gate;
+      return await claim(...args);
+    });
+    await f.runtime.start();
+    const reconciliation = f.runtime.reconcileOnce();
+    await vi.waitFor(() => expect(f.control.claim).toHaveBeenCalledOnce());
+    const draining = await setLocalLifecycleIntent(
+      f.localLifecyclePath,
+      "draining",
+    );
+    expect(
+      (await loadLocalRuntimeStatus(f.localRuntimeStatusPath)).observedLifecycle
+        ?.revision,
+    ).not.toBe(draining.revision);
+    release();
+    await reconciliation;
+    await f.runtime.reconcileOnce();
+    expect(
+      await loadLocalRuntimeStatus(f.localRuntimeStatusPath),
+    ).toMatchObject({
+      observedLifecycle: { revision: draining.revision, intent: "draining" },
+      activeAttemptIds: [attemptId],
+    });
+    expect(f.control.claim).toHaveBeenCalledOnce();
     await f.runtime.stop();
   });
 

@@ -84,7 +84,7 @@ private fun importPresentation(record: UrlImportRecord): AudioTaskPresentation {
         totalElapsedApproximate = true, processingElapsedMs = null,
         processingElapsedApproximate = false, workerAvailable = null,
         canCancel = false, canRetry = stage == AudioTaskStage.FAILED,
-        canDelete = false, canPlay = false, errorCode = record.errorCode,
+        canDelete = record.removable, canPlay = false, errorCode = record.errorCode,
         importRequestId = record.requestId, importOnly = true,
         createdAtMillis = record.createdAtMillis,
     )

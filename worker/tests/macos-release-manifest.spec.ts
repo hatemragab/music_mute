@@ -24,7 +24,8 @@ afterEach(async () => {
   );
 });
 
-describe("macOS release manifest", () => {
+// These fixtures exercise Darwin paths, UID ownership and POSIX permissions.
+describe.skipIf(process.platform !== "darwin")("macOS release manifest", () => {
   it("writes and verifies a deterministic private runtime manifest", async () => {
     const root = await fixture();
     const created = await writeMacReleaseManifest(root, "0.1.0-test.1");

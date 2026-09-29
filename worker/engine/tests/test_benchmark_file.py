@@ -14,11 +14,14 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import soundfile as sf
 
-from musicmute_engine.benchmark_file import code_digest, main
+from musicmute_engine.benchmark_file import build_report, code_digest, main
 from musicmute_engine.qualification import QualificationError, run_qualification
 
 
 class FakeSeparator:
+    def finish_profiles(self) -> tuple[Path, ...]:
+        return ()
+
     def mps_dispatch_evidence(self) -> dict[str, object]:
         return {"proven": True, "acceleratedNodeEvents": 1, "cpuNodeEvents": 0}
 
@@ -105,8 +108,8 @@ class BenchmarkFileTests(unittest.TestCase):
                 ("wav", None),
                 ("mp3", "libmp3lame"),
                 ("flac", "flac"),
-                ("ogg", "libopus"),
-                ("webm", "libopus"),
+                ("ogg", "opus"),
+                ("webm", "opus"),
             ):
                 with self.subTest(extension=extension):
                     fixture = root / f"song.{extension}"
@@ -115,7 +118,11 @@ class BenchmarkFileTests(unittest.TestCase):
                     else:
                         subprocess.run(
                             [ffmpeg, "-hide_banner", "-loglevel", "error", "-i",
-                             str(wave), "-c:a", codec, str(fixture)],
+                             str(wave), "-c:a", codec,
+                             # Fixture generation uses FFmpeg's native encoder;
+                             # production only needs Opus decoding, not libopus.
+                             *(["-strict", "-2"] if codec == "opus" else []),
+                             str(fixture)],
                             check=True,
                         )
                     work = root / f"work-{extension}"
@@ -176,6 +183,12 @@ class BenchmarkFileTests(unittest.TestCase):
             self.assertNotEqual(before, code_digest(root))
 
     def test_repeated_runs_share_one_preloaded_model_and_save_audio(self) -> None:
+        self._assert_repeated_runs("mps")
+
+    def test_directml_repeated_runs_use_service_identity_without_mps_calls(self) -> None:
+        self._assert_repeated_runs("directml")
+
+    def _assert_repeated_runs(self, provider: str) -> None:
         FakePipeline.instances.clear()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -202,7 +215,7 @@ class BenchmarkFileTests(unittest.TestCase):
                 model_cache=models,
                 ffmpeg=executable,
                 ffprobe=executable,
-                provider="mps",
+                provider=provider,
                 directml_device_id=0,
                 recipe_id="kim-vocals-v2",
                 iterations=5,
@@ -211,13 +224,17 @@ class BenchmarkFileTests(unittest.TestCase):
                 save_audio_dir=root / "saved",
                 progress=events.append,
             )
+            boundaries = []
+            arguments.before_measurement = lambda: boundaries.append(("ready", FakePipeline.instances[0].process_count))
+            arguments.after_measurement = lambda seconds: boundaries.append(("measured", FakePipeline.instances[0].process_count, seconds))
             with (
-                patch("musicmute_engine.qualification.platform.system", return_value="Darwin"),
-                patch("musicmute_engine.qualification.service_identity", return_value="tester"),
+                patch("musicmute_engine.qualification.platform.system", return_value="Windows" if provider == "directml" else "Darwin"),
+                patch("musicmute_engine.qualification.service_identity", return_value="S-1-5-19" if provider == "directml" else "tester"),
                 patch("musicmute_engine.qualification.collect_diagnostics", return_value={"status": "ok"}),
                 patch("musicmute_engine.qualification.RuntimePipeline", FakePipeline),
                 patch("musicmute_engine.qualification.KimSeparator", return_value=FakeSeparator()),
                 patch("musicmute_engine.qualification.discover_provider"),
+                patch("musicmute_engine.qualification.summarize_profiles", return_value={"proven": True, "acceleratedNodeEvents": 10, "cpuNodeEvents": 0}),
                 patch.dict("sys.modules", {"torch": torch}),
             ):
                 result = run_qualification(arguments)
@@ -225,6 +242,10 @@ class BenchmarkFileTests(unittest.TestCase):
             self.assertEqual(len(FakePipeline.instances), 1)
             self.assertEqual(pipeline.preload_count, 1)
             self.assertEqual(pipeline.process_count, 5)
+            self.assertEqual(boundaries[0], ("ready", 2))
+            self.assertEqual(boundaries[1][:2], ("measured", 5))
+            self.assertGreater(boundaries[1][2], 0)
+            self.assertEqual(result["measuredWallSeconds"], boundaries[1][2])
             recipes = result["recipes"]
             self.assertEqual([run["role"] for run in recipes],
                              ["cold", "warmup", "measured", "measured", "measured"])
@@ -237,13 +258,51 @@ class BenchmarkFileTests(unittest.TestCase):
                 saved = arguments.save_audio_dir / artifact["fileName"]
                 self.assertEqual(artifact["bytes"], saved.stat().st_size)
                 self.assertEqual(artifact["sha256"], hashlib.sha256(saved.read_bytes()).hexdigest())
-            self.assertEqual(arguments.save_audio_dir.stat().st_mode & 0o777, 0o700)
-            self.assertTrue(all(path.stat().st_mode & 0o777 == 0o600
-                                for path in arguments.save_audio_dir.iterdir()))
+            # Windows access is governed by ACLs; st_mode does not report them.
+            # Native installation/benchmark acceptance verifies those ACLs.
+            if os.name != "nt" and provider == "mps":
+                self.assertEqual(arguments.save_audio_dir.stat().st_mode & 0o777, 0o700)
+                self.assertTrue(all(path.stat().st_mode & 0o777 == 0o600
+                                    for path in arguments.save_audio_dir.iterdir()))
             self.assertEqual(len([event for event in events if event["type"] == "run-complete"]), 5)
-            self.assertEqual(recipes[0]["gpuMemoryBefore"], {
-                "tensorAllocatedBytes": 100, "driverAllocatedBytes": 200,
-            })
+            if provider == "mps":
+                self.assertEqual(recipes[0]["gpuMemoryBefore"], {
+                    "tensorAllocatedBytes": 100, "driverAllocatedBytes": 200,
+                })
+            else:
+                self.assertTrue(all(run["gpuMemoryBefore"] is None and run["gpuMemoryAfter"] is None for run in recipes))
+                self.assertEqual(torch.mps.mock_calls, [])
+
+    def test_directml_report_distinguishes_capacity_dispatch_and_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory) / "input.wav"
+            fixture.write_bytes(b"fixture")
+            arguments = Namespace(
+                provider="directml", directml_device_id=0, fixture=fixture,
+                recipe_id="kim-vocals-v2", warmup_runs=1, measured_runs=3,
+                candidate_engine_root=None, group_size=1, save_audio_dir=None,
+            )
+            raw = {
+                "recipes": [{"recipeDigest": "a" * 64, "measuredInputDurationSeconds": 12,
+                             "measuredInputSamples": 529200, "outputBitrateKbps": 160}] * 5,
+                "runtimeDiagnostics": {"python": "3.12.10"},
+                "releaseManifestDigest": "b" * 64, "fixtureDigest": "c" * 64,
+                "modelDigest": "d" * 64, "preloadSeconds": 1,
+                "serviceIdentity": "S-1-5-19", "totalSeconds": 5,
+                "providerDispatch": {"proven": True, "acceleratedNodeEvents": 10, "cpuNodeEvents": 0},
+                "savedAudioArtifacts": [],
+            }
+            identity = {"name": "Radeon RX 580", "source": "DXGI EnumAdapters1/GetDesc1", "dedicatedVideoMemoryBytes": 8 * 1024 ** 3}
+            with (
+                patch("musicmute_engine.windows_gpu.adapter_identity", return_value=identity),
+                patch("musicmute_engine.benchmark_file.gpu_model", side_effect=AssertionError("macOS probe on Windows")),
+            ):
+                report = build_report(raw, arguments, "e" * 64)
+            self.assertEqual(report["provider"], "directml")
+            self.assertFalse(report["fallbackDisabled"])
+            self.assertTrue(report["providerDispatch"]["proven"])
+            self.assertEqual(report["gpuIdentity"], identity)
+            self.assertIn("unavailable", report["memoryScope"])
 
     def test_failed_run_writes_private_partial_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -253,6 +312,7 @@ class BenchmarkFileTests(unittest.TestCase):
             report = root / "report.json"
             arguments = Namespace(
                 candidate_engine_root=None,
+                provider="mps",
                 fixture=fixture,
                 fixture_sha256=hashlib.sha256(fixture.read_bytes()).hexdigest(),
                 recipe_id="kim-vocals-v2",

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0 — pending publication
+
+- Share the npm CLI between Apple Silicon macOS and Windows x64/DirectML.
+- Add native Windows lifecycle, diagnostics, signed updates and recovery commands.
+- Verify signed metadata for initial runtime downloads before extraction or execution.
+- Validate Windows enrollment-file and staging-directory ACLs before reading credentials.
+- Preserve slot identities across one/two-worker transitions and runtime updates.
+- Enable two workers only after native qualification and backend capacity approval.
+
 ## 0.1.0-rc.1 — 2026-09-27
 
 - Public npm release candidate for the Apple Silicon macOS installer. Publication,

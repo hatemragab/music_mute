@@ -6,42 +6,51 @@ const KEY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/u;
 const MAX_CLOCK_SKEW_MS = 5 * 60_000;
 
-export interface MacUpdateArtifact {
+export const UPDATE_CONTENT_TYPES = {
+  "darwin-arm64": "application/gzip",
+  "windows-amd64": "application/zip",
+} as const;
+export type UpdatePlatform = keyof typeof UPDATE_CONTENT_TYPES;
+export interface UpdateArtifact {
   filename: string;
   bytes: number;
   sha256: string;
-  contentType: "application/gzip";
+  contentType: "application/gzip" | "application/zip";
 }
 
-export interface MacUpdateMetadata {
+export interface UpdateMetadata {
   schemaVersion: 1;
   sequence: number;
-  platform: "darwin-arm64";
+  platform: UpdatePlatform;
   releaseVersion: string;
   publishedAt: string;
   expiresAt: string;
-  release: MacUpdateArtifact;
+  release: UpdateArtifact;
 }
 
-export interface SignedMacUpdateMetadata {
+export interface SignedUpdateMetadata {
   keyId: string;
-  metadata: MacUpdateMetadata;
+  metadata: UpdateMetadata;
   signature: string;
 }
 
-export interface MacUpdateCandidate {
+export interface UpdateCandidate {
   signed: unknown;
   grant?: { url: string; expiresAt: string };
 }
 
-export function parseMacUpdateCandidate(value: unknown): MacUpdateCandidate {
+export function parseUpdateCandidate(
+  value: unknown,
+  platform: UpdatePlatform,
+): UpdateCandidate {
+  assertPlatform(platform);
   const root = strictRecord(
     value,
     new Set(["schemaVersion", "platform", "signed", "grant"]),
     "Update candidate",
     false,
   );
-  if (root.schemaVersion !== 1 || root.platform !== "darwin-arm64")
+  if (root.schemaVersion !== 1 || root.platform !== platform)
     throw new TypeError("Update candidate target is invalid");
   if (root.grant === undefined) return { signed: root.signed };
   const grant = strictRecord(
@@ -68,14 +77,15 @@ export function parseMacUpdateCandidate(value: unknown): MacUpdateCandidate {
   };
 }
 
-export function verifyMacUpdateMetadata(
+export function verifyUpdateMetadata(
   value: unknown,
   options: {
+    platform: UpdatePlatform;
     publicKeys: Readonly<Record<string, string>>;
     minimumSequence: number;
     now?: Date;
   },
-): MacUpdateMetadata {
+): UpdateMetadata {
   if (
     !Number.isSafeInteger(options.minimumSequence) ||
     options.minimumSequence < 0
@@ -93,7 +103,7 @@ export function verifyMacUpdateMetadata(
     !/^[A-Za-z0-9_-]{86}$/u.test(envelope.signature)
   )
     throw new TypeError("Update signature is invalid");
-  const metadata = parseMetadata(envelope.metadata);
+  const metadata = parseMetadata(envelope.metadata, options.platform);
   const publicKey = options.publicKeys[envelope.keyId];
   if (publicKey === undefined)
     throw new TypeError("Update signing key is not trusted");
@@ -126,13 +136,15 @@ export function verifyMacUpdateMetadata(
   return metadata;
 }
 
-export function canonicalMacUpdateMetadata(
-  metadata: MacUpdateMetadata,
-): string {
+export function canonicalUpdateMetadata(metadata: UpdateMetadata): string {
   return canonicalJson(metadata);
 }
 
-function parseMetadata(value: unknown): MacUpdateMetadata {
+function parseMetadata(
+  value: unknown,
+  platform: UpdatePlatform,
+): UpdateMetadata {
+  assertPlatform(platform);
   const record = strictRecord(
     value,
     new Set([
@@ -148,7 +160,7 @@ function parseMetadata(value: unknown): MacUpdateMetadata {
   );
   if (
     record.schemaVersion !== 1 ||
-    record.platform !== "darwin-arm64" ||
+    record.platform !== platform ||
     !Number.isSafeInteger(record.sequence) ||
     (record.sequence as number) < 1 ||
     typeof record.releaseVersion !== "string" ||
@@ -165,17 +177,22 @@ function parseMetadata(value: unknown): MacUpdateMetadata {
   if (
     typeof release.filename !== "string" ||
     !FILENAME.test(release.filename) ||
+    !release.filename.endsWith(
+      platform === "windows-amd64" ? ".zip" : ".tar.gz",
+    ) ||
+    (platform === "windows-amd64" &&
+      /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])\./iu.test(release.filename)) ||
     !Number.isSafeInteger(release.bytes) ||
     (release.bytes as number) < 1 ||
     typeof release.sha256 !== "string" ||
     !SHA256.test(release.sha256) ||
-    release.contentType !== "application/gzip"
+    release.contentType !== UPDATE_CONTENT_TYPES[platform]
   )
     throw new TypeError("Update release metadata is invalid");
   return {
     schemaVersion: 1,
     sequence: record.sequence as number,
-    platform: "darwin-arm64",
+    platform,
     releaseVersion: record.releaseVersion,
     publishedAt: record.publishedAt,
     expiresAt: record.expiresAt,
@@ -183,7 +200,7 @@ function parseMetadata(value: unknown): MacUpdateMetadata {
       filename: release.filename,
       bytes: release.bytes as number,
       sha256: release.sha256,
-      contentType: "application/gzip",
+      contentType: UPDATE_CONTENT_TYPES[platform],
     },
   };
 }
@@ -211,4 +228,9 @@ function canonicalJson(value: unknown): string {
     .sort()
     .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
     .join(",")}}`;
+}
+
+function assertPlatform(platform: UpdatePlatform): void {
+  if (platform !== "darwin-arm64" && platform !== "windows-amd64")
+    throw new TypeError("Update platform is unsupported");
 }

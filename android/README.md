@@ -414,6 +414,14 @@ and distribution status.
 
 ## System playback cards and island-style surfaces
 
+Failed link imports, including rejected admissions, offer **Delete** on Home.
+Removal clears the account-scoped local recovery record and survives restart.
+It does not retry acquisition or delete an associated cloud job. Failed imports
+without a job expire locally after seven days; cleanup runs when the account opens
+or another link is submitted. Older records start that retention window on their
+first open after upgrading. Active imports and submitted-job recovery are preserved.
+Server import records already have a seven-day TTL; administrator job history remains.
+
 Playback uses Media3's media session and standard media notification. The card
 supplies the track title, localized Original audio / Voice only label, MusicMute
 artwork and the existing transport controls. Tapping it opens Player (after the
@@ -433,3 +441,22 @@ The existing opt-in instrumentation runner also accepts `-e check playbackCard`
 to verify metadata, bitmap decoding and distinct tap PendingIntents. That check
 requires an explicitly authorized Android device; compiling it does not execute
 it. OEM island appearance and cold/warm tap navigation need device validation.
+
+## Playback queue editing
+
+The Up next screen supports long-press drag handles with edge scrolling and
+per-track Play next, Move up, Move down and Remove actions. Move actions also
+appear in accessibility controls. Reordering uses track identities and the real
+playback traversal order, including shuffle and repeat-all wrapping; it turns
+shuffle off so playback follows the chosen order. The current audio is not
+restarted by queue edits. The existing account-scoped checkpoint saves the order.
+
+Play next moves an existing queued track after the current audio, enables
+auto-next and exits repeat one. It keeps playback paused if already paused.
+Clear asks for confirmation and removes every queued track except the current
+one. Queue removal keeps Library entries and downloaded files. English and
+Arabic labels explain why repeat one or disabled auto-next leaves Up next empty.
+
+Local queue regressions are in `QueueEditingTest`, `QueueDisplayTest` and
+`PlaybackQueueTest`. Android gesture, accessibility and uninterrupted playback
+runtime checks still require an explicitly authorized Android device.

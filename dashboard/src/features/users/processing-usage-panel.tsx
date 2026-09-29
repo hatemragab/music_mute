@@ -11,6 +11,7 @@ import { formatDateTime } from "@/lib/format";
 import {
   clearAccountPolicyOverride,
   getAccountUsage,
+  resetAccountUsage,
   setAccountPolicyOverride,
 } from "./users-api";
 import { AccountPolicyOverrideDialog } from "./account-policy-override-dialog";
@@ -127,6 +128,22 @@ export function ProcessingUsageSection({ userId }: { userId: string }) {
   });
   const [editingRevision, setEditingRevision] = useState<number | null>(null);
   const [clearingRevision, setClearingRevision] = useState<number | null>(null);
+  const [resetSnapshot, setResetSnapshot] = useState<{
+    expectedRevision: number;
+    periodKey: string;
+    dayKey: string;
+    operationId: string;
+  } | null>(null);
+  const reset = async (reason: string) => {
+    if (!can("users.processing.manage") || !resetSnapshot)
+      throw new Error("Permission and current usage are required.");
+    const result = await resetAccountUsage(client, userId, {
+      ...resetSnapshot,
+      reason,
+    });
+    queryClient.setQueryData(["account-usage", userId], result);
+    await queryClient.invalidateQueries({ queryKey: ["audit"] });
+  };
   const update = useMutation({
     mutationFn: (input: {
       values: AccountPolicyOverride["values"];
@@ -198,6 +215,19 @@ export function ProcessingUsageSection({ userId }: { userId: string }) {
                         ? "Edit account override"
                         : "Add account override"}
                     </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        setResetSnapshot({
+                          expectedRevision: usage.data!.usageRevision,
+                          periodKey: usage.data!.period.key,
+                          dayKey: usage.data!.checkedAt.slice(0, 10),
+                          operationId: createOperationId(),
+                        })
+                      }
+                    >
+                      Reset usage
+                    </Button>
                     {usage.data.policyOverride ? (
                       <Button
                         variant="outline"
@@ -243,6 +273,19 @@ export function ProcessingUsageSection({ userId }: { userId: string }) {
                 onSave={(input) =>
                   update.mutateAsync(input).then(() => undefined)
                 }
+              />
+              <ReasonDialog
+                open={resetSnapshot != null}
+                onOpenChange={(open) => {
+                  if (!open) setResetSnapshot(null);
+                }}
+                title="Reset account usage"
+                description="Reset this month's processing, upload and download usage, plus today's upload grants, to zero. Limits, overrides, stored files and actual storage usage stay unchanged. Finish or cancel active jobs and imports first. If usage changes, close this dialog, refresh usage and try again."
+                confirmLabel="Reset usage to zero"
+                destructive
+                freshAuth
+                onReauthenticate={reauthenticate}
+                onConfirm={reset}
               />
               <ReasonDialog
                 open={clearingRevision != null}

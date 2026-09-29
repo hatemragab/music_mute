@@ -135,7 +135,7 @@ test("URL intake requires rights and sends the reviewed trim option", async () =
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/processing-policy"))
+      if (url.includes("/processing-policy"))
         return new Response('{"accept_new_jobs":true}', { status: 200 });
       if (url.includes("/jobs?"))
         return new Response('{"items":[],"next_cursor":null}', { status: 200 });
@@ -197,7 +197,7 @@ test("ambiguous import write reuses its request ID on retry", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/processing-policy"))
+      if (url.includes("/processing-policy"))
         return new Response('{"accept_new_jobs":true}', { status: 200 });
       if (url.includes("/jobs?"))
         return new Response('{"items":[],"next_cursor":null}', { status: 200 });
@@ -238,7 +238,7 @@ test("ambiguous import write reuses its request ID on retry", async () => {
 
 test("processing intake stays disabled when policy cannot be loaded", async () => {
   const fetchMock = vi.fn(async (url: string) => {
-    if (url.endsWith("/processing-policy"))
+    if (url.includes("/processing-policy"))
       return new Response('{"code":"SERVICE_UNAVAILABLE"}', { status: 503 });
     if (url.includes("/jobs?"))
       return new Response('{"items":[],"next_cursor":null}', { status: 200 });
@@ -261,7 +261,7 @@ test("processing intake stays disabled when policy cannot be loaded", async () =
 
 test("unknown links show unsupported locally without creating an import or retry identity", async () => {
   const fetchMock = vi.fn(async (url: string) => {
-    if (url.endsWith("/processing-policy"))
+    if (url.includes("/processing-policy"))
       return new Response('{"accept_new_jobs":true}');
     if (url.includes("/jobs?"))
       return new Response('{"items":[],"next_cursor":null}');

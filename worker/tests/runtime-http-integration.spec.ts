@@ -304,8 +304,8 @@ describe("worker runtime HTTP integration", () => {
         ],
         workRoot: join(root, "attempts"),
         modelCacheRoot: join(root, "models"),
-        ffmpegPath: "/usr/local/bin/ffmpeg",
-        ffprobePath: "/usr/local/bin/ffprobe",
+        ffmpegPath: join(root, "ffmpeg"),
+        ffprobePath: join(root, "ffprobe"),
         resources: { assertAvailable: vi.fn(async () => undefined) },
       },
       new WorkerControlPlaneClient({

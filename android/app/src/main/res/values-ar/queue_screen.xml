@@ -5,4 +5,18 @@
     <string name="queue_shuffle_on">التشغيل العشوائي مفعّل</string>
     <string name="queue_shuffle_off">التشغيل العشوائي متوقف</string>
     <string name="queue_auto_next">التشغيل التلقائي</string>
+    <string name="queue_clear">إفراغ</string>
+    <string name="queue_clear_title">إفراغ قائمة التشغيل؟</string>
+    <string name="queue_clear_message">سيستمر تشغيل المقطع الحالي. ستبقى المكتبة والملفات المحمّلة محفوظة.</string>
+    <string name="queue_cancel">إلغاء</string>
+    <string name="queue_reorder_hint">اضغط مطولًا على مقبض السحب لتغيير الترتيب. اضغط ⋮ للمزيد.</string>
+    <string name="queue_manual_order_hint">تغيير الترتيب يوقف التشغيل العشوائي ويحافظ على ترتيبك.</string>
+    <string name="queue_repeat_one_hint">تكرار المقطع الحالي مفعّل. اختر «تشغيل تاليًا» للمتابعة بمقطع آخر.</string>
+    <string name="queue_auto_next_off_hint">التشغيل التلقائي متوقف. اختر «تشغيل تاليًا» للمتابعة بمقطع آخر.</string>
+    <string name="queue_move_up">نقل لأعلى</string>
+    <string name="queue_move_down">نقل لأسفل</string>
+    <string name="queue_play_next">تشغيل تاليًا</string>
+    <string name="queue_drag">تغيير ترتيب %1$s</string>
+    <string name="queue_track_actions">خيارات قائمة التشغيل للمقطع %1$s</string>
+    <string name="queue_edit_failed">تعذر تحديث قائمة التشغيل. حاول مرة أخرى.</string>
 </resources>

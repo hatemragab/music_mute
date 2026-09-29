@@ -9,6 +9,17 @@ describe('comparison ranges', () => {
         [882000, 1323000],
       ]),
     ).toBe(true);
+    expect(validComparisonRanges([[0, 79380000]])).toBe(true);
+    expect(
+      validComparisonRanges(
+        Array.from({ length: 3001 }, (_, i) => [i * 2, i * 2 + 1]),
+      ),
+    ).toBe(true);
+    expect(
+      validComparisonRanges(
+        Array.from({ length: 3002 }, (_, i) => [i * 2, i * 2 + 1]),
+      ),
+    ).toBe(false);
     for (const ranges of [
       null,
       [],
@@ -19,7 +30,7 @@ describe('comparison ranges', () => {
         [0, 10],
         [9, 20],
       ],
-      [[0, 52920001]],
+      [[0, 79380001]],
       [[0, 10, 20]],
     ])
       expect(validComparisonRanges(ranges)).toBe(false);

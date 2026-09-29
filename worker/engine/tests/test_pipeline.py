@@ -61,6 +61,30 @@ class FakeSeparator:
 
 
 class PipelineTests(unittest.TestCase):
+    def test_cached_stage_retains_sub_millisecond_duration(self) -> None:
+        timings: dict[str, float] = {}
+        sentinel = object()
+        with (
+            patch("musicmute_engine.pipeline.time.monotonic", return_value=100.0),
+            patch("musicmute_engine.pipeline.time.perf_counter", side_effect=[100.0, 100.000001]),
+        ):
+            result = RuntimePipeline._timed(timings, "modelLoad", lambda: sentinel)
+        self.assertIs(result, sentinel)
+        self.assertAlmostEqual(timings["modelLoad"], 0.000001, places=10)
+
+    def test_failed_stage_retains_duration_and_original_exception(self) -> None:
+        timings: dict[str, float] = {}
+        failure = RuntimeError("stage failed")
+
+        def fail() -> None:
+            raise failure
+
+        with patch("musicmute_engine.pipeline.time.perf_counter", side_effect=[100.0, 100.000002]):
+            with self.assertRaises(RuntimeError) as raised:
+                RuntimePipeline._timed(timings, "modelLoad", fail)
+        self.assertIs(raised.exception, failure)
+        self.assertAlmostEqual(timings["modelLoad"], 0.000002, places=10)
+
     def test_gpu_oom_requires_provider_evidence(self) -> None:
         try:
             raise RuntimeError("MPS backend out of memory")

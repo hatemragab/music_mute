@@ -267,3 +267,65 @@ describe("worker dashboard pagination", () => {
     expect(cursors).toContain("next-diagnostic");
   });
 });
+
+describe("worker capacity approval", () => {
+  it("requires a reason and fresh sign-in before posting the selected GPU and revision", async () => {
+    const fixture = createDashboardFixture();
+    const submissions: unknown[] = [];
+    dashboardServer.use(...createDashboardHandlers(fixture));
+    dashboardServer.use(
+      http.post(
+        `*/admin/worker-fleet/machines/${FIXTURE_IDS.workerMachine}/capacity-approvals`,
+        async ({ request }) => {
+          submissions.push(await request.json());
+          return HttpResponse.json({
+            machine_id: FIXTURE_IDS.workerMachine,
+            revision: 2,
+            max_slots: 2,
+            replayed: false,
+          });
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage(
+      createElement(
+        Routes,
+        null,
+        createElement(Route, {
+          path: "/workers/:id",
+          element: createElement(WorkerMachinePage),
+        }),
+      ),
+      `/workers/${FIXTURE_IDS.workerMachine}`,
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Approve two workers" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Reauthenticate with Google" }),
+    ).toBeDisabled();
+    await user.type(
+      screen.getByLabelText("Reason"),
+      "Reviewed installed native qualification report",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Reauthenticate with Google" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    const { within } = await import("@testing-library/react");
+    await user.click(
+      await within(dialog).findByRole("button", {
+        name: "Approve two workers",
+      }),
+    );
+    expect(submissions).toEqual([
+      expect.objectContaining({
+        gpu_id: "0",
+        qualification_confirmed: true,
+        expected_revision: fixture.workerMachine.revision,
+        reason: "Reviewed installed native qualification report",
+      }),
+    ]);
+  });
+});

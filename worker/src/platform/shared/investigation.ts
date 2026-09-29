@@ -1,6 +1,6 @@
 import { loadLocalRuntimeStatus } from "../../runtime/local-runtime-status.js";
 import { readOperationalEvents } from "./operational-logs.js";
-import type { MacUserLayout } from "./user-paths.js";
+import type { OperatorLayout } from "./operator-layout.js";
 
 const MAX_EVENTS = 10_000;
 
@@ -188,7 +188,7 @@ const ERROR_CATALOGUE: Record<string, ErrorDefinition> = {
 };
 
 export async function investigateJob(
-  layout: Pick<MacUserLayout, "workRoot" | "runtimeStatusPath">,
+  layout: Pick<OperatorLayout, "workRoot" | "runtimeStatusPath">,
   jobId: string,
   since?: number,
 ): Promise<JobInvestigation> {
@@ -294,7 +294,7 @@ export async function investigateJob(
 }
 
 export async function investigateErrors(
-  layout: Pick<MacUserLayout, "workRoot" | "runtimeStatusPath">,
+  layout: Pick<OperatorLayout, "workRoot" | "runtimeStatusPath">,
   since: number,
   limit = 100,
   jobId?: string,
@@ -394,7 +394,7 @@ export async function investigateErrors(
 }
 
 export async function explainError(
-  layout: Pick<MacUserLayout, "workRoot" | "runtimeStatusPath">,
+  layout: Pick<OperatorLayout, "workRoot" | "runtimeStatusPath">,
   code: string,
   since: number,
 ): Promise<object> {
@@ -444,7 +444,7 @@ function isWork(value: unknown): value is JobStage["lastWork"] & object {
 }
 
 async function historyScope(
-  layout: Pick<MacUserLayout, "runtimeStatusPath">,
+  layout: Pick<OperatorLayout, "runtimeStatusPath">,
   eventCount: number,
 ): Promise<HistoryScope> {
   const status = await loadLocalRuntimeStatus(layout.runtimeStatusPath).catch(

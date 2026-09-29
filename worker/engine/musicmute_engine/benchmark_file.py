@@ -1,4 +1,4 @@
-"""Private repeated MPS file benchmark for a stopped local worker."""
+"""Private repeated GPU file benchmark for a stopped local worker."""
 
 from __future__ import annotations
 
@@ -82,7 +82,13 @@ def build_report(raw: dict[str, object], arguments: argparse.Namespace, engine_d
     if not isinstance(runtime, dict):
         raise QualificationError("Benchmark runtime evidence is invalid")
     snapshot = recipe_snapshot(arguments.recipe_id)
-    detected_gpu_model = gpu_model()
+    directml = arguments.provider == "directml"
+    gpu_identity = None
+    if directml:
+        from .windows_gpu import adapter_identity
+
+        gpu_identity = adapter_identity(arguments.directml_device_id)
+    detected_gpu_model = gpu_identity["name"] if gpu_identity else gpu_model()
     return {
         "schemaVersion": 2,
         "status": "PASS",
@@ -94,12 +100,16 @@ def build_report(raw: dict[str, object], arguments: argparse.Namespace, engine_d
         "modelDigest": raw["modelDigest"],
         "recipeId": arguments.recipe_id,
         "recipeDigest": first["recipeDigest"],
-        "provider": "mps",
-        "fallbackDisabled": os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK", "0") == "0",
+        "provider": arguments.provider,
+        "serviceIdentity": raw["serviceIdentity"],
+        # DirectML registers a CPU provider; the profile must prove no CPU
+        # inference occurred. Do not confuse observed dispatch with disabling it.
+        "fallbackDisabled": False if directml else os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK", "0") == "0",
         "providerDispatch": raw["providerDispatch"],
         "gpuModel": detected_gpu_model,
-        "gpuModelSource": "system_profiler SPDisplaysDataType" if detected_gpu_model else "unavailable",
-        "osVersion": platform.mac_ver()[0],
+        "gpuModelSource": gpu_identity["source"] if gpu_identity else "system_profiler SPDisplaysDataType" if detected_gpu_model else "unavailable",
+        "gpuIdentity": gpu_identity,
+        "osVersion": platform.version() if directml else platform.mac_ver()[0],
         "machineArchitecture": platform.machine(),
         "runtime": {key: value for key, value in runtime.items() if key != "modelPath"},
         "source": {
@@ -120,13 +130,14 @@ def build_report(raw: dict[str, object], arguments: argparse.Namespace, engine_d
             "overlap": KIM_VOCAL_2_OVERLAP,
         },
         "preloadSeconds": raw["preloadSeconds"],
+        "totalSeconds": raw["totalSeconds"],
         "warmupRuns": arguments.warmup_runs,
         "measuredRuns": arguments.measured_runs,
         "runs": recipes,
         "savedAudio": arguments.save_audio_dir is not None,
         "savedAudioArtifacts": raw["savedAudioArtifacts"],
-        "memoryScope": "MPS process allocation sampled at run boundaries; not peak occupancy",
-        "timingScope": "MPS synchronized at full-run boundaries; no per-window synchronization",
+        "memoryScope": "DirectML allocation measurements unavailable; adapter VRAM capacity is not utilization" if directml else "MPS process allocation sampled at run boundaries; not peak occupancy",
+        "timingScope": "DirectML synchronous inference and complete output validation at full-run boundaries" if directml else "MPS synchronized at full-run boundaries; no per-window synchronization",
         "networkUsed": False,
         "backendUsed": False,
         "cpuInferenceBenchmark": False,
@@ -135,7 +146,7 @@ def build_report(raw: dict[str, object], arguments: argparse.Namespace, engine_d
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--provider", choices=("mps",), required=True)
+    parser.add_argument("--provider", choices=("mps", "directml"), required=True)
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--fixture-sha256", required=True)
     parser.add_argument("--work-root", type=Path, required=True)
@@ -158,7 +169,9 @@ def parse_args() -> argparse.Namespace:
         parser.error("all benchmark paths must be absolute")
     if arguments.group_size not in (1, 2, 4):
         parser.error("window group must be 1, 2, or 4")
-    if os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK", "0") != "0":
+    if arguments.provider == "directml" and arguments.group_size != 1:
+        parser.error("DirectML requires window group 1")
+    if arguments.provider == "mps" and os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK", "0") != "0":
         parser.error("MPS CPU fallback must be disabled for GPU-only benchmarks")
     if not 0 <= arguments.warmup_runs <= 2 or not 3 <= arguments.measured_runs <= 10:
         parser.error("warm-up runs must be 0-2 and measured runs must be 3-10")
@@ -196,7 +209,7 @@ def main() -> int:
         failure = {
             "schemaVersion": 2, "status": "FAIL", "scope": "local-engine-only",
             "engineDigest": engine_digest, "fixtureDigest": arguments.fixture_sha256,
-            "provider": "mps", "recipeId": arguments.recipe_id,
+            "provider": arguments.provider, "recipeId": arguments.recipe_id,
             "code": type(error).__name__[:64],
             "reason": str(error) if isinstance(error, QualificationError) else "Benchmark runtime failed",
             "progress": progress[-100:],

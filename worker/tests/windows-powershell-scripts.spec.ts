@@ -20,14 +20,13 @@ describe("Windows PowerShell tooling", () => {
   });
 
   it("keeps staged qualification and service management inside MusicMute scope", async () => {
-    const source = await readFile(
-      resolve(workerRoot, "scripts/manage-windows-service.ps1"),
-      "utf8",
+    const source = await serviceManagerSource();
+    expect(source).toContain(
+      '[ValidateSet("Stage", "Benchmark", "Install", "Repair", "Update", "Reactivate", "Recover", "Doctor", "ResetRestartBudget", "Uninstall")]',
     );
     expect(source).toContain(
-      '[ValidateSet("Stage", "Install", "Repair", "Doctor", "ResetRestartBudget", "Uninstall")]',
+      "$StagingOnly = $Action -in @('Stage', 'Benchmark')",
     );
-    expect(source).toContain('$StagingOnly = $Action -eq "Stage"');
     expect(source).toContain("if (-not $StagingOnly)");
     expect(source).toContain("if ($StagingOnly)");
     expect(source).toContain('$ServiceName = "MusicMuteWorker"');
@@ -60,23 +59,7 @@ describe("Windows PowerShell tooling", () => {
       'throw "The MusicMute worker did not complete runtime startup."',
     );
     expect(source).toContain(
-      "Restore-ManagedFile $RuntimeConfigPath $RuntimeConfigExisted $PreviousRuntimeConfig $false",
-    );
-    expect(source).toContain(
-      "Restore-ManagedFile $CredentialPath $CredentialExisted $PreviousCredential $false",
-    );
-    expect(source).toContain(
-      "Restore-ManagedFile $Wrapper $WrapperExisted $PreviousWrapper $true",
-    );
-    expect(source).toContain(
-      "Restore-ManagedFile $ServiceXml $ServiceXmlExisted $PreviousXml $false",
-    );
-    expect(source).toContain("Test-InstalledRuntime $Root $PreviousVersion");
-    expect(source).toContain(
       "Test-InstalledRuntime $Root $Version $StartedAfter",
-    );
-    expect(source).toContain(
-      "Test-InstalledRuntime $Root $PreviousVersion $RollbackStartedAfter",
     );
     const consistencyCheck = source.indexOf(
       'throw "The installed service state is incomplete."',
@@ -87,11 +70,28 @@ describe("Windows PowerShell tooling", () => {
     const candidateCredentialWrite = source.indexOf(
       "Copy-PrivateFile $CredentialItem.FullName $CredentialPath",
     );
+    const journalCommit = source.indexOf(
+      "  Save-OperationJournal $Root ",
+      consistencyCheck,
+    );
     const rollbackConfigRestore = source.indexOf(
-      "Restore-ManagedFile $RuntimeConfigPath",
+      "      Restore-OperationJournal $Root",
+      candidateCredentialWrite,
     );
     expect(consistencyCheck).toBeGreaterThan(-1);
-    expect(candidateConfigWrite).toBeGreaterThan(consistencyCheck);
+    expect(journalCommit).toBeGreaterThan(consistencyCheck);
+    const drain = source.indexOf(
+      "$Drained = Wait-WorkerDrain $Root $UpdatePlan.force",
+      consistencyCheck,
+    );
+    expect(drain).toBeGreaterThan(consistencyCheck);
+    expect(drain).toBeLessThan(journalCommit);
+    expect(source).toContain("-OriginalLifecycle $OriginalLifecycle");
+    expect(candidateConfigWrite).toBeGreaterThan(journalCommit);
+    expect(source).toContain("$Stream.Flush($true)");
+    expect(source).toContain("The operation snapshot content changed.");
+    expect(source).toContain("Complete-OperationJournal $Root");
+    expect(source).toContain("Drain and stop MusicMuteWorker");
     expect(candidateCredentialWrite).toBeGreaterThan(candidateConfigWrite);
     expect(rollbackConfigRestore).toBeGreaterThan(candidateCredentialWrite);
     expect(source).toContain("Remove-Item -LiteralPath $Temporary -Force");
@@ -104,10 +104,7 @@ describe("Windows PowerShell tooling", () => {
 
   it("packages a stopped-service reset that preserves the previous budget", async () => {
     // Source contract only; actual service state and ACL behavior require Windows.
-    const source = await readFile(
-      resolve(workerRoot, "scripts/manage-windows-service.ps1"),
-      "utf8",
-    );
+    const source = await serviceManagerSource();
     const start = source.indexOf('if ($Action -eq "ResetRestartBudget")');
     const end = source.indexOf('if ($Action -eq "Doctor")', start);
     expect(start).toBeGreaterThan(source.indexOf("$Mutex.WaitOne(0)"));
@@ -132,3 +129,18 @@ describe("Windows PowerShell tooling", () => {
     expect(reset).toContain("service remains stopped");
   });
 });
+
+async function serviceManagerSource(): Promise<string> {
+  const helpers = await readFile(
+    resolve(workerRoot, "scripts/windows-service-functions.ps1"),
+    "utf8",
+  );
+  const manager = await readFile(
+    resolve(workerRoot, "scripts/manage-windows-service.ps1"),
+    "utf8",
+  );
+  return manager.replace(
+    ". (Join-Path $PSScriptRoot 'windows-service-functions.ps1')",
+    helpers,
+  );
+}

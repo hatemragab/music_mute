@@ -1,7 +1,7 @@
 import { HttpException } from '@nestjs/common';
 
 const errors = {
-  MEDIA_TOO_LONG: [400, 'Audio must be at most 20 minutes'],
+  MEDIA_TOO_LONG: [400, 'Audio exceeds the allowed duration'],
   MEDIA_TOO_LARGE: [400, 'Prepared audio exceeds the size limit'],
   MEDIA_UNSUPPORTED: [400, 'This audio format is unsupported'],
   MEDIA_DURATION_UNKNOWN: [400, 'Audio duration could not be verified'],

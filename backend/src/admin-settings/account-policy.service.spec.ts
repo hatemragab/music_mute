@@ -69,13 +69,13 @@ describe('account policy', () => {
     expect(() =>
       validateAccountPolicyValues({
         ...DEFAULT_ACCOUNT_POLICY_VALUES,
-        dailyUploadGrants: 201,
+        dailyUploadGrants: 1_001,
       }),
     ).toThrow();
     expect(() =>
       validateAccountPolicyValues({
         ...DEFAULT_ACCOUNT_POLICY_VALUES,
-        monthlyEstimatedDownloadBytes: 80_000_000_001,
+        monthlyEstimatedDownloadBytes: 500_000_000_001,
       }),
     ).toThrow();
   });
@@ -129,8 +129,15 @@ describe('account policy', () => {
     ).resolves.toMatchObject({
       source: 'global',
       overrideRevision: null,
-      values: { monthlyProcessingSeconds: 7_200 },
+      values: { monthlyProcessingSeconds: 36_000 },
     });
+  });
+
+  it('exposes expanded media limits only to opted-in clients', async () => {
+    await expect(fixture().publicPolicy('2', '2')).resolves.toMatchObject({
+      limits: { maxDurationSeconds: 1800, maxPreparedAudioBytes: 100_000_000 },
+    });
+    await expect(fixture().publicPolicy('2', '3')).rejects.toThrow();
   });
 
   it('fails the public admission gate closed while keeping safe limits visible', async () => {

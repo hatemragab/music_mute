@@ -158,11 +158,12 @@ class ProcessingViewModel(
         onDeleted()
     }
 
-    fun renameLibraryTrack(key: com.hatem.musicmute.library.LibraryKey, title: String) = perform { ticket ->
+    fun renameLibraryTrack(key: com.hatem.musicmute.library.LibraryKey, title: String, onRenamed: () -> Unit = {}) = perform { ticket ->
         if (ticket.uid != key.ownerUid) throw CancellationException("Library owner changed")
         repository.renameJob(key.jobId, title)
         checkSession(ticket)
         history.refreshAfterChange()
+        onRenamed()
     }
 
     fun deleteLibraryTrack(key: com.hatem.musicmute.library.LibraryKey, onDeleted: () -> Unit) = perform { ticket ->

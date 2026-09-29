@@ -1,3 +1,7 @@
+import {
+  MAX_AUDIO_DURATION_SECONDS,
+  MAX_PREPARED_AUDIO_BYTES,
+} from '../media-limits.js';
 import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
@@ -29,7 +33,7 @@ import { AUDIO_NAME_PATTERN } from '../job-metadata.js';
 export class InputDeclarationDto implements InputDeclaration {
   @IsIn(Object.keys(AUDIO_TYPES)) extension!: keyof typeof AUDIO_TYPES;
   @IsString() @IsIn(Object.values(AUDIO_TYPES)) contentType!: string;
-  @IsInt() @Min(1) @Max(50_000_000) bytes!: number;
+  @IsInt() @Min(1) @Max(MAX_PREPARED_AUDIO_BYTES) bytes!: number;
   @ValidateBy({
     name: 'audioDuration',
     validator: {
@@ -37,7 +41,7 @@ export class InputDeclarationDto implements InputDeclaration {
         typeof value === 'number' &&
         Number.isFinite(value) &&
         value > 0 &&
-        value <= 1_200,
+        value <= MAX_AUDIO_DURATION_SECONDS,
     },
   })
   durationSeconds!: number;

@@ -400,6 +400,33 @@ describe("worker control-plane client", () => {
     );
   });
 
+  it("requests Windows metadata with an explicit download flag and rejects a different target", async () => {
+    const response = {
+      schemaVersion: 1,
+      platform: "windows-amd64",
+      signed: { keyId: "release-test" },
+    };
+    const fetchMock = vi.fn(async () => json(response));
+    const client = new WorkerControlPlaneClient({
+      baseUrl: "http://localhost",
+      credential: "x".repeat(43),
+      allowInsecureLoopback: true,
+      fetch: fetchMock,
+    });
+    await expect(
+      client.updateCandidate("windows-amd64", true),
+    ).resolves.toEqual({ signed: response.signed });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({
+        body: JSON.stringify({ platform: "windows-amd64", download: true }),
+      }),
+    );
+    await expect(client.updateCandidate("darwin-arm64")).rejects.toThrow(
+      "target is invalid",
+    );
+  });
+
   it("requests a machine-authenticated macOS update candidate", async () => {
     const response = {
       schemaVersion: 1,
@@ -420,10 +447,12 @@ describe("worker control-plane client", () => {
       fetch: fetchMock as unknown as typeof fetch,
     });
 
-    await expect(client.macUpdateCandidate()).resolves.toMatchObject({
-      signed: response.signed,
-      grant: response.grant,
-    });
+    await expect(client.updateCandidate("darwin-arm64")).resolves.toMatchObject(
+      {
+        signed: response.signed,
+        grant: response.grant,
+      },
+    );
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       "http://localhost/worker/updates",
     );

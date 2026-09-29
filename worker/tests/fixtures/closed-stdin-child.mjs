@@ -16,5 +16,12 @@ const body = Buffer.from(
 const frame = Buffer.alloc(4 + body.length);
 frame.writeUInt32BE(body.length, 0);
 body.copy(frame, 4);
-process.stdout.write(frame, () => closeSync(0));
+process.stdout.write(frame, () => {
+  process.stdin.destroy();
+  try {
+    closeSync(0);
+  } catch (error) {
+    if (error.code !== "EBADF") throw error;
+  }
+});
 setInterval(() => undefined, 1_000);

@@ -4,6 +4,15 @@ export interface ProcessingChangeMetadata {
   after: string | number | boolean | null;
 }
 const processingAuditFields = new Set([
+  'processingUsedSeconds',
+  'processingReleasedSeconds',
+  'uploadGrants',
+  'confirmedUploadBytes',
+  'downloadGrants',
+  'estimatedDownloadBytes',
+  'dailyUsedUploadGrants',
+  'usagePeriodKey',
+  'usageDayKey',
   'monthlyProcessingSeconds',
   'overrideExpiresAt',
   'acceptNewJobs',

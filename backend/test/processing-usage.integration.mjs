@@ -243,9 +243,9 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     new Date('2026-09-30T23:59:59.000Z'),
   );
   assert.equal(reserved.period.key, '2026-09');
-  assert.equal(reserved.processing.limitSeconds, 7_200);
+  assert.equal(reserved.processing.limitSeconds, 36_000);
   assert.equal(reserved.processing.reservedSeconds, 30);
-  assert.equal(reserved.processing.remainingSeconds, 7_170);
+  assert.equal(reserved.processing.remainingSeconds, 35_970);
   assert.equal(await reservations.countDocuments(), 1);
   const openPeriod = await periods.findOne({
     accountId: owner,
@@ -269,7 +269,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   );
   assert.equal(released.processing.reservedSeconds, 0);
   assert.equal(released.processing.releasedSeconds, 30);
-  assert.equal(released.processing.remainingSeconds, 7_200);
+  assert.equal(released.processing.remainingSeconds, 36_000);
   assert.equal((await reservations.findById(job._id)).state, 'released');
   const closedPeriod = await periods.findOne({
     accountId: owner,
@@ -284,7 +284,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     new Date('2026-10-01T00:00:00.000Z'),
   );
   assert.equal(nextMonth.period.key, '2026-10');
-  assert.equal(nextMonth.processing.remainingSeconds, 7_200);
+  assert.equal(nextMonth.processing.remainingSeconds, 36_000);
 
   const successfulJob = await createJob(jobs, owner, 20);
   const october = new Date('2026-10-01T00:00:01.000Z');
@@ -301,7 +301,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   const consumed = await usage.readUsage(owner, undefined, october);
   assert.equal(consumed.processing.usedSeconds, 26);
   assert.equal(consumed.processing.reservedSeconds, 0);
-  assert.equal(consumed.processing.remainingSeconds, 7_174);
+  assert.equal(consumed.processing.remainingSeconds, 35_974);
   assert.equal((await reservations.findById(successfulJob._id)).state, 'used');
 
   await policies.updateOne(
@@ -348,15 +348,15 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   assert.equal(independent.processing.reservedSeconds, 0);
   assert.equal(independent.processing.remainingSeconds, 60);
   assert.deepEqual(independent.storage, {
-    limitBytes: 1_000_000_000,
+    limitBytes: 5_000_000_000,
     retainedBytes: 0,
-    remainingBytes: 1_000_000_000,
+    remainingBytes: 5_000_000_000,
   });
 
   const retainedObject = {
     key: `users/${secondAccount}/jobs/output/vocals.mp3`,
     versionId: 'retained-v1',
-    bytes: 1_000_000_001,
+    bytes: 5_000_000_001,
     sha256: Buffer.alloc(32, 2).toString('base64'),
     contentType: 'audio/mpeg',
   };

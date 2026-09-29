@@ -27,7 +27,10 @@ export const jobsApi = (api: ApiClient) => ({
       signal,
     ),
   policy: (signal?: AbortSignal) =>
-    api.get<ProcessingPolicyView>("/processing-policy", signal),
+    api.get<ProcessingPolicyView>(
+      "/processing-policy?media_limits_version=2",
+      signal,
+    ),
   cancel: (id: string) =>
     api.post(`/jobs/${encodeURIComponent(id)}/cancellations`, {}),
   retry: (id: string, requestId: string) =>

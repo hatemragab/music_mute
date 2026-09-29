@@ -135,3 +135,18 @@ export const updateWorkerFleetPolicy = (
     "/admin/worker-fleet/policy",
     input,
   );
+
+export const approveWorkerCapacity = (
+  client: ApiClient,
+  machineId: string,
+  input: RevisionCommand & { gpuId: string; qualificationConfirmed: true },
+) =>
+  client.post<{
+    machineId: string;
+    revision: number;
+    maxSlots: number;
+    replayed: boolean;
+  }>(
+    `/admin/worker-fleet/machines/${encodeURIComponent(machineId)}/capacity-approvals`,
+    input,
+  );

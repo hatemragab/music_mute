@@ -1,3 +1,4 @@
+import { MAX_PREPARED_AUDIO_BYTES } from '../jobs/media-limits.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { decodeExtraData, type JobExtraData } from '../jobs/job-extra-data.js';
 import { createWriteStream } from 'node:fs';
@@ -161,7 +162,7 @@ export class ImportFiles {
     if (
       !Number.isSafeInteger(maxBytes) ||
       maxBytes < 1 ||
-      maxBytes > 50_000_000
+      maxBytes > MAX_PREPARED_AUDIO_BYTES
     )
       throw new Error('Invalid import byte limit');
     await this.assertSpace(maxBytes);

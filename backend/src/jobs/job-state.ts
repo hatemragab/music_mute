@@ -1,3 +1,7 @@
+import {
+  MAX_AUDIO_DURATION_SECONDS,
+  MAX_PREPARED_AUDIO_BYTES,
+} from './media-limits.js';
 import { authError } from '../auth/auth.errors.js';
 import { jobError } from './job-errors.js';
 import {
@@ -23,10 +27,10 @@ export function assertInputDeclaration(input: InputDeclaration): void {
     AUDIO_TYPES[input.extension] !== input.contentType ||
     !Number.isInteger(input.bytes) ||
     input.bytes < 1 ||
-    input.bytes > 50_000_000 ||
+    input.bytes > MAX_PREPARED_AUDIO_BYTES ||
     !Number.isFinite(input.durationSeconds) ||
     input.durationSeconds <= 0 ||
-    input.durationSeconds > 1_200 ||
+    input.durationSeconds > MAX_AUDIO_DURATION_SECONDS ||
     !isSha256(input.sha256)
   ) {
     throw authError('INVALID_INPUT');
@@ -35,14 +39,14 @@ export function assertInputDeclaration(input: InputDeclaration): void {
 
 export function assertMeasuredDuration(
   durationSeconds: number,
-  maxDurationSeconds = 1_200,
+  maxDurationSeconds = MAX_AUDIO_DURATION_SECONDS,
 ): void {
   if (
     !Number.isFinite(durationSeconds) ||
     durationSeconds <= 0 ||
     durationSeconds > maxDurationSeconds ||
     maxDurationSeconds <= 0 ||
-    maxDurationSeconds > 1_200
+    maxDurationSeconds > MAX_AUDIO_DURATION_SECONDS
   )
     throw authError('INVALID_INPUT');
 }

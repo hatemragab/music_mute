@@ -121,6 +121,14 @@ Native apps -> TLS reverse proxy -> API (main.ts)
 
 ## Media usage and transfer contract
 
+Standard defaults: 600 successful processing minutes/month, 30-minute/100-MB
+prepared audio, 100 upload grants/day and 1,000/month, 5-GB confirmed uploads/month,
+5-GB retained storage, 1,000 download grants and 50-GB downloads/month, and a
+500-GB service outbound ceiling/month (decimal bytes). Saved global values take
+precedence over code defaults; active account overrides keep their values.
+Existing native clients retain 20-minute/50-MB local-upload policy ceilings.
+Clients opt into expanded media using `media_limits_version=2` on `/processing-policy`.
+
 Authenticated clients read `GET /processing-usage`. Schema version 2 reports
 the UTC period, processing use/reservations/refunds, upload grant and confirmed-byte
 counters, result-grant and estimated-byte counters, retained-result bytes, effective
@@ -136,8 +144,7 @@ service estimate. Presigned URLs are never persisted or logged.
 The global standard policy and selected per-account replacement values are managed
 through the existing audited admin settings and account-override routes. Overrides
 may replace processing, media, upload, download, retention, and signed-URL fields;
-omitted fields continue using the global value. Administrators change policy values,
-not raw usage counters or object metadata.
+omitted fields continue using the global value. Administrators change policy values or explicitly reset current usage through the audited reset route; object metadata is never rewritten.
 
 Set the required `REDIS_URL`, just as you set `MONGODB_URI`:
 
@@ -337,3 +344,20 @@ honors existing admission instead of rejecting an already accepted file.
 Existing authentication, per-file caps and transfer limits remain unchanged.
 Run `pnpm run test:imports:integration` for isolated Mongo concurrency, recovery,
 pre-acquisition rejection and one-minute-remaining regression coverage.
+
+## Account usage reset
+
+The user detail page's **Reset usage** action calls
+`POST /admin/users/:id/account-usage-resets`. It zeroes current UTC-month processing
+used/released seconds, upload grants/confirmed bytes, download grants/estimated
+bytes, and current UTC-day upload grants. Quota limits, overrides, actual stored
+file usage, files, historical periods and service-wide bandwidth remain unchanged.
+Active jobs, imports or reservations must finish or be cancelled first.
+The operation requires `users.processing.manage`, fresh authentication, a reason,
+a UUID operation ID, and the displayed usage revision/month/day. Stale confirmations
+return 409; refresh and reopen the dialog. Successful operation replays cannot erase
+new usage. Audit records retain before/after values; deployment alone resets no user.
+
+API guideline preflight: [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/),
+read 2026-09-29: rules 101, 104, 106, 118, 149, 151 and 176 (OpenAPI,
+authorization, compatibility, snake_case, HTTP semantics and problem responses).

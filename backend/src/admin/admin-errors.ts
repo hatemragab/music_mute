@@ -3,6 +3,7 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 import type { Request } from 'express';
 
 export type AdminErrorCode =
+  | 'USAGE_RESET_ACTIVE_WORK'
   | 'MEDIA_UNAVAILABLE'
   | 'EXPORT_TOO_LARGE'
   | 'JOB_STATE_CONFLICT'
@@ -24,6 +25,11 @@ export type AdminErrorCode =
 
 const definitions: Record<AdminErrorCode, { status: number; message: string }> =
   {
+    USAGE_RESET_ACTIVE_WORK: {
+      status: HttpStatus.CONFLICT,
+      message:
+        'Finish or cancel active jobs and imports before resetting usage',
+    },
     MEDIA_UNAVAILABLE: {
       status: HttpStatus.GONE,
       message: 'Media unavailable',

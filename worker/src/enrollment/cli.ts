@@ -28,6 +28,11 @@ import {
 import { uploadQualificationResult } from "./qualification-upload.js";
 import { prepareInstallationRelease } from "./release-archive.js";
 import { verifyWindowsRelease } from "../platform/windows/release-manifest.js";
+import { verifyInstallationSignature } from "./installation-signature.js";
+import {
+  assertWindowsPrivateDataFile,
+  assertWindowsPrivateDirectory,
+} from "../platform/windows/private-data.js";
 
 const CREDENTIAL = /^[A-Za-z0-9_-]{43}$/u;
 const UUID_V4 =
@@ -46,6 +51,7 @@ export const ENROLLMENT_USAGE = `Usage:
   mw enroll --backend-url <api-base-url> --enrollment-file <absolute-path> --release <absolute-path> [--diagnostics <absolute-path>] --qualification <absolute-path> --label <name> [--group-id <id>] [--service-root <absolute-path>] --output <existing-protected-directory> [--allow-insecure-loopback <true|false>]`;
 
 export interface InstallationPreparationReuse {
+  publicKeys?: Readonly<Record<string, string>>;
   reusableModelPath?: string;
 }
 
@@ -111,6 +117,7 @@ export async function runInstallationPreparationCommand(
     exchange.credential,
     platform,
   );
+  verifyInstallationSignature(manifest.release, platform, reuse.publicKeys);
   const artifactRoot = join(outputRoot, ARTIFACTS_DIRECTORY);
   await ensureProtectedDirectory(artifactRoot);
   const downloads = await downloadInstallationArtifacts(manifest, {
@@ -537,6 +544,7 @@ async function readBoundedJson(path: string, label: string): Promise<unknown> {
 }
 
 async function readCredential(path: string, label: string): Promise<string> {
+  if (process.platform === "win32") await assertWindowsPrivateDataFile(path);
   const info = await lstat(path);
   if (
     !info.isFile() ||
@@ -553,6 +561,7 @@ async function readCredential(path: string, label: string): Promise<string> {
 }
 
 async function assertProtectedOutputDirectory(path: string): Promise<void> {
+  if (process.platform === "win32") await assertWindowsPrivateDirectory(path);
   const info = await lstat(path);
   if (!info.isDirectory() || info.isSymbolicLink())
     throw new TypeError("Output directory is unsafe");

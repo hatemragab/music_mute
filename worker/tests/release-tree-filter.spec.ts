@@ -13,6 +13,9 @@ describe("release tree filtering", () => {
       ),
     ).toBe(true);
     expect(shouldCopyReleaseTreeEntry(root, join(root, "tests"))).toBe(false);
+    expect(shouldCopyReleaseTreeEntry(root, join(root, "._separator.py"))).toBe(
+      false,
+    );
     expect(shouldCopyReleaseTreeEntry(root, join(root, ".pytest_cache"))).toBe(
       false,
     );

@@ -4,7 +4,11 @@ import {
   type ServerResponse,
 } from "node:http";
 import { execFile as execFileCallback } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import {
+  canonicalUpdateMetadata,
+  type UpdateMetadata,
+} from "../src/platform/shared/update-metadata.js";
 import {
   chmod,
   mkdtemp,
@@ -346,6 +350,30 @@ describe("worker enrollment client", () => {
     await chmod(enrollmentFile, 0o600);
     const reportFile = join(root, "report.json");
     await writeFile(reportFile, JSON.stringify(report()), { mode: 0o600 });
+    if (process.platform === "win32") {
+      await execFile(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-EncodedCommand",
+          Buffer.from(
+            `$ErrorActionPreference='Stop'
+foreach ($Entry in @('${root.replaceAll("'", "''")}','${output.replaceAll("'", "''")}','${enrollmentFile.replaceAll("'", "''")}')) {
+  $Acl=Get-Acl -LiteralPath $Entry
+  $Acl.SetAccessRuleProtection($true,$false)
+  foreach ($Rule in @($Acl.Access)) { $Acl.RemoveAccessRuleSpecific($Rule) }
+  $Admin=New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')
+  $Acl.SetOwner($Admin)
+  $Acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($Admin,'FullControl','Allow')))
+  Set-Acl -LiteralPath $Entry -AclObject $Acl
+}`,
+            "utf16le",
+          ).toString("base64"),
+        ],
+        { timeout: 15_000, maxBuffer: 16_384 },
+      );
+    }
     const requests: Array<{
       path: string;
       authorization: string | undefined;
@@ -434,148 +462,188 @@ describe("worker enrollment client", () => {
     );
   });
 
-  it("prepares and safely reuses the approved installation artifacts", async () => {
-    const root = await mkdtemp(join(tmpdir(), "musicmute-preparation-"));
-    roots.push(root);
-    const output = join(root, "protected");
-    await mkdir(output, { mode: 0o700 });
-    await chmod(output, 0o700);
-    const enrollmentFile = join(root, "enrollment.credential");
-    await writeFile(enrollmentFile, `${enrollmentCredential}\n`, {
-      mode: 0o600,
-    });
-    await chmod(enrollmentFile, 0o600);
-    const payloads = {
-      release: await createMacReleaseArchive(root),
-      model: Buffer.from("approved model"),
-      fixture: Buffer.from("approved fixture"),
-    };
-    const artifactRequests = new Map<string, number>();
-    const exchangeBodies: unknown[] = [];
-    const server = createServer((request, response) => {
-      void (async () => {
-        if (request.method === "GET") {
-          const name = new URL(
-            request.url ?? "/",
-            "http://127.0.0.1",
-          ).pathname.slice(1) as keyof typeof payloads;
-          const payload = payloads[name];
-          if (payload === undefined) {
-            response.writeHead(404).end();
+  it.skipIf(process.platform !== "darwin")(
+    "prepares and safely reuses the approved installation artifacts",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "musicmute-preparation-"));
+      roots.push(root);
+      const output = join(root, "protected");
+      await mkdir(output, { mode: 0o700 });
+      await chmod(output, 0o700);
+      const enrollmentFile = join(root, "enrollment.credential");
+      await writeFile(enrollmentFile, `${enrollmentCredential}\n`, {
+        mode: 0o600,
+      });
+      await chmod(enrollmentFile, 0o600);
+      const payloads = {
+        release: await createMacReleaseArchive(root),
+        model: Buffer.from("approved model"),
+        fixture: Buffer.from("approved fixture"),
+      };
+      const signing = generateKeyPairSync("ed25519");
+      const publicKeys = {
+        fixture: signing.publicKey
+          .export({ type: "spki", format: "pem" })
+          .toString(),
+      };
+      const artifactRequests = new Map<string, number>();
+      const exchangeBodies: unknown[] = [];
+      const server = createServer((request, response) => {
+        void (async () => {
+          if (request.method === "GET") {
+            const name = new URL(
+              request.url ?? "/",
+              "http://127.0.0.1",
+            ).pathname.slice(1) as keyof typeof payloads;
+            const payload = payloads[name];
+            if (payload === undefined) {
+              response.writeHead(404).end();
+              return;
+            }
+            artifactRequests.set(name, (artifactRequests.get(name) ?? 0) + 1);
+            const contentType =
+              name === "release"
+                ? "application/gzip"
+                : name === "model"
+                  ? "application/octet-stream"
+                  : "audio/wav";
+            response.writeHead(200, {
+              "Content-Length": payload.length,
+              "Content-Type": contentType,
+            });
+            response.end(payload);
             return;
           }
-          artifactRequests.set(name, (artifactRequests.get(name) ?? 0) + 1);
-          const contentType =
-            name === "release"
-              ? "application/gzip"
-              : name === "model"
-                ? "application/octet-stream"
-                : "audio/wav";
-          response.writeHead(200, {
-            "Content-Length": payload.length,
-            "Content-Type": contentType,
-          });
-          response.end(payload);
-          return;
-        }
-        const body = JSON.parse(await readBody(request)) as unknown;
-        if (request.url === "/worker/installations") {
-          exchangeBodies.push(body);
-          send(response, {
-            installationId,
-            phase: "restricted",
-            expiresAt: "2099-09-20T12:00:00.000Z",
-            credential: installationCredential,
-            replayed: exchangeBodies.length > 1,
-          });
-          return;
-        }
-        if (request.url?.endsWith("/artifacts")) {
-          const address = server.address();
-          if (address === null || typeof address === "string")
-            throw new Error("Test server address is unavailable");
-          send(
-            response,
-            localArtifactManifest(`http://127.0.0.1:${address.port}`, payloads),
-          );
-          return;
-        }
-        response.writeHead(404).end();
-      })().catch(() => response.writeHead(500).end());
-    });
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", resolve),
-    );
-    const address = server.address();
-    if (address === null || typeof address === "string")
-      throw new Error("Test server address is unavailable");
-    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
-    const arguments_ = [
-      "--backend-url",
-      `http://127.0.0.1:${address.port}`,
-      "--enrollment-file",
-      enrollmentFile,
-      "--platform",
-      "darwin-arm64",
-      "--output",
-      output,
-      "--allow-insecure-loopback",
-      "true",
-    ];
-    try {
-      await runInstallationPreparationCommand(arguments_);
-      await runInstallationPreparationCommand(arguments_);
-    } finally {
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
+          const body = JSON.parse(await readBody(request)) as unknown;
+          if (request.url === "/worker/installations") {
+            exchangeBodies.push(body);
+            send(response, {
+              installationId,
+              phase: "restricted",
+              expiresAt: "2099-09-20T12:00:00.000Z",
+              credential: installationCredential,
+              replayed: exchangeBodies.length > 1,
+            });
+            return;
+          }
+          if (request.url?.endsWith("/artifacts")) {
+            const address = server.address();
+            if (address === null || typeof address === "string")
+              throw new Error("Test server address is unavailable");
+            const manifest = localArtifactManifest(
+              `http://127.0.0.1:${address.port}`,
+              payloads,
+            );
+            const metadata: UpdateMetadata = {
+              schemaVersion: 1,
+              sequence: 1,
+              platform: "darwin-arm64",
+              releaseVersion: manifest.release.version,
+              publishedAt: new Date(Date.now() - 1000).toISOString(),
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              release: {
+                filename: manifest.release.filename,
+                bytes: manifest.release.bytes,
+                sha256: manifest.release.sha256,
+                contentType: "application/gzip",
+              },
+            };
+            send(response, {
+              ...manifest,
+              release: {
+                ...manifest.release,
+                signed: {
+                  keyId: "fixture",
+                  metadata,
+                  signature: sign(
+                    null,
+                    Buffer.from(canonicalUpdateMetadata(metadata)),
+                    signing.privateKey,
+                  ).toString("base64url"),
+                },
+              },
+            });
+            return;
+          }
+          response.writeHead(404).end();
+        })().catch(() => response.writeHead(500).end());
+      });
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
       );
-    }
+      const address = server.address();
+      if (address === null || typeof address === "string")
+        throw new Error("Test server address is unavailable");
+      const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+      const arguments_ = [
+        "--backend-url",
+        `http://127.0.0.1:${address.port}`,
+        "--enrollment-file",
+        enrollmentFile,
+        "--platform",
+        "darwin-arm64",
+        "--output",
+        output,
+        "--allow-insecure-loopback",
+        "true",
+      ];
+      try {
+        await runInstallationPreparationCommand(arguments_, { publicKeys });
+        await runInstallationPreparationCommand(arguments_, { publicKeys });
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
 
-    expect(exchangeBodies).toHaveLength(2);
-    expect(exchangeBodies[0]).toEqual(exchangeBodies[1]);
-    expect(Object.fromEntries(artifactRequests)).toEqual({
-      release: 1,
-      model: 1,
-      fixture: 1,
-    });
-    const localManifest = JSON.parse(
-      await readFile(join(output, "installation-artifacts.json"), "utf8"),
-    ) as Record<string, unknown>;
-    expect(localManifest).toMatchObject({
-      schemaVersion: 1,
-      installationId,
-      platform: "darwin-arm64",
-      releaseVersion: "0.1.1",
-      release: {
-        releaseRoot: join(output, "installation-artifacts", "release-0.1.1"),
-      },
-    });
-    await expect(
-      stat(
-        join(
-          output,
-          "installation-artifacts",
-          "release-0.1.1",
-          "release-manifest.json",
+      expect(exchangeBodies).toHaveLength(2);
+      expect(exchangeBodies[0]).toEqual(exchangeBodies[1]);
+      expect(Object.fromEntries(artifactRequests)).toEqual({
+        release: 1,
+        model: 1,
+        fixture: 1,
+      });
+      const localManifest = JSON.parse(
+        await readFile(join(output, "installation-artifacts.json"), "utf8"),
+      ) as Record<string, unknown>;
+      expect(localManifest).toMatchObject({
+        schemaVersion: 1,
+        installationId,
+        platform: "darwin-arm64",
+        releaseVersion: "0.1.1",
+        release: {
+          releaseRoot: join(output, "installation-artifacts", "release-0.1.1"),
+        },
+      });
+      await expect(
+        stat(
+          join(
+            output,
+            "installation-artifacts",
+            "release-0.1.1",
+            "release-manifest.json",
+          ),
         ),
-      ),
-    ).resolves.toBeDefined();
-    const verifiedReceipt = await readInstallationArtifactsReceipt(output);
-    expect(verifiedReceipt).toMatchObject({
-      installationId,
-      platform: "darwin-arm64",
-      releaseVersion: "0.1.1",
-    });
-    await writeFile(verifiedReceipt.model.path, "changed", { mode: 0o600 });
-    await expect(readInstallationArtifactsReceipt(output)).rejects.toThrow(
-      "Prepared installation artifact",
-    );
-    expect(JSON.stringify(localManifest)).not.toContain("signature");
-    expect(JSON.stringify(localManifest)).not.toContain(installationCredential);
-    expect(log.mock.calls.flat().join(" ")).not.toContain(
-      installationCredential,
-    );
-  });
+      ).resolves.toBeDefined();
+      const verifiedReceipt = await readInstallationArtifactsReceipt(output);
+      expect(verifiedReceipt).toMatchObject({
+        installationId,
+        platform: "darwin-arm64",
+        releaseVersion: "0.1.1",
+      });
+      await writeFile(verifiedReceipt.model.path, "changed", { mode: 0o600 });
+      await expect(readInstallationArtifactsReceipt(output)).rejects.toThrow(
+        "Prepared installation artifact",
+      );
+      expect(JSON.stringify(localManifest)).not.toContain("signature");
+      expect(JSON.stringify(localManifest)).not.toContain(
+        installationCredential,
+      );
+      expect(log.mock.calls.flat().join(" ")).not.toContain(
+        installationCredential,
+      );
+    },
+  );
 
   it("rejects prebuilt reports outside explicit loopback testing", async () => {
     const root = await mkdtemp(join(tmpdir(), "musicmute-enrollment-"));

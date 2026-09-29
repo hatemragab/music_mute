@@ -1,3 +1,7 @@
+import {
+  MAX_AUDIO_DURATION_SECONDS,
+  MAX_PREPARED_AUDIO_BYTES,
+} from '../jobs/media-limits.js';
 import { elapsedMs } from '../jobs/job-stage-timing.js';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -67,12 +71,12 @@ export class ImportsService {
           : 'UPLOAD_GRANT_LIMIT_REACHED',
       );
     const maxDuration = Math.min(
-      1200,
+      MAX_AUDIO_DURATION_SECONDS,
       usage.effectiveLimits.maxDurationSeconds,
     );
     return {
       maxBytes: Math.min(
-        50_000_000,
+        MAX_PREPARED_AUDIO_BYTES,
         usage.effectiveLimits.maxPreparedAudioBytes,
         usage.uploads.monthlyRemainingBytes,
       ),

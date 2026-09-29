@@ -119,3 +119,20 @@ gives the existing connection a heartbeat grace window before recovery.
 See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
 and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
 HTTP remains responsible for authentication, commands and file transfers.
+
+## Account usage reset
+
+The user detail page's **Reset usage** action calls
+`POST /admin/users/:id/account-usage-resets`. It zeroes current UTC-month processing
+used/released seconds, upload grants/confirmed bytes, download grants/estimated
+bytes, and current UTC-day upload grants. Quota limits, overrides, actual stored
+file usage, files, historical periods and service-wide bandwidth remain unchanged.
+Active jobs, imports or reservations must finish or be cancelled first.
+The operation requires `users.processing.manage`, fresh authentication, a reason,
+a UUID operation ID, and the displayed usage revision/month/day. Stale confirmations
+return 409; refresh and reopen the dialog. Successful operation replays cannot erase
+new usage. Audit records retain before/after values; deployment alone resets no user.
+
+API guideline preflight: [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/),
+read 2026-09-29: rules 101, 104, 106, 118, 149, 151 and 176 (OpenAPI,
+authorization, compatibility, snake_case, HTTP semantics and problem responses).

@@ -36,12 +36,19 @@ export class ProcessingPolicyController {
   @Header('Cache-Control', 'no-store')
   current(@Query() query: Record<string, unknown>) {
     if (
-      Object.keys(query).some((key) => key !== 'schemaVersion') ||
+      Object.keys(query).some(
+        (key) => !['schemaVersion', 'mediaLimitsVersion'].includes(key),
+      ) ||
       (query.schemaVersion !== undefined &&
-        typeof query.schemaVersion !== 'string')
+        typeof query.schemaVersion !== 'string') ||
+      (query.mediaLimitsVersion !== undefined &&
+        typeof query.mediaLimitsVersion !== 'string')
     ) {
       throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
     }
-    return this.policies.publicPolicy(query.schemaVersion);
+    return this.policies.publicPolicy(
+      query.schemaVersion,
+      query.mediaLimitsVersion,
+    );
   }
 }

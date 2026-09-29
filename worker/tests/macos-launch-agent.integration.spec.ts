@@ -30,7 +30,7 @@ afterEach(async () => {
   if (uid !== undefined && uid > 0) {
     const controller = new MacLaunchAgentController(uid);
     if (ownsLoadedService && (await controller.status()).loaded)
-      await controller.bootout().catch(() => undefined);
+      await controller.bootout();
   }
   ownsLoadedService = false;
   await Promise.all(
@@ -49,13 +49,17 @@ describe.runIf(enabled)("real macOS LaunchAgent", () => {
     await createMacUserDirectories(layout);
     const releaseRoot = join(layout.releasesRoot, "launchd-test");
     await mkdir(releaseRoot, { recursive: true, mode: 0o700 });
-    await mkdir(layout.engineRoot, { recursive: true, mode: 0o700 });
-    await mkdir(dirname(layout.pythonPath), {
+    await mkdir(join(releaseRoot, "app", "engine"), {
+      recursive: true,
+      mode: 0o700,
+    });
+    const pythonPath = join(releaseRoot, "runtime", "python", "bin", "python3");
+    await mkdir(dirname(pythonPath), {
       recursive: true,
       mode: 0o700,
     });
     await writeFile(
-      layout.pythonPath,
+      pythonPath,
       '#!/bin/sh\nfor last do :; done\nprintf \'{"status":"ok"}\\n\' > "$last"\n',
       { mode: 0o700 },
     );
@@ -76,12 +80,19 @@ describe.runIf(enabled)("real macOS LaunchAgent", () => {
     await controller.bootstrap(layout.plistPath);
     ownsLoadedService = true;
     for (let attempt = 0; attempt < 100; attempt += 1) {
+      let report: string | undefined;
       try {
-        expect(await readFile(reportPath, "utf8")).toContain('"status":"ok"');
-        return;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        report = await readFile(reportPath, "utf8");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
+      if (report !== undefined) {
+        expect(report).toContain('"status":"ok"');
+        await controller.bootout();
+        expect((await controller.status()).loaded).toBe(false);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
     throw new Error("LaunchAgent did not write its one-shot report");
   });
@@ -103,12 +114,12 @@ describe.runIf(enabled)("real macOS LaunchAgent", () => {
     await mkdir(dirname(nodePath), { recursive: true, mode: 0o700 });
     await mkdir(dirname(cliPath), { recursive: true, mode: 0o700 });
     const pidLog = join(layout.stateRoot, "launchd-test-pids.txt");
+    await symlink(process.execPath, nodePath);
     await writeFile(
-      nodePath,
-      `#!/bin/sh\nprintf '%s\\n' "$$" >> ${shellQuote(pidLog)}\nexec /bin/sleep 30\n`,
-      { mode: 0o700 },
+      cliPath,
+      `const fs = require('node:fs');\nfs.appendFileSync(${JSON.stringify(pidLog)}, process.pid + '\\n');\nsetInterval(() => {}, 1000);\nprocess.on('SIGTERM', () => setTimeout(() => process.exit(0), 400));\n`,
+      { mode: 0o600 },
     );
-    await writeFile(cliPath, "test entry\n", { mode: 0o600 });
     await writeFile(layout.configPath, "{}\n", { mode: 0o600 });
     await symlink("releases/launchd-service", layout.currentLink);
     await writeLaunchAgentPlist(layout);
@@ -127,6 +138,9 @@ describe.runIf(enabled)("real macOS LaunchAgent", () => {
       .map(Number);
     expect(recorded).toContain(first);
     expect(recorded).toContain(second);
+    await controller.bootout();
+    expect((await controller.status()).loaded).toBe(false);
+    expect(() => process.kill(second, 0)).toThrow();
   }, 20_000);
 });
 
@@ -159,8 +173,4 @@ async function waitForRecordedPid(path: string, pid: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error("Test worker did not record its launchd PID");
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }

@@ -33,6 +33,7 @@
     <string name="creative_library_home">الانتقال للرئيسية</string>
     <string name="creative_library_refresh">تحديث</string>
     <string name="creative_library_play">تشغيل</string>
+    <string name="creative_library_play_now">تشغيل الآن</string>
     <string name="creative_library_pause">إيقاف مؤقت</string>
     <string name="creative_library_next">المقطع التالي</string>
     <string name="creative_library_previous">المقطع السابق</string>
@@ -42,6 +43,7 @@
     <string name="creative_library_download">الاحتفاظ دون اتصال</string>
     <string name="creative_library_restore">استعادة إلى المكتبة</string>
     <string name="creative_library_hide">إزالة من المكتبة</string>
+    <string name="creative_library_hide_title">إزالة من المكتبة؟</string>
     <string name="creative_library_hide_body">يُخفى العنصر من المكتبة فقط. يبقى الملف المنزّل وصوت حسابك. يمكنك العثور عليه ضمن المخفية.</string>
     <string name="creative_library_more">إجراءات الصوت</string>
     <string name="creative_library_now_playing">قيد التشغيل</string>

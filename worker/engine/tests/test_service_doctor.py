@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -10,6 +11,7 @@ from musicmute_engine.service_doctor import (
     accepted_runtime,
     executable_version,
     validate_media_runtime,
+    _media_command,
 )
 
 
@@ -43,11 +45,14 @@ class ServiceDoctorTests(unittest.TestCase):
                 accepted_runtime("directml")
 
     def test_executable_version_is_bounded_and_sanitized(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            executable = Path(directory) / "ffmpeg"
-            executable.write_text("#!/bin/sh\nprintf 'ffmpeg version test\\n'\n")
-            executable.chmod(0o755)
+        executable = Path(sys.executable).resolve()
+        output = _media_command(executable, ("-c", "print('ffmpeg version test')"), 1024)
+        with mock.patch("musicmute_engine.service_doctor._media_command", return_value=output) as command:
             self.assertEqual(executable_version(executable), "ffmpeg version test")
+            command.assert_called_once()
+        with mock.patch("musicmute_engine.service_doctor._media_command", return_value=b"x" * 513):
+            with self.assertRaisesRegex(ServiceDoctorError, "version is invalid"):
+                executable_version(executable)
 
     def test_symlinked_executable_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

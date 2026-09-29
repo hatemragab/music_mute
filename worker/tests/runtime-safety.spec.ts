@@ -14,85 +14,91 @@ afterEach(async () => {
 });
 
 describe("runtime local safety", () => {
-  it("loads a strict config while keeping the machine credential in its own file", async () => {
-    const root = await mkdtemp(join(tmpdir(), "musicmute-config-"));
-    roots.push(root);
-    const credentialFile = join(root, "machine.credential");
-    const configFile = join(root, "runtime.json");
-    const localLifecyclePath = join(root, "state", "lifecycle.json");
-    await writeFile(credentialFile, `${"x".repeat(43)}\n`, { mode: 0o600 });
-    await writeFile(
-      configFile,
-      JSON.stringify({
-        schemaVersion: 1,
-        backendBaseUrl: "https://api.example.invalid",
-        machineId: "cb56441d-f2df-4b44-a320-6f37dfa81f7f",
-        credentialFile,
-        localLifecyclePath,
-        workRoot: join(root, "work"),
-        modelCacheRoot: join(root, "models"),
-        engineRoot: join(root, "engine"),
-        pythonPath: join(root, "python"),
-        ffmpegPath: join(root, "ffmpeg"),
-        ffprobePath: join(root, "ffprobe"),
-        slots: [
-          {
-            workerId: "a69d3899-2214-4427-98cf-b9a4449aeae1",
-            gpuId: "gpu-0",
-            slotIndex: 0,
-            recipeIds: ["kim-vocals-v2"],
-            provider: "mps",
-          },
-        ],
-      }),
-      { mode: 0o600 },
-    );
+  it.skipIf(process.platform !== "darwin")(
+    "loads a strict config while keeping the machine credential in its own file",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "musicmute-config-"));
+      roots.push(root);
+      const credentialFile = join(root, "machine.credential");
+      const configFile = join(root, "runtime.json");
+      const localLifecyclePath = join(root, "state", "lifecycle.json");
+      await writeFile(credentialFile, `${"x".repeat(43)}\n`, { mode: 0o600 });
+      await writeFile(
+        configFile,
+        JSON.stringify({
+          schemaVersion: 1,
+          backendBaseUrl: "https://api.example.invalid",
+          machineId: "cb56441d-f2df-4b44-a320-6f37dfa81f7f",
+          credentialFile,
+          localLifecyclePath,
+          workRoot: join(root, "work"),
+          modelCacheRoot: join(root, "models"),
+          engineRoot: join(root, "engine"),
+          pythonPath: join(root, "python"),
+          ffmpegPath: join(root, "ffmpeg"),
+          ffprobePath: join(root, "ffprobe"),
+          slots: [
+            {
+              workerId: "a69d3899-2214-4427-98cf-b9a4449aeae1",
+              gpuId: "gpu-0",
+              slotIndex: 0,
+              recipeIds: ["kim-vocals-v2"],
+              provider: "mps",
+            },
+          ],
+        }),
+        { mode: 0o600 },
+      );
 
-    const config = await loadRuntimeConfig(configFile, {
-      platform: "darwin",
-      arch: "arm64",
-    });
-    expect(config.credential).toBe("x".repeat(43));
-    expect(config.localLifecyclePath).toBe(localLifecyclePath);
-    expect(config.slots[0]).toMatchObject({ provider: "mps", slotIndex: 0 });
-  });
+      const config = await loadRuntimeConfig(configFile, {
+        platform: "darwin",
+        arch: "arm64",
+      });
+      expect(config.credential).toBe("x".repeat(43));
+      expect(config.localLifecyclePath).toBe(localLifecyclePath);
+      expect(config.slots[0]).toMatchObject({ provider: "mps", slotIndex: 0 });
+    },
+  );
 
-  it("rejects removed CoreML macOS configurations", async () => {
-    const root = await mkdtemp(join(tmpdir(), "musicmute-legacy-config-"));
-    roots.push(root);
-    const credentialFile = join(root, "machine.credential");
-    const configFile = join(root, "runtime.json");
-    await writeFile(credentialFile, `${"x".repeat(43)}\n`, { mode: 0o600 });
-    await writeFile(
-      configFile,
-      JSON.stringify({
-        schemaVersion: 1,
-        backendBaseUrl: "https://api.example.invalid",
-        machineId: "cb56441d-f2df-4b44-a320-6f37dfa81f7f",
-        credentialFile,
-        workRoot: join(root, "work"),
-        modelCacheRoot: join(root, "models"),
-        engineRoot: join(root, "engine"),
-        pythonPath: join(root, "python"),
-        ffmpegPath: join(root, "ffmpeg"),
-        ffprobePath: join(root, "ffprobe"),
-        slots: [
-          {
-            workerId: "a69d3899-2214-4427-98cf-b9a4449aeae1",
-            gpuId: "gpu-0",
-            slotIndex: 0,
-            recipeIds: ["kim-vocals-v2"],
-            provider: "coreml",
-          },
-        ],
-      }),
-      { mode: 0o600 },
-    );
+  it.skipIf(process.platform !== "darwin")(
+    "rejects removed CoreML macOS configurations",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "musicmute-legacy-config-"));
+      roots.push(root);
+      const credentialFile = join(root, "machine.credential");
+      const configFile = join(root, "runtime.json");
+      await writeFile(credentialFile, `${"x".repeat(43)}\n`, { mode: 0o600 });
+      await writeFile(
+        configFile,
+        JSON.stringify({
+          schemaVersion: 1,
+          backendBaseUrl: "https://api.example.invalid",
+          machineId: "cb56441d-f2df-4b44-a320-6f37dfa81f7f",
+          credentialFile,
+          workRoot: join(root, "work"),
+          modelCacheRoot: join(root, "models"),
+          engineRoot: join(root, "engine"),
+          pythonPath: join(root, "python"),
+          ffmpegPath: join(root, "ffmpeg"),
+          ffprobePath: join(root, "ffprobe"),
+          slots: [
+            {
+              workerId: "a69d3899-2214-4427-98cf-b9a4449aeae1",
+              gpuId: "gpu-0",
+              slotIndex: 0,
+              recipeIds: ["kim-vocals-v2"],
+              provider: "coreml",
+            },
+          ],
+        }),
+        { mode: 0o600 },
+      );
 
-    await expect(
-      loadRuntimeConfig(configFile, { platform: "darwin", arch: "arm64" }),
-    ).rejects.toThrow("provider is invalid");
-  });
+      await expect(
+        loadRuntimeConfig(configFile, { platform: "darwin", arch: "arm64" }),
+      ).rejects.toThrow("provider is invalid");
+    },
+  );
 
   it("removes only stale UUID attempt directories on startup", async () => {
     const root = await mkdtemp(join(tmpdir(), "musicmute-workspace-"));

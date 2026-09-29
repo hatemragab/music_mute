@@ -122,3 +122,12 @@ export class CompleteWorkerCommandDto extends WorkerConfigQueryDto {
   @Type(() => WorkerCommandMetricDto)
   metrics!: WorkerCommandMetricDto[];
 }
+
+/** Operator approval after reviewing the installed two-worker qualification. */
+export class ApproveWorkerCapacityDto {
+  @IsUUID('4') operationId!: string;
+  @IsInt() @Min(0) @Max(Number.MAX_SAFE_INTEGER - 1) expectedRevision!: number;
+  @Transform(trim) @IsString() @Length(1, 128) gpuId!: string;
+  @IsIn([true]) qualificationConfirmed!: true;
+  @Transform(trim) @IsString() @Length(1, 500) reason!: string;
+}

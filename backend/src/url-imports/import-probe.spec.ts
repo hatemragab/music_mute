@@ -11,6 +11,17 @@ describe('measured audio validation', () => {
       extension: 'webm',
       contentType: 'audio/webm',
     }));
+  it('accepts 30 minutes but respects lower account and absolute ceilings', () => {
+    const long = { ...probe, format: { ...probe.format, duration: '1800' } };
+    expect(inspectProbe(long, 1800).durationSeconds).toBe(1800);
+    expect(() => inspectProbe(long, 1200)).toThrow();
+    expect(() =>
+      inspectProbe(
+        { ...long, format: { ...long.format, duration: '1800.001' } },
+        3600,
+      ),
+    ).toThrow();
+  });
   it('rejects over-limit duration', () =>
     expect(() => inspectProbe(probe, 12)).toThrow('duration'));
   it.each([

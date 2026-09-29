@@ -3,7 +3,7 @@ import {
   readOperationalEvents,
   type OperationalEvent,
 } from "./operational-logs.js";
-import type { MacUserLayout } from "./user-paths.js";
+import type { OperatorLayout } from "./operator-layout.js";
 
 const MAX_EVENTS = 10_000;
 const REPORTED_STAGES = [
@@ -111,7 +111,7 @@ export interface PerformanceQuery {
 }
 
 export async function queryPerformanceReport(
-  layout: Pick<MacUserLayout, "workRoot" | "runtimeStatusPath">,
+  layout: Pick<OperatorLayout, "workRoot" | "runtimeStatusPath">,
   query: PerformanceQuery = {},
 ): Promise<PerformanceReport> {
   const last = query.last ?? 20;

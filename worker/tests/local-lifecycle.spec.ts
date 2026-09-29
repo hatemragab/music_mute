@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { withNativeLock } from "../src/runtime/native-lock.js";
 import {
   initializeLocalLifecycle,
   loadLocalLifecycle,
@@ -25,23 +26,43 @@ afterEach(async () => {
 });
 
 describe("local lifecycle state", () => {
-  it("preserves an existing lock and lifecycle when another writer owns it", async () => {
+  it.skipIf(process.platform === "win32")(
+    "preserves an existing lock and lifecycle when another writer owns it",
+    async () => {
+      const root = await temporaryRoot();
+      const path = join(root, "lifecycle.json");
+      await initializeLocalLifecycle(path);
+      const owner = JSON.stringify({ schemaVersion: 1, pid: process.pid });
+      await writeFile(`${path}.lock`, owner, { mode: 0o600 });
+      await expect(setLocalLifecycleIntent(path, "paused")).rejects.toThrow(
+        "already in progress",
+      );
+      expect(await readFile(`${path}.lock`, "utf8")).toBe(owner);
+      expect(await loadLocalLifecycle(path)).toMatchObject({
+        intent: "active",
+        revision: 1,
+      });
+      expect(
+        (await readdir(root)).filter((name) => !name.endsWith(".guard")).sort(),
+      ).toEqual(["lifecycle.json", "lifecycle.json.lock"]);
+    },
+  );
+
+  it("preserves lifecycle when another writer owns the native lock", async () => {
     const root = await temporaryRoot();
     const path = join(root, "lifecycle.json");
     await initializeLocalLifecycle(path);
-    const owner = JSON.stringify({ schemaVersion: 1, pid: process.pid });
-    await writeFile(`${path}.lock`, owner, { mode: 0o600 });
-    await expect(setLocalLifecycleIntent(path, "paused")).rejects.toThrow(
-      "already in progress",
-    );
-    expect(await readFile(`${path}.lock`, "utf8")).toBe(owner);
-    expect(await loadLocalLifecycle(path)).toMatchObject({
-      intent: "active",
-      revision: 1,
+    await withNativeLock(`${path}.lock.guard`, async () => {
+      await expect(setLocalLifecycleIntent(path, "paused")).rejects.toThrow();
+      expect(await loadLocalLifecycle(path)).toMatchObject({
+        intent: "active",
+        revision: 1,
+      });
     });
-    expect(
-      (await readdir(root)).filter((name) => !name.endsWith(".guard")).sort(),
-    ).toEqual(["lifecycle.json", "lifecycle.json.lock"]);
+    expect(await setLocalLifecycleIntent(path, "paused")).toMatchObject({
+      intent: "paused",
+      revision: 2,
+    });
   });
 
   it("does not lose revisions under concurrent lifecycle writers", async () => {
@@ -118,22 +139,28 @@ describe("local lifecycle state", () => {
     });
   });
 
-  it("rejects unsafe permissions and unknown fields", async () => {
-    const root = await temporaryRoot();
-    const unsafeMode = join(root, "unsafe-mode.json");
-    await writeFile(
-      unsafeMode,
-      JSON.stringify({
-        schemaVersion: 1,
-        intent: "active",
-        revision: 1,
-        updatedAt: new Date().toISOString(),
-      }),
-      { mode: 0o644 },
-    );
-    await chmod(unsafeMode, 0o644);
-    await expect(loadLocalLifecycle(unsafeMode)).rejects.toThrow("unsafe");
+  it.skipIf(process.platform === "win32")(
+    "rejects unsafe POSIX permissions",
+    async () => {
+      const root = await temporaryRoot();
+      const unsafeMode = join(root, "unsafe-mode.json");
+      await writeFile(
+        unsafeMode,
+        JSON.stringify({
+          schemaVersion: 1,
+          intent: "active",
+          revision: 1,
+          updatedAt: new Date().toISOString(),
+        }),
+        { mode: 0o644 },
+      );
+      await chmod(unsafeMode, 0o644);
+      await expect(loadLocalLifecycle(unsafeMode)).rejects.toThrow("unsafe");
+    },
+  );
 
+  it("rejects unknown fields on every platform", async () => {
+    const root = await temporaryRoot();
     const unknownField = join(root, "unknown.json");
     await writeFile(
       unknownField,

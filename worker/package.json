@@ -1,6 +1,6 @@
 {
   "name": "@music-mute/worker",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0",
   "private": false,
   "description": "MusicMute machine supervisor and native processing child",
   "license": "Apache-2.0",
@@ -34,6 +34,7 @@
     "lint": "oxlint --deny-warnings src/ tests/ protocol/ scripts/",
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build.mjs",
+    "package:windows": "node dist/src/cli/main.js windows package",
     "test": "vitest run",
     "test:engine": "node scripts/run-engine-tests.mjs",
     "verify": "pnpm run protocol:check && pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm test && pnpm run test:packaging && pnpm run test:engine && pnpm run build",

@@ -30,74 +30,80 @@ afterEach(async () => {
   );
 });
 
-describe("macOS user release activation", () => {
-  it("installs, reuses, upgrades, and rolls back immutable releases", async () => {
-    const root = await temporaryRoot();
-    const home = join(root, "home");
-    await mkdir(home, { mode: 0o700 });
-    const layout = createMacUserLayout(home);
-    const first = join(root, "release-1");
-    const second = join(root, "release-2");
-    await releaseFixture(first, "0.1.0");
-    await releaseFixture(second, "0.2.0");
+// These fixtures exercise Darwin paths, UID ownership and POSIX permissions.
+describe.skipIf(process.platform !== "darwin")(
+  "macOS user release activation",
+  () => {
+    it("installs, reuses, upgrades, and rolls back immutable releases", async () => {
+      const root = await temporaryRoot();
+      const home = join(root, "home");
+      await mkdir(home, { mode: 0o700 });
+      const layout = createMacUserLayout(home);
+      const first = join(root, "release-1");
+      const second = join(root, "release-2");
+      await releaseFixture(first, "0.1.0");
+      await releaseFixture(second, "0.2.0");
 
-    const installed = await installMacUserRelease(layout, first);
-    expect(installed).toMatchObject({ previousRelease: null, reused: false });
-    expect(await readlink(layout.currentLink)).toBe("releases/0.1.0");
+      const installed = await installMacUserRelease(layout, first);
+      expect(installed).toMatchObject({ previousRelease: null, reused: false });
+      expect(await readlink(layout.currentLink)).toBe("releases/0.1.0");
 
-    await expect(installMacUserRelease(layout, first)).resolves.toMatchObject({
-      previousRelease: "releases/0.1.0",
-      reused: true,
+      await expect(installMacUserRelease(layout, first)).resolves.toMatchObject(
+        {
+          previousRelease: "releases/0.1.0",
+          reused: true,
+        },
+      );
+      const upgraded = await installMacUserRelease(layout, second);
+      expect(await readlink(layout.currentLink)).toBe("releases/0.2.0");
+      await rollbackMacUserRelease(layout, upgraded.previousRelease);
+      expect(await readlink(layout.currentLink)).toBe("releases/0.1.0");
+      expect((await readdir(layout.releasesRoot)).sort()).toEqual([
+        "0.1.0",
+        "0.2.0",
+      ]);
+      expect(await readdir(join(layout.releasesRoot, "0.1.0"))).toContain(
+        "release-manifest.json",
+      );
+      await expect(verifyActiveMacUserRelease(layout)).resolves.toBeUndefined();
+      await writeFile(
+        join(layout.releasesRoot, "0.1.0", "app", "engine", "module.py"),
+        "VALUE = 'tampered'\n",
+      );
+      await expect(verifyActiveMacUserRelease(layout)).rejects.toThrow(
+        "does not match release contents",
+      );
     });
-    const upgraded = await installMacUserRelease(layout, second);
-    expect(await readlink(layout.currentLink)).toBe("releases/0.2.0");
-    await rollbackMacUserRelease(layout, upgraded.previousRelease);
-    expect(await readlink(layout.currentLink)).toBe("releases/0.1.0");
-    expect((await readdir(layout.releasesRoot)).sort()).toEqual([
-      "0.1.0",
-      "0.2.0",
-    ]);
-    expect(await readdir(join(layout.releasesRoot, "0.1.0"))).toContain(
-      "release-manifest.json",
-    );
-    await expect(verifyActiveMacUserRelease(layout)).resolves.toBeUndefined();
-    await writeFile(
-      join(layout.releasesRoot, "0.1.0", "app", "engine", "module.py"),
-      "VALUE = 'tampered'\n",
-    );
-    await expect(verifyActiveMacUserRelease(layout)).rejects.toThrow(
-      "does not match release contents",
-    );
-  });
 
-  it("installs and reuses only an exact model artifact", async () => {
-    const root = await temporaryRoot();
-    const home = join(root, "home");
-    await mkdir(home, { mode: 0o700 });
-    const layout = createMacUserLayout(home);
-    const sourcePath = join(root, "Kim_Vocal_2.onnx");
-    const bytes = Buffer.from("approved model bytes");
-    await writeFile(sourcePath, bytes, { mode: 0o600 });
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const options = {
-      layout,
-      sourcePath,
-      filename: "Kim_Vocal_2.onnx",
-      bytes: bytes.length,
-      sha256,
-    };
+    it("installs and reuses only an exact model artifact", async () => {
+      const root = await temporaryRoot();
+      const home = join(root, "home");
+      await mkdir(home, { mode: 0o700 });
+      const layout = createMacUserLayout(home);
+      const sourcePath = join(root, "Kim_Vocal_2.onnx");
+      const bytes = Buffer.from("approved model bytes");
+      await writeFile(sourcePath, bytes, { mode: 0o600 });
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      const options = {
+        layout,
+        sourcePath,
+        filename: "Kim_Vocal_2.onnx",
+        bytes: bytes.length,
+        sha256,
+      };
 
-    await expect(installMacUserModel(options)).resolves.toMatchObject({
-      reused: false,
+      await expect(installMacUserModel(options)).resolves.toMatchObject({
+        reused: false,
+      });
+      await expect(installMacUserModel(options)).resolves.toMatchObject({
+        reused: true,
+      });
+      expect(
+        await readFile(join(layout.modelRoot, sha256, options.filename)),
+      ).toEqual(bytes);
     });
-    await expect(installMacUserModel(options)).resolves.toMatchObject({
-      reused: true,
-    });
-    expect(
-      await readFile(join(layout.modelRoot, sha256, options.filename)),
-    ).toEqual(bytes);
-  });
-});
+  },
+);
 
 async function releaseFixture(root: string, version: string): Promise<void> {
   for (const path of [

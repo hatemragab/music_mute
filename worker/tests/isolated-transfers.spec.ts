@@ -10,7 +10,14 @@ import { expect, it } from "vitest";
 import { IsolatedWorkerTransferClient } from "../src/runtime/isolated-transfers.js";
 import { WorkspaceManager } from "../src/runtime/workspace.js";
 
-for (const mode of ["success", "timeout", "cancel"] as const) {
+for (const mode of [
+  "success",
+  "timeout",
+  "cancel",
+  "corrupt",
+  "truncated",
+  "oversized",
+] as const) {
   it(`isolated transfer ${mode} releases ownership before cleanup`, async () => {
     const root = await mkdtemp(join(tmpdir(), "mw-isolated-"));
     const manager = new WorkspaceManager(root);
@@ -22,9 +29,20 @@ for (const mode of ["success", "timeout", "cancel"] as const) {
     const server = createServer((request, response) => {
       request.resume();
       if (mode === "cancel") abort.abort(new Error("fixture cancelled"));
-      if (mode !== "success") return;
-      if (request.method === "GET") response.end(bytes);
-      else
+      if (mode === "timeout" || mode === "cancel") return;
+      if (request.method === "GET") {
+        if (mode === "truncated") {
+          response.write(bytes.subarray(0, bytes.length - 1));
+          response.end();
+        } else if (mode === "oversized") {
+          response.write(bytes);
+          response.end("extra");
+        } else {
+          const downloaded = Buffer.from(bytes);
+          if (mode === "corrupt") downloaded[0]! ^= 1;
+          response.end(downloaded);
+        }
+      } else
         request.on("end", () => {
           response.writeHead(200, { "x-amz-version-id": "fixture-version" });
           response.end();
@@ -78,6 +96,22 @@ for (const mode of ["success", "timeout", "cancel"] as const) {
             expected,
           ),
         ).resolves.toBe("fixture-version");
+      } else if (
+        mode === "corrupt" ||
+        mode === "truncated" ||
+        mode === "oversized"
+      ) {
+        await expect(run).rejects.toMatchObject({
+          code: "DOWNLOAD_FAILED",
+          retryable: false,
+          diagnostic:
+            mode === "corrupt"
+              ? "download-checksum-mismatch"
+              : "download-size-mismatch",
+        });
+        await expect(readFile(workspace.input)).rejects.toMatchObject({
+          code: "ENOENT",
+        });
       } else await expect(run).rejects.toThrow();
       if (mode === "success") {
         expect(await readdir(workspace.root)).toEqual([

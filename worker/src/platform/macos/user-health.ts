@@ -8,34 +8,18 @@ import type { LaunchAgentStatus } from "./launch-agent.js";
 import type { MacUserLayout } from "./user-paths.js";
 import { verifyActiveMacUserRelease } from "./user-release.js";
 
+import {
+  HealthCheckFailure,
+  checkOperation,
+  notRun,
+  type UserHealth,
+  type UserHealthCheck,
+} from "../shared/user-health.js";
 const execFile = promisify(nodeExecFile);
 const DOCTOR_OUTPUT_LIMIT = 64 * 1024;
 
-export interface MacUserHealthCheck {
-  name: string;
-  ok: boolean;
-  path: string;
-  status?: "passed" | "failed" | "warning" | "unsupported" | "not-run";
-  code?: string;
-  evidence?: string;
-  nextAction?: string;
-}
-
-export interface MacUserHealth {
-  schemaVersion: 1;
-  healthy: boolean;
-  checks: MacUserHealthCheck[];
-  depth?: "quick" | "full";
-}
-
-class HealthCheckFailure extends Error {
-  constructor(
-    readonly code: string,
-    readonly evidence: string,
-  ) {
-    super(evidence);
-  }
-}
+export type MacUserHealth = UserHealth;
+export type MacUserHealthCheck = UserHealthCheck;
 
 interface LaunchAgentStatusReader {
   status(): Promise<LaunchAgentStatus>;
@@ -142,22 +126,6 @@ export async function inspectMacUserHealth(
   };
 }
 
-function notRun(
-  name: string,
-  path: string,
-  nextAction: string,
-): MacUserHealthCheck {
-  return {
-    name,
-    path,
-    ok: false,
-    status: "not-run",
-    code: "NOT_RUN",
-    evidence: "Not checked in quick mode",
-    nextAction,
-  };
-}
-
 async function checkFile(
   name: string,
   path: string,
@@ -195,44 +163,6 @@ async function checkFile(
       code: "FILE_MISSING",
       evidence: "Required file is unavailable",
       nextAction: `Inspect the installed ${name} file`,
-    };
-  }
-}
-
-async function checkOperation(
-  name: string,
-  path: string,
-  operation: () => Promise<void>,
-): Promise<MacUserHealthCheck> {
-  try {
-    await operation();
-    return {
-      name,
-      ok: true,
-      path,
-      status: "passed",
-      code: "OK",
-      evidence: "Check completed",
-      nextAction: "None",
-    };
-  } catch (error) {
-    return {
-      name,
-      ok: false,
-      path,
-      status: "failed",
-      code:
-        error instanceof HealthCheckFailure
-          ? error.code
-          : `${name.toUpperCase().replaceAll("-", "_")}_FAILED`,
-      evidence:
-        error instanceof HealthCheckFailure
-          ? error.evidence
-          : "Check failed; run doctor --full and inspect recent errors",
-      nextAction:
-        name === "runtime-doctor"
-          ? "Check model cache and provider integrity with doctor --full"
-          : `Inspect ${name} and rerun doctor --full`,
     };
   }
 }

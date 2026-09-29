@@ -539,6 +539,11 @@ try {
   assert.equal(queued.status, 'queued');
 
   const machines = app.get(getModelToken('WorkerMachine'));
+  // Reproduce enrollment after the fleet policy has already been published.
+  // New machines retain schema defaults until their first configuration sync.
+  await app
+    .get(getModelToken('WorkerFleetPolicy'))
+    .updateOne({ _id: 'worker-fleet' }, { $set: { revision: 1 } });
   await machines.create({
     _id: machineId,
     credentialDigest: machineCredentialDigest,
@@ -592,6 +597,55 @@ try {
     revokedAt: null,
     revision: 0,
   });
+  // Exercise the real transactional approval and idempotent replay before runtime startup.
+  const { WorkerControlService } =
+    await import('../../dist/worker-fleet/control/worker-control.service.js');
+  const capacityActor = {
+    uid: 'capacity-owner',
+    verifiedEmail: 'capacity@example.invalid',
+    role: 'owner',
+    permissions: ['workers.manage'],
+    accessRevision: 0,
+    authTimeSec: Math.floor(Date.now() / 1000),
+  };
+  await app.get(getModelToken('AdminAccess')).create({
+    uid: capacityActor.uid,
+    verifiedEmail: capacityActor.verifiedEmail,
+    role: 'owner',
+    active: true,
+    revision: 0,
+  });
+  const capacityCommand = {
+    operationId: randomUUID(),
+    expectedRevision: 0,
+    gpuId,
+    qualificationConfirmed: true,
+    reason: 'Reviewed synthetic two-worker qualification',
+  };
+  const control = app.get(WorkerControlService);
+  const approved = await control.approveCapacity(
+    capacityActor,
+    machineId,
+    capacityCommand,
+  );
+  assert.equal(approved.maxSlots, 2);
+  assert.equal(approved.revision, 1);
+  assert.equal(
+    (await control.approveCapacity(capacityActor, machineId, capacityCommand))
+      .replayed,
+    true,
+  );
+  assert.equal(
+    (await machines.findById(machineId).lean()).approvedCapabilities[0]
+      .maxSlots,
+    2,
+  );
+  assert.equal(
+    await app
+      .get(getModelToken('AdminAuditEvent'))
+      .countDocuments({ operationId: capacityCommand.operationId }),
+    1,
+  );
 
   if (externalService) {
     console.log(
@@ -703,6 +757,10 @@ try {
         }
       }
       await runtime.waitForIdle();
+      const synchronizedMachine = await machines.findById(machineId).lean();
+      assert.equal(synchronizedMachine.policyRevision, 1);
+      assert.equal(synchronizedMachine.desiredRevision, 1);
+      assert.equal(synchronizedMachine.appliedRevision, 1);
       const flowDurationMs = performance.now() - flowStartedAt;
       const state = await api('GET', `/jobs/${created.id}`);
       if (state.status !== 'ready') {
@@ -942,6 +1000,22 @@ try {
         },
         { worker: credential, expected: 201 },
       );
+      const config = await api(
+        'GET',
+        `/worker/config?session_id=${sessionId}&incarnation=${incarnation}`,
+        undefined,
+        { worker: credential },
+      );
+      assert.equal(config.desiredRevision, 1);
+      assert.equal(config.policy.revision, 1);
+      assert.equal(config.appliedRevision, 0);
+      assert.equal(config.claimAllowed, false);
+      await api(
+        'POST',
+        '/worker/config/applications',
+        { requestId: randomUUID(), sessionId, incarnation, revision: 1 },
+        { worker: credential, expected: 201 },
+      );
       return { id, credential, gpuId, slotId, sessionId, incarnation };
     };
     const claimBody = (machine) => ({
@@ -951,7 +1025,7 @@ try {
       incarnation: machine.incarnation,
       gpuId: machine.gpuId,
       slotIndex: 0,
-      appliedPolicyRevision: 0,
+      appliedPolicyRevision: 1,
     });
     const ownership = (machine) => ({
       requestId: randomUUID(),

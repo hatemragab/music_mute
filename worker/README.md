@@ -21,6 +21,11 @@ Python child owns direct-input inference and result metadata. Audio
 bytes never travel through the child control pipe, and the child never receives
 backend or S3 credentials.
 
+The shared Kim loader verifies the full model SHA-256 and constructs the pinned
+MDX architecture with fixed inference parameters. It does not use upstream model
+catalog discovery or download metadata during processing. Model acquisition is
+the separate, verified owner-source installation step.
+
 ## Public-upload security boundary
 
 The macOS LaunchAgent and Python child run as the logged-in user. A separate
@@ -34,8 +39,8 @@ the tool. On POSIX, each processing child owns a process group so forced
 termination and request timeout also terminate decoder descendants. A separate guardian observes supervisor
 lifetime through an IPC channel, including when engine input is backpressured.
 The Windows runtime uses a guardian-owned kill-on-close Job Object plus an
-independent supervisor process-handle watcher. Native Windows acceptance remains
-open; see the [implementation tracker](../docs/worker-rebuild/validation/RELIABILITY-IMPLEMENTATION-TRACKER.md). These controls do not provide a hard
+independent supervisor process-handle watcher. Native Windows acceptance and its scope are recorded in the
+[current readiness report](../docs/worker-windows-macos/READINESS.md). These controls do not provide a hard
 CPU, GPU or resident-memory quota.
 
 Service startup has a persisted five-start failure budget with jittered backoff.
@@ -67,6 +72,26 @@ macOS CLI and lifecycle mutations use persistent advisory-lock guard files.
 The OS releases ownership when a command exits or is killed; guard files must not
 be deleted during operation. Complete dead-owner records can be recovered under
 that lock. Ambiguous legacy records require operator inspection.
+
+The macOS service controller waits for launchd to remove the registration after
+`bootout`, with a thirty-second deadline. Qualification, update and removal must
+finish that teardown before replacing the service or its files. Inspection
+errors fail the operation; a missing `launchctl` executable is not evidence that
+the worker stopped.
+
+Windows explicit stop also accounts for crash restarts already queued by the
+Service Control Manager. The native controller verifies the installed helper,
+journals the recovery policy, disables the service until the saved restart delay
+has elapsed, verifies Stopped/PID 0, then restores the policy. This also runs when
+SCM initially reports Stopped. An interrupted stop retains stopped recovery
+intent. Native test and installed-package evidence are recorded separately in
+[the Windows/macOS ledger](../docs/worker-windows-macos/IMPLEMENTATION.md).
+
+Runtime status publication retains the previous complete snapshot while a
+Windows reader holds a handle that prevents replacement. Transient rename
+failures retry for at most two seconds; persistent failures remain errors, and
+unpublished temporary files are removed. Native tests exercise actual Windows
+file sharing, including preservation of the old snapshot during the wait.
 
 If installation is interrupted after enrollment, rerun `mw install`. A private
 finalization journal resumes local setup without requesting another one-use code.
@@ -175,6 +200,72 @@ unqualified architectures remain disabled. D6 verifies this local boundary,
 but passing local tests does not certify service startup, live S3, logged-out
 GPU execution or production readiness; those remain D4/D5 platform gates.
 
+## Install the shared npm CLI
+
+Install Node.js `>=24.18.0 <25`, then install the same CLI on either supported
+platform:
+
+```sh
+npm install -g @music-mute/worker
+mw --version
+```
+
+The npm package contains the CLI. The authenticated installer separately obtains
+the platform runtime, verifies its Ed25519 signature and archive digest, downloads
+the model from its authorized owner, qualifies the GPU, and enrolls the machine.
+An administrator creates a one-use code in Workers → Enrollment. Installing the
+public CLI alone does not admit a machine to the fleet.
+
+| Platform            | Runtime                          | Installation and startup                                         |
+| ------------------- | -------------------------------- | ---------------------------------------------------------------- |
+| Apple Silicon macOS | PyTorch MPS                      | Current user, no sudo; LaunchAgent starts at login               |
+| Windows x64         | ONNX Runtime DirectML, adapter 0 | Elevated PowerShell; LocalService Windows Service starts at boot |
+
+Recorded qualified hardware is an Apple Silicon Mac with 24 GiB RAM and an HP
+Z440 with Windows 11 Pro, Xeon E5-1660 v3, 24 GiB RAM and Radeon RX 580 8 GiB.
+These are tested configurations, not proven minimum requirements. Other compatible
+GPUs must pass installation qualification. Intel Mac, Windows ARM64, Linux/Ubuntu,
+CUDA and MIGraphX are not supported by this release. Keep enough free disk for
+the private runtime, model, staged updates and job scratch; a minimum disk/RAM
+limit for arbitrary input lengths has not been established.
+
+### Windows first installation
+
+Run this in **PowerShell as Administrator**. The code is read without echo and
+kept in a directory accessible only to Administrators and SYSTEM. Use a fresh
+directory for each enrollment and reuse it when retrying an interrupted install.
+
+```powershell
+$container = Join-Path $env:ProgramData 'MusicMuteWorkerEnrollment'
+New-Item -ItemType Directory -Path $container -ErrorAction Stop | Out-Null
+icacls $container /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F'
+if ($LASTEXITCODE -ne 0) { throw 'Could not protect enrollment directory' }
+icacls $container /setowner '*S-1-5-32-544'
+if ($LASTEXITCODE -ne 0) { throw 'Could not set enrollment directory owner' }
+$stage = Join-Path $container 'installation'
+New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
+icacls $stage /setowner '*S-1-5-32-544'
+if ($LASTEXITCODE -ne 0) { throw 'Could not set staging directory owner' }
+$code = Read-Host 'One-use enrollment code' -AsSecureString
+$pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($code)
+try {
+  $text = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+  [IO.File]::WriteAllText((Join-Path $stage 'enrollment.credential'), $text)
+} finally {
+  [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+  $text = $null
+  $code.Dispose()
+}
+mw install --backend-url https://api.music-mute.com --enrollment-file "$stage\enrollment.credential" --output $stage --label "Studio Windows"
+mw start --wait-ready
+mw status
+```
+
+The enrollment directory contains private pairing state; do not share it or add
+it to source control. Keep the computer powered on and awake with network access.
+The service runs without an open terminal or Windows sign-in. Use `mw drain`
+before planned maintenance and `mw resume` when ready to accept work again.
+
 ## macOS per-user CLI and LaunchAgent
 
 The public MVP entry point is a current-user install with no `sudo`:
@@ -238,17 +329,27 @@ Available local commands are `status`, `start`, `stop`, `restart`, `pause`,
 by default; pass `--json` only when stable machine-readable output is needed by
 a script or monitoring tool. `benchmark` deliberately requires the worker to
 be already drained and stopped. `benchmark --workers 2` invalidates any previous
-capacity approval before qualification, then records the
-single-worker baseline, then runs two isolated MPS qualifications
-concurrently. It writes an owner-only, seven-day capacity receipt only when
-both accelerated runs preserve the model/release/fixture identity and improve
-throughput by at least 1.1x. Runtime configuration defaults to one worker per
-GPU, requires that fresh receipt to select two, and rejects more than two;
-backend-approved machine capability and policy remain additional hard gates.
-Version 2 receipts additionally verify the installed release inventory, executable
-paths, model and fixture bytes, recipe set, and host/OS signature. Older receipts
-require requalification. These checks do not replace sustained workload and output
-quality acceptance before enabling two slots.
+capacity approval before qualification. For each canonical recipe it measures a
+single-worker baseline followed by two independent processes, with cold and warmup
+runs excluded from throughput. A seven-day private approval contains every measured
+run and output comparison. Startup recomputes each recipe's 1.1x throughput and
+quality gates, verifies the installed release inventory, executable paths, model,
+fixture, recipe set and host/OS identity. Windows approval also binds the DXGI
+adapter hardware and driver version. Old summary-only approvals require a fresh
+benchmark; there is no conversion or compatibility bypass.
+
+After qualification, `mw capacity --workers 2` atomically configures two slots while
+the service is stopped. Repeating the command preserves their IDs. It does not
+start the service or change backend policy. `mw capacity --workers 1` restores
+one slot even if approval has expired. Both platforms still require the existing
+backend-approved machine capability and policy. Qualification on a short fixture
+does not establish sustained workload capacity.
+An administrator with `workers.manage` can approve the backend ceiling from the
+machine's **Approve two workers** capability action after reviewing the installed
+machine's passing qualification. Record the benchmark evidence in the required
+reason and complete fresh authentication. This approval does not start the local
+service: configure capacity while stopped, then resume and start with
+`--wait-ready`, and verify both slots in the live dashboard.
 `update --check` verifies signed metadata
 without minting a download grant or changing local state. `update` downloads a
 verified candidate, checks the private Node/FFmpeg versions, qualifies MPS,
@@ -422,6 +523,138 @@ mw package-macos \
 
 ## Windows private release and service
 
+`mw install [--json]` without enrollment flags verifies a preserved paired
+installation and reactivates its immutable release. It validates the exact
+runtime/state paths, private ACLs, release inventory and any two-worker capacity
+receipt before registration. A registered installation returns `already-installed`
+without starting a stopped service. Reactivation preserves credentials and
+lifecycle intent; registration/startup failures restore the previous local files
+through the native recovery journal. The installed release must contain the
+current manager and `config-check` command. The source implementation and native
+filesystem rollback tests are complete; acceptance through a newly packaged
+release remains tracked in the implementation ledger.
+
+`mw update --check [--json]` requests Windows metadata without a download grant.
+The shared macOS/Windows verifier checks Ed25519 signatures, target platform,
+archive content type, expiry and the protected sequence/quarantine state. Windows
+trust and update state reside under the administrator-controlled `service`
+directory. This check does not download or switch the installed runtime.
+
+`mw update [--force] [--json]` downloads the signed ZIP into a private transaction,
+checks the archive and release inventory, then rechecks the signature and original
+pairing/configuration under the native operation locks. It qualifies the new
+release as LocalService and preserves running/stopped state and lifecycle intent.
+Changed releases use one worker until a fresh two-worker benchmark authorizes
+the second slot. Graceful drain acknowledgement precedes the maintenance
+transaction. The transaction journals config, credentials, the original lifecycle
+intent, activation files and update sequence before activation; failed or
+interrupted activation restores the previous release and quarantines the failed
+candidate. The protected
+sequence advances only with a committed activation. Native acceptance and its
+fixture boundaries are recorded in the implementation ledger.
+
+Maintenance also journals Windows' actual service startup and recovery settings.
+It disables SCM restarts while qualifying a release, waits out any previously
+queued restart delay, then restores those settings. Replacing the WinSW XML
+alone does not update an existing SCM registration. The managed policy supports
+no-action/restart entries with delays up to one minute; other custom recovery
+actions are rejected before maintenance changes the service.
+
+The current Windows CLI routes `start`, `stop`, `restart`, `pause`, `drain`,
+`resume` and local `status` to the native Service Control Manager. Run operator
+commands from an elevated administrator shell. Repeated start/resume preserve
+an already-running worker. Graceful stop waits for the shared runtime to
+acknowledge drain and finish active attempts; `--force` explicitly allows
+interruption. Status rejects records from an earlier service process or a stale
+heartbeat. `status --watch` uses the shared interruptible observation loop and
+prints newline-delimited snapshots with `--json`. `start --wait-ready` waits up
+to six minutes for the current service's models, reports phase changes and
+preserves the running service if waiting times out. This local readiness check
+does not override pause/drain intent or establish backend claim eligibility.
+
+`logs`, `job`, `errors`, `explain` and `perf` use the same bounded, sanitized
+operator implementation as macOS. Windows checks the private installation ACLs
+before reading this history. Installer operations and mutating CLI operations
+share an exclusive kernel-owned named-pipe lock, including owner-death recovery.
+
+`unpair [--force] [--json]` drains and stops local processing, requests the
+existing authenticated backend unpair command, and verifies the returned
+machine identity. It preserves credentials on rejection or mismatch. Once
+confirmed, it records an administrator-controlled receipt before removing the
+credential and runtime configuration. A retry completes interrupted cleanup
+without another backend request; a receipt for a different pairing is rejected.
+`--force` permits interrupting active processing. Graceful backend conflicts
+are retried within a bounded monotonic deadline.
+
+`uninstall [--json]` drains/stops processing and removes the SCM registration,
+stable service files and active-release marker. Releases, models, credentials,
+configuration, diagnostics and history are preserved. `uninstall --purge`
+requires a valid backend-confirmed unpair receipt and absent credential/config
+files. Run purge through Node/CLI outside the managed runtime so Windows does
+not have to delete its executing binary. Pending maintenance must be recovered
+before either removal command; deleting credential files manually is not proof
+of unpairing.
+
+`doctor [--full] [--json]` checks Windows installation ACLs, configuration,
+lifecycle, pending recovery, and current service heartbeat. Full mode additionally
+verifies the active release inventory before executing its private Python
+integrity checker. It checks DirectML availability, the cached model and media
+tools without inference or starting the service. A stopped service is reported
+as `SERVICE_NOT_RUNNING` with exit 1, while offline integrity checks still run.
+Provider availability is separate from LocalService GPU qualification.
+
+`diagnostics [--output <new-archive.zip>] [--job <id>] [--since <duration>]`
+uses the same allowlisted contents and 8 MiB export bound as macOS. It writes a
+new ZIP under the protected service directory by default; an explicit local absolute
+path must have an existing parent and cannot target installation files. The ZIP
+is created with access limited to Administrators and SYSTEM before bytes are
+written. Existing outputs are never replaced. An interrupted export can leave
+an incomplete private output; choose a new filename when retrying. The command
+exports local evidence only and does not contact or upload to the backend.
+
+Windows parity work and its native acceptance evidence are tracked in
+[the implementation ledger](../docs/worker-windows-macos/IMPLEMENTATION.md).
+Windows `benchmark-file` runs as LocalService with a private copy of the input,
+one cold run, 0-2 warmup runs and 3-10 measured runs. It requires the operational
+service to be stopped and restores its previous stopped definition afterward.
+The report identifies the GPU, measured DirectML dispatch, stage timings and
+median processing time. Dedicated VRAM capacity is not an allocation measurement.
+Use `--release-version` for an installed, staged candidate without enrollment:
+
+```powershell
+mw benchmark-file --input C:\MusicMuteBuild\qualification.wav `
+  --release-version 0.1.0-win.20260929.14 `
+  --recipe kim-vocals-v2 --warmup-runs 1 --measured-runs 3 `
+  --output C:\MusicMuteBuild\benchmark.json --json
+```
+
+Output must be new and cannot alter installed code or service configuration.
+`mw benchmark --workers 2 --input <absolute-audio-path>` runs both canonical
+recipes, comparing a single baseline process with two independent processes.
+Every process completes its cold and warmup runs before a common measured-run
+start. At least three measured runs per process are required. Each recipe must
+improve throughput by at least 1.1x and pass decoded-output comparison (maximum
+absolute difference 0.01, RMS difference 0.0001, equal frame counts). The report
+includes individual process peak resident memory, which excludes GPU allocation
+and media subprocesses. A valid measurement can report `FAIL`; this does not
+activate a second worker. For an existing stopped installation, a successful run
+against its active release and installed `state/qualification-fixture-<sha256>.wav` writes the full
+capacity approval. An unpaired installation, another candidate release, or a
+different input produces measurement evidence only. Every two-worker rerun
+invalidates prior approval before GPU work. Use `mw capacity --workers 2` after
+successful approval, then start/resume through the normal lifecycle commands.
+Candidate 14 passed native capacity approval, two-slot activation, overlapping
+600-second jobs, corruption/cancellation isolation, active drain and repeated stop
+against synthetic loopback backend/storage. Its short-fixture throughput gains
+were 1.52–1.54x with matching decoded outputs. Boot and two-job processing also
+passed without interactive sign-in. Real production backend/S3 acceptance is
+separate; see the dated implementation ledger and current readiness report.
+
+The macOS two-worker command uses the same coordinator and validators. Startup,
+warmup, report finalization and output comparison are excluded from its measured
+throughput. Full measurements are kept in private `state/capacity-measurements.json`;
+a failed rerun invalidates the previous capacity receipt.
+
 Build Windows packages only on native x86_64 Windows from already-qualified
 private Node, Python 3.12/DirectML and offline FFmpeg roots. The packager audits
 every executable as PE32+ x86_64, rejects links, and records every release file
@@ -433,7 +666,7 @@ fixed hashes.
 powershell.exe -NoProfile -File .\scripts\build-windows-service-runtime.ps1 `
   -OutputPath C:\MusicMuteBuild\winsw-runtime
 pnpm run build
-node .\dist\src\cli\main.js windows package `
+pnpm run package:windows `
   --worker-root C:\src\music_remover\worker `
   --output C:\MusicMuteBuild\musicmute-worker-0.1.0-win `
   --version 0.1.0-win `
@@ -446,8 +679,20 @@ node .\dist\src\cli\main.js windows package `
 From an elevated PowerShell prompt, the packaged manager installs or repairs
 the versioned release under `%ProgramData%\MusicMuteWorker`, applies restrictive
 ACLs, verifies the exact Kim model, writes a password-free LocalService WinSW
-definition, and rolls back the definition if its local doctor fails. The
-runtime config must select exactly one DirectML slot on adapter `0` and use the
+definition, and rolls back the protected configuration snapshot if qualification
+or runtime startup fails. Drain and stop the existing service before maintenance.
+The durable journal supports recovery after installer termination; subsequent
+manager operations recover it before making further changes. For explicit recovery,
+run `mw recover --json`. Recovery uses the journal's verified installed manager
+when an update interrupted the active release switch. Use `--leave-stopped` when
+the restored runtime needs offline repair or capacity requalification before it
+can start. If the first installation was interrupted before an active
+release was recorded, supply `--release-version <installed-version>`. This command
+verifies the installed package and uses its manager to recover the private journal.
+The packaged manager also supports `-Action Recover` with the same `-InstallRoot`.
+Normal lifecycle commands reject a pending recovery journal. Full service crash
+and reboot acceptance remain tracked separately in the implementation ledger. The
+runtime config must select one or two qualified DirectML slots on adapter `0` and use the
 matching versioned runtime paths plus the stable state paths.
 
 ```powershell
@@ -456,7 +701,9 @@ powershell.exe -NoProfile -File C:\MusicMuteBuild\musicmute-worker-0.1.0-win\ins
   -Release C:\MusicMuteBuild\musicmute-worker-0.1.0-win `
   -Config C:\MusicMutePrivate\runtime.json `
   -Credential C:\MusicMutePrivate\machine.credential `
-  -ModelSource C:\MusicMutePrivate\Kim_Vocal_2.onnx
+  -ModelSource C:\MusicMutePrivate\Kim_Vocal_2.onnx `
+  -FixtureSource C:\MusicMutePrivate\qualification.wav `
+  -FixtureSha256 <verified-fixture-sha256>
 
 powershell.exe -NoProfile -File C:\MusicMuteBuild\musicmute-worker-0.1.0-win\installer\manage-windows-service.ps1 -Action Doctor
 ```
@@ -475,15 +722,24 @@ Reset refuses a running service, preserves the previous budget under a unique
 `restart-budget.reset.*.json` name, and leaves the service stopped. Unsafe or
 invalid-sized budget files fail closed for operator inspection. The next start
 creates a new budget with the service's normal state-directory permissions.
-Native Windows service and ACL acceptance for this operation remains pending.
+Native stopped-service reset, preserved bytes/ACL, repeated reset and restoration
+passed on candidate 14; see the dated implementation ledger.
 
-`Repair` accepts the same four private inputs. `Uninstall` removes only the
-Windows Service definition, stable wrapper and active-release marker; releases,
+`Repair` accepts the same private inputs as `Install`. Both accept `-LeaveStopped`
+for maintenance that must qualify the candidate without starting operational
+processing afterward. `Uninstall` drains active work, suppresses queued crash
+restarts and waits for SCM deletion before removing the stable wrapper and
+active-release marker. Graceful drain acknowledgement precedes the removal or
+update transaction, so a rejected or interrupted drain leaves active work alone.
+Once that transaction starts, recovery restores a stopped installation for
+removal; updates retain the prior lifecycle intent in their verified snapshot. Releases,
 credentials, models and job state remain preserved. The scripts never bypass
 PowerShell policy, alter global Node/Python, or install/replace a GPU driver.
-Local package tests do not prove LocalService GPU access, logged-out operation,
-restart/reboot recovery, live S3, or actual Z440 execution; those stay `NOT_RUN`
-until the owner-authorized Windows host run.
+Candidate `0.1.0-win.20260929.3` passed native Z440 LocalService qualification
+for both current recipes, including accelerated DirectML dispatch with no CPU
+node events. See the ledger for artifact identity and limits. Later source
+changes still require a new package. Logged-out/reboot recovery, live S3 and
+two-worker acceptance remain open; package or fixture tests do not prove them.
 
 ### Offline song benchmark (macOS)
 

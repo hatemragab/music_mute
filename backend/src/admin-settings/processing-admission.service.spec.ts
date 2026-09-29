@@ -92,8 +92,8 @@ describe('processing admission', () => {
       maxProcessingJobs: 1,
       maxInfrastructureAttempts: 3,
       maxClientInputAttempts: 5,
-      maxDurationSeconds: 1_200,
-      maxInputBytes: 50_000_000,
+      maxDurationSeconds: 1_800,
+      maxInputBytes: 100_000_000,
     });
     expect(f.fences.updateOne).toHaveBeenCalledTimes(1);
     expect(f.users.updateOne).toHaveBeenCalledTimes(1);
@@ -105,7 +105,7 @@ describe('processing admission', () => {
     );
     expect(f.usage.assertRetainedCapacity).toHaveBeenCalledWith(
       owner,
-      1_000_000_000,
+      5_000_000_000,
       session,
     );
   });

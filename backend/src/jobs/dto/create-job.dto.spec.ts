@@ -88,18 +88,21 @@ describe('create-job HTTP declaration', () => {
         ...payload,
         input: {
           ...payload.input,
-          bytes: 50_000_000,
-          durationSeconds: 1_200,
+          bytes: 100_000_000,
+          durationSeconds: 1_800,
         },
       }),
     ).resolves.toBeInstanceOf(CreateJobDto);
     await expect(
-      transform({ ...payload, input: { ...payload.input, bytes: 50_000_001 } }),
+      transform({
+        ...payload,
+        input: { ...payload.input, bytes: 100_000_001 },
+      }),
     ).rejects.toThrow();
     await expect(
       transform({
         ...payload,
-        input: { ...payload.input, durationSeconds: 1_200.001 },
+        input: { ...payload.input, durationSeconds: 1_800.001 },
       }),
     ).rejects.toThrow();
   });

@@ -76,6 +76,24 @@ describe('account policy HTTP boundary', () => {
       .expect(400);
   });
 
+  it('accepts scalar media capability and rejects duplicate or unknown query fields', async () => {
+    const { harness, policies } = await setup();
+    await harness
+      .request(
+        'get',
+        '/processing-policy?schema_version=2&media_limits_version=2',
+      )
+      .expect(200);
+    expect(policies.publicPolicy).toHaveBeenCalledWith('2', '2');
+    await harness
+      .request(
+        'get',
+        '/processing-policy?media_limits_version=2&media_limits_version=2',
+      )
+      .expect(409);
+    await harness.request('get', '/processing-policy?unknown=2').expect(409);
+  });
+
   it('removes the old processing settings administrator routes', async () => {
     const { harness } = await setup();
     const token = harness.signInAs('owner');

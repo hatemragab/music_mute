@@ -1,3 +1,4 @@
+import { repeatedReport } from "./fixtures/repeated-benchmark.js";
 import {
   chmod,
   mkdir,
@@ -11,13 +12,15 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initializeLocalLifecycle } from "../src/runtime/local-lifecycle.js";
 import {
-  benchmarkMacUserWorker,
   compareBenchmarkReports,
   parseStoredRepeatedBenchmarkReport,
   runFileBenchmarkProcess,
-  runTwoWorkerCapacityBenchmark,
   summarizeFileBenchmarkReport,
   summarizeRepeatedBenchmarkReport,
+} from "../src/platform/shared/file-benchmark.js";
+import {
+  benchmarkMacUserWorker,
+  runTwoWorkerCapacityBenchmark,
 } from "../src/platform/macos/user-benchmark.js";
 import {
   createMacUserDirectories,
@@ -33,41 +36,112 @@ afterEach(async () => {
 });
 
 describe("macOS local benchmark admission", () => {
-  it("invalidates a previous PASS before a failed capacity rerun", async () => {
-    const home = await mkdtemp(join(tmpdir(), "capacity-rerun-"));
-    roots.push(home);
-    const layout = createMacUserLayout(home);
-    await createMacUserDirectories(layout);
-    await writeFile(
-      layout.capacityValidationPath,
-      JSON.stringify({ status: "PASS" }),
-      { mode: 0o600 },
-    );
-    await expect(
-      runTwoWorkerCapacityBenchmark({
-        layout,
-        machineId: "unused",
-        releaseRoot: layout.currentLink,
-        fixturePath: join(layout.stateRoot, "qualification.wav"),
-        fixtureSha256: "a".repeat(64),
-        baseline: {},
-      }),
-    ).rejects.toThrow();
+  it("retains honest DirectML fallback and hardware evidence and rejects CPU dispatch", () => {
+    const raw = {
+      ...repeatedReport([120, 115, 100, 90, 110]),
+      provider: "directml",
+      serviceIdentity: "S-1-5-19",
+      fallbackDisabled: false,
+      gpuModel: "Radeon RX 580",
+      gpuIdentity: {
+        source: "DXGI EnumAdapters1/GetDesc1",
+        driverVersion: "31.0.21925.1001",
+        deviceIndex: 0,
+        name: "Radeon RX 580",
+        luid: "0000000000000001",
+        vendorId: 4098,
+        deviceId: 26591,
+        subsystemId: 1,
+        revision: 1,
+        dedicatedVideoMemoryBytes: 8 * 1024 ** 3,
+        sharedSystemMemoryLimitBytes: 12 * 1024 ** 3,
+      },
+    };
+    const context = {
+      processWallSeconds: 600,
+      warmupRuns: 1,
+      measuredRuns: 3,
+      provider: "directml" as const,
+    };
+    const report = summarizeRepeatedBenchmarkReport(raw, context);
+    expect(report.fallbackDisabled).toBe(false);
+    expect(report.gpuIdentity).toEqual(raw.gpuIdentity);
     expect(
-      JSON.parse(await readFile(layout.capacityValidationPath, "utf8")),
-    ).toMatchObject({ status: "IN_PROGRESS" });
+      report.runs.every(
+        (run) => run.gpuMemoryBefore === null && run.gpuMemoryAfter === null,
+      ),
+    ).toBe(true);
+    expect(parseStoredRepeatedBenchmarkReport(report)).toEqual(report);
+    expect(() =>
+      summarizeRepeatedBenchmarkReport(
+        {
+          ...raw,
+          providerDispatch: { ...raw.providerDispatch, cpuNodeEvents: 1 },
+        },
+        context,
+      ),
+    ).toThrow("GPU dispatch");
+    expect(() =>
+      summarizeRepeatedBenchmarkReport({ ...raw, gpuIdentity: null }, context),
+    ).toThrow("adapter identity");
+    expect(() =>
+      summarizeRepeatedBenchmarkReport(raw, { ...context, provider: "mps" }),
+    ).toThrow("local GPU execution");
   });
 
-  it("terminates an interrupted benchmark subprocess", async () => {
-    const controller = new AbortController();
-    const run = runFileBenchmarkProcess(
-      process.execPath,
-      ["-e", "setInterval(() => {}, 1000)"],
-      { cwd: tmpdir(), env: process.env, signal: controller.signal },
-    );
-    setTimeout(() => controller.abort(), 50);
-    await expect(run).rejects.toThrow("interrupted");
-  });
+  it.skipIf(process.platform !== "darwin")(
+    "invalidates a previous PASS before a failed capacity rerun",
+    async () => {
+      const home = await mkdtemp(join(tmpdir(), "capacity-rerun-"));
+      roots.push(home);
+      const layout = createMacUserLayout(home);
+      await createMacUserDirectories(layout);
+      await writeFile(
+        layout.capacityValidationPath,
+        JSON.stringify({ status: "PASS" }),
+        { mode: 0o600 },
+      );
+      await expect(
+        runTwoWorkerCapacityBenchmark({
+          layout,
+          machineId: "unused",
+          releaseRoot: layout.currentLink,
+          fixturePath: join(layout.stateRoot, "qualification.wav"),
+          fixtureSha256: "a".repeat(64),
+          baseline: {},
+        }),
+      ).rejects.toThrow();
+      expect(
+        JSON.parse(await readFile(layout.capacityValidationPath, "utf8")),
+      ).toMatchObject({ status: "IN_PROGRESS" });
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "terminates an interrupted benchmark subprocess",
+    async () => {
+      const controller = new AbortController();
+      const run = runFileBenchmarkProcess(
+        process.execPath,
+        ["-e", "setInterval(() => {}, 1000)"],
+        { cwd: tmpdir(), env: process.env, signal: controller.signal },
+      );
+      setTimeout(() => controller.abort(), 50);
+      await expect(run).rejects.toThrow("interrupted");
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "rejects POSIX benchmark launch before spawning on Windows",
+    async () => {
+      await expect(
+        runFileBenchmarkProcess("nonexistent-executable", [], {
+          cwd: tmpdir(),
+          env: process.env,
+        }),
+      ).rejects.toThrow("owned service task");
+    },
+  );
 
   it("keeps every warm sample and compares only compatible GPU reports", () => {
     const baseline = summarizeRepeatedBenchmarkReport(
@@ -241,31 +315,34 @@ describe("macOS local benchmark admission", () => {
     ).toThrow("GPU dispatch");
   });
 
-  it("refuses while the worker is active or loaded", async () => {
-    const root = await mkdtemp(join(tmpdir(), "musicmute-benchmark-"));
-    roots.push(root);
-    await chmod(root, 0o700);
-    const home = join(root, "home");
-    await mkdir(home, { mode: 0o700 });
-    const layout = createMacUserLayout(home);
-    await createMacUserDirectories(layout);
-    await initializeLocalLifecycle(layout.lifecyclePath);
-    const qualify = vi.fn();
+  it.skipIf(process.platform !== "darwin")(
+    "refuses while the worker is active or loaded",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "musicmute-benchmark-"));
+      roots.push(root);
+      await chmod(root, 0o700);
+      const home = join(root, "home");
+      await mkdir(home, { mode: 0o700 });
+      const layout = createMacUserLayout(home);
+      await createMacUserDirectories(layout);
+      await initializeLocalLifecycle(layout.lifecyclePath);
+      const qualify = vi.fn();
 
-    await expect(
-      benchmarkMacUserWorker({
-        layout,
-        uid: process.getuid!(),
-        launchAgent: {
-          status: async () => ({ loaded: true, running: true }),
-          bootstrap: async () => undefined,
-          bootout: async () => undefined,
-        },
-        qualify,
-      }),
-    ).rejects.toThrow("already-drained and stopped");
-    expect(qualify).not.toHaveBeenCalled();
-  });
+      await expect(
+        benchmarkMacUserWorker({
+          layout,
+          uid: process.getuid!(),
+          launchAgent: {
+            status: async () => ({ loaded: true, running: true }),
+            bootstrap: async () => undefined,
+            bootout: async () => undefined,
+          },
+          qualify,
+        }),
+      ).rejects.toThrow("already-drained and stopped");
+      expect(qualify).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["kim-vocals-v2", "kim-vocals-v2-trim"] as const)(
     "summarizes exactly one %s pass",
@@ -350,83 +427,6 @@ describe("macOS local benchmark admission", () => {
     });
   });
 });
-
-function repeatedReport(times: number[]) {
-  return {
-    schemaVersion: 2,
-    status: "PASS",
-    scope: "local-engine-only",
-    sourceMode: "candidate-engine",
-    engineDigest: "a".repeat(64),
-    releaseManifestDigest: "b".repeat(64),
-    fixtureDigest: "c".repeat(64),
-    modelDigest: "d".repeat(64),
-    recipeId: "kim-vocals-v2",
-    recipeDigest: "e".repeat(64),
-    provider: "mps",
-    fallbackDisabled: true,
-    providerDispatch: {
-      proven: true,
-      acceleratedNodeEvents: 1,
-      cpuNodeEvents: 0,
-    },
-    gpuModel: "Apple M4",
-    osVersion: "26.0",
-    runtime: {
-      python: "3.13",
-      torch: "2.14.0",
-      onnxRuntime: "1.30.0",
-      audioSeparator: "0.47.0",
-      ffmpeg: "8.0.3",
-      ffprobe: "8.0.3",
-    },
-    source: {
-      sha256: "c".repeat(64),
-      bytes: 4_000_000,
-      decodedDurationSeconds: 180,
-      decodedSamples: 7_938_000,
-      sampleRate: 44_100,
-      channels: 2,
-    },
-    audioSettings: {
-      format: "mp3",
-      bitrateKbps: 320,
-      groupSize: 1,
-      hopLength: 1024,
-      segmentSize: 256,
-      fftSize: 7680,
-      overlap: 0.0294,
-    },
-    preloadSeconds: 5,
-    warmupRuns: 1,
-    measuredRuns: 3,
-    savedAudio: false,
-    savedAudioArtifacts: [] as Array<{
-      iteration: number;
-      role: string;
-      format: string;
-      fileName: string;
-      sha256: string;
-      bytes: number;
-    }>,
-    runs: times.map((seconds, index) => ({
-      iteration: index + 1,
-      role: index === 0 ? "cold" : index === 1 ? "warmup" : "measured",
-      recipeId: "kim-vocals-v2",
-      recipeDigest: "e".repeat(64),
-      resultDigest: "f".repeat(64),
-      resultBytes: 4_000_000,
-      sourceDurationSeconds: 180,
-      measuredInputDurationSeconds: 180,
-      measuredInputSamples: 7_938_000,
-      outputDurationSeconds: 180,
-      endToEndSeconds: seconds,
-      stageTimings: { preparation: 4, separation: seconds - 20, encode: 2 },
-      gpuMemoryBefore: { tensorAllocatedBytes: 100, driverAllocatedBytes: 200 },
-      gpuMemoryAfter: { tensorAllocatedBytes: 110, driverAllocatedBytes: 220 },
-    })),
-  };
-}
 
 function recipeResult(
   recipeId: "kim-vocals-v2" | "kim-vocals-v2-trim",

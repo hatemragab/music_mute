@@ -73,6 +73,16 @@ describe("original comparison timeline", () => {
       [88200, 132300],
     ]);
   });
+  it("accepts a 30-minute timeline and rejects samples beyond it", () => {
+    const withEnd = (sourceEnd: number) => ({
+      ...result,
+      editMap: { chunks: [[{ sourceStart: 0, sourceEnd }]] },
+    });
+    expect(parseChildProcessResult(withEnd(79380000)).comparisonRanges).toEqual(
+      [[0, 79380000]],
+    );
+    expect(() => parseChildProcessResult(withEnd(79380001))).toThrow();
+  });
   it("rejects overlapping ranges and accepts older child results without a map", () => {
     expect(parseChildProcessResult(result).comparisonRanges).toBeUndefined();
     expect(() =>

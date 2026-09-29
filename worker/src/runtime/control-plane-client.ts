@@ -18,9 +18,10 @@ import {
   type WorkerRecipeId,
 } from "./contracts.js";
 import {
-  parseMacUpdateCandidate,
-  type MacUpdateCandidate,
-} from "../platform/macos/update-metadata.js";
+  parseUpdateCandidate,
+  type UpdateCandidate,
+  type UpdatePlatform,
+} from "../platform/shared/update-metadata.js";
 import type { WorkerProgressPhase } from "../../protocol/v1/protocol.js";
 import { MAX_RETRY_DELAY_MS, retryAfterMilliseconds } from "./retry-after.js";
 import { fromWireCase, toWireCase } from "./wire-case.js";
@@ -434,17 +435,19 @@ export class WorkerControlPlaneClient {
     return response as unknown as WorkerMachineStatus;
   }
 
-  async macUpdateCandidate(
+  async updateCandidate(
+    platform: UpdatePlatform,
     download = false,
     signal?: AbortSignal,
-  ): Promise<MacUpdateCandidate> {
-    return parseMacUpdateCandidate(
+  ): Promise<UpdateCandidate> {
+    return parseUpdateCandidate(
       await this.request(
         "worker/updates",
         "POST",
-        { platform: "darwin-arm64", download },
+        { platform, download },
         signal,
       ),
+      platform,
     );
   }
 

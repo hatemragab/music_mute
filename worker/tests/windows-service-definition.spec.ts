@@ -41,6 +41,7 @@ describe("Windows service definition", () => {
 
     expect(xml).toContain("runtime\\python\\python.exe");
     expect(xml).toContain("musicmute_engine.qualification");
+    expect(xml).toContain("musicmute_engine.windows_service_task");
     expect(xml).toContain("--directml-device-id 0");
     expect(xml).toContain("<startmode>Manual</startmode>");
     expect(xml).toContain("<domain>NT AUTHORITY</domain>");
@@ -48,6 +49,35 @@ describe("Windows service definition", () => {
     expect(xml).not.toContain("<delayedAutoStart/>");
     expect(xml).not.toContain('action="restart"');
     expect(xml).not.toContain("state\\runtime.json");
+  });
+
+  it("runs repeated benchmarks with LocalService, private scratch and fixed DirectML grouping", () => {
+    const layout = createWindowsServiceLayout();
+    const release = createWindowsReleaseLayout(layout, "0.1.0-test");
+    const task = {
+      fixturePath: `${layout.stateRoot}\\input.mp3`,
+      fixtureSha256: "a".repeat(64),
+      reportPath: `${layout.stateRoot}\\qualification-test.json`,
+      benchmark: {
+        recipeId: "kim-vocals-v2" as const,
+        warmupRuns: 1,
+        measuredRuns: 3,
+      },
+    };
+    const xml = renderWinSWConfig(layout, release, task);
+    expect(xml).toContain(
+      "musicmute_engine.windows_service_task musicmute_engine.benchmark_file --",
+    );
+    expect(xml).toContain("--group-size 1");
+    expect(xml).toContain("state\\tmp\\qualification-test");
+    expect(xml).toContain('<env name="PYTHONDONTWRITEBYTECODE" value="1"/>');
+    expect(xml).not.toContain("state\\runtime.json");
+    expect(() =>
+      renderWinSWConfig(layout, release, {
+        ...task,
+        benchmark: { ...task.benchmark, measuredRuns: 1 },
+      }),
+    ).toThrow("benchmark settings");
   });
 
   it("rejects roots and versions that can escape the installation", () => {
@@ -64,5 +94,28 @@ describe("Windows service definition", () => {
         reportPath: `${layout.stateRoot}\\report.json`,
       }),
     ).toThrow("fixture digest is invalid");
+  });
+
+  it("runs all-recipe capacity measurement inside the owned LocalService task", () => {
+    const layout = createWindowsServiceLayout();
+    const release = createWindowsReleaseLayout(layout, "0.1.0-test");
+    const task = {
+      fixturePath: `${layout.stateRoot}\\input.wav`,
+      fixtureSha256: "a".repeat(64),
+      reportPath: `${layout.stateRoot}\\qualification-capacity.json`,
+      capacity: { warmupRuns: 1, measuredRuns: 3 },
+    };
+    const xml = renderWinSWConfig(layout, release, task);
+    expect(xml).toContain(
+      "musicmute_engine.windows_service_task musicmute_engine.capacity_benchmark --",
+    );
+    expect(xml).toContain("state\\tmp\\qualification-capacity");
+    expect(xml).not.toContain("--recipe-id");
+    expect(() =>
+      renderWinSWConfig(layout, release, {
+        ...task,
+        capacity: { warmupRuns: 0, measuredRuns: 3 },
+      }),
+    ).toThrow("benchmark settings");
   });
 });

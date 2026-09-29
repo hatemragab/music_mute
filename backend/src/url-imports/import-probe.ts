@@ -1,3 +1,4 @@
+import { MAX_AUDIO_DURATION_SECONDS } from '../jobs/media-limits.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { AUDIO_TYPES, type InputDeclaration } from '../jobs/job.types.js';
@@ -24,8 +25,11 @@ export function inspectProbe(
   const durationSeconds = Number(data.format?.duration ?? stream.duration);
   if (!Number.isFinite(durationSeconds) || durationSeconds <= 0)
     throw importError('IMPORT_INVALID_AUDIO');
-  if (durationSeconds > Math.min(maxDuration, 1200))
-    throw importError('IMPORT_TOO_LONG', Math.min(maxDuration, 1200));
+  if (durationSeconds > Math.min(maxDuration, MAX_AUDIO_DURATION_SECONDS))
+    throw importError(
+      'IMPORT_TOO_LONG',
+      Math.min(maxDuration, MAX_AUDIO_DURATION_SECONDS),
+    );
   const formats = data.format?.format_name?.split(',') ?? [];
   const codec = stream.codec_name;
   let extension: keyof typeof AUDIO_TYPES;

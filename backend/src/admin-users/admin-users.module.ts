@@ -1,3 +1,8 @@
+import { MongooseModule } from '@nestjs/mongoose';
+import {
+  MediaImport,
+  MediaImportSchema,
+} from '../url-imports/media-import.schema.js';
 import { Module } from '@nestjs/common';
 import { AdminModule } from '../admin/admin.module.js';
 import { AdminSettingsModule } from '../admin-settings/admin-settings.module.js';
@@ -10,6 +15,9 @@ import { AdminAccountRecoveryService } from './admin-account-recovery.service.js
 
 @Module({
   imports: [
+    MongooseModule.forFeature([
+      { name: MediaImport.name, schema: MediaImportSchema },
+    ]),
     AdminModule,
     AdminSettingsModule,
     ProcessingPersistenceModule,

@@ -110,6 +110,8 @@ export function buildServiceRuntimeConfig(
     backendBaseUrl,
     machineId: options.machineId,
     credentialFile: layout.credentialPath,
+    localLifecyclePath: layout.lifecyclePath,
+    localRuntimeStatusPath: layout.runtimeStatusPath,
     workRoot: layout.workRoot,
     modelCacheRoot: layout.modelCacheRoot,
     engineRoot: release.engineRoot,

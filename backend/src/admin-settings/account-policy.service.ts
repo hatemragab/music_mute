@@ -245,8 +245,9 @@ export class AccountPolicyService implements OnModuleInit {
     return presentOverride(await this.overrides.findOne({ accountId }).lean());
   }
 
-  async publicPolicy(schemaVersion = '2') {
-    if (schemaVersion !== '2') throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
+  async publicPolicy(schemaVersion = '2', mediaLimitsVersion = '1') {
+    if (schemaVersion !== '2' || !['1', '2'].includes(mediaLimitsVersion))
+      throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
     const policy = await this.global();
     const acceptNewJobs =
       this.config.get<boolean>('AUDIO_PROCESSING_ENABLED') === true &&
@@ -260,8 +261,15 @@ export class AccountPolicyService implements OnModuleInit {
       messageEn: policy.maintenanceMessageEn,
       messageAr: policy.maintenanceMessageAr,
       limits: {
-        maxDurationSeconds: policy.maxDurationSeconds,
-        maxPreparedAudioBytes: policy.maxPreparedAudioBytes,
+        // Existing native clients validate against their compiled media ceilings.
+        maxDurationSeconds: Math.min(
+          policy.maxDurationSeconds,
+          mediaLimitsVersion === '2' ? 1_800 : 1_200,
+        ),
+        maxPreparedAudioBytes: Math.min(
+          policy.maxPreparedAudioBytes,
+          mediaLimitsVersion === '2' ? 100_000_000 : 50_000_000,
+        ),
         maxProcessingJobs: policy.maxProcessingJobs,
         maxLocalSourceBytes: 200_000_000,
         longJobThresholdSeconds: Math.min(600, policy.maxDurationSeconds),

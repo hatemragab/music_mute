@@ -1,8 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { chmod, lstat, open, readFile, rename } from "node:fs/promises";
+import { chmod, lstat, open, readFile, rename, rm } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 
 export interface LocalRuntimeStatus {
   schemaVersion: 1;
+  observedLifecycle?: {
+    revision: number;
+    intent: "active" | "paused" | "draining";
+  };
   activeAttemptIds: string[];
   currentAttempts?: Array<{
     workerId: string;
@@ -49,6 +54,7 @@ export interface RuntimeJobSummary {
 }
 
 export interface LocalRuntimeStatusDetails {
+  observedLifecycle?: LocalRuntimeStatus["observedLifecycle"];
   currentAttempts?: LocalRuntimeStatus["currentAttempts"];
   childState?: LocalRuntimeStatus["childState"];
   sessionId?: string;
@@ -83,6 +89,9 @@ export async function writeLocalRuntimeStatus(
   validateDetails(details, activeAttemptIds);
   const state: LocalRuntimeStatus = {
     schemaVersion: 1,
+    ...(details.observedLifecycle === undefined
+      ? {}
+      : { observedLifecycle: details.observedLifecycle }),
     activeAttemptIds: [...activeAttemptIds].sort(),
     ...(details.currentAttempts === undefined
       ? {}
@@ -121,14 +130,47 @@ export async function writeLocalRuntimeStatus(
   const temporary = `${path}.${randomUUID()}.tmp`;
   const handle = await open(temporary, "wx", 0o600);
   try {
-    await handle.writeFile(`${JSON.stringify(state)}\n`, "utf8");
-    await handle.sync();
+    try {
+      await handle.writeFile(`${JSON.stringify(state)}\n`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await publishStatusFile(temporary, path);
+    await chmod(path, 0o600);
   } finally {
-    await handle.close();
+    await rm(temporary, { force: true });
   }
-  await rename(temporary, path);
-  await chmod(path, 0o600);
   return state;
+}
+
+async function publishStatusFile(
+  temporary: string,
+  path: string,
+): Promise<void> {
+  // Windows readers can deny FILE_SHARE_DELETE while they inspect the previous
+  // snapshot. Keep that complete snapshot until the reader releases its handle;
+  // never unlink the destination or publish a partially written document.
+  const deadline = performance.now() + 2_000;
+  let pause = 10;
+  for (;;) {
+    try {
+      await rename(temporary, path);
+      return;
+    } catch (error) {
+      const remaining = deadline - performance.now();
+      if (
+        process.platform !== "win32" ||
+        !["EPERM", "EACCES", "EBUSY"].includes(
+          (error as NodeJS.ErrnoException).code ?? "",
+        ) ||
+        remaining <= 0
+      )
+        throw error;
+      await delay(Math.min(pause, remaining));
+      pause = Math.min(pause * 2, 100);
+    }
+  }
 }
 
 export async function loadLocalRuntimeStatus(
@@ -140,7 +182,7 @@ export async function loadLocalRuntimeStatus(
     info.isSymbolicLink() ||
     info.size < 2 ||
     info.size > 16 * 1024 ||
-    (info.mode & 0o077) !== 0
+    (process.platform !== "win32" && (info.mode & 0o077) !== 0)
   )
     throw new TypeError("Local runtime status file is unsafe");
   const value = JSON.parse(await readFile(path, "utf8")) as unknown;
@@ -152,6 +194,7 @@ export async function loadLocalRuntimeStatus(
       (key) =>
         ![
           "schemaVersion",
+          "observedLifecycle",
           "activeAttemptIds",
           "currentAttempts",
           "childState",
@@ -178,6 +221,9 @@ export async function loadLocalRuntimeStatus(
   )
     throw new TypeError("Local runtime status is invalid");
   const details: LocalRuntimeStatusDetails = {
+    ...(record.observedLifecycle === undefined
+      ? {}
+      : { observedLifecycle: record.observedLifecycle as never }),
     ...(record.currentAttempts === undefined
       ? {}
       : { currentAttempts: record.currentAttempts as never }),
@@ -210,6 +256,9 @@ export async function loadLocalRuntimeStatus(
   validateDetails(details, record.activeAttemptIds as string[]);
   return {
     schemaVersion: 1,
+    ...(details.observedLifecycle === undefined
+      ? {}
+      : { observedLifecycle: details.observedLifecycle }),
     activeAttemptIds: record.activeAttemptIds as string[],
     ...(details.currentAttempts === undefined
       ? {}
@@ -247,6 +296,20 @@ function validateDetails(
   details: LocalRuntimeStatusDetails,
   activeAttemptIds: readonly string[],
 ): void {
+  const lifecycle = details.observedLifecycle;
+  if (
+    lifecycle !== undefined &&
+    (lifecycle === null ||
+      typeof lifecycle !== "object" ||
+      Array.isArray(lifecycle) ||
+      Object.keys(lifecycle).some(
+        (key) => !["revision", "intent"].includes(key),
+      ) ||
+      !Number.isSafeInteger(lifecycle.revision) ||
+      lifecycle.revision < 1 ||
+      !["active", "paused", "draining"].includes(lifecycle.intent))
+  )
+    throw new TypeError("Local runtime lifecycle acknowledgement is invalid");
   if (
     details.childState !== undefined &&
     !["loading", "warming", "ready", "unavailable", "stopped"].includes(

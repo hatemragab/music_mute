@@ -42,36 +42,36 @@ paths:
               type: object
               additionalProperties: false
       responses:
-        '201':
-          description: Single-use connection ticket issued.
-          headers:
-            Cache-Control:
-              schema: { type: string, const: no-store }
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [ticket, path, protocol, expires_at]
-                properties:
-                  ticket:
-                    {
-                      type: string,
-                      pattern: '^[A-Za-z0-9_-]{43}$',
-                      writeOnly: false,
-                    }
-                  path: { type: string, const: /realtime/socket }
-                  protocol: { type: string, const: musicmute.realtime.v1 }
-                  expires_at: { type: string, format: date-time }
-        '400':
-          $ref: '#/components/responses/Problem400'
-        '401':
-          $ref: '#/components/responses/Problem401'
-        '403':
-          $ref: '#/components/responses/Problem403'
-        '429':
-          $ref: '#/components/responses/Problem429'
-        '503':
-          $ref: '#/components/responses/Problem503'
+    '201':
+      description: Single-use connection ticket issued.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [ticket, path, protocol, expires_at]
+            properties:
+              ticket:
+                {
+                  type: string,
+                  pattern: '^[A-Za-z0-9_-]{43}$',
+                  writeOnly: false,
+                }
+              path: { type: string, const: /realtime/socket }
+              protocol: { type: string, const: musicmute.realtime.v1 }
+              expires_at: { type: string, format: date-time }
+    '400':
+      $ref: '#/components/responses/Problem400'
+    '401':
+      $ref: '#/components/responses/Problem401'
+    '403':
+      $ref: '#/components/responses/Problem403'
+    '429':
+      $ref: '#/components/responses/Problem429'
+    '503':
+      $ref: '#/components/responses/Problem503'
   /admin/realtime-tickets:
     post:
       tags: [admin]
@@ -3034,6 +3034,81 @@ paths:
           $ref: '#/components/responses/Problem503'
       x-audience:
         - administrator
+  /admin/users/{id}/account-usage-resets:
+    post:
+      tags:
+        - admin
+      operationId: AdminUsersController.resetUsage
+      summary: Reset the current daily and monthly account usage
+      description: >-
+        Audited idempotent reset of current UTC-month processing used/released seconds,
+        upload grants/confirmed bytes, download grants/estimated bytes and today's
+        upload grants. Preserves files, actual storage usage, policy overrides,
+        historical periods and service-wide usage. Requires no active jobs/imports
+        or reservations. Returns 409 USAGE_RESET_ACTIVE_WORK for active work,
+        or REVISION_CONFLICT for stale usage revision/day/month. Replay of the same
+        operation ID does not reset usage accrued after the first success.
+      security:
+        - FirebaseBearer: []
+      x-source: src/admin-users/admin-users.controller.ts
+      x-auth-policy: A(`users.processing.manage`) F
+      x-rate-policy: G + Ax sensitive
+      x-required-permissions:
+        - users.processing.manage
+      x-recent-auth-max-age-seconds: 300
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Account ID whose current usage will be reset.
+          schema:
+            type: string
+            pattern: ^[a-f0-9]{24}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetAccountUsageDto'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response_AdminUsersController_usage'
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            X-Request-Id:
+              description: Request correlation identifier.
+              schema:
+                type: string
+                format: uuid
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '415':
+          $ref: '#/components/responses/Problem415'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '500':
+          $ref: '#/components/responses/Problem500'
+        '503':
+          $ref: '#/components/responses/Problem503'
+      x-audience:
+        - administrator
   /admin/users/{id}/account-policy-override:
     put:
       tags:
@@ -3632,6 +3707,74 @@ paths:
           $ref: '#/components/responses/Problem403'
         '404':
           $ref: '#/components/responses/Problem404'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '500':
+          $ref: '#/components/responses/Problem500'
+        '503':
+          $ref: '#/components/responses/Problem503'
+      x-audience:
+        - administrator
+  /admin/worker-fleet/machines/{id}/capacity-approvals:
+    post:
+      tags:
+        - admin
+      operationId: AdminWorkerControlController.approveCapacity
+      summary: POST /admin/worker-fleet/machines/{id}/capacity-approvals
+      description: Operator approval of two slots for one existing GPU after reviewing local qualification. Does not run a benchmark or enable local capacity. Requires revision, confirmation and evidence in the reason.
+      security:
+        - FirebaseBearer: []
+      x-source: src/worker-fleet/control/admin-worker-control.controller.ts
+      x-auth-policy: A(`workers.manage`) F
+      x-rate-policy: G + Ax sensitive
+      x-required-permissions:
+        - workers.manage
+      x-recent-auth-max-age-seconds: 300
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Operator approval of two slots for one existing GPU after reviewing local qualification. Does not run a benchmark or enable local capacity. Requires revision, confirmation and evidence in the reason.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveWorkerCapacityDto'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response_AdminWorkerControlController_approveCapacity'
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            X-Request-Id:
+              description: Request correlation identifier.
+              schema:
+                type: string
+                format: uuid
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '415':
+          $ref: '#/components/responses/Problem415'
         '429':
           $ref: '#/components/responses/Problem429'
         '500':
@@ -5820,7 +5963,7 @@ paths:
         - public
       operationId: ProcessingPolicyController.current
       summary: GET /processing-policy
-      description: optional `schemaVersion`, checked by policy service
+      description: Optional schema version and media capability; legacy clients retain 1200-second/50-MB limits.
       security: []
       x-source: src/admin-settings/admin-settings.controller.ts
       x-auth-policy: P
@@ -5836,6 +5979,16 @@ paths:
           style: form
           explode: false
           description: One scalar value; repeated keys are rejected.
+        - name: media_limits_version
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ['1', '2']
+            default: '1'
+          style: form
+          explode: false
+          description: Version 2 opts into 1800-second/100-MB media ceilings. Existing clients default to 1200 seconds/50 MB. Account policy can lower either ceiling.
       responses:
         '200':
           description: Successful response
@@ -5850,6 +6003,8 @@ paths:
                 const: no-store
         '400':
           $ref: '#/components/responses/Problem400'
+        '409':
+          $ref: '#/components/responses/Problem409'
         '429':
           $ref: '#/components/responses/Problem429'
         '500':
@@ -6624,7 +6779,11 @@ paths:
         - worker
       operationId: WorkerConfigController.get
       summary: GET /worker/config
-      description: UUIDv4 session/incarnation query; one policy snapshot
+      description: >-
+        UUIDv4 session/incarnation query; one policy snapshot. Reconciles a stale
+        machine desired revision to the current fleet policy using the current
+        session and machine revision. Applied revision remains unchanged until
+        the worker acknowledges the policy. Concurrent changes return 409.
       security:
         - WorkerCredential: []
       x-source: src/worker-fleet/control/worker-config.controller.ts
@@ -7950,7 +8109,7 @@ components:
           description: Retained source sample intervals at 44100 Hz. Optional for older workers.
           type: array
           minItems: 1
-          maxItems: 2001
+          maxItems: 3001
           items:
             type: array
             minItems: 2
@@ -8194,6 +8353,28 @@ components:
         - request_id
         - bytes
         - sha256
+    ResetAccountUsageDto:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, period_key, day_key, operation_id, reason]
+      properties:
+        expected_revision:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        period_key:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        day_key:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$'
+        operation_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
     DeleteAccountPolicyOverrideDto:
       type: object
       additionalProperties: false
@@ -8681,6 +8862,50 @@ components:
         - runtime
         - capabilities
         - summary
+    ApproveWorkerCapacityDto:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          operation_id,
+          expected_revision,
+          gpu_id,
+          qualification_confirmed,
+          reason,
+        ]
+      properties:
+        operation_id:
+          type: string
+          format: uuid
+        expected_revision:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740990
+        gpu_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        qualification_confirmed:
+          type: boolean
+          const: true
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    Response_AdminWorkerControlController_approveCapacity:
+      type: object
+      required: [machine_id, revision, max_slots, replayed]
+      properties:
+        machine_id:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+        max_slots:
+          type: integer
+          const: 2
+        replayed:
+          type: boolean
     RequestWorkerBenchmarkDto:
       type: object
       additionalProperties: false
@@ -9119,7 +9344,7 @@ components:
         measured_duration_seconds:
           type: number
           minimum: 0.001
-          maximum: 1200
+          maximum: 1800
       required:
         - request_id
         - worker_id
@@ -9196,11 +9421,11 @@ components:
         bytes:
           type: integer
           minimum: 1
-          maximum: 50000000
+          maximum: 100000000
         duration_seconds:
           type: number
           exclusiveMinimum: 0
-          maximum: 1200
+          maximum: 1800
         sha256:
           type: string
           description: Canonical base64 encoding of exactly 32 SHA-256 bytes.
@@ -9934,7 +10159,7 @@ components:
         comparison_ranges:
           description: Retained source sample intervals at 44100 Hz, in output order. Null for older workers. A position inside a removed gap maps to the next retained interval.
           type: [array, 'null']
-          maxItems: 2001
+          maxItems: 3001
           items:
             type: array
             minItems: 2
@@ -17720,6 +17945,9 @@ components:
               description: UTC RFC 3339 timestamp.
             version:
               type: string
+            signed:
+              description: Signed runtime identity verified before extraction or execution. The envelope matches the machine-update metadata contract.
+              $ref: '#/components/schemas/WorkerSignedRuntimeMetadata'
           required:
             - filename
             - bytes
@@ -18146,6 +18374,68 @@ components:
         - schema_version
         - platform
         - signed
+    WorkerSignedRuntimeMetadata:
+      type: object
+      additionalProperties: true
+      properties:
+        key_id:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+          properties:
+            schemaVersion:
+              type: integer
+              minimum: 1
+              maximum: 1
+            sequence:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            platform:
+              type: string
+              enum:
+                - darwin-arm64
+                - windows-amd64
+            releaseVersion:
+              type: string
+            publishedAt:
+              type: string
+            expiresAt:
+              type: string
+            release:
+              type: object
+              additionalProperties: true
+              properties:
+                filename:
+                  type: string
+                bytes:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                sha256:
+                  type: string
+                contentType:
+                  type: string
+              required:
+                - filename
+                - bytes
+                - sha256
+                - contentType
+          required:
+            - schemaVersion
+            - sequence
+            - platform
+            - releaseVersion
+            - publishedAt
+            - expiresAt
+            - release
+        signature:
+          type: string
+      required:
+        - key_id
+        - metadata
+        - signature
   responses:
     Problem400:
       description: Invalid request or input

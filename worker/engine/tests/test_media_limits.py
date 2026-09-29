@@ -64,7 +64,7 @@ class MediaLimitTests(unittest.TestCase):
 
     def test_tool_timeout_and_normal_output_are_preserved(self) -> None:
         result = _run([sys.executable, "-B", "-c", "print('ok')"], 5, "failed")
-        self.assertEqual(result.stdout, "ok\n")
+        self.assertEqual(result.stdout.splitlines(), ["ok"])
         with self.assertRaisesRegex(MediaProcessingError, "timed out"):
             _run([sys.executable, "-B", "-c", "import time; time.sleep(30)"], 0.1, "timed out")
 

@@ -1,10 +1,7 @@
 import { lstat, open, readFile, unlink, link } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import {
-  DarwinFileLockBusyError,
-  withDarwinFileLock,
-} from "./darwin-file-lock.js";
+import { NativeLockBusyError, withNativeLock } from "./native-lock.js";
 import { setTimeout as delay } from "node:timers/promises";
 
 const WAIT_MS = 5_000;
@@ -14,16 +11,18 @@ export async function withDiagnosticStoreLock<T>(
   root: string,
   operation: () => Promise<T>,
 ): Promise<T> {
-  if (process.platform !== "darwin")
+  if (process.platform !== "darwin" && process.platform !== "win32")
     return await withWriterLock(root, operation);
   const deadline = Date.now() + WAIT_MS;
   while (true) {
     try {
-      return await withDarwinFileLock(join(root, "writer.lock.guard"), () =>
-        withWriterLock(root, operation),
+      return await withNativeLock(join(root, "writer.lock.guard"), () =>
+        process.platform === "win32"
+          ? operation()
+          : withWriterLock(root, operation),
       );
     } catch (error) {
-      if (!(error instanceof DarwinFileLockBusyError)) throw error;
+      if (!(error instanceof NativeLockBusyError)) throw error;
       if (Date.now() >= deadline) throw new Error("Diagnostic history is busy");
       await delay(RETRY_MS);
     }

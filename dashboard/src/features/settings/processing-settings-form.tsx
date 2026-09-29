@@ -21,7 +21,7 @@ const numericFields: Array<{
   {
     key: "monthlyProcessingSeconds",
     label: "Successful processing seconds / UTC month",
-    help: "7,200 seconds equals 120 minutes. Only successful processing is consumed.",
+    help: "36,000 seconds equals 600 minutes. Only successful processing is consumed.",
   },
   {
     key: "maxDurationSeconds",
@@ -31,7 +31,7 @@ const numericFields: Array<{
   {
     key: "maxPreparedAudioBytes",
     label: "Maximum prepared audio bytes",
-    help: "Decimal bytes; the accepted launch default is 50,000,000.",
+    help: "Decimal bytes; 100,000,000 bytes equals 100 MB.",
   },
   {
     key: "dailyUploadGrants",

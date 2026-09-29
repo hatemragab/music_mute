@@ -1,5 +1,11 @@
+import { approveWindowsCapacity } from "./capacity-approval.js";
+import { inspectPreservedWindowsInstallation } from "./user-installation.js";
+import {
+  prepareWindowsUpdatePlan,
+  quarantineWindowsUpdate,
+} from "./update-plan.js";
 import { execFile } from "node:child_process";
-import { lstat, open, readFile } from "node:fs/promises";
+import { lstat, open, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, win32 } from "node:path";
 import {
   runEnrollmentCommand,
@@ -10,6 +16,9 @@ import { parseQualificationEvidence } from "../../enrollment/report-builder.js";
 import { createInstallationReleaseArchive } from "../../enrollment/release-archive.js";
 import { buildWindowsRelease } from "./release-builder.js";
 import { verifyWindowsRelease } from "./release-manifest.js";
+import type { WorkerRecipeId } from "../../../protocol/v1/protocol.js";
+import { summarizeRepeatedBenchmarkReport } from "../shared/file-benchmark.js";
+import { parseCapacityBenchmarkReport } from "../shared/capacity-benchmark.js";
 import {
   createWindowsReleaseLayout,
   createWindowsServiceLayout,
@@ -21,8 +30,11 @@ export const WINDOWS_USAGE = `Usage:
   mw windows package --worker-root <path> --output <path> --version <version> --node-root <path> --python-root <path> --media-root <path> --service-root <path> [--archive <path.zip>]
   mw windows bootstrap --backend-url <api-base-url> --enrollment-file <path> --output <protected-path> --label <name> [--group-id <id>] [--allow-insecure-loopback <true|false>] [--root <path>]
   mw windows verify --release <path>
+  mw windows config-check --root <path> --version <version>
   mw windows service-config --root <path> --version <version> --output <path> [--qualification-fixture <path> --qualification-fixture-sha256 <hex> --qualification-report <path>]
-  mw windows qualification-check --report <path> --fixture-sha256 <hex>`;
+  mw windows qualification-check --report <path> --fixture-sha256 <hex>
+  mw windows benchmark-check --report <path> --fixture-sha256 <hex> --recipe <id> --warmup-runs <0-2> --measured-runs <3-10> --process-wall-seconds <seconds> --output <new-path>
+  mw windows capacity-check --report <path> --fixture-sha256 <hex> --warmup-runs <1-2> --measured-runs <3-10> --output <new-path>`;
 
 type InstallationReceipt = Awaited<
   ReturnType<typeof readInstallationArtifactsReceipt>
@@ -54,6 +66,37 @@ export async function runWindowsCommand(
 ): Promise<void> {
   const action = arguments_[0];
   const flags = parseFlags(arguments_.slice(1));
+  if (action === "update-quarantine") {
+    exactFlags(flags, new Set(["root", "version"]));
+    await quarantineWindowsUpdate(
+      createWindowsServiceLayout(windowsAbsoluteFlag(flags, "root")),
+      requiredFlag(flags, "version"),
+    );
+    console.log(JSON.stringify({ action, status: "ok" }));
+    return;
+  }
+  if (action === "update-plan") {
+    exactFlags(flags, new Set(["root", "request", "release"]));
+    const plan = await prepareWindowsUpdatePlan(
+      createWindowsServiceLayout(windowsAbsoluteFlag(flags, "root")),
+      windowsAbsoluteFlag(flags, "request"),
+      windowsAbsoluteFlag(flags, "release"),
+    );
+    console.log(JSON.stringify(plan));
+    return;
+  }
+  if (action === "config-check") {
+    exactFlags(flags, new Set(["root", "version"]));
+    const result = await inspectPreservedWindowsInstallation(
+      createWindowsServiceLayout(windowsAbsoluteFlag(flags, "root")),
+    );
+    if (result.version !== requiredFlag(flags, "version"))
+      throw new TypeError("Preserved release identity changed");
+    console.log(
+      JSON.stringify({ action, status: "ok", releaseVersion: result.version }),
+    );
+    return;
+  }
   if (action === "package") {
     const packageFlags = new Set([
       "worker-root",
@@ -224,6 +267,25 @@ export async function runWindowsCommand(
       throw new TypeError(
         "Windows qualification flags must be provided together",
       );
+    const capacityMode = flags.get("benchmark-workers") === "2";
+    if (flags.has("benchmark-workers") && !capacityMode)
+      throw new TypeError("Capacity benchmark requires two workers");
+    const benchmarkFlags = [
+      capacityMode ? "benchmark-workers" : "benchmark-recipe",
+      "benchmark-warmup-runs",
+      "benchmark-measured-runs",
+    ];
+    const benchmarkCount = benchmarkFlags.filter((name) =>
+      flags.has(name),
+    ).length;
+    if (
+      benchmarkCount !== 0 &&
+      (benchmarkCount !== benchmarkFlags.length ||
+        qualificationFlagCount !== qualificationFlags.length)
+    )
+      throw new TypeError(
+        "Windows benchmark flags require a complete qualification context",
+      );
     exactFlags(
       flags,
       new Set([
@@ -231,6 +293,7 @@ export async function runWindowsCommand(
         "version",
         "output",
         ...(qualificationFlagCount === 0 ? [] : qualificationFlags),
+        ...(benchmarkCount === 0 ? [] : benchmarkFlags),
       ]),
     );
     const version = requiredFlag(flags, "version");
@@ -254,6 +317,33 @@ export async function runWindowsCommand(
                   "qualification-fixture-sha256",
                 ),
                 reportPath: absoluteFlag(flags, "qualification-report"),
+                ...(benchmarkCount === 0
+                  ? {}
+                  : capacityMode
+                    ? {
+                        capacity: {
+                          warmupRuns: Number(
+                            requiredFlag(flags, "benchmark-warmup-runs"),
+                          ),
+                          measuredRuns: Number(
+                            requiredFlag(flags, "benchmark-measured-runs"),
+                          ),
+                        },
+                      }
+                    : {
+                        benchmark: {
+                          recipeId: requiredFlag(
+                            flags,
+                            "benchmark-recipe",
+                          ) as WorkerRecipeId,
+                          warmupRuns: Number(
+                            requiredFlag(flags, "benchmark-warmup-runs"),
+                          ),
+                          measuredRuns: Number(
+                            requiredFlag(flags, "benchmark-measured-runs"),
+                          ),
+                        },
+                      }),
               },
         ),
         "utf8",
@@ -295,6 +385,113 @@ export async function runWindowsCommand(
         status: "ok",
         action,
         recipeCount: evidence.recipeIds.length,
+      }),
+    );
+    return;
+  }
+  if (action === "capacity-approve") {
+    exactFlags(flags, new Set(["root", "version", "report"]));
+    const result = await approveWindowsCapacity({
+      layout: createWindowsServiceLayout(absoluteFlag(flags, "root")),
+      releaseVersion: requiredFlag(flags, "version"),
+      reportPath: absoluteFlag(flags, "report"),
+    });
+    console.log(JSON.stringify(result));
+    return;
+  }
+  if (action === "capacity-check") {
+    exactFlags(
+      flags,
+      new Set([
+        "report",
+        "fixture-sha256",
+        "warmup-runs",
+        "measured-runs",
+        "output",
+      ]),
+    );
+    const path = absoluteFlag(flags, "report");
+    const info = await lstat(path);
+    if (
+      !info.isFile() ||
+      info.isSymbolicLink() ||
+      info.size < 2 ||
+      info.size > 4 * 1024 * 1024
+    )
+      throw new TypeError("Windows capacity report is unsafe");
+    const capacity = parseCapacityBenchmarkReport(
+      JSON.parse(await readFile(path, "utf8")),
+      {
+        provider: "directml",
+        fixtureDigest: requiredFlag(flags, "fixture-sha256"),
+        warmupRuns: Number(requiredFlag(flags, "warmup-runs")),
+        measuredRuns: Number(requiredFlag(flags, "measured-runs")),
+      },
+    );
+    await writeFile(
+      absoluteFlag(flags, "output"),
+      `${JSON.stringify(capacity)}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
+    console.log(
+      JSON.stringify({
+        status: "ok",
+        action,
+        measuredRuns: capacity.measuredRuns,
+        qualified: capacity.status === "PASS",
+      }),
+    );
+    return;
+  }
+  if (action === "benchmark-check") {
+    exactFlags(
+      flags,
+      new Set([
+        "report",
+        "fixture-sha256",
+        "recipe",
+        "warmup-runs",
+        "measured-runs",
+        "process-wall-seconds",
+        "output",
+      ]),
+    );
+    const path = absoluteFlag(flags, "report");
+    const info = await lstat(path);
+    if (
+      !info.isFile() ||
+      info.isSymbolicLink() ||
+      info.size < 2 ||
+      info.size > 4 * 1024 * 1024
+    )
+      throw new TypeError("Windows benchmark report is unsafe");
+    const report = summarizeRepeatedBenchmarkReport(
+      JSON.parse(await readFile(path, "utf8")),
+      {
+        provider: "directml",
+        groupSize: 1,
+        warmupRuns: Number(requiredFlag(flags, "warmup-runs")),
+        measuredRuns: Number(requiredFlag(flags, "measured-runs")),
+        processWallSeconds: Number(requiredFlag(flags, "process-wall-seconds")),
+      },
+    );
+    if (
+      report.fixtureDigest !== requiredFlag(flags, "fixture-sha256") ||
+      report.recipeId !== requiredFlag(flags, "recipe")
+    )
+      throw new TypeError(
+        "Windows benchmark report does not match the requested input or recipe",
+      );
+    await writeFile(
+      absoluteFlag(flags, "output"),
+      `${JSON.stringify(report)}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
+    console.log(
+      JSON.stringify({
+        status: "ok",
+        action,
+        measuredRuns: report.measuredRuns,
       }),
     );
     return;
@@ -366,23 +563,39 @@ async function privateFileExists(path: string): Promise<boolean> {
   }
 }
 
-async function executeWindowsServiceManager(
+export async function executeWindowsServiceManager(
   scriptPath: string,
   arguments_: string[],
 ): Promise<void> {
+  const systemRoot = process.env.SystemRoot;
+  if (
+    process.platform !== "win32" ||
+    systemRoot === undefined ||
+    !/^[A-Za-z]:\\[^\r\n\0]+$/u.test(systemRoot)
+  )
+    throw new TypeError(
+      "Windows service management requires the native system directory",
+    );
   await new Promise<void>((resolve, reject) => {
     execFile(
-      "powershell.exe",
+      win32.join(
+        systemRoot,
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      ),
       [
         "-NoLogo",
         "-NoProfile",
+        "-NonInteractive",
         "-ExecutionPolicy",
         "RemoteSigned",
         "-File",
         scriptPath,
         ...arguments_,
       ],
-      { windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+      { windowsHide: true, maxBuffer: 4 * 1024 * 1024, timeout: 7_800_000 },
       (error) => {
         if (error) {
           reject(new TypeError("Windows service manager failed"));

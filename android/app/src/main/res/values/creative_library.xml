@@ -33,6 +33,7 @@
     <string name="creative_library_home">Go to Home</string>
     <string name="creative_library_refresh">Refresh</string>
     <string name="creative_library_play">Play</string>
+    <string name="creative_library_play_now">Play now</string>
     <string name="creative_library_pause">Pause</string>
     <string name="creative_library_next">Next track</string>
     <string name="creative_library_previous">Previous track</string>
@@ -42,6 +43,7 @@
     <string name="creative_library_download">Keep offline</string>
     <string name="creative_library_restore">Restore to Library</string>
     <string name="creative_library_hide">Remove from Library</string>
+    <string name="creative_library_hide_title">Remove from Library?</string>
     <string name="creative_library_hide_body">This hides the item in Library. Your downloaded file and account audio are kept. Find it again under Removed.</string>
     <string name="creative_library_more">Audio actions</string>
     <string name="creative_library_now_playing">Now playing</string>

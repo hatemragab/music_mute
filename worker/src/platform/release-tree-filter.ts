@@ -38,6 +38,7 @@ export function shouldCopyReleaseTreeEntry(
     return false;
   const name = basename(path).toLowerCase();
   return (
+    !name.startsWith("._") &&
     name !== ".ds_store" &&
     !DEVELOPMENT_SUFFIXES.some((suffix) => name.endsWith(suffix))
   );

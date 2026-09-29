@@ -21,7 +21,8 @@ afterEach(async () => {
   );
 });
 
-describe("macOS release builder", () => {
+// These fixtures exercise Darwin paths, UID ownership and POSIX permissions.
+describe.skipIf(process.platform !== "darwin")("macOS release builder", () => {
   it("assembles only the compiled app and private runtime inputs", async () => {
     const root = await temporaryRoot();
     const workerRoot = join(root, "worker");

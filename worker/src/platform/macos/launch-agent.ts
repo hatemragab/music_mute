@@ -196,6 +196,14 @@ export class MacLaunchAgentController {
 
   public async bootout(): Promise<void> {
     await this.execute("/bin/launchctl", ["bootout", this.service]);
+    // launchctl can acknowledge removal while the label is still registered.
+    // Do not let qualification, activation or removal race that teardown.
+    const deadline = performance.now() + 30_000;
+    while ((await this.status()).loaded) {
+      if (performance.now() >= deadline)
+        throw new Error("MusicMute worker service did not unload");
+      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+    }
   }
 
   public async kickstart(): Promise<void> {
@@ -220,7 +228,7 @@ export class MacLaunchAgentController {
     } catch (error) {
       const code = (error as { code?: unknown }).code;
       // launchctl exits with EX_NOTFOUND (113) when the label is absent.
-      if (code === "ESRCH" || code === "ENOENT" || code === 113)
+      if (code === "ESRCH" || code === 113)
         return { loaded: false, running: false };
       throw error;
     }

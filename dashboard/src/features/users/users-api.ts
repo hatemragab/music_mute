@@ -101,3 +101,19 @@ export const clearAccountPolicyOverride = (
       ),
     readResult: () => getAccountUsage(client, id),
   }).then(() => getAccountUsage(client, id));
+
+export const resetAccountUsage = (
+  client: ApiClient,
+  id: string,
+  input: RevisionCommand & { periodKey: string; dayKey: string },
+) =>
+  submitWithReceiptReadBack<import("@/api/contracts").AccountUsage>({
+    client,
+    operationId: input.operationId,
+    submit: () =>
+      client.post(
+        `/admin/users/${encodeURIComponent(id)}/account-usage-resets`,
+        input,
+      ),
+    readResult: () => getAccountUsage(client, id),
+  });

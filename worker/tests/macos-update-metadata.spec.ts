@@ -1,13 +1,20 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  canonicalMacUpdateMetadata,
-  parseMacUpdateCandidate,
-  verifyMacUpdateMetadata,
-  type MacUpdateMetadata,
-} from "../src/platform/macos/update-metadata.js";
+  canonicalUpdateMetadata,
+  parseUpdateCandidate as parseCandidate,
+  verifyUpdateMetadata as verifyMetadata,
+  type UpdateMetadata,
+} from "../src/platform/shared/update-metadata.js";
 
-const metadata: MacUpdateMetadata = {
+const parseUpdateCandidate = (value: unknown) =>
+  parseCandidate(value, "darwin-arm64");
+const verifyUpdateMetadata = (
+  value: unknown,
+  options: Omit<Parameters<typeof verifyMetadata>[1], "platform">,
+) => verifyMetadata(value, { ...options, platform: "darwin-arm64" });
+
+const metadata: UpdateMetadata = {
   schemaVersion: 1,
   sequence: 7,
   platform: "darwin-arm64",
@@ -33,12 +40,12 @@ describe("signed macOS update metadata", () => {
         expiresAt: "2099-01-01T00:00:00.000Z",
       },
     };
-    expect(parseMacUpdateCandidate(candidate)).toMatchObject({
+    expect(parseUpdateCandidate(candidate)).toMatchObject({
       signed: { opaque: true },
       grant: { url: candidate.grant.url },
     });
     expect(
-      parseMacUpdateCandidate({
+      parseUpdateCandidate({
         ...candidate,
         future_field: "new server field",
         grant: { ...candidate.grant, future_field: true },
@@ -48,14 +55,14 @@ describe("signed macOS update metadata", () => {
       grant: candidate.grant,
     });
     expect(
-      parseMacUpdateCandidate({
+      parseUpdateCandidate({
         schemaVersion: 1,
         platform: "darwin-arm64",
         signed: { opaque: true },
       }),
     ).toEqual({ signed: { opaque: true } });
     expect(() =>
-      parseMacUpdateCandidate({
+      parseUpdateCandidate({
         ...candidate,
         grant: { ...candidate.grant, url: "http://storage.invalid/release" },
       }),
@@ -65,7 +72,7 @@ describe("signed macOS update metadata", () => {
   it("accepts an Ed25519 signature from the selected trusted key", () => {
     const fixture = signed(metadata);
     expect(
-      verifyMacUpdateMetadata(fixture.envelope, {
+      verifyUpdateMetadata(fixture.envelope, {
         publicKeys: { "release-2026": fixture.publicKey },
         minimumSequence: 6,
         now: new Date("2026-09-22T00:00:00.000Z"),
@@ -81,7 +88,7 @@ describe("signed macOS update metadata", () => {
       now: new Date("2026-09-22T00:00:00.000Z"),
     };
     expect(() =>
-      verifyMacUpdateMetadata(
+      verifyUpdateMetadata(
         {
           ...fixture.envelope,
           metadata: { ...metadata, releaseVersion: "9.9.9" },
@@ -90,16 +97,16 @@ describe("signed macOS update metadata", () => {
       ),
     ).toThrow("signature does not match");
     expect(() =>
-      verifyMacUpdateMetadata({ ...fixture.envelope, extra: true }, options),
+      verifyUpdateMetadata({ ...fixture.envelope, extra: true }, options),
     ).toThrow("unknown fields");
     expect(() =>
-      verifyMacUpdateMetadata(fixture.envelope, {
+      verifyUpdateMetadata(fixture.envelope, {
         ...options,
         now: new Date("2026-09-24T00:00:00.000Z"),
       }),
     ).toThrow("validity window");
     expect(() =>
-      verifyMacUpdateMetadata(fixture.envelope, {
+      verifyUpdateMetadata(fixture.envelope, {
         ...options,
         minimumSequence: 8,
       }),
@@ -109,7 +116,7 @@ describe("signed macOS update metadata", () => {
   it("rejects a valid signature from an untrusted key", () => {
     const fixture = signed(metadata);
     expect(() =>
-      verifyMacUpdateMetadata(fixture.envelope, {
+      verifyUpdateMetadata(fixture.envelope, {
         publicKeys: {},
         minimumSequence: 0,
         now: new Date("2026-09-22T00:00:00.000Z"),
@@ -118,11 +125,11 @@ describe("signed macOS update metadata", () => {
   });
 });
 
-function signed(value: MacUpdateMetadata) {
+function signed(value: UpdateMetadata) {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   const signature = sign(
     null,
-    Buffer.from(canonicalMacUpdateMetadata(value), "utf8"),
+    Buffer.from(canonicalUpdateMetadata(value), "utf8"),
     privateKey,
   ).toString("base64url");
   return {

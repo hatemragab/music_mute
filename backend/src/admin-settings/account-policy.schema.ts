@@ -24,21 +24,21 @@ export interface AccountPolicyValues {
 
 export const DEFAULT_ACCOUNT_POLICY_VALUES: Readonly<AccountPolicyValues> =
   Object.freeze({
-    monthlyProcessingSeconds: 7_200,
-    maxDurationSeconds: 1_200,
-    maxPreparedAudioBytes: 50_000_000,
-    dailyUploadGrants: 30,
-    monthlyUploadGrants: 200,
-    monthlyConfirmedUploadBytes: 1_000_000_000,
+    monthlyProcessingSeconds: 36_000,
+    maxDurationSeconds: 1_800,
+    maxPreparedAudioBytes: 100_000_000,
+    dailyUploadGrants: 100,
+    monthlyUploadGrants: 1_000,
+    monthlyConfirmedUploadBytes: 5_000_000_000,
     maxWaitingJobs: 20,
     maxProcessingJobs: 1,
     maxInfrastructureAttempts: 3,
     maxClientInputAttempts: 5,
-    monthlyDownloadGrants: 150,
-    monthlyEstimatedDownloadBytes: 10_000_000_000,
-    maxRetainedOutputBytes: 1_000_000_000,
+    monthlyDownloadGrants: 1_000,
+    monthlyEstimatedDownloadBytes: 50_000_000_000,
+    maxRetainedOutputBytes: 5_000_000_000,
     signedUrlTtlSeconds: 600,
-    monthlyServiceOutboundBytes: 80_000_000_000,
+    monthlyServiceOutboundBytes: 500_000_000_000,
     deletionGraceHours: 15 * 24,
   });
 export type AccountPolicyValueKey = keyof AccountPolicyValues;

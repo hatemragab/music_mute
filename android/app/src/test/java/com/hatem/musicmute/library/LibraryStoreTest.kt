@@ -56,6 +56,28 @@ class LibraryStoreTest {
     }
 
     @Test
+    fun renamingALibraryTrackPreservesFlagsAndOtherAccounts() = runTest {
+        val root = kotlin.io.path.createTempDirectory().toFile()
+        val storeJob = SupervisorJob()
+        val store = ProcessingStore(root, CoroutineScope(storeJob + Dispatchers.IO))
+        val original = job("shared-id")
+        store.updateLibraryJobs("owner", listOf(original))
+        store.updateLibraryJobs("other", listOf(original))
+        store.updateLibraryFlags("owner", original.id, starred = true, hidden = true)
+
+        store.updateLibraryJob("owner", original.copy(displayName = "Renamed audio"))
+
+        val renamed = store.library("owner").first().single()
+        assertEquals("Renamed audio", renamed.job.displayName)
+        assertTrue(renamed.starred)
+        assertTrue(renamed.hidden)
+        assertEquals(original, store.library("other").first().single().job)
+        storeJob.cancelAndJoin()
+        val reopened = ProcessingStore(root, backgroundScope).library("owner").first().single()
+        assertEquals(renamed, reopened)
+    }
+
+    @Test
     fun twoConcurrentStarTogglesCancelEachOtherWithoutWaitingForUiEmission() = runTest {
         val store = ProcessingStore(kotlin.io.path.createTempDirectory().toFile(), backgroundScope)
         store.updateLibraryJobs("owner", listOf(job("starred")))

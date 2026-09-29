@@ -20,6 +20,7 @@ import { workerError } from '../worker-errors.js';
 import { sanitizeWorkerDiagnosticLine } from '../telemetry/worker-diagnostic-sanitizer.js';
 import { WorkerCommand } from './worker-command.schema.js';
 import type {
+  ApproveWorkerCapacityDto,
   AdminWorkerListQueryDto,
   AdminWorkerPageQueryDto,
   ApplyWorkerConfigDto,
@@ -88,6 +89,42 @@ export class WorkerControlService {
       .maxTimeMS(2000)
       .lean();
     if (!policy) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+    // Machines enrolled after a policy change start with revision zero. Reconcile
+    // their desired policy here as well as at API startup, without acknowledging
+    // it on the worker's behalf. Fence concurrent policy/session changes.
+    if (
+      machine.policyRevision > policy.revision ||
+      machine.desiredRevision > policy.revision ||
+      machine.appliedRevision > policy.revision
+    )
+      throw workerError('WORKER_CONFLICT');
+    if (
+      machine.policyRevision !== policy.revision ||
+      machine.desiredRevision !== policy.revision
+    ) {
+      const reconciled = await this.machines.updateOne(
+        {
+          _id: machine._id,
+          revision: machine.revision,
+          status: trusted({ $ne: 'revoked' }),
+          policyRevision: machine.policyRevision,
+          desiredRevision: machine.desiredRevision,
+          'currentSession.sessionId': query.sessionId,
+          'currentSession.incarnation': query.incarnation,
+        },
+        {
+          $set: {
+            policyRevision: policy.revision,
+            desiredRevision: policy.revision,
+          },
+          $inc: { revision: 1 },
+        },
+        { runValidators: true },
+      );
+      if (reconciled.modifiedCount !== 1) throw workerError('WORKER_CONFLICT');
+      machine.policyRevision = policy.revision;
+      machine.desiredRevision = policy.revision;
+    }
     const commands = await this.commands
       .find({
         machineId: machine._id,
@@ -532,6 +569,85 @@ export class WorkerControlService {
     );
     void this.hints?.publish('policy_changed').catch(() => undefined);
     return { revision: result.receipt.revision, replayed: result.replayed };
+  }
+
+  async approveCapacity(
+    actor: AdminActor,
+    id: string,
+    dto: ApproveWorkerCapacityDto,
+  ) {
+    if (!isUUID(id, '4') || dto.qualificationConfirmed !== true)
+      throw adminError('INVALID_REQUEST');
+    const result = await this.operations.run(
+      actor,
+      {
+        operationId: dto.operationId,
+        route: 'POST /admin/worker-fleet/machines/:id/capacity-approvals',
+        request: {
+          id,
+          expectedRevision: dto.expectedRevision,
+          gpuId: dto.gpuId,
+          qualificationConfirmed: true,
+          maxSlots: 2,
+        },
+        action: 'workers.machine.capacity.approve',
+        resourceType: 'worker_machine',
+        reason: dto.reason,
+      },
+      async (session) => {
+        const machine = await this.machines
+          .findById(id)
+          .session(session)
+          .lean();
+        if (!machine) throw adminError('RESOURCE_NOT_FOUND');
+        if (machine.revision !== dto.expectedRevision)
+          throw adminError('REVISION_CONFLICT');
+        if (machine.status === 'revoked') throw adminError('INVALID_REQUEST');
+        const matching = machine.approvedCapabilities.filter(
+          (c) => c.gpuId === dto.gpuId,
+        );
+        if (matching.length !== 1) throw adminError('INVALID_REQUEST');
+        // This only increases an existing approved GPU's ceiling. Recipe/provider
+        // eligibility, fleet policy and the runtime's bound qualification remain gates.
+        if (matching[0].maxSlots === 2)
+          return {
+            resourceId: id,
+            previousRevision: machine.revision,
+            revision: machine.revision,
+            value: null,
+          };
+        if (matching[0].maxSlots !== 1) throw adminError('INVALID_REQUEST');
+        const updated = await this.machines.updateOne(
+          {
+            _id: id,
+            revision: machine.revision,
+            status: trusted({ $ne: 'revoked' }),
+          },
+          {
+            $set: {
+              approvedCapabilities: machine.approvedCapabilities.map((c) =>
+                c.gpuId === dto.gpuId ? { ...c, maxSlots: 2 } : c,
+              ),
+            },
+            $inc: { revision: 1 },
+          },
+          { session, runValidators: true },
+        );
+        if (updated.modifiedCount !== 1) throw adminError('REVISION_CONFLICT');
+        return {
+          resourceId: id,
+          previousRevision: machine.revision,
+          revision: machine.revision + 1,
+          value: null,
+        };
+      },
+    );
+    return {
+      machineId: id,
+      revision: result.receipt.revision,
+      maxSlots: 2,
+      replayed: result.replayed,
+    };
   }
 
   private async requestCommand(

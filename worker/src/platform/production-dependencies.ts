@@ -1,9 +1,28 @@
 import { execFile } from "node:child_process";
 import { cp, readFile, readdir, rm, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { win32, join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+
+export function pnpmInvocation(
+  arguments_: string[],
+  platform = process.platform,
+  npmExecPath = process.env.npm_execpath,
+): { command: string; arguments: string[] } {
+  if (platform !== "win32") return { command: "pnpm", arguments: arguments_ };
+  // Windows cannot exec a .cmd shim without a shell. Use the pinned pnpm JS
+  // entry point provided by `pnpm run`; paths never pass through cmd.exe.
+  if (
+    !npmExecPath ||
+    !win32.isAbsolute(npmExecPath) ||
+    !["pnpm.cjs", "pnpm.js"].includes(win32.basename(npmExecPath))
+  )
+    throw new Error(
+      "Build Windows releases using pnpm run package:windows so its Node entry point is available",
+    );
+  return { command: process.execPath, arguments: [npmExecPath, ...arguments_] };
+}
 
 /** Install the locked, production-only Node closure inside the release tree. */
 export async function installProductionDependencies(
@@ -16,18 +35,19 @@ export async function installProductionDependencies(
   if (Object.keys(manifest.dependencies ?? {}).length === 0) return;
   await cp(join(workerRoot, "pnpm-lock.yaml"), join(appRoot, "pnpm-lock.yaml"));
   try {
-    await execFileAsync(
-      "pnpm",
-      [
-        "install",
-        "--prod",
-        "--offline",
-        "--frozen-lockfile",
-        "--ignore-scripts",
-        "--config.node-linker=hoisted",
-      ],
-      { cwd: appRoot, timeout: 120_000, maxBuffer: 1024 * 1024 },
-    );
+    const invocation = pnpmInvocation([
+      "install",
+      "--prod",
+      "--offline",
+      "--frozen-lockfile",
+      "--ignore-scripts",
+      "--config.node-linker=hoisted",
+    ]);
+    await execFileAsync(invocation.command, invocation.arguments, {
+      cwd: appRoot,
+      timeout: 120_000,
+      maxBuffer: 1024 * 1024,
+    });
     // The Windows release manifest rejects links; hoisted installs only create
     // unused executable links under .bin, so omit those from both platforms.
     await rm(join(appRoot, "node_modules", ".bin"), {
@@ -76,7 +96,8 @@ export async function uploadWorkerSourceMaps(
   const environment = { ...process.env, SENTRY_AUTH_TOKEN: token };
   const execute = async (arguments_: string[]) => {
     try {
-      await execFileAsync("pnpm", ["exec", "sentry-cli", ...arguments_], {
+      const invocation = pnpmInvocation(["exec", "sentry-cli", ...arguments_]);
+      await execFileAsync(invocation.command, invocation.arguments, {
         cwd: workerRoot,
         env: environment,
         timeout: 120_000,

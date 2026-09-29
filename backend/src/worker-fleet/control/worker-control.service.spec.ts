@@ -473,6 +473,90 @@ describe('worker control plane', () => {
     );
   });
 
+  it('offers the current policy to a newly enrolled machine without acknowledging it', async () => {
+    const f = fixture();
+    f.machines.findById.mockReturnValue(
+      query(
+        currentMachine({
+          policyRevision: 0,
+          desiredRevision: 0,
+          appliedRevision: 0,
+        }),
+      ),
+    );
+    f.policies.findById.mockReturnValue(query(policy()));
+    f.machines.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    f.commands.find.mockReturnValue(query([]));
+
+    const result = await f.service.config(
+      { kind: 'machine', subjectId: machineId, credential: 'x'.repeat(43) },
+      { sessionId, incarnation },
+    );
+
+    expect(result).toMatchObject({
+      desiredRevision: 3,
+      appliedRevision: 0,
+      claimAllowed: false,
+      policy: { revision: 3 },
+    });
+    expect(f.machines.updateOne).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        _id: machineId,
+        revision: 4,
+        policyRevision: 0,
+        desiredRevision: 0,
+        'currentSession.sessionId': sessionId,
+        'currentSession.incarnation': incarnation,
+      }),
+      {
+        $set: { policyRevision: 3, desiredRevision: 3 },
+        $inc: { revision: 1 },
+      },
+      { runValidators: true },
+    );
+  });
+
+  it('rejects reconciliation after a concurrent machine or session change', async () => {
+    const f = fixture();
+    f.machines.findById.mockReturnValue(
+      query(
+        currentMachine({
+          policyRevision: 0,
+          desiredRevision: 0,
+          appliedRevision: 0,
+        }),
+      ),
+    );
+    f.policies.findById.mockReturnValue(query(policy()));
+    f.machines.updateOne.mockResolvedValue({ modifiedCount: 0 });
+    await expect(
+      f.service.config(
+        { kind: 'machine', subjectId: machineId, credential: 'x'.repeat(43) },
+        { sessionId, incarnation },
+      ),
+    ).rejects.toMatchObject({ response: { code: 'WORKER_CONFLICT' } });
+    expect(f.commands.find).not.toHaveBeenCalled();
+  });
+
+  it.each(['policyRevision', 'desiredRevision', 'appliedRevision'])(
+    'does not downgrade a newer %s using a stale policy read',
+    async (field) => {
+      const f = fixture();
+      f.machines.findById.mockReturnValue(
+        query(currentMachine({ [field]: 4 })),
+      );
+      f.policies.findById.mockReturnValue(query(policy()));
+      await expect(
+        f.service.config(
+          { kind: 'machine', subjectId: machineId, credential: 'x'.repeat(43) },
+          { sessionId, incarnation },
+        ),
+      ).rejects.toMatchObject({ response: { code: 'WORKER_CONFLICT' } });
+      expect(f.machines.updateOne).toHaveBeenCalledTimes(1);
+      expect(f.commands.find).not.toHaveBeenCalled();
+    },
+  );
+
   it('acknowledges a policy revision with revision-fenced session identity', async () => {
     const f = fixture();
     f.machines.findById.mockReturnValue(
@@ -607,5 +691,95 @@ describe('worker control plane', () => {
       f.service.completeCommand(principal, commandId, dto),
     ).resolves.toEqual({ commandId, state: 'succeeded', replayed: true });
     expect(f.commands.updateOne).toHaveBeenCalledOnce();
+  });
+  const capacityDto = {
+    operationId: '1d1fe535-cd14-4687-be68-c4ab87f410fe',
+    expectedRevision: 4,
+    gpuId: 'gpu0',
+    qualificationConfirmed: true as const,
+    reason: 'Reviewed passing installed two-worker qualification',
+  };
+  const capability = {
+    platform: 'windows-amd64',
+    provider: 'directml',
+    gpuId: 'gpu0',
+    recipeIds: ['kim-vocals-v2'],
+    maxSlots: 1,
+  };
+  it('audits a fenced capacity increase without changing recipes or another GPU', async () => {
+    const f = fixture();
+    const other = { ...capability, gpuId: 'gpu1' };
+    f.machines.findById.mockReturnValue(
+      query(currentMachine({ approvedCapabilities: [capability, other] })),
+    );
+    f.machines.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    await expect(
+      f.service.approveCapacity(actor, machineId, capacityDto),
+    ).resolves.toEqual({
+      machineId,
+      revision: 5,
+      maxSlots: 2,
+      replayed: false,
+    });
+    expect(f.machines.updateOne).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: machineId, revision: 4 }),
+      {
+        $set: { approvedCapabilities: [{ ...capability, maxSlots: 2 }, other] },
+        $inc: { revision: 1 },
+      },
+      expect.objectContaining({
+        runValidators: true,
+        session: expect.anything(),
+      }),
+    );
+    expect(f.operations.run).toHaveBeenCalledWith(
+      actor,
+      expect.objectContaining({
+        action: 'workers.machine.capacity.approve',
+        reason: capacityDto.reason,
+      }),
+      expect.any(Function),
+    );
+  });
+  it.each([
+    { status: 'revoked' },
+    { revision: 5 },
+    { approvedCapabilities: [] },
+    { approvedCapabilities: [capability, capability] },
+  ])('rejects ineligible or stale capacity approval %j', async (overrides) => {
+    const f = fixture();
+    f.machines.findById.mockReturnValue(
+      query(
+        currentMachine({ approvedCapabilities: [capability], ...overrides }),
+      ),
+    );
+    await expect(
+      f.service.approveCapacity(actor, machineId, capacityDto),
+    ).rejects.toThrow();
+    expect(f.machines.updateOne).not.toHaveBeenCalled();
+  });
+  it('rejects a concurrent change during capacity approval', async () => {
+    const f = fixture();
+    f.machines.findById.mockReturnValue(
+      query(currentMachine({ approvedCapabilities: [capability] })),
+    );
+    f.machines.updateOne.mockResolvedValue({ modifiedCount: 0 });
+    await expect(
+      f.service.approveCapacity(actor, machineId, capacityDto),
+    ).rejects.toThrow('Revision conflict');
+  });
+  it('leaves an already approved GPU unchanged', async () => {
+    const f = fixture();
+    f.machines.findById.mockReturnValue(
+      query(
+        currentMachine({
+          approvedCapabilities: [{ ...capability, maxSlots: 2 }],
+        }),
+      ),
+    );
+    await expect(
+      f.service.approveCapacity(actor, machineId, capacityDto),
+    ).resolves.toMatchObject({ revision: 4, maxSlots: 2 });
+    expect(f.machines.updateOne).not.toHaveBeenCalled();
   });
 });

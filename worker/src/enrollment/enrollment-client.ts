@@ -97,6 +97,7 @@ export interface InstallationArtifactGrant {
 
 export interface InstallationReleaseGrant extends InstallationArtifactGrant {
   version: string;
+  signed?: unknown;
 }
 
 export interface InstallationModelDescriptor {
@@ -684,6 +685,7 @@ function parseArtifactGrant(
   return {
     version: boundedText(record.version, "installation release version", 100),
     ...artifact,
+    ...(record.signed === undefined ? {} : { signed: record.signed }),
   };
 }
 

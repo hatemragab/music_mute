@@ -17,6 +17,7 @@ from musicmute_engine.separator import (
     _uvr_mps_model,
     _write_vocal_wav,
     _separate_primary_vocals,
+    _load_verified_mdx,
     SeparatorError,
 )
 
@@ -228,6 +229,7 @@ class SeparatorIsolationTests(unittest.TestCase):
                 "musicmute_engine.separator._uvr_mps_model",
                 return_value=nullcontext(),
             ),
+            patch("musicmute_engine.separator._load_verified_mdx"),
         ):
             separator = KimSeparator(
                 "mps", Path(directory) / "Kim_Vocal_2.onnx", on_startup_stage=stages.append
@@ -248,6 +250,54 @@ class SeparatorIsolationTests(unittest.TestCase):
         self.assertAlmostEqual(KIM_VOCAL_2_OVERLAP, 0.029411764705882353)
         self.assertEqual(separator._separator.model_instance.run_calls, 1)
         self.assertEqual(stages, ["warming"])
+
+    def test_verified_model_load_uses_pinned_metadata_without_network_or_discovery(self) -> None:
+        from audio_separator.separator import Separator
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("socket.socket.connect", side_effect=AssertionError("Network is forbidden")),
+            patch("requests.sessions.Session.request", side_effect=AssertionError("Network is forbidden")),
+            patch.object(Separator, "load_model", side_effect=AssertionError("Model discovery is forbidden")),
+            patch("audio_separator.separator.architectures.mdx_separator.MDXSeparator") as constructor,
+        ):
+            separator = Separator(model_file_dir=directory, output_dir=directory,
+                                  output_single_stem="Vocals", use_soundfile=True)
+            model = constructor.return_value
+            model._execution_policy_resolved = False
+            path = Path(directory) / "Kim_Vocal_2.onnx"
+            _load_verified_mdx(separator, path)
+            config = constructor.call_args.kwargs["common_config"]
+            self.assertEqual(config["model_data"], {
+                "compensate": 1.009, "mdx_dim_f_set": 3072,
+                "mdx_dim_t_set": 8, "mdx_n_fft_scale_set": 7680,
+                "primary_stem": "Vocals",
+            })
+            self.assertEqual(config["model_path"], str(path))
+            self.assertEqual(config["torch_device"], separator.torch_device)
+            self.assertEqual(config["onnx_execution_provider"], separator.onnx_execution_provider)
+            self.assertIs(separator.model_instance, model)
+            model.resolve_execution_policy.assert_called_once_with("mdx")
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_direct_mdx_configuration_matches_pinned_upstream_loader(self) -> None:
+        from audio_separator.separator import Separator
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("audio_separator.separator.architectures.mdx_separator.MDXSeparator") as constructor,
+        ):
+            separator = Separator(model_file_dir=directory, output_dir=directory,
+                                  output_single_stem="Vocals", use_soundfile=True)
+            path = Path(directory) / "Kim_Vocal_2.onnx"
+            _load_verified_mdx(separator, path)
+            direct = constructor.call_args.kwargs
+            with (
+                patch.object(separator, "download_model_files", return_value=(path.name, "MDX", "Kim Vocal 2", str(path), None)),
+                patch.object(separator, "load_model_data_using_hash", return_value=direct["common_config"]["model_data"].copy()),
+            ):
+                separator.load_model(model_filename=path.name)
+            self.assertEqual(constructor.call_args.kwargs, direct)
 
     def test_vocal_writer_pins_pcm16_even_for_mp3_input(self) -> None:
         from types import SimpleNamespace

@@ -224,7 +224,10 @@ describe("worker child lifecycle", () => {
     await child.start();
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     await expect(child.request("ping", {})).rejects.toThrow(
-      /Worker child (pipe|is not running|exited)/u,
+      process.platform === "win32"
+        ? /Worker child (pipe|is not running|exited|ping timed out)/u
+        : /Worker child (pipe|is not running|exited)/u,
     );
+    await expect.poll(() => child!.isAlive(), { timeout: 2_000 }).toBe(false);
   });
 });

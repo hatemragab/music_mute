@@ -1,3 +1,4 @@
+import { adminError } from '../admin/admin-errors.js';
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -208,6 +209,95 @@ export class ProcessingUsageService {
       maxProcessingJobs: effective.values.maxProcessingJobs,
       availability,
       checkedAt: now.toISOString(),
+    };
+  }
+
+  async resetUsage(
+    accountId: Types.ObjectId,
+    expected: { expectedRevision: number; periodKey: string; dayKey: string },
+    session: ClientSession,
+    now = new Date(),
+  ) {
+    this.assertTransaction(session);
+    const month = utcMonthPeriod(now);
+    const day = utcDayPeriod(now);
+    if (expected.periodKey !== month.key || expected.dayKey !== day.key)
+      throw adminError('REVISION_CONFLICT');
+    // The caller holds the account admission fence. Never erase live holds:
+    // their later settlement must still subtract from the original counters.
+    if (
+      await this.reservations
+        .exists({ accountId, state: 'reserved' })
+        .session(session)
+    )
+      throw adminError('USAGE_RESET_ACTIVE_WORK');
+    if (
+      await this.jobs
+        .exists({
+          userId: accountId,
+          deletedAt: null,
+          status: trusted({
+            $in: [
+              ...WAITING_CAPACITY_STATUSES,
+              ...PROCESSING_CAPACITY_STATUSES,
+            ],
+          }),
+        })
+        .session(session)
+    )
+      throw adminError('USAGE_RESET_ACTIVE_WORK');
+    const periodId = usagePeriodId(accountId, month.key);
+    const dayId = usageDayId(accountId, day.key);
+    await this.ensurePeriod(accountId, periodId, month, session, now);
+    await this.ensureDay(accountId, dayId, day, session, now);
+    const before = await this.periods
+      .findById(periodId)
+      .session(session)
+      .lean();
+    const dailyBefore = await this.dailyPeriods
+      .findById(dayId)
+      .session(session)
+      .lean();
+    if (!before || before.revision !== expected.expectedRevision)
+      throw adminError('REVISION_CONFLICT');
+    if (before.processingReservationCount || before.processingReservedSeconds)
+      throw adminError('USAGE_RESET_ACTIVE_WORK');
+    const counters = {
+      processingUsedSeconds: 0,
+      processingReleasedSeconds: 0,
+      uploadGrants: 0,
+      confirmedUploadBytes: 0,
+      downloadGrants: 0,
+      estimatedDownloadBytes: 0,
+    };
+    const updated = await this.periods.updateOne(
+      { _id: periodId, revision: expected.expectedRevision },
+      { $set: { ...counters, lastMutationAt: now }, $inc: { revision: 1 } },
+      { session, runValidators: true },
+    );
+    if (updated.modifiedCount !== 1) throw adminError('REVISION_CONFLICT');
+    await this.dailyPeriods.updateOne(
+      { _id: dayId },
+      { $set: { uploadGrants: 0, lastMutationAt: now }, $inc: { revision: 1 } },
+      { session, runValidators: true },
+    );
+    return {
+      previousRevision: before.revision,
+      revision: before.revision + 1,
+      processingChanges: [
+        ...Object.entries(counters).map(([field, after]) => ({
+          field,
+          before: before[field as keyof typeof counters],
+          after,
+        })),
+        {
+          field: 'dailyUsedUploadGrants',
+          before: dailyBefore?.uploadGrants ?? 0,
+          after: 0,
+        },
+        { field: 'usagePeriodKey', before: month.key, after: month.key },
+        { field: 'usageDayKey', before: day.key, after: day.key },
+      ],
     };
   }
 

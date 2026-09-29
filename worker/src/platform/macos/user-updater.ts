@@ -1,4 +1,10 @@
+import {
+  BUILT_IN_UPDATE_TRUST,
+  parseUpdateTrust,
+} from "../shared/update-trust.js";
+import { compareWorkerReleaseVersions } from "../shared/release-version.js";
 import { createHash, randomUUID } from "node:crypto";
+import { retainSlotIdentities } from "../shared/slot-identities.js";
 import { createReadStream } from "node:fs";
 import {
   chmod,
@@ -36,11 +42,11 @@ import {
   stageMacUserRelease,
 } from "./user-release.js";
 import {
-  verifyMacUpdateMetadata,
-  type MacUpdateCandidate,
-  type MacUpdateMetadata,
-} from "./update-metadata.js";
-import { waitForLocalDrain } from "./local-drain.js";
+  verifyUpdateMetadata,
+  type UpdateCandidate,
+  type UpdateMetadata,
+} from "../shared/update-metadata.js";
+import { waitForLocalDrain } from "../shared/local-drain.js";
 import { verifyMacRelease } from "./release-manifest.js";
 import { inspectMacUserHealth } from "./user-health.js";
 import { MacCommandBusyError, withMacUserCommandLock } from "./command-lock.js";
@@ -89,14 +95,6 @@ export async function recoverMacUpdateAtStartup(
   if (restart !== undefined) throw new MacUpdateStartupRecovered(restart);
 }
 
-export const BUILT_IN_MAC_UPDATE_TRUST: Readonly<Record<string, string>> =
-  Object.freeze({
-    "worker-release-2026-09": `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAxqTXgndqBXIAA8Glr46bf0fK4eppjHhgLKoqhjghoVY=
------END PUBLIC KEY-----
-`,
-  });
-
 interface UpdateState {
   schemaVersion: 1;
   highestSequence: number;
@@ -119,57 +117,16 @@ export interface MacUserUpdateCheck {
   availableVersion: string;
   sequence: number;
   updateAvailable: boolean;
-  candidate: MacUpdateCandidate;
-  metadata: MacUpdateMetadata;
+  candidate: UpdateCandidate;
+  metadata: UpdateMetadata;
   state: UpdateState;
   installationState: Record<string, unknown>;
-}
-
-export function compareWorkerReleaseVersions(
-  left: string,
-  right: string,
-): number {
-  const semver =
-    /^(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?(?:\.(0|[1-9]\d*))?(?:-([0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*))?(?:\+[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*)?$/u;
-  const leftMatch = semver.exec(left);
-  const rightMatch = semver.exec(right);
-  if (leftMatch && rightMatch) {
-    for (let index = 1; index <= 3; index++) {
-      const comparison = compareNumericIdentifier(
-        leftMatch[index] ?? "0",
-        rightMatch[index] ?? "0",
-      );
-      if (comparison !== 0) return comparison;
-    }
-    const leftPre = leftMatch[4];
-    const rightPre = rightMatch[4];
-    if (leftPre === undefined || rightPre === undefined) {
-      if (leftPre === rightPre) return 0;
-      return leftPre === undefined ? 1 : -1;
-    }
-    const leftParts = leftPre.split(/[._-]/u);
-    const rightParts = rightPre.split(/[._-]/u);
-    for (
-      let index = 0;
-      index < Math.max(leftParts.length, rightParts.length);
-      index++
-    ) {
-      const leftPart = leftParts[index];
-      const rightPart = rightParts[index];
-      if (leftPart === undefined || rightPart === undefined)
-        return leftPart === rightPart ? 0 : leftPart === undefined ? -1 : 1;
-      const comparison = comparePrereleaseIdentifier(leftPart, rightPart);
-      if (comparison !== 0) return comparison;
-    }
-    return 0;
-  }
-  return compareNaturalVersion(left, right);
 }
 
 export async function checkMacUserUpdate(
   layout: MacUserLayout,
   dependencies: {
-    candidate?: () => Promise<MacUpdateCandidate>;
+    candidate?: () => Promise<UpdateCandidate>;
     now?: Date;
     download?: boolean;
   } = {},
@@ -189,9 +146,10 @@ export async function checkMacUserUpdate(
         baseUrl: config.backendBaseUrl,
         credential: config.credential,
         allowInsecureLoopback: config.allowInsecureLoopback,
-      }).macUpdateCandidate(dependencies.download === true))
+      }).updateCandidate("darwin-arm64", dependencies.download === true))
   )();
-  const metadata = verifyMacUpdateMetadata(candidate.signed, {
+  const metadata = verifyUpdateMetadata(candidate.signed, {
+    platform: "darwin-arm64",
     publicKeys: trust,
     minimumSequence: state.highestSequence,
     ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
@@ -211,45 +169,6 @@ export async function checkMacUserUpdate(
   };
 }
 
-function comparePrereleaseIdentifier(left: string, right: string): number {
-  const leftNumeric = /^\d+$/u.test(left);
-  const rightNumeric = /^\d+$/u.test(right);
-  if (leftNumeric && rightNumeric) return compareNumericIdentifier(left, right);
-  if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
-  return left === right ? 0 : left < right ? -1 : 1;
-}
-
-function compareNumericIdentifier(left: string, right: string): number {
-  const leftNumber = BigInt(left);
-  const rightNumber = BigInt(right);
-  return leftNumber === rightNumber ? 0 : leftNumber < rightNumber ? -1 : 1;
-}
-
-function compareNaturalVersion(left: string, right: string): number {
-  const tokenize = (value: string) => value.match(/\d+|\D+/gu) ?? [];
-  const leftParts = tokenize(left);
-  const rightParts = tokenize(right);
-  for (
-    let index = 0;
-    index < Math.max(leftParts.length, rightParts.length);
-    index++
-  ) {
-    const leftPart = leftParts[index];
-    const rightPart = rightParts[index];
-    if (leftPart === undefined || rightPart === undefined)
-      return leftPart === rightPart ? 0 : leftPart === undefined ? -1 : 1;
-    if (leftPart === rightPart) continue;
-    const comparison =
-      /^\d+$/u.test(leftPart) && /^\d+$/u.test(rightPart)
-        ? compareNumericIdentifier(leftPart, rightPart)
-        : leftPart < rightPart
-          ? -1
-          : 1;
-    if (comparison !== 0) return comparison;
-  }
-  return 0;
-}
-
 export async function updateMacUserWorker(options: {
   layout: MacUserLayout;
   uid: number;
@@ -258,7 +177,7 @@ export async function updateMacUserWorker(options: {
     MacLaunchAgentController,
     "bootstrap" | "bootout" | "status"
   >;
-  candidate?: () => Promise<MacUpdateCandidate>;
+  candidate?: () => Promise<UpdateCandidate>;
   qualify?: typeof qualifyMacUserRelease;
   now?: Date;
   fetch?: typeof fetch;
@@ -361,10 +280,14 @@ export async function updateMacUserWorker(options: {
   // Commit recovery intent before the first lifecycle/service mutation.
   await writeUpdateState(options.layout.updateStatePath, pending);
   try {
-    await setLocalLifecycleIntent(options.layout.lifecyclePath, "draining");
+    const draining = await setLocalLifecycleIntent(
+      options.layout.lifecyclePath,
+      "draining",
+    );
     if (serviceWasLoaded) {
       await waitForLocalDrain({
         runtimeStatusPath: options.layout.runtimeStatusPath,
+        expectedRevision: draining.revision,
         force: options.force === true,
       });
     }
@@ -398,9 +321,8 @@ export async function updateMacUserWorker(options: {
         return true;
       });
       await writePrivateRecord(options.layout.configPath, {
-        ...previousConfig,
+        ...retainSlotIdentities(previousConfig, slots),
         validatedMaxWorkersPerGpu: 1,
-        slots,
       });
     }
     // A stopped service must also have a valid configuration before committing.
@@ -487,10 +409,14 @@ export async function recoverInterruptedMacUpdate(
     ].includes(activeTarget)
   )
     throw new Error("Update recovery found an unrelated active release");
-  await setLocalLifecycleIntent(layout.lifecyclePath, "draining");
+  const draining = await setLocalLifecycleIntent(
+    layout.lifecyclePath,
+    "draining",
+  );
   if (!serviceStartup && (await launchAgent.status()).loaded) {
     await waitForLocalDrain({
       runtimeStatusPath: layout.runtimeStatusPath,
+      expectedRevision: draining.revision,
       force: false,
     });
     await launchAgent.bootout();
@@ -555,30 +481,10 @@ export async function loadMacUpdateTrust(
     record = await readPrivateRecord(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
-      return { ...BUILT_IN_MAC_UPDATE_TRUST };
+      return { ...BUILT_IN_UPDATE_TRUST };
     throw error;
   }
-  if (Object.keys(record).length < 1 || Object.keys(record).length > 8)
-    throw new TypeError("Update trust store is empty or too large");
-  const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (
-      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(key) ||
-      typeof value !== "string" ||
-      value.length > 8192
-    )
-      throw new TypeError("Update trust store is invalid");
-    if (
-      BUILT_IN_MAC_UPDATE_TRUST[key] !== undefined &&
-      BUILT_IN_MAC_UPDATE_TRUST[key] !== value
-    )
-      throw new TypeError("Update trust store cannot replace a built-in key");
-    result[key] = value;
-  }
-  const merged = { ...result, ...BUILT_IN_MAC_UPDATE_TRUST };
-  if (Object.keys(merged).length > 8)
-    throw new TypeError("Update trust store is too large");
-  return merged;
+  return parseUpdateTrust(record);
 }
 
 async function loadUpdateState(path: string): Promise<UpdateState> {

@@ -1,9 +1,10 @@
 # Worker release procedure
 
-The first public candidate targets **macOS Apple Silicon**, one worker per GPU
-by default, with manual updates. Windows source and fixture coverage are retained;
-they do not establish a public Windows release. Linux and Intel Mac are unsupported.
-Verification does not publish, deploy or modify the running worker.
+The shared npm CLI targets **macOS Apple Silicon** and **Windows x64 with
+DirectML**, with one worker per GPU by default and manual runtime updates.
+Validate each platform's exact signed runtime and a fresh npm installation before
+promoting the shared package. Linux and Intel Mac are unsupported.
+Verification and publication are separate operations.
 
 ## Source and npm gates
 

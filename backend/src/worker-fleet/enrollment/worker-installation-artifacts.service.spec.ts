@@ -77,6 +77,17 @@ describe('worker installation artifact grants', () => {
       },
     });
     expect(f.transfers.createDownloadGrant).toHaveBeenCalledOnce();
+    const installation = await f.service.createDownloadGrants(
+      principal,
+      installationId,
+      'darwin-arm64',
+    );
+    const update = await f.service.createUpdateGrant(
+      machinePrincipal,
+      'darwin-arm64',
+      false,
+    );
+    expect(installation.release).toMatchObject({ signed: update.signed });
   });
 
   it('fails closed when update metadata is absent or the caller is not a machine', async () => {

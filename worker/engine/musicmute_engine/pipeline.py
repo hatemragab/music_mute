@@ -484,11 +484,13 @@ class RuntimePipeline:
     def _timed(
         timings: dict[str, float], name: str, operation: Callable[[], Any]
     ) -> Any:
-        started = time.monotonic()
+        # Python 3.12 on Windows uses a coarse monotonic clock. Cached stages
+        # need the high-resolution performance counter to retain real timings.
+        started = time.perf_counter()
         try:
             return operation()
         finally:
-            elapsed = time.monotonic() - started
+            elapsed = time.perf_counter() - started
             timings[name] = elapsed if math.isfinite(elapsed) else 0.0
 
 

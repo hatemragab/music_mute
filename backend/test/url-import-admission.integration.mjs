@@ -149,7 +149,7 @@ test('URL acquisition holds allowance before paid work and releases safely', asy
       assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
       assert.equal(
         (await usage.readUsage(owners[1])).processing.reservedSeconds,
-        1200,
+        1800,
       );
       await assert.rejects(
         transactions.run((session) =>

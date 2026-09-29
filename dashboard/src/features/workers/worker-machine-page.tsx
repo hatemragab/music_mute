@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/table";
 import { formatBytes, formatDateTime } from "@/lib/format";
 import {
+  approveWorkerCapacity,
   changeWorkerMachineState,
   requestWorkerBenchmark,
   requestWorkerDoctor,
@@ -99,6 +100,10 @@ export function WorkerMachinePage() {
   const [pendingAction, setPendingAction] = useState<MachineAction | null>(
     null,
   );
+  const [capacityTarget, setCapacityTarget] = useState<{
+    gpuId: string;
+    revision: number;
+  } | null>(null);
   const [diagnosticPage, setDiagnosticPage] = useState<{
     machineId: string;
     cursor: string | null;
@@ -327,6 +332,22 @@ export function WorkerMachinePage() {
                         </li>
                       ))}
                     </ul>
+                    {can("workers.manage") &&
+                    data.machine.status !== "revoked" &&
+                    capability.maxSlots === 1 ? (
+                      <Button
+                        className="mt-3"
+                        variant="outline"
+                        onClick={() =>
+                          setCapacityTarget({
+                            gpuId: capability.gpuId,
+                            revision: data.machine.revision,
+                          })
+                        }
+                      >
+                        Approve two workers
+                      </Button>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -383,6 +404,31 @@ export function WorkerMachinePage() {
           </PageSection>
         </CardContent>
       </Card>
+      <ReasonDialog
+        open={capacityTarget !== null}
+        onOpenChange={(open) => !open && setCapacityTarget(null)}
+        title="Approve two workers"
+        description="Confirm that you reviewed a passing two-worker qualification for this installed machine. Include the benchmark evidence in the reason. This approves the backend ceiling; the local runtime must still validate and enable two workers."
+        confirmLabel="Approve two workers"
+        freshAuth
+        onReauthenticate={reauthenticate}
+        summary={
+          <p>
+            {data.machine.label} · GPU {capacityTarget?.gpuId} · 1 → 2 workers
+          </p>
+        }
+        onConfirm={async (reason) => {
+          if (!capacityTarget) return;
+          await approveWorkerCapacity(client, id, {
+            operationId: createOperationId(),
+            expectedRevision: capacityTarget.revision,
+            gpuId: capacityTarget.gpuId,
+            qualificationConfirmed: true,
+            reason,
+          });
+          setCapacityTarget(null);
+        }}
+      />
       <ReasonDialog
         open={Boolean(pendingAction)}
         onOpenChange={(open) => !open && setPendingAction(null)}

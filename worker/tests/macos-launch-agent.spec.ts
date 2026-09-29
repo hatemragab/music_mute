@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 import {
   MacLaunchAgentController,
@@ -7,7 +7,9 @@ import {
 } from "../src/platform/macos/launch-agent.js";
 import { createMacUserLayout } from "../src/platform/macos/user-paths.js";
 
-describe("macOS user LaunchAgent", () => {
+// These fixtures exercise Darwin paths, UID ownership and POSIX permissions.
+describe.skipIf(process.platform !== "darwin")("macOS user LaunchAgent", () => {
+  afterEach(() => vi.useRealTimers());
   it("renders an owner-scoped worker without privileged identity fields", () => {
     const plist = renderLaunchAgentPlist(
       createMacUserLayout("/Users/Music & Mute"),
@@ -46,10 +48,11 @@ describe("macOS user LaunchAgent", () => {
   });
 
   it("uses only the current user launchctl domain", async () => {
-    const execute = vi.fn<LaunchAgentExecutor>(async () => ({
-      stdout: "",
-      stderr: "",
-    }));
+    const execute = vi.fn<LaunchAgentExecutor>(async (_file, args) => {
+      if (args[0] === "print")
+        throw Object.assign(new Error("absent"), { code: 113 });
+      return { stdout: "", stderr: "" };
+    });
     const controller = new MacLaunchAgentController(501, execute);
 
     await controller.bootstrap("/Users/tester/Library/LaunchAgents/test.plist");
@@ -67,8 +70,63 @@ describe("macOS user LaunchAgent", () => {
       ],
       ["/bin/launchctl", ["kickstart", "gui/501/com.musicmute.worker"]],
       ["/bin/launchctl", ["bootout", "gui/501/com.musicmute.worker"]],
+      ["/bin/launchctl", ["print", "gui/501/com.musicmute.worker"]],
     ]);
   });
+
+  it("waits for registration removal after bootout is acknowledged", async () => {
+    vi.useFakeTimers();
+    let checks = 0;
+    const execute = vi.fn<LaunchAgentExecutor>(async (_file, args) => {
+      if (args[0] === "print" && ++checks > 2)
+        throw Object.assign(new Error("absent"), { code: 113 });
+      return { stdout: "state = exited\n", stderr: "" };
+    });
+    let complete = false;
+    const stopped = new MacLaunchAgentController(501, execute)
+      .bootout()
+      .then(() => {
+        complete = true;
+      });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(complete).toBe(false);
+    await vi.advanceTimersByTimeAsync(100);
+    await stopped;
+    expect(checks).toBe(3);
+    expect(
+      execute.mock.calls.filter(([, args]) => args[0] === "bootout"),
+    ).toHaveLength(1);
+  });
+
+  it("fails within the deadline when the label remains registered", async () => {
+    vi.useFakeTimers();
+    const execute = vi.fn<LaunchAgentExecutor>(async () => ({
+      stdout: "state = running\npid = 4321\n",
+      stderr: "",
+    }));
+    const stopped = expect(
+      new MacLaunchAgentController(501, execute).bootout(),
+    ).rejects.toThrow("MusicMute worker service did not unload");
+    await vi.advanceTimersByTimeAsync(30_000);
+    await stopped;
+    expect(
+      execute.mock.calls.filter(([, args]) => args[0] === "bootout"),
+    ).toHaveLength(1);
+  });
+
+  it.each([5, "ENOENT"])(
+    "does not treat inspection failure %s as successful removal",
+    async (code) => {
+      const error = Object.assign(new Error("inspection failed"), { code });
+      const execute = vi.fn<LaunchAgentExecutor>(async (_file, args) => {
+        if (args[0] === "print") throw error;
+        return { stdout: "", stderr: "" };
+      });
+      await expect(
+        new MacLaunchAgentController(501, execute).bootout(),
+      ).rejects.toBe(error);
+    },
+  );
 
   it("renders a one-shot MPS qualification without KeepAlive", () => {
     const layout = createMacUserLayout("/Users/tester");

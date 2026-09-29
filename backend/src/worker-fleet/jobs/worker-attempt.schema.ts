@@ -1,3 +1,4 @@
+import { MAX_AUDIO_DURATION_SECONDS } from '../../jobs/media-limits.js';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Schema as MongoSchema, type Types } from 'mongoose';
 import type {
@@ -96,7 +97,7 @@ const outputReservation = new MongoSchema<WorkerOutputReservation>(
       type: Number,
       required: true,
       min: 0.001,
-      max: 1200,
+      max: MAX_AUDIO_DURATION_SECONDS,
     },
     grantExpiresAt: { type: Date, required: true },
   },

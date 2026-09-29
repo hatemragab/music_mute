@@ -18,10 +18,10 @@ import {
   clearDiagnosticHistory,
   sanitizeDiagnosticEvent,
 } from "../../runtime/diagnostic-spool.js";
-import type { MacUserLayout } from "./user-paths.js";
+import type { OperatorLayout } from "./operator-layout.js";
 
-export const MAC_LOG_ROTATE_BYTES = 5 * 1024 * 1024;
-export const MAC_LOG_ARCHIVE_COUNT = 5;
+export const WORKER_LOG_ROTATE_BYTES = 5 * 1024 * 1024;
+export const WORKER_LOG_ARCHIVE_COUNT = 5;
 const TAIL_BYTES = 2 * 1024 * 1024;
 
 export type OperationalLogLevel = "info" | "warning" | "error";
@@ -63,15 +63,15 @@ export interface ClearedOperationalLogs {
   bytesCleared: number;
 }
 
-export async function maintainMacUserLogs(
-  layout: Pick<MacUserLayout, "stdoutPath" | "stderrPath">,
+export async function maintainWorkerLogs(
+  layout: Pick<OperatorLayout, "stdoutPath" | "stderrPath">,
 ): Promise<void> {
   await rotateIfRequired(layout.stdoutPath);
   await rotateIfRequired(layout.stderrPath);
 }
 
-export async function clearMacUserLogs(
-  layout: Pick<MacUserLayout, "stdoutPath" | "stderrPath" | "workRoot">,
+export async function clearWorkerLogs(
+  layout: Pick<OperatorLayout, "stdoutPath" | "stderrPath" | "workRoot">,
 ): Promise<ClearedOperationalLogs> {
   let filesCleared = 0;
   let bytesCleared = 0;
@@ -79,7 +79,7 @@ export async function clearMacUserLogs(
     const cleared = await clearActiveLog(path);
     filesCleared += cleared.files;
     bytesCleared += cleared.bytes;
-    for (let index = 1; index <= MAC_LOG_ARCHIVE_COUNT; index += 1) {
+    for (let index = 1; index <= WORKER_LOG_ARCHIVE_COUNT; index += 1) {
       const removed = await removePrivateLog(`${path}.${index}.gz`);
       filesCleared += removed.files;
       bytesCleared += removed.bytes;
@@ -92,7 +92,7 @@ export async function clearMacUserLogs(
   return { filesCleared, bytesCleared };
 }
 
-export async function appendMacFatalError(
+export async function appendWorkerFatalError(
   path: string,
   component: string,
   error: unknown,
@@ -115,11 +115,17 @@ export async function readTextLogTail(
   lines: number,
 ): Promise<string> {
   const value = await readTail(path, TAIL_BYTES);
-  return sanitizeDiagnostic(value.split("\n").slice(-lines).join("\n"));
+  return sanitizeDiagnostic(
+    value
+      .replace(/\r?\n$/u, "")
+      .split(/\r?\n/u)
+      .slice(-lines)
+      .join("\n"),
+  );
 }
 
 export async function readOperationalEvents(
-  layout: Pick<MacUserLayout, "workRoot">,
+  layout: Pick<OperatorLayout, "workRoot">,
   filter: OperationalLogFilter,
 ): Promise<OperationalEvent[]> {
   if (
@@ -179,7 +185,7 @@ export async function readOperationalEvents(
 }
 
 export async function readNewOperationalEvents(
-  layout: Pick<MacUserLayout, "workRoot">,
+  layout: Pick<OperatorLayout, "workRoot">,
   filter: OperationalLogFilter,
   cursor: OperationalLogCursor,
 ): Promise<OperationalEvent[]> {
@@ -298,7 +304,7 @@ function parseOperationalEvent(
 }
 
 export async function inspectOperationalLogUsage(
-  layout: Pick<MacUserLayout, "logRoot" | "workRoot">,
+  layout: Pick<OperatorLayout, "logRoot" | "workRoot">,
 ): Promise<OperationalLogUsage> {
   const roots = [layout.logRoot, join(layout.workRoot, "..", "logs")];
   let bytes = 0;
@@ -316,8 +322,8 @@ export async function inspectOperationalLogUsage(
   return {
     bytes,
     files,
-    rotationLimitBytes: MAC_LOG_ROTATE_BYTES,
-    archivesPerStream: MAC_LOG_ARCHIVE_COUNT,
+    rotationLimitBytes: WORKER_LOG_ROTATE_BYTES,
+    archivesPerStream: WORKER_LOG_ARCHIVE_COUNT,
     diagnosticSpoolBlocked: (await lstat(marker).catch(() => null)) !== null,
   };
 }
@@ -367,9 +373,9 @@ async function rotateIfRequired(path: string): Promise<void> {
   if (!information) return;
   if (!information.isFile() || information.isSymbolicLink())
     throw new TypeError("Worker log file is unsafe");
-  if (information.size < MAC_LOG_ROTATE_BYTES) return;
-  await rm(`${path}.${MAC_LOG_ARCHIVE_COUNT}.gz`, { force: true });
-  for (let index = MAC_LOG_ARCHIVE_COUNT - 1; index >= 1; index -= 1) {
+  if (information.size < WORKER_LOG_ROTATE_BYTES) return;
+  await rm(`${path}.${WORKER_LOG_ARCHIVE_COUNT}.gz`, { force: true });
+  for (let index = WORKER_LOG_ARCHIVE_COUNT - 1; index >= 1; index -= 1) {
     await rename(`${path}.${index}.gz`, `${path}.${index + 1}.gz`).catch(
       (error: NodeJS.ErrnoException) => {
         if (error.code !== "ENOENT") throw error;

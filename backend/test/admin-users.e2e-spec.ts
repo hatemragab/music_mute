@@ -28,6 +28,9 @@ describe('admin users HTTP boundary', () => {
         plan: 'standard',
         effectivePolicySource: 'account_override',
       }),
+      resetUsage: vi
+        .fn()
+        .mockResolvedValue({ schemaVersion: 2, usageRevision: 5 }),
       deletePolicyOverride: vi.fn().mockResolvedValue({
         schemaVersion: 2,
         plan: 'standard',
@@ -119,5 +122,45 @@ describe('admin users HTTP boundary', () => {
       )
       .expect(200);
     expect(users.deletePolicyOverride).toHaveBeenCalledOnce();
+  });
+  it('requires permission, fresh authentication and valid reset preconditions', async () => {
+    const { harness, users } = await setup();
+    const path = '/admin/users/64b000000000000000000001/account-usage-resets';
+    const body = {
+      expectedRevision: 4,
+      periodKey: '2026-09',
+      dayKey: '2026-09-29',
+      operationId: '7f107510-108d-4c25-a091-ecf28e43bd7b',
+      reason: 'Customer allowance reset',
+    };
+    await harness
+      .request('post', path, wireJson(body), harness.signInAs('viewer'))
+      .expect(403);
+    const stale = harness.signInAs('support');
+    harness.identities.get(stale)!.authTimeSec =
+      Math.floor(Date.now() / 1000) - 301;
+    await harness.request('post', path, wireJson(body), stale).expect(403);
+    harness.identities.get(stale)!.authTimeSec = Math.floor(Date.now() / 1000);
+    for (const invalid of [
+      { reason: ' ' },
+      { expectedRevision: -1 },
+      { periodKey: '2026-13' },
+      { dayKey: 'bad' },
+      { operationId: 'bad' },
+      { extra: true },
+    ]) {
+      await harness
+        .request(
+          'post',
+          path,
+          wireJson({ ...body, ...invalid }),
+          harness.signInAs('support'),
+        )
+        .expect(400);
+    }
+    await harness
+      .request('post', path, wireJson(body), harness.signInAs('support'))
+      .expect(200);
+    expect(users.resetUsage).toHaveBeenCalledOnce();
   });
 });
