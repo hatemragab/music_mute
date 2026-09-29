@@ -441,6 +441,7 @@ export class DashboardFixture {
     recentError: null,
   };
   workerDetail: WorkerMachineDetail = {
+    asOf: NOW,
     machine: this.workerMachine,
     slots: [
       {
@@ -912,7 +913,7 @@ export class DashboardFixture {
     if (
       path.match(
         new RegExp(
-          `^/admin/worker-fleet/machines/${FIXTURE_IDS.workerMachine}/(doctor|benchmark)$`,
+          `^/admin/worker-fleet/machines/${FIXTURE_IDS.workerMachine}/(diagnostic-runs|benchmark-runs)$`,
         ),
       ) &&
       method === "POST"

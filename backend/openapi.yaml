@@ -15950,6 +15950,10 @@ components:
       type: object
       additionalProperties: true
       properties:
+        as_of:
+          type: string
+          format: date-time
+          description: Server observation time for this bounded machine snapshot.
         machine:
           type: object
           additionalProperties: true
