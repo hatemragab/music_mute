@@ -85,3 +85,8 @@ real worker command or production permission mutation is included in local tests
   No dependency installation or runtime replacement was attempted on real workers.
 - `git diff --check` passed. Visual screenshots were inspected. No production
   commands, native-device tests, live GPU qualification or deployment took place.
+
+Hosted worker CI initially reached all 74 Python tests but failed the 11 media
+fixtures because ffmpeg/ffprobe were absent. The worker workflow now explicitly
+installs Homebrew's core ffmpeg formula (which supplies both executables) before
+running engine tests. Tests are not disabled or replaced with success stubs.
