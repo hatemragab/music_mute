@@ -109,6 +109,72 @@ import XCTest
       importId: "68c000000000000000000001", status: "submitted", jobId: nil, error: nil)
     XCTAssertThrowsError(try bad.validated())
   }
+
+  func testFailedImportRemovalSurvivesRestartAndKeepsOtherOwner() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = ProcessingStore(root: root, stagingRoot: root.appendingPathComponent("staging"))
+    var failed = URLImportRecord(url: "https://youtu.be/UXqq0ZvbOnk", requestId: UUID())
+    failed.status = "failed"
+    try await store.saveURLImport(failed, ownerUid: "owner")
+    try await store.saveURLImport(failed, ownerUid: "other")
+    let api = URLImportFixtureAPI()
+    let model = URLImportsModel(api: api, store: store)
+    await model.bindOwner("owner")
+    await model.removeFailedImport()
+    XCTAssertNil(model.record)
+    let reopened = ProcessingStore(root: root, stagingRoot: root.appendingPathComponent("staging"))
+    let removed = try await reopened.urlImport(ownerUid: "owner")
+    let other = try await reopened.urlImport(ownerUid: "other")
+    XCTAssertNil(removed)
+    XCTAssertEqual(other?.requestId, failed.requestId)
+    XCTAssertTrue(api.requests.isEmpty)
+  }
+
+  func testFailureRetentionAndActiveRemovalGuard() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = ProcessingStore(root: root, stagingRoot: root.appendingPathComponent("staging"))
+    let now = Date()
+    var failed = URLImportRecord(url: "https://youtu.be/UXqq0ZvbOnk", requestId: UUID())
+    failed.status = "failed"
+    failed.failedAt = now.addingTimeInterval(-7 * 86_400)
+    try await store.saveURLImport(failed, ownerUid: "owner")
+    let retained = try await store.urlImport(ownerUid: "owner", now: now.addingTimeInterval(-1))
+    XCTAssertEqual(retained?.requestId, failed.requestId)
+    try await store.removeFailedURLImport(requestId: UUID(), ownerUid: "owner")
+    let unmatched = try await store.urlImport(ownerUid: "owner", now: now.addingTimeInterval(-1))
+    XCTAssertEqual(unmatched?.requestId, failed.requestId)
+    let expired = try await store.urlImport(ownerUid: "owner", now: now)
+    XCTAssertNil(expired)
+    failed.status = "pending"
+    try await store.saveURLImport(failed, ownerUid: "owner")
+    try await store.removeFailedURLImport(requestId: failed.requestId, ownerUid: "owner")
+    let active = try await store.urlImport(
+      ownerUid: "owner", now: now.addingTimeInterval(8 * 86_400))
+    XCTAssertEqual(active?.status, "pending")
+  }
+
+  func testLegacyFailedRecordGetsBoundedRetentionWindow() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = ProcessingStore(root: root, stagingRoot: root.appendingPathComponent("staging"))
+    let legacy = Data(
+      """
+      {"url":"https://youtu.be/UXqq0ZvbOnk","requestId":"\(UUID().uuidString)","status":"failed"}
+      """.utf8)
+    let record = try JSONDecoder().decode(URLImportRecord.self, from: legacy)
+    XCTAssertNil(record.failedAt)
+    try await store.saveURLImport(record, ownerUid: "owner")
+    let first = try await store.urlImport(ownerUid: "owner")
+    XCTAssertNotNil(first?.failedAt)
+    try await store.saveURLImport(record, ownerUid: "owner")
+    let repeated = try await store.urlImport(ownerUid: "owner")
+    XCTAssertEqual(first?.failedAt, repeated?.failedAt)
+    let expired = try await store.urlImport(
+      ownerUid: "owner", now: try XCTUnwrap(first?.failedAt).addingTimeInterval(7 * 86_400))
+    XCTAssertNil(expired)
+  }
 }
 
 @MainActor private final class URLImportFixtureAPI: JobsAPI {

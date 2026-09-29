@@ -177,6 +177,7 @@ class ProcessingStore(
     /** Persist the request ID before making any network request. */
     suspend fun addUrlImport(uid: String, value: UrlImportRecord): UrlImportRecord {
         require(value.ownerUid == uid)
+        pruneFailedUrlImports(uid)
         val document = store(uid).updateData { current ->
             validateOwner(uid, current)
             val existing = current.urlImports.firstOrNull {
@@ -199,6 +200,30 @@ class ProcessingStore(
             current.copy(urlImports = current.urlImports.map { record ->
                 if (record.requestId != requestId) record else transform(record).also {
                     require(it.ownerUid == uid && it.requestId == requestId && it.url == record.url)
+                }.let {
+                    it.copy(failedAtMillis = if (it.removable) it.failedAtMillis.takeIf { time -> time > 0 }
+                        ?: System.currentTimeMillis() else 0)
+                }
+            })
+        }
+    }
+
+    suspend fun removeFailedUrlImport(uid: String, requestId: String) {
+        store(uid).updateData { current ->
+            validateOwner(uid, current)
+            current.copy(urlImports = current.urlImports.filterNot { it.requestId == requestId && it.removable })
+        }
+    }
+
+    suspend fun pruneFailedUrlImports(uid: String, nowMillis: Long = System.currentTimeMillis()) {
+        store(uid).updateData { current ->
+            validateOwner(uid, current)
+            current.copy(urlImports = current.urlImports.mapNotNull { record ->
+                when {
+                    !record.removable -> record
+                    record.failedAtMillis <= 0 -> record.copy(failedAtMillis = nowMillis)
+                    nowMillis - record.failedAtMillis >= UrlImportRecord.FAILURE_RETENTION_MILLIS -> null
+                    else -> record
                 }
             })
         }

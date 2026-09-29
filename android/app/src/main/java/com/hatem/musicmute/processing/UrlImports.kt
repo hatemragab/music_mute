@@ -38,9 +38,12 @@ data class UrlImportRecord(
     val jobObserved: Boolean = false,
     val trimEnabled: Boolean = false,
     val serverStageTimings: ServerStageTimings? = null,
+    val failedAtMillis: Long = 0,
 ) {
+    val removable: Boolean get() = status in setOf("failed", "attention") && jobId == null
     companion object {
         val terminalStatuses = setOf("submitted", "failed")
+        const val FAILURE_RETENTION_MILLIS = 7 * 86_400_000L
     }
 }
 
@@ -185,6 +188,7 @@ class UrlImportCoordinator(
         mutableRecords.value = emptyList()
         if (value == null) return
         observeTask = scope.launch {
+            store.pruneFailedUrlImports(value.uid)
             store.urlImports(value.uid).collect { records ->
                 if (owner != value || session() != value) return@collect
                 mutableRecords.value = records
@@ -232,6 +236,13 @@ class UrlImportCoordinator(
             else current
         }
         if (record.status == "failed" || record.errorCode == "IMPORT_REQUEST_CONFLICT") submit(record.url)
+    }
+
+    suspend fun remove(record: UrlImportRecord) {
+        val ticket = owner?.takeIf { it == session() && it.uid == record.ownerUid }
+            ?: throw UrlImportFailure("UNAUTHENTICATED")
+        if (!record.removable) return
+        store.removeFailedUrlImport(ticket.uid, record.requestId)
     }
 
     private suspend fun run(ticket: ProcessingSession, requestId: String) {

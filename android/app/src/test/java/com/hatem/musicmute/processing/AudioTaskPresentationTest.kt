@@ -47,13 +47,17 @@ class AudioTaskPresentationTest {
             listOf(submitted)).single().stage)
     }
 
-    @Test fun importFailuresStayRetryableWithoutJobActions() {
+    @Test fun importFailuresCanBeRemovedWithoutCloudJobActions() {
         val record = UrlImportRecord("owner", "https://example.com/media", "request",
             status = "failed", errorCode = "IMPORT_UPSTREAM_REFUSED")
         val task = audioTaskPresentations(emptyList(), emptyList(), 0, listOf(record)).single()
         assertFalse(task.active)
         assertTrue(task.canRetry)
-        assertFalse(task.canDelete)
+        assertTrue(task.canDelete)
+        assertFalse(audioTaskPresentations(emptyList(), emptyList(), 0,
+            listOf(record.copy(status = "downloading"))).single().canDelete)
+        assertFalse(audioTaskPresentations(emptyList(), emptyList(), 0,
+            listOf(record.copy(jobId = "68c000000000000000000002"))).single().canDelete)
         assertEquals(record.errorCode, task.errorCode)
     }
 

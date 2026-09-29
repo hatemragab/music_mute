@@ -190,11 +190,40 @@ actor ProcessingStore {
     SHA256.hash(data: Data(uid.utf8)).map { String(format: "%02x", $0) }.joined()
   }
 
-  func urlImport(ownerUid: String) throws -> URLImportRecord? { try load(ownerUid).urlImport }
+  func urlImport(ownerUid: String, now: Date = Date()) throws -> URLImportRecord? {
+    var snapshot = try load(ownerUid)
+    if var record = snapshot.urlImport, record.status == "failed", record.jobId == nil {
+      if let failedAt = record.failedAt {
+        if now.timeIntervalSince(failedAt) >= 7 * 86_400 {
+          snapshot.urlImport = nil
+          try persist(snapshot)
+        }
+      } else {
+        record.failedAt = now
+        snapshot.urlImport = record
+        try persist(snapshot)
+      }
+    }
+    return snapshot.urlImport
+  }
 
   func saveURLImport(_ record: URLImportRecord, ownerUid: String) throws {
     var snapshot = try load(ownerUid)
-    snapshot.urlImport = record
+    var saved = record
+    let previousFailure = snapshot.urlImport.flatMap {
+      $0.requestId == record.requestId && $0.status == "failed" ? $0.failedAt : nil
+    }
+    saved.failedAt = record.status == "failed" ? record.failedAt ?? previousFailure ?? Date() : nil
+    snapshot.urlImport = saved
+    try persist(snapshot)
+  }
+
+  func removeFailedURLImport(requestId: UUID, ownerUid: String) throws {
+    var snapshot = try load(ownerUid)
+    guard let record = snapshot.urlImport, record.requestId == requestId,
+      record.status == "failed", record.jobId == nil
+    else { return }
+    snapshot.urlImport = nil
     try persist(snapshot)
   }
 

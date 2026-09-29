@@ -213,6 +213,13 @@ continues using the shared live session rather than restarting the connection.
 
 ## Current jobs and Library (2026-09-28)
 
+Failed link imports offer **Delete** on the import card. Removal clears the
+account-scoped local recovery record and survives restart without submitting
+another acquisition. Failed imports without a job expire locally after seven
+days when the account opens. Older records start that window on their first open
+after upgrading. Active imports and submitted jobs are preserved. Server import
+records already have a seven-day TTL; administrator job history remains.
+
 Home and the processing list hide terminal cloud jobs (`ready`, `failed`,
 `cancelled`); unfinished local reviews and recoverable local imports stay
 accessible. Creation date and time are shown on Home job cards. Filtering is

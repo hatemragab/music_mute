@@ -77,6 +77,7 @@ fun HomeScreen(
     onPhotos: () -> Unit = {},
     actionBusy: Boolean = false,
     notificationsNeeded: Boolean = false,
+    onDelete: (AudioTaskPresentation) -> Unit = {},
 ) {
     val visibleTasks = tasks.filter { it.visibleOnHome }
     var notificationDismissed by rememberSaveable { mutableStateOf(false) }
@@ -161,6 +162,7 @@ fun HomeScreen(
                         busy = busy || actionBusy,
                         onOpen = { onOpen(task) },
                         onCancel = { onCancel(task) },
+                        onDelete = { onDelete(task) },
                     )
                     ProcessingQueueStatus(history.jobs.firstOrNull { it.id == task.jobId }, history.connection)
                 }

@@ -450,6 +450,15 @@ fun VocalApp(
                             onPhotos = { importVideo.launch(arrayOf("video/*")) },
                             onRefresh = processingModel.history::refresh,
                             onLoadMore = processingModel.history::loadMore,
+                            onDelete = { task ->
+                                val record = urlImports.firstOrNull { it.requestId == task.importRequestId }
+                                if (record != null) scope.launch {
+                                    try { app.urlImports.remove(record) }
+                                    catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                                    catch (error: UrlImportFailure) { urlImportError = error.code }
+                                    catch (_: Exception) { urlImportError = "SERVICE_UNAVAILABLE" }
+                                }
+                            },
                             onOpen = { task ->
                                 processingModel.selectTask(task.operationId, task.jobId)
                                 nav.navigate(taskDetailRoute(task.operationId, task.jobId)) { launchSingleTop = true }
