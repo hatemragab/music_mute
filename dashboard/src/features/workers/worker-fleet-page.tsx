@@ -38,6 +38,7 @@ import { formatDateTime } from "@/lib/format";
 import { revokeWorkerInvitation } from "./worker-api";
 import { WorkerEnrollmentDialog } from "./worker-enrollment-dialog";
 import { WorkerPolicyPanel } from "./worker-policy-panel";
+import { WorkerFleetSummary } from "./worker-insight-panels";
 import { workerContactState } from "./worker-status";
 import {
   WORKER_MACHINE_STATUSES,
@@ -186,6 +187,9 @@ export function WorkerFleetPage() {
               onChange={(event) => change("releaseVersion", event.target.value)}
             />
           </div>
+          {machines.data && !machines.isError && (
+            <WorkerFleetSummary data={machines.data} />
+          )}
           {machines.isLoading ? (
             <LoadingState />
           ) : machines.isError ? (
@@ -315,7 +319,7 @@ function MachineTable({
               const gpu = machine.hardware?.gpus.find(
                 (item) => item.id === capability?.gpuId,
               );
-              const contact = workerContactState(machine);
+              const contact = workerContactState(machine, Date.parse(asOf));
               return (
                 <TableRow key={machine.machineId}>
                   <TableCell>

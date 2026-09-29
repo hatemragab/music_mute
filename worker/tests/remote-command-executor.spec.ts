@@ -89,16 +89,87 @@ describe("packaged remote command executor", () => {
       outcome: "succeeded",
       summary: "5 worker health checks passed",
     });
-    expect(result.metrics.map((metric) => metric.name)).toEqual([
-      "check.service",
-      "check.storage",
-      "storage.free_bytes",
-      "check.model",
-      "model.bytes",
-      "check.provider",
-      "check.ffmpeg",
-    ]);
+    expect(result.metrics.map((metric) => metric.name)).toEqual(
+      expect.arrayContaining([
+        "check.service",
+        "check.storage",
+        "storage.free_bytes",
+        "check.model",
+        "model.bytes",
+        "check.provider",
+        "check.ffmpeg",
+        "runtime.uptime_seconds",
+        "runtime.rss_bytes",
+        "host.memory_free_bytes",
+        "storage.total_bytes",
+      ]),
+    );
+    expect(
+      result.metrics.every(
+        (item) => Number.isFinite(item.value) && item.value >= 0,
+      ),
+    ).toBe(true);
     expect(f.serviceCheck).toHaveBeenCalledOnce();
+  });
+
+  it("keeps successful storage and service results when the engine probe fails", async () => {
+    const f = await fixture();
+    f.runFile.mockRejectedValue(new Error("private-path credential=secret"));
+    const result = await f.executor.execute(
+      command({
+        checks: ["service", "storage", "model", "provider", "ffmpeg"],
+      }),
+    );
+    expect(result.outcome).toBe("failed");
+    expect(result.metrics).toEqual(
+      expect.arrayContaining([
+        { name: "check.service", value: 1, unit: "boolean" },
+        { name: "check.storage", value: 1, unit: "boolean" },
+        { name: "check.model", value: 0, unit: "boolean" },
+        { name: "check.provider", value: 0, unit: "boolean" },
+        { name: "check.ffmpeg", value: 0, unit: "boolean" },
+      ]),
+    );
+    expect(JSON.stringify(result)).not.toMatch(
+      /private-path|credential|secret/,
+    );
+  });
+
+  it("continues after a failed service check and does not start Python for a runtime snapshot", async () => {
+    const f = await fixture();
+    f.serviceCheck.mockRejectedValue(new Error("service unavailable"));
+    const result = await f.executor.execute(
+      command({ checks: ["service", "storage"] }),
+    );
+    expect(result.outcome).toBe("failed");
+    expect(result.metrics).toEqual(
+      expect.arrayContaining([
+        { name: "check.service", value: 0, unit: "boolean" },
+        { name: "check.storage", value: 1, unit: "boolean" },
+      ]),
+    );
+    expect(f.runFile).not.toHaveBeenCalled();
+  });
+
+  it("does not turn cancellation into a completed failed check", async () => {
+    const f = await fixture();
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled"));
+    await expect(
+      f.executor.execute(command({}), controller.signal),
+    ).rejects.toThrow("cancelled");
+    expect(f.serviceCheck).not.toHaveBeenCalled();
+  });
+
+  it("propagates cancellation received while a service check is running", async () => {
+    const f = await fixture();
+    const controller = new AbortController();
+    f.serviceCheck.mockImplementation(async () => {
+      controller.abort(new Error("stopping"));
+    });
+    await expect(
+      f.executor.execute(command({}), controller.signal),
+    ).rejects.toThrow("stopping");
   });
 
   it("runs exactly one Kim Vocal 2 benchmark pass", async () => {

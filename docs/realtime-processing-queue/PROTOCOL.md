@@ -166,3 +166,13 @@ and `next_cursor`. Each item contains title/body, creator/reason, timestamps,
 receipt. Changes to `notification_campaigns` and `notification_campaign_deliveries`
 invalidate the resource; existing user/admin authorization fences still apply.
 Creation remains an audited HTTP command. There is no browser polling.
+
+### Worker observation time (2026-09-29)
+
+`admin.worker` and the compatible HTTP machine-detail response now include
+`as_of`, an additive UTC server timestamp for the bounded snapshot. The dashboard
+uses it to assess last-contact freshness without relying on the browser clock.
+Older responses without it display freshness as unknown. Existing command metrics
+remain bounded name/value/unit arrays; updated workers report additional numeric
+resource metrics through the same command-result route. No new socket resource or
+polling path is introduced.

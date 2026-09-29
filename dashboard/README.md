@@ -135,3 +135,27 @@ FCM acceptance does not prove device delivery or reading. Current Android client
 show notification payloads in the background; they do not show announcement banners
 in the foreground. iOS display depends on APNs setup and notification permission.
 Web users without a native push registration are not reachable by this feature.
+
+## Worker insights and commands
+
+The fleet page summarizes only the currently loaded, filtered page. Worker detail
+explains contact, policy-sync and slot blockers against the server observation
+time, and labels cached data when disconnected. It does not promise scheduler
+eligibility or an ETA. The overview links directly to failed jobs, worker capacity,
+health and push history according to administrator permissions.
+
+Owners can request Runtime snapshot (service/storage), Engine checks
+(model/provider/FFmpeg), full Doctor, and one Kim Vocal 2 Benchmark. Existing
+pause/drain/resume/revoke controls are retained. Commands require an audit reason
+and fresh authentication. A pending command disables another of the same kind;
+a lost response is reconciled through the operation receipt, and an unresolved
+outcome blocks further commands in that page session.
+
+Recent command history shows up to 20 commands, checks, expiry/completion times
+and bounded readable metrics. Runtime snapshot metrics on updated workers include
+supervisor/host uptime, supervisor resident/heap memory, host total/free memory,
+CPU parallelism, and scratch volume available/total space. These are observations
+at command execution, not continuous CPU/GPU utilization or memory budgets. Older
+workers may omit metrics. The engine checks share one packaged probe: a failed
+probe means its requested checks failed or could not complete. Successful unrelated
+checks remain visible. See [review and plan](../docs/dashboard/worker-insights-plan.md).

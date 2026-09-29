@@ -1,5 +1,5 @@
 import { useLiveQuery } from "@/realtime/hooks";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -12,7 +12,10 @@ import {
 } from "lucide-react";
 import { Link, useParams } from "react-router";
 
-import { createOperationId } from "@/api/api-client";
+import {
+  createOperationId,
+  OperationOutcomeUnknownError,
+} from "@/api/api-client";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
 import {
@@ -45,10 +48,21 @@ import {
   workerContactState,
 } from "./worker-status";
 import { workerRecipeLabel } from "./worker-recipes";
+import {
+  WorkerCommandHistory,
+  WorkerReadinessPanel,
+} from "./worker-insight-panels";
 import type { WorkerMachineDetail } from "./worker-types";
 
 type MachineAction =
-  "pause" | "drain" | "resume" | "revoke" | "doctor" | "benchmark";
+  | "pause"
+  | "drain"
+  | "resume"
+  | "revoke"
+  | "doctor"
+  | "runtime"
+  | "engine"
+  | "benchmark";
 
 const actionCopy: Record<
   MachineAction,
@@ -83,10 +97,22 @@ const actionCopy: Record<
       "Queue bounded service, storage, model, provider and FFmpeg checks for this machine.",
     label: "Request doctor",
   },
+  runtime: {
+    title: "Request runtime snapshot",
+    description:
+      "Check the supervisor and scratch storage. Updated workers also report uptime, process memory, host memory and disk capacity. No inference benchmark is started.",
+    label: "Request runtime snapshot",
+  },
+  engine: {
+    title: "Request engine checks",
+    description:
+      "Run the packaged model, GPU provider and FFmpeg probe. These components are validated together; a shared failure may leave individual checks incomplete.",
+    label: "Request engine checks",
+  },
   benchmark: {
     title: "Request one benchmark",
     description:
-      "Queue one iteration of the first qualified recipe. The command defers while a slot is busy.",
+      "Queue one Kim Vocal 2 qualification pass. The command defers while a slot is busy.",
     label: "Request benchmark",
   },
 };
@@ -96,6 +122,8 @@ export function WorkerMachinePage() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const { can, reauthenticate } = useAdminSession();
+  const [uncertain, setUncertain] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<MachineAction | null>(
     null,
   );
@@ -132,15 +160,24 @@ export function WorkerMachinePage() {
         expectedRevision: current.machine.revision,
         reason,
       };
-      if (action === "doctor")
+      if (uncertain)
+        throw new Error(
+          "Resolve the previous operation before issuing another command.",
+        );
+      if (["doctor", "runtime", "engine"].includes(action))
         return requestWorkerDoctor(client, id, {
           ...command,
-          checks: ["service", "storage", "model", "provider", "ffmpeg"],
+          checks:
+            action === "runtime"
+              ? ["service", "storage"]
+              : action === "engine"
+                ? ["model", "provider", "ffmpeg"]
+                : ["service", "storage", "model", "provider", "ffmpeg"],
         });
       if (action === "benchmark") {
         const recipeId = current.machine.capabilities
           .flatMap((capability) => capability.recipeIds)
-          .at(0);
+          .find((recipe) => recipe === "kim-vocals-v2");
         if (!recipeId)
           throw new Error("This machine has no qualified benchmark recipe.");
         return requestWorkerBenchmark(client, id, {
@@ -149,9 +186,27 @@ export function WorkerMachinePage() {
           iterations: 1,
         });
       }
-      return changeWorkerMachineState(client, id, action, command);
+      if (
+        action === "pause" ||
+        action === "drain" ||
+        action === "resume" ||
+        action === "revoke"
+      )
+        return changeWorkerMachineState(client, id, action, command);
+      throw new Error("Unknown worker action.");
     },
-    onSuccess: async () => {
+    onError: (error) => {
+      if (error instanceof OperationOutcomeUnknownError) {
+        setUncertain(error.operationId);
+        setPendingAction(null);
+      }
+    },
+    onSuccess: async (result) => {
+      setNotice(
+        "commandId" in result
+          ? `Command ${result.commandId} accepted. Follow its result in Recent commands.`
+          : "Worker state updated.",
+      );
       setDiagnosticPage({ machineId: id, cursor: null });
       await queryClient.invalidateQueries({ queryKey: ["worker-machine", id] });
       await queryClient.invalidateQueries({ queryKey: ["worker-machines"] });
@@ -188,14 +243,27 @@ export function WorkerMachinePage() {
       <PageHeader
         title={data.machine.label}
         description={`${data.machine.machineId} · revision ${data.machine.revision}`}
-        actions={
-          <>
-            {can("workers.manage") && data.machine.status !== "revoked" ? (
-              <MachineActions data={data} onAction={setPendingAction} />
-            ) : null}
-          </>
-        }
       />
+      {can("workers.manage") && data.machine.status !== "revoked" ? (
+        <MachineActions
+          data={data}
+          disabled={mutation.isPending || Boolean(uncertain)}
+          onAction={setPendingAction}
+        />
+      ) : null}
+      {notice && (
+        <p role="status" className="break-words text-sm">
+          {notice}
+        </p>
+      )}
+      {uncertain && (
+        <p role="alert" className="break-words text-sm text-destructive">
+          Command outcome is unresolved. Further commands are disabled in this
+          page session to prevent duplicates. Check recent history and operation{" "}
+          {uncertain} before returning to this page.
+        </p>
+      )}
+      <WorkerReadinessPanel data={data} />
       <div className="grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <CardContent className="space-y-6 p-5">
@@ -205,7 +273,16 @@ export function WorkerMachinePage() {
                   <StatusBadge value={data.machine.status} />
                 </Datum>
                 <Datum label="Contact">
-                  <StatusBadge value={workerContactState(data.machine)} />
+                  <StatusBadge
+                    value={
+                      data.asOf
+                        ? workerContactState(
+                            data.machine,
+                            Date.parse(data.asOf),
+                          )
+                        : "unknown"
+                    }
+                  />
                 </Datum>
                 <Datum label="Last contact">
                   {formatDateTime(data.machine.lastSeenAt)}
@@ -379,7 +456,7 @@ export function WorkerMachinePage() {
                 }
               />
             ) : null}
-            <CommandHistory commands={data.commands} />
+            <WorkerCommandHistory commands={data.commands} />
           </PageSection>
         </CardContent>
       </Card>
@@ -413,13 +490,29 @@ export function WorkerMachinePage() {
 function MachineActions({
   data,
   onAction,
+  disabled,
 }: {
   data: WorkerMachineDetail;
+  disabled: boolean;
   onAction(action: MachineAction): void;
 }) {
   const status = data.machine.status;
+  const doctorPending = data.commands.some(
+    (command) => command.kind === "doctor" && command.state === "pending",
+  );
+  const benchmarkUnavailable =
+    data.commands.some(
+      (command) => command.kind === "benchmark" && command.state === "pending",
+    ) ||
+    !data.machine.capabilities.some((capability) =>
+      capability.recipeIds.includes("kim-vocals-v2"),
+    );
   return (
-    <>
+    <fieldset
+      disabled={disabled}
+      className="flex flex-wrap gap-2"
+      aria-label="Worker commands"
+    >
       {status === "active" ? (
         <>
           <Button variant="outline" onClick={() => onAction("pause")}>
@@ -434,16 +527,44 @@ function MachineActions({
           <Play aria-hidden="true" /> Resume
         </Button>
       ) : null}
-      <Button variant="outline" onClick={() => onAction("doctor")}>
+      <Button
+        variant="outline"
+        disabled={doctorPending}
+        onClick={() => onAction("runtime")}
+      >
+        <Activity aria-hidden="true" /> Runtime snapshot
+      </Button>
+      <Button
+        variant="outline"
+        disabled={doctorPending}
+        onClick={() => onAction("engine")}
+      >
+        <HeartPulse aria-hidden="true" /> Engine checks
+      </Button>
+      <Button
+        variant="outline"
+        disabled={doctorPending}
+        onClick={() => onAction("doctor")}
+      >
         <HeartPulse aria-hidden="true" /> Doctor
       </Button>
-      <Button variant="outline" onClick={() => onAction("benchmark")}>
+      <Button
+        variant="outline"
+        disabled={benchmarkUnavailable}
+        onClick={() => onAction("benchmark")}
+      >
         <Gauge aria-hidden="true" /> Benchmark
       </Button>
       <Button variant="destructive" onClick={() => onAction("revoke")}>
         <Ban aria-hidden="true" /> Revoke
       </Button>
-    </>
+      {(doctorPending || benchmarkUnavailable) && (
+        <p className="basis-full text-xs text-muted-foreground">
+          A pending command blocks another of the same kind. Benchmark also
+          requires the Kim Vocal 2 capability.
+        </p>
+      )}
+    </fieldset>
   );
 }
 
@@ -577,42 +698,6 @@ function DiagnosticList({
           ) : null}
         </details>
       ))}
-    </div>
-  );
-}
-
-function CommandHistory({
-  commands,
-}: {
-  commands: WorkerMachineDetail["commands"];
-}) {
-  const ordered = useMemo(() => commands.slice(0, 20), [commands]);
-  return (
-    <div className="space-y-2">
-      <h3 className="text-sm font-medium">Recent commands</h3>
-      {ordered.length ? (
-        <ul className="space-y-2">
-          {ordered.map((command) => (
-            <li
-              key={command.commandId}
-              className="rounded-lg border p-3 text-sm"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium capitalize">{command.kind}</span>
-                <StatusBadge value={command.state} />
-                <span className="text-xs text-muted-foreground">
-                  {formatDateTime(command.requestedAt)}
-                </span>
-              </div>
-              {command.summary ? (
-                <p className="mt-2 text-muted-foreground">{command.summary}</p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-sm text-muted-foreground">No commands requested.</p>
-      )}
     </div>
   );
 }
