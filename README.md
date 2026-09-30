@@ -32,13 +32,14 @@ policy. Source changes and local test results do not establish live availability
 ## Architecture
 
 URL imports use private SaaS adapters:
-`client → NestJS → private adapter → SaaS`, then
-`audio bytes → adapter → NestJS validation → private R2 → worker`.
-VideoScale accepts the enabled public item sites, including YouTube, Instagram,
-TikTok, Vimeo, SoundCloud and Facebook/Reels; usable separate audio is required.
-Only YouTube has recorded live end-to-end proof. Provider-specific APIs and
-credentials stay outside NestJS; switch vendors with a contract-compatible
-adapter and generic URL/key settings. Included metadata is saved as nullable
+`client → NestJS → private router → private adapter → SaaS`, then
+`audio bytes → adapter → router → NestJS validation → private R2 → worker`.
+The private acquisition router selects Tunelio for YouTube and VideoScale for
+the other enabled public item sites, including Instagram, TikTok, Vimeo,
+SoundCloud and Facebook/Reels; usable separate audio is required. Consult the
+provider documentation for dated end-to-end proof. Provider-specific APIs and
+credentials stay outside NestJS; the router and adapters preserve the generic
+URL/key contract. Included metadata is saved as nullable
 `extra_data` without paid enrichment. Both adapter and backend scratch are
 bounded and cleaned up. See [provider architecture](video_providers/README.md)
 for the contract, security boundaries, setup and verification.

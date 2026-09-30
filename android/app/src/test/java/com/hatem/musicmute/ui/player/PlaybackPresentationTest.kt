@@ -31,11 +31,17 @@ class PlaybackPresentationTest {
         assertEquals(RepeatMode.OFF, RepeatMode.ONE.toggleCurrentTrackRepeat())
     }
 
-    @Test fun miniPlayerIsVisibleOnlyWhileATrackIsPlaying() {
+    @Test fun miniPlayerIsHiddenWithoutASelectedTrack() {
         assertFalse(PlaybackState().shouldShowMiniPlayer())
-        assertFalse(PlaybackState(trackId = "restored-track").shouldShowMiniPlayer())
         assertFalse(PlaybackState(playing = true).shouldShowMiniPlayer())
+    }
+
+    @Test fun miniPlayerRemainsVisibleWhileATrackIsSelected() {
         assertTrue(PlaybackState(trackId = "active-track", playing = true).shouldShowMiniPlayer())
+        assertTrue(PlaybackState(trackId = "paused-track", positionMs = 30_000).shouldShowMiniPlayer())
+        assertTrue(PlaybackState(trackId = "buffering-track", buffering = true).shouldShowMiniPlayer())
+        assertTrue(PlaybackState(trackId = "failed-track", failed = true).shouldShowMiniPlayer())
+        assertTrue(PlaybackState(trackId = "finished-track", positionMs = 60_000, durationMs = 60_000).shouldShowMiniPlayer())
     }
 
     @Test fun downloadPresentationClampsProgressAndRoundsRemainingTimeUp() {

@@ -165,6 +165,7 @@ test('shared dashboard indexes preserve filters and cursor pages', async (t) => 
   t.after(() => connection.close());
   const definitions = await schemas();
   const accountId = new Types.ObjectId();
+  const fixtureStart = Date.now() - 60_000;
   const cases = [
     {
       name: 'WorkerMachineSchema',
@@ -190,6 +191,8 @@ test('shared dashboard indexes preserve filters and cursor pages', async (t) => 
       name: 'AdminAuditEventSchema',
       time: 'at',
       direction: -1,
+      // Match AdminAuditService: the TTL index cannot order tied audit dates.
+      hint: 'admin_audit_time',
       filters: [
         {},
         { actorUid: 'selected' },
@@ -231,7 +234,7 @@ test('shared dashboard indexes preserve filters and cursor pages', async (t) => 
     // Include tied timestamps to exercise the _id cursor tie-breaker.
     const rows = Array.from({ length: 300 }, (_, i) => ({
       ...scenario.row(i),
-      [scenario.time]: new Date(1000 + Math.floor(i / 3)),
+      [scenario.time]: new Date(fixtureStart + Math.floor(i / 3)),
     }));
     await model.collection.insertMany(rows);
     const sort = { [scenario.time]: -1, _id: scenario.direction };
@@ -265,7 +268,7 @@ test('shared dashboard indexes preserve filters and cursor pages', async (t) => 
           : filter;
         const query = () =>
           model.collection
-            .find(cursorFilter)
+            .find(cursorFilter, scenario.hint ? { hint: scenario.hint } : {})
             .sort(sort)
             .limit(25)
             .maxTimeMS(5000);

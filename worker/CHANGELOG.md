@@ -1,6 +1,20 @@
 # Changelog
 
-## 0.1.0 — pending publication
+## Unreleased — R2 migration
+
+- Replace S3 version IDs with quoted ETags and checksum-bound create-only uploads.
+- Update installer qualification and worker transfer contracts for private R2.
+- Rebuild and sign platform runtimes, publish verified R2 artifacts and select a
+  new npm release version before rollout; existing published runtimes are incompatible.
+
+## 0.1.1 — 2026-09-30
+
+- Use `npm.cmd` and `mw.cmd` in Windows PowerShell installation instructions so
+  the default Restricted script policy accepts the commands.
+- Retain the accepted signed `0.1.0` runtimes; this CLI patch changes documentation
+  and the reported CLI version.
+
+## 0.1.0 — 2026-09-30
 
 - Share the npm CLI between Apple Silicon macOS and Windows x64/DirectML.
 - Add native Windows lifecycle, diagnostics, signed updates and recovery commands.
@@ -8,6 +22,8 @@
 - Validate Windows enrollment-file and staging-directory ACLs before reading credentials.
 - Preserve slot identities across one/two-worker transitions and runtime updates.
 - Enable two workers only after native qualification and backend capacity approval.
+- Allow progressing runtime downloads up to one hour on slow connections, retaining the thirty-second inactivity timeout and full integrity verification.
+- Resume exchanged enrollments with the saved installation credential after the invitation expires; replay uncertain activation without repeating its qualification report.
 
 ## 0.1.0-rc.1 — 2026-09-27
 

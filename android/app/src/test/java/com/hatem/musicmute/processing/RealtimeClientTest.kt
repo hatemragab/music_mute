@@ -102,6 +102,26 @@ class RealtimeClientTest {
         assertEquals(2, tickets)
     }
 
+    @Test fun tracksTwentyImportsAlongsidePolicyUsageAndHistoryOnOneSocket() = runTest(dispatcher) {
+        val sockets = mutableListOf<Socket>()
+        val auth = AuthApiClient(AuthConfiguration("https://api.example.test", false), { "owner" }, { "fixture-token" },
+            AuthHttpTransport { _, _, _, _ -> AuthHttpResponse(201, """{"ticket":"${"a".repeat(43)}","path":"/realtime/socket","protocol":"musicmute.realtime.v1"}""") })
+        val client = RealtimeClient(auth, backgroundScope, { "installation" }, openSocket = { request, listener -> Socket(request, listener).also { sockets.add(it) } })
+        client.bindSession(ProcessingSession("owner", 1)); client.setForeground(true)
+        val collectors = (0 until 20).map { index ->
+            backgroundScope.launch { client.watch("import", mapOf("id" to "import$index")).collect {} }
+        } + listOf("policy", "usage", "jobs").map { resource ->
+            backgroundScope.launch { client.watch(resource).collect {} }
+        }
+        runCurrent()
+        sockets.single().frame("""{"type":"ready","protocol_version":1,"stream_id":"imports"}""")
+        runCurrent()
+        assertEquals(23, sockets.single().sent.count { it.contains("subscribe") })
+        collectors.forEach { it.cancel() }
+        runCurrent()
+        client.bindSession(null)
+    }
+
     @Test fun forbiddenTicketStopsReconnect() = runTest(dispatcher) {
         var tickets = 0
         val auth = AuthApiClient(AuthConfiguration("https://api.example.test", false), { "owner" }, { "fixture-token" },

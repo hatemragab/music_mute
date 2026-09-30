@@ -14,22 +14,25 @@ class MediaPreparationTestRunner : Instrumentation() {
     private var sourceUri: String? = null
     private var playbackCard = false
     private var listeningFeatures = false
+    private var notificationBadges = false
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
         sourceUri = arguments?.getString("sourceUri")
         playbackCard = arguments?.getString("check") == "playbackCard"
         listeningFeatures = arguments?.getString("check") == "listeningFeatures"
+        notificationBadges = arguments?.getString("check") == "notificationBadges"
         start()
     }
 
     override fun onStart() {
-        if (playbackCard || listeningFeatures) {
+        if (playbackCard || listeningFeatures || notificationBadges) {
             val report = Bundle()
             try {
-                if (listeningFeatures) runBlocking { com.hatem.musicmute.playback.checkListeningFeatures(targetContext) }
+                if (notificationBadges) com.hatem.musicmute.checkNotificationBadges(targetContext)
+                else if (listeningFeatures) runBlocking { com.hatem.musicmute.playback.checkListeningFeatures(targetContext) }
                 else com.hatem.musicmute.playback.checkPlaybackCard(targetContext)
-                report.putString("result", "PASS: requested playback framework checks")
+                report.putString("result", "PASS: requested framework checks")
                 finish(Activity.RESULT_OK, report)
             } catch (error: Exception) {
                 report.putString("failure", error.stackTraceToString())

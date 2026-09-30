@@ -330,7 +330,6 @@
     <string name="url_import_queued">Waiting to import…</string>
     <string name="url_import_validating">Checking audio…</string>
     <string name="url_import_uploading">Saving audio for processing…</string>
-    <string name="url_import_submitted">Import started. We’ll process it in the background.</string>
     <string name="url_import_failed">Import failed</string>
     <string name="url_import_attention">Import needs attention</string>
     <string name="url_import_invalid">Enter one valid link.</string>

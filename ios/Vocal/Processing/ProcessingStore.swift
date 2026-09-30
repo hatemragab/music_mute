@@ -176,6 +176,7 @@ actor ProcessingStore {
     var retryIntents: [JobRetryIntent]? = nil
     var pipelines: [AudioPipelineIntent]? = nil
     var urlImport: URLImportRecord? = nil
+    var urlImports: [URLImportRecord]? = nil
   }
   private let root: URL
   private let stagingRoot: URL
@@ -190,39 +191,55 @@ actor ProcessingStore {
     SHA256.hash(data: Data(uid.utf8)).map { String(format: "%02x", $0) }.joined()
   }
 
-  func urlImport(ownerUid: String, now: Date = Date()) throws -> URLImportRecord? {
+  func urlImports(ownerUid: String, now: Date = Date()) throws -> [URLImportRecord] {
     var snapshot = try load(ownerUid)
-    if var record = snapshot.urlImport, record.status == "failed", record.jobId == nil {
-      if let failedAt = record.failedAt {
-        if now.timeIntervalSince(failedAt) >= 7 * 86_400 {
-          snapshot.urlImport = nil
-          try persist(snapshot)
-        }
-      } else {
-        record.failedAt = now
-        snapshot.urlImport = record
-        try persist(snapshot)
+    var records = snapshot.urlImports ?? snapshot.urlImport.map { [$0] } ?? []
+    records = records.compactMap { value in
+      var record = value
+      guard record.status == "failed", record.jobId == nil else { return record }
+      if let failedAt = record.failedAt, now.timeIntervalSince(failedAt) >= 7 * 86_400 {
+        return nil
       }
+      record.failedAt = record.failedAt ?? now
+      return record
     }
-    return snapshot.urlImport
+    if snapshot.urlImports != records || snapshot.urlImport != nil {
+      snapshot.urlImports = records
+      snapshot.urlImport = nil
+      try persist(snapshot)
+    }
+    return records
+  }
+
+  func urlImport(ownerUid: String, now: Date = Date()) throws -> URLImportRecord? {
+    try urlImports(ownerUid: ownerUid, now: now).last
   }
 
   func saveURLImport(_ record: URLImportRecord, ownerUid: String) throws {
     var snapshot = try load(ownerUid)
+    var records = snapshot.urlImports ?? snapshot.urlImport.map { [$0] } ?? []
     var saved = record
-    let previousFailure = snapshot.urlImport.flatMap {
-      $0.requestId == record.requestId && $0.status == "failed" ? $0.failedAt : nil
+    let previous = records.first { $0.requestId == record.requestId }
+    saved.failedAt =
+      record.status == "failed" ? record.failedAt ?? previous?.failedAt ?? Date() : nil
+    if let index = records.firstIndex(where: { $0.requestId == record.requestId }) {
+      records[index] = saved
+    } else {
+      records.append(saved)
     }
-    saved.failedAt = record.status == "failed" ? record.failedAt ?? previousFailure ?? Date() : nil
-    snapshot.urlImport = saved
+    // Keep active recovery intents and failed records; bound completed import receipts.
+    let completed = Set(records.filter { $0.status == "submitted" }.suffix(20).map(\.requestId))
+    records.removeAll { $0.status == "submitted" && !completed.contains($0.requestId) }
+    snapshot.urlImports = records
+    snapshot.urlImport = nil
     try persist(snapshot)
   }
 
   func removeFailedURLImport(requestId: UUID, ownerUid: String) throws {
     var snapshot = try load(ownerUid)
-    guard let record = snapshot.urlImport, record.requestId == requestId,
-      record.status == "failed", record.jobId == nil
-    else { return }
+    var records = snapshot.urlImports ?? snapshot.urlImport.map { [$0] } ?? []
+    records.removeAll { $0.requestId == requestId && $0.status == "failed" && $0.jobId == nil }
+    snapshot.urlImports = records
     snapshot.urlImport = nil
     try persist(snapshot)
   }

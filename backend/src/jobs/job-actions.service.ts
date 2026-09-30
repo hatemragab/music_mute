@@ -19,6 +19,7 @@ import { WorkerSlot } from '../worker-fleet/machines/worker-slot.schema.js';
 import { adminError } from '../admin/admin-errors.js';
 import type { AdminActor } from '../admin/admin.types.js';
 import { WorkerHintService } from '../worker-hints/worker-hint.service.js';
+import { assertJobRequestNotPurged } from './purged-job-request.js';
 
 type JobActionPrincipal =
   | { kind: 'owner'; userId: Types.ObjectId }
@@ -222,6 +223,13 @@ export class JobActionsService {
           .session(session)
           .lean();
         if (repeated) return this.presentRetry(repeated, hash);
+        await assertJobRequestNotPurged(
+          this.jobs,
+          owner,
+          requestId,
+          hash,
+          session,
+        );
         const original = await this.jobs
           .findOne({ _id: originalId, userId: owner })
           .session(session)

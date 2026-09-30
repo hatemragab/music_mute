@@ -24,6 +24,7 @@ import {
   workerRecipeSnapshot,
 } from './worker-recipes.js';
 import { WorkerHintService } from '../worker-hints/worker-hint.service.js';
+import { assertJobRequestNotPurged } from './purged-job-request.js';
 
 const UPLOAD_EXPIRY_GRACE_MS = 300_000;
 const TRANSFER_SETTLEMENT_MS = 3_600_000;
@@ -73,6 +74,13 @@ export class JobsService {
             .session(session)
             .lean();
           if (repeated) return repeated;
+          await assertJobRequestNotPurged(
+            this.jobs,
+            owner,
+            requestId,
+            hash,
+            session,
+          );
           // Exchange the import hold for the measured job reservation atomically.
           if (importReservationId)
             await this.usage.releaseImport(

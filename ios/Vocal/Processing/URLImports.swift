@@ -30,16 +30,19 @@ struct URLImportRecord: Codable, Equatable, Sendable {
   var terminal: Bool { ["submitted", "failed"].contains(status) }
 }
 
-/// One durable import per account. Ambiguous writes keep their original request ID.
+/// Account-scoped durable imports. Ambiguous writes retain their original request IDs.
 @MainActor final class URLImportsModel: ObservableObject {
-  @Published private(set) var record: URLImportRecord?
+  @Published private(set) var records: [URLImportRecord] = []
+  var record: URLImportRecord? { records.last }
   @Published private(set) var messageKey: String?
   @Published private(set) var busy = false
+  @Published private(set) var submitting = false
+  @Published private(set) var owner: String?
   private let api: JobsAPI
   private let store: ProcessingStore
-  @Published private(set) var owner: String?
   private var epoch: UInt64 = 0
-  private var task: Task<Void, Never>?
+  private var tasks: [UUID: Task<Void, Never>] = [:]
+  private var suspended = Set<UUID>()
   private var active = true
   var onSubmitted: (String) async -> Void = { _ in }
 
@@ -51,17 +54,19 @@ struct URLImportRecord: Codable, Equatable, Sendable {
   func bindOwner(_ uid: String?) async {
     epoch &+= 1
     let ticket = epoch
-    task?.cancel()
-    task = nil
+    for task in tasks.values { task.cancel() }
+    tasks.removeAll()
+    suspended.removeAll()
     owner = uid
-    record = nil
+    records = []
     messageKey = nil
     busy = false
+    submitting = false
     guard let uid else { return }
     do {
-      let saved = try await store.urlImport(ownerUid: uid)
+      let saved = try await store.urlImports(ownerUid: uid)
       guard ticket == epoch else { return }
-      record = saved
+      records = saved
       resume()
     } catch {
       if ticket == epoch { messageKey = "processing_error_storage" }
@@ -69,21 +74,20 @@ struct URLImportRecord: Codable, Equatable, Sendable {
   }
 
   func submit(_ raw: String, trimEnabled: Bool = true) async {
-    guard !busy, record == nil || record?.terminal == true, let uid = owner else { return }
+    guard !submitting, let uid = owner else { return }
     let ticket = epoch
     do {
       let url = try SupportedAudioSites.canonical(raw)
       let pending = URLImportRecord(url: url, requestId: UUID(), trimEnabled: trimEnabled)
-      busy = true
+      submitting = true
+      defer { if ticket == epoch { submitting = false } }
       try await store.saveURLImport(pending, ownerUid: uid)
       guard ticket == epoch else { return }
-      record = pending
+      records.append(pending)
       messageKey = nil
-      busy = false
-      resume()
+      startPending()
     } catch {
       guard ticket == epoch else { return }
-      busy = false
       messageKey = (error as? URLImportFailure)?.messageKey ?? processingErrorKey(error)
     }
   }
@@ -93,94 +97,127 @@ struct URLImportRecord: Codable, Equatable, Sendable {
     await bindOwner(owner)
   }
 
-  func removeFailedImport() async {
-    guard !busy, let uid = owner, let current = record, current.status == "failed",
-      current.jobId == nil
+  func removeFailedImport(requestId: UUID? = nil) async {
+    guard let uid = owner,
+      let current = records.first(where: { $0.requestId == (requestId ?? record?.requestId) }),
+      current.status == "failed", current.jobId == nil
     else { return }
     let ticket = epoch
-    busy = true
-    defer { if ticket == epoch { busy = false } }
     do {
       try await store.removeFailedURLImport(requestId: current.requestId, ownerUid: uid)
       guard ticket == epoch else { return }
-      record = nil
+      records.removeAll { $0.requestId == current.requestId }
       messageKey = nil
-    } catch {
-      if ticket == epoch { messageKey = "processing_error_storage" }
-    }
+    } catch { if ticket == epoch { messageKey = "processing_error_storage" } }
   }
 
   func pause() {
     active = false
-    task?.cancel()
-    task = nil
-    busy = false
     epoch &+= 1
+    for task in tasks.values { task.cancel() }
+    tasks.removeAll()
+    busy = false
+    submitting = false
   }
 
-  func resume() {
-    guard active, task == nil, let uid = owner, let record, !record.terminal else { return }
-    let ticket = epoch
-    busy = true
-    task = Task { [weak self] in
-      guard let self else { return }
-      defer {
-        if ticket == self.epoch {
-          self.task = nil
-          self.busy = false
+  func isTracking(_ requestId: UUID) -> Bool { tasks[requestId] != nil }
+
+  func resume(requestId: UUID? = nil) {
+    if let requestId { suspended.remove(requestId) } else { suspended.removeAll() }
+    startPending()
+  }
+
+  private func startPending() {
+    guard active, let uid = owner else { return }
+    // Leave capacity on the shared socket for history, usage and job details.
+    for current in records where !current.terminal && !suspended.contains(current.requestId) {
+      guard tasks.count < 100 else { break }
+      let id = current.requestId
+      guard tasks[id] == nil else { continue }
+      let ticket = epoch
+      tasks[id] = Task { [weak self] in
+        guard let self else { return }
+        defer {
+          if ticket == self.epoch {
+            self.tasks[id] = nil
+            self.busy = !self.tasks.isEmpty
+            self.startPending()
+          }
         }
-      }
-      while !Task.isCancelled, ticket == self.epoch, var current = self.record, !current.terminal {
         do {
-          let view: URLImportView
-          if let id = current.importId {
-            view = try await self.api.urlImport(id: id)
+          var value = current
+          if value.importId == nil {
+            let view = try await self.api.createURLImport(
+              url: value.url, requestId: value.requestId, trimEnabled: value.trimEnabled)
+            value = try await self.save(view, record: value, owner: uid, ticket: ticket)
+          }
+          guard !value.terminal, let importId = value.importId else { return }
+          if let realtime = self.api.realtime {
+            for try await data in realtime.watch("import", params: ["id": importId]) {
+              let view = try JSONDecoder.authDecoder().decode(URLImportView.self, from: data)
+                .validated()
+              value = try await self.save(view, record: value, owner: uid, ticket: ticket)
+              if value.terminal { return }
+            }
           } else {
-            view = try await self.api.createURLImport(
-              url: current.url, requestId: current.requestId, trimEnabled: current.trimEnabled)
+            // Fixture/explicit-read clients get one snapshot, never status polling.
+            let view = try await self.api.urlImport(id: importId)
+            _ = try await self.save(view, record: value, owner: uid, ticket: ticket)
           }
-          try Task.checkCancellation()
-          guard ticket == self.epoch else { return }
-          current.importId = view.importId
-          current.status = view.status
-          current.jobId = view.jobId
-          current.messageKey = view.error.map { URLImportFailure.server($0.code).messageKey }
-          try await self.store.saveURLImport(current, ownerUid: uid)
-          guard ticket == self.epoch else { return }
-          self.record = current
-          self.messageKey = nil
-          if let job = current.jobId, current.status == "submitted" {
-            await self.onSubmitted(job)
-            return
-          }
-          if current.terminal { return }
-          try await Task.sleep(for: .seconds(3))
-        } catch is CancellationError { return } catch {
-          guard ticket == self.epoch, !Task.isCancelled else { return }
-          self.messageKey = (error as? URLImportFailure)?.messageKey ?? processingErrorKey(error)
-          if let failure = error as? URLImportFailure {
-            let retryable: Bool
-            switch failure {
-            case .server(let code):
-              retryable = ["IMPORT_QUEUE_FULL", "IMPORT_DISABLED"].contains(code)
-            default: retryable = false
-            }
-            if !retryable {
-              current.status = "failed"
-              current.messageKey = failure.messageKey
-              do {
-                try await self.store.saveURLImport(current, ownerUid: uid)
-                guard ticket == self.epoch else { return }
-                self.record = current
-              } catch {
-                if ticket == self.epoch { self.messageKey = "processing_error_storage" }
-              }
-            }
-          }
-          // Explicit retry avoids a hot loop for permanent errors and honors HTTP cooldowns.
+          self.suspended.insert(id)
+        } catch is CancellationError {
           return
+        } catch {
+          guard ticket == self.epoch, !Task.isCancelled else { return }
+          self.suspended.insert(id)
+          let key = (error as? URLImportFailure)?.messageKey ?? processingErrorKey(error)
+          self.messageKey = key
+          guard let index = self.records.firstIndex(where: { $0.requestId == id }) else { return }
+          var failed = self.records[index]
+          failed.messageKey = key
+          if let failure = error as? URLImportFailure, case .server(let code) = failure,
+            !["IMPORT_QUEUE_FULL", "IMPORT_DISABLED"].contains(code)
+          {
+            failed.status = "failed"
+          }
+          do {
+            try await self.store.saveURLImport(failed, ownerUid: uid)
+            guard ticket == self.epoch,
+              let latest = self.records.firstIndex(where: { $0.requestId == id })
+            else { return }
+            self.records[latest] = failed
+          } catch {
+            if ticket == self.epoch { self.messageKey = "processing_error_storage" }
+          }
         }
       }
     }
+    busy = !tasks.isEmpty
+  }
+
+  private func save(
+    _ view: URLImportView, record: URLImportRecord, owner uid: String, ticket: UInt64
+  )
+    async throws -> URLImportRecord
+  {
+    try Task.checkCancellation()
+    guard ticket == epoch, owner == uid else { throw CancellationError() }
+    let view = try view.validated()
+    guard record.importId == nil || record.importId == view.importId else {
+      throw JobsFailure.malformedResponse
+    }
+    var saved = record
+    saved.importId = view.importId
+    saved.status = view.status
+    saved.jobId = view.jobId
+    saved.messageKey = view.error.map { URLImportFailure.server($0.code).messageKey }
+    try await store.saveURLImport(saved, ownerUid: uid)
+    guard ticket == epoch, !Task.isCancelled,
+      let index = records.firstIndex(where: { $0.requestId == saved.requestId })
+    else { throw CancellationError() }
+    records[index] = saved
+    messageKey = nil
+    if let job = saved.jobId, saved.status == "submitted" { await onSubmitted(job) }
+    return saved
   }
 }

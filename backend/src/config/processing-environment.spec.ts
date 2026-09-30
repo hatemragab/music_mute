@@ -18,6 +18,39 @@ const base = {
 };
 
 describe('processing configuration', () => {
+  it('defaults URL imports to twenty active executions with a bounded waiting backlog', () => {
+    expect(validateEnvironment(base)).toMatchObject({
+      URL_IMPORT_CONCURRENCY: 20,
+      URL_IMPORT_REQUESTS_PER_SECOND: 5,
+      URL_IMPORT_MAX_OUTSTANDING: 100,
+    });
+  });
+  it.each([
+    ['URL_IMPORT_CONCURRENCY', 0],
+    ['URL_IMPORT_CONCURRENCY', 21],
+    ['URL_IMPORT_CONCURRENCY', 1.5],
+    ['URL_IMPORT_REQUESTS_PER_SECOND', 0],
+    ['URL_IMPORT_REQUESTS_PER_SECOND', 6],
+    ['URL_IMPORT_REQUESTS_PER_SECOND', 1.5],
+    ['URL_IMPORT_MAX_OUTSTANDING', 0],
+    ['URL_IMPORT_MAX_OUTSTANDING', 101],
+  ])('rejects invalid %s capacity %s', (key, value) => {
+    expect(() => validateEnvironment({ ...base, [key]: value })).toThrow(key);
+  });
+  it('allows reducing shared URL import throughput', () => {
+    expect(
+      validateEnvironment({
+        ...base,
+        URL_IMPORT_CONCURRENCY: '2',
+        URL_IMPORT_REQUESTS_PER_SECOND: '1',
+        URL_IMPORT_MAX_OUTSTANDING: '20',
+      }),
+    ).toMatchObject({
+      URL_IMPORT_CONCURRENCY: 2,
+      URL_IMPORT_REQUESTS_PER_SECOND: 1,
+      URL_IMPORT_MAX_OUTSTANDING: 20,
+    });
+  });
   it('keeps processing disabled by default', () => {
     expect(validateEnvironment(base).AUDIO_PROCESSING_ENABLED).toBe(false);
   });

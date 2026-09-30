@@ -102,12 +102,17 @@ const schema = Joi.object({
   AUDIO_PROCESSING_ENABLED: Joi.boolean().default(false),
   URL_IMPORT_ENABLED: Joi.boolean().default(false),
   URL_IMPORT_PROCESSOR_ENABLED: Joi.boolean().default(false),
-  URL_IMPORT_CONCURRENCY: Joi.number().integer().min(1).max(1).default(1),
+  URL_IMPORT_CONCURRENCY: Joi.number().integer().min(1).max(20).default(20),
+  URL_IMPORT_REQUESTS_PER_SECOND: Joi.number()
+    .integer()
+    .min(1)
+    .max(5)
+    .default(5),
   URL_IMPORT_MAX_OUTSTANDING: Joi.number()
     .integer()
     .min(1)
     .max(100)
-    .default(20),
+    .default(100),
   URL_IMPORT_TEMP_ROOT: Joi.string()
     .pattern(/^\//)
     .default('/tmp/musicmute-url-imports'),

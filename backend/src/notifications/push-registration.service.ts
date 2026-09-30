@@ -16,6 +16,10 @@ import {
   PushInstallation,
   type PushInstallationDocument,
 } from './push-installation.schema.js';
+import {
+  NOTIFICATION_DETAIL_RETENTION_MS,
+  NOTIFICATION_RETENTION_BATCH_SIZE,
+} from './notification-retention.js';
 
 const MAX_WRITE_ATTEMPTS = 3;
 const PAGE_LIMIT = 50;
@@ -56,6 +60,44 @@ export class PushRegistrationsService {
     private readonly transactions: ProcessingTransactions,
     private readonly installationOwners: DeviceInstallationOwnersService,
   ) {}
+
+  /** Existing inactive records are assigned expiry gradually, never active bindings. */
+  async scheduleInactiveRetention(): Promise<void> {
+    const rows = await this.registrations
+      .find({
+        active: false,
+        deactivatedAt: trusted({ $type: 'date' }),
+        purgeAt: null,
+      })
+      .setOptions({ sanitizeFilter: false })
+      .select('_id deactivatedAt bindingRevision')
+      .sort({ deactivatedAt: 1, _id: 1 })
+      .limit(NOTIFICATION_RETENTION_BATCH_SIZE)
+      .lean()
+      .exec();
+    if (!rows.length) return;
+    await this.registrations.bulkWrite(
+      rows.map((row) => ({
+        updateOne: {
+          filter: {
+            _id: row._id,
+            active: false,
+            bindingRevision: row.bindingRevision,
+            deactivatedAt: row.deactivatedAt,
+            purgeAt: null,
+          },
+          update: {
+            $set: {
+              purgeAt: new Date(
+                row.deactivatedAt!.getTime() + NOTIFICATION_DETAIL_RETENTION_MS,
+              ),
+            },
+          },
+        },
+      })),
+      { ordered: false },
+    );
+  }
 
   async register(
     user: UserDocument,
@@ -117,6 +159,7 @@ export class PushRegistrationsService {
         .session(session)
         .exec();
       if (!current) return;
+      const deactivatedAt = new Date();
       await this.registrations
         .updateOne(
           {
@@ -126,7 +169,13 @@ export class PushRegistrationsService {
             bindingRevision: current.bindingRevision,
           },
           {
-            $set: { active: false, deactivatedAt: new Date() },
+            $set: {
+              active: false,
+              deactivatedAt,
+              purgeAt: new Date(
+                deactivatedAt.getTime() + NOTIFICATION_DETAIL_RETENTION_MS,
+              ),
+            },
             $inc: { bindingRevision: 1 },
           },
           { session, runValidators: true },
@@ -147,6 +196,7 @@ export class PushRegistrationsService {
     this.assertInstallationId(installationId);
     if (!Number.isSafeInteger(bindingRevision) || bindingRevision < 1)
       throw authError('INVALID_INPUT');
+    const deactivatedAt = new Date();
     const result = await this.registrations
       .updateOne(
         {
@@ -157,7 +207,13 @@ export class PushRegistrationsService {
           active: true,
         },
         {
-          $set: { active: false, deactivatedAt: new Date() },
+          $set: {
+            active: false,
+            deactivatedAt,
+            purgeAt: new Date(
+              deactivatedAt.getTime() + NOTIFICATION_DETAIL_RETENTION_MS,
+            ),
+          },
           $inc: { bindingRevision: 1 },
         },
         { runValidators: true },
@@ -326,6 +382,7 @@ export class PushRegistrationsService {
       current.authTimeSec === authTimeSec;
     if (sameBinding) return current;
 
+    const deactivatedAt = new Date();
     await this.registrations
       .updateMany(
         {
@@ -334,7 +391,13 @@ export class PushRegistrationsService {
           active: true,
         },
         {
-          $set: { active: false, deactivatedAt: new Date() },
+          $set: {
+            active: false,
+            deactivatedAt,
+            purgeAt: new Date(
+              deactivatedAt.getTime() + NOTIFICATION_DETAIL_RETENTION_MS,
+            ),
+          },
           $inc: { bindingRevision: 1 },
         },
         { session, runValidators: true },
@@ -354,6 +417,7 @@ export class PushRegistrationsService {
             authTimeSec,
             active: true,
             deactivatedAt: null,
+            purgeAt: null,
           },
         ],
         { session },
@@ -372,6 +436,7 @@ export class PushRegistrationsService {
             authTimeSec,
             active: true,
             deactivatedAt: null,
+            purgeAt: null,
           },
           $inc: { bindingRevision: 1 },
         },

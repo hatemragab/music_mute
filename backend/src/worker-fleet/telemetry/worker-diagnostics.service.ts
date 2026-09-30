@@ -14,7 +14,7 @@ import type {
 import { WorkerDiagnostic } from './worker-diagnostic.schema.js';
 import { sanitizeWorkerDiagnosticLine } from './worker-diagnostic-sanitizer.js';
 
-const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class WorkerDiagnosticsService {

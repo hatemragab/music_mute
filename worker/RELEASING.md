@@ -48,11 +48,24 @@ GPU, service or live-fleet acceptance.
 
 ## Runtime and catalog gates
 
+Documentation-only CLI patches may retain an accepted managed runtime. Compare
+the new tarball with its accepted predecessor: compiled JavaScript, protocol and
+engine files must be byte-identical, with changes limited to release documentation
+and the CLI manifest version. Retain the original runtime candidate evidence and
+signed catalog; run packed-consumer checks and fresh registry checks on both
+platforms for the new CLI. Record CLI and runtime versions separately. Any runtime
+code change requires the full native runtime and catalog gates below.
+If the workspace has advanced, prepare this patch in a private staging directory
+from the accepted tarball and copy only the reviewed documentation and version
+change. Never overwrite newer repository source to recreate the accepted bytes.
+
 1. Freeze a reviewed commit and one version across `package.json`, the runtime
    manifest, signed metadata and release notes. Rebuild the runtime from that
    source; do not relabel an older `.local.*` archive.
-2. Use `mw package-macos` with qualified private Node/Python/media roots and that
-   version. Leave `SENTRY_AUTH_TOKEN` unset for local builds that must not upload
+2. On native macOS, use `mw package-macos` with qualified private Node/Python/media
+   roots and that version. On native Windows x64, use `mw windows package` with
+   qualified private Node/Python/FFmpeg/WinSW roots, as documented in README.md.
+   Leave `SENTRY_AUTH_TOKEN` unset for local builds that must not upload
    source maps. Keep credentials, state, models and job media outside the archive.
 3. Audit the actual native dependency inventory and notices, including the media
    source manifest. Retain the recorded direct-owner model authorization. Do not
@@ -80,6 +93,10 @@ The gate verifies built-in signing trust, expiry, sequence, version agreement,
 artifact hashes, runtime inventory and extracted archive contents. After separately
 authorized promotion, independently read the deployed catalog. Do not downgrade a
 healthy newer local runtime to an older catalog. Automatic fleet rollout is absent.
+
+Run the same gate on native Windows using its runtime directory, ZIP archive,
+npm evidence and signed `windows-amd64` metadata. Each platform has its own
+monotonic sequence. A passing macOS gate does not cover Windows.
 
 ## Capacity and rollback
 
@@ -112,6 +129,9 @@ entries do not establish acceptance of the candidate:
 
 - Fresh dedicated Mac: Node/npm setup, enrollment, artifact/model integrity,
   GPU qualification and backend registration; interrupted installation recovery.
+- Fresh Windows x64 installation from an administrator shell: protected NTFS
+  enrollment inputs, signed ZIP delivery, DirectML qualification and LocalService
+  registration; interrupted installation recovery and Automatic startup at boot.
 - Login startup, screen lock, logout/login, sleep/wake and reboot; pause/drain/
   resume, normal stop/restart and backend pause/revocation fences.
 - Running/stopped updates, interrupted activation, verified rollback, expired

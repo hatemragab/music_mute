@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { createConnection, Types } from 'mongoose';
 import { IsolatedServices } from './helpers/isolated-services.mjs';
 import { JobSchema } from '../dist/jobs/job.schema.js';
+import { PurgedJobRequestSchema } from '../dist/jobs/purged-job-request.schema.js';
 import { JobActionsService } from '../dist/jobs/job-actions.service.js';
 import { ProcessingTransactions } from '../dist/processing/processing-transactions.js';
 import { StorageCleanupTaskSchema } from '../dist/storage/storage-cleanup-task.schema.js';
@@ -20,11 +21,15 @@ test(
     const connection = await createConnection(mongoUri).asPromise();
     t.after(() => connection.close());
     const jobs = connection.model('Job', JobSchema);
+    const receipts = connection.model(
+      'PurgedJobRequest',
+      PurgedJobRequestSchema,
+    );
     const tasks = connection.model(
       'StorageCleanupTask',
       StorageCleanupTaskSchema,
     );
-    await Promise.all([jobs.init(), tasks.init()]);
+    await Promise.all([jobs.init(), tasks.init(), receipts.init()]);
     const owner = new Types.ObjectId();
     const now = new Date('2026-09-30T00:00:00Z');
     const key = `users/${owner}/jobs/${new Types.ObjectId()}/input/${randomUUID()}.mp3`;

@@ -1,12 +1,12 @@
 import { HttpException, ValidationPipe } from '@nestjs/common';
 import type { Model } from 'mongoose';
 import { Types } from 'mongoose';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Job } from '../jobs/job.schema.js';
 import type { RateBudgetService } from '../rate-limits/rate-budget.service.js';
 import type { RateLimitKeys } from '../rate-limits/rate-limit-keys.js';
 import { ClientErrorDto } from './client-error.dto.js';
-import type { ClientError } from './client-error.schema.js';
+import { ClientErrorSchema, type ClientError } from './client-error.schema.js';
 import type { AccountAccessService } from '../users/account-access.service.js';
 import { ClientErrorsService } from './client-errors.service.js';
 
@@ -69,6 +69,39 @@ function setup(options?: {
 }
 
 describe('ClientErrorsService', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('expires diagnostics from server receipt time while keeping event replay uniqueness', async () => {
+    const receivedAt = new Date('2026-09-30T10:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(receivedAt);
+    const f = setup();
+
+    await f.service.report(ownerId.toHexString(), report);
+
+    expect(f.errors.create).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          receivedAt,
+          occurredAt: new Date(report.occurredAt),
+        }),
+      ],
+      { session: {} },
+    );
+    expect(ClientErrorSchema.indexes()).toEqual(
+      expect.arrayContaining([
+        [
+          { receivedAt: 1 },
+          expect.objectContaining({
+            expireAfterSeconds: 2_592_000,
+            name: 'client_errors_expiry',
+          }),
+        ],
+        [{ userId: 1, eventId: 1 }, expect.objectContaining({ unique: true })],
+      ]),
+    );
+  });
+
   it.each([
     [{ ...report, stage: 'SIGNED_URL' }],
     [{ ...report, code: 'Bearer secret-value' }],

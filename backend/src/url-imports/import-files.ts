@@ -31,6 +31,8 @@ const ORPHAN_GRACE_MS = 60 * 60_000;
 export class ImportFiles {
   private readonly active = new Set<string>();
   private sweepOffset = 0;
+  private reservedBytes = 0;
+  private spaceReservation: Promise<void> = Promise.resolve();
   readonly root: string;
 
   constructor(
@@ -51,8 +53,29 @@ export class ImportFiles {
 
   async assertSpace(additionalBytes = 0): Promise<void> {
     const space = await statfs(this.root);
-    if (space.bavail * space.bsize < this.minimumFreeBytes + additionalBytes)
+    if (
+      space.bavail * space.bsize <
+      this.minimumFreeBytes + this.reservedBytes + additionalBytes
+    )
       throw importError('IMPORT_DISK_FULL');
+  }
+
+  private async reserveSpace(bytes: number): Promise<() => void> {
+    // Serialize check-and-reserve before a paid POST; concurrent transfers must
+    // not all spend the same free bytes. Retain the full hold during streaming
+    // so delayed filesystem allocation cannot weaken the disk headroom check.
+    const admission = this.spaceReservation.then(async () => {
+      await this.assertSpace(bytes);
+      this.reservedBytes += bytes;
+    });
+    this.spaceReservation = admission.catch(() => undefined);
+    await admission;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      this.reservedBytes -= bytes;
+    };
   }
 
   async withFile<T>(
@@ -165,7 +188,7 @@ export class ImportFiles {
       maxBytes > MAX_PREPARED_AUDIO_BYTES
     )
       throw new Error('Invalid import byte limit');
-    await this.assertSpace(maxBytes);
+    const releaseSpace = await this.reserveSpace(maxBytes);
     const controller = new AbortController();
     const transferSignal = AbortSignal.any([
       signal,
@@ -284,6 +307,7 @@ export class ImportFiles {
       response?.destroy();
       outgoing?.destroy();
       controller.abort();
+      releaseSpace();
     }
   }
 }

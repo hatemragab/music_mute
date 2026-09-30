@@ -7,8 +7,10 @@ import com.azhon.appupdate.listener.LifecycleCallbacksAdapter
 import com.azhon.appupdate.listener.OnButtonClickListener
 import com.azhon.appupdate.listener.OnDownloadListenerAdapter
 import com.azhon.appupdate.manager.DownloadManager
+import com.azhon.appupdate.util.NotificationUtil
 import com.azhon.appupdate.view.UpdateDialogActivity
 import com.hatem.musicmute.R
+import com.hatem.musicmute.createAppUpdateNotificationChannel
 import java.io.File
 import java.lang.ref.WeakReference
 import java.util.Locale
@@ -105,6 +107,7 @@ internal class AppUpdateDownloadClient(
                     .apkSize(String.format(Locale.ROOT, "%.1f MB", permission.bytes / 1_000_000.0))
                     .smallIcon(R.mipmap.ic_launcher)
                     .forcedUpgrade(required)
+                    .notificationChannel(createAppUpdateNotificationChannel(host))
                     .showNotification(false)
                     .showBgdToast(false)
                     .jumpInstallPage(false)
@@ -127,6 +130,9 @@ internal class AppUpdateDownloadClient(
                         }
                         override fun done(apk: File) {
                             // The custom HTTP manager verified this file before AppUpdate saw Done.
+                            // Android 10+ still gets a library completion notification despite
+                            // showNotification(false). The app owns the installer handoff.
+                            NotificationUtil.cancelNotification(host)
                             handoff.verified(apk)
                             main.post {
                                 dialog.get()?.finish()

@@ -330,7 +330,6 @@
     <string name="url_import_queued">في انتظار الاستيراد…</string>
     <string name="url_import_validating">جارٍ فحص الصوت…</string>
     <string name="url_import_uploading">جارٍ حفظ الصوت للمعالجة…</string>
-    <string name="url_import_submitted">بدأ الاستيراد. سنواصل المعالجة في الخلفية.</string>
     <string name="url_import_failed">فشل الاستيراد</string>
     <string name="url_import_attention">يتطلب الاستيراد انتباهك</string>
     <string name="url_import_invalid">أدخل رابطًا واحدًا صالحًا.</string>

@@ -1,0 +1,16 @@
+{
+  "TaskTemplate": {
+    "ContainerSpec": {
+      "Init": true,
+      "ReadOnly": true,
+      "CapabilityDrop": ["ALL"]
+    },
+    "Resources": {
+      "Limits": { "NanoCPUs": 500000000, "MemoryBytes": 134217728 }
+    },
+    "LogDriver": {
+      "Name": "json-file",
+      "Options": { "max-size": "5m", "max-file": "2" }
+    }
+  }
+}

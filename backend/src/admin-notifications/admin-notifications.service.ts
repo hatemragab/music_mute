@@ -9,6 +9,7 @@ import {
   CampaignDelivery,
 } from './notification-campaign.schema.js';
 import type { CreateNotificationDto } from './create-notification.dto.js';
+import { campaignDeliveryCounts } from './campaign-delivery-counts.js';
 
 @Injectable()
 export class AdminNotificationsService implements OnModuleInit {
@@ -90,20 +91,10 @@ export class AdminNotificationsService implements OnModuleInit {
     return new Types.ObjectId(value);
   }
   private async present(row: NotificationCampaign) {
-    const counts = {
-      pending: 0,
-      sent: 0,
-      failed: 0,
-      invalid: 0,
-      ineligible: 0,
-    };
-    const groups = await this.deliveries
-      .aggregate<{ _id: keyof typeof counts; count: number }>([
-        { $match: { outboxId: row._id } },
-        { $group: { _id: '$status', count: { $sum: 1 } } },
-      ])
-      .option({ maxTimeMS: 5000 });
-    for (const group of groups) counts[group._id] = group.count;
+    const counts =
+      row.state === 'completed' && row.finalCounts
+        ? row.finalCounts
+        : await campaignDeliveryCounts(this.deliveries, row._id);
     return {
       id: row._id.toHexString(),
       title: row.title,

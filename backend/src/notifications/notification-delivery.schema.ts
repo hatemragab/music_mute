@@ -84,6 +84,10 @@ export class NotificationDelivery {
   @Prop({ type: Date, default: null })
   failedAt!: Date | null;
 
+  // Assigned only after the owning outbox/campaign completes.
+  @Prop({ type: Date, default: null })
+  purgeAt!: Date | null;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
@@ -97,4 +101,22 @@ NotificationDeliverySchema.index(
 NotificationDeliverySchema.index(
   { outboxId: 1, status: 1, nextAttemptAt: 1, _id: 1 },
   { name: 'notification_delivery_due' },
+);
+NotificationDeliverySchema.index(
+  { purgeAt: 1 },
+  {
+    expireAfterSeconds: 0,
+    partialFilterExpression: {
+      status: {
+        $in: NOTIFICATION_DELIVERY_STATUSES.filter(
+          (status) => status !== 'pending',
+        ),
+      },
+    },
+    name: 'notification_delivery_retention',
+  },
+);
+NotificationDeliverySchema.index(
+  { outboxId: 1, purgeAt: 1, _id: 1 },
+  { name: 'notification_delivery_retention_due' },
 );

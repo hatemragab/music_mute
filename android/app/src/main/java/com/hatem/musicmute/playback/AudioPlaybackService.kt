@@ -30,9 +30,11 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
+import androidx.media3.session.DefaultMediaNotificationProvider
 import android.os.SystemClock
 import com.hatem.musicmute.MainActivity
 import com.hatem.musicmute.VocalApplication
+import com.hatem.musicmute.createPlaybackNotificationChannel
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class AudioPlaybackService : MediaLibraryService() {
@@ -68,6 +70,10 @@ class AudioPlaybackService : MediaLibraryService() {
             stopSelf()
             return
         }
+        val notificationChannel = createPlaybackNotificationChannel(this)
+        setMediaNotificationProvider(DefaultMediaNotificationProvider.Builder(this)
+            .setChannelId(notificationChannel.id)
+            .build())
         scope.launch(Dispatchers.IO) {
             for ((expected, snapshot) in checkpoints) {
                 try {

@@ -258,6 +258,7 @@ describe('account deletion cleanup', () => {
         'account_daily_usage_periods',
         'upload_grant_receipts',
         'download_grant_receipts',
+        'audio_purged_job_requests',
         'processing_reservations',
         'account_policy_overrides',
         'abuse_event_buckets',

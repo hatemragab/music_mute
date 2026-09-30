@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sanitizeWorkerDiagnosticLine } from './worker-diagnostic-sanitizer.js';
 import { WorkerDiagnosticsService } from './worker-diagnostics.service.js';
 
@@ -15,6 +15,15 @@ const sessionQuery = (value: unknown) => ({
 });
 
 describe('worker installation diagnostics', () => {
+  const receivedAt = new Date('2026-09-30T10:00:00.000Z');
+  const expiresAt = new Date('2026-10-07T10:00:00.000Z');
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(receivedAt);
+  });
+  afterEach(() => vi.useRealTimers());
+
   it.each([0, 47, undefined])(
     'reads the machine cursor %s only for its current session',
     async (cursor) => {
@@ -138,6 +147,7 @@ describe('worker installation diagnostics', () => {
       sequenceStart: 4,
       sequenceEnd: 5,
       lines: ['starting', 'password=[REDACTED]'],
+      expiresAt,
     });
     expect(installations.updateOne).toHaveBeenCalledWith(
       expect.objectContaining({ _id: id }),
@@ -217,6 +227,7 @@ describe('worker installation diagnostics', () => {
       installationId: null,
       kind: 'runtime_log',
       lines: ['token=[REDACTED]'],
+      expiresAt,
     });
     expect(machines.updateOne).toHaveBeenCalledWith(
       expect.objectContaining({

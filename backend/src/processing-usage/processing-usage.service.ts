@@ -519,7 +519,7 @@ export class ProcessingUsageService {
       },
       {
         $inc: { uploadGrants: 1, revision: 1 },
-        $set: { lastMutationAt: now, purgeAt: null },
+        $set: { lastMutationAt: now },
       },
       { session, returnDocument: 'after', runValidators: true },
     );
@@ -603,7 +603,7 @@ export class ProcessingUsageService {
       },
       {
         $inc: { confirmedUploadBytes: bytes, revision: 1 },
-        $set: { lastMutationAt: now, purgeAt: null },
+        $set: { lastMutationAt: now },
       },
       { session, runValidators: true },
     );
@@ -689,7 +689,7 @@ export class ProcessingUsageService {
             estimatedDownloadBytes: input.object.bytes,
             revision: 1,
           },
-          $set: { lastMutationAt: now, purgeAt: null },
+          $set: { lastMutationAt: now },
         },
         { session, runValidators: true },
       );
@@ -914,6 +914,50 @@ export class ProcessingUsageService {
         { $set: { purgeAt: period.purgeAt } },
         { session, runValidators: true },
       );
+  }
+
+  /** Restore expiry left unset by older transfer writers, without losing live holds. */
+  async restoreClosedPeriodExpiry(
+    periodId: string,
+    session: ClientSession,
+    now = new Date(),
+  ): Promise<boolean> {
+    this.assertTransaction(session);
+    const period = await this.periods
+      .findById(periodId)
+      .session(session)
+      .lean();
+    if (
+      !period ||
+      period.purgeAt !== null ||
+      period.processingReservationCount !== 0 ||
+      period.processingReservedSeconds !== 0 ||
+      period.periodKey >= utcMonthPeriod(now).key ||
+      !/^\d{4}-(0[1-9]|1[0-2])$/.test(period.periodKey)
+    )
+      return false;
+    if (
+      await this.reservations
+        .exists({
+          accountId: period.accountId,
+          periodKey: period.periodKey,
+          state: 'reserved',
+        })
+        .session(session)
+    )
+      return false;
+    const result = await this.periods.updateOne(
+      {
+        _id: period._id,
+        revision: period.revision,
+        purgeAt: null,
+        processingReservationCount: 0,
+        processingReservedSeconds: 0,
+      },
+      { $set: { purgeAt: this.periodForKey(period.periodKey).purgeAt } },
+      { session, runValidators: true },
+    );
+    return result.modifiedCount === 1;
   }
 
   private async ensurePeriod(

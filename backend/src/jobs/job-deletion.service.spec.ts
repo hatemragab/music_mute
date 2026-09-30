@@ -27,6 +27,10 @@ describe('job deletion worker fencing', () => {
     const slotModel = {
       updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
     };
+    const deliveryModel = {
+      updateMany: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+    };
+    const outboxId = new Types.ObjectId();
     const jobs = {
       findOne: vi.fn(() => ({
         session: vi.fn().mockResolvedValue({
@@ -46,12 +50,21 @@ describe('job deletion worker fencing', () => {
       updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
       db: {
         model: vi.fn((name: string) =>
-          name === 'WorkerAttempt' ? attemptModel : slotModel,
+          name === 'WorkerAttempt'
+            ? attemptModel
+            : name === 'WorkerSlot'
+              ? slotModel
+              : deliveryModel,
         ),
       },
     };
     const outbox = {
       updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }),
+      find: vi.fn(() => ({
+        session: vi.fn(() => ({
+          lean: vi.fn(async () => [{ _id: outboxId }]),
+        })),
+      })),
     };
     const transactions = {
       run: vi.fn(async (operation: (session: unknown) => Promise<void>) =>
@@ -68,6 +81,17 @@ describe('job deletion worker fencing', () => {
     );
 
     await service.delete(userId.toString(), jobId.toString());
+    expect(deliveryModel.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'pending' }),
+      {
+        $set: {
+          status: 'ineligible',
+          lastFailureKind: 'ineligible',
+          failedAt: expect.any(Date),
+        },
+      },
+      expect.objectContaining({ session: expect.anything() }),
+    );
 
     expect(jobs.updateOne).toHaveBeenCalledWith(
       expect.objectContaining({ _id: jobId, revision: 4 }),

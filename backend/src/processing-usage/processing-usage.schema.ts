@@ -65,6 +65,17 @@ AccountUsagePeriodSchema.index(
   { purgeAt: 1 },
   { expireAfterSeconds: 0, name: 'account_usage_closed_period_ttl' },
 );
+AccountUsagePeriodSchema.index(
+  { _id: 1, periodKey: 1 },
+  {
+    name: 'account_usage_retention_repair',
+    partialFilterExpression: {
+      purgeAt: null,
+      processingReservationCount: 0,
+      processingReservedSeconds: 0,
+    },
+  },
+);
 
 @Schema({
   collection: 'account_daily_usage_periods',

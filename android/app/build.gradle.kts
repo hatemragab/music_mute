@@ -168,7 +168,7 @@ dependencies {
     implementation(libs.work.runtime)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
-    implementation(libs.sentry.android)
+    implementation(libs.sentry.android.core)
     "directImplementation"(libs.azhon.appupdate)
     "playImplementation"(libs.play.appupdate)
     "playImplementation"(libs.play.appupdate.ktx)

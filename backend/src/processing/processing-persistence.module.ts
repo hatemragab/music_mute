@@ -20,6 +20,10 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Job, JobSchema } from '../jobs/job.schema.js';
 import {
+  PurgedJobRequest,
+  PurgedJobRequestSchema,
+} from '../jobs/purged-job-request.schema.js';
+import {
   ClientError,
   ClientErrorSchema,
 } from '../client-errors/client-error.schema.js';
@@ -53,6 +57,7 @@ export const PROCESSING_MODELS = [
   { name: ServiceUsagePeriod.name, schema: ServiceUsagePeriodSchema },
   { name: ClientError.name, schema: ClientErrorSchema },
   { name: Job.name, schema: JobSchema },
+  { name: PurgedJobRequest.name, schema: PurgedJobRequestSchema },
   { name: JobError.name, schema: JobErrorSchema },
   { name: NotificationOutbox.name, schema: NotificationOutboxSchema },
   { name: PushInstallation.name, schema: PushInstallationSchema },

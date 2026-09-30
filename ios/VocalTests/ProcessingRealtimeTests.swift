@@ -120,6 +120,24 @@ import XCTest
     withExtendedLifetime(stream) {}
   }
 
+  func testTwentyImportSubscriptionsCanShareTheSocketWithHistoryAndUsage() async throws {
+    let socket = Socket()
+    let client = ProcessingRealtime(
+      configuration: AuthConfiguration(apiOrigin: URL(string: "https://api.example.invalid")!),
+      makeSocket: { _ in socket }, ticket: { self.ticket })
+    client.bindOwner("owner")
+    client.setForeground(true)
+    let streams =
+      (0..<20).map { client.watch("import", params: ["id": "import\($0)"]) }
+      + [client.watch("policy"), client.watch("usage"), client.watch("jobs")]
+    for _ in 0..<200 where socket.waiting == nil { await Task.yield() }
+    socket.frame(#"{"type":"ready","protocol_version":1,"stream_id":"imports"}"#)
+    for _ in 0..<200 where socket.sent.count < 23 { await Task.yield() }
+    XCTAssertEqual(socket.sent.filter { $0.contains("subscribe") }.count, 23)
+    client.bindOwner(nil)
+    withExtendedLifetime(streams) {}
+  }
+
   private func snapshot(_ sequence: Int, _ status: String) -> String {
     """
     {"type":"snapshot","protocol_version":1,"stream_id":"one","subscription_id":"s1","sequence":\(sequence),"data":{"status":"\(status)","display_name":"Test"}}

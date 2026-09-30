@@ -1,6 +1,8 @@
 # R2-only migration validation — 2026-09-30
 
-This record covers the local `hatem/r2-storage-migration` worktree. The owner
+This record covers the local `hatem/r2-storage-migration` worktree. The initial
+checks below preceded the latest-main synchronization; the PR preparation
+section records the combined-source rerun. The owner
 approved breaking storage identities and fresh MongoDB. Checks below are recorded
 only after execution, including the final backend rerun and compiled integrations.
 No commit, push, publication, deployment, cloud configuration, real data deletion or billable
@@ -239,3 +241,41 @@ All reported implementation suites above passed within their stated local/fixtur
 boundaries; explicit opt-in skips are listed separately. Final documentation
 formatting, secret/link scanning and whitespace checks passed. Live R2
 configuration and the manual setup above remain unverified.
+
+## PR preparation after latest-main synchronization
+
+The owner explicitly authorized committing, pushing, creating a PR to `main` and
+merging it on 2026-09-30. The migration was combined with `origin/main`
+`4a6c1e5d78c7b90e63d9307a587f91ec820f8318`, preserving the new Tunelio router,
+20-import concurrency, retention, native reliability and worker release changes.
+The new deleted-job retention service now uses exact R2 deletion and keeps its
+30-day retention, dependency fences and compact replay receipts. Its fixture
+waits for both deletion passes and the real retry backoff. The cleanup fixture
+registers the new purged-request model. A newly added concurrency fixture had a
+busy-loop drain predicate; it now waits for queue progress while work remains.
+
+Fresh local checks on the combined source:
+
+- Backend `pnpm run verify`: passed formatting, lint, typecheck, secret/benchmark
+  checks, **1,075 unit tests**, **158 e2e tests** and build. An earlier liveness
+  test hit a socket error; its isolated 10-test rerun and the complete rerun passed.
+- Compiled local integrations: **34 passed across 17 files**, sequentially,
+  including all 14 files in the initial command plus
+  `test/job-retention.integration.mjs`, `test/mongodb-retention.integration.mjs`
+  and `test/mongodb-storage-indexes.integration.mjs`. An interrupted preliminary
+  run is not counted as passed.
+- Worker lint/typecheck/build/format/protocol checks passed; **552 tests passed,
+  18 skipped**, plus **11 packaging tests** and the isolated packed-consumer
+  check. The `0.1.1` package version came from latest main; these R2 changes remain
+  unreleased and require a new npm version and rebuilt signed runtime artifacts.
+- Web formatting/lint/typecheck/build passed, **133 unit tests** and **9 server
+  tests** passed.
+- Dashboard formatting/lint/typecheck/build passed, **98 unit tests** and
+  **11 deployment tests** passed. Native and browser results in the initial
+  record were not rerun during this synchronization.
+
+GitHub's pre-existing dashboard production dependency audit failed on main run
+`36750496193` with three findings (two moderate, one high). Dashboard dependency
+manifests and lockfiles are unchanged by this migration; this audit limitation is
+separate from migration test results. No R2 bucket operation, deployment, npm
+publication, runtime upload or database reset was performed during PR preparation.

@@ -6,10 +6,12 @@ import ipaddress
 import json
 import math
 import os
+from pathlib import Path
 import re
 import select
 import socket
 import ssl
+import sys
 import tempfile
 import threading
 import time
@@ -17,6 +19,14 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 from official_metadata import OfficialMetadata, merge_metadata
+try:
+    from acquisition_limits import AcquisitionLimits, Admission, retry_seconds, wait_for_slot
+except ModuleNotFoundError as error:
+    if error.name != 'acquisition_limits':
+        raise
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from acquisition_limits import AcquisitionLimits, Admission, retry_seconds, wait_for_slot
+from acquisition_scratch import ScratchBudget, ScratchUnavailable
 
 API_HOST = 'gate.apiscrape.net'
 API_PORT = 16262
@@ -227,7 +237,7 @@ def metadata(f, site='youtube'):
 
 
 class Provider:
-    def __init__(self, authorization, check, connection=PublicTLS, log=None):
+    def __init__(self, authorization, check, connection=PublicTLS, log=None, admission=None):
         self.authorization, self.check, self.connection = authorization, check, connection
         self.stage = 'formats'
         self.http_status = None
@@ -239,6 +249,13 @@ class Provider:
         self.unknown_polls = 0
         self.selected = None
         self.rejected_formats = {}
+        self.read_connection = None
+        self.admission = admission or Admission()
+
+    def close(self):
+        conn, self.read_connection = self.read_connection, None
+        if conn is not None:
+            conn.close()
 
     def step(self, stage, message, **fields):
         self.stage = stage
@@ -281,8 +298,24 @@ class Provider:
     def _request(self, path, body=None):
         self.check()
         self.http_status = None
-        conn = self.connection(API_HOST, API_PORT, timeout=25)
+        started = time.monotonic()
+        reused = (body is None and self.read_connection is not None
+                  and self.read_connection.sock is not None)
+        if body is None and not reused:
+            self.close()
+        # A paid POST must never use an idle socket or share its transport with
+        # retried reads. Only this acquisition owns the retained GET connection.
+        conn = self.read_connection if reused else self.connection(API_HOST, API_PORT, timeout=25)
+        retain = False
+        response_headers_ms = None
         try:
+            if body is not None:
+                # Dedicated transport connects before the paid-start window;
+                # DNS/TLS delays cannot release an oversized paid burst later.
+                conn.connect()
+                self.check()
+                self.admission.reserve(self.check)
+                self.check()
             headers = {'Authorization': self.authorization, 'Accept': 'application/json',
                        'Accept-Encoding': 'identity'}
             if body is not None:
@@ -290,7 +323,10 @@ class Provider:
             conn.request('POST' if body is not None else 'GET', path,
                          json.dumps(body).encode() if body is not None else None, headers)
             response = conn.getresponse()
+            response_headers_ms = round((time.monotonic() - started) * 1000)
             self.http_status = response.status
+            if response.status == 429:
+                self.admission.cooldown(retry_seconds(response.getheader('Retry-After')))
             if response.status in (403, 429):
                 raise Failure('IMPORT_UPSTREAM_REFUSED', 502,
                               reason='VideoScale refused access (403) or rate-limited the request (429); no automatic retry.')
@@ -310,17 +346,41 @@ class Provider:
                 payload.extend(chunk)
                 if len(payload) > 1_048_576:
                     raise Failure(reason='VideoScale JSON response exceeded the 1 MiB safety limit.')
+            # read1() can return EOF without raising IncompleteRead when the
+            # advertised Content-Length has not arrived, even with valid JSON.
+            if response.length is not None and response.length != 0:
+                raise Failure(retryable=True, reason='VideoScale JSON response ended before its Content-Length.')
             try:
-                return json.loads(payload)
+                result = json.loads(payload)
             except (ValueError, UnicodeError):
                 raise Failure(reason='VideoScale returned invalid JSON.') from None
+            # EOF above is required before reuse. Server-close responses and
+            # failed/malformed/partial responses always discard the connection.
+            retain = body is None and not response.will_close and conn.sock is not None
+            return result
         except (TimeoutError, ConnectionResetError, ConnectionRefusedError,
-                http.client.RemoteDisconnected, http.client.IncompleteRead):
+                BrokenPipeError, ssl.SSLEOFError, http.client.RemoteDisconnected, http.client.IncompleteRead):
             raise Failure(retryable=True, reason='Upstream connection timed out, disconnected or returned an incomplete response.') from None
         finally:
-            conn.close()
+            if retain:
+                self.read_connection = conn
+            else:
+                if self.read_connection is conn:
+                    self.read_connection = None
+                conn.close()
+            self.log(message='VideoScale request ended; duration excludes local retry and polling waits.',
+                     request_method='POST' if body is not None else 'GET',
+                     request_duration_ms=round((time.monotonic() - started) * 1000),
+                     response_headers_ms=response_headers_ms,
+                     reused_connection=reused, **self.diagnostics())
 
     def acquire(self, url, limit, output):
+        try:
+            return self._acquire(url, limit, output)
+        finally:
+            self.close()
+
+    def _acquire(self, url, limit, output):
         site = source_site(url)
         self.step('formats', 'Discovering available formats using GET /api/formats.', site=site)
         for attempt in range(2):
@@ -347,6 +407,7 @@ class Provider:
             raise Failure(reason='Download creation did not return a valid task ID; POST is not retried to avoid duplicate charges.')
         submitted = time.monotonic()
         unknown_since = None
+        missing_status_polls = 0
         self.step('task-status', 'Download task accepted; waiting for completion using GET /api/status/{task_id}.')
         while True:
             self.check()
@@ -357,9 +418,12 @@ class Provider:
                 # A freshly returned task can briefly be absent from the status
                 # endpoint. Retry only this read, never the paid submission.
                 if (error.code != 'IMPORT_SOURCE_UNAVAILABLE' or time.monotonic() - submitted >= 10
-                        or not self.retry_read(1)):
+                        or not self.retry_read(missing_status_polls + 1)):
                     raise
-                status = {'status': 'pending'}
+                missing_status_polls += 1
+                # retry_read already waited; do not add the normal pending
+                # two-second pause before checking the same accepted task.
+                continue
             if not isinstance(status, dict):
                 raise Failure(reason='Task status response was not a JSON object.')
             # No provider messages/URLs or arbitrary status strings in logs.
@@ -394,13 +458,17 @@ class Provider:
         delivery = self.request('/api/download/' + task_id)
         url = storage_url(delivery.get('download_url') if isinstance(delivery, dict) else None)
         p = urlsplit(url)
+        self.close()
         self.step('audio-transfer', 'Delivery host validated; downloading audio over HTTPS without vendor credentials.')
+        started = time.monotonic()
+        response_headers_ms = None
         conn = self.connection(STORAGE_HOST, 443, timeout=25)
         try:
             # Never forward provider credentials or formats' http_headers.
             conn.request('GET', p.path + ('?' + p.query if p.query else ''),
                          headers={'Accept-Encoding': 'identity'})
             response = conn.getresponse()
+            response_headers_ms = round((time.monotonic() - started) * 1000)
             self.http_status = response.status
             if response.status != 200 or response.getheader('Content-Encoding', 'identity') != 'identity':
                 raise Failure(reason='Audio delivery returned a non-200 status or unsupported content encoding.')
@@ -424,6 +492,11 @@ class Provider:
             return size, metadata(selected, site)
         finally:
             conn.close()
+            self.log(message='Audio transfer ended; connection was isolated from vendor authentication.',
+                     request_method='GET',
+                     request_duration_ms=round((time.monotonic() - started) * 1000),
+                     response_headers_ms=response_headers_ms,
+                     reused_connection=False, **self.diagnostics())
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -499,10 +572,6 @@ class Handler(BaseHTTPRequestHandler):
                     or not finite(duration) or not 0 < duration <= MAX_DURATION_SECONDS):
                 raise Failure('IMPORT_INVALID_REQUEST', 400)
             url = source_url(body['url'])
-            acquired = self.server.slots.acquire(blocking=False)
-            if not acquired:
-                raise Failure('IMPORT_QUEUE_FULL', 503, reason='Adapter is already acquiring another item; no vendor request was started.')
-
             def check():
                 if time.monotonic() - started > 600:
                     raise Failure(reason='The 600-second acquisition deadline expired; no further upstream requests will be made.')
@@ -511,17 +580,24 @@ class Handler(BaseHTTPRequestHandler):
                     if not self.connection.recv(1, socket.MSG_PEEK):
                         raise ConnectionAbortedError()
 
+            wait_for_slot(self.server.slots, check)
+            acquired = True
+            try:
+                reservation = self.server.scratch_budget.reserve(limit)
+            except ScratchUnavailable:
+                raise Failure('IMPORT_DISK_FULL', 503,
+                              reason='Dedicated scratch cannot safely reserve the requested audio bytes.') from None
             # Unlinked immediately by TemporaryFile: crash/restart cannot leave
             # named media orphans. Deployment mounts this directory as tmpfs.
-            with tempfile.TemporaryFile(dir=self.server.scratch) as audio:
+            with reservation, tempfile.TemporaryFile(dir=self.server.scratch) as audio:
                 def log(**fields):
                     print(json.dumps({'event': 'audio-acquisition-step', 'acquisition_id': acquisition_id,
                                       'elapsed_ms': round((time.monotonic() - started) * 1000),
                                       **fields}), flush=True)
 
-                provider = Provider(self.server.provider_auth, check, log=log)
+                provider = Provider(self.server.provider_auth, check, log=log, admission=self.server.admission)
                 title_lookup = self.server.metadata.start(url)
-                size, extra = provider.acquire(url, limit, audio)
+                size, extra = provider.acquire(url, limit, reservation.wrap(audio))
                 extra = merge_metadata(extra, title_lookup)
                 log(stage='metadata', message='Optional official metadata lookup finished or skipped; audio acquisition is not retried.',
                     metadata_ready=title_lookup.done(), has_title='title' in extra)
@@ -580,9 +656,9 @@ class Handler(BaseHTTPRequestHandler):
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     metadata = OfficialMetadata(PublicTLS)
-    request_queue_size = 8
+    request_queue_size = 64
     # Bound even unauthenticated slow-client handler threads.
-    threads = threading.BoundedSemaphore(16)
+    threads = threading.BoundedSemaphore(64)
 
     def process_request(self, request, client_address):
         if not self.threads.acquire(blocking=False):
@@ -612,9 +688,12 @@ def main():
     scratch = os.environ.get('ACQUISITION_TEMP_ROOT', '/work')
     if not os.path.isdir(scratch) or os.path.islink(scratch) or scratch in ('/', '/tmp'):
         raise SystemExit('Dedicated acquisition scratch directory required')
+    limits = AcquisitionLimits.from_env()
     server = Server(('0.0.0.0', 8080), Handler)
     server.api_key, server.provider_auth, server.scratch = key, basic, scratch
-    server.slots = threading.BoundedSemaphore(1)
+    server.slots = threading.BoundedSemaphore(limits.concurrency)
+    server.admission = Admission(limits.requests_per_second)
+    server.scratch_budget = ScratchBudget(scratch)
     print('Private audio acquisition ready', flush=True)
     server.serve_forever()
 

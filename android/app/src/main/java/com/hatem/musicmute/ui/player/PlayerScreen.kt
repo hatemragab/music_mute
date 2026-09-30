@@ -136,7 +136,7 @@ fun MiniPlayer(
     }
 }
 
-internal fun PlaybackState.shouldShowMiniPlayer(): Boolean = trackId != null && playing
+internal fun PlaybackState.shouldShowMiniPlayer(): Boolean = trackId != null
 
 @Composable internal fun AutoNextRow(enabled: Boolean, onChange: (Boolean) -> Unit) {
     val description = stringResource(R.string.creative_library_auto_next)

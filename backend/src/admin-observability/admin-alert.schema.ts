@@ -48,3 +48,11 @@ AdminAlertSchema.index(
   { state: 1, severity: 1, _id: -1 },
   { name: 'admin_alerts_page' },
 );
+AdminAlertSchema.index(
+  { resolvedAt: 1 },
+  {
+    expireAfterSeconds: 90 * 24 * 60 * 60,
+    name: 'admin_alert_resolved_expiry',
+    partialFilterExpression: { state: 'resolved' },
+  },
+);

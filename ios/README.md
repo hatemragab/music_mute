@@ -5,7 +5,10 @@ and newer. Select one owned or permitted audio/video file, review its prepared a
 confirm permission, and explicitly start cloud processing for vocals-only MP3 output.
 Local Files/Photos preparation, cloud upload, job history and result playback remain.
 Home supports server-side link imports with a bundled site list,
-local URL checks, rights confirmation, durable retry identity and import progress.
+local URL checks, rights confirmation, durable retry identities and independent
+WebSocket progress for multiple imports. The form accepts another link after
+persisting its intent, while earlier imports continue. Existing single-import
+recovery records are preserved when upgrading.
 See [the shared site policy](../docs/url-imports/supported-sites.md).
 Source metadata on existing server jobs remains readable.
 

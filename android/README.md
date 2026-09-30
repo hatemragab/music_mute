@@ -222,6 +222,9 @@ Release builds enable R8 code optimization and resource shrinking. All existing
 ABIs remain supported. Device URL acquisition and its bundled runtime are removed.
 Use the server import form for URLs. User audio files are not deleted.
 
+Sentry uses the Android core SDK for Java/Kotlin crash and ANR reporting. The
+Sentry NDK integration and session replay modules are not packaged.
+
 ## Validation
 
 The Gradle validation command above covers JVM tests, lint, and APK assembly.
@@ -434,6 +437,16 @@ integration, not a guarantee of a custom island on every Android phone. Android'
 [Live Updates](https://developer.android.com/develop/ui/views/notifications/live-update)
 do not accept MediaStyle or custom RemoteViews, so playback does not request
 promoted Live Updates. Processing notifications remain separate.
+
+Playback and direct-update notifications use separate channels with launcher
+badges disabled. Their new channel IDs avoid library defaults already saved with
+badges enabled, while carrying forward legacy importance, sound, vibration, light,
+lock-screen and group preferences. The direct updater also clears its library's
+completion notification before the app's verified installer handoff. Actual
+processing outcomes retain their existing alert channel and badge preferences.
+The opt-in instrumentation runner accepts `-e check notificationBadges` to check
+the saved channel policy; OEM launcher behavior still needs an explicitly
+authorized Android device.
 
 Local checks: `:app:testDirectDebugUnitTest`, `:app:lintDirectDebug`,
 `:app:assembleDirectDebug` and `:app:compileDirectDebugAndroidTestKotlin`.

@@ -21,6 +21,9 @@ import { TransferBudget } from "./transfer-budget.js";
 
 const SHA256 = /^[a-f0-9]{64}$/u;
 const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024 * 1024;
+// Runtime archives can take more than ten minutes over a slow Wi-Fi connection.
+// Progress still has the separate thirty-second inactivity deadline.
+const ARTIFACT_DOWNLOAD_TIMEOUT_MS = 60 * 60_000;
 
 export interface VerifiedArtifactDownloadOptions {
   url: string;
@@ -207,7 +210,7 @@ export async function downloadVerifiedArtifact(
   let handle: FileHandle | undefined;
   let response: Response | undefined;
   const budget = new TransferBudget(
-    options.timeoutMs,
+    options.timeoutMs ?? ARTIFACT_DOWNLOAD_TIMEOUT_MS,
     options.idleTimeoutMs,
     options.signal,
   );
@@ -408,9 +411,9 @@ function validateOptions(options: VerifiedArtifactDownloadOptions): void {
     !/^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/u.test(
       options.expectedContentType,
     ) ||
-    !Number.isSafeInteger(options.timeoutMs ?? 10 * 60_000) ||
-    (options.timeoutMs ?? 10 * 60_000) < 1_000 ||
-    (options.timeoutMs ?? 10 * 60_000) > 60 * 60_000 ||
+    !Number.isSafeInteger(options.timeoutMs ?? ARTIFACT_DOWNLOAD_TIMEOUT_MS) ||
+    (options.timeoutMs ?? ARTIFACT_DOWNLOAD_TIMEOUT_MS) < 1_000 ||
+    (options.timeoutMs ?? ARTIFACT_DOWNLOAD_TIMEOUT_MS) > 60 * 60_000 ||
     !Number.isSafeInteger(options.maxRedirects ?? 0) ||
     (options.maxRedirects ?? 0) < 0 ||
     (options.maxRedirects ?? 0) > 4 ||

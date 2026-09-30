@@ -56,7 +56,8 @@ test(
         REDIS_URL: `redis://127.0.0.1:${databases.redisPort}/3`,
         URL_IMPORT_ENABLED: 'false',
         URL_IMPORT_PROCESSOR_ENABLED: 'true',
-        URL_IMPORT_CONCURRENCY: '1',
+        URL_IMPORT_CONCURRENCY: '20',
+        URL_IMPORT_REQUESTS_PER_SECOND: '5',
         URL_IMPORT_TEMP_ROOT: join(services.directory, 'imports'),
         AUDIO_ACQUISITION_API_URL: 'http://127.0.0.1:9/',
         AUDIO_ACQUISITION_API_KEY: randomUUID(),
@@ -72,9 +73,13 @@ test(
       });
       const queue = app.get(getQueueToken(IMPORT_QUEUE));
       const processor = app.get(ImportProcessor);
-      assert.equal(await queue.getGlobalConcurrency(), 1);
+      assert.equal(await queue.getGlobalConcurrency(), 20);
+      assert.deepEqual(await queue.getGlobalRateLimit(), {
+        max: 5,
+        duration: 1000,
+      });
       assert.equal(processor.worker.isRunning(), true);
-      assert.equal(processor.worker.concurrency, 1);
+      assert.equal(processor.worker.concurrency, 20);
       await app.close();
       app = undefined;
       assert.equal(processor.shutdown.signal.aborted, true);

@@ -60,7 +60,7 @@ class RealtimeClient(
         val id = withContext(Dispatchers.Main.immediate) {
             if (sessionRejected) throw JobsFailure(JobsProblem.UNAUTHENTICATED)
             val id = "s${++nextId}"
-            if (subscriptions.size >= 16) throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE)
+            if (subscriptions.size >= 128) throw JobsFailure(JobsProblem.SERVICE_UNAVAILABLE)
             val entry = Subscription(id, resource, params, { result -> result.fold({ trySend(it) }, { close(it) }) })
             subscriptions[id] = entry
             if (stream.isNotEmpty()) subscribe(entry)

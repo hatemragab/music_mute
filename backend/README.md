@@ -27,6 +27,39 @@ API preflight: [Zalando guidelines](https://opensource.zalando.com/restful-api-g
 read on 2026-09-28; rules 106 (compatibility) and 151 (success/error responses).
 Existing routes, authorization and response shapes are preserved.
 
+## URL import throughput
+
+URL submissions return a durable queued import immediately, including while other
+imports are downloading. The BullMQ import queue defaults to 20 active executions
+across all backend replicas (`URL_IMPORT_CONCURRENCY=20`) and at most five new
+executions per second (`URL_IMPORT_REQUESTS_PER_SECOND=5`). These shared limits apply
+to every acquisition provider. The generic private router and adapters use matching
+`ACQUISITION_CONCURRENCY=20` and `ACQUISITION_REQUESTS_PER_SECOND=5` settings.
+
+`URL_IMPORT_MAX_OUTSTANDING=100` counts queued, downloading, validating and uploading
+imports globally: up to 20 can be active while the rest wait for a slot. A full
+100-import backlog returns `IMPORT_QUEUE_FULL`; successful and failed imports release
+their capacity. The starts-per-second limit is distinct from simultaneous execution:
+20 long downloads can overlap while starts remain bounded. Existing account waiting
+limits, allowance reservations and transfer quotas still apply.
+
+Each transfer reserves its maximum byte allowance before acquisition so simultaneous
+downloads cannot all spend the same free disk space. The reservation remains held
+during streaming and is released after transfer, when the filesystem accounts for
+the written file. Allow up to 4 GB of scratch capacity plus
+`URL_IMPORT_MIN_FREE_BYTES` headroom for twenty maximum-size 100-MB files and their
+conservative in-flight reservations per backend container. Validation, uploads and
+cleanup retain their existing bounds. Changing source defaults does not override
+existing process environment values; update the backend, router and both adapters
+together after the provider plan supports the configured rate.
+
+API preflight: [Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+read on 2026-09-30; rules 104 (OpenAPI), 106 (compatibility) and 176 (asynchronous
+processing). The existing `/media-imports` queued response and authorization remain
+compatible. Redis-backed concurrency and rate limiting were checked against the
+[BullMQ global concurrency](https://docs.bullmq.io/guide/queues/global-concurrency)
+and [global rate limit](https://docs.bullmq.io/guide/queues/global-rate-limit) guides.
+
 ## Requirements and local run
 
 - Node.js 24 LTS and pnpm 10. The lockfile defines reproducible dependency versions.
@@ -86,6 +119,12 @@ After connecting, startup awaits Mongoose model initialization so collections an
 indexes are created before the API accepts traffic. The database user therefore
 needs index-management permission. Audit declared schema indexes before any
 separately authorized database maintenance.
+
+Operational details have automatic expiry; see [MongoDB retention](../docs/mongodb-retention.md)
+for the exact periods, completed-only guards, existing-data behavior and isolated
+verification commands. Successful Library media remains retained. Already-deleted
+jobs become eligible for coordinated metadata/attempt cleanup 30 days after media
+cleanup completes, with compact request receipts preserving replay protection.
 
 The storage provider is private Cloudflare R2 Standard. Configure all six required
 backend-only values: `STORAGE_PROVIDER=r2`, the account-root HTTPS
@@ -392,8 +431,11 @@ invalid destinations deactivate only the exact current binding. Startup/restart 
 multiple replicas recover through durable leases and per-binding attempt records.
 History counts are per device, not unique users, and grow while targets are frozen.
 New per-account deliveries use the shared account-deletion transaction fence.
-Account purging removes its delivery records; historical aggregate counts therefore
-exclude purged accounts. Broadcast content and administrator audit history remain.
+Completed campaigns save final counters before their delivery details expire after
+30 days; their historical counters remain stable after detail/account cleanup.
+Campaign content and summaries expire 365 days after completion. Counts already
+lost through account cleanup before this policy cannot be reconstructed.
+Administrator audit history expires after 365 days; command replay receipts remain.
 
 FCM submission is at least once: a crash or timeout after provider acceptance but
 before its durable receipt can produce a duplicate. Stable event IDs and collapse

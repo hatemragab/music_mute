@@ -338,28 +338,30 @@ describe("worker enrollment client", () => {
     ]);
   });
 
-  it("runs and safely replays the complete restricted enrollment sequence", async () => {
-    const root = await mkdtemp(join(tmpdir(), "musicmute-enrollment-"));
-    roots.push(root);
-    const output = join(root, "protected");
-    await mkdir(output, { mode: 0o700 });
-    await chmod(output, 0o700);
-    const enrollmentFile = join(root, "enrollment.credential");
-    await writeFile(enrollmentFile, `${enrollmentCredential}\n`, {
-      mode: 0o600,
-    });
-    await chmod(enrollmentFile, 0o600);
-    const reportFile = join(root, "report.json");
-    await writeFile(reportFile, JSON.stringify(report()), { mode: 0o600 });
-    if (process.platform === "win32") {
-      await execFile(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-EncodedCommand",
-          Buffer.from(
-            `$ErrorActionPreference='Stop'
+  it.each([false, true])(
+    "replays enrollment with an uncertain activation response: %s",
+    async (loseActivationResponse) => {
+      const root = await mkdtemp(join(tmpdir(), "musicmute-enrollment-"));
+      roots.push(root);
+      const output = join(root, "protected");
+      await mkdir(output, { mode: 0o700 });
+      await chmod(output, 0o700);
+      const enrollmentFile = join(root, "enrollment.credential");
+      await writeFile(enrollmentFile, `${enrollmentCredential}\n`, {
+        mode: 0o600,
+      });
+      await chmod(enrollmentFile, 0o600);
+      const reportFile = join(root, "report.json");
+      await writeFile(reportFile, JSON.stringify(report()), { mode: 0o600 });
+      if (process.platform === "win32") {
+        await execFile(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-EncodedCommand",
+            Buffer.from(
+              `$ErrorActionPreference='Stop'
 foreach ($Entry in @('${root.replaceAll("'", "''")}','${output.replaceAll("'", "''")}','${enrollmentFile.replaceAll("'", "''")}')) {
   $Acl=Get-Acl -LiteralPath $Entry
   $Acl.SetAccessRuleProtection($true,$false)
@@ -369,102 +371,108 @@ foreach ($Entry in @('${root.replaceAll("'", "''")}','${output.replaceAll("'", "
   $Acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($Admin,'FullControl','Allow')))
   Set-Acl -LiteralPath $Entry -AclObject $Acl
 }`,
-            "utf16le",
-          ).toString("base64"),
-        ],
-        { timeout: 15_000, maxBuffer: 16_384 },
+              "utf16le",
+            ).toString("base64"),
+          ],
+          { timeout: 15_000, maxBuffer: 16_384 },
+        );
+      }
+      const requests: Array<{
+        path: string;
+        authorization: string | undefined;
+        body: Record<string, unknown>;
+      }> = [];
+      let activated = false;
+      let activationResponseLost = false;
+      const server = createServer((request, response) => {
+        void handleRequest(
+          request,
+          response,
+          requests,
+          () => activated,
+          () => {
+            activated = true;
+          },
+          () => {
+            if (!loseActivationResponse || activationResponseLost) return false;
+            activationResponseLost = true;
+            return true;
+          },
+        );
+      });
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
       );
-    }
-    const requests: Array<{
-      path: string;
-      authorization: string | undefined;
-      body: Record<string, unknown>;
-    }> = [];
-    let activated = false;
-    const server = createServer((request, response) => {
-      void handleRequest(
-        request,
-        response,
-        requests,
-        () => activated,
-        () => {
-          activated = true;
-        },
-      );
-    });
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", resolve),
-    );
-    const address = server.address();
-    if (address === null || typeof address === "string")
-      throw new Error("Test server address is unavailable");
-    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
-    const arguments_ = [
-      "--backend-url",
-      `http://127.0.0.1:${address.port}`,
-      "--enrollment-file",
-      enrollmentFile,
-      "--report",
-      reportFile,
-      "--output",
-      output,
-      "--allow-insecure-loopback",
-      "true",
-    ];
-    try {
-      await runEnrollmentCommand(arguments_);
-      await runEnrollmentCommand(arguments_);
-    } finally {
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
-    }
+      const address = server.address();
+      if (address === null || typeof address === "string")
+        throw new Error("Test server address is unavailable");
+      const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+      const arguments_ = [
+        "--backend-url",
+        `http://127.0.0.1:${address.port}`,
+        "--enrollment-file",
+        enrollmentFile,
+        "--report",
+        reportFile,
+        "--output",
+        output,
+        "--allow-insecure-loopback",
+        "true",
+      ];
+      try {
+        if (loseActivationResponse)
+          await expect(runEnrollmentCommand(arguments_)).rejects.toThrow();
+        else await runEnrollmentCommand(arguments_);
+        await runEnrollmentCommand(arguments_);
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
 
-    expect(requests.map((request) => request.path)).toEqual([
-      "/worker/installations",
-      `/worker/installations/${installationId}/reports`,
-      `/worker/installations/${installationId}/activations`,
-      "/worker/installations",
-      `/worker/installations/${installationId}/activations`,
-    ]);
-    expect(requests[0]?.authorization).toBe(`Bearer ${enrollmentCredential}`);
-    expect(requests[3]?.authorization).toBe(`Bearer ${enrollmentCredential}`);
-    expect(
-      [requests[1], requests[2], requests[4]].every(
-        (request) =>
-          request?.authorization === `Bearer ${installationCredential}`,
-      ),
-    ).toBe(true);
-    expect(requests[0]?.body.requestId).toBe(requests[3]?.body.requestId);
-    expect(requests[2]?.body.requestId).toBe(requests[4]?.body.requestId);
-    const machineCredential = (
-      await readFile(join(output, "machine.credential"), "utf8")
-    ).trim();
-    expect(machineCredential).toMatch(/^[A-Za-z0-9_-]{43}$/u);
-    const credentialDigest = createHash("sha256")
-      .update(machineCredential)
-      .digest("hex");
-    expect(requests[2]?.body.credentialDigest).toBe(credentialDigest);
-    expect(requests[4]?.body.credentialDigest).toBe(credentialDigest);
-    expect(
-      JSON.parse(await readFile(join(output, "machine.json"), "utf8")),
-    ).toMatchObject({ machineId, credentialRevision: 1 });
-    if (process.platform !== "win32") {
+      expect(requests.map((request) => request.path)).toEqual([
+        "/worker/installations",
+        `/worker/installations/${installationId}/reports`,
+        `/worker/installations/${installationId}/activations`,
+        `/worker/installations/${installationId}/activations`,
+      ]);
+      expect(requests[0]?.authorization).toBe(`Bearer ${enrollmentCredential}`);
       expect(
-        (await stat(join(output, "machine.credential"))).mode & 0o777,
-      ).toBe(0o600);
+        [requests[1], requests[2], requests[3]].every(
+          (request) =>
+            request?.authorization === `Bearer ${installationCredential}`,
+        ),
+      ).toBe(true);
+      expect(requests[2]?.body.requestId).toBe(requests[3]?.body.requestId);
+      const machineCredential = (
+        await readFile(join(output, "machine.credential"), "utf8")
+      ).trim();
+      expect(machineCredential).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+      const credentialDigest = createHash("sha256")
+        .update(machineCredential)
+        .digest("hex");
+      expect(requests[2]?.body.credentialDigest).toBe(credentialDigest);
+      expect(requests[3]?.body.credentialDigest).toBe(credentialDigest);
       expect(
-        (await stat(join(output, ".enrollment-state.json"))).mode & 0o777,
-      ).toBe(0o600);
-    }
-    expect(log.mock.calls.flat().join(" ")).not.toContain(machineCredential);
-    expect(log.mock.calls.flat().join(" ")).not.toContain(
-      installationCredential,
-    );
-  });
+        JSON.parse(await readFile(join(output, "machine.json"), "utf8")),
+      ).toMatchObject({ machineId, credentialRevision: 1 });
+      if (process.platform !== "win32") {
+        expect(
+          (await stat(join(output, "machine.credential"))).mode & 0o777,
+        ).toBe(0o600);
+        expect(
+          (await stat(join(output, ".enrollment-state.json"))).mode & 0o777,
+        ).toBe(0o600);
+      }
+      expect(log.mock.calls.flat().join(" ")).not.toContain(machineCredential);
+      expect(log.mock.calls.flat().join(" ")).not.toContain(
+        installationCredential,
+      );
+    },
+  );
 
   it.skipIf(process.platform !== "darwin")(
-    "prepares and safely reuses the approved installation artifacts",
+    "resumes approved installation artifacts after the invitation expires",
     async () => {
       const root = await mkdtemp(join(tmpdir(), "musicmute-preparation-"));
       roots.push(root);
@@ -517,6 +525,14 @@ foreach ($Entry in @('${root.replaceAll("'", "''")}','${output.replaceAll("'", "
           }
           const body = JSON.parse(await readBody(request)) as unknown;
           if (request.url === "/worker/installations") {
+            if (exchangeBodies.length > 0) {
+              response
+                .writeHead(410, {
+                  "Content-Type": "application/problem+json",
+                })
+                .end(JSON.stringify({ code: "WORKER_EXPIRED" }));
+              return;
+            }
             exchangeBodies.push(body);
             send(response, {
               installationId,
@@ -597,8 +613,7 @@ foreach ($Entry in @('${root.replaceAll("'", "''")}','${output.replaceAll("'", "
         );
       }
 
-      expect(exchangeBodies).toHaveLength(2);
-      expect(exchangeBodies[0]).toEqual(exchangeBodies[1]);
+      expect(exchangeBodies).toHaveLength(1);
       expect(Object.fromEntries(artifactRequests)).toEqual({
         release: 1,
         model: 1,
@@ -685,6 +700,7 @@ async function handleRequest(
   }>,
   isActivated: () => boolean,
   markActivated: () => void,
+  loseActivationResponse: () => boolean,
 ): Promise<void> {
   try {
     const body = fromWireCase(JSON.parse(await readBody(request))) as Record<
@@ -718,6 +734,12 @@ async function handleRequest(
     }
     if (request.url?.endsWith("/activations")) {
       markActivated();
+      if (loseActivationResponse()) {
+        response
+          .writeHead(200, { "Content-Type": "application/json" })
+          .end("{");
+        return;
+      }
       send(response, {
         machineId,
         status: "active",

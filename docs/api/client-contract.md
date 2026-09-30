@@ -161,6 +161,12 @@ request body requires `request_id`, generate a UUIDv4 and preserve it for
 reconciliation after an uncertain response; do not invent a new request ID for
 an automatic retry of the same operation.
 
+Already-deleted jobs may be physically removed 30 days after media cleanup
+completes. Compact account-scoped request receipts continue rejecting the original
+request ID with `JOB_NOT_FOUND`; a changed payload under that ID conflicts. Use a
+new request ID only for a genuinely new user operation. Successful Library jobs
+remain retained. See [MongoDB retention](../mongodb-retention.md).
+
 ## Errors, budgets, and client behavior
 
 Errors use RFC 9457 `application/problem+json`, with `type`, `title`, `status`,
@@ -322,6 +328,8 @@ and read its `resource_id` at `GET /admin/notifications/:id` before another send
 `items` and `next_cursor`. The dashboard uses `admin.notifications` socket snapshots.
 Both reads require `notifications.read`; sending requires `notifications.send`.
 History includes broadcast content, audit context, state/timestamps and per-device
-outcomes. Native registrations and active ownership are rechecked; web-only users
+outcomes. Completed per-device totals remain stable when detailed deliveries expire
+after 30 days; completed campaign content/history expires after 365 days.
+Native registrations and active ownership are rechecked; web-only users
 are not reachable. FCM acceptance does not mean delivery or reading. Full schemas
 and problem responses are in OpenAPI. All responses are private/no-store.

@@ -1,0 +1,19 @@
+// CapRover pre-deploy hook: this adapter's private key, no database/cloud keys.
+var preDeployFunction = function (captainAppObj, dockerUpdateObject) {
+  return Promise.resolve().then(function () {
+    var key = require("fs")
+      .readFileSync(
+        "/captain/data/musicmute-acquisition/tunelio-api-key",
+        "utf8",
+      )
+      .trim();
+    if (key.length < 32 || key.length > 256)
+      throw new Error("Missing private Tunelio acquisition service key");
+    var spec = dockerUpdateObject.TaskTemplate.ContainerSpec;
+    spec.Env = (spec.Env || []).filter(function (entry) {
+      return !entry.startsWith("AUDIO_ACQUISITION_API_KEY=");
+    });
+    spec.Env.push("AUDIO_ACQUISITION_API_KEY=" + key);
+    return dockerUpdateObject;
+  });
+};

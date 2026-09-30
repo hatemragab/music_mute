@@ -32,6 +32,18 @@ Thumbs.db
 # Generated release packages
 /artifacts/
 
+# Local investigation downloads, generated reports and auxiliary checkouts
+/tmp/
+/output/
+/.claude/worktrees/
+
+# Generated private-provider verification output
+/video_providers/videoscale/validation/
+/video_providers/videoscale/docs/backend-release.png
+/video_providers/videoscale/docs/deployment-private.png
+/video_providers/videoscale/docs/release-82-e2e.png
+/video_providers/docs/tunelio-live-ready-2026-09-30.jpg
+
 # Python
 __pycache__/
 *.py[cod]

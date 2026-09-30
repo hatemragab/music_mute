@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createConnection, set, Types } from 'mongoose';
+import { createConnection, set, trusted, Types } from 'mongoose';
 import {
   JobError,
   JobErrorSchema,
@@ -408,6 +408,152 @@ test('notification outbox dispatch is durable, bounded and account-safe', async 
       );
       assert.equal(messaging.sent.length, 1);
       assert.equal(messaging.sent[0].data.jobId, later.jobId.toHexString());
+    },
+  );
+
+  await t.test(
+    'detail retention requires completion and preserves the outcome replay fence',
+    async () => {
+      await Promise.all([
+        outbox.deleteMany({}),
+        deliveries.deleteMany({}),
+        errors.deleteMany({}),
+      ]);
+      const completedAt = new Date(Date.now() - 10 * 86400000);
+      const { event, userId, jobId } = await createEvent({
+        state: 'completed',
+        completedAt,
+        targetsFrozenAt: completedAt,
+      });
+      const { event: active } = await createEvent({
+        nextAttemptAt: new Date(Date.now() + 86400000),
+      });
+      const addDelivery = (outboxId) =>
+        deliveries.create({
+          outboxId,
+          registrationId: new Types.ObjectId(),
+          bindingRevision: 1,
+          status: 'sent',
+          sentAt: completedAt,
+        });
+      const completedDelivery = await addDelivery(event._id);
+      const activeDelivery = await addDelivery(active._id);
+      const messaging = new FakeMessaging();
+      const service = serviceFor(new FakeRegistrations(userId), messaging);
+      await service.scheduleCompletedRetention();
+      const retained = await deliveries.findById(completedDelivery._id).lean();
+      assert.equal(
+        retained.purgeAt.getTime(),
+        completedAt.getTime() + 30 * 86400000,
+      );
+      assert.equal(
+        (await deliveries.findById(activeDelivery._id).lean()).purgeAt,
+        null,
+      );
+      assert.ok(
+        (await outbox.findById(event._id).lean())
+          .deliveryRetentionScheduledAt instanceof Date,
+      );
+      // Simulate only this fixture's TTL deletion; the owning replay fence remains.
+      await deliveries.deleteOne({ _id: completedDelivery._id });
+      assert.equal(
+        (await outbox.findById(event._id).lean()).state,
+        'completed',
+      );
+      await assert.rejects(
+        outbox.create({ jobId, userId, outcome: 'ready' }),
+        (error) => error.code === 11000,
+      );
+      assert.equal(await service.dispatchDue(), false);
+      assert.equal(messaging.sent.length, 0);
+
+      const { event: large } = await createEvent({
+        state: 'completed',
+        completedAt,
+      });
+      await deliveries.insertMany(
+        Array.from({ length: 101 }, () => ({
+          outboxId: large._id,
+          registrationId: new Types.ObjectId(),
+          bindingRevision: 1,
+          status: 'sent',
+        })),
+      );
+      await service.scheduleCompletedRetention();
+      assert.equal(
+        await deliveries.countDocuments({
+          outboxId: large._id,
+          purgeAt: trusted({ $ne: null }),
+        }),
+        100,
+      );
+      assert.equal(
+        (await outbox.findById(large._id).lean()).deliveryRetentionScheduledAt,
+        null,
+      );
+      await service.scheduleCompletedRetention();
+      assert.equal(
+        await deliveries.countDocuments({
+          outboxId: large._id,
+          purgeAt: trusted({ $ne: null }),
+        }),
+        101,
+      );
+      assert.ok(
+        (await outbox.findById(large._id).lean())
+          .deliveryRetentionScheduledAt instanceof Date,
+      );
+
+      const { event: unfinished } = await createEvent({
+        state: 'completed',
+        completedAt,
+      });
+      const pending = await deliveries.create({
+        outboxId: unfinished._id,
+        registrationId: new Types.ObjectId(),
+        bindingRevision: 1,
+      });
+      const sent = await addDelivery(unfinished._id);
+      await service.scheduleCompletedRetention();
+      assert.equal(
+        (await outbox.findById(unfinished._id).lean())
+          .deliveryRetentionScheduledAt,
+        null,
+      );
+      assert.equal(
+        (await deliveries.findById(pending._id).lean()).purgeAt,
+        null,
+      );
+      assert.equal((await deliveries.findById(sent._id).lean()).purgeAt, null);
+      const blockedParent = await outbox.findById(unfinished._id).lean();
+      assert.ok(blockedParent.retentionNextAt instanceof Date);
+      const { event: later } = await createEvent({
+        state: 'completed',
+        completedAt,
+      });
+      const laterDelivery = await addDelivery(later._id);
+      await service.scheduleCompletedRetention();
+      assert.ok(
+        (await outbox.findById(later._id).lean())
+          .deliveryRetentionScheduledAt instanceof Date,
+      );
+      assert.ok(
+        (await deliveries.findById(laterDelivery._id).lean()).purgeAt instanceof
+          Date,
+      );
+      await deliveries.updateOne(
+        { _id: pending._id },
+        { $set: { status: 'ineligible', failedAt: new Date() } },
+      );
+      await service.scheduleCompletedRetention(blockedParent.retentionNextAt);
+      assert.ok(
+        (await outbox.findById(unfinished._id).lean())
+          .deliveryRetentionScheduledAt instanceof Date,
+      );
+      assert.equal(
+        (await deliveries.findById(pending._id).lean()).purgeAt.getTime(),
+        completedAt.getTime() + 30 * 86400000,
+      );
     },
   );
 });

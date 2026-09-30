@@ -8,6 +8,8 @@ import { accountFixture } from './helpers/account-fixture.mjs';
 import { PROCESSING_MODELS } from '../dist/processing/processing-persistence.module.js';
 import { ProcessingTransactions } from '../dist/processing/processing-transactions.js';
 import { ProcessingUsageService } from '../dist/processing-usage/processing-usage.service.js';
+import { ProcessingUsageMaintenanceService } from '../dist/processing-usage/processing-usage-maintenance.service.js';
+import { AccountUsagePeriodSchema } from '../dist/processing-usage/processing-usage.schema.js';
 import { ProcessingAdmissionService } from '../dist/admin-settings/processing-admission.service.js';
 import {
   AccountPolicy,
@@ -134,6 +136,12 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   });
   assert.equal(await uploadGrants.countDocuments(), 1);
   assert.equal((await jobs.findById(job._id)).uploadAttemptCount, 1);
+  assert.equal(
+    (
+      await periods.findOne({ accountId: owner, periodKey: '2026-09' })
+    ).purgeAt.toISOString(),
+    '2027-10-01T00:00:00.000Z',
+  );
 
   const concurrent = await Promise.allSettled([
     transactions.run((session) =>
@@ -207,6 +215,12 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     (error) => error.getResponse().code === 'UPLOAD_BYTE_LIMIT_REACHED',
   );
   const uploadUsage = await usage.readUsage(owner, undefined, septemberDayTwo);
+  assert.equal(
+    (
+      await periods.findOne({ accountId: owner, periodKey: '2026-09' })
+    ).purgeAt.toISOString(),
+    '2027-10-01T00:00:00.000Z',
+  );
   assert.deepEqual(uploadUsage.uploads, {
     dailyGrantLimit: 2,
     dailyGrants: 1,
@@ -426,6 +440,12 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   assert.equal(
     concurrentReplay.filter((outcome) => outcome.status === 'fulfilled').length,
     2,
+  );
+  assert.equal(
+    (
+      await periods.findOne({ accountId: secondAccount, periodKey: '2026-09' })
+    ).purgeAt.toISOString(),
+    '2027-10-01T00:00:00.000Z',
   );
   await transactions.run((session) =>
     usage.reserveDownloadGrant(
@@ -717,6 +737,130 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     status: 'blocked',
     reason: 'monthly_limit_reached',
   });
+
+  const retentionOwner = new Types.ObjectId();
+  await accountFixture(connection, [retentionOwner.toString()]);
+  const retentionJob = await createJob(jobs, retentionOwner, 1);
+  const august = new Date('2026-08-12T12:00:00Z');
+  const grantRetentionDownload = () =>
+    transactions.run((session) =>
+      usage.reserveDownloadGrant(
+        {
+          accountId: retentionOwner,
+          jobId: retentionJob._id,
+          scope: 'user_result',
+          requestId: randomUUID(),
+          object: { etag: '"retention-result"', bytes: 1 },
+        },
+        session,
+        august,
+      ),
+    );
+  const retentionPeriodId = `${retentionOwner}:2026-08`;
+  await transactions.run((session) =>
+    usage.reserveForJob(retentionJob._id, retentionOwner, 1, session, august),
+  );
+  await grantRetentionDownload();
+  assert.equal((await periods.findById(retentionPeriodId)).purgeAt, null);
+  await transactions.run((session) =>
+    usage.settleJob(
+      { _id: retentionJob._id, userId: retentionOwner, status: 'ready' },
+      session,
+      august,
+    ),
+  );
+  await grantRetentionDownload();
+  assert.equal(
+    (await periods.findById(retentionPeriodId)).purgeAt.toISOString(),
+    '2027-09-01T00:00:00.000Z',
+  );
+
+  // Simulate a historical download clearing expiry after the final settlement.
+  await periods.updateOne(
+    { _id: retentionPeriodId },
+    { $set: { purgeAt: null } },
+  );
+  const maintenance = new ProcessingUsageMaintenanceService(
+    periods,
+    usage,
+    transactions,
+  );
+  await maintenance.repairDue(new Date('2026-09-30T12:00:00Z'));
+  assert.equal(
+    (await periods.findById(retentionPeriodId)).purgeAt.toISOString(),
+    '2027-09-01T00:00:00.000Z',
+  );
+
+  const heldJob = await createJob(jobs, retentionOwner, 1);
+  await transactions.run((session) =>
+    usage.reserveForJob(heldJob._id, retentionOwner, 1, session, august),
+  );
+  await maintenance.repairDue(new Date('2026-09-30T12:00:00Z'));
+  assert.equal((await periods.findById(retentionPeriodId)).purgeAt, null);
+  // Even inconsistent zero counters must not allow expiry of a live ledger hold.
+  await periods.updateOne(
+    { _id: retentionPeriodId },
+    { $set: { processingReservedSeconds: 0, processingReservationCount: 0 } },
+  );
+  assert.equal(
+    await transactions.run((session) =>
+      usage.restoreClosedPeriodExpiry(
+        retentionPeriodId,
+        session,
+        new Date('2026-09-30T12:00:00Z'),
+      ),
+    ),
+    false,
+  );
+  assert.equal((await periods.findById(retentionPeriodId)).purgeAt, null);
+});
+
+test('usage retention repair scans candidates without sorting retained or held history', async (t) => {
+  const native = await IsolatedServices.create();
+  t.after(() => native.stop());
+  const { mongoUri } = await native.startDatabases();
+  const connection = await createConnection(mongoUri).asPromise();
+  t.after(() => connection.close());
+  const periods = connection.model(
+    'AccountUsagePeriod',
+    AccountUsagePeriodSchema,
+  );
+  await periods.init();
+  await periods.collection.insertMany([
+    ...Array.from({ length: 2_000 }, (_, index) => ({
+      _id: `history-${String(index).padStart(4, '0')}:2026-08`,
+      accountId: new Types.ObjectId(),
+      periodKey: '2026-08',
+      purgeAt: index % 2 ? new Date('2099-01-01T00:00:00Z') : null,
+      processingReservationCount: index % 2 ? 0 : 1,
+      processingReservedSeconds: index % 2 ? 0 : 30,
+    })),
+    ...['repair-a:2026-08', 'repair-b:2026-08'].map((_id) => ({
+      _id,
+      accountId: new Types.ObjectId(),
+      periodKey: '2026-08',
+      purgeAt: null,
+      processingReservationCount: 0,
+      processingReservedSeconds: 0,
+    })),
+  ]);
+  const plan = await periods.collection
+    .find({
+      _id: { $gt: 'repair-a:2026-08' },
+      periodKey: { $lt: '2026-09' },
+      purgeAt: null,
+      processingReservationCount: 0,
+      processingReservedSeconds: 0,
+    })
+    .sort({ _id: 1 })
+    .limit(100)
+    .maxTimeMS(5000)
+    .explain('executionStats');
+  assert.equal(plan.executionStats.nReturned, 1);
+  assert.ok(plan.executionStats.totalDocsExamined <= 2);
+  const winning = JSON.stringify(plan.queryPlanner.winningPlan);
+  assert.ok(winning.includes('account_usage_retention_repair'));
+  assert.ok(!winning.includes('"stage":"SORT"'));
 });
 
 test('account admission atomically accepts only twenty waiting jobs', async (t) => {

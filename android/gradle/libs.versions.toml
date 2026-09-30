@@ -53,7 +53,7 @@ serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-jso
 work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
 media3-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
-sentry-android = { module = "io.sentry:sentry-android", version.ref = "sentry-android" }
+sentry-android-core = { module = "io.sentry:sentry-android-core", version.ref = "sentry-android" }
 
 [plugins]
 google-services = { id = "com.google.gms.google-services", version.ref = "google-services" }
