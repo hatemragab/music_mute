@@ -140,6 +140,7 @@ unlimited requests, uninterrupted availability or immunity to source blocking.
 - [Tunelio implementation and setup](tunelio/README.md)
 - [Private routing and configuration](router/README.md)
 - [Tunelio routing deployment and live proof, 2026-09-30](docs/TUNELIO-ROUTING-2026-09-30.md)
+- [Current-main private provider rollout, 2026-09-30](docs/R2-ROLLOUT-2026-09-30.md)
 - [Agent handoff](videoscale/docs/AI-HANDOFF.md)
 - [Dated deployment evidence](videoscale/docs/DEPLOYMENT.md)
 - [Local cleanup evidence](videoscale/docs/LOCAL-CLEANUP.md)
