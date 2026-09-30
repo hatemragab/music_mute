@@ -48,4 +48,7 @@ class ProcessingUsageRepositoryTest {
     @Test(expected = JobsFailure::class) fun invalidTransferLimitsAreRejected() {
         usage().copy(effectiveLimits = usage().effectiveLimits.copy(signedUrlTtlSeconds = 601)).validate()
     }
+    @Test(expected = JobsFailure::class) fun negativeGrantQuotaIsRejected() {
+        usage().copy(uploads = usage().uploads.copy(dailyGrantLimit = -1, dailyRemainingGrants = 0)).validate()
+    }
 }

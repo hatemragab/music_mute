@@ -13,6 +13,35 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AuthContractTest {
+    @Test fun verifiedIdentityDoesNotHideReducedQuotasBeforeProfileSync() {
+        val state = accountState(identityVerified = true, profileVerified = false)
+            .copy(profileSyncPending = true)
+        assertEquals(false, state.accountEmailVerified)
+    }
+
+    @Test fun successfulProfileSyncUnlocksVerifiedAccountStatus() {
+        val state = accountState(identityVerified = true, profileVerified = false)
+        assertEquals(true, state.copy(profile = state.profile!!.copy(emailVerified = true)).accountEmailVerified)
+    }
+
+    @Test fun offlineAccountUsesCachedProfileWithoutIdentity() {
+        assertEquals(false, accountState(null, false, offline = true).accountEmailVerified)
+        assertEquals(true, accountState(null, true, offline = true).accountEmailVerified)
+    }
+
+    @Test fun identityVerificationIsOnlyFallbackWhenProfileIsUnavailable() {
+        assertEquals(false, accountState(false, null).accountEmailVerified)
+        assertEquals(true, accountState(true, null).accountEmailVerified)
+        assertNull(accountState(null, null).accountEmailVerified)
+    }
+
+    private fun accountState(identityVerified: Boolean?, profileVerified: Boolean?, offline: Boolean = false) = AuthUiState(
+        phase = AuthPhase.AUTHENTICATED,
+        identity = identityVerified?.let { IdentitySnapshot("uid", "listener@example.test", it, setOf(PASSWORD_PROVIDER)) },
+        profile = profileVerified?.let { AccountProfile("profile-1", "Listener", "listener@example.test", it, listOf(PASSWORD_PROVIDER)) },
+        offline = offline,
+    )
+
     @Test fun removesDeviceHistoryWithAuthenticatedEmptyDelete() = runTest {
         val id = "0e47b60a-4835-4cc3-a5b9-2d64d48f8c19"
         val api = client(AuthHttpTransport { url, method, headers, body ->

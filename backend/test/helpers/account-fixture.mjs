@@ -17,6 +17,9 @@ export async function accountFixture(connection, ids = []) {
     await users.create({
       _id: id,
       firebaseUid: `fixture-${id}`,
+      // General processing fixtures exercise the full verified allowance.
+      // Verification-specific tests explicitly change this field.
+      emailVerified: true,
       displayName: 'Fixture',
       nameSource: 'numeric_alias',
       profileSyncedAt: new Date(),

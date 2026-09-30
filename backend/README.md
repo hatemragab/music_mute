@@ -14,6 +14,32 @@ completed-result access, cancellation, deletion, and notifications remain suppor
 - [Zalando guideline index](../docs/backend-security/zalando-guidelines-index.md)
 - [Exhaustive route and security matrix](../docs/backend-security/route-matrix.md)
 
+## Email verification and account quotas
+
+Accounts without verified email receive one fifth of their resolved monthly
+processing seconds, daily/monthly upload grants, monthly confirmed upload bytes,
+monthly download grants/estimated bytes and retained-output storage quota. Resolve
+the saved global policy and any active account override first, then divide these
+quotas by five and round down to whole units (limits below five become zero).
+The current default processing allowance is 7,200 seconds for unverified accounts
+and 36,000 seconds after verification. Per-file limits, waiting/processing capacity,
+retry budgets, signed URL lifetime and service-wide outbound limits are unchanged.
+
+The backend reads the synchronized, trusted email-verification status in the same
+MongoDB session as quota admission. `/processing-usage` and realtime usage snapshots
+report the reduced limits. Verification and profile synchronization restore the
+full current allowance; existing usage, reservations and retained files are
+preserved. Accounts already above a reduced quota have zero remaining allowance,
+and accepted processing reservations retain their original settlement behavior.
+Android, iOS and web Account screens explain the reduced allowance and offer the
+existing verification action.
+
+API preflight: [Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+read on 2026-09-30; rules 104 (OpenAPI), 106 (compatible contracts), 132
+(snake_case), 151 (responses) and 118 (security). Existing routes, response shapes
+and authorization remain compatible; the quota reduction is the intended behavior
+change.
+
 ## Default queue capacity
 
 Each account defaults to 20 waiting jobs (`awaiting_upload` plus `queued`) and

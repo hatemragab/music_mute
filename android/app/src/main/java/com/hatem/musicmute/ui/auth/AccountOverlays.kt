@@ -24,7 +24,7 @@ internal fun EmailVerificationSheet(state: AuthUiState, email: String, cooldownU
         AccountSymbol(Icons.Outlined.Email, Modifier.align(Alignment.CenterHorizontally))
         Text(stringResource(R.string.creative_account_verify), style = MaterialTheme.typography.headlineSmall)
         Text(email)
-        Text(stringResource(R.string.auth_optional_verification))
+        Text(stringResource(R.string.auth_verification_quota_description))
         AuthMessages(state, dismissMessage)
         CooldownContent(cooldownUntil) { cooldown ->
             CreativePrimaryButton(onSend, Modifier.fillMaxWidth().testTag("auth-verify-email"),
