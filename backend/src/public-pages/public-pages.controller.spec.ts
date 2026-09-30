@@ -133,6 +133,8 @@ describe('Public account, privacy, and support resources', () => {
       'IP address',
       'audio-only stream',
       'voice-only results',
+      'permanent shared storage',
+      'Local file uploads and their results remain private',
       '15-day recovery period',
       'does not sell personal information',
     ]) {

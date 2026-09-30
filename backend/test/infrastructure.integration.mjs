@@ -40,7 +40,7 @@ test(
       const redis = probe.get(SECURITY_REDIS);
       assert.equal(await redis.ping(), 'PONG');
       assert.equal(redis.options.db, 2);
-      assert.equal(await probe.get(StorageClient).config.region(), 'us-east-1');
+      assert.equal(await probe.get(StorageClient).config.region(), 'auto');
       await redis.set('isolated:restart-probe', 'retained', 'EX', 120);
 
       const endpoint = (name) => `http://127.0.0.1:${apiPort}/health/${name}`;

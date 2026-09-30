@@ -130,6 +130,34 @@ function fixture() {
 }
 
 describe('coordinated deleted job retention', () => {
+  it.each(['private', 'shared'] as const)(
+    'purges shared job metadata while preserving shared assets and cleaning %s attempts',
+    async (attemptStorage) => {
+      const f = fixture();
+      const prefix = `shared/url/${'a'.repeat(64)}/2f237a2e-031e-4b58-b9a7-9f9e7c0e31a9`;
+      const privateAttemptKey = f.attempt.outputReservation.key;
+      Object.assign(f.job, {
+        inputReservation: { key: `${prefix}/input/source.mp3` },
+        inputObject: { key: `${prefix}/input/source.mp3` },
+        outputObject: { key: `${prefix}/output/vocals.mp3` },
+      });
+      Object.assign(f.attempt, {
+        outputObject: { key: `${prefix}/output/vocals.mp3` },
+      });
+      if (attemptStorage === 'shared')
+        f.attempt.outputReservation.key = `${prefix}/output/vocals.mp3`;
+
+      await expect(f.service.purgeDue(now)).resolves.toBe(true);
+
+      expect(f.storage.deleteObject.mock.calls.map(([key]) => key)).toEqual(
+        attemptStorage === 'private' ? [privateAttemptKey] : [],
+      );
+      expect(f.jobs.deleteOne).toHaveBeenCalledOnce();
+      expect(f.attempts.deleteMany).toHaveBeenCalledOnce();
+      expect(f.receipts.updateOne).toHaveBeenCalledOnce();
+    },
+  );
+
   it('purges deleted jobs after30 days of confirmed cleanup and retains compact replay proof atomically', async () => {
     const f = fixture();
     await expect(f.service.purgeDue(now)).resolves.toBe(true);

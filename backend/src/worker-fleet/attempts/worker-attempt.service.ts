@@ -1,7 +1,7 @@
 import { validComparisonRanges } from '../../jobs/comparison-ranges.js';
 import { measureTransferOperation } from './transfer-timing.js';
 import { withAttemptMeasurements } from '../../jobs/job-stage-timing.js';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { isUUID } from 'class-validator';
 import {
@@ -17,6 +17,7 @@ import { NotificationOutbox } from '../../notifications/notification-outbox.sche
 import { ProcessingUsageService } from '../../processing-usage/processing-usage.service.js';
 import { StorageCleanupService } from '../../storage/storage-cleanup.service.js';
 import { StorageTransfersService } from '../../storage/storage-transfers.service.js';
+import { SharedMediaService } from '../../shared-media/shared-media.service.js';
 import { AccountAccessService } from '../../users/account-access.service.js';
 import type { WorkerPrincipal } from '../auth/worker-auth.types.js';
 import {
@@ -49,6 +50,7 @@ export class WorkerAttemptService {
     private readonly cleanup: StorageCleanupService,
     private readonly accountAccess: AccountAccessService,
     private readonly usage: ProcessingUsageService,
+    @Optional() private readonly sharedMedia?: SharedMediaService,
   ) {}
 
   private get outbox() {
@@ -335,6 +337,10 @@ export class WorkerAttemptService {
     if (first.attempt.state === 'succeeded')
       return this.presentCompletion(first.attempt, dto, true);
     this.assertCurrent(first.attempt, first.job, new Date());
+    if (first.job.sharedResultKey) {
+      if (!this.sharedMedia) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+      await this.accountAccess.assertActive(first.job.userId);
+    }
     const reservation = first.attempt.outputReservation;
     if (!reservation) throw workerError('WORKER_CONFLICT');
     const object = await measureTransferOperation(
@@ -342,6 +348,23 @@ export class WorkerAttemptService {
       attemptId,
       () => this.storage.verifyUploadedObject(reservation, dto.etag),
     );
+    let sharedObject = object;
+    if (first.job.sharedResultKey) {
+      const publishing = await this.loadCurrent(principal, attemptId, dto);
+      this.assertRecipe(publishing.job, dto);
+      this.assertReservation(publishing.attempt.outputReservation, reservation);
+      if (!sameReservationObject(reservation, object))
+        throw workerError('WORKER_CONFLICT');
+      await this.accountAccess.assertActive(publishing.job.userId);
+      try {
+        sharedObject = await this.sharedMedia!.publishOutput(
+          publishing.job,
+          object,
+        );
+      } catch {
+        throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+      }
+    }
     const session = await this.connection.startSession();
     try {
       const result = await measureTransferOperation(
@@ -391,9 +414,30 @@ export class WorkerAttemptService {
             );
             if (attemptFence.modifiedCount !== 1)
               throw workerError('WORKER_CONFLICT');
+            if (current.job.sharedResultKey) {
+              try {
+                await this.sharedMedia!.completeResult(
+                  current.job,
+                  sharedObject,
+                  dto.comparisonRanges ?? null,
+                  session,
+                );
+              } catch (error) {
+                // The driver must see transaction labels to retry a write conflict.
+                if (
+                  error &&
+                  typeof error === 'object' &&
+                  'errorLabels' in error &&
+                  Array.isArray(error.errorLabels) &&
+                  error.errorLabels.includes('TransientTransactionError')
+                )
+                  throw error;
+                throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+              }
+            }
             await this.usage.recordRetainedOutput(
               current.job,
-              object.bytes + (current.job.inputObject?.bytes ?? 0),
+              sharedObject.bytes + (current.job.inputObject?.bytes ?? 0),
               session,
             );
             const readyAt = new Date();
@@ -406,7 +450,7 @@ export class WorkerAttemptService {
                 {
                   $set: {
                     status: 'ready',
-                    outputObject: object,
+                    outputObject: sharedObject,
                     comparisonRanges: dto.comparisonRanges ?? null,
                     retainedOutputAccountedAt: readyAt,
                     retainedInputBytes: current.job.inputObject?.bytes ?? 0,
@@ -449,7 +493,8 @@ export class WorkerAttemptService {
             await this.releaseSlot(current.attempt, now, session);
             await this.usage.settleJob(job, session);
             await this.enqueueNotification(job, 'ready', now, session);
-            await this.cleanup.cancelScheduled(reservation.key, session);
+            if (!current.job.sharedResultKey)
+              await this.cleanup.cancelScheduled(reservation.key, session);
             return {
               attemptId,
               jobId: job._id.toHexString(),

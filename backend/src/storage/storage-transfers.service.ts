@@ -2,12 +2,14 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
+  CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { StorageClient } from '../infrastructure/storage.module.js';
 import { jobError } from '../jobs/job-errors.js';
+import { isSharedMediaKey } from '../shared-media/shared-media-key.js';
 import type {
   AdmissionSnapshot,
   DownloadGrant,
@@ -26,6 +28,8 @@ import {
 
 const REQUEST_TIMEOUT_MILLISECONDS = 30_000;
 const MAX_SIGNED_URL_SECONDS = 600;
+const USER_COPY_KEY =
+  /^users\/[a-f0-9]{24}\/jobs\/[A-Za-z0-9][A-Za-z0-9_.-]*\/(?:[A-Za-z0-9][A-Za-z0-9_.-]*\/)*[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 function confirmedMissing(error: unknown): boolean {
   if (
     !(error instanceof Error) ||
@@ -35,6 +39,14 @@ function confirmedMissing(error: unknown): boolean {
   return (
     (error as { $metadata?: { httpStatusCode?: number } }).$metadata
       ?.httpStatusCode === 404
+  );
+}
+function confirmedPreconditionFailure(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === 'PreconditionFailed' &&
+    (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+      ?.httpStatusCode === 412
   );
 }
 export interface InputTransferJob {
@@ -73,9 +85,65 @@ export class StorageTransfersService {
     if (!identity) throw jobError('UPLOAD_NOT_READY');
     return identity;
   }
+  /**
+   * Callers reserve a fresh destination key before copying. Shared originals and
+   * results are permanently retained; destination keys are never reused.
+   */
+  async copyObject(
+    source: ObjectIdentity,
+    destinationKey: string,
+  ): Promise<ObjectIdentity> {
+    validateObjectReservation(source);
+    validateStorageKey(destinationKey);
+    if (
+      !isStorageEtag(source.etag) ||
+      source.key === destinationKey ||
+      (!isSharedMediaKey(destinationKey) && !USER_COPY_KEY.test(destinationKey))
+    )
+      throw new TypeError('Invalid storage copy');
+    let copied;
+    try {
+      copied = await this.storage.send(
+        new CopyObjectCommand({
+          Bucket: this.bucket,
+          Key: destinationKey,
+          CopySource: `${encodeURIComponent(this.bucket)}/${source.key
+            .split('/')
+            .map(encodeURIComponent)
+            .join('/')}`,
+          CopySourceIfMatch: source.etag,
+          MetadataDirective: 'COPY',
+          StorageClass: 'STANDARD',
+        }),
+        { abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS) },
+      );
+      this.preflight.recordSuccess?.();
+    } catch (error) {
+      if (confirmedMissing(error) || confirmedPreconditionFailure(error)) {
+        this.preflight.recordSuccess?.();
+        throw jobError('UPLOAD_NOT_READY');
+      }
+      this.preflight.recordFailure?.();
+      throw error;
+    }
+    const etag = copied.CopyObjectResult?.ETag;
+    if (!isStorageEtag(etag)) throw jobError('UPLOAD_NOT_READY');
+    try {
+      return await this.verifyUploadedObject(
+        { ...source, key: destinationKey },
+        etag,
+      );
+    } catch (error) {
+      if (confirmedPreconditionFailure(error))
+        throw jobError('UPLOAD_NOT_READY');
+      throw error;
+    }
+  }
   /** Unique keys are deleted only after all upload grants and transfers settle. */
   async deleteObject(key: string): Promise<void> {
     validateStorageKey(key);
+    if (isSharedMediaKey(key))
+      throw new TypeError('Shared media is permanently retained');
     try {
       await this.storage.send(
         new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),

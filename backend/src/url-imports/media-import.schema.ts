@@ -31,6 +31,20 @@ export type ImportState = (typeof IMPORT_STATES)[number];
 })
 export class MediaImport {
   _id!: Types.ObjectId;
+  @Prop({
+    type: String,
+    default: null,
+    match: /^[a-f0-9]{64}$/,
+    immutable: true,
+  })
+  sharedSourceKey!: string | null;
+  @Prop({
+    type: String,
+    default: null,
+    match: /^[a-f0-9]{64}$/,
+    immutable: true,
+  })
+  sharedResultKey!: string | null;
   @Prop({ type: [StageMeasurementSchema], default: [] })
   stageTimings!: StageMeasurement[];
   @Prop({ type: Date, default: null }) finishedAt!: Date | null;

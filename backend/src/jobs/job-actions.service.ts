@@ -20,6 +20,7 @@ import { adminError } from '../admin/admin-errors.js';
 import type { AdminActor } from '../admin/admin.types.js';
 import { WorkerHintService } from '../worker-hints/worker-hint.service.js';
 import { assertJobRequestNotPurged } from './purged-job-request.js';
+import { SharedMediaResult } from '../shared-media/shared-media.schema.js';
 
 type JobActionPrincipal =
   | { kind: 'owner'; userId: Types.ObjectId }
@@ -264,6 +265,42 @@ export class JobActionsService {
         );
         if (touched.modifiedCount !== 1) throw jobError('JOB_STATE_CONFLICT');
 
+        if (original.sharedSourceKey || original.sharedResultKey) {
+          if (!original.sharedSourceKey || !original.sharedResultKey)
+            throw jobError('JOB_STATE_CONFLICT');
+          // Claim the shared result in the same transaction as the retry. A
+          // completed result or another producer must never start duplicate work.
+          const rebound = await this.jobs.db
+            .model<SharedMediaResult>(SharedMediaResult.name)
+            .updateOne(
+              {
+                _id: original.sharedResultKey,
+                sourceKey: original.sharedSourceKey,
+                'recipeSnapshot.recipeDigest':
+                  original.recipeSnapshot!.recipeDigest,
+                $or: [
+                  { state: 'failed' },
+                  { state: 'processing', producerJobId: original._id },
+                ],
+              },
+              {
+                $set: {
+                  state: 'processing',
+                  producerJobId: newJobId,
+                  pendingOutput: null,
+                  outputObject: null,
+                  outputKey: null,
+                  publicationToken: null,
+                  publicationLeaseUntil: null,
+                  comparisonRanges: null,
+                  completedAt: null,
+                },
+              },
+              { session, runValidators: true },
+            );
+          if (rebound.modifiedCount !== 1) throw jobError('JOB_STATE_CONFLICT');
+        }
+
         const queuedAt = new Date();
         const [created] = await this.jobs.create(
           [
@@ -279,6 +316,8 @@ export class JobActionsService {
               displayName: original.displayName ?? original.sourceTitle ?? null,
               sourceKind: original.sourceKind ?? null,
               sourceUrl: original.sourceUrl ?? null,
+              sharedSourceKey: original.sharedSourceKey ?? null,
+              sharedResultKey: original.sharedResultKey ?? null,
               clientStartedAt: queuedAt,
               processingAccumulatedMs: 0,
               serverTimingStartedAt: queuedAt,

@@ -368,6 +368,20 @@ export class Job {
     match: YOUTUBE_SOURCE_URL_PATTERN,
   })
   sourceUrl!: string | null;
+  @Prop({
+    type: String,
+    default: null,
+    immutable: true,
+    match: /^[a-f0-9]{64}$/,
+  })
+  sharedSourceKey!: string | null;
+  @Prop({
+    type: String,
+    default: null,
+    immutable: true,
+    match: /^[a-f0-9]{64}$/,
+  })
+  sharedResultKey!: string | null;
   @Prop({ type: Date, default: null }) clientStartedAt!: Date | null;
   @Prop({ type: Date, default: null }) deletedAt!: Date | null;
   @Prop({ type: Date, default: null })

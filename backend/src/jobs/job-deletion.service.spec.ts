@@ -9,6 +9,84 @@ const incarnation = 'e221c880-7196-4fa5-b1b8-ee504e87c04c';
 const attemptId = '99f8016b-67f3-4f4b-beb4-205a7b87147e';
 
 describe('job deletion worker fencing', () => {
+  it.each(['shared', 'foreignUser', 'malformedShared'] as const)(
+    'protects %s media during job reference deletion',
+    async (storageMode) => {
+      const now = new Date('2026-10-01T00:00:00.000Z');
+      const userId = new Types.ObjectId();
+      const jobId = new Types.ObjectId();
+      const sharedPrefix = `shared/url/${'a'.repeat(64)}/2f237a2e-031e-4b58-b9a7-9f9e7c0e31a9`;
+      const job = {
+        _id: jobId,
+        userId,
+        deletedAt: now,
+        cleanupCompletedAt: null,
+        cleanupFirstDeletedAt: null,
+        cleanupNextAt: now,
+        cleanupToken: null as string | null,
+        cleanupAttempts: 0,
+        inputReservation: { key: `${sharedPrefix}/input/source.mp3` },
+        inputObject: { key: `${sharedPrefix}/input/source.mp3` },
+        outputObject: { key: `${sharedPrefix}/output/vocals.mp3` },
+        retainedOutputAccountedAt: now,
+        retainedOutputReleasedAt: null,
+      };
+      if (storageMode === 'foreignUser')
+        job.inputReservation.key = `users/${new Types.ObjectId()}/jobs/${jobId}/input/source.mp3`;
+      if (storageMode === 'malformedShared')
+        job.inputReservation.key = 'shared/url/invalid-source/input/source.mp3';
+      const jobs = {
+        findOneAndUpdate: vi.fn((_filter: unknown, update: any) => {
+          job.cleanupToken = update.$set.cleanupToken;
+          return { lean: async () => ({ ...job }) };
+        }),
+        findOne: vi.fn(() => ({
+          session: () => ({ lean: async () => ({ ...job }) }),
+        })),
+        updateOne: vi.fn(async (_filter, update) => {
+          Object.assign(job, update.$set ?? {});
+          return { matchedCount: 1, modifiedCount: 1 };
+        }),
+        exists: vi.fn(),
+      };
+      const storage = { deleteObject: vi.fn() };
+      const usage = { releaseRetainedOutput: vi.fn(async () => undefined) };
+      const service = new JobDeletionService(
+        jobs as never,
+        {} as never,
+        {
+          run: (operation: (session: unknown) => Promise<unknown>) =>
+            operation({}),
+        } as never,
+        storage as never,
+        usage as never,
+        {} as never,
+      );
+
+      await expect(service.cleanupDue(now)).resolves.toBe(true);
+
+      expect(storage.deleteObject).not.toHaveBeenCalled();
+      expect(jobs.exists).not.toHaveBeenCalled();
+      if (storageMode !== 'shared') {
+        expect(usage.releaseRetainedOutput).not.toHaveBeenCalled();
+        expect(job).toMatchObject({
+          cleanupCompletedAt: null,
+          cleanupAttempts: 1,
+          retainedOutputReleasedAt: null,
+        });
+        return;
+      }
+      expect(usage.releaseRetainedOutput).toHaveBeenCalledOnce();
+      expect(job).toMatchObject({
+        cleanupCompletedAt: now,
+        cleanupFirstDeletedAt: null,
+        cleanupNextAt: null,
+        cleanupToken: null,
+        retainedOutputReleasedAt: now,
+      });
+    },
+  );
+
   it('cancels stale terminal-job ownership before scheduling cleanup', async () => {
     const userId = new Types.ObjectId();
     const jobId = new Types.ObjectId();

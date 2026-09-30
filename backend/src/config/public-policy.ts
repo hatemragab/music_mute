@@ -3,14 +3,14 @@ export const PUBLIC_POLICY_DEFAULTS = {
   developerName: 'MusicMute',
   publicOrigin: 'https://api.music-mute.com',
   supportEmail: 'hatemragapdev@gmail.com',
-  policyVersion: '2026-09-27',
-  policyUpdatedAt: '2026-09-27T00:00:00Z',
+  policyVersion: '2026-10-01',
+  policyUpdatedAt: '2026-10-01T00:00:00Z',
   recoveryPeriodDays: 15,
   replayFenceHours: 24,
   deletionTimeframe:
     'Account access ends as soon as a deletion request is accepted. MusicMute keeps the account in a 15-day recovery period. Permanent active-system cleanup starts automatically when that period ends and is retried until it completes.',
   retentionNotice:
-    "Account data and private cloud media remain inaccessible during the 15-day recovery period so the owner can request recovery. Permanent cleanup then removes the account profile, cloud input and result audio, processing history, and account-linked device and push records. A pseudonymous security replay fence remains for 24 hours. Files selected from another provider and copies exported by the user remain under that user or provider's control. Access-restricted operational logs and backup copies may remain until their normal service lifecycle expires and are not used to restore the deleted account, except when preservation is required for security, fraud prevention, or law.",
+    "Account data and privately uploaded local media remain inaccessible during the 15-day recovery period so the owner can request recovery. Permanent cleanup then removes the account profile, privately uploaded input and result audio, processing history, and account-linked device and push records. Audio imported from supported public links and its processed results are stored once in permanent shared storage and remain after job or account deletion; deletion removes the account's records and access to them. Shared storage remains private and requires an authorized account job for access. A pseudonymous security replay fence remains for 24 hours. Files selected from another provider and copies exported by the user remain under that user or provider's control. Access-restricted operational logs and backup copies may remain until their normal service lifecycle expires and are not used to restore the deleted account, except when preservation is required for security, fraud prevention, or law.",
 } as const;
 
 export const PUBLIC_POLICY_PATHS = {

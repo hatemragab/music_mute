@@ -11,6 +11,7 @@ import { Job } from '../jobs/job.schema.js';
 import { StorageCleanupService } from '../storage/storage-cleanup.service.js';
 import { UserIdentityFenceService } from './user-identity-fence.service.js';
 import { User } from './user.schema.js';
+import { isSharedMediaKey } from '../shared-media/shared-media-key.js';
 
 const LEASE_MS = 60_000;
 const PAGE_SIZE = 20;
@@ -326,7 +327,7 @@ export class AccountDeletionCleanupService {
         typeof attempt.outputObject?.key === 'string'
           ? attempt.outputObject.key
           : null;
-      if (reservationKey)
+      if (reservationKey && !isSharedMediaKey(reservationKey))
         await this.storageCleanup.schedule({
           key: reservationKey,
           ownerUserId: userId,
@@ -334,7 +335,11 @@ export class AccountDeletionCleanupService {
           nextAt: now,
           settleUntil: new Date(now.getTime() + 4_500_000),
         });
-      if (outputKey && outputKey !== reservationKey)
+      if (
+        outputKey &&
+        outputKey !== reservationKey &&
+        !isSharedMediaKey(outputKey)
+      )
         await this.storageCleanup.schedule({
           key: outputKey,
           ownerUserId: userId,

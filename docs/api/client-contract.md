@@ -67,7 +67,7 @@ timestamps. Reuse the request ID for retries of the same URL.
 Monthly processing admission uses **used + reserved seconds before the new file**.
 If that total is below the monthly limit, the full file is accepted even when its
 duration exceeds the remaining allowance: one minute remaining can admit a
-four-minute song. At or above the limit, new local-file jobs and URL imports
+four-minute song. At or above the limit, new local-file jobs and uncached URL processing
 return `PROCESSING_ALLOWANCE_EXHAUSTED` before issuing an upload grant or calling
 the acquisition provider. The entire measured duration is accounted, and
 remaining allowance is clamped to zero. Already accepted files finish normally.
@@ -78,6 +78,15 @@ to 1800 seconds) because duration is unknown; this does **not** require that man
 seconds remaining. Job creation atomically exchanges the hold for measured
 duration, and failed/interrupted imports release it. Existing per-file size,
 duration, authentication and transfer protections remain in force.
+
+Canonical public URL imports use [permanent shared media](../url-imports/shared-media.md).
+Each account's job references the same original and matching trim/model result,
+without per-user R2 copies. Completed hits need no processing/upload reservation
+and may succeed after monthly processing or waiting capacity is exhausted;
+account, policy, media, logical Library storage and download limits still apply.
+Source-only hits require normal compute admission. Local uploads remain private.
+URL job/account deletion removes owned records/access and retains shared audio.
+No cache hashes, global cache lookup or additional grant fields are exposed.
 
 Use owner-scoped realtime import snapshots until `submitted` or `failed`.
 After `submitted`, subscribe to the job for worker progress and results.

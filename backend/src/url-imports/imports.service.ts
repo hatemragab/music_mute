@@ -3,7 +3,8 @@ import {
   MAX_PREPARED_AUDIO_BYTES,
 } from '../jobs/media-limits.js';
 import { elapsedMs } from '../jobs/job-stage-timing.js';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { SharedMediaService } from '../shared-media/shared-media.service.js';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -35,10 +36,12 @@ export class ImportsService {
     private readonly config: ConfigService,
     @InjectQueue(IMPORT_QUEUE) private readonly queue: Queue,
     private readonly restrictions: AccountRestrictionsService,
+    @Optional() private readonly shared?: SharedMediaService,
   ) {}
 
   async initialize(): Promise<void> {
     await this.records.init();
+    await this.shared?.initialize();
     await this.fences.updateOne(
       { _id: 'url-import-admission' },
       { $setOnInsert: { revision: 0 } },
@@ -46,13 +49,17 @@ export class ImportsService {
     );
   }
 
-  async assertAccountAllowed(userId: Types.ObjectId) {
-    await this.access.assertActive(userId);
+  async assertAccountAllowed(userId: Types.ObjectId, session?: ClientSession) {
+    await this.access.assertActive(userId, session);
     await this.restrictions.assertAllowed(userId, 'job_create');
   }
 
-  async assertEligible(userId: Types.ObjectId, session?: ClientSession) {
-    await this.assertAccountAllowed(userId);
+  async assertEligible(
+    userId: Types.ObjectId,
+    session?: ClientSession,
+    requireUpload = true,
+  ) {
+    await this.assertAccountAllowed(userId, session);
     const usage = await this.usage.readUsage(userId, session);
     if (usage.availability.status !== 'available')
       throw jobError(
@@ -61,9 +68,10 @@ export class ImportsService {
           : 'PROCESSING_UNAVAILABLE',
       );
     if (
-      usage.uploads.dailyRemainingGrants < 1 ||
-      usage.uploads.monthlyRemainingGrants < 1 ||
-      usage.uploads.monthlyRemainingBytes < 1
+      requireUpload &&
+      (usage.uploads.dailyRemainingGrants < 1 ||
+        usage.uploads.monthlyRemainingGrants < 1 ||
+        usage.uploads.monthlyRemainingBytes < 1)
     )
       throw jobError(
         usage.uploads.monthlyRemainingBytes < 1
@@ -78,7 +86,7 @@ export class ImportsService {
       maxBytes: Math.min(
         MAX_PREPARED_AUDIO_BYTES,
         usage.effectiveLimits.maxPreparedAudioBytes,
-        usage.uploads.monthlyRemainingBytes,
+        ...(requireUpload ? [usage.uploads.monthlyRemainingBytes] : []),
       ),
       maxDuration,
     };
@@ -128,6 +136,7 @@ export class ImportsService {
       );
       await this.usage.releaseImport(record._id, record.userId, session);
     });
+    await this.shared?.failImport(record);
   }
 
   async create(
@@ -152,7 +161,7 @@ export class ImportsService {
     }
     if (!this.config.get<boolean>('URL_IMPORT_ENABLED'))
       throw importError('IMPORT_DISABLED');
-    await this.assertEligible(owner);
+    await this.assertAccountAllowed(owner);
     const id = new Types.ObjectId();
     const jobRequestId = randomUUID();
     const record = await this.transactions.run(async (session) => {
@@ -180,6 +189,15 @@ export class ImportsService {
         .session(session);
       if (count >= this.config.getOrThrow<number>('URL_IMPORT_MAX_OUTSTANDING'))
         throw importError('IMPORT_QUEUE_FULL');
+      const shared = await this.shared?.claim(
+        source.url,
+        source.provider,
+        id,
+        trimEnabled,
+        session,
+      );
+      if (!shared?.cached)
+        await this.assertEligible(owner, session, !shared?.hasSource);
       const [created] = await this.records.create(
         [
           {
@@ -190,6 +208,8 @@ export class ImportsService {
             trimEnabled,
             sourceUrl: source.url,
             provider: source.provider,
+            sharedSourceKey: shared?.sourceKey ?? null,
+            sharedResultKey: shared?.resultKey ?? null,
           },
         ],
         { session },
@@ -202,6 +222,19 @@ export class ImportsService {
   }
 
   async enqueue(id: string): Promise<void> {
+    if (this.shared) {
+      const record = await this.records.findById(id).lean();
+      if (!record || record.status !== 'queued') return;
+      const state = await this.shared.inspect(record);
+      if (state?.action === 'wait') return;
+      if (state?.action === 'failed') {
+        await this.failAcquisition(record, {
+          code: 'IMPORT_DEPENDENCY_FAILED',
+          message: 'Audio acquisition is temporarily unavailable',
+        });
+        return;
+      }
+    }
     await this.queue.add(
       'import',
       { importId: id },

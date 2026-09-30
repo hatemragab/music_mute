@@ -1,4 +1,8 @@
-import { DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  HeadObjectCommand,
+} from '@aws-sdk/client-s3';
 import { ConfigService } from '@nestjs/config';
 import { StorageClient } from '../infrastructure/storage.module.js';
 import type { ObjectIdentity } from '../jobs/job.types.js';
@@ -16,6 +20,7 @@ const object: ObjectIdentity = {
   sha256: Buffer.alloc(32, 2).toString('base64'),
 };
 const clients: StorageClient[] = [];
+const sharedKey = `shared/url/${'a'.repeat(64)}/2f237a2e-031e-4b58-b9a7-9f9e7c0e31a9/output/vocals.mp3`;
 afterEach(() => {
   for (const client of clients.splice(0)) client.destroy();
   vi.useRealTimers();
@@ -88,6 +93,151 @@ function expectSignedUrl(url: string) {
 }
 
 describe('StorageTransfersService R2', () => {
+  it('copies a confirmed identity server-side with an ETag fence and verifies the preserved checksum metadata', async () => {
+    const { service, send, preflight } = fixture();
+    const copiedEtag = '"copied-etag"';
+    send
+      .mockResolvedValueOnce({
+        CopyObjectResult: { ETag: copiedEtag },
+      } as never)
+      .mockResolvedValueOnce({ ...verifiedHead(), ETag: copiedEtag } as never);
+
+    await expect(service.copyObject(object, sharedKey)).resolves.toEqual({
+      ...object,
+      key: sharedKey,
+      etag: copiedEtag,
+    });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0][0]).toBeInstanceOf(CopyObjectCommand);
+    expect((send.mock.calls[0][0] as CopyObjectCommand).input).toEqual({
+      Bucket: bucket,
+      Key: sharedKey,
+      CopySource: `${bucket}/${object.key}`,
+      CopySourceIfMatch: object.etag,
+      MetadataDirective: 'COPY',
+      StorageClass: 'STANDARD',
+    });
+    expect((send.mock.calls[1][0] as HeadObjectCommand).input).toEqual({
+      Bucket: bucket,
+      Key: sharedKey,
+      IfMatch: copiedEtag,
+    });
+    expect(send.mock.calls[0][1]).toMatchObject({
+      abortSignal: expect.any(AbortSignal),
+    });
+    expect(preflight.recordSuccess).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['NoSuchKey', 404],
+    ['NotFound', 404],
+    ['PreconditionFailed', 412],
+  ])(
+    'maps confirmed copy failure %s HTTP %s to a safe identity error',
+    async (name, status) => {
+      const { service, send, preflight } = fixture();
+      send.mockRejectedValueOnce(storageError(name, status) as never);
+      await expect(service.copyObject(object, sharedKey)).rejects.toMatchObject(
+        {
+          response: { code: 'UPLOAD_NOT_READY' },
+        },
+      );
+      expect(send).toHaveBeenCalledOnce();
+      expect(preflight.recordSuccess).toHaveBeenCalledOnce();
+      expect(preflight.recordFailure).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['AccessDenied', 403],
+    ['ServiceUnavailable', 503],
+    ['PreconditionFailed', 503],
+    ['NoSuchBucket', 404],
+  ])(
+    'preserves copy infrastructure failure %s HTTP %s',
+    async (name, status) => {
+      const { service, send, preflight } = fixture();
+      const error = storageError(name, status);
+      send.mockRejectedValueOnce(error as never);
+      await expect(service.copyObject(object, sharedKey)).rejects.toBe(error);
+      expect(preflight.recordFailure).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    { ContentLength: object.bytes + 1 },
+    { ContentType: 'audio/wav' },
+    { Metadata: { sha256: Buffer.alloc(32, 3).toString('base64') } },
+    { ETag: '"unexpected"' },
+  ])(
+    'rejects a copied object that fails identity verification: %o',
+    async (patch) => {
+      const { service, send } = fixture();
+      send
+        .mockResolvedValueOnce({
+          CopyObjectResult: { ETag: object.etag },
+        } as never)
+        .mockResolvedValueOnce({ ...verifiedHead(), ...patch } as never);
+      await expect(service.copyObject(object, sharedKey)).rejects.toMatchObject(
+        {
+          response: { code: 'UPLOAD_NOT_READY' },
+        },
+      );
+      expect(send).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('rejects missing copy ETag and changed destination identity without granting access', async () => {
+    const { service, send } = fixture();
+    send.mockResolvedValueOnce({ CopyObjectResult: {} } as never);
+    await expect(service.copyObject(object, sharedKey)).rejects.toMatchObject({
+      response: { code: 'UPLOAD_NOT_READY' },
+    });
+    expect(send).toHaveBeenCalledOnce();
+    send
+      .mockResolvedValueOnce({
+        CopyObjectResult: { ETag: object.etag },
+      } as never)
+      .mockRejectedValueOnce(storageError('PreconditionFailed', 412) as never);
+    await expect(service.copyObject(object, sharedKey)).rejects.toMatchObject({
+      response: { code: 'UPLOAD_NOT_READY' },
+    });
+  });
+
+  it.each([
+    'app-releases/release.apk',
+    'users/invalid-owner/jobs/job/input/source.mp3',
+    `shared/url/${'a'.repeat(63)}/2f237a2e-031e-4b58-b9a7-9f9e7c0e31a9/output/vocals.mp3`,
+    `shared/url/${'a'.repeat(64)}/invalid-generation/output/vocals.mp3`,
+    sharedKey.replace('/output/', '/other/'),
+    object.key,
+  ])(
+    'rejects an unreserved copy destination %s before storage access',
+    async (key) => {
+      const { service, send } = fixture();
+      await expect(service.copyObject(object, key)).rejects.toThrow(TypeError);
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an invalid source identity before copying', async () => {
+    const { service, send } = fixture();
+    await expect(
+      service.copyObject({ ...object, etag: 'bare' }, sharedKey),
+    ).rejects.toThrow(TypeError);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('never deletes permanently retained shared originals or results', async () => {
+    const { service, send } = fixture();
+    for (const key of [sharedKey, sharedKey.replace('/output/', '/input/')])
+      await expect(service.deleteObject(key)).rejects.toThrow(
+        'Shared media is permanently retained',
+      );
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('signs one conditional PUT locally with exact size, type and both bound SHA256 headers', async () => {
     const { service, send, preflight } = fixture();
     const grant = await service.createInputGrant(

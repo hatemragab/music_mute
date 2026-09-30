@@ -29,6 +29,12 @@ Existing routes, authorization and response shapes are preserved.
 
 ## URL import throughput
 
+New URL jobs reference [permanent shared media](../docs/url-imports/shared-media.md)
+in private R2. Canonical URL hashes deduplicate acquisition; recipe hashes separate
+trim/model/output variants. Later users reuse originals and matching vocals without
+per-user copies. Local uploads stay private. Shared artifacts/catalog rows have no
+TTL and survive job/account deletion.
+
 URL submissions return a durable queued import immediately, including while other
 imports are downloading. The BullMQ import queue defaults to 20 active executions
 across all backend replicas (`URL_IMPORT_CONCURRENCY=20`) and at most five new
@@ -381,7 +387,7 @@ remain historical and do not prove R2 latency.
 
 ### Monthly admission and URL import reservations
 
-New local jobs and URL imports are admitted while used plus reserved monthly
+New local jobs and uncached URL processing are admitted while used plus reserved monthly
 processing seconds are below the limit. An accepted file runs in full even if
 its duration crosses that limit; subsequent submissions are blocked. URL imports
 reserve a temporary per-file-cap hold before acquisition, then atomically exchange
@@ -389,6 +395,10 @@ it for measured job duration. The hold does not require a full file's allowance
 remaining. Failed/stalled imports release it. Measured duration reconciliation
 honors existing admission instead of rejecting an already accepted file.
 Existing authentication, per-file caps and transfer limits remain unchanged.
+Completed shared results need no compute/upload reservation and can be reused
+after monthly processing or waiting capacity is exhausted, subject to account,
+policy, media and logical Library storage checks. Source-only reuse still requires
+normal compute admission. Fresh acquisition keeps normal upload billing.
 Run `pnpm run test:imports:integration` for isolated Mongo concurrency, recovery,
 pre-acquisition rejection and one-minute-remaining regression coverage.
 
