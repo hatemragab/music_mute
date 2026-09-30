@@ -1,7 +1,9 @@
 # Private Cloudflare R2 storage
 
 This is the current storage setup and contract for MusicMute. The owner approved
-an R2-only breaking change on 2026-09-30 and will recreate MongoDB themselves.
+an R2-only breaking change on 2026-09-30. The initial plan allowed an owner-managed
+fresh database; the subsequent rollout preserves current MongoDB data and worker
+pairing. Any database reset remains a separate owner action.
 There is no AWS fallback, old-record bridge, migration copy, or database
 reset command. Dated AWS/S3 validation records elsewhere describe earlier releases;
 they do not establish R2 behavior and their provider setup/acceleration commands
@@ -9,6 +11,9 @@ must not be used for this implementation.
 
 The [local validation record](VALIDATION.md) lists executed checks and the
 remaining separate fixture, simulator and live verification boundaries.
+The [September 30 rollout](ROLLOUT-2026-09-30.md) and
+[October 1 continuation](ROLLOUT-2026-10-01.md) record actual deliveries and
+remaining publication/distribution gates.
 
 ## Repository audit
 
@@ -20,7 +25,7 @@ remaining separate fixture, simulator and live verification boundaries.
 | Dashboard/releases       | Exact signed APK upload headers and backend identity verification; no browser secret/configuration exposure                                                              |
 | Installer/catalog        | Old provider-specific runtime/fixture entries removed; real R2 publication and signature/hash verification required before activation                                    |
 | Configuration/deployment | Safe backend env examples updated; Docker/CapRover/CI use runtime configuration, without baked provider secrets or extra storage services                                |
-| MongoDB                  | Key/ETag/bytes/checksum/type identities; owner recreates database, with no migration/reset/copy automation                                                               |
+| MongoDB                  | Key/ETag/bytes/checksum/type identities; no migration/reset/copy automation                                                                                              |
 | Tests/tools/docs         | R2 fixtures, explicit opt-in dedicated-bucket integration/benchmark, generic credential scanner, current setup/contracts and marked historical evidence                  |
 
 ## Architecture
@@ -218,8 +223,9 @@ application download-grant estimates cannot meter URL replays precisely.
 
 ## Fresh database and installation artifacts
 
-The owner recreates MongoDB outside this implementation. The new schemas do not
-interpret old version IDs; no database migration or old audio copy is required.
+Any owner-managed MongoDB recreation is outside this implementation. The current
+rollout preserves existing current-schema records. The new schemas do not
+interpret old version IDs; no old-record bridge or old audio copy is implemented.
 Deleting MongoDB does not delete old AWS objects or stop their storage charges.
 No AWS bucket/object deletion is authorized or implemented here.
 
@@ -228,8 +234,11 @@ archives and the bounded synthetic qualification fixture to R2 through the exist
 trusted release pipeline. Verify each unique key's ETag, bytes, SHA-256, type and
 Ed25519 signature, then promote the corresponding installation catalog. Publish
 required APK releases through the existing administrator upload/verification flow.
-Default runtime releases and qualification fixture are intentionally empty until
-real R2 objects are verified; do not invent ETags or reuse old signed identities.
+The initial migration catalog was intentionally empty. The current catalog now
+contains verified private R2 macOS/Windows 0.1.2 runtime objects and the synthetic
+qualification fixture. Their publication and separate native acceptance boundaries
+are recorded in the dated rollout guides; catalog presence alone does not prove
+activation or npm publication. Do not invent ETags or reuse old signed identities.
 The direct-owner model catalog remains unchanged: **do not mirror model weights**
 to R2 or change upstream model URLs just because they use another host/provider.
 

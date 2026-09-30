@@ -22,6 +22,12 @@ installations require a rebuild to receive new catalog entries. See
 Open `MusicMute.xcodeproj` in Xcode 26.0.1 or newer. Regenerate with XcodeGen after
 changing `project.yml`. Only Firebase and Sentry remain as Swift package roots.
 
+The current R2 release candidate is **0.1.2 (3)**. Local simulator tests and an
+unsigned Release archive are separate from distribution. A MusicMute Apple team,
+matching provisioning profile with the app's capabilities, and an explicit
+distribution channel are required before exporting or publishing an IPA. See
+the [native R2 rollout evidence](../android/tasks/r2-rollout/VALIDATION.md).
+
 ## Architecture
 
 - `Auth/`: Firebase identity and authenticated transport.

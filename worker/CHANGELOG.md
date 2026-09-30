@@ -1,11 +1,11 @@
 # Changelog
 
-## Unreleased — R2 migration
+## 0.1.2 — 2026-09-30
 
 - Replace S3 version IDs with quoted ETags and checksum-bound create-only uploads.
 - Update installer qualification and worker transfer contracts for private R2.
-- Rebuild and sign platform runtimes, publish verified R2 artifacts and select a
-  new npm release version before rollout; existing published runtimes are incompatible.
+- Require matching signed platform runtimes and verified private R2 artifacts;
+  earlier published runtimes use the incompatible object-version contract.
 
 ## 0.1.1 — 2026-09-30
 

@@ -1,6 +1,6 @@
 # MusicMute worker runtime
 
-> **Shared CLI:** `0.1.1` targets Apple
+> **Shared CLI candidate:** `0.1.2` targets Apple
 > Silicon macOS and Windows x64/DirectML. [RELEASING.md](RELEASING.md) describes artifact checks,
 > native acceptance and separately authorized publication/catalog promotion.
 > The npm CLI and managed service runtime are separate artifacts.
@@ -30,10 +30,12 @@ the separate, verified owner-source installation step.
 
 Workers and CLI consume backend grants and receive no R2 credentials. The updated
 backend and worker share quoted `etag` identities and signed checksum metadata;
-old version-ID contracts are unsupported. The R2 changes are unreleased; the
-current package version alone is not proof of a compatible npm/runtime release.
-Runtime catalogs/qualification fixtures
-start empty until verified R2 artifacts are published. See
+old version-ID contracts are unsupported. Both native 0.1.2 runtime archives and
+the qualification fixture are verified private R2 catalog entries. The current
+package version alone does not prove npm publication or native activation. See
+[the dated rollout record](R2-ROLLOUT-2026-09-30.md) and
+[the current continuation](../docs/r2-storage/ROLLOUT-2026-10-01.md) for executed
+acceptance checks and remaining gates, plus
 [storage setup and artifact requirements](../docs/r2-storage/README.md). Historical
 validation sections below do not establish live R2 acceptance.
 
