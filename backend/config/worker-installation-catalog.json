@@ -2,18 +2,32 @@
   "schemaVersion": 1,
   "releases": {
     "darwin-arm64": {
-      "version": "0.1.0-mvp.33",
-      "filename": "musicmute-worker-darwin-arm64-0.1.0-mvp.33.tar.gz",
-      "key": "worker-installation-artifacts/releases/darwin-arm64/0.1.0-mvp.33.tar.gz",
-      "versionId": "S_eL35UrdMy01fRMpv7PrAH8oamGGwD8",
-      "bytes": 313835588,
-      "sha256": "fa670332969470d79f40188da08f756f654e5a28e30019d0d4f3e389ab411eac",
+      "version": "0.1.0",
+      "filename": "musicmute-worker-darwin-arm64-0.1.0.tar.gz",
+      "bytes": 330921314,
+      "sha256": "4c8be302de484ac7cacf6fd3c5bae0b9c76f16543f9f689f55186a9c26428994",
       "contentType": "application/gzip",
+      "key": "worker-installation-artifacts/releases/darwin-arm64/0.1.0.tar.gz",
+      "versionId": "5JdYH_gBd_ZwlVH8wC3XnAjbZ574Kqu.",
+      "sequence": 3,
+      "publishedAt": "2026-09-29T20:59:39.378Z",
+      "expiresAt": "2027-09-29T20:59:39.378Z",
+      "keyId": "worker-release-2026-01",
+      "signature": "nZOmQZfpclQyJfXRZFaDP7teoBdO8HZcJeuOR3ACGbhTeiomZsA9Z9kqrt_K0bEm9HYux2-vEDq1snPGlfsqBA"
+    },
+    "windows-amd64": {
+      "version": "0.1.0",
+      "filename": "musicmute-worker-windows-amd64-0.1.0.zip",
+      "bytes": 354471021,
+      "sha256": "68f3f15a01dae995dc3541bd429dad6bc5e8f438c34f27151ff91e160763f39c",
+      "contentType": "application/zip",
+      "key": "worker-installation-artifacts/releases/windows-amd64/0.1.0-unpair-recovery.zip",
+      "versionId": "Qq1UUOpQ0pJg_K7uAYLRvhjUgr5glFe9",
       "sequence": 2,
-      "publishedAt": "2026-09-22T17:08:54.229Z",
-      "expiresAt": "2027-09-22T17:08:54.229Z",
-      "keyId": "worker-release-2026-09",
-      "signature": "Lz0fEQDWcNrERDEIryLjEo5zsk54Odb_T_IYIZTNqQLjy1ZaB1nOIi0ig9iOrAJf-f4PabghVBnLBCCxbUMUBg"
+      "publishedAt": "2026-09-30T01:09:05.690Z",
+      "expiresAt": "2027-09-30T01:09:05.690Z",
+      "keyId": "worker-release-2026-01",
+      "signature": "VXD-wGOLf-ni9BOMztsmbtnrvwHfaxi79bVNwuzocjc1yHPH6u1SPYc2cWZpOJuLT3iTV4NJoA94RwVUkBi-CQ"
     }
   },
   "model": {

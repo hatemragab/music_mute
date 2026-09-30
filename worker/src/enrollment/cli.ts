@@ -234,7 +234,7 @@ export async function runEnrollmentCommand(
   const exchange = exchanged.exchange;
   state = exchanged.state;
 
-  if (exchange.phase !== "activated") {
+  if (state.reportRevision === undefined) {
     const report = flags.has("report")
       ? await reportFromFileMode(flags, backendBaseUrl, allowInsecureLoopback)
       : await reportAndUploadQualification(
@@ -356,7 +356,28 @@ async function exchangeInstallation(
   enrollmentCredential: string,
   state: EnrollmentState,
   statePath: string,
-): Promise<{ exchange: ExchangeResult; state: EnrollmentState }> {
+): Promise<{
+  exchange: Pick<ExchangeResult, "installationId" | "credential" | "replayed">;
+  state: EnrollmentState;
+}> {
+  if (
+    state.installationId !== undefined &&
+    state.installationCredential !== undefined
+  ) {
+    return {
+      exchange: {
+        installationId: state.installationId,
+        credential: state.installationCredential,
+        replayed: true,
+      },
+      state,
+    };
+  }
+  if (
+    state.installationId !== undefined ||
+    state.installationCredential !== undefined
+  )
+    throw new TypeError("Enrollment state installation identity is incomplete");
   const exchange = await client.exchange(
     enrollmentCredential,
     state.exchangeRequestId,

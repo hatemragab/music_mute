@@ -487,8 +487,32 @@ function Read-OperationJournal([string]$RootPath) {
   if ($Actual.Count -ne $Expected.Count -or @($Actual | Where-Object { $_.Name -notin $Expected }).Count -ne 0) {
     throw 'The operation recovery inventory is invalid.'
   }
-  if ($Journal.serviceExisted -and @('config', 'credential', 'wrapper', 'xml', 'active' | Where-Object { -not $Journal.files.$_.existed }).Count -ne 0) {
-    throw 'The previous installed service snapshot is incomplete.'
+  if ($Journal.serviceExisted) {
+    if (@('wrapper', 'xml', 'active' | Where-Object { -not $Journal.files.$_.existed }).Count -ne 0) {
+      throw 'The previous installed service snapshot is incomplete.'
+    }
+    if (-not $Journal.files.config.existed -or -not $Journal.files.credential.existed) {
+      # Confirmed unpair removes both files after a durable stop. Recovery may
+      # preserve that stopped service, but must never restart an unpaired one.
+      if ($Journal.wasRunning -or $Journal.files.config.existed -or $Journal.files.credential.existed) {
+        throw 'The previous installed service snapshot is incomplete.'
+      }
+      $ReceiptPath = Join-Path $RootPath 'service\unpaired.json'
+      Assert-RegularFile $ReceiptPath 'confirmed unpair receipt' 4096 | Out-Null
+      Assert-RecoveryPath $ReceiptPath $false
+      $ReceiptAcl = Get-Acl -LiteralPath $ReceiptPath
+      if ($ReceiptAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin @('S-1-5-18', 'S-1-5-32-544')) {
+        throw 'The confirmed unpair receipt owner is unsafe.'
+      }
+      $Receipt = [IO.File]::ReadAllText($ReceiptPath) | ConvertFrom-Json
+      $ConfirmedAt = [DateTimeOffset]::MinValue
+      if ((($Receipt.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'confirmedAt,machineId,schemaVersion' -or
+          $Receipt.schemaVersion -isnot [int] -or $Receipt.schemaVersion -ne 1 -or
+          $Receipt.machineId -isnot [string] -or $Receipt.machineId -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' -or
+          $Receipt.confirmedAt -isnot [string] -or -not [DateTimeOffset]::TryParse($Receipt.confirmedAt, [ref]$ConfirmedAt)) {
+        throw 'The confirmed unpair receipt is invalid.'
+      }
+    }
   }
   return $Journal
 }

@@ -18,6 +18,10 @@ import {
   PushRegistrationsService,
   type EligiblePushRegistration,
 } from './push-registration.service.js';
+import {
+  NOTIFICATION_RETENTION_RECHECK_MS,
+  scheduleCompletedDeliveryRetention,
+} from './notification-retention.js';
 
 const OUTBOX_LEASE_MS = 60_000;
 const SEND_TIMEOUT_MS = 10_000;
@@ -120,6 +124,62 @@ export class NotificationDispatcherService {
     @Inject(FIREBASE_MESSAGING) private readonly messaging: Messaging,
     private readonly access: AccountAccessService,
   ) {}
+
+  /** Backfills one completed parent in bounded batches, keeping its replay fence. */
+  async scheduleCompletedRetention(now = new Date()): Promise<void> {
+    const event = await this.outbox
+      .findOne({
+        state: 'completed',
+        completedAt: trusted({ $type: 'date' }),
+        deliveryRetentionScheduledAt: null,
+        $or: [
+          { retentionNextAt: null },
+          { retentionNextAt: trusted({ $lte: now }) },
+        ],
+      })
+      .setOptions({ sanitizeFilter: false })
+      .sort({ retentionNextAt: 1, completedAt: 1, _id: 1 })
+      .lean()
+      .exec();
+    if (!event) return;
+    if (
+      await scheduleCompletedDeliveryRetention(
+        this.deliveries,
+        event._id,
+        event.completedAt!,
+      )
+    ) {
+      await this.outbox.updateOne(
+        {
+          _id: event._id,
+          state: 'completed',
+          deliveryRetentionScheduledAt: null,
+        },
+        { $set: { deliveryRetentionScheduledAt: now, retentionNextAt: null } },
+        { runValidators: true },
+      );
+    } else if (
+      await this.deliveries.exists({ outboxId: event._id, status: 'pending' })
+    ) {
+      // A legacy completed parent with pending children must not block every
+      // later completed event from receiving retention dates.
+      await this.outbox.updateOne(
+        {
+          _id: event._id,
+          state: 'completed',
+          deliveryRetentionScheduledAt: null,
+        },
+        {
+          $set: {
+            retentionNextAt: new Date(
+              now.getTime() + NOTIFICATION_RETENTION_RECHECK_MS,
+            ),
+          },
+        },
+        { runValidators: true },
+      );
+    }
+  }
 
   /** Claims and advances at most one outbox event. Safe for concurrent replicas. */
   async dispatchDue(now = new Date()): Promise<boolean> {

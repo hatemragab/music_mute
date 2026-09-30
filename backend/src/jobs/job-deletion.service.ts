@@ -7,6 +7,7 @@ import { ProcessingTransactions } from '../processing/processing-transactions.js
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { StorageTransfersService } from '../storage/storage-transfers.service.js';
 import { NotificationOutbox } from '../notifications/notification-outbox.schema.js';
+import { NotificationDelivery } from '../notifications/notification-delivery.schema.js';
 import { Job } from './job.schema.js';
 import { objectId } from './job-request.js';
 import { jobError } from './job-errors.js';
@@ -90,6 +91,28 @@ export class JobDeletionService {
         },
         { session },
       );
+      const events = await this.outbox
+        .find({ jobId: id, userId: owner })
+        .session(session)
+        .lean();
+      if (events.length) {
+        await this.jobs.db
+          .model<NotificationDelivery>(NotificationDelivery.name)
+          .updateMany(
+            {
+              outboxId: trusted({ $in: events.map((event) => event._id) }),
+              status: 'pending',
+            },
+            {
+              $set: {
+                status: 'ineligible',
+                lastFailureKind: 'ineligible',
+                failedAt: now,
+              },
+            },
+            { session, runValidators: true },
+          );
+      }
     });
   }
 

@@ -40,6 +40,7 @@ const ACCOUNT_RECORD_COLLECTIONS = [
   ['account_daily_usage_periods', 'accountId'],
   ['upload_grant_receipts', 'accountId'],
   ['download_grant_receipts', 'accountId'],
+  ['audio_purged_job_requests', 'accountId'],
   ['processing_reservations', 'accountId'],
   ['account_policy_overrides', 'accountId'],
   ['abuse_event_buckets', 'accountId'],

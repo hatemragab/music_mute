@@ -26,9 +26,20 @@ export class JobError {
   })
   stage!: string;
   @Prop({ required: true, type: Date }) createdAt!: Date;
+  @Prop({ type: Date, default: null }) finalizedAt!: Date | null;
+  @Prop({ type: Date, default: null }) purgeAt!: Date | null;
+  @Prop({ type: Date, default: null }) retentionNextAt!: Date | null;
 }
 export const JobErrorSchema = SchemaFactory.createForClass(JobError);
 JobErrorSchema.index(
   { jobId: 1, eventId: 1 },
   { unique: true, name: 'job_error_event_unique' },
+);
+JobErrorSchema.index(
+  { purgeAt: 1 },
+  { expireAfterSeconds: 0, name: 'job_error_ttl' },
+);
+JobErrorSchema.index(
+  { finalizedAt: 1, retentionNextAt: 1, _id: 1 },
+  { name: 'job_error_finalize_due' },
 );

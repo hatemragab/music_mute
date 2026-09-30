@@ -84,3 +84,7 @@ ClientErrorSchema.index(
   { userId: 1, eventId: 1 },
   { unique: true, name: 'client_errors_owner_event_unique' },
 );
+ClientErrorSchema.index(
+  { receivedAt: 1 },
+  { expireAfterSeconds: 30 * 24 * 60 * 60, name: 'client_errors_expiry' },
+);

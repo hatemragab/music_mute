@@ -59,6 +59,78 @@ Remove-Item -LiteralPath (Join-Path $Root 'state\\machine.credential')
 describe.skipIf(process.platform !== "win32")(
   "native Windows durable operation recovery",
   () => {
+    it("recovers a stopped confirmed-unpaired service without recreating credentials", async () => {
+      const root = await mkdtemp(join(tmpdir(), "mw-unpaired-recovery-"));
+      const serviceName = `MusicMuteUnpairedFixture-${randomUUID()}`;
+      try {
+        await execute(
+          shell,
+          script(
+            root,
+            `
+$ServiceName=${quote(serviceName)}
+New-Item -ItemType Directory -Path (Join-Path $Root 'state'),(Join-Path $Root 'service') | Out-Null
+Set-DirectoryAcl (Join-Path $Root 'service') 'RX' | Out-Null
+$Wrapper=Join-Path $Root 'service\\MusicMuteWorkerService.exe'
+Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\\cmd.exe') -Destination $Wrapper
+[IO.File]::WriteAllText((Join-Path $Root 'service\\MusicMuteWorkerService.xml'), '<fixture/>')
+[IO.File]::WriteAllText((Join-Path $Root 'state\\active-release.json'), '{"releaseVersion":"0.1.0-test"}')
+$Created=Invoke-CimMethod -ClassName Win32_Service -MethodName Create -Arguments @{Name=$ServiceName;DisplayName=$ServiceName;PathName=('"'+$Wrapper+'"');ServiceType=[byte]16;ErrorControl=[byte]1;StartMode='Manual';StartName='NT AUTHORITY\\LocalService'}
+if ($Created.ReturnValue -ne 0) { throw 'SCM fixture creation failed' }
+try {
+  $Expected=@{schemaVersion=1;startMode='Auto';delayedAutoStart=$true;nonCrash=$false;resetPeriod=3600;types=@(1,0);delays=@(100,0)}
+  Set-ServicePolicy $Root $Expected
+  $Receipt=Join-Path $Root 'service\\unpaired.json'
+  foreach($Case in @('missing','invalid','service-writable','partial','running')) {
+    if(Test-Path $Receipt) {Remove-Item -LiteralPath $Receipt}
+    if($Case -ne 'missing') {
+      $MachineId=if($Case -eq 'invalid') {'invalid'}else{'11111111-1111-4111-8111-111111111111'}
+      [IO.File]::WriteAllText($Receipt,(@{schemaVersion=1;machineId=$MachineId;confirmedAt='2026-09-30T00:00:00Z'}|ConvertTo-Json))
+      Set-PrivateFileAcl $Receipt
+      if($Case -eq 'service-writable') {
+        $Acl=Get-Acl $Receipt
+        $Acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule([Security.Principal.SecurityIdentifier]'S-1-5-19','FullControl','Allow')))
+        Set-Acl $Receipt $Acl
+      }
+    }
+    if($Case -eq 'partial') {[IO.File]::WriteAllText((Join-Path $Root 'state\\runtime.json'), '{"fixture":true}')}
+    Save-OperationJournal $Root $true ($Case -eq 'running') '0.1.0-test' '' '' '0.1.0-test'
+    $Rejected=$false
+    try {Read-OperationJournal $Root | Out-Null} catch {$Rejected=$true}
+    if(-not $Rejected) {throw "Unsafe unpaired snapshot accepted: $Case"}
+    Remove-Item -LiteralPath (Join-Path $Root 'service\\operation-recovery') -Recurse -Force
+    if(Test-Path (Join-Path $Root 'state\\runtime.json')) {Remove-Item -LiteralPath (Join-Path $Root 'state\\runtime.json')}
+  }
+  Remove-Item -LiteralPath $Receipt
+  [IO.File]::WriteAllText($Receipt,(@{schemaVersion=1;machineId='11111111-1111-4111-8111-111111111111';confirmedAt='2026-09-30T00:00:00Z'}|ConvertTo-Json))
+  Set-PrivateFileAcl $Receipt
+  Stop-ManagedService $Root '0.1.0-test'
+  if(Test-Path (Join-Path $Root 'service\\operation-recovery')) {throw 'Unpaired stop did not commit'}
+  Save-OperationJournal $Root $true $false '0.1.0-test' '' '' '0.1.0-test'
+  Disable-ServiceRestarts $Root (Read-OperationJournal $Root).servicePolicy | Out-Null
+  function Read-ReleaseManifest {return @{releaseVersion='0.1.0-test'}}
+  Restore-OperationJournal $Root $true
+  $Restored=Get-ServicePolicy $Root
+  if($Restored.startMode -ne 'Auto' -or -not $Restored.delayedAutoStart -or ($Restored.types -join ',') -ne '1,0') {throw 'Unpaired recovery changed the saved SCM policy'}
+  foreach($Leaf in @('state\\runtime.json','state\\machine.credential','service\\operation-recovery')) {
+    if(Test-Path (Join-Path $Root $Leaf)) {throw 'Unpaired recovery recreated pairing or left its journal'}
+  }
+  if(-not (Test-Path $Receipt)) {throw 'Unpaired recovery lost backend confirmation'}
+  $Native=Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
+  if($Native.State -ne 'Stopped' -or $Native.ProcessId -ne 0) {throw 'Unpaired recovery started the service'}
+} finally {
+  $Native=Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
+  if($null -ne $Native) {Invoke-CimMethod -InputObject $Native -MethodName Delete | Out-Null}
+}
+`,
+          ),
+          { timeout: 60_000, maxBuffer: 128 * 1024 },
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }, 90_000);
+
     it("journals actual SCM recovery settings and disables restarts during qualification", async () => {
       const root = await mkdtemp(join(tmpdir(), "mw-scm-policy-"));
       const serviceName = `MusicMutePolicyFixture-${randomUUID()}`;

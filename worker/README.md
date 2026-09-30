@@ -1,7 +1,7 @@
 # MusicMute worker runtime
 
-> **Release candidate:** `0.1.0-rc.1` prepares the public Apple
-> Silicon macOS package. [RELEASING.md](RELEASING.md) describes artifact checks,
+> **Shared CLI:** `0.1.1` targets Apple
+> Silicon macOS and Windows x64/DirectML. [RELEASING.md](RELEASING.md) describes artifact checks,
 > native acceptance and separately authorized publication/catalog promotion.
 > The npm CLI and managed service runtime are separate artifacts.
 
@@ -203,18 +203,37 @@ GPU execution or production readiness; those remain D4/D5 platform gates.
 ## Install the shared npm CLI
 
 Install Node.js `>=24.18.0 <25`, then install the same CLI on either supported
-platform:
+platform. On macOS:
 
 ```sh
 npm install -g @music-mute/worker
 mw --version
 ```
 
+On Windows, open **PowerShell as Administrator**:
+
+```powershell
+npm.cmd install -g @music-mute/worker
+mw.cmd --version
+```
+
+Use `mw.cmd` for the Windows commands below. The `.cmd` shims run under
+PowerShell's default Restricted script policy without changing that policy.
+The CLI and signed managed runtime have separate versions; this CLI patch uses
+the accepted `0.1.0` runtime.
+
 The npm package contains the CLI. The authenticated installer separately obtains
 the platform runtime, verifies its Ed25519 signature and archive digest, downloads
 the model from its authorized owner, qualifies the GPU, and enrolls the machine.
 An administrator creates a one-use code in Workers → Enrollment. Installing the
 public CLI alone does not admit a machine to the fleet.
+
+Runtime and model downloads allow up to one hour per artifact while bytes are
+arriving. A transfer with no progress for thirty seconds still fails; signatures,
+declared sizes and complete SHA-256 checks remain required before installation.
+Once enrollment has exchanged the one-use code, installation retries use the
+saved installation credential. An expired invitation does not interrupt that
+installation; the backend still enforces the installation credential's expiry.
 
 | Platform            | Runtime                          | Installation and startup                                         |
 | ------------------- | -------------------------------- | ---------------------------------------------------------------- |
@@ -256,15 +275,15 @@ try {
   $text = $null
   $code.Dispose()
 }
-mw install --backend-url https://api.music-mute.com --enrollment-file "$stage\enrollment.credential" --output $stage --label "Studio Windows"
-mw start --wait-ready
-mw status
+mw.cmd install --backend-url https://api.music-mute.com --enrollment-file "$stage\enrollment.credential" --output $stage --label "Studio Windows"
+mw.cmd start --wait-ready
+mw.cmd status
 ```
 
 The enrollment directory contains private pairing state; do not share it or add
 it to source control. Keep the computer powered on and awake with network access.
-The service runs without an open terminal or Windows sign-in. Use `mw drain`
-before planned maintenance and `mw resume` when ready to accept work again.
+The service runs without an open terminal or Windows sign-in. Use `mw.cmd drain`
+before planned maintenance and `mw.cmd resume` when ready to accept work again.
 
 ## macOS per-user CLI and LaunchAgent
 

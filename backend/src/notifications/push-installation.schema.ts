@@ -57,6 +57,9 @@ export class PushInstallation {
   @Prop({ type: Date, default: null })
   deactivatedAt!: Date | null;
 
+  @Prop({ type: Date, default: null })
+  purgeAt!: Date | null;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
@@ -80,4 +83,16 @@ PushInstallationSchema.index(
 PushInstallationSchema.index(
   { userId: 1, active: 1, _id: 1 },
   { name: 'push_owner_active' },
+);
+PushInstallationSchema.index(
+  { active: 1, purgeAt: 1, deactivatedAt: 1, _id: 1 },
+  { name: 'push_registration_retention_due' },
+);
+PushInstallationSchema.index(
+  { purgeAt: 1 },
+  {
+    expireAfterSeconds: 0,
+    partialFilterExpression: { active: false },
+    name: 'push_inactive_registration_retention',
+  },
 );

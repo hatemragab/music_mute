@@ -27,6 +27,55 @@ afterEach(async () => {
 });
 
 describe("verified enrollment artifact downloads", () => {
+  for (const [chunks, succeeds] of [
+    [40, true],
+    [181, false],
+  ] as const) {
+    it(`bounds a continuously progressing slow artifact transfer (${chunks} chunks)`, async () => {
+      const root = await protectedRoot();
+      const payload = Buffer.alloc(chunks, 1);
+      const target = join(root, "slow-runtime.zip");
+      let delivered = 0;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const stream = new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              vi.advanceTimersByTime(20_000);
+              controller.enqueue(payload.subarray(delivered, ++delivered));
+              if (delivered === chunks) controller.close();
+            },
+          },
+          { highWaterMark: 0 },
+        );
+        const download = downloadVerifiedArtifact({
+          url: "https://example.invalid/runtime.zip",
+          outputPath: target,
+          expectedBytes: payload.length,
+          expectedSha256: createHash("sha256").update(payload).digest("hex"),
+          expectedContentType: "application/zip",
+          fetch: async () =>
+            new Response(stream, {
+              headers: {
+                "Content-Length": String(payload.length),
+                "Content-Type": "application/zip",
+              },
+            }),
+        });
+        if (succeeds) {
+          await download;
+          expect(await readFile(target)).toEqual(payload);
+        } else {
+          await expect(download).rejects.toThrow("Transfer total timeout");
+          expect(delivered).toBeGreaterThan(40);
+          expect(await readdir(root)).toEqual([]);
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
+
   it("downloads the complete approved installation set into a protected root", async () => {
     const root = await protectedRoot();
     const payloads = {

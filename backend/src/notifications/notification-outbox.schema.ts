@@ -73,6 +73,12 @@ export class NotificationOutbox {
   @Prop({ type: Date, default: null })
   completedAt!: Date | null;
 
+  @Prop({ type: Date, default: null })
+  deliveryRetentionScheduledAt!: Date | null;
+
+  @Prop({ type: Date, default: null })
+  retentionNextAt!: Date | null;
+
   @Prop({ min: 0, default: 0, validate: Number.isSafeInteger })
   revision!: number;
 
@@ -89,4 +95,14 @@ NotificationOutboxSchema.index(
 NotificationOutboxSchema.index(
   { state: 1, nextAttemptAt: 1, leaseExpiresAt: 1, createdAt: 1, _id: 1 },
   { name: 'notification_outbox_due' },
+);
+NotificationOutboxSchema.index(
+  {
+    state: 1,
+    deliveryRetentionScheduledAt: 1,
+    retentionNextAt: 1,
+    completedAt: 1,
+    _id: 1,
+  },
+  { name: 'notification_outbox_retention_due' },
 );

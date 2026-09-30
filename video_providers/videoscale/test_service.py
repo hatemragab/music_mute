@@ -1,13 +1,16 @@
 import base64
+import http.client
 import io
 import json
 import tempfile
 import threading
 import unittest
 import socket
+import ssl
 import urllib.error
 import urllib.request
 from unittest.mock import patch
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from service import Failure, Handler, Provider, PublicTLS, Server, metadata, select_format, source_url, source_site, storage_url
 
@@ -93,7 +96,7 @@ class ContractTests(unittest.TestCase):
                 if isinstance(value, Exception):
                     raise value
                 status, payload = value
-                response = unittest.mock.Mock(status=status)
+                response = unittest.mock.Mock(status=status, length=0)
                 response.read1 = io.BytesIO(json.dumps(payload).encode()).read
                 return response
             def close(self):
@@ -138,6 +141,14 @@ class ContractTests(unittest.TestCase):
         with patch('service.time.sleep'), self.assertRaises(ConnectionAbortedError):
             provider.request('/api/formats')
         self.assertEqual(calls, ['GET'])
+
+    def test_certificate_verification_failure_is_never_retried(self):
+        for body in [None, {}]:
+            provider, calls = self.provider_with_responses([ssl.SSLCertVerificationError()])
+            with self.assertRaises(ssl.SSLCertVerificationError):
+                provider.request('/api/download', body)
+            self.assertEqual(calls, ['GET' if body is None else 'POST'])
+            self.assertEqual(provider.read_retries, 0)
 
     def test_formats_recheck_and_task_failure_diagnostics(self):
         provider = Provider('Basic synthetic', lambda: None)
@@ -460,10 +471,245 @@ class ContractTests(unittest.TestCase):
                 raise value
             return value
         provider.request = request
+        provider.pause = unittest.mock.Mock()
         with patch('service.time.sleep'), self.assertRaises(Failure):
             provider.acquire('https://www.youtube.com/watch?v=aqz-KE-bpKQ', 2048, io.BytesIO())
         self.assertEqual(len([c for c in calls if c[1] is not None]), 1)
         self.assertEqual(len([c for c in calls if '/status/' in c[0]]), 2)
+        provider.pause.assert_called_once_with(1)
+
+
+class ProviderConnectionTests(unittest.TestCase):
+    """Real HTTP/1.1 framing/keep-alive fixtures; never contact VideoScale."""
+    def setUp(self):
+        self.calls = []
+        self.connections = []
+        self.events = []
+        self.replies = []
+        self.break_reused_status = False
+        self.reused_status_error = BrokenPipeError()
+        fixture = self
+
+        class Upstream(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def log_message(self, *_args):
+                pass
+
+            def handle(self):
+                try:
+                    super().handle()
+                except (BrokenPipeError, ConnectionResetError):
+                    # Failed status bodies are intentionally not drained; the
+                    # adapter discards their connection rather than reusing it.
+                    pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.do_GET()
+
+            def do_GET(self):
+                fixture.calls.append((self.command, self.path, self.headers.get('Authorization'), self.connection))
+                reply = fixture.replies.pop(0)
+                status, payload, close = reply[:3]
+                data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+                self.send_response(status)
+                self.send_header('Content-Length', str(reply[3] if len(reply) == 4 else len(data)))
+                if close is True:
+                    self.send_header('Connection', 'close')
+                if close:
+                    self.close_connection = True
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        self.thread = threading.Thread(target=self.server.serve_forever)
+        self.thread.start()
+
+        class Connection(http.client.HTTPConnection):
+            def __init__(self, host, port, timeout):
+                if host == 's3.fr-par.scw.cloud':
+                    fixture.assertIsNone(fixture.provider.read_connection)
+                    fixture.assertTrue(all(conn.sock is None for conn in fixture.connections))
+                self.upstream = (host, port)
+                super().__init__('127.0.0.1', fixture.server.server_port, timeout=timeout)
+                fixture.connections.append(self)
+
+            def request(self, method, path, *args, **kwargs):
+                if (fixture.break_reused_status and self.sock is not None
+                        and method == 'GET' and '/api/status/' in path):
+                    fixture.break_reused_status = False
+                    raise fixture.reused_status_error
+                super().request(method, path, *args, **kwargs)
+
+        self.provider = Provider('Basic synthetic', lambda: None, Connection,
+                                 log=lambda **event: self.events.append(event))
+        self.provider.pause = unittest.mock.Mock()
+
+    def tearDown(self):
+        self.provider.close()
+        for conn in self.connections:
+            conn.close()
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
+
+    def acquire(self):
+        output = io.BytesIO()
+        result = self.provider.acquire('https://youtu.be/aqz-KE-bpKQ', 2048, output)
+        self.assertEqual(result[0], 5)
+        self.assertEqual(output.getvalue(), b'audio')
+        self.assertEqual(sum(call[0] == 'POST' for call in self.calls), 1)
+        self.assertTrue(all(conn.sock is None for conn in self.connections))
+        self.assertIsNone(self.provider.read_connection)
+
+    def responses(self, status_replies, close_formats=False):
+        self.replies = [
+            (200, [FORMAT], close_formats),
+            (202, {'task_id': '00000000-0000-4000-8000-000000000001'}, False),
+            *status_replies,
+            (200, {'download_url': 'https://s3.fr-par.scw.cloud/audio'}, False),
+            (200, b'audio', False),
+        ]
+
+    def test_reuse_drained_reads_with_isolated_post_and_credential_free_storage(self):
+        self.responses([(200, {'status': 'unknown'}, False),
+                        (200, {'status': 'completed'}, False)])
+        self.acquire()
+        self.assertEqual(len(self.connections), 3)
+        self.assertEqual([conn.upstream for conn in self.connections], [
+            ('gate.apiscrape.net', 16262), ('gate.apiscrape.net', 16262),
+            ('s3.fr-par.scw.cloud', 443)])
+        reads = [call for call in self.calls if call[0] == 'GET' and call[1] != '/audio']
+        self.assertTrue(all(call[3] is reads[0][3] for call in reads))
+        self.assertIsNot(self.calls[1][3], reads[0][3])
+        self.assertEqual(self.calls[-1][2], None)
+        timings = [event for event in self.events if 'request_duration_ms' in event]
+        self.assertEqual([event['reused_connection'] for event in timings],
+                         [False, False, True, True, True, False])
+        self.assertTrue(all(event['request_duration_ms'] >= 0 for event in timings))
+        self.assertNotIn('synthetic', json.dumps(self.events))
+        self.assertNotIn('aqz-KE-bpKQ', json.dumps(self.events))
+
+    def test_server_close_discards_connection_before_next_read(self):
+        self.responses([(200, {'status': 'processing'}, True),
+                        (200, {'status': 'completed'}, False)], close_formats=True)
+        self.acquire()
+        self.assertEqual(len(self.connections), 5)
+        timings = [event for event in self.events if 'request_duration_ms' in event]
+        self.assertEqual([event['reused_connection'] for event in timings],
+                         [False, False, False, False, True, False])
+
+    def test_transient_failed_read_reconnects_without_second_post(self):
+        self.responses([(503, {'error': 'private fixture text'}, False),
+                        (200, {'status': 'completed'}, False)])
+        self.acquire()
+        self.assertEqual(len(self.connections), 4)
+        self.provider.pause.assert_called_once_with(1)
+        timings = [event for event in self.events if 'request_duration_ms' in event]
+        self.assertEqual([event['reused_connection'] for event in timings],
+                         [False, False, True, False, True, False])
+        self.assertNotIn('private fixture text', json.dumps(self.events))
+
+    def test_stale_read_socket_reconnects_without_replaying_paid_post(self):
+        self.responses([(200, {'status': 'completed'}, False)])
+        self.break_reused_status = True
+        self.acquire()
+        self.assertEqual(len(self.connections), 4)
+        self.provider.pause.assert_called_once_with(1)
+        self.assertEqual(self.provider.read_retries, 1)
+
+    def test_tls_eof_on_retained_read_reconnects_without_second_paid_post(self):
+        self.responses([(200, {'status': 'completed'}, False)])
+        self.break_reused_status = True
+        self.reused_status_error = ssl.SSLEOFError()
+        self.acquire()
+        self.assertEqual(len(self.connections), 4)
+        self.provider.pause.assert_called_once_with(1)
+        self.assertEqual(self.provider.read_retries, 1)
+
+    def test_truncated_valid_json_read_is_discarded_before_bounded_retry(self):
+        status = {'status': 'completed'}
+        self.responses([(200, status, 'truncated', len(json.dumps(status).encode()) + 10),
+                        (200, status, False)])
+        self.acquire()
+        self.assertEqual(len(self.connections), 4)
+        self.provider.pause.assert_called_once_with(1)
+        self.assertEqual(self.provider.read_retries, 1)
+        timings = [event for event in self.events if 'request_duration_ms' in event]
+        self.assertEqual([event['reused_connection'] for event in timings],
+                         [False, False, True, False, True, False])
+
+    def test_truncated_paid_post_is_never_replayed(self):
+        task = {'task_id': '00000000-0000-4000-8000-000000000001'}
+        self.replies = [(200, [FORMAT], False),
+                        (202, task, 'truncated', len(json.dumps(task).encode()) + 10)]
+        with self.assertRaises(Failure):
+            self.provider.acquire('https://youtu.be/aqz-KE-bpKQ', 2048, io.BytesIO())
+        self.assertEqual(sum(call[0] == 'POST' for call in self.calls), 1)
+        self.assertEqual(self.provider.read_retries, 0)
+        self.assertTrue(all(conn.sock is None for conn in self.connections))
+
+    def test_fresh_404_backoff_preserves_ten_second_propagation_window(self):
+        self.responses([*[(404, {}, False) for _ in range(4)],
+                        (200, {'status': 'completed'}, False)])
+        clock = [0]
+        waits = []
+        def pause(seconds):
+            waits.append(seconds)
+            clock[0] += seconds
+        self.provider.pause = pause
+        with patch('service.time.monotonic', side_effect=lambda: clock[0]):
+            self.acquire()
+        self.assertEqual(waits, [1, 2, 3, 4])
+        self.assertEqual(clock[0], 10)
+        self.assertEqual(self.provider.read_retries, 4)
+        self.assertEqual(self.provider.poll_count, 5)
+
+    def test_successive_imports_do_not_share_connections(self):
+        for _ in range(2):
+            self.responses([(200, {'status': 'completed'}, False)])
+            output = io.BytesIO()
+            self.provider.acquire('https://youtu.be/aqz-KE-bpKQ', 2048, output)
+            self.assertIsNone(self.provider.read_connection)
+        self.assertEqual(len(self.connections), 6)
+        self.assertTrue(all(conn.sock is None for conn in self.connections))
+
+    def test_terminal_failure_closes_retained_read_connection(self):
+        self.responses([(200, {'status': 'failed'}, False)])
+        with self.assertRaises(Failure):
+            self.provider.acquire('https://youtu.be/aqz-KE-bpKQ', 2048, io.BytesIO())
+        self.assertEqual(len(self.connections), 2)
+        self.assertTrue(all(conn.sock is None for conn in self.connections))
+        self.assertIsNone(self.provider.read_connection)
+        self.assertEqual(sum(call[0] == 'POST' for call in self.calls), 1)
+
+    def test_cancellation_while_waiting_closes_retained_read_connection(self):
+        self.responses([(200, {'status': 'processing'}, False)])
+        self.provider.pause.side_effect = ConnectionAbortedError()
+        with self.assertRaises(ConnectionAbortedError):
+            self.provider.acquire('https://youtu.be/aqz-KE-bpKQ', 2048, io.BytesIO())
+        self.assertEqual(len(self.connections), 2)
+        self.assertTrue(all(conn.sock is None for conn in self.connections))
+        self.assertIsNone(self.provider.read_connection)
+        self.assertEqual(sum(call[0] == 'POST' for call in self.calls), 1)
+
+    def test_cancellation_before_json_eof_discards_connection(self):
+        self.replies = [(200, [FORMAT], False)]
+        self.provider.check = unittest.mock.Mock(side_effect=[None, None, ConnectionAbortedError()])
+        with self.assertRaises(ConnectionAbortedError):
+            self.provider.acquire('https://youtu.be/aqz-KE-bpKQ', 2048, io.BytesIO())
+        self.assertEqual(len(self.calls), 1)
+        self.assertTrue(all(conn.sock is None for conn in self.connections))
+        self.assertIsNone(self.provider.read_connection)
+
+    def test_malformed_read_is_discarded_without_retry_or_submission(self):
+        self.replies = [(200, b'not json', False)]
+        with self.assertRaises(Failure):
+            self.provider.acquire('https://youtu.be/aqz-KE-bpKQ', 2048, io.BytesIO())
+        self.assertEqual(len(self.calls), 1)
+        self.assertTrue(all(conn.sock is None for conn in self.connections))
+        self.assertIsNone(self.provider.read_connection)
 
 
 class ServerTests(unittest.TestCase):

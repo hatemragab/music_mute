@@ -903,7 +903,7 @@ paths:
       tags: [admin]
       operationId: AdminNotificationsController.list
       summary: Read announcement history
-      description: Owner only. FCM acceptance is not device delivery. Uses durable operation receipts and bounded background dispatch.
+      description: Owner only. FCM acceptance is not device delivery. Uses durable operation receipts and bounded background dispatch. Completed campaign totals remain stable after delivery details expire at 30 days; completed campaign content/history expires at 365 days.
       security:
         - FirebaseBearer: []
       x-source: src/admin-notifications/admin-notifications.controller.ts
@@ -1005,7 +1005,7 @@ paths:
       tags: [admin]
       operationId: AdminNotificationsController.detail
       summary: Read announcement history
-      description: Owner only. FCM acceptance is not device delivery. Uses durable operation receipts and bounded background dispatch.
+      description: Owner only. FCM acceptance is not device delivery. Uses durable operation receipts and bounded background dispatch. Completed campaign totals remain stable after delivery details expire at 30 days; completed campaign content/history expires at 365 days.
       security:
         - FirebaseBearer: []
       x-source: src/admin-notifications/admin-notifications.controller.ts
@@ -5418,7 +5418,7 @@ paths:
         - jobs
       operationId: JobsController.create
       summary: POST /jobs
-      description: policy version/profile/source enums, UUIDv4 request ID, declared bytes 1–50M, bounded duration/hash/title/URL. Monthly allowance admission checks used plus reserved seconds before the new file. Any positive remaining allowance admits the entire file; at or above the limit the request returns PROCESSING_ALLOWANCE_EXHAUSTED before issuing an upload grant. Accepted files may cross the monthly limit and finish normally.
+      description: policy version/profile/source enums, UUIDv4 request ID, declared bytes 1–50M, bounded duration/hash/title/URL. Monthly allowance admission checks used plus reserved seconds before the new file. Any positive remaining allowance admits the entire file; at or above the limit the request returns PROCESSING_ALLOWANCE_EXHAUSTED before issuing an upload grant. Accepted files may cross the monthly limit and finish normally. Replaying an already-deleted request returns JOB_NOT_FOUND even after coordinated metadata cleanup; changed payloads under that request ID conflict.
       security:
         - FirebaseBearer: []
       x-source: src/jobs/jobs.controller.ts
@@ -5478,6 +5478,8 @@ paths:
           $ref: '#/components/responses/Problem401'
         '403':
           $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
         '409':
           $ref: '#/components/responses/Problem409'
         '413':
@@ -5499,7 +5501,7 @@ paths:
         - jobs
       operationId: JobsController.delete
       summary: DELETE /jobs/{id}
-      description: empty body; own job, durable media cleanup
+      description: empty body; own job, durable media cleanup. Already-deleted metadata and dependent operational details become eligible for coordinated removal 30 days after confirmed storage cleanup, with compact request replay receipts retained for the account lifetime. Successful Library jobs are not expired by this policy.
       security:
         - FirebaseBearer: []
       x-source: src/jobs/jobs.controller.ts

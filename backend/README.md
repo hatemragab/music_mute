@@ -86,6 +86,12 @@ indexes are created before the API accepts traffic. The database user therefore
 needs index-management permission. Audit declared schema indexes before any
 separately authorized database maintenance.
 
+Operational details have automatic expiry; see [MongoDB retention](../docs/mongodb-retention.md)
+for the exact periods, completed-only guards, existing-data behavior and isolated
+verification commands. Successful Library media remains retained. Already-deleted
+jobs become eligible for coordinated metadata/attempt cleanup 30 days after media
+cleanup completes, with compact request receipts preserving replay protection.
+
 `AWS_REGION` and `S3_BUCKET` prepare the S3 integration. `StorageClient` uses the
 AWS SDK v3 standard credential chain. Locally use an AWS profile; on the VPS use
 a least-privilege identity with access to only the required bucket/prefix.
@@ -384,8 +390,11 @@ invalid destinations deactivate only the exact current binding. Startup/restart 
 multiple replicas recover through durable leases and per-binding attempt records.
 History counts are per device, not unique users, and grow while targets are frozen.
 New per-account deliveries use the shared account-deletion transaction fence.
-Account purging removes its delivery records; historical aggregate counts therefore
-exclude purged accounts. Broadcast content and administrator audit history remain.
+Completed campaigns save final counters before their delivery details expire after
+30 days; their historical counters remain stable after detail/account cleanup.
+Campaign content and summaries expire 365 days after completion. Counts already
+lost through account cleanup before this policy cannot be reconstructed.
+Administrator audit history expires after 365 days; command replay receipts remain.
 
 FCM submission is at least once: a crash or timeout after provider acceptance but
 before its durable receipt can produce a duplicate. Stable event IDs and collapse

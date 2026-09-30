@@ -1,7 +1,8 @@
 import { accountFixture } from './helpers/account-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import mongoose, { createConnection } from 'mongoose';
+import { randomUUID } from 'node:crypto';
+import mongoose, { createConnection, trusted } from 'mongoose';
 import { Device, DeviceSchema } from '../dist/devices/device.schema.js';
 import {
   DeviceInstallationOwner,
@@ -268,6 +269,7 @@ test('push bindings survive rotation, account switches, logout and opt-out witho
   assert.equal(afterDelayedLogout.active, true);
   assert.equal(afterDelayedLogout.bindingRevision, reactivated.bindingRevision);
   assert.equal(afterDelayedLogout.deactivatedAt, null);
+  assert.equal(afterDelayedLogout.purgeAt, null);
   await service.deactivate(
     other._id.toHexString(),
     installB,
@@ -282,6 +284,10 @@ test('push bindings survive rotation, account switches, logout and opt-out witho
     .findOne({ installationId: installB })
     .lean();
   assert.equal(currentOptOut.active, false);
+  assert.equal(
+    currentOptOut.purgeAt.getTime(),
+    currentOptOut.deactivatedAt.getTime() + 30 * 86400000,
+  );
   assert.equal(currentOptOut.bindingRevision, reactivated.bindingRevision + 1);
   const binding = await service.register(
     other,
@@ -359,11 +365,75 @@ test('push bindings survive rotation, account switches, logout and opt-out witho
   assert.equal((await service.eligibleFor(other._id.toHexString())).length, 0);
 
   const indexes = await registrations.listIndexes();
-  assert.ok(indexes.every((index) => index.expireAfterSeconds === undefined));
+  assert.ok(
+    indexes.some(
+      (index) =>
+        index.name === 'push_inactive_registration_retention' &&
+        index.expireAfterSeconds === 0 &&
+        index.partialFilterExpression.active === false,
+    ),
+  );
   assert.ok(
     indexes.some(
       (index) =>
         index.name === 'push_active_token_hash_unique' && index.unique === true,
     ),
+  );
+
+  const legacyDeactivatedAt = new Date(Date.now() - 10 * 86400000);
+  const legacyIds = await registrations.collection.insertMany(
+    Array.from({ length: 101 }, () => ({
+      userId: owner._id,
+      installationId: randomUUID(),
+      token: 'fixture-inactive-token',
+      tokenHash: randomUUID().replaceAll('-', '').padEnd(64, '0'),
+      active: false,
+      bindingRevision: 1,
+      authTimeSec: 100,
+      deactivatedAt: legacyDeactivatedAt,
+    })),
+  );
+  const legacyKeys = Object.values(legacyIds.insertedIds);
+  const inactiveWithoutDate = await registrations.collection.insertOne({
+    userId: owner._id,
+    installationId: randomUUID(),
+    token: 'fixture-undated-token',
+    tokenHash: randomUUID().replaceAll('-', '').padEnd(64, '0'),
+    active: false,
+    bindingRevision: 1,
+    authTimeSec: 100,
+    deactivatedAt: null,
+  });
+  await service.scheduleInactiveRetention();
+  assert.equal(
+    await registrations.countDocuments({
+      _id: trusted({ $in: legacyKeys }),
+      purgeAt: trusted({ $ne: null }),
+    }),
+    100,
+  );
+  await service.scheduleInactiveRetention();
+  assert.equal(
+    await registrations.countDocuments({
+      _id: trusted({ $in: legacyKeys }),
+      purgeAt: trusted({ $ne: null }),
+    }),
+    101,
+  );
+  assert.equal(
+    (await registrations.findById(legacyKeys[0]).lean()).purgeAt.getTime(),
+    legacyDeactivatedAt.getTime() + 30 * 86400000,
+  );
+  assert.equal(
+    (await registrations.findById(inactiveWithoutDate.insertedId).lean())
+      .purgeAt,
+    undefined,
+  );
+  assert.equal(
+    await registrations.countDocuments({
+      active: true,
+      purgeAt: trusted({ $ne: null }),
+    }),
+    0,
   );
 });

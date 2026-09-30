@@ -174,6 +174,27 @@ test('broadcasts freeze bounded targets, survive restart and record safe outcome
       assert.equal(result.state, 'completed');
       assert.equal(result.counts.sent, 101);
       assert.equal(sent.length, 101);
+      const completed = await campaigns.findById(campaign._id).lean();
+      assert.deepEqual(completed.finalCounts, result.counts);
+      assert.equal(await deliveries.countDocuments({ purgeAt: null }), 101);
+      await dispatcher().scheduleCompletedRetention();
+      assert.equal(await deliveries.countDocuments({ purgeAt: null }), 1);
+      assert.equal(
+        (await campaigns.findById(campaign._id).lean()).purgeAt,
+        null,
+      );
+      await dispatcher().scheduleCompletedRetention();
+      assert.equal(await deliveries.countDocuments({ purgeAt: null }), 0);
+      assert.equal(
+        (await campaigns.findById(campaign._id).lean()).purgeAt.getTime(),
+        completed.completedAt.getTime() + 365 * 86400000,
+      );
+      // Simulate detail expiry in this isolated fixture. Stable counts remain.
+      await deliveries.deleteMany({ outboxId: campaign._id });
+      assert.deepEqual(
+        (await history.detail(String(campaign._id))).counts,
+        result.counts,
+      );
       assert.equal(sent[0].data.type, 'system_announcement');
       assert.doesNotMatch(
         JSON.stringify(result),
@@ -328,6 +349,121 @@ test('broadcasts freeze bounded targets, survive restart and record safe outcome
         history.create(actor, { ...input, operationId: randomUUID() }),
       );
       assert.equal(await campaigns.countDocuments(), 1);
+    },
+  );
+  await t.test(
+    'legacy completed summaries are captured before detail expiry and active campaigns remain untouched',
+    async () => {
+      await reset();
+      const completedAt = new Date(Date.now() - 10 * 86400000);
+      const campaign = await create();
+      await campaigns.updateOne(
+        { _id: campaign._id },
+        { $set: { state: 'completed', frozen: true, completedAt } },
+      );
+      const active = await create();
+      await deliveries.insertMany([
+        {
+          outboxId: campaign._id,
+          userId: new Types.ObjectId(),
+          registrationId: new Types.ObjectId(),
+          bindingRevision: 1,
+          status: 'sent',
+        },
+        {
+          outboxId: campaign._id,
+          userId: new Types.ObjectId(),
+          registrationId: new Types.ObjectId(),
+          bindingRevision: 1,
+          status: 'failed',
+        },
+        {
+          outboxId: active._id,
+          userId: new Types.ObjectId(),
+          registrationId: new Types.ObjectId(),
+          bindingRevision: 1,
+          status: 'sent',
+        },
+      ]);
+      await dispatcher().scheduleCompletedRetention();
+      const summary = await history.detail(String(campaign._id));
+      assert.deepEqual(summary.counts, {
+        pending: 0,
+        sent: 1,
+        failed: 1,
+        invalid: 0,
+        ineligible: 0,
+      });
+      const detail = await deliveries
+        .findOne({ outboxId: campaign._id })
+        .lean();
+      assert.equal(
+        detail.purgeAt.getTime(),
+        completedAt.getTime() + 30 * 86400000,
+      );
+      assert.equal(
+        (await deliveries.findOne({ outboxId: active._id }).lean()).purgeAt,
+        null,
+      );
+      assert.equal((await campaigns.findById(active._id).lean()).purgeAt, null);
+      await deliveries.deleteMany({ outboxId: campaign._id });
+      assert.deepEqual(
+        (await history.detail(String(campaign._id))).counts,
+        summary.counts,
+      );
+    },
+  );
+
+  await t.test(
+    'a legacy completed parent with pending children retains its summary until repair',
+    async () => {
+      await reset();
+      const campaign = await create();
+      const completedAt = new Date(Date.now() - 10 * 86400000);
+      await campaigns.updateOne(
+        { _id: campaign._id },
+        { $set: { state: 'completed', frozen: true, completedAt } },
+      );
+      const pending = await deliveries.create({
+        outboxId: campaign._id,
+        userId: new Types.ObjectId(),
+        registrationId: new Types.ObjectId(),
+        bindingRevision: 1,
+      });
+      await dispatcher().scheduleCompletedRetention();
+      let parent = await campaigns.findById(campaign._id).lean();
+      assert.equal(parent.finalCounts, null);
+      assert.equal(parent.deliveryRetentionScheduledAt, null);
+      assert.equal(parent.purgeAt, null);
+      assert.ok(parent.retentionNextAt instanceof Date);
+      const recheckAt = parent.retentionNextAt;
+      assert.equal(
+        (await deliveries.findById(pending._id).lean()).purgeAt,
+        null,
+      );
+      const later = await create();
+      await campaigns.updateOne(
+        { _id: later._id },
+        { $set: { state: 'completed', frozen: true, completedAt } },
+      );
+      await dispatcher().scheduleCompletedRetention();
+      assert.ok(
+        (await campaigns.findById(later._id).lean())
+          .deliveryRetentionScheduledAt instanceof Date,
+      );
+      await deliveries.updateOne(
+        { _id: pending._id },
+        { $set: { status: 'ineligible', failedAt: new Date() } },
+      );
+      await dispatcher().scheduleCompletedRetention(recheckAt);
+      parent = await campaigns.findById(campaign._id).lean();
+      assert.equal(parent.finalCounts.pending, 0);
+      assert.equal(parent.finalCounts.ineligible, 1);
+      assert.ok(parent.deliveryRetentionScheduledAt instanceof Date);
+      assert.equal(
+        parent.purgeAt.getTime(),
+        completedAt.getTime() + 365 * 86400000,
+      );
     },
   );
 });

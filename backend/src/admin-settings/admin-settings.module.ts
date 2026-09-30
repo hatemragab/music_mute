@@ -20,6 +20,8 @@ import {
 } from './account-policy.schema.js';
 import { AccountPolicyService } from './account-policy.service.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
+import { ProcessingUsageMaintenanceService } from '../processing-usage/processing-usage-maintenance.service.js';
+import { ProcessingTransactions } from '../processing/processing-transactions.js';
 
 @Module({
   imports: [
@@ -42,6 +44,8 @@ import { ProcessingUsageService } from '../processing-usage/processing-usage.ser
   providers: [
     AccountPolicyService,
     ProcessingUsageService,
+    ProcessingUsageMaintenanceService,
+    ProcessingTransactions,
     ProcessingAdmissionService,
   ],
   exports: [

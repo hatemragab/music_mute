@@ -239,6 +239,12 @@ class Provider:
         self.unknown_polls = 0
         self.selected = None
         self.rejected_formats = {}
+        self.read_connection = None
+
+    def close(self):
+        conn, self.read_connection = self.read_connection, None
+        if conn is not None:
+            conn.close()
 
     def step(self, stage, message, **fields):
         self.stage = stage
@@ -281,7 +287,16 @@ class Provider:
     def _request(self, path, body=None):
         self.check()
         self.http_status = None
-        conn = self.connection(API_HOST, API_PORT, timeout=25)
+        started = time.monotonic()
+        reused = (body is None and self.read_connection is not None
+                  and self.read_connection.sock is not None)
+        if body is None and not reused:
+            self.close()
+        # A paid POST must never use an idle socket or share its transport with
+        # retried reads. Only this acquisition owns the retained GET connection.
+        conn = self.read_connection if reused else self.connection(API_HOST, API_PORT, timeout=25)
+        retain = False
+        response_headers_ms = None
         try:
             headers = {'Authorization': self.authorization, 'Accept': 'application/json',
                        'Accept-Encoding': 'identity'}
@@ -290,6 +305,7 @@ class Provider:
             conn.request('POST' if body is not None else 'GET', path,
                          json.dumps(body).encode() if body is not None else None, headers)
             response = conn.getresponse()
+            response_headers_ms = round((time.monotonic() - started) * 1000)
             self.http_status = response.status
             if response.status in (403, 429):
                 raise Failure('IMPORT_UPSTREAM_REFUSED', 502,
@@ -310,17 +326,41 @@ class Provider:
                 payload.extend(chunk)
                 if len(payload) > 1_048_576:
                     raise Failure(reason='VideoScale JSON response exceeded the 1 MiB safety limit.')
+            # read1() can return EOF without raising IncompleteRead when the
+            # advertised Content-Length has not arrived, even with valid JSON.
+            if response.length is not None and response.length != 0:
+                raise Failure(retryable=True, reason='VideoScale JSON response ended before its Content-Length.')
             try:
-                return json.loads(payload)
+                result = json.loads(payload)
             except (ValueError, UnicodeError):
                 raise Failure(reason='VideoScale returned invalid JSON.') from None
+            # EOF above is required before reuse. Server-close responses and
+            # failed/malformed/partial responses always discard the connection.
+            retain = body is None and not response.will_close and conn.sock is not None
+            return result
         except (TimeoutError, ConnectionResetError, ConnectionRefusedError,
-                http.client.RemoteDisconnected, http.client.IncompleteRead):
+                BrokenPipeError, ssl.SSLEOFError, http.client.RemoteDisconnected, http.client.IncompleteRead):
             raise Failure(retryable=True, reason='Upstream connection timed out, disconnected or returned an incomplete response.') from None
         finally:
-            conn.close()
+            if retain:
+                self.read_connection = conn
+            else:
+                if self.read_connection is conn:
+                    self.read_connection = None
+                conn.close()
+            self.log(message='VideoScale request ended; duration excludes local retry and polling waits.',
+                     request_method='POST' if body is not None else 'GET',
+                     request_duration_ms=round((time.monotonic() - started) * 1000),
+                     response_headers_ms=response_headers_ms,
+                     reused_connection=reused, **self.diagnostics())
 
     def acquire(self, url, limit, output):
+        try:
+            return self._acquire(url, limit, output)
+        finally:
+            self.close()
+
+    def _acquire(self, url, limit, output):
         site = source_site(url)
         self.step('formats', 'Discovering available formats using GET /api/formats.', site=site)
         for attempt in range(2):
@@ -347,6 +387,7 @@ class Provider:
             raise Failure(reason='Download creation did not return a valid task ID; POST is not retried to avoid duplicate charges.')
         submitted = time.monotonic()
         unknown_since = None
+        missing_status_polls = 0
         self.step('task-status', 'Download task accepted; waiting for completion using GET /api/status/{task_id}.')
         while True:
             self.check()
@@ -357,9 +398,12 @@ class Provider:
                 # A freshly returned task can briefly be absent from the status
                 # endpoint. Retry only this read, never the paid submission.
                 if (error.code != 'IMPORT_SOURCE_UNAVAILABLE' or time.monotonic() - submitted >= 10
-                        or not self.retry_read(1)):
+                        or not self.retry_read(missing_status_polls + 1)):
                     raise
-                status = {'status': 'pending'}
+                missing_status_polls += 1
+                # retry_read already waited; do not add the normal pending
+                # two-second pause before checking the same accepted task.
+                continue
             if not isinstance(status, dict):
                 raise Failure(reason='Task status response was not a JSON object.')
             # No provider messages/URLs or arbitrary status strings in logs.
@@ -394,13 +438,17 @@ class Provider:
         delivery = self.request('/api/download/' + task_id)
         url = storage_url(delivery.get('download_url') if isinstance(delivery, dict) else None)
         p = urlsplit(url)
+        self.close()
         self.step('audio-transfer', 'Delivery host validated; downloading audio over HTTPS without vendor credentials.')
+        started = time.monotonic()
+        response_headers_ms = None
         conn = self.connection(STORAGE_HOST, 443, timeout=25)
         try:
             # Never forward provider credentials or formats' http_headers.
             conn.request('GET', p.path + ('?' + p.query if p.query else ''),
                          headers={'Accept-Encoding': 'identity'})
             response = conn.getresponse()
+            response_headers_ms = round((time.monotonic() - started) * 1000)
             self.http_status = response.status
             if response.status != 200 or response.getheader('Content-Encoding', 'identity') != 'identity':
                 raise Failure(reason='Audio delivery returned a non-200 status or unsupported content encoding.')
@@ -424,6 +472,11 @@ class Provider:
             return size, metadata(selected, site)
         finally:
             conn.close()
+            self.log(message='Audio transfer ended; connection was isolated from vendor authentication.',
+                     request_method='GET',
+                     request_duration_ms=round((time.monotonic() - started) * 1000),
+                     response_headers_ms=response_headers_ms,
+                     reused_connection=False, **self.diagnostics())
 
 
 class Handler(BaseHTTPRequestHandler):

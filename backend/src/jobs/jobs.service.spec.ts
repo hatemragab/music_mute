@@ -42,6 +42,7 @@ function fixture() {
     findOne: vi.fn(),
     create: vi.fn(),
     updateOne: vi.fn(),
+    db: { model: vi.fn(() => ({ findOne: vi.fn(() => sessionLean(null)) })) },
   };
   const storage = {
     createInputGrant: vi.fn().mockResolvedValue({

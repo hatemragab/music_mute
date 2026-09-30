@@ -22,6 +22,13 @@ import {
   NotificationCampaign,
   CampaignDelivery,
 } from './notification-campaign.schema.js';
+import { campaignDeliveryCounts } from './campaign-delivery-counts.js';
+import {
+  NOTIFICATION_RETENTION_RECHECK_MS,
+  scheduleCompletedDeliveryRetention,
+} from '../notifications/notification-retention.js';
+
+const CAMPAIGN_SUMMARY_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
 
 export function campaignMessage(
   token: string,
@@ -88,6 +95,96 @@ export class CampaignDispatcherService
   private async tick() {
     for (let i = 0; i < 10 && !this.stopping; i++)
       if (!(await this.dispatchDue())) break;
+    if (!this.stopping) await this.scheduleCompletedRetention();
+  }
+
+  /** Persist history before gradually assigning expiry to completed deliveries. */
+  async scheduleCompletedRetention(now = new Date()): Promise<void> {
+    const campaign = await this.campaigns
+      .findOne({
+        state: 'completed',
+        completedAt: trusted({ $type: 'date' }),
+        deliveryRetentionScheduledAt: null,
+        $or: [
+          { retentionNextAt: null },
+          { retentionNextAt: trusted({ $lte: now }) },
+        ],
+      })
+      .setOptions({ sanitizeFilter: false })
+      .sort({ retentionNextAt: 1, completedAt: 1, _id: 1 })
+      .lean()
+      .exec();
+    if (!campaign) return;
+    if (!campaign.finalCounts) {
+      const finalCounts = await campaignDeliveryCounts(
+        this.deliveries,
+        campaign._id,
+      );
+      if (finalCounts.pending > 0) {
+        await this.deferRetention(campaign._id, now);
+        return;
+      }
+      const result = await this.campaigns.updateOne(
+        { _id: campaign._id, state: 'completed', finalCounts: null },
+        {
+          $set: {
+            finalCounts,
+          },
+        },
+        { runValidators: true },
+      );
+      if (result.matchedCount !== 1) return;
+    }
+    if (
+      await scheduleCompletedDeliveryRetention(
+        this.deliveries,
+        campaign._id,
+        campaign.completedAt!,
+      )
+    ) {
+      await this.campaigns.updateOne(
+        {
+          _id: campaign._id,
+          state: 'completed',
+          deliveryRetentionScheduledAt: null,
+          finalCounts: trusted({ $ne: null }),
+        },
+        {
+          $set: {
+            deliveryRetentionScheduledAt: now,
+            retentionNextAt: null,
+            purgeAt: new Date(
+              campaign.completedAt!.getTime() + CAMPAIGN_SUMMARY_RETENTION_MS,
+            ),
+          },
+        },
+        { sanitizeFilter: false, runValidators: true },
+      );
+    } else if (
+      await this.deliveries.exists({
+        outboxId: campaign._id,
+        status: 'pending',
+      })
+    ) {
+      await this.deferRetention(campaign._id, now);
+    }
+  }
+
+  private async deferRetention(
+    id: NotificationCampaign['_id'],
+    now: Date,
+  ): Promise<void> {
+    await this.campaigns.updateOne(
+      { _id: id, state: 'completed', deliveryRetentionScheduledAt: null },
+      {
+        $set: {
+          retentionNextAt: new Date(
+            now.getTime() + NOTIFICATION_RETENTION_RECHECK_MS,
+          ),
+        },
+      },
+      { runValidators: true },
+    );
   }
   async dispatchDue(now = new Date()): Promise<boolean> {
     const leaseId = randomUUID();
@@ -207,12 +304,17 @@ export class CampaignDispatcherService
         .findOne({ outboxId: campaign._id, status: 'pending' })
         .sort({ nextAttemptAt: 1 })
         .lean();
+      const finalCounts = !next
+        ? await campaignDeliveryCounts(this.deliveries, campaign._id)
+        : null;
       await this.campaigns.updateOne(owned, {
         $set: {
           leaseId: null,
           leaseExpiresAt: null,
           nextAttemptAt: next?.nextAttemptAt ?? now,
-          ...(!next ? { state: 'completed', completedAt: new Date() } : {}),
+          ...(!next
+            ? { state: 'completed', completedAt: now, finalCounts }
+            : {}),
         },
       });
     } catch {

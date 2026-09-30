@@ -58,15 +58,27 @@ outbound POST with a guaranteed invoice amount. Use an existing Library item
 instead of importing it again when possible.
 
 A returned task's status-only 404 response has a ten-second propagation grace.
-This never resubmits the acquisition. An observed `already_exists` response is
+Its read-only retries wait 1/2/3/4 seconds within the shared four-retry budget;
+each retry resumes immediately after its wait without an extra pending-state
+pause. This never resubmits the acquisition. An observed `already_exists` response is
 handled using its returned task ID and the same completed-state checks.
 
 Read-only calls retry transient 500/502/503/504 and selected transport failures
 at most twice (1s/2s backoff). An unsupported/empty format list is rechecked once,
 without relaxing audio-only, DRM, known-quality or size checks. All read retries,
 including fresh-task 404 grace, share a four-retry operation budget, cancellation
-checks and the existing deadline. 401/403/429, malformed responses, oversized
+checks and the existing deadline. 401/403/429, invalid JSON, oversized
 audio, media-byte transfers and paid POST requests are not automatically retried.
+
+Vendor JSON GETs reuse one verified connection during a single acquisition,
+only after a complete, valid response has been drained. Server-close responses,
+transport failures, malformed/truncated responses and cancellation discard it.
+Transport/HTTP failure retries use a fresh connection with the existing bounds. The
+paid POST always uses an isolated fresh connection and is never replayed. The
+retained read connection closes before audio transfer and on every exit;
+imports do not share connections. Storage transfer stays separate and receives
+no vendor credentials. Normal pending/unknown status checks still wait two
+seconds. This reduces repeated connection setup, not provider extraction time.
 
 Unrecognized/missing task-state fields in a JSON object are inconclusive, not
 proof of an unavailable source. Recheck the same task after two seconds for at
@@ -85,6 +97,13 @@ allowlisted task status, poll/retry counts, format rejection counts, sanitized
 selected-format metadata and timing. Unexpected exceptions include only type and
 adapter code line, not exception text, stack locals, URLs, bodies or credentials. See
 [failure recovery and diagnostics](docs/IMPORT-RELIABILITY.md).
+Each vendor request and storage transfer logs `request_duration_ms`,
+`response_headers_ms` and `reused_connection` beside its stage. The first two
+measure elapsed time through completion/failure and through response headers
+(null if no headers arrive). They exclude local retry/polling waits and never
+contain request URLs or bodies.
+See [latency investigation](docs/PERFORMANCE.md) for measured baseline and the
+boundary between local optimization checks and live release proof.
 
 ## Included metadata
 

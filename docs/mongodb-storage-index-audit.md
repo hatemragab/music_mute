@@ -1,5 +1,10 @@
 # MongoDB storage and index audit
 
+This records the original index audit. The later [2026-09-30 retention policy](mongodb-retention.md)
+adds operational TTLs, completed-only cleanup and compact deleted-job request
+receipts. The historical index counts and retention decisions below describe the
+earlier audit, not the current schema inventory.
+
 All 42 persisted Mongoose schemas and embedded documents were reviewed against model/raw collection queries, filters, sorting, uniqueness, TTL, cleanup, retention and startup at base `c95672f41bbb13cd5a91850e1b6794fc33fd8e0f`.
 
 Secondary indexes: **99 → 92 → 85**; with 42 built-in `_id_` indexes: **141 → 134 → 127** on a fresh database. All unique constraints and TTL durations remain. These are definition counts, not measured disk savings.

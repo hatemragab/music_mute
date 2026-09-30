@@ -5,7 +5,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -168,11 +167,6 @@ fun VocalApp(
                 app.urlImports.submit(urlImportText, trimEnabled)
                 urlImportText = ""
                 urlImportError = null
-                Toast.makeText(
-                    context.applicationContext,
-                    R.string.url_import_submitted,
-                    Toast.LENGTH_SHORT,
-                ).show()
             } catch (error: UrlImportFailure) {
                 urlImportError = error.code
             } catch (_: Exception) {

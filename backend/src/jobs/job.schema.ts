@@ -373,6 +373,7 @@ export class Job {
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
   cleanupAttempts!: number;
   @Prop({ type: Date, default: null }) cleanupCompletedAt!: Date | null;
+  @Prop({ type: Date, default: null }) retentionNextAt!: Date | null;
   @Prop({
     type: String,
     enum: JOB_STATUSES,
@@ -539,6 +540,13 @@ JobSchema.index(
   { cleanupNextAt: 1, cleanupLeaseUntil: 1 },
   {
     name: 'jobs_cleanup_due',
+    partialFilterExpression: { deletedAt: { $type: 'date' } },
+  },
+);
+JobSchema.index(
+  { retentionNextAt: 1, cleanupCompletedAt: 1, _id: 1 },
+  {
+    name: 'jobs_deleted_retention_due',
     partialFilterExpression: { deletedAt: { $type: 'date' } },
   },
 );

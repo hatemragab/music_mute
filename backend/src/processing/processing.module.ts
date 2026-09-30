@@ -29,6 +29,7 @@ import { JobsController } from '../jobs/jobs.controller.js';
 import { JobActionsService } from '../jobs/job-actions.service.js';
 import { JobMetadataService } from '../jobs/job-metadata.service.js';
 import { JobDeletionService } from '../jobs/job-deletion.service.js';
+import { JobRetentionService } from '../jobs/job-retention.service.js';
 import { ClientErrorsController } from '../client-errors/client-errors.controller.js';
 import { ClientErrorsService } from '../client-errors/client-errors.service.js';
 import { JobsQueryService } from '../jobs/jobs-query.service.js';
@@ -94,6 +95,7 @@ import { AccountDeletionMaintenanceService } from '../users/account-deletion-mai
     JobActionsService,
     JobMetadataService,
     JobDeletionService,
+    JobRetentionService,
     ClientErrorsService,
     ProcessingStorageCleanupService,
     ProcessingMaintenanceService,
