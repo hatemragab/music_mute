@@ -18,7 +18,7 @@ Existing clients ──HTTPS──> NestJS API <──HTTPS── Existing dashb
        │                         ├── Python child / GPU slot 1
        │                         └── Python child / GPU slot 2
        │                              │
-       └───────────── S3 <────────────┘
+       └───────────── R2 <────────────┘
                 presigned data transfers
 ```
 
@@ -26,15 +26,15 @@ No public listener is needed on a worker machine. All normal worker connections 
 
 ## Responsibilities
 
-| Component | Owns | Does not own |
-| --- | --- | --- |
-| Existing NestJS backend | User authorization, admission, recipe snapshots, queue claims, leases, S3 grants, finalization, fleet admin | Model inference or proxying user audio |
-| MongoDB | Authoritative job/attempt state and durable policy | Live transport delivery |
-| Redis | Expiring live state, notification fan-out if needed | Final job ownership or the only queue |
-| Supervisor | Machine identity, one backend connection, local workers, transfers, leases, IPC, logs, configuration, local control | User/admin authentication or permanent AWS access |
-| Python child | One inference session/device, one task at a time, audio pipeline, stage diagnostics | Database, Redis, backend admin, S3 account credentials |
-| Launcher | Launch selected release, observe startup/crash health, switch to last-known-good | Audio pipeline and arbitrary remote commands |
-| Dashboard | Read fleet state, issue allowed admin commands, enroll, select recipes/updates | Executing shell commands or directly accessing machine secrets |
+| Component               | Owns                                                                                                                | Does not own                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Existing NestJS backend | User authorization, admission, recipe snapshots, queue claims, leases, R2 grants, finalization, fleet admin         | Model inference or proxying user audio                         |
+| MongoDB                 | Authoritative job/attempt state and durable policy                                                                  | Live transport delivery                                        |
+| Redis                   | Expiring live state, notification fan-out if needed                                                                 | Final job ownership or the only queue                          |
+| Supervisor              | Machine identity, one backend connection, local workers, transfers, leases, IPC, logs, configuration, local control | User/admin authentication or permanent R2 access               |
+| Python child            | One inference session/device, one task at a time, audio pipeline, stage diagnostics                                 | Database, Redis, backend admin, R2 account credentials         |
+| Launcher                | Launch selected release, observe startup/crash health, switch to last-known-good                                    | Audio pipeline and arbitrary remote commands                   |
+| Dashboard               | Read fleet state, issue allowed admin commands, enroll, select recipes/updates                                      | Executing shell commands or directly accessing machine secrets |
 
 Use TypeScript for CLI/supervisor/backend coordination, Python for existing audio separation capability, and thin platform-specific installers. Start with one backend deployment, not microservices. Reuse existing backend storage/usage/audit capabilities rather than copying them into fleet modules.
 
@@ -60,14 +60,14 @@ The initial scheduler is **oldest eligible queued job first**, with deterministi
 
 ## Hardware policy and platform status
 
-| Target | Admission requirement | Implementation status before testing |
-| --- | --- | --- |
-| macOS ARM64 | Apple Silicon M1+; actual Kim acceleration via CoreML; adequate unified memory | Required first target: M4 |
-| Windows x86_64 / AMD | DirectX 12/DirectML and at least 4 GiB dedicated VRAM; real Kim execution | Required second target: RX 580 8 GB |
-| Windows/Linux x86_64 / NVIDIA | CUDA-supported runtime/device and at least 4 GiB dedicated VRAM | Prepare adapter; disable production until tested |
-| Linux x86_64 / AMD | Officially supported ROCm/device/runtime combination; at least 4 GiB dedicated VRAM | Prepare MIGraphX path; disable until tested |
-| Intel Mac, Intel GPU, CPU-only machine | Not supported | Reject |
-| Windows/Linux ARM64 | Not part of initial tested support | Reject with explicit platform reason |
+| Target                                 | Admission requirement                                                               | Implementation status before testing             |
+| -------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------ |
+| macOS ARM64                            | Apple Silicon M1+; actual Kim acceleration via CoreML; adequate unified memory      | Required first target: M4                        |
+| Windows x86_64 / AMD                   | DirectX 12/DirectML and at least 4 GiB dedicated VRAM; real Kim execution           | Required second target: RX 580 8 GB              |
+| Windows/Linux x86_64 / NVIDIA          | CUDA-supported runtime/device and at least 4 GiB dedicated VRAM                     | Prepare adapter; disable production until tested |
+| Linux x86_64 / AMD                     | Officially supported ROCm/device/runtime combination; at least 4 GiB dedicated VRAM | Prepare MIGraphX path; disable until tested      |
+| Intel Mac, Intel GPU, CPU-only machine | Not supported                                                                       | Reject                                           |
+| Windows/Linux ARM64                    | Not part of initial tested support                                                  | Reject with explicit platform reason             |
 
 The 4 GiB threshold and 8 GiB recommendation are product policies, not model execution guarantees. Record actual byte counts, not approximate string names. Apple unified memory is not dedicated VRAM; assess a conservative working-memory budget and the real benchmark.
 

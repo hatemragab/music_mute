@@ -109,7 +109,7 @@ describe('bounded temporary imports', () => {
       expect(await readdir(files.root)).toEqual([]);
     },
   );
-  it('cleans files when validation or S3 submission fails', async () => {
+  it('cleans files when validation or storage submission fails', async () => {
     await expect(
       files.withFile(async (path) => {
         await writeFile(path, 'audio');

@@ -56,7 +56,7 @@ describe('public update snapshots', () => {
       storeUrl: null,
       artifact: {
         key: 'private-secret-key',
-        versionId: 'private-version',
+        etag: '"private-version"',
         bytes: 1,
         sha256Hex: 'b'.repeat(64),
         signerSha256Hex: 'c'.repeat(64),

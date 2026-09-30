@@ -1,5 +1,11 @@
 # 0.1.0-rc.1 readiness — 2026-09-27
 
+> **Storage update — 2026-09-30:** AWS/S3 observations and setup commands below
+> belong to earlier releases. They are historical evidence, not R2 acceptance.
+> Do not execute the old provider/versioning/tiering/acceleration setup. Use the
+> [current private R2 Standard setup and verification guide](../docs/r2-storage/README.md); the owner
+> approved fresh MongoDB and quoted ETag identities with no legacy bridge.
+
 This records local implementation and validation, not npm publication or fleet
 deployment. Unrelated Android/backend/web changes in the shared checkout were
 preserved. The installed worker and production catalog were not changed.

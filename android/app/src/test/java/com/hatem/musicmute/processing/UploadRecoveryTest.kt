@@ -35,7 +35,7 @@ class UploadRecoveryTest {
             "https://storage.example/",
             mapOf(
                 "Content-Type" to "audio/mpeg",
-                "x-amz-checksum-sha256" to "fixture",
+                "x-amz-checksum-sha256" to "fixture", "x-amz-meta-sha256" to "fixture",
                 "If-None-Match" to "*",
             ),
             Instant.parse("2026-09-10T12:00:00Z"),

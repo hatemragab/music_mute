@@ -16,8 +16,8 @@ documentation under `video_providers/<provider>/`.
    bytes, not a provider delivery URL.
 4. NestJS counts/hashes the transfer into bounded temporary storage, probes
    audio and enforces duration/size, then uploads the validated input to private
-   S3 and confirms the normal processing job.
-5. The existing worker retrieves the S3 input using its normal grant and produces
+   R2 and confirms the normal processing job.
+5. The existing worker retrieves the R2 input using its normal grant and produces
    the output. Neither clients nor workers receive SaaS credentials or URLs.
 
 The [private OpenAPI contract](videoscale/openapi.yaml) is provider-neutral.
@@ -38,7 +38,7 @@ null. Never store raw payloads, secrets or delivery URLs.
 
 The adapter uses bounded temporary storage and cleans up success, failure and
 disconnect paths. NestJS retains transfer caps, free-space checks, deadlines,
-`finally` cleanup and an orphan sweeper. S3 inputs/results are intentional
+`finally` cleanup and an orphan sweeper. R2 inputs/results are intentional
 retained objects under account lifecycle policy, not VPS scratch.
 
 ## Configuration and provider replacement
@@ -46,7 +46,7 @@ retained objects under account lifecycle policy, not VPS scratch.
 NestJS has only `AUDIO_ACQUISITION_API_URL` and
 `AUDIO_ACQUISITION_API_KEY` for provider access. SaaS credentials belong only in
 the adapter. Run each adapter as a private CapRover app without public exposure
-or published ports and without MongoDB, S3 or Firebase credentials.
+or published ports and without MongoDB, R2 or Firebase credentials.
 
 To change vendors, implement and test another adapter against the same private
 contract, deploy it privately, then change NestJS's URL/key settings and restart
@@ -75,4 +75,4 @@ unlimited requests, uninterrupted availability or immunity to source blocking.
 
 Run adapter tests plus backend verification and import/processing integration
 checks. Run backend build-producing commands sequentially: they share `dist`.
-Local tests are not live-provider, S3, worker or deployment proof.
+Local tests are not live-provider, R2, worker or deployment proof.

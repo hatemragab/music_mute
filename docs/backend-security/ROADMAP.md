@@ -1,5 +1,10 @@
 # Backend security and cost branch roadmap
 
+> Storage-specific completed tasks/evidence below describe the previous AWS
+> release. The [R2-only setup and ETag contract](../r2-storage/README.md) supersedes
+> those provider requirements; live R2 acceptance is separate and unverified.
+
+
 **Collection:** `codex/backend-security-cost-hardening`
 **Implementation checkpoints:** 32
 **Current implementation status:** All five branches merged; A1–E6 complete

@@ -34,13 +34,13 @@ const { WorkerRuntime } =
 const { WorkerChildProcess } =
   await import('../../../worker/dist/src/agent/child-process.js');
 
-const useRealS3 = process.env.WORKER_INTEGRATION_STORAGE === 's3';
+const useRealR2 = process.env.WORKER_INTEGRATION_STORAGE === 'r2';
 const externalService = process.env.WORKER_INTEGRATION_EXTERNAL === 'true';
 const realGpu = process.env.WORKER_INTEGRATION_REAL_GPU === 'true';
-if (realGpu && (externalService || useRealS3))
+if (realGpu && (externalService || useRealR2))
   throw new Error('Real GPU fixture requires isolated local storage');
-if (externalService && !useRealS3)
-  throw new Error('External worker integration requires real S3');
+if (externalService && !useRealR2)
+  throw new Error('External worker integration requires real R2');
 const externalPlatform =
   process.env.WORKER_INTEGRATION_EXTERNAL_PLATFORM ?? 'windows-amd64';
 if (
@@ -116,7 +116,7 @@ const inputDurationSeconds = realGpu
 if (!Number.isFinite(inputDurationSeconds) || inputDurationSeconds <= 0)
   throw new Error('Invalid real GPU fixture duration');
 const output = Buffer.from('musicmute-worker-integration-output');
-const transferTimeoutMs = useRealS3 || realGpu ? 120_000 : 10_000;
+const transferTimeoutMs = useRealR2 || realGpu ? 120_000 : 10_000;
 const digestBase64 = (value) =>
   createHash('sha256').update(value).digest('base64');
 
@@ -146,7 +146,7 @@ const firebase = {
   revokeSessions: async () => undefined,
 };
 
-class VersionedObjectFixture {
+class R2ObjectFixture {
   constructor() {
     this.objects = new Map();
     this.grants = new Map();
@@ -180,6 +180,7 @@ class VersionedObjectFixture {
         'Content-Type': reservation.contentType,
         'If-None-Match': '*',
         'x-amz-checksum-sha256': reservation.sha256,
+        'x-amz-meta-sha256': reservation.sha256,
       },
       expiresAt: new Date(Date.now() + 300_000).toISOString(),
     };
@@ -199,13 +200,12 @@ class VersionedObjectFixture {
   }
 
   async verifyInput(job) {
-    const object = this.latest(job.inputReservation.key);
+    const object = this.objects.get(job.inputReservation.key);
     this.assertObject(job.inputReservation, object);
     return this.identity(object);
   }
 
   async createDownloadGrant(object) {
-    this.assertObject(object, this.version(object.key, object.versionId));
     return this.downloadGrant(object);
   }
 
@@ -221,52 +221,36 @@ class VersionedObjectFixture {
     return this.uploadGrant(reservation);
   }
 
-  async findUploadedVersion(reservation) {
-    const object = this.latest(reservation.key);
+  async findUploadedObject(reservation) {
+    const object = this.objects.get(reservation.key);
     if (!object) return null;
     this.assertObject(reservation, object);
     return this.identity(object);
   }
 
-  async verifyUploadedVersion(reservation, versionId) {
-    const object = this.version(reservation.key, versionId);
-    this.assertObject(reservation, object);
+  async verifyUploadedObject(reservation, etag) {
+    const object = this.objects.get(reservation.key);
+    this.assertObject({ ...reservation, etag }, object);
     return this.identity(object);
   }
 
-  async isPinnedObjectAvailable(object) {
+  async isObjectAvailable(object) {
     try {
-      this.assertObject(object, this.version(object.key, object.versionId));
+      this.assertObject(object, this.objects.get(object.key));
       return true;
     } catch {
       return false;
     }
   }
 
-  async deleteVersionsForKey(key) {
+  async deleteObject(key) {
     this.objects.delete(key);
-    return true;
-  }
-
-  async sweepVersionsForKey(key) {
-    const deleted = this.objects.get(key)?.size ?? 0;
-    this.objects.delete(key);
-    return { complete: true, deleted };
-  }
-
-  latest(key) {
-    const versions = this.objects.get(key);
-    return versions ? ([...versions.values()].at(-1) ?? null) : null;
-  }
-
-  version(key, versionId) {
-    return this.objects.get(key)?.get(versionId) ?? null;
   }
 
   identity(object) {
     assert.ok(object);
-    const { key, versionId, bytes, sha256, contentType } = object;
-    return { key, versionId, bytes, sha256, contentType };
+    const { key, etag, bytes, sha256, contentType } = object;
+    return { key, etag, bytes, sha256, contentType };
   }
 
   assertObject(reservation, object) {
@@ -275,8 +259,7 @@ class VersionedObjectFixture {
     assert.equal(object.bytes, reservation.bytes);
     assert.equal(object.sha256, reservation.sha256);
     assert.equal(object.contentType, reservation.contentType);
-    if (reservation.versionId)
-      assert.equal(object.versionId, reservation.versionId);
+    if (reservation.etag) assert.equal(object.etag, reservation.etag);
   }
 
   async handle(request, response) {
@@ -287,16 +270,20 @@ class VersionedObjectFixture {
       const grant = token ? this.grants.get(token) : null;
       if (!grant) return this.send(response, 404);
       if (grant.type === 'download') {
-        if (request.method !== 'GET') return this.send(response, 405);
-        const object = this.version(grant.object.key, grant.object.versionId);
+        if (!['GET', 'HEAD'].includes(request.method))
+          return this.send(response, 405);
+        const object = this.objects.get(grant.object.key);
+        if (!object) return this.send(response, 404);
         this.assertObject(grant.object, object);
         response.writeHead(200, {
           'Content-Type': object.contentType,
           'Content-Length': object.bytes,
           'Content-Encoding': 'identity',
           'Cache-Control': 'no-store',
+          ETag: object.etag,
+          'x-amz-meta-sha256': object.sha256,
         });
-        response.end(object.body);
+        response.end(request.method === 'HEAD' ? undefined : object.body);
         return;
       }
       if (request.method !== 'PUT') return this.send(response, 405);
@@ -305,6 +292,7 @@ class VersionedObjectFixture {
         request.headers['content-type'] !== reservation.contentType ||
         request.headers['if-none-match'] !== '*' ||
         request.headers['x-amz-checksum-sha256'] !== reservation.sha256 ||
+        request.headers['x-amz-meta-sha256'] !== reservation.sha256 ||
         this.objects.has(reservation.key)
       )
         return this.send(response, 412);
@@ -322,10 +310,12 @@ class VersionedObjectFixture {
         digestBase64(body) !== reservation.sha256
       )
         return this.send(response, 422);
-      const versionId = randomUUID();
-      const object = { ...reservation, versionId, body };
-      this.objects.set(reservation.key, new Map([[versionId, object]]));
-      response.writeHead(200, { 'x-amz-version-id': versionId });
+      // R2 evaluates conditional creation atomically after receiving the payload.
+      if (this.objects.has(reservation.key)) return this.send(response, 412);
+      const etag = `"${createHash('md5').update(body).digest('hex')}"`;
+      const object = { ...reservation, etag, body };
+      this.objects.set(reservation.key, object);
+      response.writeHead(200, { ETag: etag });
       response.end();
     } catch (error) {
       response.writeHead(500, { 'Content-Type': 'application/json' });
@@ -391,7 +381,7 @@ class FixtureChild {
   }
 }
 
-async function cleanupS3Objects(application) {
+async function cleanupR2Objects(application) {
   const jobs = application.get(getModelToken('Job'));
   const attempts = application.get(getModelToken('WorkerAttempt'));
   const [jobDocuments, attemptDocuments] = await Promise.all([
@@ -413,19 +403,14 @@ async function cleanupS3Objects(application) {
   let deleted = 0;
   for (const key of keys) {
     if (!safeKey.test(key))
-      throw new Error('Refusing unsafe worker integration S3 cleanup key');
-    for (let pass = 0; pass < 20; pass += 1) {
-      const sweep = await transfers.sweepVersionsForKey(key);
-      deleted += sweep.deleted;
-      if (sweep.complete && sweep.deleted === 0) break;
-      if (pass === 19)
-        throw new Error('Worker integration cleanup exceeded bounded passes');
-    }
+      throw new Error('Refusing unsafe worker integration R2 cleanup key');
+    await transfers.deleteObject(key);
+    deleted += 1;
   }
   return deleted;
 }
 
-const storage = useRealS3 ? null : new VersionedObjectFixture();
+const storage = useRealR2 ? null : new R2ObjectFixture();
 await storage?.start();
 const root = await mkdtemp(join(tmpdir(), 'musicmute-worker-integration-'));
 let app;
@@ -530,7 +515,7 @@ try {
     signal: AbortSignal.timeout(transferTimeoutMs),
   });
   assert.equal(uploaded.status, 200);
-  assert.ok(uploaded.headers.get('x-amz-version-id'));
+  assert.ok(uploaded.headers.get('etag'));
   const queued = await api(
     'POST',
     `/jobs/${created.id}/upload-completions`,
@@ -1223,12 +1208,12 @@ try {
     assert.equal(revoked.code, 'WORKER_UNAUTHENTICATED');
   }
   console.log(
-    `WORKER_FLEET_INTEGRATION_OK storage=${useRealS3 ? 's3' : 'fixture'} platform=${externalService ? externalPlatformMarker : 'simulated'} status=ready ownership=${externalService ? 'not-run' : 'pass'} recovery=${externalService ? 'not-run' : 'pass'} cancellation=${externalService ? 'not-run' : 'pass'} security=${externalService ? 'not-run' : 'pass'}`,
+    `WORKER_FLEET_INTEGRATION_OK storage=${useRealR2 ? 'r2' : 'fixture'} platform=${externalService ? externalPlatformMarker : 'simulated'} status=ready ownership=${externalService ? 'not-run' : 'pass'} recovery=${externalService ? 'not-run' : 'pass'} cancellation=${externalService ? 'not-run' : 'pass'} security=${externalService ? 'not-run' : 'pass'}`,
   );
 } finally {
-  if (useRealS3 && app) {
-    const deleted = await cleanupS3Objects(app);
-    console.log(`WORKER_FLEET_S3_CLEANUP_OK deleted=${deleted}`);
+  if (useRealR2 && app) {
+    const deleted = await cleanupR2Objects(app);
+    console.log(`WORKER_FLEET_R2_CLEANUP_OK deleted=${deleted}`);
   }
   await app?.close();
   await storage?.close();

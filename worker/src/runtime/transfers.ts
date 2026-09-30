@@ -12,7 +12,7 @@ const UPLOAD_HEADER_NAMES = new Set([
   "content-type",
   "if-none-match",
   "x-amz-checksum-sha256",
-  "x-amz-storage-class",
+  "x-amz-meta-sha256",
 ]);
 const DEFAULT_TRANSFER_TIMEOUT_MS = 2 * 60 * 60_000;
 const DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
@@ -371,14 +371,14 @@ export class WorkerTransferClient {
           false,
           "output-not-consumed",
         );
-      const versionId = response.headers.get("x-amz-version-id");
-      if (!versionId || versionId === "null" || versionId.length > 1024)
+      const etag = response.headers.get("ETag");
+      if (!etag || !/^"[\x21\x23-\x7e]{1,1022}"$/u.test(etag))
         throw new TransferError(
           "OUTPUT_UPLOAD_FAILED",
           true,
-          "upload-version-id-missing",
+          "upload-etag-missing",
         );
-      return versionId;
+      return etag;
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
       if (validationError) throw validationError;
@@ -436,16 +436,14 @@ function validateUploadHeaders(
       value,
     ]),
   );
-  const storageClass = headers.get("x-amz-storage-class");
   if (
-    headers.size < 3 ||
-    headers.size > 4 ||
+    headers.size !== 4 ||
     Object.keys(grant.headers).length !== headers.size ||
     [...headers.keys()].some((name) => !UPLOAD_HEADER_NAMES.has(name)) ||
     headers.get("content-type") !== expected.contentType ||
     headers.get("x-amz-checksum-sha256") !== expected.sha256 ||
     headers.get("if-none-match") !== "*" ||
-    (storageClass !== undefined && storageClass !== "INTELLIGENT_TIERING")
+    headers.get("x-amz-meta-sha256") !== expected.sha256
   )
     throw new TransferError(
       "OUTPUT_UPLOAD_FAILED",

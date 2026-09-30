@@ -46,6 +46,7 @@ function credentialEnvironmentValue(key, value) {
   return (
     /(?:PASSWORD|SECRET|TOKEN|PRIVATE_KEY)/.test(key) ||
     key === 'AWS_ACCESS_KEY_ID' ||
+    key === 'STORAGE_ACCESS_KEY_ID' ||
     key === 'FIREBASE_SERVICE_ACCOUNT_BASE64'
   );
 }

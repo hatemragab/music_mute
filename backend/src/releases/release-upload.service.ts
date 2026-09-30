@@ -244,9 +244,9 @@ export class ReleaseUploadService implements OnModuleInit {
         }
       : command;
     // Select the object outside the short mutation transaction. The CAS below pins it permanently.
-    let versionId: string;
+    let etag: string;
     try {
-      versionId = await this.storage.pin(before, before.versionId ?? undefined);
+      etag = await this.storage.pin(before, before.etag ?? undefined);
     } catch (error) {
       if (error instanceof ApkVerificationError) {
         await this.operations.run(actor, executionCommand, async (session) => {
@@ -328,7 +328,7 @@ export class ReleaseUploadService implements OnModuleInit {
               {
                 artifactState: 'verifying',
                 verificationDeadline: trusted({ $lte: new Date() }),
-                versionId,
+                etag,
               },
             ],
           })
@@ -346,7 +346,7 @@ export class ReleaseUploadService implements OnModuleInit {
         if (
           !current ||
           !release ||
-          (current.versionId !== null && current.versionId !== versionId)
+          (current.etag !== null && current.etag !== etag)
         )
           throw adminError('REVISION_CONFLICT');
         await this.uploads.updateOne(
@@ -354,7 +354,7 @@ export class ReleaseUploadService implements OnModuleInit {
           {
             $set: {
               artifactState: 'verifying',
-              versionId,
+              etag,
               verificationToken: token,
               completionOperationId: finishOperationId,
               verificationDeadline: new Date(Date.now() + APK_VERIFICATION_MS),
@@ -397,13 +397,13 @@ export class ReleaseUploadService implements OnModuleInit {
         ...claim.value,
         signal: AbortSignal.timeout(remaining),
         download: (path, signal) =>
-          this.storage.download(before, versionId, path, signal),
+          this.storage.download(before, etag, path, signal),
       });
       if (Date.now() > (claimed.verificationDeadline?.getTime() ?? 0))
         throw new ApkVerificationError('APK_VERIFICATION_TIMEOUT');
       artifact = {
         key: before.key,
-        versionId,
+        etag,
         bytes: before.expectedBytes,
         sha256Hex: before.expectedSha256,
         ...metadata,
@@ -419,7 +419,7 @@ export class ReleaseUploadService implements OnModuleInit {
       {
         operationId: finishOperationId,
         route: `POST /admin/releases/${releaseId}/uploads/${uploadId}/verification-result`,
-        request: { uploadId, versionId, token },
+        request: { uploadId, etag, token },
         action: artifact
           ? 'releases.upload.verified'
           : 'releases.upload.rejected',
@@ -432,7 +432,7 @@ export class ReleaseUploadService implements OnModuleInit {
             _id: before._id,
             artifactState: 'verifying',
             verificationToken: token,
-            versionId,
+            etag,
           })
           .session(session)
           .lean();

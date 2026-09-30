@@ -1,3 +1,4 @@
+import { isStorageEtag } from '../storage/object-identity.js';
 import { adminError } from '../admin/admin-errors.js';
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -619,7 +620,7 @@ export class ProcessingUsageService {
       scope: DownloadGrantScope;
       requestId: string;
       attemptId?: string | null;
-      object: Pick<ObjectIdentity, 'versionId' | 'bytes'>;
+      object: Pick<ObjectIdentity, 'etag' | 'bytes'>;
     },
     session: ClientSession,
     now = new Date(),
@@ -631,8 +632,7 @@ export class ProcessingUsageService {
     if (
       (input.scope === 'worker_input' && (!attemptId || !isUUID(attemptId))) ||
       (input.scope !== 'worker_input' && attemptId !== null) ||
-      !input.object.versionId ||
-      input.object.versionId === 'null' ||
+      !isStorageEtag(input.object.etag) ||
       !Number.isSafeInteger(input.object.bytes) ||
       input.object.bytes < 1
     )
@@ -652,7 +652,7 @@ export class ProcessingUsageService {
         existing.scope !== input.scope ||
         existing.attemptId !== attemptId ||
         existing.requestId !== requestId ||
-        existing.objectVersionId !== input.object.versionId ||
+        existing.objectEtag !== input.object.etag ||
         existing.estimatedBytes !== input.object.bytes
       )
         throw jobError('IDEMPOTENCY_CONFLICT');
@@ -744,7 +744,7 @@ export class ProcessingUsageService {
           scope: input.scope,
           attemptId,
           requestId,
-          objectVersionId: input.object.versionId,
+          objectEtag: input.object.etag,
           estimatedBytes: input.object.bytes,
           periodKey: period.key,
           createdAt: now,

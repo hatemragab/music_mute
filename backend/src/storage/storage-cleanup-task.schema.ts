@@ -19,8 +19,6 @@ export type StorageCleanupReason = (typeof STORAGE_CLEANUP_REASONS)[number];
 export class StorageCleanupTask {
   _id!: Types.ObjectId;
   @Prop({ required: true, immutable: true, maxlength: 1024 }) key!: string;
-  @Prop({ type: String, default: null, immutable: true, maxlength: 1024 })
-  versionId!: string | null;
   @Prop({
     type: MongoSchema.Types.ObjectId,
     default: null,
@@ -42,6 +40,7 @@ export class StorageCleanupTask {
     string | null;
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
   attempts!: number;
+  @Prop({ type: Date, default: null }) firstDeletedAt!: Date | null;
   @Prop({ type: Date, default: null }) completedAt!: Date | null;
   createdAt!: Date;
   updatedAt!: Date;

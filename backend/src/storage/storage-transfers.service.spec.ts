@@ -1,387 +1,415 @@
-import {
-  DeleteObjectCommand,
-  DeleteObjectsCommand,
-  HeadObjectCommand,
-  S3Client,
-} from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { ConfigService } from '@nestjs/config';
-import {
-  browserSafeS3Config,
-  type StorageClient,
-} from '../infrastructure/storage.module.js';
+import { StorageClient } from '../infrastructure/storage.module.js';
 import type { ObjectIdentity } from '../jobs/job.types.js';
 import { StorageTransfersService } from './storage-transfers.service.js';
 import type { StoragePreflightService } from './storage-preflight.service.js';
 
+const endpoint =
+  'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com';
+const bucket = 'music-mute-test-unit';
 const object: ObjectIdentity = {
   key: 'users/user-1/jobs/job-1/output/vocals.mp3',
-  versionId: 'pinned',
+  etag: '"immutable-etag"',
   contentType: 'audio/mpeg',
   bytes: 2048,
   sha256: Buffer.alloc(32, 2).toString('base64'),
 };
+const clients: StorageClient[] = [];
+afterEach(() => {
+  for (const client of clients.splice(0)) client.destroy();
+  vi.useRealTimers();
+});
 
 function fixture() {
-  const client = new S3Client({
-    region: 'us-east-1',
-    ...browserSafeS3Config,
-    credentials: {
-      accessKeyId: 'fixture-access-key',
-      secretAccessKey: 'fixture-secret-key',
-    },
-  });
-  const send = vi.spyOn(client, 'send');
-  const preflight = { assertReady: vi.fn(async () => undefined) };
-  const service = new StorageTransfersService(
-    client as unknown as StorageClient,
+  const client = new StorageClient(
     new ConfigService({
-      S3_BUCKET: 'private-fixture-bucket',
+      STORAGE_ENDPOINT: endpoint,
+      STORAGE_REGION: 'auto',
+      STORAGE_ACCESS_KEY_ID: 'fixture-access-key',
+      STORAGE_SECRET_ACCESS_KEY: 'fixture-secret-key',
+    }),
+  );
+  clients.push(client);
+  const send = vi.spyOn(client, 'send');
+  const preflight = {
+    assertReady: vi.fn(async () => undefined),
+    recordSuccess: vi.fn(),
+    recordFailure: vi.fn(),
+  };
+  const service = new StorageTransfersService(
+    client,
+    new ConfigService({
+      STORAGE_BUCKET: bucket,
       PROCESSING_URL_SECONDS: 900,
     }),
     preflight as unknown as StoragePreflightService,
   );
   return { service, client, send, preflight };
 }
-
-describe('StorageTransfersService', () => {
-  it('uses the opt-in signer for audio PUT/GET and keeps verification regional', async () => {
-    const { service, client, send } = fixture();
-    const accelerated = new S3Client({
-      region: 'us-east-1',
-      useAccelerateEndpoint: true,
-      ...browserSafeS3Config,
-      credentials: {
-        accessKeyId: 'fixture-access-key',
-        secretAccessKey: 'fixture-secret-key',
-      },
-    });
-    Object.assign(client, { transferSigner: accelerated });
-    try {
-      const grant = await service.createWorkerOutputGrant(
-        object,
-        new Date(Date.now() + 60_000),
-      );
-      const url = new URL(grant.url);
-      expect(url.hostname).toBe(
-        'private-fixture-bucket.s3-accelerate.amazonaws.com',
-      );
-      expect(url.searchParams.get('X-Amz-SignedHeaders')).toContain(
-        'if-none-match',
-      );
-      expect(grant.headers['x-amz-checksum-sha256']).toBe(object.sha256);
-      const download = new URL((await service.createDownloadGrant(object)).url);
-      expect(download.hostname).toBe(url.hostname);
-      expect(download.searchParams.get('versionId')).toBe('pinned');
-      expect(download.searchParams.has('x-amz-checksum-mode')).toBe(false);
-      send.mockResolvedValueOnce({
-        VersionId: 'pinned',
-        ContentLength: object.bytes,
-        ContentType: object.contentType,
-        ChecksumSHA256: object.sha256,
-      } as never);
-      await expect(
-        service.verifyUploadedVersion(object, 'pinned'),
-      ).resolves.toEqual(object);
-      expect(send).toHaveBeenCalledOnce();
-      expect(client.config.useAccelerateEndpoint).toBe(false);
-    } finally {
-      accelerated.destroy();
-      client.destroy();
-    }
+function reservation() {
+  return {
+    key: object.key,
+    bytes: object.bytes,
+    sha256: object.sha256,
+    contentType: object.contentType,
+  };
+}
+function inputReservation() {
+  return {
+    ...reservation(),
+    key: 'users/user-1/jobs/job-1/input/source.mp3',
+    extension: 'mp3' as const,
+    durationSeconds: 30,
+  };
+}
+function verifiedHead() {
+  return {
+    ETag: object.etag,
+    ContentLength: object.bytes,
+    ContentType: object.contentType,
+    Metadata: { sha256: object.sha256 },
+  };
+}
+function storageError(name: string, statusCode: number) {
+  return Object.assign(new Error('private storage diagnostics'), {
+    name,
+    $metadata: { httpStatusCode: statusCode },
   });
+}
+function expectSignedUrl(url: string) {
+  const parsed = new URL(url);
+  expect(parsed.origin).toBe(endpoint);
+  expect(decodeURIComponent(parsed.pathname)).toBe(`/${bucket}/${object.key}`);
+  expect(parsed.searchParams.get('X-Amz-Credential')).toContain(
+    '/auto/s3/aws4_request',
+  );
+  return parsed;
+}
 
-  it('signs immutable input uploads with exact size, type, and checksum', async () => {
-    const { service, client, preflight } = fixture();
-    const reservation = {
-      key: 'users/user-1/jobs/job-1/input/source.mp3',
-      extension: 'mp3' as const,
-      contentType: 'audio/mpeg',
-      bytes: 2048,
-      durationSeconds: 30,
-      sha256: object.sha256,
-    };
-    const grant = await service.createInputGrant({
-      inputReservation: reservation,
-      inputObject: null,
-      admissionSnapshot: {
-        policyVersion: 2,
-        maxDurationSeconds: 1_200,
-        maxInputBytes: 50_000_000,
-        preparationProfileId: 'audio-cap-aac-lc-160-v1',
-        source: 'audio_file',
-        settingsRevision: 1,
-        maxWaitingJobs: 3,
-        maxProcessingJobs: 1,
-        maxInfrastructureAttempts: 3,
-        maxClientInputAttempts: 5,
-        reservationExpiresAt: new Date(Date.now() + 60_000),
-      },
-    });
-    expect(preflight.assertReady).toHaveBeenCalledOnce();
+describe('StorageTransfersService R2', () => {
+  it('signs one conditional PUT locally with exact size, type and both bound SHA256 headers', async () => {
+    const { service, send, preflight } = fixture();
+    const grant = await service.createInputGrant(
+      { inputReservation: inputReservation(), inputObject: null },
+      new Date(Date.now() + 60_000),
+    );
     expect(grant.method).toBe('PUT');
     expect(grant.headers).toEqual({
-      'Content-Type': reservation.contentType,
-      'x-amz-checksum-sha256': reservation.sha256,
+      'Content-Type': object.contentType,
+      'x-amz-checksum-sha256': object.sha256,
+      'x-amz-meta-sha256': object.sha256,
       'If-None-Match': '*',
     });
     const url = new URL(grant.url);
-    expect(decodeURIComponent(url.pathname)).toBe(`/${reservation.key}`);
+    expect(url.origin).toBe(endpoint);
+    expect(decodeURIComponent(url.pathname)).toBe(
+      `/${bucket}/${inputReservation().key}`,
+    );
     expect(url.searchParams.get('x-id')).toBe('PutObject');
-    expect(url.searchParams.has('x-amz-checksum-sha256')).toBe(false);
-    expect(url.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toEqual(
-      expect.arrayContaining([
-        'content-type',
-        'host',
-        'if-none-match',
-        'x-amz-checksum-sha256',
-      ]),
-    );
-    client.destroy();
-  });
-
-  it('pins a verified input to the immutable S3 version', async () => {
-    const { service, client, send } = fixture();
-    const reservation = {
-      key: 'users/user-1/jobs/job-1/input/source.mp3',
-      extension: 'mp3' as const,
-      contentType: 'audio/mpeg',
-      bytes: 2048,
-      durationSeconds: 30,
-      sha256: object.sha256,
-    };
-    send
-      .mockResolvedValueOnce({ VersionId: 'input-version' } as never)
-      .mockResolvedValueOnce({
-        VersionId: 'input-version',
-        ContentLength: reservation.bytes,
-        ContentType: reservation.contentType,
-        ChecksumSHA256: reservation.sha256,
-      } as never);
-    await expect(
-      service.verifyInput({ inputReservation: reservation, inputObject: null }),
-    ).resolves.toEqual({
-      key: reservation.key,
-      versionId: 'input-version',
-      bytes: reservation.bytes,
-      contentType: reservation.contentType,
-      sha256: reservation.sha256,
-    });
-    expect((send.mock.calls[0][0] as HeadObjectCommand).input.VersionId).toBe(
-      undefined,
-    );
-    expect((send.mock.calls[1][0] as HeadObjectCommand).input.VersionId).toBe(
-      'input-version',
-    );
-    client.destroy();
-  });
-
-  it('rejects an input object larger than the reserved upload even when metadata matches', async () => {
-    const { service, client, send } = fixture();
-    const reservation = {
-      key: 'users/user-1/jobs/job-1/input/source.mp3',
-      extension: 'mp3' as const,
-      contentType: 'audio/mpeg',
-      bytes: 50_000_000,
-      durationSeconds: 1_200,
-      sha256: object.sha256,
-    };
-    send
-      .mockResolvedValueOnce({ VersionId: 'input-version' } as never)
-      .mockResolvedValueOnce({
-        VersionId: 'input-version',
-        ContentLength: 50_000_001,
-        ContentType: reservation.contentType,
-        ChecksumSHA256: reservation.sha256,
-      } as never);
-    await expect(
-      service.verifyInput({ inputReservation: reservation, inputObject: null }),
-    ).rejects.toMatchObject({ response: { code: 'UPLOAD_NOT_READY' } });
-    client.destroy();
-  });
-  it('signs downloads for the exact pinned key and version', async () => {
-    const { service, client, preflight } = fixture();
-    const grant = await service.createDownloadGrant(object);
-    const url = new URL(grant.url);
-    expect(preflight.assertReady).toHaveBeenCalledOnce();
-    expect(decodeURIComponent(url.pathname)).toBe(`/${object.key}`);
-    expect(url.searchParams.get('versionId')).toBe(object.versionId);
-    expect(url.searchParams.get('response-cache-control')).toBe('no-store');
-    expect(url.searchParams.get('X-Amz-Expires')).toBe('600');
-    client.destroy();
-  });
-
-  it('caps worker upload grants at ten minutes even with a larger legacy setting', async () => {
-    const { service, client } = fixture();
-    const grant = await service.createWorkerOutputGrant(
-      object,
-      new Date(Date.now() + 3_600_000),
-    );
-    const url = new URL(grant.url);
-    expect(url.searchParams.get('X-Amz-Expires')).toBe('600');
-    expect(grant.headers['x-amz-storage-class']).toBe('INTELLIGENT_TIERING');
-    expect(url.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toContain(
+    for (const name of [
+      'x-amz-checksum-sha256',
+      'x-amz-meta-sha256',
       'x-amz-storage-class',
-    );
-    client.destroy();
-  });
-
-  it('bounds media grants and rejects unsafe filenames', async () => {
-    const { service, client } = fixture();
-    const grant = await service.createMediaGrant(
-      object,
-      'download',
-      'vocals.mp3',
-    );
-    const url = new URL(grant.url);
-    expect(url.searchParams.get('X-Amz-Expires')).toBe('300');
-    expect(url.searchParams.get('response-content-disposition')).toBe(
-      'attachment; filename="vocals.mp3"',
-    );
-    await expect(
-      service.createMediaGrant(object, 'play', 'bad\r\nheader'),
-    ).rejects.toThrow('Invalid media grant');
-    client.destroy();
-  });
-
-  it('checks the exact stored version and distinguishes missing from unavailable', async () => {
-    const { service, client, send } = fixture();
-    send.mockResolvedValueOnce({
-      VersionId: object.versionId,
-      ContentLength: object.bytes,
-      ContentType: object.contentType,
-      ChecksumSHA256: object.sha256,
-    } as never);
-    await expect(service.isPinnedObjectAvailable(object)).resolves.toBe(true);
-    expect((send.mock.calls[0][0] as HeadObjectCommand).input.VersionId).toBe(
-      object.versionId,
-    );
-    send.mockRejectedValueOnce(
-      Object.assign(new Error('missing'), {
-        name: 'NoSuchVersion',
-        $metadata: { httpStatusCode: 404 },
-      }) as never,
-    );
-    await expect(service.isPinnedObjectAvailable(object)).resolves.toBe(false);
-    send.mockRejectedValueOnce(new Error('unavailable') as never);
-    await expect(service.isPinnedObjectAvailable(object)).rejects.toThrow(
-      'unavailable',
-    );
-    client.destroy();
-  });
-
-  it('verifies only the worker-declared immutable output version', async () => {
-    const { service, client, send } = fixture();
-    const reservation = {
-      key: object.key,
-      bytes: object.bytes,
-      sha256: object.sha256,
-      contentType: object.contentType,
-      measuredDurationSeconds: 30,
-      grantExpiresAt: new Date(Date.now() + 60_000),
-    };
-    send.mockResolvedValueOnce({
-      VersionId: 'worker-version',
-      ContentLength: object.bytes,
-      ContentType: object.contentType,
-      ChecksumSHA256: object.sha256,
-    } as never);
-    await expect(
-      service.verifyUploadedVersion(reservation, 'worker-version'),
-    ).resolves.toEqual({
-      key: reservation.key,
-      versionId: 'worker-version',
-      bytes: reservation.bytes,
-      sha256: reservation.sha256,
-      contentType: reservation.contentType,
-    });
-    expect((send.mock.calls[0][0] as HeadObjectCommand).input.VersionId).toBe(
-      'worker-version',
-    );
-
-    send.mockResolvedValueOnce({
-      VersionId: 'worker-version',
-      ContentLength: object.bytes + 1,
-      ContentType: object.contentType,
-      ChecksumSHA256: object.sha256,
-    } as never);
-    await expect(
-      service.verifyUploadedVersion(reservation, 'worker-version'),
-    ).rejects.toMatchObject({ response: { code: 'UPLOAD_NOT_READY' } });
-    client.destroy();
-  });
-
-  it('recovers an exact immutable output after the PUT response is lost', async () => {
-    const { service, client, send } = fixture();
-    const reservation = {
-      key: object.key,
-      bytes: object.bytes,
-      sha256: object.sha256,
-      contentType: object.contentType,
-    };
-    send
-      .mockResolvedValueOnce({ VersionId: 'worker-version' } as never)
-      .mockResolvedValueOnce({
-        VersionId: 'worker-version',
-        ContentLength: object.bytes,
-        ContentType: object.contentType,
-        ChecksumSHA256: object.sha256,
-      } as never);
-
-    await expect(service.findUploadedVersion(reservation)).resolves.toEqual({
-      ...reservation,
-      versionId: 'worker-version',
-    });
-    expect((send.mock.calls[1][0] as HeadObjectCommand).input.VersionId).toBe(
-      'worker-version',
-    );
-    client.destroy();
-  });
-
-  it('deletes only exact-key versions and delete markers', async () => {
-    const { service, client, send } = fixture();
-    send
-      .mockResolvedValueOnce({
-        Versions: [
-          { Key: object.key, VersionId: 'v1' },
-          { Key: `${object.key}-other`, VersionId: 'other' },
-        ],
-        DeleteMarkers: [{ Key: object.key, VersionId: 'marker' }],
-        IsTruncated: false,
-      } as never)
-      .mockResolvedValueOnce({} as never);
-    await expect(service.sweepVersionsForKey(object.key)).resolves.toEqual({
-      complete: true,
-      deleted: 2,
-    });
-    expect(
-      (send.mock.calls[1][0] as DeleteObjectsCommand).input.Delete?.Objects,
-    ).toEqual([
-      { Key: object.key, VersionId: 'v1' },
-      { Key: object.key, VersionId: 'marker' },
+    ])
+      expect(url.searchParams.has(name)).toBe(false);
+    expect(url.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toEqual([
+      'content-length',
+      'content-type',
+      'host',
+      'if-none-match',
+      'x-amz-checksum-sha256',
+      'x-amz-meta-sha256',
     ]);
-    client.destroy();
+    expect(send).not.toHaveBeenCalled();
+    expect(preflight.assertReady).not.toHaveBeenCalled();
   });
 
-  it('deletes one exact version and reconciles a confirmed missing version', async () => {
-    const { service, client, send } = fixture();
-    send.mockResolvedValueOnce({} as never);
-    await expect(
-      service.deleteExactVersion(object.key, object.versionId),
-    ).resolves.toBeUndefined();
-    expect((send.mock.calls[0][0] as DeleteObjectCommand).input).toMatchObject({
-      Key: object.key,
-      VersionId: object.versionId,
-    });
+  it('caps upload/download lifetimes at ten minutes and respects fixed deadlines', async () => {
+    const { service } = fixture();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-30T00:00:00.000Z'));
+    const deadline = new Date(Date.now() + 60_000);
+    for (const grant of [
+      await service.createWorkerOutputGrant(
+        reservation(),
+        new Date(Date.now() + 3_600_000),
+      ),
+      await service.createDownloadGrant(object),
+    ]) {
+      expect(new URL(grant.url).searchParams.get('X-Amz-Expires')).toBe('600');
+      expect(grant.expiresAt).toBe('2026-09-30T00:10:00.000Z');
+    }
+    for (const grant of [
+      await service.createWorkerOutputGrant(reservation(), deadline),
+      await service.createWorkerInstallationUploadGrant(
+        reservation(),
+        deadline,
+      ),
+      await service.createDownloadGrant(object, deadline),
+    ]) {
+      expect(new URL(grant.url).searchParams.get('X-Amz-Expires')).toBe('60');
+      expect(grant.expiresAt).toBe(deadline.toISOString());
+    }
+    for (const expired of [
+      new Date(Date.now()),
+      new Date(Date.now() - 1000),
+      new Date(NaN),
+    ]) {
+      await expect(
+        service.createWorkerOutputGrant(reservation(), expired),
+      ).rejects.toMatchObject({
+        response: { code: 'UPLOAD_RESERVATION_EXPIRED' },
+      });
+      await expect(
+        service.createDownloadGrant(object, expired),
+      ).rejects.toMatchObject({
+        response: { code: 'DOWNLOAD_RESERVATION_EXPIRED' },
+      });
+    }
+  });
 
-    send.mockRejectedValueOnce(
-      Object.assign(new Error('missing'), {
-        name: 'NoSuchVersion',
-        $metadata: { httpStatusCode: 404 },
-      }) as never,
+  it('signs immutable downloads without storage requests, checksum-mode or version selectors', async () => {
+    const { service, send, preflight } = fixture();
+    const url = expectSignedUrl(
+      (await service.createDownloadGrant(object)).url,
+    );
+    expect(url.searchParams.get('response-cache-control')).toBe('no-store');
+    expect(url.searchParams.has('x-amz-checksum-mode')).toBe(false);
+    expect(
+      [...url.searchParams.keys()].some((key) => /version/i.test(key)),
+    ).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+    expect(preflight.assertReady).not.toHaveBeenCalled();
+  });
+
+  it('bounds playback/download grants and rejects header-injection filenames', async () => {
+    const { service } = fixture();
+    for (const [purpose, disposition] of [
+      ['download', 'attachment'],
+      ['play', 'inline'],
+    ] as const) {
+      const url = expectSignedUrl(
+        (await service.createMediaGrant(object, purpose, 'vocals.mp3')).url,
+      );
+      expect(url.searchParams.get('X-Amz-Expires')).toBe('300');
+      expect(url.searchParams.get('response-content-type')).toBe(
+        object.contentType,
+      );
+      expect(url.searchParams.get('response-content-disposition')).toBe(
+        `${disposition}; filename="vocals.mp3"`,
+      );
+    }
+    for (const filename of ['../vocals.mp3', 'bad\r\nheader', '"unsafe"', ''])
+      await expect(
+        service.createMediaGrant(object, 'play', filename),
+      ).rejects.toThrow('Invalid media grant');
+  });
+
+  it('confirms a successful PUT with one HEAD using signed metadata when checksum is omitted', async () => {
+    const { service, send, preflight } = fixture();
+    send.mockResolvedValueOnce(verifiedHead() as never);
+    await expect(
+      service.verifyUploadedObject(reservation(), object.etag),
+    ).resolves.toEqual(object);
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0][0]).toBeInstanceOf(HeadObjectCommand);
+    expect((send.mock.calls[0][0] as HeadObjectCommand).input).toEqual({
+      Bucket: bucket,
+      Key: object.key,
+      IfMatch: object.etag,
+    });
+    expect(send.mock.calls[0][1]).toMatchObject({
+      abortSignal: expect.any(AbortSignal),
+    });
+    expect(preflight.recordSuccess).toHaveBeenCalledOnce();
+    expect(preflight.assertReady).not.toHaveBeenCalled();
+  });
+
+  it('checks the provider checksum when present without making a second HEAD', async () => {
+    const { service, send } = fixture();
+    send.mockResolvedValueOnce({
+      ...verifiedHead(),
+      ChecksumSHA256: object.sha256,
+    } as never);
+    await expect(
+      service.verifyUploadedObject(reservation(), object.etag),
+    ).resolves.toEqual(object);
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it('recovers a lost PUT response using one HEAD by immutable key', async () => {
+    const { service, send } = fixture();
+    send.mockResolvedValueOnce(verifiedHead() as never);
+    await expect(service.findUploadedObject(reservation())).resolves.toEqual(
+      object,
+    );
+    expect(send).toHaveBeenCalledOnce();
+    expect((send.mock.calls[0][0] as HeadObjectCommand).input).toEqual({
+      Bucket: bucket,
+      Key: object.key,
+    });
+  });
+
+  it('confirms input without version discovery or a second storage read', async () => {
+    const { service, send } = fixture();
+    const input = inputReservation();
+    send.mockResolvedValueOnce(verifiedHead() as never);
+    await expect(
+      service.verifyInput({ inputReservation: input, inputObject: null }),
+    ).resolves.toEqual({ ...reservation(), key: input.key, etag: object.etag });
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['oversized', { ContentLength: object.bytes + 1 }],
+    ['undersized', { ContentLength: object.bytes - 1 }],
+    ['wrong type', { ContentType: 'audio/wav' }],
+    ['missing signed metadata', { Metadata: undefined }],
+    [
+      'wrong signed metadata',
+      { Metadata: { sha256: Buffer.alloc(32, 3).toString('base64') } },
+    ],
+    [
+      'wrong checksum',
+      { ChecksumSHA256: Buffer.alloc(32, 3).toString('base64') },
+    ],
+    ['missing ETag', { ETag: undefined }],
+    ['bare ETag', { ETag: 'bare' }],
+    ['weak ETag', { ETag: 'W/"weak"' }],
+    ['different ETag', { ETag: '"different"' }],
+  ])('rejects %s after one HEAD', async (_label, patch) => {
+    const { service, send } = fixture();
+    send.mockResolvedValueOnce({ ...verifiedHead(), ...patch } as never);
+    await expect(
+      service.verifyUploadedObject(reservation(), object.etag),
+    ).rejects.toMatchObject({ response: { code: 'UPLOAD_NOT_READY' } });
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it.each(['NotFound', 'NoSuchKey'])(
+    'treats only a confirmed %s HTTP 404 as missing',
+    async (name) => {
+      const { service, send, preflight } = fixture();
+      send.mockRejectedValueOnce(storageError(name, 404) as never);
+      await expect(
+        service.findUploadedObject(reservation()),
+      ).resolves.toBeNull();
+      expect(preflight.recordSuccess).toHaveBeenCalledOnce();
+      expect(preflight.recordFailure).not.toHaveBeenCalled();
+      send.mockRejectedValueOnce(storageError(name, 404) as never);
+      await expect(
+        service.verifyInput({
+          inputReservation: inputReservation(),
+          inputObject: null,
+        }),
+      ).rejects.toMatchObject({ response: { code: 'UPLOAD_NOT_READY' } });
+      send.mockRejectedValueOnce(storageError(name, 404) as never);
+      await expect(service.isObjectAvailable(object)).resolves.toBe(false);
+    },
+  );
+
+  it.each([
+    ['AccessDenied', 403],
+    ['ServiceUnavailable', 503],
+    ['NotFound', 403],
+    ['NoSuchBucket', 404],
+  ])(
+    'preserves storage failure %s HTTP %s instead of claiming an absent object',
+    async (name, status) => {
+      const { service, send, preflight } = fixture();
+      const error = storageError(name, status);
+      send.mockRejectedValueOnce(error as never);
+      await expect(service.findUploadedObject(reservation())).rejects.toBe(
+        error,
+      );
+      expect(preflight.recordFailure).toHaveBeenCalledOnce();
+      expect(preflight.recordSuccess).not.toHaveBeenCalled();
+    },
+  );
+
+  it('checks availability using the confirmed ETag and metadata only when explicitly requested', async () => {
+    const { service, send } = fixture();
+    send.mockResolvedValueOnce(verifiedHead() as never);
+    await expect(service.isObjectAvailable(object)).resolves.toBe(true);
+    expect((send.mock.calls[0][0] as HeadObjectCommand).input.IfMatch).toBe(
+      object.etag,
     );
     await expect(
-      service.deleteExactVersion(object.key, object.versionId),
-    ).resolves.toBeUndefined();
-    client.destroy();
+      service.isObjectAvailable({ ...object, etag: 'invalid' }),
+    ).resolves.toBe(false);
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['invalid key', { key: '../other' }],
+    ['encoded key', { key: 'users/%2fother' }],
+    ['empty key', { key: '' }],
+    ['invalid bytes', { bytes: 0 }],
+    ['fractional bytes', { bytes: 1.5 }],
+    ['invalid hash', { sha256: 'not-a-checksum' }],
+    ['invalid content type', { contentType: 'audio/mpeg\r\nprivate-header' }],
+  ])(
+    'rejects %s before any signing/storage operation',
+    async (_label, patch) => {
+      const { service, send } = fixture();
+      const invalid = { ...object, ...patch };
+      await expect(
+        service.createWorkerOutputGrant(invalid, new Date(Date.now() + 60_000)),
+      ).rejects.toThrow(TypeError);
+      await expect(service.createDownloadGrant(invalid)).rejects.toThrow(
+        TypeError,
+      );
+      await expect(service.findUploadedObject(invalid)).rejects.toThrow(
+        TypeError,
+      );
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['bare', 'W/"weak"', '"inner"quote"', '"control\n"'])(
+    'rejects invalid ETag %s before any storage call',
+    async (etag) => {
+      const { service, send } = fixture();
+      await expect(
+        service.verifyUploadedObject(reservation(), etag),
+      ).rejects.toMatchObject({ response: { code: 'UPLOAD_NOT_READY' } });
+      await expect(
+        service.createDownloadGrant({ ...object, etag }),
+      ).rejects.toThrow('Invalid storage identity');
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
+  it('deletes one exact key without version listing, read or marker operations', async () => {
+    const { service, send, preflight } = fixture();
+    send.mockResolvedValueOnce({} as never);
+    await expect(service.deleteObject(object.key)).resolves.toBeUndefined();
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0][0]).toBeInstanceOf(DeleteObjectCommand);
+    expect((send.mock.calls[0][0] as DeleteObjectCommand).input).toEqual({
+      Bucket: bucket,
+      Key: object.key,
+    });
+    expect(send.mock.calls[0][1]).toMatchObject({
+      abortSignal: expect.any(AbortSignal),
+    });
+    expect(preflight.recordSuccess).toHaveBeenCalledOnce();
+    expect(preflight.assertReady).not.toHaveBeenCalled();
+  });
+
+  it('reconciles confirmed missing deletes but propagates permission/transport failures', async () => {
+    const { service, send, preflight } = fixture();
+    send.mockRejectedValueOnce(storageError('NoSuchKey', 404) as never);
+    await expect(service.deleteObject(object.key)).resolves.toBeUndefined();
+    expect(preflight.recordSuccess).toHaveBeenCalledOnce();
+    const denied = storageError('AccessDenied', 403);
+    send.mockRejectedValueOnce(denied as never);
+    await expect(service.deleteObject(object.key)).rejects.toBe(denied);
+    expect(preflight.recordFailure).toHaveBeenCalledOnce();
+    await expect(service.deleteObject('users/../other')).rejects.toThrow(
+      'Invalid storage key',
+    );
+    expect(send).toHaveBeenCalledTimes(2);
   });
 });

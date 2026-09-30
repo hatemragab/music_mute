@@ -1,5 +1,7 @@
 # MusicMute repository guide
 
+Private R2 Standard is the only application storage provider. Read the [current storage guide](docs/r2-storage/README.md) before storage changes. Credentials stay backend-only; old version IDs, acceleration and AWS setup are unsupported. Historical validation records are not live R2 proof.
+
 Read the root README, the affected component's README and manifest, and any
 nested `AGENTS.md` before changing code. This repository has no root package
 install; run checks from the component directory. Search existing source before
@@ -31,7 +33,7 @@ links the protocol, tests and dated validation evidence.
 Read [provider architecture](video_providers/README.md) and
 [provider instructions](video_providers/AGENTS.md) before changing URL imports.
 Clients submit to NestJS; a private adapter acquires audio from SaaS and returns
-bytes to NestJS for validation, private S3 upload and the existing worker flow.
+bytes to NestJS for validation, private R2 upload and the existing worker flow.
 Only the adapter receives vendor credentials. NestJS uses generic
 `AUDIO_ACQUISITION_API_URL` / `AUDIO_ACQUISITION_API_KEY` settings.
 Keep included metadata in nullable, sanitized MongoDB `extra_data`, with no paid
@@ -64,10 +66,10 @@ From `web-client/`, use `npm ci --ignore-scripts`, then `npm run format:check`,
 `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`,
 `npm run test:server` and `npm run test:e2e` as relevant. Browser tests use
 installed desktop Chrome and synthetic/mock fixtures; they do not establish
-real Firebase, API or S3 end-to-end success. `npm run package:caprover` creates
+real Firebase, API or R2 end-to-end success. `npm run package:caprover` creates
 an allowlisted deployment archive. The live app uses CapRover app `app` at
 `https://app.music-mute.com`, with public Firebase Web SDK settings supplied at
-runtime. Never place AWS credentials, Firebase Admin keys, database URLs,
+runtime. Never place R2 credentials, Firebase Admin keys, database URLs,
 backend dotenv values or user data in the web package, browser config or logs.
 
 The public app entry page may be indexed. Authenticated routes should not be

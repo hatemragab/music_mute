@@ -12,63 +12,69 @@ media, or screenshots containing personal data into Git.
 
 - [ ] Confirm the implementation branch owning the setting is merged and deployed
       to a non-production test environment first.
-- [ ] Confirm the exact AWS account/region/bucket, Atlas project/cluster, Redis
+- [ ] Confirm the exact R2 account/bucket, Atlas project/cluster, Redis
       service, and environment without printing secrets.
 - [ ] Export or record existing non-secret policy/configuration for rollback.
 - [ ] Confirm the change will not delete current objects/data or interrupt another
       environment.
 - [ ] Set a cost alert/contact before enabling new public traffic.
 
-## 2. AWS S3 privacy and request controls
+## 2. Private Cloudflare R2 and request controls
 
-- [ ] Keep all four S3 Block Public Access settings enabled.
-- [ ] Keep bucket/object ACL public access disabled.
-- [ ] Confirm default encryption is enabled.
-- [ ] Confirm bucket versioning is enabled because the backend pins immutable
-      versions.
-- [ ] Confirm the backend IAM principal has only required exact bucket/object
-      actions and cannot administer unrelated AWS resources.
-- [ ] Add/test a bucket-policy denial for presigned query requests whose
-      `s3:signatureAge` exceeds `600000` milliseconds.
-- [ ] Confirm the policy does not block valid ten-minute upload/download grants,
-      worker attempt grants, or required signed checksum/content headers.
-- [ ] Test with a synthetic exact object: valid fresh request succeeds; older
-      signature is denied; wrong key/header/checksum is denied.
-- [ ] Record only sanitized policy revision/evidence, never a presigned URL.
+See [current R2 setup](../../r2-storage/README.md). Storage setup remains manual;
+these checkboxes are not evidence of an executed cloud change.
 
-Do not paste a ready-to-run policy with a guessed bucket ARN. Generate/review the
-policy against the actual account and existing statements so a broad `Deny` does
-not break AWS service access.
+- [ ] Create/use private `music-mute` with Standard storage.
+- [ ] Keep `r2.dev` and public custom domains disabled.
+- [ ] Restrict R2 S3 API credentials to the required bucket and object read/write;
+      provide them only to the backend through its runtime secret configuration.
+- [ ] Set required `STORAGE_PROVIDER=r2`, account-root `STORAGE_ENDPOINT` (without
+      bucket/path/trailing slash), `STORAGE_REGION=auto`, `STORAGE_BUCKET`,
+      `STORAGE_ACCESS_KEY_ID`, and `STORAGE_SECRET_ACCESS_KEY`.
+- [ ] Remove obsolete AWS provider variables rather than enabling a fallback.
+- [ ] Configure exact browser origins/methods/signed headers in R2 CORS, and the
+      exact R2 origin in browser CSP. Never use wildcard/public access to fix CORS.
+- [ ] Test a bounded synthetic PUT with matching signed checksum and metadata;
+      wrong checksum/header and overwrite must fail. HEAD must match ETag, type,
+      size and signed checksum metadata; optional returned checksum must match.
+- [ ] Test fresh/expired signed GET, Range, and browser upload/download.
+- [ ] Publish and verify required runtime/qualification/APK artifacts; do not invent
+      ETags or mirror model weights into R2.
+- [ ] Record only redacted result evidence, never a signed URL or credential.
 
-## 3. S3 storage lifecycle
+R2 does not implement the old AWS bucket versioning, ACL/acceleration or
+`signatureAge` policy design. Keep bounded signed expiration and existing
+application authorization rather than attempting to recreate unsupported controls.
 
-- [ ] Confirm successful audio is written with `INTELLIGENT_TIERING` or transitions
-      through a narrowly scoped `users/` lifecycle rule accepted by branch B.
-- [ ] Confirm Frequent → Infrequent after 30 inactive days.
-- [ ] Confirm Archive Instant Access after 90 inactive days.
-- [ ] Keep optional Archive Access and Deep Archive Access disabled for launch.
-- [ ] Do not add expiration for successful outputs; they persist until job/account
-      deletion.
-- [ ] Configure incomplete multipart cleanup only if the finalized upload protocol
+## 3. R2 retention and cleanup
+
+- [ ] Keep Standard; no Infrequent Access or automatic tier transition.
+- [ ] Preserve completed originals/results until job/account deletion.
+- [ ] Verify failed/invalid/abandoned/stale-attempt exact-key cleanup and recovery
+      with synthetic data, including late/uncertain PUT completion: first free DELETE
+      after recorded grant deadline plus one hour, durable firstDeletedAt, and
+      second free DELETE two hours later before completion. Restart/replica races
+      must preserve the stage; no HEAD/list polling. The window is application
+      policy, not a provider-wide deadline for unlimited external transfers.
+- [ ] Never expire a broad successful-media prefix or delete unrelated objects.
+- [ ] Add incomplete multipart expiration only if a future supported flow actually
       uses multipart and the rule cannot affect complete objects.
-- [ ] Do not create a broad input-prefix expiration rule until branch B supplies a
-      tested tag/prefix contract. Application cleanup remains authoritative.
-- [ ] Observe a synthetic/test-tagged object and record lifecycle configuration;
-      do not claim a 30/90-day transition was observed immediately.
+- [ ] Let the owner perform the separately planned fresh MongoDB reset; this
+      runbook does not authorize database/object deletion.
 
-## 4. AWS cost protection
+## 4. Cost protection
 
-- [ ] Configure AWS Budgets or equivalent billing alert below the tolerated monthly
-      spend.
-- [ ] Configure a second urgent threshold and a responsible notification contact.
-- [ ] Enable a cost anomaly alert for S3 request, storage, and data-transfer spikes
-      when available.
-- [ ] Review current AWS-wide internet-transfer usage because the free allowance is
-      aggregated across services/regions.
-- [ ] Compare provider billing data with the backend's 80 GB estimated service
-      ceiling; record that estimates are not invoice-perfect actual bytes.
-- [ ] Define the manual response when alerts fire: inspect, restrict grants, lower
-      global policy, or disable new processing without deleting existing data.
+- [ ] Review R2 account-level Standard storage and Class A/Class B operations;
+      configure available billing thresholds/contacts without adding a paid proxy.
+- [ ] Keep ordinary tests local and real synthetic tests explicitly opt-in,
+      minimal and scoped to a dedicated test bucket.
+- [ ] Confirm health views report cached observations and do not poll storage.
+- [ ] Compare actual provider billing with grant estimates; free egress does not
+      make storage, GET/HEAD or writes universally free.
+- [ ] Review old AWS resources separately: wiping MongoDB does not stop their
+      charges. This implementation does not delete or administer those resources.
+- [ ] Define the manual response to unexpected spend: inspect usage, restrict
+      grants or disable new processing without deleting retained media.
 
 ## 5. MongoDB Atlas Free
 

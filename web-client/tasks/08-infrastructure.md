@@ -1,5 +1,9 @@
 # Infrastructure snapshot and release evidence
 
+> Storage-specific completed tasks/evidence below describe the previous AWS
+> release. The [R2-only setup and ETag contract](../../docs/r2-storage/README.md) supersedes
+> those provider requirements; live R2 acceptance is separate and unverified.
+
 Observed and verified in this conversation on 2026-09-26; recheck before a later
 release because external configuration can drift. No credentials belong here.
 

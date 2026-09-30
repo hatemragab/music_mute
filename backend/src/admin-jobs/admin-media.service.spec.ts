@@ -6,7 +6,7 @@ import type { AdminActor } from '../admin/admin.types.js';
 function fixture(extra: Record<string, unknown> = {}) {
   const object = {
     key: 'private/key',
-    versionId: 'pinned',
+    etag: '"pinned"',
     bytes: 42,
     contentType: 'audio/mpeg',
     sha256: 'checksum',
@@ -28,7 +28,6 @@ function fixture(extra: Record<string, unknown> = {}) {
   };
   const account = { assertActive: vi.fn(async () => undefined) };
   const storage = {
-    isPinnedObjectAvailable: vi.fn(async () => true),
     createMediaGrant: vi.fn(async () => ({
       url: 'https://private.example.invalid/signed',
       expiresAt: new Date().toISOString(),
@@ -82,7 +81,7 @@ describe('admin media grants', () => {
     { deletedAt: new Date() },
     { outputObject: null },
     { status: 'uploading_result' },
-    { outputObject: { versionId: 'null' } },
+    { outputObject: { etag: 'null' } },
   ])('rejects unavailable or unverified media %j', async (extra) => {
     const f = fixture(extra);
     await expect(
@@ -110,7 +109,7 @@ describe('admin media grants', () => {
     ).rejects.toThrow();
     expect(deleting.storage.createMediaGrant).not.toHaveBeenCalled();
     const missing = fixture();
-    missing.storage.isPinnedObjectAvailable.mockResolvedValueOnce(false);
+    missing.job.outputObject = null as never;
     await expect(
       missing.service.grant(
         missing.actor,

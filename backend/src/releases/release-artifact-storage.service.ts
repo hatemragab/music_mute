@@ -1,3 +1,8 @@
+import {
+  isStorageEtag,
+  confirmedObjectIdentity,
+  validateStorageKey,
+} from '../storage/object-identity.js';
 import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable } from '@nestjs/common';
@@ -24,19 +29,24 @@ export class ReleaseArtifactStorageService {
     config: ConfigService,
     private readonly preflight: StoragePreflightService,
   ) {
-    this.bucket = config.getOrThrow<string>('S3_BUCKET');
+    this.bucket = config.getOrThrow<string>('STORAGE_BUCKET');
     this.downloadSeconds = Math.min(
       600,
       config.get<number>('APP_RELEASE_DOWNLOAD_SECONDS', 300),
     );
   }
   async grant(reservation: Reservation, expiresAt: Date) {
-    await this.preflight.assertReady();
     const now = Date.now();
-    const expires = Math.max(
-      1,
-      Math.min(600, Math.floor((expiresAt.getTime() - now) / 1000)),
+    const expires = Math.min(
+      600,
+      Math.floor((expiresAt.getTime() - now) / 1000),
     );
+    if (
+      !Number.isFinite(expires) ||
+      expires < 1 ||
+      !/^[a-f0-9]{64}$/.test(reservation.expectedSha256)
+    )
+      throw new ApkVerificationError('APK_INVALID');
     const checksum = Buffer.from(reservation.expectedSha256, 'hex').toString(
       'base64',
     );
@@ -51,53 +61,56 @@ export class ReleaseArtifactStorageService {
       expiresAt: new Date(now + expires * 1_000),
     });
   }
-  async pin(reservation: Reservation, versionId?: string): Promise<string> {
-    const latest =
-      versionId ??
-      (
-        await this.storage.send(
-          new HeadObjectCommand({ Bucket: this.bucket, Key: reservation.key }),
-          { abortSignal: AbortSignal.timeout(5000) },
-        )
-      ).VersionId;
-    if (!latest || latest === 'null' || latest.length > 1024)
+  async pin(reservation: Reservation, etag?: string): Promise<string> {
+    validateStorageKey(reservation.key);
+    if (etag !== undefined && !isStorageEtag(etag))
       throw new ApkVerificationError('APK_INVALID');
     const pinned = await this.storage.send(
       new HeadObjectCommand({
         Bucket: this.bucket,
         Key: reservation.key,
-        VersionId: latest,
-        ChecksumMode: 'ENABLED',
+        ...(etag ? { IfMatch: etag } : {}),
       }),
       { abortSignal: AbortSignal.timeout(5000) },
     );
-    if (pinned.VersionId !== latest)
+    this.preflight.recordSuccess?.();
+    if (!isStorageEtag(pinned.ETag) || (etag && pinned.ETag !== etag))
       throw new ApkVerificationError('APK_INVALID');
     if (pinned.ContentLength !== reservation.expectedBytes)
       throw new ApkVerificationError('APK_SIZE_MISMATCH');
-    if (
-      pinned.ChecksumSHA256 !==
-      Buffer.from(reservation.expectedSha256, 'hex').toString('base64')
-    )
-      throw new ApkVerificationError('APK_CHECKSUM_MISMATCH');
-    return latest;
+    const identity = confirmedObjectIdentity(
+      {
+        key: reservation.key,
+        bytes: reservation.expectedBytes,
+        sha256: Buffer.from(reservation.expectedSha256, 'hex').toString(
+          'base64',
+        ),
+        contentType: 'application/vnd.android.package-archive',
+      },
+      pinned,
+    );
+    if (!identity) throw new ApkVerificationError('APK_CHECKSUM_MISMATCH');
+    return identity.etag;
   }
+
   async download(
     reservation: Reservation,
-    versionId: string,
+    etag: string,
     path: string,
     signal: AbortSignal,
   ): Promise<void> {
+    validateStorageKey(reservation.key);
+    if (!isStorageEtag(etag)) throw new ApkVerificationError('APK_INVALID');
     const result = await this.storage.send(
       new GetObjectCommand({
         Bucket: this.bucket,
         Key: reservation.key,
-        VersionId: versionId,
+        IfMatch: etag,
       }),
       { abortSignal: signal },
     );
     if (
-      result.VersionId !== versionId ||
+      result.ETag !== etag ||
       result.ContentLength !== reservation.expectedBytes ||
       !result.Body
     ) {
@@ -127,14 +140,15 @@ export class ReleaseArtifactStorageService {
     if (bytes !== reservation.expectedBytes)
       throw new ApkVerificationError('APK_SIZE_MISMATCH');
   }
-  async createDownloadGrant(artifact: { key: string; versionId: string }) {
-    await this.preflight.assertReady();
+  async createDownloadGrant(artifact: { key: string; etag: string }) {
+    validateStorageKey(artifact.key);
+    if (!isStorageEtag(artifact.etag))
+      throw new ApkVerificationError('APK_INVALID');
     const url = await getSignedUrl(
       this.storage,
       new GetObjectCommand({
         Bucket: this.bucket,
         Key: artifact.key,
-        VersionId: artifact.versionId,
         ResponseCacheControl: 'no-store',
         ResponseContentType: 'application/vnd.android.package-archive',
       }),

@@ -1006,7 +1006,7 @@ export class WorkerRuntime {
 
       enterStage("output-upload");
       const uploadStarted = performance.now();
-      const versionId = await this.publishOutput(
+      const etag = await this.publishOutput(
         identity,
         claim,
         result,
@@ -1023,7 +1023,7 @@ export class WorkerRuntime {
           claim.attemptId,
           identity,
           {
-            versionId,
+            etag,
             recipeId: result.recipeId,
             recipeRevision: result.recipeRevision,
             recipeDigest: result.recipeDigest,
@@ -1299,7 +1299,7 @@ export class WorkerRuntime {
       if (response.object) {
         if (!sameOutput(response.object, response.reservation))
           throw new TransferError("OUTPUT_UPLOAD_FAILED", false);
-        return response.object.versionId;
+        return response.object.etag;
       }
       const putStarted = performance.now();
       try {
@@ -1731,7 +1731,7 @@ function randomPollDelay(options: WorkerRuntimeOptions): number {
 function sameObject(left: ObjectIdentity, right: ObjectIdentity): boolean {
   return (
     left.key === right.key &&
-    left.versionId === right.versionId &&
+    left.etag === right.etag &&
     left.bytes === right.bytes &&
     left.sha256 === right.sha256 &&
     left.contentType === right.contentType

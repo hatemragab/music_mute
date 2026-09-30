@@ -525,7 +525,7 @@ class Handler(BaseHTTPRequestHandler):
                 extra = merge_metadata(extra, title_lookup)
                 log(stage='metadata', message='Optional official metadata lookup finished or skipped; audio acquisition is not retried.',
                     metadata_ready=title_lookup.done(), has_title='title' in extra)
-                provider.step('backend-transfer', 'Sending acquired audio to NestJS for independent validation and S3 upload.')
+                provider.step('backend-transfer', 'Sending acquired audio to NestJS for independent validation and object-storage upload.')
                 check()
                 audio.seek(0)
                 self.send_response(200)

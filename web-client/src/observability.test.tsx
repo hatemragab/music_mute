@@ -31,8 +31,7 @@ describe("browser failure recovery", () => {
                   lineno: 12,
                 },
                 {
-                  filename:
-                    "https://private.s3.amazonaws.com/file?signature=secret",
+                  filename: "https://storage.example/file?signature=secret",
                 },
               ],
             },

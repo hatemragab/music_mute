@@ -35,7 +35,7 @@ Use existing installed desktop Chrome for browser checks. For any simulator UI
 test, use only iPhone 17 Pro/iOS 26.0 UDID
 `3CC14436-EC3C-4419-A079-C84951E5FA07`; report unavailability instead of substituting.
 Never claim mocked checks prove production. Read `08-infrastructure.md` for
-already verified Firebase/API/S3 settings and remaining hosting work.
+historically verified Firebase/API/AWS settings and the pending R2 verification and remaining hosting work.
 
 Do not commit, push, publish, deploy, delete real data, expose credentials, or
 change production permissions without separate authorization. Deliver a working,

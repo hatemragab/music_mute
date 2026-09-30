@@ -97,7 +97,7 @@ test('bounded audited CSV snapshots', { timeout: 60000 }, async (t) => {
     processingAccumulatedMs: null,
     sourceTitle: 'PRIVATE_TITLE',
     displayName: 'PRIVATE_NAME',
-    inputObject: { key: 'PRIVATE_OBJECT_KEY', versionId: 'PRIVATE_VERSION' },
+    inputObject: { key: 'PRIVATE_OBJECT_KEY', etag: '"PRIVATE_VERSION"' },
     ...extra,
   });
   const reset = async () => {

@@ -116,7 +116,7 @@ entries do not establish acceptance of the candidate:
   resume, normal stop/restart and backend pause/revocation fences.
 - Running/stopped updates, interrupted activation, verified rollback, expired
   capacity evidence and independent runtime health/configuration read-back.
-- Real backend/S3 input download, processing, upload and authoritative completion;
+- Real backend/R2 input download, processing, upload and authoritative completion;
   independent MP3 decoding and listening acceptance.
 - Controlled cancellation, network interruption, lease loss and lost completion
   acknowledgement with synthetic jobs; no duplicate published output.

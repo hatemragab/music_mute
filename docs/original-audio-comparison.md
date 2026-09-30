@@ -2,9 +2,9 @@
 
 ## Behavior
 
-New completed jobs retain their uploaded, unseparated input in private S3 storage.
+New completed jobs retain their uploaded, unseparated input in private R2 storage.
 The database stores the pinned object identity and comparison timeline; audio bytes
-remain in S3. Existing owner-scoped input download grants authorize playback and
+remain in R2. Existing owner-scoped input download grants authorize playback and
 export. Job/account deletion continues to clean up both artifacts. Cancelled,
 expired, and non-retryable failed uploads retain their existing cleanup behavior.
 
@@ -107,8 +107,8 @@ This is a local worker rollout, not a published fleet-wide worker release.
 - Original retention increases stored bytes; new jobs account for input plus output.
 - Mobile changes require distribution of a new app build. The web client was not changed by this feature.
 - Live backend health and worker qualification are verified; a new authenticated
-  production job covering S3 retention, completion, and native playback end-to-end
-  has not been run. Synthetic native UI tests are not production S3 proof.
+  production job covering R2 retention, completion, and native playback end-to-end
+  has not been run. Synthetic native UI tests are not production R2 proof.
 
 ## Offline switching follow-up
 

@@ -1,5 +1,10 @@
 # Music Mute worker rebuild: fast MVP branch roadmap
 
+> Storage-specific completed tasks/evidence below describe the previous AWS
+> release. The [R2-only setup and ETag contract](../r2-storage/README.md) supersedes
+> those provider requirements; live R2 acceptance is separate and unverified.
+
+
 This roadmap keeps stable extension boundaries while delivering one narrow, proven path first. The collection branch is not an implementation milestone; each accepted feature branch merges into it through review.
 
 ## 1. Sequential topology

@@ -40,7 +40,7 @@ describe("worker transfers", () => {
         { url: "http://127.0.0.1/input", expiresAt: future() },
         {
           key: "input/source.mp3",
-          versionId: "v1",
+          etag: '"v1"',
           bytes: 1,
           sha256: createHash("sha256").update("x").digest("base64"),
           contentType: "audio/mpeg",
@@ -74,7 +74,7 @@ describe("worker transfers", () => {
       { url: "http://127.0.0.1/input", expiresAt: future() },
       {
         key: "input/source.mp3",
-        versionId: "v1",
+        etag: '"v1"',
         bytes: body.length,
         sha256: createHash("sha256").update(body).digest("base64"),
         contentType: "audio/mpeg",
@@ -89,7 +89,7 @@ describe("worker transfers", () => {
     });
   });
 
-  it("uploads only exact signed headers and requires an immutable version", async () => {
+  it("uploads only exact signed headers and requires an immutable object", async () => {
     const body = Buffer.from("bounded-output");
     const digest = createHash("sha256").update(body).digest("base64");
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
@@ -97,8 +97,8 @@ describe("worker transfers", () => {
         "Content-Type": "audio/mpeg",
         "Content-Length": String(body.length),
         "x-amz-checksum-sha256": digest,
+        "x-amz-meta-sha256": digest,
         "If-None-Match": "*",
-        "x-amz-storage-class": "INTELLIGENT_TIERING",
       });
       const chunks: Buffer[] = [];
       for await (const chunk of init!.body as unknown as AsyncIterable<Buffer>)
@@ -106,7 +106,7 @@ describe("worker transfers", () => {
       expect(Buffer.concat(chunks)).toEqual(body);
       return new Response(null, {
         status: 200,
-        headers: { "x-amz-version-id": "output-version" },
+        headers: { ETag: '"output-version"' },
       });
     });
     const root = await mkdtemp(join(tmpdir(), "musicmute-transfer-"));
@@ -127,14 +127,94 @@ describe("worker transfers", () => {
           headers: {
             "Content-Type": "audio/mpeg",
             "x-amz-checksum-sha256": digest,
+            "x-amz-meta-sha256": digest,
             "If-None-Match": "*",
-            "x-amz-storage-class": "INTELLIGENT_TIERING",
           },
         },
         source,
         { bytes: body.length, sha256: digest, contentType: "audio/mpeg" },
       ),
-    ).resolves.toBe("output-version");
+    ).resolves.toBe('"output-version"');
+  });
+
+  it.each([undefined, "bare", 'W/"weak"', '"bad\n"'])(
+    "requires a strong ETag after a successful unversioned PUT (%s)",
+    async (etag) => {
+      const body = Buffer.from("r2-output");
+      const digest = createHash("sha256").update(body).digest("base64");
+      const root = await mkdtemp(join(tmpdir(), "musicmute-transfer-"));
+      roots.push(root);
+      const source = join(root, "vocals.mp3");
+      await writeFile(source, body, { mode: 0o600 });
+      const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+        for await (const _chunk of init!
+          .body as unknown as AsyncIterable<Buffer>) {
+          // Consume the streaming body as an object storage server would.
+        }
+        return new Response(null, {
+          headers: etag === undefined ? {} : { ETag: etag },
+        });
+      });
+      const client = new WorkerTransferClient({
+        fetch: fetchMock as typeof fetch,
+      });
+      await expect(
+        client.upload(
+          {
+            method: "PUT",
+            url: "https://storage.example.invalid/output",
+            expiresAt: future(),
+            headers: {
+              "Content-Type": "audio/mpeg",
+              "If-None-Match": "*",
+              "x-amz-checksum-sha256": digest,
+              "x-amz-meta-sha256": digest,
+            },
+          },
+          source,
+          { bytes: body.length, sha256: digest, contentType: "audio/mpeg" },
+        ),
+      ).rejects.toMatchObject({
+        code: "OUTPUT_UPLOAD_FAILED",
+        retryable: true,
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("rejects unsigned or mismatched metadata and provider storage classes before PUT", async () => {
+    const digest = createHash("sha256").update("r2-output").digest("base64");
+    const fetchMock = vi.fn();
+    const client = new WorkerTransferClient({
+      fetch: fetchMock as typeof fetch,
+    });
+    for (const extra of [
+      {},
+      { "x-amz-meta-sha256": "different" },
+      { "x-amz-meta-sha256": digest, "x-amz-storage-class": "STANDARD" },
+    ]) {
+      await expect(
+        client.upload(
+          {
+            method: "PUT",
+            url: "https://storage.example.invalid/output",
+            expiresAt: future(),
+            headers: {
+              "Content-Type": "audio/mpeg",
+              "If-None-Match": "*",
+              "x-amz-checksum-sha256": digest,
+              ...extra,
+            },
+          },
+          "/unused/vocals.mp3",
+          { bytes: 9, sha256: digest, contentType: "audio/mpeg" },
+        ),
+      ).rejects.toMatchObject({
+        diagnostic: "upload-header-mismatch",
+        retryable: false,
+      });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("starts PUT before reading the full output and rejects corruption before the last chunk", async () => {
@@ -166,6 +246,7 @@ describe("worker transfers", () => {
           headers: {
             "Content-Type": "audio/mpeg",
             "x-amz-checksum-sha256": digest,
+            "x-amz-meta-sha256": digest,
             "If-None-Match": "*",
           },
         },
@@ -198,7 +279,7 @@ describe("worker transfers", () => {
         chunks.push(chunk);
       expect(Buffer.concat(chunks)).toEqual(data);
       return new Response(null, {
-        headers: { "x-amz-version-id": "retry-version" },
+        headers: { ETag: '"retry-version"' },
       });
     });
     const client = new WorkerTransferClient({
@@ -212,6 +293,7 @@ describe("worker transfers", () => {
       headers: {
         "Content-Type": "audio/mpeg",
         "x-amz-checksum-sha256": digest,
+        "x-amz-meta-sha256": digest,
         "If-None-Match": "*",
       },
     };
@@ -228,7 +310,7 @@ describe("worker transfers", () => {
       retryable: true,
     });
     await expect(client.upload(grant, source, expected)).resolves.toBe(
-      "retry-version",
+      '"retry-version"',
     );
   });
 
@@ -254,6 +336,7 @@ describe("worker transfers", () => {
           headers: {
             "Content-Type": "audio/mpeg",
             "x-amz-checksum-sha256": digest,
+            "x-amz-meta-sha256": digest,
             "If-None-Match": "*",
             "x-amz-storage-class": "STANDARD",
           },
@@ -292,6 +375,7 @@ describe("worker transfers", () => {
           headers: {
             "Content-Type": "audio/mpeg",
             "x-amz-checksum-sha256": digest,
+            "x-amz-meta-sha256": digest,
             "If-None-Match": "*",
           },
         },
@@ -321,7 +405,7 @@ describe("worker transfers", () => {
         { url: "http://127.0.0.1/input", expiresAt: future() },
         {
           key: "input/source.mp3",
-          versionId: "v1",
+          etag: '"v1"',
           bytes: 1,
           sha256: createHash("sha256").update("x").digest("base64"),
           contentType: "audio/mpeg",

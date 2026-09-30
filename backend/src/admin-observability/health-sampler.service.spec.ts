@@ -20,7 +20,13 @@ function setup() {
         'used_memory:1000000\r\nmaxmemory:268435456\r\nmaxmemory_policy:noeviction\r\n',
       ),
   };
-  const storage = { assertReady: vi.fn().mockResolvedValue(undefined) };
+  const storage = {
+    snapshot: vi.fn(() => ({
+      status: 'healthy',
+      checkedAt: new Date().toISOString(),
+      code: null,
+    })),
+  };
   const releases = {
     find: vi.fn(() => ({
       select: () => ({
@@ -60,13 +66,30 @@ describe('HealthSamplerService', () => {
     expect(f.database.db.command).toHaveBeenCalledTimes(2);
     expect(f.redis.ping).toHaveBeenCalledOnce();
     expect(f.redis.info).toHaveBeenCalledWith('memory');
-    expect(f.storage.assertReady).toHaveBeenCalledOnce();
+    expect(f.storage.snapshot).toHaveBeenCalledOnce();
     expect(first.components.map((item) => item.name)).toEqual([
       'api',
       'mongodb',
       'redis',
       'storage',
     ]);
+  });
+
+  it('retains storage observation freshness instead of probing R2 on sampling', async () => {
+    const f = setup();
+    f.storage.snapshot.mockReturnValueOnce({
+      status: 'unknown',
+      checkedAt: '2026-09-30T00:00:00.000Z',
+      code: 'STORAGE_OBSERVATION_STALE',
+    } as never);
+    const result = await f.service.sample();
+    expect(
+      result.components.find((item) => item.name === 'storage'),
+    ).toMatchObject({
+      status: 'unknown',
+      checkedAt: '2026-09-30T00:00:00.000Z',
+      code: 'STORAGE_OBSERVATION_STALE',
+    });
   });
 
   it('raises sanitized degraded signals for bounded datastore pressure', async () => {

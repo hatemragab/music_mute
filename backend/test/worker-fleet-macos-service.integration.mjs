@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { IsolatedServices, until } from './helpers/isolated-services.mjs';
 
 const requiredEnvironment = [
-  'AWS_ACCESS_KEY_ID',
-  'AWS_SECRET_ACCESS_KEY',
-  'AWS_REGION',
-  'S3_BUCKET',
+  'STORAGE_ACCESS_KEY_ID',
+  'STORAGE_SECRET_ACCESS_KEY',
+  'STORAGE_REGION',
+  'STORAGE_BUCKET',
+  'STORAGE_ENDPOINT',
   'WORKER_INTEGRATION_MACHINE_ID',
   'WORKER_INTEGRATION_WORKER_ID',
   'WORKER_INTEGRATION_GPU_ID',
@@ -17,12 +18,26 @@ const requiredEnvironment = [
 ];
 
 test(
-  'installed macOS service completes an MPS job through local API and real S3',
-  { timeout: 20 * 60_000 },
+  'installed macOS service completes an MPS job through local API and real R2',
+  {
+    timeout: 20 * 60_000,
+    skip: process.env.MUSICMUTE_R2_INTEGRATION !== 'true',
+  },
   async () => {
     for (const key of requiredEnvironment)
       assert.ok(process.env[key], `Missing required environment key: ${key}`);
 
+    assert.match(
+      process.env.STORAGE_BUCKET,
+      /^music-mute-test-[a-z0-9-]+$/,
+      'Use a dedicated R2 integration test bucket',
+    );
+    assert.match(
+      process.env.STORAGE_ENDPOINT,
+      /^https:\/\/[a-f0-9]{32}\.r2\.cloudflarestorage\.com\/?$/,
+      'Use an R2 account endpoint',
+    );
+    assert.equal(process.env.STORAGE_REGION, 'auto');
     const services = await IsolatedServices.create();
     try {
       const { mongoUri, redisPort } = await services.startDatabases({
@@ -38,13 +53,12 @@ test(
         {
           MONGODB_URI: mongoUri,
           REDIS_URL: `redis://127.0.0.1:${redisPort}/0`,
-          AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
-          AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
-          ...(process.env.AWS_SESSION_TOKEN
-            ? { AWS_SESSION_TOKEN: process.env.AWS_SESSION_TOKEN }
-            : {}),
-          AWS_REGION: process.env.AWS_REGION,
-          S3_BUCKET: process.env.S3_BUCKET,
+          STORAGE_ACCESS_KEY_ID: process.env.STORAGE_ACCESS_KEY_ID,
+          STORAGE_SECRET_ACCESS_KEY: process.env.STORAGE_SECRET_ACCESS_KEY,
+          STORAGE_REGION: process.env.STORAGE_REGION,
+          STORAGE_BUCKET: process.env.STORAGE_BUCKET,
+          STORAGE_PROVIDER: 'r2',
+          STORAGE_ENDPOINT: process.env.STORAGE_ENDPOINT,
           AUDIO_PROCESSING_ENABLED: 'true',
           RATE_LIMIT: '10000',
           AUTH_UID_PER_MINUTE: '10000',
@@ -52,7 +66,7 @@ test(
           PROCESSING_CREATE_UID_PER_MINUTE: '10000',
           PROCESSING_GRANT_UID_PER_MINUTE: '10000',
           PROCESSING_MUTATION_UID_PER_MINUTE: '10000',
-          WORKER_INTEGRATION_STORAGE: 's3',
+          WORKER_INTEGRATION_STORAGE: 'r2',
           WORKER_INTEGRATION_EXTERNAL: 'true',
           WORKER_INTEGRATION_EXTERNAL_PLATFORM: 'darwin-arm64',
           WORKER_INTEGRATION_RUN_ID: randomUUID(),
@@ -91,9 +105,9 @@ test(
       assert.equal(child.exitCode, 0, child.output);
       assert.match(
         child.output,
-        /WORKER_FLEET_INTEGRATION_OK storage=s3 platform=macos-mps-service status=ready/,
+        /WORKER_FLEET_INTEGRATION_OK storage=r2 platform=macos-mps-service status=ready/,
       );
-      assert.match(child.output, /WORKER_FLEET_S3_CLEANUP_OK deleted=2/);
+      assert.match(child.output, /WORKER_FLEET_R2_CLEANUP_OK deleted=2/);
     } finally {
       await services.stop();
     }

@@ -15,7 +15,7 @@ const SHA256_HEX = /^[a-f0-9]{64}$/u;
 
 export interface ObjectIdentity {
   key: string;
-  versionId: string;
+  etag: string;
   bytes: number;
   sha256: string;
   contentType: string;
@@ -285,7 +285,12 @@ function objectIdentity(value: unknown, label: string): ObjectIdentity {
   const item = record(value, label);
   return {
     key: text(item.key, `${label}.key`, undefined, 1024),
-    versionId: text(item.versionId, `${label}.versionId`, undefined, 1024),
+    etag: text(
+      item.etag,
+      `${label}.etag`,
+      /^"[\x21\x23-\x7e]{1,1022}"$/u,
+      1024,
+    ),
     bytes: integer(item.bytes, `${label}.bytes`, 1, 1_000_000_000),
     sha256: text(item.sha256, `${label}.sha256`, SHA256_BASE64, 44),
     contentType: text(item.contentType, `${label}.contentType`, undefined, 100),

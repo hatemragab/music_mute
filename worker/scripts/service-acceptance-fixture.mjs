@@ -78,7 +78,7 @@ export function createAcceptanceFixture({
   }));
   const inputObject = {
     key: "acceptance/input.wav",
-    versionId: "acceptance-input-v1",
+    etag: '"acceptance-input-v1"',
     bytes: input.length,
     sha256: createHash("sha256").update(input).digest("base64"),
     contentType: "audio/wav",
@@ -364,6 +364,7 @@ export function createAcceptanceFixture({
               headers: {
                 "Content-Type": "audio/mpeg",
                 "x-amz-checksum-sha256": body.sha256,
+                "x-amz-meta-sha256": body.sha256,
                 "If-None-Match": "*",
               },
               expiresAt: expiresAt(),
@@ -374,7 +375,7 @@ export function createAcceptanceFixture({
         if (match[2] === "completions") {
           if (
             !job.upload ||
-            body.versionId !== job.upload.versionId ||
+            body.etag !== job.upload.etag ||
             body.recipeDigest !== job.recipe.recipeDigest ||
             body.modelDigest !== job.recipe.modelDigest
           )
@@ -436,7 +437,8 @@ export function createAcceptanceFixture({
             request.headers["if-none-match"] !== "*" ||
             raw.length !== job.reservation.bytes ||
             actual !== job.reservation.sha256 ||
-            request.headers["x-amz-checksum-sha256"] !== actual
+            request.headers["x-amz-checksum-sha256"] !== actual ||
+            request.headers["x-amz-meta-sha256"] !== actual
           )
             return send(response, 400, { code: "WORKER_INVALID_REQUEST" });
           const path = `${outputPath}.${job.slotIndex}.mp3`;
@@ -444,11 +446,11 @@ export function createAcceptanceFixture({
           job.upload = {
             bytes: raw.length,
             sha256: actual,
-            versionId: `acceptance-output-${job.slotIndex}-v1`,
+            etag: `"acceptance-output-${job.slotIndex}"`,
           };
           job.outputReceivedAtMs = milliseconds();
           persist();
-          response.writeHead(200, { "x-amz-version-id": job.upload.versionId });
+          response.writeHead(200, { ETag: job.upload.etag });
           return response.end();
         }
       }

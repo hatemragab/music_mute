@@ -65,10 +65,13 @@ export function createWebServer({
 } = {}) {
   const config = publicConfig(env);
   const root = resolve(dist);
-  const mediaOrigin =
-    env.PUBLIC_MEDIA_ORIGIN ||
-    "https://music-remover.s3.us-east-2.amazonaws.com";
-  const media = new URL(mediaOrigin);
+  const mediaOrigin = env.PUBLIC_MEDIA_ORIGIN;
+  let media;
+  try {
+    media = new URL(mediaOrigin || "");
+  } catch {
+    throw new Error("PUBLIC_MEDIA_ORIGIN must be an explicit HTTPS origin.");
+  }
   if (
     media.protocol !== "https:" ||
     media.pathname !== "/" ||
@@ -78,21 +81,7 @@ export function createWebServer({
     media.hash
   )
     throw new Error("PUBLIC_MEDIA_ORIGIN must be an HTTPS origin.");
-  const acceleration = env.PUBLIC_MEDIA_ACCELERATION_ENABLED ?? "false";
-  if (!["true", "false"].includes(acceleration))
-    throw new Error("PUBLIC_MEDIA_ACCELERATION_ENABLED must be true or false.");
-  const mediaOrigins = [media.origin];
-  if (acceleration === "true") {
-    const match =
-      /^([a-z0-9][a-z0-9-]{1,61}[a-z0-9])\.s3\.[a-z0-9-]+\.amazonaws\.com$/.exec(
-        media.hostname,
-      );
-    if (!match || media.port)
-      throw new Error("Acceleration requires a regional S3 bucket origin.");
-    // Keep regional grants valid during rollout/rollback; permit only this bucket.
-    mediaOrigins.push(`https://${match[1]}.s3-accelerate.amazonaws.com`);
-  }
-  const mediaSources = mediaOrigins.join(" ");
+  const mediaSources = media.origin;
   const telemetryOrigin = config.sentry.enabled
     ? new URL(config.sentry.dsn).origin
     : "";

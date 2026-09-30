@@ -158,6 +158,11 @@ export function AudioUpload({
         await uploadWithProgress(
           grant,
           prepared.blob,
+          {
+            contentType: prepared.contentType,
+            bytes: prepared.blob.size,
+            sha256,
+          },
           abort.signal,
           setPercent,
         );

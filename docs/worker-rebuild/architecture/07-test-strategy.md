@@ -15,24 +15,24 @@ Each checkpoint report states command, environment, relevant versions, commit, e
 
 ## 2. Initial test environments
 
-The owner's **Mac mini M4** is the first development and inference host. Use local isolated MongoDB **replica set** and Redis. S3 credentials will be supplied privately in `.local.env` for backend/test harness use only; run-scoped object keys and version-aware cleanup are mandatory.
+The owner's **Mac mini M4** is the first development and inference host. Use local isolated MongoDB **replica set** and Redis. R2 credentials will be supplied privately in `.local.env` for backend/test harness use only; run-scoped object keys and exact-key cleanup are mandatory.
 
-The **Windows Z440 / RX 580 8 GB** is reached through SSH after the owner supplies target/authentication and trusted host-key details. Test the identical accepted commit and manifest, not an uncommitted ad hoc Windows fork. Never copy `.local.env` or backend AWS credentials to the worker.
+The **Windows Z440 / RX 580 8 GB** is reached through SSH after the owner supplies target/authentication and trusted host-key details. Test the identical accepted commit and manifest, not an uncommitted ad hoc Windows fork. Never copy `.local.env` or backend R2 credentials to the worker.
 
 Linux CI can test protocol, packaging and rejection fixtures; it cannot establish M4/DirectML/NVIDIA/ROCm performance. NVIDIA and AMD Linux remain release-disabled without actual target evidence. Minimum OS versions and precise runtime pins are recorded after tests, not guessed from model names.
 
 ## 3. Layered validation
 
-| Layer | Required examples |
-| --- | --- |
-| Pure logic | Recipe validation, trimmer parity, error mapping, expiry calculations, revision handling |
-| Backend integration | Real isolated Mongo transactions/indexes; claims, slots, renewals, cancellation and retry |
-| Transport | Authenticated HTTPS/WSS, reconnect, missing/duplicate hints, payload bounds and rate limits |
-| Storage | Real scoped presigned PUT/GET, exact versions/checksums, expiry/refresh, attempt isolation and cleanup |
-| Engine | Real Kim inference, valid voice-only output, provider dispatch evidence, repeat-job isolation |
-| Host service | Correct service account, no interactive login dependence, restart/reboot/logged-out execution |
-| Release lifecycle | Side-by-side candidate, explicit manual activation, verification checks, bad release rollback without backend availability |
-| Product | Existing client requests and history/playback/cancel/delete/usage remain compatible |
+| Layer               | Required examples                                                                                                          |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Pure logic          | Recipe validation, trimmer parity, error mapping, expiry calculations, revision handling                                   |
+| Backend integration | Real isolated Mongo transactions/indexes; claims, slots, renewals, cancellation and retry                                  |
+| Transport           | Authenticated HTTPS/WSS, reconnect, missing/duplicate hints, payload bounds and rate limits                                |
+| Storage             | Real scoped presigned PUT/GET, exact keys/ETags/checksums, expiry/refresh, attempt isolation and cleanup                   |
+| Engine              | Real Kim inference, valid voice-only output, provider dispatch evidence, repeat-job isolation                              |
+| Host service        | Correct service account, no interactive login dependence, restart/reboot/logged-out execution                              |
+| Release lifecycle   | Side-by-side candidate, explicit manual activation, verification checks, bad release rollback without backend availability |
+| Product             | Existing client requests and history/playback/cancel/delete/usage remain compatible                                        |
 
 Fake engines are explicitly test-only and impossible to activate with production registration. A CPU-only mock must never advertise a real validated GPU capability.
 
@@ -73,7 +73,7 @@ downloads, test the exact owner URL, the allowed provider redirect chain,
 redirect loops/limits, an unapproved redirect host, timeout/rate-limit/retry,
 wrong content type, oversized/truncated bytes, wrong digest, safe partial-file
 cleanup, verified-cache reuse, and proof that no model object is written to or
-read from MusicMute S3.
+read from MusicMute R2.
 
 Exercise expiring/replayed enrollment, lost exchange response, idempotent activation and machine revocation. Collect pre-activation success/failure diagnostics; simulate offline upload/reconnect and duplicate batches. Verify no credential or full presigned URL in local/backend logs, errors, process arguments beyond acknowledged one-use enrollment limitations, evidence or archive.
 
@@ -89,9 +89,11 @@ Automatic target selection, canary promotion, capacity-aware fleet rollout, paus
 
 ## 8. Release gates
 
-Both M4 and Z440 must pass actual model, end-to-end S3, service-context, restart/logged-out and rollback tests before the full two-platform MVP is called ready. A missing SSH prerequisite may leave a branch draft; do not turn it into fabricated support.
+Both M4 and Z440 must pass actual model, end-to-end R2, service-context, restart/logged-out and rollback tests before the full two-platform MVP is called ready. A missing SSH prerequisite may leave a branch draft; do not turn it into fabricated support.
 
-All new requests remain gated outside the isolated test environment until owner release approval. Preserve existing history and user data. Keep a backwards-compatible backend window for last-known-good workers and an explicit rollback runbook.
+All new requests remain gated outside the isolated test environment until owner release approval. Preserve existing history and user data. The R2 identity change requires coordinated updated backend/workers and fresh
+MongoDB; old version-ID workers are unsupported. Keep local signed-package rollback
+and an explicit runbook without restoring the old storage provider.
 
 Final evidence includes artifact checksums/signature verification, runtime and
 license/provenance record, a confidential authorization-record reference for

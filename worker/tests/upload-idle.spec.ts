@@ -29,7 +29,7 @@ describe("upload inactivity protection with real HTTP", () => {
         request.resume();
         request.on("end", () => {
           if (mode === "success") {
-            response.writeHead(200, { "x-amz-version-id": "fixture-v1" });
+            response.writeHead(200, { ETag: '"fixture-v1"' });
             response.end();
           }
           if (mode === "cancel") controller.abort(new Error("owner cancelled"));
@@ -55,13 +55,14 @@ describe("upload inactivity protection with real HTTP", () => {
               "Content-Type": "audio/mpeg",
               "If-None-Match": "*",
               "x-amz-checksum-sha256": sha256,
+              "x-amz-meta-sha256": sha256,
             },
           },
           source,
           { bytes: bytes.length, sha256, contentType: "audio/mpeg" },
           controller.signal,
         );
-        if (mode === "success") await expect(run).resolves.toBe("fixture-v1");
+        if (mode === "success") await expect(run).resolves.toBe('"fixture-v1"');
         else if (mode === "cancel")
           await expect(run).rejects.toThrow("owner cancelled");
         else

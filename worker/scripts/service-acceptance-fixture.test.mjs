@@ -113,7 +113,7 @@ test("fixture verifies transfer capabilities, conditional checksummed uploads, a
   const path = `/worker/attempts/${claim.attempt_id}`;
   const complete = {
     ...owner,
-    version_id: "acceptance-output-0-v1",
+    etag: '"acceptance-output-0"',
     recipe_id: claim.recipe.recipe_id,
     recipe_digest: claim.recipe.recipe_digest,
     model_digest: claim.recipe.model_digest,

@@ -73,13 +73,22 @@ const schema = Joi.object({
     .pattern(/^mongodb(?:\+srv)?:\/\//)
     .required(),
   REDIS_URL: Joi.string().required(),
-  AWS_REGION: Joi.string()
-    .pattern(/^[a-z]{2}(?:-[a-z]+)+-\d$/)
+  STORAGE_PROVIDER: Joi.string().valid('r2').required(),
+  STORAGE_ENDPOINT: Joi.string()
+    .uri({ scheme: ['https'] })
     .required(),
-  S3_TRANSFER_ACCELERATION_ENABLED: Joi.boolean().default(false),
-  S3_BUCKET: Joi.string()
-    .pattern(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/)
+  STORAGE_REGION: Joi.string().valid('auto').required(),
+  STORAGE_BUCKET: Joi.string()
+    .pattern(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/)
     .required(),
+  STORAGE_ACCESS_KEY_ID: Joi.string().trim().min(1).required(),
+  STORAGE_SECRET_ACCESS_KEY: Joi.string().trim().min(1).required(),
+  AWS_REGION: Joi.forbidden(),
+  S3_BUCKET: Joi.forbidden(),
+  S3_TRANSFER_ACCELERATION_ENABLED: Joi.forbidden(),
+  AWS_ACCESS_KEY_ID: Joi.forbidden(),
+  AWS_SECRET_ACCESS_KEY: Joi.forbidden(),
+  AWS_SESSION_TOKEN: Joi.forbidden(),
   WORKER_INSTALLATION_CATALOG_PATH: Joi.string()
     .pattern(/^\//)
     .max(4096)
@@ -303,11 +312,18 @@ export function validateEnvironment(
     publicSiteOrigin.hash
   )
     throw new Error('Invalid environment: PUBLIC_SITE_ORIGIN');
+  const storageEndpoint = new URL(String(env.STORAGE_ENDPOINT));
   if (
-    env.S3_TRANSFER_ACCELERATION_ENABLED === true &&
-    String(env.S3_BUCKET).includes('.')
+    storageEndpoint.origin !== env.STORAGE_ENDPOINT ||
+    storageEndpoint.username ||
+    storageEndpoint.password ||
+    storageEndpoint.port ||
+    storageEndpoint.pathname !== '/' ||
+    storageEndpoint.search ||
+    storageEndpoint.hash ||
+    !/^[a-f0-9]{32}\.r2\.cloudflarestorage\.com$/.test(storageEndpoint.hostname)
   )
-    throw new Error('Invalid environment: S3_BUCKET');
+    throw new Error('Invalid environment: STORAGE_ENDPOINT');
   if (
     env.URL_IMPORT_ENABLED === true &&
     (env.URL_IMPORT_PROCESSOR_ENABLED !== true ||
@@ -339,7 +355,9 @@ export function validateEnvironment(
     for (const key of [
       'MONGODB_URI',
       'REDIS_URL',
-      'S3_BUCKET',
+      'STORAGE_BUCKET',
+      'STORAGE_ACCESS_KEY_ID',
+      'STORAGE_SECRET_ACCESS_KEY',
       'FIREBASE_PROJECT_ID',
       'FIREBASE_WEB_API_KEY',
       'RATE_LIMIT_HASH_SECRET',

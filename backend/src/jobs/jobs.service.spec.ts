@@ -178,7 +178,7 @@ describe('public job admission', () => {
     };
     const identity = {
       key: job.inputReservation.key,
-      versionId: 'immutable-version',
+      etag: '"immutable-version"',
       bytes: input.bytes,
       sha256: input.sha256,
       contentType: input.contentType,
@@ -226,7 +226,10 @@ describe('public job admission', () => {
       admissionSnapshot,
       recipeSnapshot: { recipeId: 'kim-vocal-2-v1' },
     };
-    f.jobs.findOne.mockReturnValueOnce(directLean(job));
+    f.jobs.findOne
+      .mockReturnValueOnce(directLean(job))
+      .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(job) });
+    f.jobs.updateOne.mockResolvedValue({ modifiedCount: 1 });
     f.storage.verifyInput.mockRejectedValue(jobError('UPLOAD_NOT_READY'));
 
     await expect(
@@ -236,12 +239,34 @@ describe('public job admission', () => {
     expect(f.cleanup.schedule).toHaveBeenCalledWith(
       expect.objectContaining({
         key: job.inputReservation.key,
-        versionId: null,
         ownerUserId: ownerId,
         reason: 'AUDIO_INPUT_INVALID',
       }),
+      expect.anything(),
     );
     const scheduled = f.cleanup.schedule.mock.calls[0]?.[0];
     expect(scheduled).not.toHaveProperty('url');
+  });
+  it('does not schedule a stale failed confirmation after another request already committed', async () => {
+    const f = fixture();
+    const job = {
+      _id: jobId,
+      userId: ownerId,
+      status: 'awaiting_upload',
+      revision: 2,
+      deletedAt: null,
+      inputObject: null,
+      inputReservation: { ...input, key: 'users/u/jobs/j/input/source.mp3' },
+      admissionSnapshot,
+      recipeSnapshot: { recipeId: 'kim-vocal-2-v1' },
+    };
+    f.jobs.findOne
+      .mockReturnValueOnce(directLean(job))
+      .mockReturnValueOnce({ session: vi.fn().mockResolvedValue(null) });
+    f.storage.verifyInput.mockRejectedValue(jobError('UPLOAD_NOT_READY'));
+    await expect(
+      f.service.confirmUpload(ownerId.toHexString(), jobId.toHexString()),
+    ).rejects.toMatchObject({ response: { code: 'UPLOAD_NOT_READY' } });
+    expect(f.cleanup.schedule).not.toHaveBeenCalled();
   });
 });

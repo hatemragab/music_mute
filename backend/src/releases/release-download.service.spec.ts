@@ -24,7 +24,7 @@ describe('public release download grants', () => {
       revision: 1,
       artifact: {
         key: 'fixture/key',
-        versionId: 'fixture-version',
+        etag: '"fixture-version"',
         bytes: 123,
         sha256Hex: 'b'.repeat(64),
         signerSha256Hex: 'c'.repeat(64),

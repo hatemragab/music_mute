@@ -83,7 +83,7 @@ Use owner-scoped realtime import snapshots until `submitted` or `failed`.
 After `submitted`, subscribe to the job for worker progress and results.
 HTTP detail reads remain available for explicit non-live reads.
 Android sends only the source URL; the backend acquires validated native audio
-and uses the existing S3 pipeline. Existing file-upload calls remain available.
+and uses the existing R2 pipeline. Existing file-upload calls remain available.
 
 Public single-item links are resolved by the private SaaS acquisition adapter.
 The current VideoScale adapter supports YouTube only; other sites return
@@ -112,9 +112,22 @@ in `Sec-WebSocket-Protocol`, as described by OpenAPI's `x-websocket-upgrade`.
 Do not put the credential or ticket in the URL. Hints only wake reconciliation;
 authenticated HTTP remains authoritative for jobs, leases, and commands.
 
-Mobile apps upload and download media directly through short-lived signed S3
+Mobile apps upload and download media directly through short-lived signed R2
 grants returned by the API; use the grant's exact URL and headers, without
-attaching the Firebase bearer token to the S3 request.
+attaching the Firebase bearer token to the R2 request.
+
+## Storage identity (R2-only, approved 2026-09-30)
+
+Stored objects and worker completion/qualification bodies use `etag` in place of
+`version_id`. ETag is a quoted opaque strong HTTP identifier (3–1024 characters),
+not a SHA-256 digest. This is an owner-approved breaking change for fresh MongoDB;
+backend and workers must move together. There is no old-record or old-worker bridge.
+Upload grants require the supplied content type, `x-amz-checksum-sha256`,
+`x-amz-meta-sha256` and `If-None-Match: *` headers. The two checksum values match;
+copy every returned header and never attach application bearer credentials to R2.
+One confirmation HEAD validates key/ETag, bytes, type and signed checksum metadata.
+Required release artifacts must be republished before installation/qualification.
+See [R2 architecture and setup](../r2-storage/README.md).
 
 ## JSON, query, and pagination
 
@@ -130,7 +143,7 @@ attaching the Firebase bearer token to the S3 request.
   `GET /worker/logs/cursor?session_id=<uuid>&incarnation=<uuid>` and returns
   `acknowledged_sequence`. Both query values must be UUIDv4 values for the
   current machine session.
-- Successful API JSON is converted to snake_case by the backend. Signed S3
+- Successful API JSON is converted to snake_case by the backend. Signed R2
   request headers and the worker release's signed metadata retain their own
   external naming contracts; copy those values exactly as supplied.
 
@@ -294,6 +307,7 @@ backward compatible; new UIs use `server_stage_timings` for authoritative totals
 Omitting `media_limits_version` retains 20-minute / 50-MB ceilings for installed
 native clients. Account allowances apply equally to all clients; URL imports use
 the effective account policy. Existing job admission snapshots remain authoritative.
+
 ### Administrator announcement broadcasts
 
 Owner-only `POST /admin/notifications` accepts `{operation_id, title, body, reason}`

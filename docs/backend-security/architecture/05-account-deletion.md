@@ -51,7 +51,7 @@ job, upload, retry, worker, or media-download grants.
 At or after the deadline, the leased cleanup workflow removes or de-identifies:
 
 1. in-flight worker ownership and eligible jobs;
-2. every verified exact input/output/stale-attempt S3 version owned by the account;
+2. every verified exact input/output/stale-attempt R2 version owned by the account;
 3. job history and safe job errors;
 4. usage periods, reservations, adjustments, and policy override;
 5. abuse events and restriction records;
@@ -83,7 +83,7 @@ idempotent and demonstrate completion. It may include a random deletion operatio
 ID, completion time, phase/version, and non-personal outcome codes.
 
 It must not include email, display name, raw Firebase UID, installation/device ID,
-IP, media name, S3 key, checksum, job metadata, quota history, abuse details, or
+IP, media name, R2 key, checksum, job metadata, quota history, abuse details, or
 free-text admin notes.
 
 ## Client and administrator behavior

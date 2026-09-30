@@ -4,6 +4,7 @@ import { createWebServer } from "../server.mjs";
 test("production CSP permits local audio inspection", async ({ page }) => {
   const server = createWebServer({
     env: {
+      PUBLIC_MEDIA_ORIGIN: "https://fixture.r2.cloudflarestorage.com",
       PUBLIC_API_ORIGIN: "https://api.example.com",
       PUBLIC_FIREBASE_API_KEY: "public-test",
       PUBLIC_FIREBASE_AUTH_DOMAIN: "example.firebaseapp.com",

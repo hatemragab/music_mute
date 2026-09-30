@@ -11,7 +11,7 @@ The attached [separate.py](../reference/separate.py) is the authoritative refere
 ## 2. Fixed execution order
 
 ```text
-Pinned S3 input download and checksum verification
+Pinned R2 input download and checksum verification
     → Validate/probe local media and limits
     → Prepare PCM16 stereo 44.1 kHz WAV
     → Kim_Vocal_2.onnx, voice-only separation
@@ -19,7 +19,7 @@ Pinned S3 input download and checksum verification
     → Optional reference-compatible gap trimming
     → MP3 encoding
     → Validate final audio, measure duration, hash bytes
-    → Attempt-scoped S3 upload and conditional completion
+    → Attempt-scoped R2 upload and conditional completion
 ```
 
 All steps use an attempt-local directory. Filenames are generated from trusted identifiers, not user titles. Validate duration after decode, since declarations alone are not trusted. Bound decoded sample count, disk use, subprocess time, output size and media metadata. FFmpeg reads a local file and must not fetch arbitrary playlist/network inputs. Enforce a local-media protocol policy and safe argument arrays; never assemble shell commands from request values.
@@ -104,7 +104,7 @@ Record source/measured input duration, final output duration, removed samples, s
 
 Do not require bit-identical Kim model results across MPS/DirectML floating-point implementations. Require validity and explicitly bounded quality/numerical regression checks on common fixtures.
 
-Output uploads use fresh attempt-specific keys and pinned S3 versions. The client-visible job reference is assigned only by successful backend finalization.
+Output uploads use fresh attempt-specific create-only keys and verified R2 ETags. The client-visible job reference is assigned only by successful backend finalization.
 
 ## 7. Model/artifact manifest
 
@@ -112,6 +112,6 @@ Record filename `Kim_Vocal_2.onnx`, provenance, verified SHA-256 hexadecimal dig
 
 Download/cache by content digest, verify before use, and keep old model artifacts required by a rollback. Dependency pins must come from branch B feasibility tests. Do not use a compatible GPU vendor as evidence that the actual Kim graph is accelerated.
 
-The benchmark fixture is a versioned rights-cleared asset uploaded once by the owner/backend test harness to a scoped S3 location. Installer services download it with a scoped grant and upload a small result only under a fixture-specific grant. They never receive S3 account credentials.
+The benchmark fixture is an immutable rights-cleared asset uploaded once by the owner/backend test harness to a scoped R2 location. Installer services download it with a scoped grant and upload a small result only under a fixture-specific grant. They never receive R2 account credentials.
 
 Future Demucs/MDX/dereverb/normalize/bass/drum/karaoke steps fit this recipe boundary, but are not installed or implemented now.

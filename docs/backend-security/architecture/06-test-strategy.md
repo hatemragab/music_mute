@@ -4,7 +4,7 @@
 
 The implementation is complete only when observable behavior is tested at the
 correct layer. Unit tests do not prove MongoDB transaction races; a local build does
-not prove S3 policy; mocks do not prove a deployed provider.
+not prove R2 policy; mocks do not prove a deployed provider.
 
 ## Evidence labels
 
@@ -29,7 +29,7 @@ tested commit, and a short sanitized observation.
 | Redis integration  | Atomic multi-bucket limits, TTL, hashed keys, outage/timeout behavior                          |
 | HTTP E2E           | Auth, DTO validation, ownership, `Retry-After`, policy/usage/admin contracts                   |
 | Storage simulation | Exact key/version/size/checksum, URL expiry inputs, cleanup retry                              |
-| Real isolated S3   | Bucket-policy age, signed headers, exact object/version, lifecycle observation when authorized |
+| Real isolated R2   | Bucket-policy age, signed headers, exact object/version, lifecycle observation when authorized |
 | Dashboard          | Permissions, effective/global display, validation, adverse/error/loading states                |
 | Android/iOS        | Backend policy consumption, boundary copy, retry/idempotency persistence, deletion lifecycle   |
 | Documentation      | Markdown formatting, relative links, JSON parse/schema checks, no stale limits                 |
@@ -107,7 +107,7 @@ For every numeric limit, test:
 - recovery does not award quota or revive stale worker ownership;
 - purge inventory covers schemas introduced by A-D;
 - failure after each purge phase resumes without double deletion;
-- S3 missing/temporary error behavior;
+- R2 missing/temporary error behavior;
 - Firebase failure leaves retryable fenced state;
 - final tombstone contains no prohibited personal data;
 - Android/iOS/dashboard/public copy all show fifteen days.

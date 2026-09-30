@@ -69,7 +69,7 @@ export interface AdmissionSnapshot {
 }
 export interface ObjectIdentity {
   key: string;
-  versionId: string;
+  etag: string;
   bytes: number;
   sha256: string;
   contentType: string;

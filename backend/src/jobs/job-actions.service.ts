@@ -1,3 +1,4 @@
+import { isStorageEtag } from '../storage/object-identity.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -248,6 +249,7 @@ export class JobActionsService {
             userId: owner,
             deletedAt: null,
             revision: original.revision,
+            reservationCleanupScheduledAt: null,
           },
           { $inc: { revision: 1 } },
           { session },
@@ -395,8 +397,8 @@ export class JobActionsService {
     const input = job.inputObject;
     if (
       !input ||
-      !input.versionId ||
-      input.versionId === 'null' ||
+      job.reservationCleanupScheduledAt != null ||
+      !isStorageEtag(input.etag) ||
       input.key !== job.inputReservation.key ||
       input.bytes !== job.inputReservation.bytes ||
       input.sha256 !== job.inputReservation.sha256 ||

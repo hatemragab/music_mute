@@ -1,5 +1,7 @@
 # MusicMute
 
+Private R2 Standard is the only application storage provider. Read the [current storage guide](docs/r2-storage/README.md) before storage changes. Credentials stay backend-only; old version IDs, acceleration and AWS setup are unsupported. Historical validation records are not live R2 proof.
+
 **Remove background music. Keep the voice.**
 
 MusicMute is an AI-powered audio source separation project with native Android
@@ -20,7 +22,7 @@ policy. Source changes and local test results do not establish live availability
 - **Native mobile apps:** Kotlin/Jetpack Compose on Android and Swift/SwiftUI on iOS.
 - **End-user web app:** responsive English/Arabic browser journeys for accounts, imports, jobs, library, and playback.
 - **Processing library:** retain job history and completed voice-only results.
-- **Private transfers:** authenticated APIs and short-lived S3 upload/download grants.
+- **Private transfers:** authenticated APIs and short-lived R2 upload/download grants.
 - **Job coordination:** durable processing state, cancellation, and recovery support.
 - **Realtime updates:** raw WebSocket job snapshots and per-job queue position on
   Android, iOS and web, plus live administrator views.
@@ -31,7 +33,7 @@ policy. Source changes and local test results do not establish live availability
 
 URL imports use private SaaS adapters:
 `client → NestJS → private adapter → SaaS`, then
-`audio bytes → adapter → NestJS validation → private S3 → worker`.
+`audio bytes → adapter → NestJS validation → private R2 → worker`.
 VideoScale accepts the enabled public item sites, including YouTube, Instagram,
 TikTok, Vimeo, SoundCloud and Facebook/Reels; usable separate audio is required.
 Only YouTube has recorded live end-to-end proof. Provider-specific APIs and
@@ -52,9 +54,9 @@ flowchart LR
     API --> Firebase[Firebase Authentication]
     API --> MongoDB[(MongoDB)]
     API --> Redis[(Redis)]
-    API --> S3[(Private S3 storage)]
-    Apps -->|Signed transfers| S3
-    Web -->|Signed transfers| S3
+    API --> R2[(Private R2 storage)]
+    Apps -->|Signed transfers| R2
+    Web -->|Signed transfers| R2
 ```
 
 | Component       | Technology                             | Setup and details                   |
@@ -62,7 +64,7 @@ flowchart LR
 | Android app     | Kotlin, Jetpack Compose                | [android/](android/README.md)       |
 | iOS app         | Swift, SwiftUI                         | [ios/](ios/README.md)               |
 | Web client      | React, TypeScript, Vite                | [web-client/](web-client/README.md) |
-| API             | NestJS, TypeScript, MongoDB, Redis, S3 | [backend/](backend/README.md)       |
+| API             | NestJS, TypeScript, MongoDB, Redis, R2 | [backend/](backend/README.md)       |
 | Admin dashboard | React, TypeScript, Vite, Tailwind CSS  | [dashboard/](dashboard/README.md)   |
 
 ## Getting started
@@ -167,8 +169,8 @@ The apps integrate Firebase Authentication and optional Firebase Messaging.
 Messaging registration depends on notification permission and successful backend
 device/session synchronization; iOS also requires APNs provisioning/token setup.
 Client SDK integration does not establish live provider configuration or delivery.
-Local files use the backend's short-lived signed S3 upload grants. URL imports
-use `/media-imports`: the server acquires audio and uploads it to S3. Mobile
+Local files use the backend's short-lived signed R2 upload grants. URL imports
+use `/media-imports`: the server acquires audio and uploads it to R2. Mobile
 clients never acquire provider media or hold SaaS credentials. See
 [the provider flow](video_providers/README.md).
 
@@ -189,7 +191,7 @@ firebase apps:sdkconfig IOS 1:412717301830:ios:29c661efe91a5b76a9ca47 --project 
 ```
 
 Run these commands before native builds in a fresh checkout. Supply Admin SDK,
-AWS, database, Redis, SMTP, and signing credentials only through ignored local
+R2, database, Redis, SMTP, and signing credentials only through ignored local
 files or the deployment platform's secret/environment settings.
 
 ## Validate Android

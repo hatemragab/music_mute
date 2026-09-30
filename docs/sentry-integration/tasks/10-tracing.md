@@ -15,7 +15,7 @@ Status: TODO, follow-up scope. Priority: P2. Dependency: SEN-09 error-monitoring
 3. Add `sentry-trace` and `baggage` to the backend's explicit CORS allowlist when
    browser propagation is enabled. Add W3C headers only if the chosen integration
    requires them. Validate length/format and ignore malformed or untrusted context.
-4. Exclude S3 uploads/downloads, signed grants, Firebase, YouTube, owner-hosted
+4. Exclude R2 uploads/downloads, signed grants, Firebase, YouTube, owner-hosted
    model downloads and arbitrary URLs from propagation. Test URLs/redirects and
    each transfer transport rather than relying on a permissive regex.
 5. Verify Router 8 and native networking compatibility with pinned SDKs. Use

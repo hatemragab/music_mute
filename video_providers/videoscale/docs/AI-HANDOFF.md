@@ -1,5 +1,9 @@
 # VideoScale implementation handoff
 
+Storage now uses [private R2 Standard](../../../docs/r2-storage/README.md). The
+dated S3 size/checksum/version proof below belongs to the earlier deployment and
+is not live R2 acceptance; no paid import should be replayed just for migration.
+
 Updated 2026-09-28. Read [provider README](../README.md), [tasks](../TASKS.md),
 [private contract](../openapi.yaml) and [deployment evidence](DEPLOYMENT.md).
 The cross-provider authority is [provider architecture](../../README.md) and
@@ -9,11 +13,11 @@ The cross-provider authority is [provider architecture](../../README.md) and
 
 `Apps -> NestJS -> private provider adapter -> VideoScale`
 
-`SaaS audio -> adapter -> NestJS validation -> private S3 -> existing worker`
+`SaaS audio -> adapter -> NestJS validation -> private R2 -> existing worker`
 
 - NestJS uses `AudioAcquisitionClient` and only
   `AUDIO_ACQUISITION_API_URL` / `AUDIO_ACQUISITION_API_KEY`.
-- The adapter alone receives the VideoScale credential. No MongoDB, S3 or
+- The adapter alone receives the VideoScale credential. No MongoDB, R2 or
   Firebase credentials belong in it. No public exposure or published ports.
 - Included metadata is sanitized into nullable MongoDB `extra_data`.
   Titles use its optional `title` field. No extra paid metadata requests.

@@ -192,7 +192,7 @@ export class ImportProcessor extends WorkerHost {
                 method: 'PUT',
                 headers: {
                   ...upload.headers,
-                  // A stream has no inferred length; S3 signs the measured byte count.
+                  // A stream has no inferred length; the storage signer binds the measured byte count.
                   'Content-Length': String(downloaded.bytes),
                 },
                 redirect: 'error',
@@ -259,7 +259,7 @@ export class ImportProcessor extends WorkerHost {
       record.userId.toHexString(),
       record.jobRequestId,
     );
-    // Existing cancelled-job storage maintenance reclaims only this reservation's S3 key.
+    // Existing cancelled-job storage maintenance reclaims only this reservation's object key.
     await this.imports.failAcquisition(record, safeImportError(error));
   }
 

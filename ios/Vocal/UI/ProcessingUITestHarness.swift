@@ -230,7 +230,8 @@
       UploadGrant(
         method: .put, url: URL(string: "https://fixture.invalid/upload")!,
         headers: [
-          "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
+          "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture",
+          "x-amz-meta-sha256": "fixture", "If-None-Match": "*",
         ],
         expiresAt: Date().addingTimeInterval(60))
     }
@@ -277,7 +278,7 @@
   @MainActor private final class ProcessingFixtureTransfers: BackgroundTransferring {
     var onCompletion: ((TransferCompletion) async -> Void)?
     var onProgress: ((TransferContext, TransferProgressSnapshot) -> Void)?
-    func startUpload(file: S3MultipartFile, grant: UploadGrant, context: TransferContext)
+    func startUpload(file: ObjectStorageUploadFile, grant: UploadGrant, context: TransferContext)
       async throws -> Int
     {
       Task { @MainActor in

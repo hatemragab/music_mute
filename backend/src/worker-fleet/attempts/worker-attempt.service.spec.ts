@@ -45,7 +45,7 @@ function fixture() {
     deletedAt: null,
     inputObject: {
       key: `users/${userId.toHexString()}/jobs/${jobId.toHexString()}/input/source.mp3`,
-      versionId: 'input-v1',
+      etag: '"input-v1"',
       bytes: 100,
       sha256: 'A'.repeat(43) + '=',
       contentType: 'audio/mpeg',
@@ -116,7 +116,7 @@ function fixture() {
     },
   };
   const storage = {
-    isPinnedObjectAvailable: vi.fn().mockResolvedValue(true),
+    isObjectAvailable: vi.fn().mockResolvedValue(true),
     createDownloadGrant: vi.fn().mockResolvedValue({
       url: 'https://storage.invalid/input',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -127,12 +127,13 @@ function fixture() {
       headers: {
         'Content-Type': 'audio/mpeg',
         'x-amz-checksum-sha256': 'B'.repeat(43) + '=',
+        'x-amz-meta-sha256': 'B'.repeat(43) + '=',
         'If-None-Match': '*',
       },
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     }),
-    findUploadedVersion: vi.fn().mockResolvedValue(null),
-    verifyUploadedVersion: vi.fn(),
+    findUploadedObject: vi.fn().mockResolvedValue(null),
+    verifyUploadedObject: vi.fn(),
   };
   const cleanup = {
     schedule: vi.fn().mockResolvedValue(undefined),
@@ -193,7 +194,7 @@ const output = {
 };
 const completion = {
   ...ownership,
-  versionId: 'output-v1',
+  etag: '"output-v1"',
   recipeId: 'kim-vocals-v2' as const,
   recipeRevision: 4,
   recipeDigest: 'b'.repeat(64),
@@ -272,9 +273,7 @@ describe('worker attempt transfers and finalization', () => {
       object: f.job.inputObject,
     });
 
-    expect(f.storage.isPinnedObjectAvailable).toHaveBeenCalledWith(
-      f.job.inputObject,
-    );
+    expect(f.storage.isObjectAvailable).not.toHaveBeenCalled();
     expect(f.usage.reserveDownloadGrant).toHaveBeenCalledWith(
       expect.objectContaining({
         accountId: f.job.userId,
@@ -292,9 +291,9 @@ describe('worker attempt transfers and finalization', () => {
     );
   });
 
-  it('does not charge or sign a missing pinned worker input', async () => {
+  it('does not charge or sign when the confirmed worker input identity is missing', async () => {
     const f = fixture();
-    f.storage.isPinnedObjectAvailable.mockResolvedValue(false);
+    f.job.inputObject = null as never;
 
     await expect(
       f.service.inputGrant(principal, attemptId, ownership),
@@ -319,6 +318,7 @@ describe('worker attempt transfers and finalization', () => {
         key: expectedKey,
         reason: 'AUDIO_OUTPUT_ORPHANED',
         nextAt: f.attempt.deadlineAt,
+        settleUntil: new Date(f.attempt.deadlineAt.getTime() + 3_600_000),
       }),
       expect.any(Object),
     );
@@ -332,12 +332,12 @@ describe('worker attempt transfers and finalization', () => {
     await f.service.outputGrant(principal, attemptId, output);
     const object = {
       key: f.attempt.outputReservation.key,
-      versionId: 'recovered-version',
+      etag: '"recovered-version"',
       bytes: output.bytes,
       sha256: output.sha256,
       contentType: output.contentType,
     };
-    f.storage.findUploadedVersion.mockResolvedValue(object);
+    f.storage.findUploadedObject.mockResolvedValue(object);
 
     const replay = await f.service.outputGrant(principal, attemptId, output);
 
@@ -349,9 +349,9 @@ describe('worker attempt transfers and finalization', () => {
   it('records server finalization when an older worker omits execution timings', async () => {
     const f = fixture();
     await f.service.outputGrant(principal, attemptId, output);
-    f.storage.verifyUploadedVersion.mockResolvedValue({
+    f.storage.verifyUploadedObject.mockResolvedValue({
       key: f.attempt.outputReservation.key,
-      versionId: completion.versionId,
+      etag: completion.etag,
       bytes: output.bytes,
       sha256: output.sha256,
       contentType: output.contentType,
@@ -372,7 +372,7 @@ describe('worker attempt transfers and finalization', () => {
     ]);
   });
 
-  it('publishes one verified immutable version and replays identical completion', async () => {
+  it('publishes one verified immutable object and replays identical completion', async () => {
     const f = fixture();
     const lowerBitrateCompletion = {
       ...completion,
@@ -385,12 +385,12 @@ describe('worker attempt transfers and finalization', () => {
     await f.service.outputGrant(principal, attemptId, output);
     const object = {
       key: f.attempt.outputReservation.key,
-      versionId: lowerBitrateCompletion.versionId,
+      etag: lowerBitrateCompletion.etag,
       bytes: output.bytes,
       sha256: output.sha256,
       contentType: output.contentType,
     };
-    f.storage.verifyUploadedVersion.mockResolvedValue(object);
+    f.storage.verifyUploadedObject.mockResolvedValue(object);
 
     await expect(
       f.service.complete(principal, attemptId, lowerBitrateCompletion),
@@ -399,7 +399,7 @@ describe('worker attempt transfers and finalization', () => {
       f.service.complete(principal, attemptId, lowerBitrateCompletion),
     ).resolves.toMatchObject({ status: 'ready', replayed: true });
 
-    expect(f.storage.verifyUploadedVersion).toHaveBeenCalledOnce();
+    expect(f.storage.verifyUploadedObject).toHaveBeenCalledOnce();
     expect(f.job.stageTimingAttempts).toEqual([
       {
         attemptId,
@@ -445,7 +445,7 @@ describe('worker attempt transfers and finalization', () => {
     await expect(
       f.service.complete(principal, attemptId, completion),
     ).rejects.toThrow('Worker resource changed');
-    expect(f.storage.verifyUploadedVersion).not.toHaveBeenCalled();
+    expect(f.storage.verifyUploadedObject).not.toHaveBeenCalled();
     expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
@@ -461,7 +461,7 @@ describe('worker attempt transfers and finalization', () => {
     await expect(
       f.service.complete(principal, attemptId, completion),
     ).rejects.toThrow('Worker resource changed');
-    expect(f.storage.verifyUploadedVersion).not.toHaveBeenCalled();
+    expect(f.storage.verifyUploadedObject).not.toHaveBeenCalled();
     expect(f.cleanup.schedule).toHaveBeenCalledWith(
       expect.objectContaining({
         key: staleKey,

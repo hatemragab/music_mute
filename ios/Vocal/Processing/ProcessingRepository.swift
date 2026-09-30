@@ -480,7 +480,7 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
           let inputURL = try await store.inputURL(for: operation)
           let destination = try await store.multipartURL(for: operation, transferId: transferId)
           let builder = Task.detached(priority: .utility) {
-            try S3MultipartFile.build(
+            try ObjectStorageUploadFile.build(
               inputURL: inputURL, declaration: operation.input,
               destination: destination, policyVersion: operation.policyVersion)
           }
@@ -545,7 +545,7 @@ func acceptsCallback(captured: SessionFence, current: SessionFence?) -> Bool { c
         guard $0.transferId == context.transferId,
           $0.phase == .uploading || $0.phase == .confirmationPending
         else { return }
-        // Even a lost/error response may follow a successful S3 write. Confirm first.
+        // Even a lost/error response may follow a successful object write. Confirm first.
         $0.phase = .confirmationPending
         $0.transferTaskId = nil
         $0.lastFailureCode = event.succeeded ? nil : "processing_upload_uncertain"

@@ -19,12 +19,21 @@ The Node supervisor owns machine authentication, backend reconciliation, job
 authority, leases, transfers, child lifecycle and sanitized diagnostics. The
 Python child owns direct-input inference and result metadata. Audio
 bytes never travel through the child control pipe, and the child never receives
-backend or S3 credentials.
+backend or R2 credentials.
 
 The shared Kim loader verifies the full model SHA-256 and constructs the pinned
 MDX architecture with fixed inference parameters. It does not use upstream model
 catalog discovery or download metadata during processing. Model acquisition is
 the separate, verified owner-source installation step.
+
+## R2 storage boundary
+
+Workers and CLI consume backend grants and receive no R2 credentials. The updated
+backend and worker share quoted `etag` identities and signed checksum metadata;
+old version-ID contracts are unsupported. Runtime catalogs/qualification fixtures
+start empty until verified R2 artifacts are published. See
+[storage setup and artifact requirements](../docs/r2-storage/README.md). Historical
+validation sections below do not establish live R2 acceptance.
 
 ## Public-upload security boundary
 
@@ -171,7 +180,7 @@ mw run --config /absolute/path/runtime.json
 Use mode `0600` for the credential on POSIX systems. Plain HTTP is rejected
 except when `allowInsecureLoopback` is explicitly true for isolated local
 development. The model is not redistributed by this repository or through
-MusicMute S3. The installer must download it from the exact owner-authorized
+MusicMute R2. The installer must download it from the exact owner-authorized
 upstream URL in authenticated catalog metadata, verify its size and SHA-256,
 and only then place it in the local content-addressed cache.
 
@@ -197,7 +206,7 @@ Only two runtime adapters are enabled: native macOS ARM64/PyTorch MPS with launc
 and owner-only POSIX credentials, and Windows x64/DirectML adapter 0 with a
 Windows Service and LocalService NTFS ACLs. Linux, CUDA, MIGraphX, Intel Mac and
 unqualified architectures remain disabled. D6 verifies this local boundary,
-but passing local tests does not certify service startup, live S3, logged-out
+but passing local tests does not certify service startup, live R2, logged-out
 GPU execution or production readiness; those remain D4/D5 platform gates.
 
 ## Install the shared npm CLI
@@ -321,7 +330,7 @@ must report `>=24.18.0 <25`; FFmpeg and FFprobe must be the same version in
 components require a newer verified private release. Global tools are detected
 only for diagnostics and are never changed or spliced into the service. A model
 cache miss downloads only from its owner-authorized upstream URL, never from
-MusicMute S3.
+MusicMute R2.
 
 Available local commands are `status`, `start`, `stop`, `restart`, `pause`,
 `drain`, `resume`, `logs`, `doctor`, `benchmark`, `update --check`, `update`,
@@ -656,7 +665,7 @@ Candidate 14 passed native capacity approval, two-slot activation, overlapping
 600-second jobs, corruption/cancellation isolation, active drain and repeated stop
 against synthetic loopback backend/storage. Its short-fixture throughput gains
 were 1.52–1.54x with matching decoded outputs. Boot and two-job processing also
-passed without interactive sign-in. Real production backend/S3 acceptance is
+passed without interactive sign-in. Real production backend/R2 acceptance is
 separate; see the dated implementation ledger and current readiness report.
 
 The macOS two-worker command uses the same coordinator and validators. Startup,
@@ -747,13 +756,13 @@ PowerShell policy, alter global Node/Python, or install/replace a GPU driver.
 Candidate `0.1.0-win.20260929.3` passed native Z440 LocalService qualification
 for both current recipes, including accelerated DirectML dispatch with no CPU
 node events. See the ledger for artifact identity and limits. Later source
-changes still require a new package. Logged-out/reboot recovery, live S3 and
+changes still require a new package. Logged-out/reboot recovery, live R2 and
 two-worker acceptance remain open; package or fixture tests do not prove them.
 
 ### Offline song benchmark (macOS)
 
 With the worker already drained and stopped, benchmark the UVR-compatible MPS
-engine directly. This command does not contact the backend, S3, or a database.
+engine directly. This command does not contact the backend, R2, or a database.
 During local development, build this worktree and run its CLI directly so the
 new command is not confused with an older installed release. Use a full-length
 local song and keep its source unchanged across reports:
@@ -836,7 +845,7 @@ the default setting; this is not an end-to-end production speed guarantee.
 The uploader starts a streaming PUT after receiving the checksum-bound backend
 grant. It hashes bounded chunks while uploading and withholds the final chunk
 until size and checksum match. There is no full-file buffer or extra pre-upload
-hash pass. S3's signed checksum, immutable version, retries and completion
+hash pass. R2's signed checksum, create-only key, ETag, retries and completion
 checks remain required. The final checksum and upload grant must exist before
 upload starts; network latency cannot be eliminated by local processing.
 
@@ -853,7 +862,7 @@ test also passed with fixture storage. A real local MPS smoke run using a
 six-second synthetic fixture produced and decoded the final MP3, ran mandatory
 trimming, and left no generated WAVs. Its measured stages were 1.186 seconds
 separation, 0.002 seconds trimming, and 0.141 seconds encoding. This is a
-functional smoke test, not a comparative benchmark or live-S3/deployment proof.
+functional smoke test, not a comparative benchmark or live-R2/deployment proof.
 Android DirectDebug unit tests, lint and APK assembly passed; no device/UI or
 listening acceptance was performed.
 

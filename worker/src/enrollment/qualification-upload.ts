@@ -6,7 +6,7 @@ import type { WorkerEnrollmentClient } from "./enrollment-client.js";
 import { TransferBudget } from "./transfer-budget.js";
 
 const MAX_RESULT_BYTES = 30_000_000;
-const VERSION_ID = /^[A-Za-z0-9+/=_.,:-]{1,1024}$/u;
+const ETAG = /^"[\x21\x23-\x7e]{1,1022}"$/u;
 
 type QualificationClient = Pick<
   WorkerEnrollmentClient,
@@ -82,7 +82,7 @@ export async function uploadQualificationResult(
     options.signal,
   );
   let response: Response | undefined;
-  let versionId: string;
+  let etag: string;
   try {
     budget.signal.throwIfAborted();
     let offset = 0;
@@ -116,10 +116,10 @@ export async function uploadQualificationResult(
     response = await (options.fetch ?? fetch)(grant.url, request);
     budget.signal.throwIfAborted();
     if (!response.ok) throw new Error("Qualification result upload failed");
-    const version = response.headers.get("x-amz-version-id");
-    if (version === null || !VERSION_ID.test(version))
-      throw new TypeError("Qualification upload version is unavailable");
-    versionId = version;
+    const returnedEtag = response.headers.get("ETag");
+    if (returnedEtag === null || !ETAG.test(returnedEtag))
+      throw new TypeError("Qualification upload ETag is unavailable");
+    etag = returnedEtag;
   } finally {
     budget.dispose();
     await response?.body?.cancel().catch(() => undefined);
@@ -129,7 +129,7 @@ export async function uploadQualificationResult(
     options.installationId,
     options.installationCredential,
     options.confirmRequestId,
-    versionId,
+    etag,
   );
   return {
     bytes: payload.byteLength,

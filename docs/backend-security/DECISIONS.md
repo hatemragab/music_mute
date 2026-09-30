@@ -102,9 +102,9 @@ effective policy source, and next reset time.
 - A repeated HTTP request with the same idempotency key returns the same grant and
   does not increment counters again.
 - Asking for a new grant increments daily and monthly grant counters even if the
-  URL is unused, because the S3 request capability was created.
+  URL is unused, because the R2 request capability was created.
 - Confirmed bytes increment only after exact key, owner, size, type, checksum, and
-  immutable version verification.
+  ETag and signed checksum-metadata verification.
 - Reconfirming the same verified object is idempotent.
 - Five client/input attempts are tracked by a server-owned logical-audio family;
   changing a request ID alone does not erase the family count.
@@ -130,29 +130,22 @@ effective policy source, and next reset time.
   processing reservation fully, retain a safe error, and schedule temporary-object
   cleanup.
 
-## 8. S3 storage and download accounting
+## 8. Private R2 storage and download accounting
 
-- The bucket remains private and every grant is for one exact owner-scoped key.
-- Existing checksum, exact-size, content-type, immutable-version, and attempt-fence
-  validation remains mandatory.
-- Upload and download URLs expire in no more than ten minutes. A bucket policy also
-  denies presigned requests whose signature age exceeds 600,000 milliseconds.
-- Presigned URLs are bearer capabilities and can be reused until expiry. The API
-  therefore counts download grants, not unverifiable client GET completions.
-- Estimated download bytes equal the immutable object size at grant issuance.
-- User result grants count toward both account download limits and the service
-  outbound ceiling. Worker input downloads count toward the service ceiling but do
-  not consume the user's result-download grant count.
-- Use a locally cached valid result for playback when available without requesting
-  another URL.
-- Successful result objects remain indefinitely while the job/account exists.
-- Inputs, abandoned uploads, invalid uploads, cancelled jobs, failed attempts, and
-  stale results enter idempotent cleanup and should be removed within 24 hours of
-  terminal eligibility.
-- Use Intelligent-Tiering Frequent, automatic Infrequent after 30 inactive days,
-  and automatic Archive Instant Access after 90 inactive days.
-- Do not enable optional Archive Access or Deep Archive Access for launch because
-  they require asynchronous restore before playback.
+The storage portions of the original launch decisions are superseded by
+[the R2-only approved contract](../r2-storage/README.md). Existing account/service
+limits remain configured by the current backend policy.
+
+- Keep the Standard bucket private and grants exact/owner scoped.
+- Validate real checksum-bound PUTs, size/type, quoted ETag and attempt fencing.
+- Use unique never-reused create-only keys; no AWS version ID, tiering, ACL,
+  acceleration or signature-age bucket policy.
+- Preserve bounded signed expiration, application authorization and grant/estimated
+  byte accounting. A presigned URL can be reused until expiry.
+- Reuse valid cached playback; normal signing makes no storage request.
+- Retain successful originals/results until job/account deletion.
+- Clean failed/invalid/abandoned/stale keys durably after their safe transfer window.
+- Avoid repeated HEAD/list/health traffic; one metadata HEAD confirms each upload.
 
 ## 9. Abuse and restrictions
 
@@ -177,7 +170,7 @@ effective policy source, and next reset time.
   cannot create jobs or upload/download grants.
 - Recovery restores the existing account and current-period usage; it does not
   award another monthly allowance or duplicate jobs.
-- After the deadline, cleanup permanently removes owned S3 input/output objects,
+- After the deadline, cleanup permanently removes owned R2 input/output objects,
   jobs, usage/override/restriction data, installation ownership links, personal
   profile data, and the Firebase identity through the existing retryable flow.
 - Keep only a minimal non-personal completion tombstone needed for idempotency and

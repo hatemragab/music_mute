@@ -1,5 +1,5 @@
 {
-  "description": "Observed synthetic responses from the compiled AppModule workflow with real isolated MongoDB and Redis; Firebase identity, S3 and APK verification use doubles. UUIDs, document IDs, timestamps and one-time keys are normalized. These are examples, not credentials or live service proof.",
+  "description": "Observed synthetic responses from the compiled AppModule workflow with real isolated MongoDB and Redis; Firebase identity, Object storage and APK verification use doubles. UUIDs, document IDs, timestamps and one-time keys are normalized. These are examples, not credentials or live service proof.",
   "responses": [
     {
       "method": "GET",

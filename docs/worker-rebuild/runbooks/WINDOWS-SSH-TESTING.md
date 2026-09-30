@@ -44,7 +44,7 @@ An SSH tunnel is a test transport, not a production architecture requirement. Ki
 
 ## 3. Artifact transfer and credential isolation
 
-Build the exact Windows runtime/artifact on the approved build path, verify signatures/digests, then transfer only worker artifacts and scoped synthetic test material. No `.local.env`, AWS access keys, Firebase admin credentials, MongoDB/Redis URLs, backend signing keys or personal audio.
+Build the exact Windows runtime/artifact on the approved build path, verify signatures/digests, then transfer only worker artifacts and scoped synthetic test material. No `.local.env`, R2 access keys, Firebase admin credentials, MongoDB/Redis URLs, backend signing keys or personal audio.
 
 Use a short-lived enrollment code for the test installation. Output URLs are issued by the backend per attempt. The service stores only its machine credential with restrictive ACLs. Use the provider/model pins accepted in B and the actual CLI syntax implemented in D; the package name/version/domain in design examples may not yet be published.
 
@@ -58,7 +58,7 @@ Test paths containing spaces, permissions to model cache/temp directories, missi
 
 ## 5. End-to-end and failures
 
-Run all recipe combinations through real leased S3 jobs, with default one slot. Test a second slot only after an explicit throughput/memory benchmark permits it. A DirectML session must not execute concurrent inference calls; each child owns its session.
+Run all recipe combinations through real leased R2 jobs, with default one slot. Test a second slot only after an explicit throughput/memory benchmark permits it. A DirectML session must not execute concurrent inference calls; each child owns its session.
 
 Disconnect SSH while keeping the worker's normal backend route alive to show the service does not depend on the management shell. Separately remove the test backend route to check renewal expiry and job reassignment. Reconnect and verify stale attempt rejection.
 
@@ -66,6 +66,6 @@ Test child crash, supervisor/service restart, graceful drain, repair, optional u
 
 ## 6. Cleanup and report
 
-Revoke test-only enrollment/machine credentials when the run is over, drain before removing services, and delete only the dedicated Music Mute test directory/artifacts. The Mac backend owns exact S3 test cleanup; do not grant the Windows worker bucket deletion/listing permissions for teardown.
+Revoke test-only enrollment/machine credentials when the run is over, drain before removing services, and delete only the dedicated Music Mute test directory/artifacts. The Mac backend owns exact R2 test cleanup; do not grant the Windows worker bucket deletion/listing permissions for teardown.
 
 Store sanitized evidence with Windows build, GPU driver, chosen provider/package/model/recipe digests, service context, benchmark measurements and remaining blockers. Never upload SSH config containing private connection details or tokens into the PR.

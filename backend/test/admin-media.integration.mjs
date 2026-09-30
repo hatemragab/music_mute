@@ -74,11 +74,11 @@ test(
         requestHash: 'a'.repeat(64),
         status: 'ready',
         inputReservation: reservation,
-        inputObject: { ...identity, versionId: 'input-pinned' },
+        inputObject: { ...identity, etag: '"input-pinned"' },
         outputObject: {
           ...identity,
           key: 'private/vocals.mp3',
-          versionId: 'output-pinned',
+          etag: '"output-pinned"',
         },
       });
       const audit = new AdminAuditService(events);
@@ -90,10 +90,9 @@ test(
       );
       let signed = 0;
       const storage = {
-        isPinnedObjectAvailable: async () => true,
         createMediaGrant: async (object) => {
           signed++;
-          assert.equal(object.versionId, 'output-pinned');
+          assert.equal(object.etag, '"output-pinned"');
           return {
             url: 'https://example.invalid/private-signed-url',
             expiresAt: new Date(Date.now() + 300000).toISOString(),
@@ -120,7 +119,7 @@ test(
         await events.find().lean(),
         await receipts.find().lean(),
       ]);
-      assert.equal(/private|signed-url|filename|versionId/.test(stored), false);
+      assert.equal(/private|signed-url|filename|etag/.test(stored), false);
       await assert.rejects(
         service.grant(actor, job._id.toString(), first),
         (e) => e.getStatus() === 409,
@@ -146,7 +145,7 @@ test(
       assert.equal(signed, beforeDeletion);
       assert.equal(await events.countDocuments(), 1);
       await users.updateOne({ _id: userId }, { $set: { status: 'active' } });
-      storage.isPinnedObjectAvailable = async () => false;
+      await jobs.updateOne({ _id: job._id }, { $set: { outputObject: null } });
       await assert.rejects(
         service.grant(actor, job._id.toString(), body()),
         (e) => e.getStatus() === 410,

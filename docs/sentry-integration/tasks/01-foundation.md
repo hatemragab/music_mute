@@ -17,7 +17,7 @@ Status: TODO. Priority: P0. Dependencies: none.
 - Define eligible errors and reporting ownership. Establish approved tags,
   context bounds, deduplication/rate limits, disabled defaults, queue limits,
   flush deadlines, and restart/build semantics for disabling telemetry.
-- Create synthetic fixtures for nested JWTs, bearer headers, cookies, signed S3
+- Create synthetic fixtures for nested JWTs, bearer headers, cookies, signed R2
   queries, enrollment codes, database URIs, email, media names, POSIX/Windows user
   paths, Python locals, and `NSError.userInfo`. Use invented data only.
 - Review SDK event channels and default integrations, including native crash

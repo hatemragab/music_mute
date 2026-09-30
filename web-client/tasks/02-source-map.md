@@ -25,16 +25,16 @@ account recovery integration suites. Follow existing fixture patterns.
 Prefix for paths in this section:
 `android/app/src/main/java/com/hatem/musicmute/`.
 
-| Area                     | Source starting points                                                                                                                                                                 |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Navigation and app state | `MainActivity.kt`, `VocalApplication.kt`, `ui/VocalApp.kt`, `state/`                                                                                                                   |
-| Identity and account     | `auth/AuthSessionCoordinator.kt`, `auth/AuthApiClient.kt`, `auth/AuthModels.kt`, `auth/FirebaseAuthGateway.kt`, `ui/auth/`                                                             |
-| Theme                    | `ui/Theme.kt`, `ui/Typography.kt`, `ui/design/AccentPalette.kt`, `CreativeTokens.kt`, `CreativeComponents.kt`, `CreativeMotion.kt`, `CreativeWave.kt` in `ui/design/`                  |
-| Home and review          | `ui/home/HomeScreen.kt`, `ui/importing/ImportReviewSheet.kt`                                                                                                                           |
-| Jobs/results             | `ui/ProcessingHistoryScreen.kt`, `ui/ProcessingDetailScreen.kt`, `ui/jobs/`, `ui/AudioTaskCard.kt`, `ui/AudioStepTimeline.kt`                                                          |
-| Intake and wire calls    | `processing/JobsApiClient.kt`, `UrlImports.kt`, `JobModels.kt`, `ProcessingMediaPolicy.kt`, `AudioInputPreparer.kt`, `AudioPreparationEngine.kt`, `S3FormUploader.kt` in `processing/` |
-| Library/player           | `library/LibraryModels.kt`, `library/DefaultLibraryRepository.kt`, `ui/library/LibraryScreen.kt`, `ui/player/`, `playback/`                                                            |
-| Settings                 | `ui/settings/SettingsScreen.kt`, `ui/settings/AccentPickerScreen.kt`                                                                                                                   |
+| Area                     | Source starting points                                                                                                                                                                        |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Navigation and app state | `MainActivity.kt`, `VocalApplication.kt`, `ui/VocalApp.kt`, `state/`                                                                                                                          |
+| Identity and account     | `auth/AuthSessionCoordinator.kt`, `auth/AuthApiClient.kt`, `auth/AuthModels.kt`, `auth/FirebaseAuthGateway.kt`, `ui/auth/`                                                                    |
+| Theme                    | `ui/Theme.kt`, `ui/Typography.kt`, `ui/design/AccentPalette.kt`, `CreativeTokens.kt`, `CreativeComponents.kt`, `CreativeMotion.kt`, `CreativeWave.kt` in `ui/design/`                         |
+| Home and review          | `ui/home/HomeScreen.kt`, `ui/importing/ImportReviewSheet.kt`                                                                                                                                  |
+| Jobs/results             | `ui/ProcessingHistoryScreen.kt`, `ui/ProcessingDetailScreen.kt`, `ui/jobs/`, `ui/AudioTaskCard.kt`, `ui/AudioStepTimeline.kt`                                                                 |
+| Intake and wire calls    | `processing/JobsApiClient.kt`, `UrlImports.kt`, `JobModels.kt`, `ProcessingMediaPolicy.kt`, `AudioInputPreparer.kt`, `AudioPreparationEngine.kt`, `ObjectStorageUploader.kt` in `processing/` |
+| Library/player           | `library/LibraryModels.kt`, `library/DefaultLibraryRepository.kt`, `ui/library/LibraryScreen.kt`, `ui/player/`, `playback/`                                                                   |
+| Settings                 | `ui/settings/SettingsScreen.kt`, `ui/settings/AccentPickerScreen.kt`                                                                                                                          |
 
 Inspect English and Arabic resources under `android/app/src/main/res/values/`
 and `values-ar/`, plus font/drawable assets. Inventory every relevant screen,

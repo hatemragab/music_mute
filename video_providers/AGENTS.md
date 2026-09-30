@@ -1,5 +1,7 @@
 # Provider contributor guide
 
+Private R2 Standard is the only application storage provider. Read the [current storage guide](../docs/r2-storage/README.md) before storage changes. Credentials stay backend-only; old version IDs, acceleration and AWS setup are unsupported. Historical validation records are not live R2 proof.
+
 Read the root AGENTS/README, [provider architecture](README.md), and the affected
 provider's README, private OpenAPI contract and handoff before editing.
 
@@ -12,7 +14,7 @@ provider's README, private OpenAPI contract and handoff before editing.
   scraping or extraction runtime. Missing descriptive metadata stays absent.
   Preserve NestJS's independent media validation and temporary-file cleanup.
 - Use private, least-privilege CapRover apps with bounded memory, scratch and logs.
-  The adapter gets no database, S3 or Firebase credentials.
+  The adapter gets no database, R2 or Firebase credentials.
 - Never blindly repeat a paid task-creation request. Status polling is internal
   to the adapter and bounded; UI updates use existing WebSocket snapshots.
 - Do not restore extraction runtimes, environment aliases, migration bridges or

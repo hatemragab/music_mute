@@ -1123,6 +1123,14 @@ export class DashboardFixture {
       method === "POST"
     ) {
       this.releases[0].artifactState = "awaiting_upload";
+      const declaration = input.body as { bytes: number; sha256Hex: string };
+      const checksum = btoa(
+        String.fromCharCode(
+          ...declaration.sha256Hex
+            .match(/../g)!
+            .map((byte) => Number.parseInt(byte, 16)),
+        ),
+      );
       return {
         status: 201,
         body: {
@@ -1132,14 +1140,14 @@ export class DashboardFixture {
             url: "https://upload.fixture.invalid",
             headers: {
               "Content-Type": "application/vnd.android.package-archive",
-              "x-amz-checksum-sha256":
-                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "x-amz-checksum-sha256": checksum,
+              "x-amz-meta-sha256": checksum,
               "If-None-Match": "*",
             },
             expiresAt: "2026-09-11T00:05:00.000Z",
           },
-          expectedBytes: 1024,
-          expectedSha256: "a".repeat(64),
+          expectedBytes: declaration.bytes,
+          expectedSha256: declaration.sha256Hex,
         },
       };
     }

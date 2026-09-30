@@ -30,7 +30,7 @@ pnpm vitest run src/auth/foo.spec.ts                      # single unit test
 pnpm vitest run --config ./vitest.config.e2e.ts test/foo.e2e-spec.ts   # single e2e test
 ```
 
-Opt-in integration suites spawn real `mongod`/`redis-server` (must be on PATH) with isolated ports; they never touch Atlas/S3/production: `pnpm run test:integration`, `test:auth:integration`, `test:processing:integration`, `test:worker:integration` (also builds `../worker`), `test:imports:integration`, `test:deletion:integration`, `test:dashboard:integration`. Local auth/device/deletion writes need a MongoDB **replica set** (transactions).
+Opt-in integration suites spawn real `mongod`/`redis-server` (must be on PATH) with isolated ports; they never touch Atlas/R2/production: `pnpm run test:integration`, `test:auth:integration`, `test:processing:integration`, `test:worker:integration` (also builds `../worker`), `test:imports:integration`, `test:deletion:integration`, `test:dashboard:integration`. Local auth/device/deletion writes need a MongoDB **replica set** (transactions).
 
 ### worker/ (pnpm + uv)
 
@@ -97,11 +97,11 @@ Only that one simulator is authorized for runtime/UI checks; do not substitute d
 
 ## Architecture
 
-Request path: **native apps / end-user web / dashboard → TLS proxy → NestJS API → MongoDB, Redis, S3, Firebase Auth**. Workers claim jobs from the API over authenticated HTTPS; a WebSocket hint channel only _wakes_ reconciliation and never carries job authority. Local uploads and result downloads use signed S3 grants. URL-import audio travels from SaaS through a private adapter to NestJS validation and S3; it never travels through the worker control pipe.
+Request path: **native apps / end-user web / dashboard → TLS proxy → NestJS API → MongoDB, Redis, R2, Firebase Auth**. Workers claim jobs from the API over authenticated HTTPS; a WebSocket hint channel only _wakes_ reconciliation and never carries job authority. Local uploads and result downloads use signed R2 grants. URL-import audio travels from SaaS through a private adapter to NestJS validation and R2; it never travels through the worker control pipe.
 
-- `backend/src/`: feature modules — `auth`/`users`/`devices` (identity), `admin*` (dashboard APIs), `jobs`/`processing`/`processing-usage` (durable jobs and policy-controlled processing), `url-imports` (server-side link acquisition), `worker-fleet`/`worker-hints` (machine enrollment, claiming, leases), `storage` (presigned grants), `rate-limits` (shared Redis counters), `infrastructure` (Mongo/S3), `http` (global policies).
-- `web-client/`: standalone end-user app. Public Firebase Web SDK and API settings are read at runtime; signed media bytes transfer directly between the browser and S3. The root entry page is public, while authenticated routes carry noindex headers.
-- `worker/src/`: Node supervisor (`runtime`, `agent`, `enrollment`, `platform`, `cli`). The Python child (`worker/engine/`) does inference only — it never receives backend or S3 credentials. macOS LaunchAgent / Windows Service; Linux and CUDA disabled.
+- `backend/src/`: feature modules — `auth`/`users`/`devices` (identity), `admin*` (dashboard APIs), `jobs`/`processing`/`processing-usage` (durable jobs and policy-controlled processing), `url-imports` (server-side link acquisition), `worker-fleet`/`worker-hints` (machine enrollment, claiming, leases), `storage` (presigned grants), `rate-limits` (shared Redis counters), `infrastructure` (Mongo/R2), `http` (global policies).
+- `web-client/`: standalone end-user app. Public Firebase Web SDK and API settings are read at runtime; signed media bytes transfer directly between the browser and R2. The root entry page is public, while authenticated routes carry noindex headers.
+- `worker/src/`: Node supervisor (`runtime`, `agent`, `enrollment`, `platform`, `cli`). The Python child (`worker/engine/`) does inference only — it never receives backend or R2 credentials. macOS LaunchAgent / Windows Service; Linux and CUDA disabled.
 - Wire contract: **root-mounted routes, snake_case JSON/query names, no version prefix**. `docs/api/client-contract.md` + `backend/openapi.yaml` are canonical; mobile clients adapt idiomatic local names at the HTTP layer.
 - `worker/protocol/v1/` is _generated_ from the backend's canonical protocol. Edit the backend source, then `pnpm protocol:sync` in worker; `protocol:check` fails on drift.
 - Processing availability follows current backend configuration, account policy and worker capacity; do not assume submissions are globally disabled.
@@ -126,9 +126,9 @@ From `backend/AGENTS.md` and component guides — these are enforced boundaries,
 
 - Backend is ESM: relative imports need `.js` suffixes; use `import type` for types (notably Mongoose `Connection`, which is not an ESM runtime named export). Tests run through SWC decorator metadata, so DI/validation behave like the real build.
 - Reuse the existing Mongo worker-claim scheduler and separate BullMQ import queue; do not add a second scheduler. Do not commit, push, deploy, create cloud resources, or touch real data without a direct request.
-- Never read or print real dotenv values, AWS keys, or connection URIs. Firebase config files (`google-services.json`, `GoogleService-Info.plist`), keystores, and `.env*` are local-only and git-ignored — never force-add. `pnpm run verify` includes a tracked-file credential scan.
+- Never read or print real dotenv values, object-storage keys, or connection URIs. Firebase config files (`google-services.json`, `GoogleService-Info.plist`), keystores, and `.env*` are local-only and git-ignored — never force-add. `pnpm run verify` includes a tracked-file credential scan.
 - The web app's `PUBLIC_*` values are browser-visible identifiers, not backend secrets; never copy API service credentials into that app. Read `web-client/README.md` and root `AGENTS.md` before web edits.
 - Production DB changes are limited to collections/indexes declared by Mongoose schemas; no automatic index drops or document migrations.
 - Env keys validate centrally in `backend/src/config/`; new keys must update the safe examples and docs.
-- Report which commands actually ran and distinguish local proof from Docker/Atlas/S3/VPS validation — they are separate boundaries. Skipped checks get reported as skipped, not passed.
+- Report which commands actually ran and distinguish local proof from Docker/Atlas/R2/VPS validation — they are separate boundaries. Skipped checks get reported as skipped, not passed.
 - pnpm: never `--force` or `--legacy-peer-deps`; preserve lockfiles.

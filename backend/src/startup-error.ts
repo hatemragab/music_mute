@@ -35,24 +35,7 @@ const SAFE_DEPENDENCY_STAGES = new Set([
   'Device schema initialization failed',
   'Device installation owner schema initialization failed',
   'User identity fence schema initialization failed',
-  ...[
-    'GetBucketLocation',
-    'GetBucketAccelerateConfiguration',
-    'transfer acceleration must be Enabled',
-    'GetBucketVersioning',
-    'GetPublicAccessBlock',
-    'GetBucketPolicyStatus',
-    'GetBucketAcl',
-    'GetBucketLifecycleConfiguration',
-    'bucket region does not match AWS_REGION',
-    'versioning must be Enabled',
-    'all four public access blocks must be enabled',
-    'bucket policy must be confirmed private',
-    'bucket ACL must be confirmed private',
-    'lifecycle configuration could not be verified',
-    'lifecycle expiration rules are not allowed',
-    'unsafe lifecycle actions are not allowed',
-  ].map((step) => `Storage bucket preflight failed: ${step}`),
+  'Storage bucket preflight failed: HeadBucket',
 ]);
 
 const SAFE_PROVIDER_CODES = new Set([

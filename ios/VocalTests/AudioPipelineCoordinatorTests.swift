@@ -162,7 +162,8 @@ import XCTest
         upload: UploadGrant(
           method: .put, url: URL(string: "https://storage.fixture.invalid")!,
           headers: [
-            "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
+            "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture",
+            "x-amz-meta-sha256": "fixture", "If-None-Match": "*",
           ],
           expiresAt: Date().addingTimeInterval(60)),
         requestId: requestId.uuidString.lowercased())
@@ -171,7 +172,8 @@ import XCTest
       UploadGrant(
         method: .put, url: URL(string: "https://storage.fixture.invalid")!,
         headers: [
-          "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
+          "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture",
+          "x-amz-meta-sha256": "fixture", "If-None-Match": "*",
         ],
         expiresAt: Date().addingTimeInterval(60))
     }
@@ -198,7 +200,7 @@ import XCTest
     var onProgress: ((TransferContext, TransferProgressSnapshot) -> Void)?
     var started: [TransferContext] = []
     func startUpload(
-      file: S3MultipartFile, grant: UploadGrant, context: TransferContext
+      file: ObjectStorageUploadFile, grant: UploadGrant, context: TransferContext
     ) async throws -> Int {
       started.append(context)
       return started.count

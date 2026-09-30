@@ -13,6 +13,7 @@ type TaskRecord = ScheduleStorageCleanup & {
   leaseToken: string | null;
   leaseUntil: Date | null;
   attempts: number;
+  firstDeletedAt: Date | null;
   completedAt: Date | null;
   nextAt: Date | null;
 };
@@ -20,11 +21,12 @@ type TaskRecord = ScheduleStorageCleanup & {
 class TasksFixture {
   records: TaskRecord[] = [];
   init = vi.fn(async () => this);
+  reference = vi.fn(async () => null as unknown);
+  db = { collection: vi.fn(() => ({ findOne: this.reference })) };
 
   async updateOne(
     filter: {
       key?: string;
-      versionId?: string | null;
       _id?: Types.ObjectId;
       leaseToken?: string;
       settleUntil?: Date;
@@ -35,8 +37,6 @@ class TasksFixture {
     let item = this.records.find(
       (entry) =>
         (filter.key === undefined || entry.key === filter.key) &&
-        (filter.versionId === undefined ||
-          (entry.versionId ?? null) === filter.versionId) &&
         (filter._id === undefined || entry._id.equals(filter._id)) &&
         (filter.leaseToken === undefined ||
           entry.leaseToken === filter.leaseToken) &&
@@ -105,28 +105,17 @@ class TasksFixture {
   }
 }
 
-function setup(
-  results: Array<{ complete: boolean; deleted: number } | Error> = [],
-  exactResults: Array<undefined | Error> = [],
-) {
+function setup(results: Array<undefined | Error> = []) {
   const tasks = new TasksFixture();
-  const sweepVersionsForKey = vi.fn(async () => {
-    const result = results.shift() ?? { complete: true, deleted: 0 };
-    if (result instanceof Error) throw result;
-    return result;
-  });
-  const deleteExactVersion = vi.fn(async () => {
-    const result = exactResults.shift();
+  const deleteObject = vi.fn(async () => {
+    const result = results.shift();
     if (result instanceof Error) throw result;
   });
   const service = new StorageCleanupService(
     tasks as unknown as Model<StorageCleanupTask>,
-    {
-      sweepVersionsForKey,
-      deleteExactVersion,
-    } as unknown as StorageTransfersService,
+    { deleteObject } as unknown as StorageTransfersService,
   );
-  return { service, tasks, sweepVersionsForKey, deleteExactVersion };
+  return { service, tasks, deleteObject };
 }
 
 describe('StorageCleanupService', () => {
@@ -186,18 +175,16 @@ describe('StorageCleanupService', () => {
     expect(tasks.records).toHaveLength(1);
     expect(tasks.records[0]).toMatchObject({
       key,
-      versionId: null,
       attempts: 0,
       nextAt: due,
       settleUntil: new Date(due.getTime() + 40_000),
     });
   });
 
-  it('leases and completes one exact immutable version without a key sweep', async () => {
-    const { service, tasks, sweepVersionsForKey, deleteExactVersion } = setup();
+  it('leases an exact first deletion and remains pending until the free recheck', async () => {
+    const { service, tasks, deleteObject } = setup();
     await service.schedule({
       key,
-      versionId: 'version-1',
       ownerUserId: owner,
       reason: 'AUDIO_INPUT_EXPIRED',
       nextAt: due,
@@ -206,21 +193,20 @@ describe('StorageCleanupService', () => {
 
     await expect(service.cleanupDue(due)).resolves.toBe(true);
 
-    expect(deleteExactVersion).toHaveBeenCalledWith(key, 'version-1');
-    expect(sweepVersionsForKey).not.toHaveBeenCalled();
+    expect(deleteObject).toHaveBeenCalledExactlyOnceWith(key);
     expect(tasks.records[0]).toMatchObject({
-      completedAt: due,
-      nextAt: null,
+      completedAt: null,
+      firstDeletedAt: due,
+      nextAt: new Date(
+        due.getTime() + StorageCleanupService.LATE_UPLOAD_RECHECK_MS,
+      ),
       leaseToken: null,
     });
   });
 
-  it('waits through settlement and completes only after a final empty pass', async () => {
+  it('makes no storage request before settlement, then deletes once', async () => {
     const settleUntil = new Date(due.getTime() + 60_000);
-    const { service, tasks, sweepVersionsForKey } = setup([
-      { complete: true, deleted: 2 },
-      { complete: true, deleted: 0 },
-    ]);
+    const { service, tasks, deleteObject } = setup();
     await service.schedule({
       key,
       ownerUserId: owner,
@@ -231,36 +217,23 @@ describe('StorageCleanupService', () => {
     await expect(service.cleanupDue(due)).resolves.toBe(true);
     expect(tasks.records[0]?.nextAt).toEqual(settleUntil);
     expect(tasks.records[0]?.completedAt).toBeNull();
+    expect(deleteObject).not.toHaveBeenCalled();
     await expect(service.cleanupDue(settleUntil)).resolves.toBe(true);
-    expect(tasks.records[0]?.completedAt).toEqual(settleUntil);
-    expect(tasks.records[0]?.nextAt).toBeNull();
-    expect(sweepVersionsForKey).toHaveBeenCalledTimes(2);
-  });
-
-  it('keeps paginated/deleting work due until an empty sweep is proven', async () => {
-    const { service, tasks } = setup([
-      { complete: false, deleted: 100 },
-      { complete: true, deleted: 1 },
-      { complete: true, deleted: 0 },
-    ]);
-    await service.schedule({
-      key,
-      ownerUserId: owner,
-      reason: 'AUDIO_OUTPUT_ORPHANED',
-      nextAt: due,
-      settleUntil: due,
-    });
-    await service.cleanupDue(due);
-    await service.cleanupDue(new Date(due.getTime() + 1_000));
-    await service.cleanupDue(new Date(due.getTime() + 2_000));
-    expect(tasks.records[0]?.completedAt).toEqual(
-      new Date(due.getTime() + 2_000),
+    expect(tasks.records[0]?.completedAt).toBeNull();
+    expect(tasks.records[0]?.firstDeletedAt).toEqual(settleUntil);
+    expect(deleteObject).toHaveBeenCalledExactlyOnceWith(key);
+    const recheck = new Date(
+      settleUntil.getTime() + StorageCleanupService.LATE_UPLOAD_RECHECK_MS,
     );
+    await service.cleanupDue(recheck);
+    expect(tasks.records[0]?.completedAt).toEqual(recheck);
+    expect(tasks.records[0]?.nextAt).toBeNull();
+    expect(deleteObject).toHaveBeenCalledTimes(2);
   });
 
   it('preserves a concurrent settlement extension while sweeping', async () => {
     const extendedSettleUntil = new Date(due.getTime() + 60_000);
-    const { service, tasks, sweepVersionsForKey } = setup();
+    const { service, tasks, deleteObject } = setup();
     await service.schedule({
       key,
       ownerUserId: owner,
@@ -268,7 +241,7 @@ describe('StorageCleanupService', () => {
       nextAt: due,
       settleUntil: due,
     });
-    sweepVersionsForKey.mockImplementationOnce(async () => {
+    deleteObject.mockImplementationOnce(async () => {
       await service.schedule({
         key,
         ownerUserId: owner,
@@ -276,7 +249,7 @@ describe('StorageCleanupService', () => {
         nextAt: due,
         settleUntil: extendedSettleUntil,
       });
-      return { complete: true, deleted: 0 };
+      return undefined;
     });
 
     await expect(service.cleanupDue(due)).resolves.toBe(true);
@@ -287,6 +260,96 @@ describe('StorageCleanupService', () => {
       leaseUntil: null,
       nextAt: due,
       settleUntil: extendedSettleUntil,
+    });
+  });
+
+  it('protects a retained/retry reference at deletion time without any storage requests', async () => {
+    const { service, tasks, deleteObject } = setup();
+    await service.schedule({
+      key,
+      ownerUserId: owner,
+      reason: 'AUDIO_INPUT_TERMINAL',
+      nextAt: due,
+      settleUntil: due,
+    });
+    tasks.reference.mockResolvedValueOnce({ _id: new Types.ObjectId() });
+    await service.cleanupDue(due);
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(tasks.records[0]).toMatchObject({
+      completedAt: null,
+      nextAt: new Date(due.getTime() + 3_600_000),
+      leaseToken: null,
+    });
+    await service.cleanupDue(new Date(due.getTime() + 3_600_000));
+    expect(deleteObject).toHaveBeenCalledExactlyOnceWith(key);
+    expect(tasks.records[0].completedAt).toBeNull();
+  });
+  it('keeps referenced release artifacts safe from stale orphan tasks', async () => {
+    const { service, tasks, deleteObject } = setup();
+    await service.schedule({
+      key: 'app-releases/r/u/file.apk',
+      ownerUserId: null,
+      reason: 'RELEASE_UPLOAD_ORPHANED',
+      nextAt: due,
+      settleUntil: due,
+    });
+    tasks.reference.mockResolvedValueOnce({ _id: new Types.ObjectId() });
+    await service.cleanupDue(due);
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(tasks.db.collection).toHaveBeenCalledWith('app_releases');
+  });
+
+  it('reconciles a late PUT on the second pass before allowing account purge', async () => {
+    const { service, tasks, deleteObject } = setup();
+    let exists = true;
+    deleteObject.mockImplementation(async () => {
+      exists = false;
+    });
+    await service.schedule({
+      key,
+      ownerUserId: owner,
+      reason: 'AUDIO_INPUT_TERMINAL',
+      nextAt: due,
+      settleUntil: due,
+    });
+    await service.cleanupDue(due);
+    expect(exists).toBe(false);
+    await expect(service.hasPendingForOwner(owner)).resolves.toBe(true);
+    exists = true; // A PUT begun before expiry commits after the first deletion.
+    await service.cleanupDue(
+      new Date(
+        due.getTime() + StorageCleanupService.LATE_UPLOAD_RECHECK_MS - 1,
+      ),
+    );
+    expect(exists).toBe(true);
+    const recheck = new Date(
+      due.getTime() + StorageCleanupService.LATE_UPLOAD_RECHECK_MS,
+    );
+    await service.cleanupDue(recheck);
+    expect(exists).toBe(false);
+    expect(deleteObject).toHaveBeenCalledTimes(2);
+    expect(tasks.records[0].completedAt).toEqual(recheck);
+    await expect(service.hasPendingForOwner(owner)).resolves.toBe(false);
+  });
+  it('keeps a failed second pass pending without losing its first deletion time', async () => {
+    const { service, tasks } = setup([undefined, new Error('unavailable')]);
+    await service.schedule({
+      key,
+      ownerUserId: owner,
+      reason: 'AUDIO_INPUT_TERMINAL',
+      nextAt: due,
+      settleUntil: due,
+    });
+    await service.cleanupDue(due);
+    const recheck = new Date(
+      due.getTime() + StorageCleanupService.LATE_UPLOAD_RECHECK_MS,
+    );
+    await service.cleanupDue(recheck);
+    expect(tasks.records[0]).toMatchObject({
+      firstDeletedAt: due,
+      completedAt: null,
+      attempts: 1,
+      nextAt: new Date(recheck.getTime() + 30000),
     });
   });
 
@@ -310,10 +373,9 @@ describe('StorageCleanupService', () => {
   });
 
   it('keeps a permanent provider failure safely pending at bounded hourly retry', async () => {
-    const { service, tasks } = setup([], [new Error('access denied')]);
+    const { service, tasks } = setup([new Error('access denied')]);
     await service.schedule({
       key,
-      versionId: 'version-1',
       ownerUserId: owner,
       reason: 'AUDIO_INPUT_EXPIRED',
       nextAt: due,

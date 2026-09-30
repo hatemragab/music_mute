@@ -16,7 +16,7 @@ export interface WorkerMetric {
 
 export interface WorkerDiagnosticArchive {
   key: string;
-  versionId: string;
+  etag: string;
   digest: string;
   bytes: number;
 }
@@ -33,7 +33,7 @@ const metric = new MongoSchema<WorkerMetric>(
 const archive = new MongoSchema<WorkerDiagnosticArchive>(
   {
     key: { type: String, required: true, maxlength: 1024 },
-    versionId: { type: String, required: true, maxlength: 1024 },
+    etag: { type: String, required: true, maxlength: 1024 },
     digest: { type: String, required: true, match: SHA256_HEX_PATTERN },
     bytes: {
       type: Number,

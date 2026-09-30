@@ -1,3 +1,4 @@
+import { isStorageEtag } from '../storage/object-identity.js';
 import {
   MAX_AUDIO_DURATION_SECONDS,
   MAX_PREPARED_AUDIO_BYTES,
@@ -66,7 +67,12 @@ const workerProgressSnapshot = new MongoSchema<WorkerProgressSnapshot>(
 const objectIdentity = new MongoSchema<ObjectIdentity>(
   {
     key: { type: String, required: true, maxlength: 1024 },
-    versionId: { type: String, required: true, maxlength: 1024 },
+    etag: {
+      type: String,
+      required: true,
+      maxlength: 1024,
+      validate: isStorageEtag,
+    },
     bytes: {
       type: Number,
       required: true,
@@ -366,6 +372,7 @@ export class Job {
   @Prop({ type: Date, default: null }) deletedAt!: Date | null;
   @Prop({ type: Date, default: null })
   reservationCleanupScheduledAt!: Date | null;
+  @Prop({ type: Date, default: null }) cleanupFirstDeletedAt!: Date | null;
   @Prop({ type: Date, default: null }) cleanupNextAt!: Date | null;
   @Prop({ type: Date, default: null }) cleanupLeaseUntil!: Date | null;
   @Prop({ type: String, default: null, maxlength: 36 }) cleanupToken!:

@@ -1,10 +1,7 @@
 import {
   GetObjectCommand,
   DeleteObjectCommand,
-  DeleteObjectsCommand,
-  ListObjectVersionsCommand,
   HeadObjectCommand,
-  type HeadObjectCommandOutput,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable } from '@nestjs/common';
@@ -20,29 +17,31 @@ import type {
 } from '../jobs/job.types.js';
 import { StoragePreflightService } from './storage-preflight.service.js';
 import { createImmutableUploadGrant } from './immutable-upload-grant.js';
+import {
+  confirmedObjectIdentity,
+  isStorageEtag,
+  validateObjectReservation,
+  validateStorageKey,
+} from './object-identity.js';
 
 const REQUEST_TIMEOUT_MILLISECONDS = 30_000;
 const MAX_SIGNED_URL_SECONDS = 600;
-const MISSING_OBJECT_NAMES = new Set([
-  'NotFound',
-  'NoSuchKey',
-  'NoSuchVersion',
-]);
-
 function confirmedMissing(error: unknown): boolean {
-  if (!(error instanceof Error) || !MISSING_OBJECT_NAMES.has(error.name))
+  if (
+    !(error instanceof Error) ||
+    !['NotFound', 'NoSuchKey'].includes(error.name)
+  )
     return false;
-  const metadata = (error as { $metadata?: { httpStatusCode?: number } })
-    .$metadata;
-  return metadata?.httpStatusCode === 404;
+  return (
+    (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+      ?.httpStatusCode === 404
+  );
 }
-
 export interface InputTransferJob {
   inputReservation: InputReservation;
   admissionSnapshot?: AdmissionSnapshot | null;
   inputObject: ObjectIdentity | null;
 }
-
 type ObjectReservation = Pick<
   InputReservation,
   'key' | 'bytes' | 'sha256' | 'contentType'
@@ -52,208 +51,140 @@ type ObjectReservation = Pick<
 export class StorageTransfersService {
   private readonly bucket: string;
   private readonly grantSeconds: number;
-
   constructor(
     private readonly storage: StorageClient,
     config: ConfigService,
     private readonly preflight: StoragePreflightService,
   ) {
-    this.bucket = config.getOrThrow<string>('S3_BUCKET');
+    this.bucket = config.getOrThrow<string>('STORAGE_BUCKET');
     this.grantSeconds = Math.min(
       MAX_SIGNED_URL_SECONDS,
       config.getOrThrow<number>('PROCESSING_URL_SECONDS'),
     );
   }
-
   async createInputGrant(
     job: InputTransferJob,
     expiresAt = job.admissionSnapshot?.reservationExpiresAt,
   ): Promise<UploadGrant> {
     return this.createUploadGrant(job.inputReservation, expiresAt);
   }
-
   async verifyInput(job: InputTransferJob): Promise<ObjectIdentity> {
-    const identity = await this.inspect(job.inputReservation);
+    const identity = await this.findUploadedObject(job.inputReservation);
     if (!identity) throw jobError('UPLOAD_NOT_READY');
     return identity;
   }
-
-  /** Deletes one immutable version only. Missing keys/versions are already reconciled. */
-  async deleteExactVersion(key: string, versionId: string): Promise<void> {
-    if (!key || !versionId || versionId === 'null')
-      throw new TypeError('Invalid exact object identity');
+  /** Unique keys are deleted only after all upload grants and transfers settle. */
+  async deleteObject(key: string): Promise<void> {
+    validateStorageKey(key);
     try {
       await this.storage.send(
-        new DeleteObjectCommand({
-          Bucket: this.bucket,
-          Key: key,
-          VersionId: versionId,
-        }),
+        new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
         { abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS) },
       );
+      this.preflight.recordSuccess?.();
     } catch (error) {
-      if (!confirmedMissing(error)) throw error;
+      if (!confirmedMissing(error)) {
+        this.preflight.recordFailure?.();
+        throw error;
+      }
+      this.preflight.recordSuccess?.();
     }
   }
-
-  /** A bounded sweep of versions for one exact reservation key, never a prefix delete. */
-  async deleteVersionsForKey(key: string): Promise<boolean> {
-    return (await this.sweepVersionsForKey(key)).complete;
-  }
-
-  /** Also reports whether anything was removed so durable cleanup can prove a final empty pass. */
-  async sweepVersionsForKey(
-    key: string,
-  ): Promise<{ complete: boolean; deleted: number }> {
-    const page = await this.storage.send(
-      new ListObjectVersionsCommand({
-        Bucket: this.bucket,
-        Prefix: key,
-        MaxKeys: 100,
-      }),
-      { abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS) },
-    );
-    const objects = [...(page.Versions ?? []), ...(page.DeleteMarkers ?? [])]
-      .filter((entry) => entry.Key === key && entry.VersionId)
-      .map((entry) => ({ Key: key, VersionId: entry.VersionId! }));
-    if (objects.length) {
-      const result = await this.storage.send(
-        new DeleteObjectsCommand({
-          Bucket: this.bucket,
-          Delete: { Objects: objects, Quiet: true },
-        }),
-        { abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS) },
-      );
-      if (
-        result.Errors?.some(
-          (error) => !['NoSuchKey', 'NoSuchVersion'].includes(error.Code ?? ''),
-        )
-      )
-        throw new Error('Artifact cleanup unavailable');
-    }
-    // S3 orders by key: once the next page starts at a longer sibling key,
-    // all versions of our exact key have been visited. Never delete siblings.
-    return {
-      complete:
-        !page.IsTruncated ||
-        (page.NextKeyMarker !== undefined && page.NextKeyMarker !== key),
-      deleted: objects.length,
-    };
-  }
-
   async createDownloadGrant(
     object: ObjectIdentity,
     fixedExpiry?: Date,
   ): Promise<DownloadGrant> {
-    const expiresIn = fixedExpiry
-      ? Math.min(
-          this.grantSeconds,
-          Math.floor((fixedExpiry.getTime() - Date.now()) / 1_000),
-        )
-      : this.grantSeconds;
-    if (expiresIn < 1) throw jobError('DOWNLOAD_RESERVATION_EXPIRED');
+    const expiresIn = this.expiration(fixedExpiry);
+    if (!Number.isFinite(expiresIn) || expiresIn < 1)
+      throw jobError('DOWNLOAD_RESERVATION_EXPIRED');
     return this.signDownload(object, expiresIn);
   }
-
   async createWorkerOutputGrant(
     reservation: ObjectReservation,
     deadlineAt: Date,
   ): Promise<UploadGrant> {
-    return this.createUploadGrant(
-      reservation,
-      deadlineAt,
-      'INTELLIGENT_TIERING',
-    );
+    return this.createUploadGrant(reservation, deadlineAt);
   }
-
   async createWorkerInstallationUploadGrant(
     reservation: ObjectReservation,
     deadlineAt: Date,
   ): Promise<UploadGrant> {
     return this.createUploadGrant(reservation, deadlineAt);
   }
-
-  async verifyUploadedVersion(
+  async verifyUploadedObject(
     reservation: ObjectReservation,
-    versionId: string,
+    etag: string,
   ): Promise<ObjectIdentity> {
-    if (!versionId || versionId === 'null') throw jobError('UPLOAD_NOT_READY');
-    let pinned: HeadObjectCommandOutput;
-    try {
-      pinned = await this.head(reservation.key, versionId);
-    } catch (error) {
-      if (confirmedMissing(error)) throw jobError('UPLOAD_NOT_READY');
-      throw error;
-    }
-    if (
-      pinned.VersionId !== versionId ||
-      pinned.ContentLength !== reservation.bytes ||
-      pinned.ContentType !== reservation.contentType ||
-      pinned.ChecksumSHA256 !== reservation.sha256
-    )
-      throw jobError('UPLOAD_NOT_READY');
-    return {
-      key: reservation.key,
-      versionId,
-      bytes: reservation.bytes,
-      sha256: reservation.sha256,
-      contentType: reservation.contentType,
-    };
+    if (!isStorageEtag(etag)) throw jobError('UPLOAD_NOT_READY');
+    const object = await this.findUploadedObject(reservation, etag);
+    if (!object || object.etag !== etag) throw jobError('UPLOAD_NOT_READY');
+    return object;
   }
-
-  /** Recovers the immutable version after a successful PUT response was lost. */
-  async findUploadedVersion(
+  /** One HEAD recovers a successful upload whose response was lost. */
+  async findUploadedObject(
     reservation: ObjectReservation,
+    etag?: string,
   ): Promise<ObjectIdentity | null> {
-    return this.inspect(reservation);
-  }
-
-  async isPinnedObjectAvailable(object: ObjectIdentity): Promise<boolean> {
-    if (!object.versionId || object.versionId === 'null') return false;
+    validateObjectReservation(reservation);
+    if (etag !== undefined && !isStorageEtag(etag))
+      throw jobError('UPLOAD_NOT_READY');
+    let head;
     try {
-      const pinned = await this.head(object.key, object.versionId);
-      return (
-        pinned.VersionId === object.versionId &&
-        pinned.ContentLength === object.bytes &&
-        pinned.ContentType === object.contentType &&
-        pinned.ChecksumSHA256 === object.sha256
+      head = await this.storage.send(
+        new HeadObjectCommand({
+          Bucket: this.bucket,
+          Key: reservation.key,
+          ...(etag ? { IfMatch: etag } : {}),
+        }),
+        { abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS) },
       );
+      this.preflight.recordSuccess?.();
     } catch (error) {
-      if (confirmedMissing(error)) return false;
+      if (confirmedMissing(error)) {
+        this.preflight.recordSuccess?.();
+        return null;
+      }
+      this.preflight.recordFailure?.();
       throw error;
     }
+    const object = confirmedObjectIdentity(reservation, head);
+    if (!object || (etag !== undefined && object.etag !== etag))
+      throw jobError('UPLOAD_NOT_READY');
+    return object;
   }
-
+  async isObjectAvailable(object: ObjectIdentity): Promise<boolean> {
+    if (!isStorageEtag(object.etag)) return false;
+    const found = await this.findUploadedObject(object, object.etag);
+    return found !== null;
+  }
   async createMediaGrant(
     object: ObjectIdentity,
     purpose: 'play' | 'download',
     filename: string,
   ): Promise<DownloadGrant> {
-    if (
-      !/^[a-zA-Z0-9._-]{1,120}$/.test(filename) ||
-      !object.versionId ||
-      object.versionId === 'null'
-    )
+    if (!/^[a-zA-Z0-9._-]{1,120}$/.test(filename))
       throw new TypeError('Invalid media grant');
     return this.signDownload(object, 300, {
       contentType: object.contentType,
       disposition: `${purpose === 'play' ? 'inline' : 'attachment'}; filename="${filename}"`,
     });
   }
-
   private async signDownload(
     object: ObjectIdentity,
     expiresIn: number,
     response?: { contentType: string; disposition: string },
   ): Promise<DownloadGrant> {
-    await this.preflight.assertReady();
+    validateObjectReservation(object);
+    if (!isStorageEtag(object.etag))
+      throw new TypeError('Invalid storage identity');
+    // Keys are unique and conditional PUTs cannot overwrite them. Signing is local;
+    // authorization and database identity checks happen before this call.
     const now = Date.now();
     const url = await getSignedUrl(
-      this.storage.transferSigner ?? this.storage,
+      this.storage,
       new GetObjectCommand({
         Bucket: this.bucket,
         Key: object.key,
-        VersionId: object.versionId,
         ResponseCacheControl: 'no-store',
         ...(response
           ? {
@@ -264,87 +195,32 @@ export class StorageTransfersService {
       }),
       { expiresIn },
     );
-    return {
-      url,
-      expiresAt: new Date(now + expiresIn * 1_000).toISOString(),
-    };
+    return { url, expiresAt: new Date(now + expiresIn * 1_000).toISOString() };
   }
-
+  private expiration(fixedExpiry?: Date): number {
+    return fixedExpiry
+      ? Math.min(
+          this.grantSeconds,
+          Math.floor((fixedExpiry.getTime() - Date.now()) / 1_000),
+        )
+      : this.grantSeconds;
+  }
   private async createUploadGrant(
     reservation: ObjectReservation,
     fixedExpiry?: Date,
-    storageClass?: 'INTELLIGENT_TIERING',
   ): Promise<UploadGrant> {
-    await this.preflight.assertReady();
-    const now = Date.now();
-    const expiresIn = fixedExpiry
-      ? Math.min(
-          this.grantSeconds,
-          Math.floor((fixedExpiry.getTime() - now) / 1000),
-        )
-      : this.grantSeconds;
-    if (expiresIn < 1) throw jobError('UPLOAD_RESERVATION_EXPIRED');
+    const expiresIn = this.expiration(fixedExpiry);
+    if (!Number.isFinite(expiresIn) || expiresIn < 1)
+      throw jobError('UPLOAD_RESERVATION_EXPIRED');
     return createImmutableUploadGrant({
-      storage: this.storage.transferSigner ?? this.storage,
+      storage: this.storage,
       bucket: this.bucket,
       key: reservation.key,
       bytes: reservation.bytes,
       contentType: reservation.contentType,
       checksumSha256: reservation.sha256,
-      storageClass,
       expiresIn,
-      expiresAt: new Date(now + expiresIn * 1000),
+      expiresAt: new Date(Date.now() + expiresIn * 1_000),
     });
-  }
-
-  private async inspect(
-    reservation: ObjectReservation,
-  ): Promise<ObjectIdentity | null> {
-    let latest: HeadObjectCommandOutput;
-    try {
-      latest = await this.head(reservation.key);
-    } catch (error) {
-      if (confirmedMissing(error)) return null;
-      throw error;
-    }
-    if (!latest.VersionId || latest.VersionId === 'null')
-      throw jobError('UPLOAD_NOT_READY');
-
-    let pinned: HeadObjectCommandOutput;
-    try {
-      pinned = await this.head(reservation.key, latest.VersionId);
-    } catch (error) {
-      if (confirmedMissing(error)) return null;
-      throw error;
-    }
-    if (
-      pinned.VersionId !== latest.VersionId ||
-      pinned.ContentLength !== reservation.bytes ||
-      pinned.ContentType !== reservation.contentType ||
-      pinned.ChecksumSHA256 !== reservation.sha256
-    )
-      throw jobError('UPLOAD_NOT_READY');
-    return {
-      key: reservation.key,
-      versionId: latest.VersionId,
-      bytes: reservation.bytes,
-      sha256: reservation.sha256,
-      contentType: reservation.contentType,
-    };
-  }
-
-  private head(
-    key: string,
-    versionId?: string,
-  ): Promise<HeadObjectCommandOutput> {
-    return this.storage.send(
-      new HeadObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
-        ...(versionId ? { VersionId: versionId } : {}),
-        ChecksumMode: 'ENABLED',
-      }),
-      { abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS) },
-    );
   }
 }

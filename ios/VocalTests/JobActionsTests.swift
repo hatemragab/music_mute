@@ -244,7 +244,8 @@ import XCTest
     UploadGrant(
       method: .put, url: URL(string: "https://storage.example")!,
       headers: [
-        "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
+        "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture",
+        "x-amz-meta-sha256": "fixture", "If-None-Match": "*",
       ],
       expiresAt: Date().addingTimeInterval(600))
   }
@@ -285,7 +286,8 @@ import XCTest
   var started: [TransferContext] = []
   var active: [TransferContext] = []
   var cancelledOwners: [String] = []
-  func startUpload(file: S3MultipartFile, grant: UploadGrant, context: TransferContext) async throws
+  func startUpload(file: ObjectStorageUploadFile, grant: UploadGrant, context: TransferContext)
+    async throws
     -> Int
   {
     started.append(context)

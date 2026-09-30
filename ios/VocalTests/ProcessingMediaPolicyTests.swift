@@ -62,10 +62,10 @@ final class ProcessingMediaPolicyTests: XCTestCase {
       extension: "m4a", contentType: "audio/mp4", bytes: 3,
       durationSeconds: 1_200, sha256: Data(SHA256.hash(data: data)).base64EncodedString())
     XCTAssertThrowsError(
-      try S3MultipartFile.build(
+      try ObjectStorageUploadFile.build(
         inputURL: source, declaration: declaration,
         destination: root.appendingPathComponent("missing-version")))
-    let result = try S3MultipartFile.build(
+    let result = try ObjectStorageUploadFile.build(
       inputURL: source, declaration: declaration,
       destination: root.appendingPathComponent("standard"), policyVersion: 2)
     XCTAssertEqual(result.bytes, 3)

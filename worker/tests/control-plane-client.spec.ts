@@ -303,7 +303,7 @@ describe("worker control-plane client", () => {
           attemptId,
           object: {
             key: "input/source.mp3",
-            versionId: "v1",
+            etag: '"v1"',
             bytes: 1,
             sha256: "A".repeat(43) + "=",
             contentType: "audio/mpeg",

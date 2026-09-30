@@ -10,7 +10,7 @@ See [the shared site policy](../docs/url-imports/supported-sites.md).
 Source metadata on existing server jobs remains readable.
 
 URL audio is acquired by a private SaaS adapter, returned to NestJS for validation
-and S3 upload, then processed by the existing worker. iOS never receives SaaS
+and R2 upload, then processed by the existing worker. iOS never receives SaaS
 credentials or provider delivery URLs. The shared catalog enables multiple sites;
 an eligible separate audio stream must be available on each link. Existing native
 installations require a rebuild to receive new catalog entries. See
@@ -130,7 +130,7 @@ hides private history, and stops private playback.
 
 Optional FCM/APNs registration waits for permission and an APNs token; taps re-fetch
 authenticated job detail. Simulator fixtures disable live push transport. Real
-Firebase/APNs provisioning and deployed backend/S3/Z440 behavior require separate
+Firebase/APNs provisioning and deployed backend/R2/Z440 behavior require separate
 operational validation. See the [current client contract](../docs/api/client-contract.md).
 
 The Android project, reserved backend directory, and existing tracked deletions are

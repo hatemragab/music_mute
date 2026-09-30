@@ -425,7 +425,7 @@ describe('worker enrollment lifecycle', () => {
         },
         qualificationObject: {
           key: `worker-installation-results/${id}/qualification.mp3`,
-          versionId: 'qualification-version',
+          etag: '"qualification-version"',
           bytes: 1234,
           sha256: Buffer.alloc(32, 1).toString('base64'),
           contentType: 'audio/mpeg',

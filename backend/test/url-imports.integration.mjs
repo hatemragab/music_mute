@@ -184,7 +184,7 @@ test('native acquisition cleans upload/finalization failures and preserves commi
       return {
         id: reservation._id.toHexString(),
         upload: {
-          url: `${origin}/s3-input`,
+          url: `${origin}/storage-input`,
           headers: {
             'Content-Type': input.contentType,
           },

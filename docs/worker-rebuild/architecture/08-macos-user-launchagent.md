@@ -81,7 +81,7 @@ approved FFmpeg silence-trimming stage after separation.
 
 ## 7. Security and diagnostics
 
-The worker receives no database, Redis, Firebase administrator, S3 account, or
+The worker receives no database, Redis, Firebase administrator, R2 account, or
 release-signing secret. Transfer grants are attempt-scoped and short-lived.
 Diagnostics are bounded and redact credentials, signed URLs, payloads, and user
 paths before persistence or upload. Unknown resource or diagnostic-spool state

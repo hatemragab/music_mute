@@ -108,7 +108,7 @@ The dashboard whole-tree formatter also flags an unchanged baseline test; touche
 files were checked separately. Preserve these limitations in future reports.
 
 The measured six-socket local baseline is not production capacity proof. Staging
-proxy upgrades, Mongo change-stream privileges, real Firebase/S3, larger load and
+proxy upgrades, Mongo change-stream privileges, real Firebase/R2, larger load and
 reconnect storms remain release gates. Backend support must precede new clients;
 realtime requires a replica set/sharded Mongo deployment and Redis. Do not commit,
 push, deploy or change production permissions without explicit user authorization.

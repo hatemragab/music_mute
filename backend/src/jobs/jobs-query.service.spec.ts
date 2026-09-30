@@ -30,12 +30,12 @@ describe('history cursor', () => {
 describe('accounted result grants', () => {
   const requestId = 'de8be0bb-f574-4b90-b9c0-2adcc8f04c29';
 
-  function fixture(available = true) {
+  function fixture() {
     const userId = new Types.ObjectId();
     const jobId = new Types.ObjectId();
     const outputObject = {
       key: `users/${userId}/jobs/${jobId}/attempts/a/vocals.mp3`,
-      versionId: 'output-v1',
+      etag: '"output-v1"',
       bytes: 2_048,
       sha256: 'B'.repeat(43) + '=',
       contentType: 'audio/mpeg',
@@ -61,7 +61,6 @@ describe('accounted result grants', () => {
     };
     const access = { assertActive: vi.fn().mockResolvedValue(undefined) };
     const storage = {
-      isPinnedObjectAvailable: vi.fn().mockResolvedValue(available),
       createDownloadGrant: vi.fn().mockResolvedValue({
         url: 'https://storage.invalid/result',
         expiresAt: '2026-09-20T00:10:00.000Z',
@@ -116,7 +115,8 @@ describe('accounted result grants', () => {
   });
 
   it('does not charge or sign a missing pinned result', async () => {
-    const f = fixture(false);
+    const f = fixture();
+    f.job.outputObject = null;
 
     await expect(
       f.service.download(
@@ -132,9 +132,10 @@ describe('accounted result grants', () => {
 
   it('does not charge when immutable object metadata changes before accounting', async () => {
     const f = fixture();
-    f.storage.isPinnedObjectAvailable.mockImplementation(async () => {
-      f.job.outputObject = { ...f.job.outputObject, bytes: 4_096 };
-      return true;
+    let accessCalls = 0;
+    f.access.assertActive.mockImplementation(async () => {
+      if (++accessCalls === 2)
+        f.job.outputObject = { ...f.job.outputObject, bytes: 4_096 };
     });
 
     await expect(

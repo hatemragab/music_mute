@@ -85,7 +85,10 @@ export class CompleteWorkerAttemptDto extends TimedWorkerAttemptDto {
   @IsArray()
   @ArrayMaxSize(3001)
   comparisonRanges?: number[][];
-  @IsString() @MaxLength(1024) versionId!: string;
+  @IsString()
+  @MaxLength(1024)
+  @Matches(/^"[\x21\x23-\x7e]{1,1022}"$/u)
+  etag!: string;
   @IsIn(WORKER_RECIPE_IDS) recipeId!: WorkerRecipeId;
   @IsInt() @Min(0) recipeRevision!: number;
   @Matches(/^[a-f0-9]{64}$/) recipeDigest!: string;

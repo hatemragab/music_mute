@@ -59,8 +59,8 @@ export class ConfirmWorkerQualificationUploadDto {
   @Transform(trim)
   @IsString()
   @Length(1, 1024)
-  @Matches(/^[A-Za-z0-9+/=_.,:-]+$/)
-  versionId!: string;
+  @Matches(/^"[\x21\x23-\x7e]{1,1022}"$/u)
+  etag!: string;
 }
 
 export class WorkerGpuReportDto {

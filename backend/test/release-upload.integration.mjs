@@ -14,7 +14,7 @@ import { ReleaseUploadService } from '../dist/releases/release-upload.service.js
 import { ApkVerificationError } from '../dist/releases/apk-verifier.service.js';
 
 test(
-  'APK reservations and verification completions remain audited, selected, version-pinned and fenced',
+  'APK reservations and verification completions remain audited, selected, ETag-bound and fenced',
   { timeout: 60000 },
   async () => {
     const fixture = await IsolatedServices.create();
@@ -59,7 +59,7 @@ test(
         );
       const bytes = 32,
         sha256Hex = 'a'.repeat(64);
-      let latestVersion = 'immutable-v1',
+      let latestEtag = '"immutable-v1"',
         pinError = null,
         verifyError = null,
         verifierCalls = 0,
@@ -72,13 +72,14 @@ test(
           headers: {
             'Content-Type': 'application/vnd.android.package-archive',
             'x-amz-checksum-sha256': 'A'.repeat(43) + '=',
+            'x-amz-meta-sha256': 'A'.repeat(43) + '=',
             'If-None-Match': '*',
           },
           expiresAt: new Date(Date.now() + 900000).toISOString(),
         }),
         pin: async (_reservation, pinned) => {
           if (pinError) throw pinError;
-          return pinned ?? latestVersion;
+          return pinned ?? latestEtag;
         },
         download: async (_reservation, version) => {
           downloads.push(version);
@@ -148,7 +149,7 @@ test(
           .artifactState,
         'verifying',
       );
-      latestVersion = 'replacement-v2';
+      latestEtag = '"replacement-v2"';
       assert.equal(
         (await complete(release, reservation, operationId)).artifactState,
         'verifying',
@@ -162,8 +163,8 @@ test(
       );
       assert.equal(verifierCalls, 1);
       const stored = await releases.findById(release._id).lean();
-      assert.equal(stored.artifact.versionId, 'immutable-v1');
-      assert.deepEqual(downloads, ['immutable-v1']);
+      assert.equal(stored.artifact.etag, '"immutable-v1"');
+      assert.deepEqual(downloads, ['"immutable-v1"']);
       assert.equal(
         await events.countDocuments({ resourceId: reservation.uploadId }),
         3,

@@ -60,7 +60,7 @@ describe("download inactivity protection", () => {
           },
           {
             key: "input",
-            versionId: "v1",
+            etag: '"v1"',
             contentType: "audio/mpeg",
             bytes: body.length,
             sha256: createHash("sha256").update(body).digest("base64"),

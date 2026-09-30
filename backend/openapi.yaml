@@ -126,7 +126,7 @@ paths:
       tags: [jobs]
       operationId: ImportsController.create
       summary: Import one supported native audio source
-      description: Asynchronous native-audio acquisition through a private provider-neutral adapter into existing S3 processing. Requires existing processing access. The selected adapter determines qualified public single-item source support; the initial VideoScale adapter supports YouTube. Only separate audio streams are downloaded; no video acquisition, playlists, private-network access, or account cookies. A repeated request_id with the same canonical URL returns the same import; different input returns 409. Queue capacity includes active and waiting imports. Monthly processing admission checks used plus reserved seconds before the new file. Any positive remaining allowance admits the complete file even if its duration crosses the monthly limit; accounts at or above the limit receive PROCESSING_ALLOWANCE_EXHAUSTED before provider acquisition. A temporary duration hold protects admission against concurrent requests and is atomically exchanged for measured duration; failure/recovery releases it. Independently measured audio must satisfy account limits. Included sanitized metadata is stored privately as nullable job extra_data without additional metadata requests.
+      description: Asynchronous native-audio acquisition through a private provider-neutral adapter into existing private R2 processing. Requires existing processing access. The selected adapter determines qualified public single-item source support; the initial VideoScale adapter supports YouTube. Only separate audio streams are downloaded; no video acquisition, playlists, private-network access, or account cookies. A repeated request_id with the same canonical URL returns the same import; different input returns 409. Queue capacity includes active and waiting imports. Monthly processing admission checks used plus reserved seconds before the new file. Any positive remaining allowance admits the complete file even if its duration crosses the monthly limit; accounts at or above the limit receive PROCESSING_ALLOWANCE_EXHAUSTED before provider acquisition. A temporary duration hold protects admission against concurrent requests and is atomically exchanged for measured duration; failure/recovery releases it. Independently measured audio must satisfy account limits. Included sanitized metadata is stored privately as nullable job extra_data without additional metadata requests.
       security:
         - FirebaseBearer: []
       x-source: src/url-imports/imports.controller.ts
@@ -5835,7 +5835,7 @@ paths:
         - jobs
       operationId: JobsController.confirm
       summary: POST /jobs/{id}/upload-completions
-      description: empty body; exact S3 object verification for own job
+      description: empty body; exact R2 object verification for own job
       security:
         - FirebaseBearer: []
       x-source: src/jobs/jobs.controller.ts
@@ -5845,7 +5845,7 @@ paths:
         - name: id
           in: path
           required: true
-          description: empty body; exact S3 object verification for own job
+          description: empty body; exact R2 object verification for own job
           schema:
             type: string
             pattern: ^[a-f0-9]{24}$
@@ -5896,7 +5896,7 @@ paths:
         - jobs
       operationId: JobsController.renew
       summary: POST /jobs/{id}/upload-grants
-      description: UUIDv4 request ID; own pending job; idempotent S3 grant; 409 UPLOAD_GRANT_LIMIT_REACHED when the period grant quota is exhausted (next_reset_at in Problem Details); 429 for request throttling
+      description: UUIDv4 request ID; own pending job; idempotent R2 grant; 409 UPLOAD_GRANT_LIMIT_REACHED when the period grant quota is exhausted (next_reset_at in Problem Details); 429 for request throttling
       security:
         - FirebaseBearer: []
       x-source: src/jobs/jobs.controller.ts
@@ -5906,7 +5906,7 @@ paths:
         - name: id
           in: path
           required: true
-          description: UUIDv4 request ID; own pending job; idempotent S3 grant
+          description: UUIDv4 request ID; own pending job; idempotent R2 grant
           schema:
             type: string
             pattern: ^[a-f0-9]{24}$
@@ -8329,9 +8329,12 @@ components:
           type: string
           format: uuid
           pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$
-        version_id:
+        etag:
           type: string
+          minLength: 3
           maxLength: 1024
+          pattern: '^"[\x21\x23-\x7e]{1,1022}"$'
+          description: Opaque quoted strong object ETag; not a SHA-256 digest.
         recipe_id:
           type: string
           enum: &a3
@@ -8367,7 +8370,7 @@ components:
         - worker_id
         - session_id
         - incarnation
-        - version_id
+        - etag
         - recipe_id
         - recipe_revision
         - recipe_digest
@@ -8421,14 +8424,15 @@ components:
           type: string
           format: uuid
           pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$
-        version_id:
+        etag:
           type: string
-          minLength: 1
+          minLength: 3
           maxLength: 1024
-          pattern: ^[A-Za-z0-9+/=_.,:-]+$
+          pattern: '^"[\x21\x23-\x7e]{1,1022}"$'
+          description: Opaque quoted strong object ETag; not a SHA-256 digest.
       required:
         - request_id
-        - version_id
+        - etag
     CreateAdminAccessDto:
       type: object
       additionalProperties: false
@@ -10612,7 +10616,13 @@ components:
           type: object
           additionalProperties:
             type: string
-          description: Signed upload headers. Header names are opaque and retain their original spelling.
+          description: >-
+            Exactly four required signed PUT headers, copied without renaming or extra credentials:
+            Content-Type, x-amz-checksum-sha256, x-amz-meta-sha256 and If-None-Match.
+            Content-Type matches the approved declaration; both checksum headers contain
+            the same canonical padded base64 SHA-256 bound to the declared raw bytes;
+            If-None-Match is "*" for the unique create-only key. No storage-class,
+            Firebase bearer token or worker credential header is sent to R2.
         expires_at: *a10
       required:
         - method
@@ -13258,6 +13268,13 @@ components:
               type: object
               additionalProperties:
                 type: string
+              description: >-
+                Exactly four required signed PUT headers, copied without renaming or extra credentials:
+                Content-Type, x-amz-checksum-sha256, x-amz-meta-sha256 and If-None-Match.
+                Content-Type matches the approved declaration; both checksum headers contain
+                the same canonical padded base64 SHA-256 bound to the declared raw bytes;
+                If-None-Match is "*" for the unique create-only key. No storage-class,
+                Firebase bearer token or worker credential header is sent to R2.
             expires_at:
               type: string
               format: date-time
@@ -17525,8 +17542,12 @@ components:
           properties:
             key:
               type: string
-            version_id:
+            etag:
               type: string
+              minLength: 3
+              maxLength: 1024
+              pattern: '^"[\x21\x23-\x7e]{1,1022}"$'
+              description: Opaque quoted strong object ETag; not a SHA-256 digest.
             bytes:
               type: integer
               minimum: 0
@@ -17537,7 +17558,7 @@ components:
               type: string
           required:
             - key
-            - version_id
+            - etag
             - bytes
             - sha256
             - content_type
@@ -17599,8 +17620,12 @@ components:
               properties:
                 key:
                   type: string
-                version_id:
+                etag:
                   type: string
+                  minLength: 3
+                  maxLength: 1024
+                  pattern: '^"[\x21\x23-\x7e]{1,1022}"$'
+                  description: Opaque quoted strong object ETag; not a SHA-256 digest.
                 bytes:
                   type: integer
                   minimum: 0
@@ -17611,7 +17636,7 @@ components:
                   type: string
               required:
                 - key
-                - version_id
+                - etag
                 - bytes
                 - sha256
                 - content_type
@@ -17664,6 +17689,13 @@ components:
                   type: object
                   additionalProperties:
                     type: string
+                  description: >-
+                    Exactly four required signed PUT headers, copied without renaming or extra credentials:
+                    Content-Type, x-amz-checksum-sha256, x-amz-meta-sha256 and If-None-Match.
+                    Content-Type matches the approved declaration; both checksum headers contain
+                    the same canonical padded base64 SHA-256 bound to the declared raw bytes;
+                    If-None-Match is "*" for the unique create-only key. No storage-class,
+                    Firebase bearer token or worker credential header is sent to R2.
                 expires_at:
                   type: string
                   format: date-time
@@ -17734,8 +17766,12 @@ components:
                       properties:
                         key:
                           type: string
-                        version_id:
+                        etag:
                           type: string
+                          minLength: 3
+                          maxLength: 1024
+                          pattern: '^"[\x21\x23-\x7e]{1,1022}"$'
+                          description: Opaque quoted strong object ETag; not a SHA-256 digest.
                         bytes:
                           type: integer
                           minimum: 0
@@ -17746,7 +17782,7 @@ components:
                           type: string
                       required:
                         - key
-                        - version_id
+                        - etag
                         - bytes
                         - sha256
                         - content_type
@@ -18288,6 +18324,13 @@ components:
                   type: object
                   additionalProperties:
                     type: string
+                  description: >-
+                    Exactly four required signed PUT headers, copied without renaming or extra credentials:
+                    Content-Type, x-amz-checksum-sha256, x-amz-meta-sha256 and If-None-Match.
+                    Content-Type matches the approved declaration; both checksum headers contain
+                    the same canonical padded base64 SHA-256 bound to the declared raw bytes;
+                    If-None-Match is "*" for the unique create-only key. No storage-class,
+                    Firebase bearer token or worker credential header is sent to R2.
                 expires_at:
                   type: string
                   format: date-time
