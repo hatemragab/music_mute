@@ -14,7 +14,7 @@ struct URLImportCard: View {
       Label("url_import_title", systemImage: "link").font(.headline)
       Text("url_import_supported").font(.caption).foregroundStyle(.secondary)
       Text(SupportedAudioSites.names.joined(separator: ", ")).font(.caption)
-      if model.record == nil || model.record?.terminal == true {
+      Group {
         TextField("url_import_hint", text: $source)
           .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
           .environment(\.layoutDirection, .leftToRight)
@@ -30,31 +30,38 @@ struct URLImportCard: View {
           do {
             _ = try SupportedAudioSites.canonical(source)
             localError = nil
-            Task { await model.submit(source, trimEnabled: trimEnabled) }
+            let link = source
+            let count = model.records.count
+            let owner = model.owner
+            Task {
+              await model.submit(link, trimEnabled: trimEnabled)
+              if model.owner == owner, source == link, model.records.count > count { source = "" }
+            }
           } catch {
             localError = (error as? URLImportFailure)?.messageKey ?? "url_import_invalid"
           }
         }
         .buttonStyle(PrimaryButtonStyle())
         .disabled(
-          !rights || model.busy || source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+          !rights || model.submitting
+            || source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         )
         .accessibilityIdentifier("submitURLImport")
       }
-      if let record = model.record {
+      ForEach(model.records, id: \.requestId) { record in
+        Text(record.url).font(.caption).lineLimit(1)
         Text(LocalizedStringKey(statusKey(record.status))).font(.caption)
         if let key = record.messageKey { Text(LocalizedStringKey(key)).foregroundStyle(.red) }
         if record.status == "failed", record.jobId == nil {
           Button("processing_delete", role: .destructive) {
-            Task { await model.removeFailedImport() }
+            Task { await model.removeFailedImport(requestId: record.requestId) }
           }
-          .disabled(model.busy)
           .accessibilityIdentifier("deleteFailedURLImport")
         }
         if let job = record.jobId, record.status == "submitted" {
           Button("url_import_open_job") { openJob(job) }
-        } else if !model.busy && !record.terminal {
-          Button("retry") { model.resume() }
+        } else if !model.isTracking(record.requestId) && !record.terminal {
+          Button("retry") { model.resume(requestId: record.requestId) }
         }
       }
       if model.busy { ProgressView().accessibilityLabel(Text("url_import_pending")) }

@@ -1,6 +1,6 @@
 # VideoScale implementation handoff
 
-Updated 2026-09-28. Read [provider README](../README.md), [tasks](../TASKS.md),
+Updated 2026-09-30. Read [provider README](../README.md), [tasks](../TASKS.md),
 [private contract](../openapi.yaml) and [deployment evidence](DEPLOYMENT.md).
 The cross-provider authority is [provider architecture](../../README.md) and
 [provider contributor instructions](../../AGENTS.md).
@@ -40,6 +40,16 @@ verified. See [release 82 evidence](RELEASE-82.md) for exact results and limits.
 
 ## Remaining boundaries
 
+Local capacity change: the router and both adapters now share
+`ACQUISITION_CONCURRENCY=20` and `ACQUISITION_REQUESTS_PER_SECOND=5` defaults.
+Busy capacity and start allowance wait cancellably before paid work; creation
+connects before rate admission so DNS/TLS latency cannot create a larger burst.
+Adapters reserve scratch before provider work and account flushed writes.
+The release must include the shared capacity/scratch modules and apply the
+2 GiB tmpfs / 3 GiB memory overrides; older resource limits are insufficient.
+This change has synthetic validation only and has not been deployed. Provider
+plans must support the configured allowances. See the current [setup](../README.md).
+
 Released follow-up: [official metadata](OFFICIAL-METADATA.md) adds optional oEmbed
 title/creator lookup; no scraping or extraction fallback. Include
 `official_metadata.py` in every new adapter deployment archive. Adapter image 6
@@ -58,8 +68,9 @@ For authorized releases, use the authenticated CapRover CLI connection
 `musicmute` at `https://captain.music-mute.com`, not Chrome. The owner explicitly
 authorized CLI deployment on 2026-09-28. Run with a PTY:
 `caprover deploy -n musicmute -a music-mute-videoscale -t <absolute-allowlisted-tar>`.
-Package only `captain-definition`, `Dockerfile`, `.dockerignore`, `service.py`,
-`official_metadata.py`.
+Use `package_caprover.py` to package only `captain-definition`, `Dockerfile`,
+`.dockerignore`, `service.py`, `official_metadata.py`, `acquisition_limits.py` and
+`acquisition_scratch.py`. Shared modules come from the parent provider directory.
 Keep credentials in CLI/runtime storage; never print its config or tokens.
 Verify the Docker service image, health and source hash after deployment.
 This does not authorize unrelated deployments, credential or permission changes.

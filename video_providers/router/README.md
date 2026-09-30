@@ -51,11 +51,13 @@ allowlisted `IMPORT_*` error/status pairs survive; other failures become a
 sanitized `IMPORT_DEPENDENCY_FAILED` problem response. A bounded numeric
 `Retry-After` on 503 does not authorize automatic paid resubmission.
 
-Two admitted relays and sixteen HTTP handlers are bounded. One active POST per
-destination protects the adapters' one-acquisition capacity. A second request
-for the same destination waits before submission, within the original
-600-second operation deadline, with cancellation checks; it does not retry.
-Excess global capacity returns `IMPORT_QUEUE_FULL` without submitting.
+Twenty admitted relays and sixty-four HTTP handlers are bounded. One shared
+capacity pool covers both destinations; there is no per-provider serialization.
+Additional requests wait for a slot before submission, within the original
+600-second operation deadline, with cancellation checks. A shared rolling-second
+admission gate starts at most five adapter requests per second across both routes.
+Waiting never retries or replays a submission. The backend's durable queue holds
+the normal backlog; the router's bounded handlers protect its private HTTP hop.
 The independent health handler never contacts or waits for adapters. A 100 ms
 watcher interrupts blocked upstream headers/body reads on caller disconnect or
 deadline, including Connection-close response sockets. Already submitted vendor
@@ -77,6 +79,8 @@ Use [config.example.json](config.example.json) for nonsecret settings:
 
 | Environment key                     | Runtime value                                     |
 | ----------------------------------- | ------------------------------------------------- |
+| `ACQUISITION_CONCURRENCY`           | Shared active capacity, 1–20; default 20          |
+| `ACQUISITION_REQUESTS_PER_SECOND`   | Shared start rate, 1–5; default 5                 |
 | `AUDIO_ACQUISITION_API_KEY`         | Private NestJS/router service key                 |
 | `YOUTUBE_AUDIO_ACQUISITION_API_URL` | `http://srv-captain--music-mute-tunelio:8080/`    |
 | `YOUTUBE_AUDIO_ACQUISITION_API_KEY` | Private router/Tunelio adapter service key        |
@@ -113,14 +117,14 @@ caprover deploy -n musicmute -a music-mute-audio-router -t /absolute/path/outsid
 ```
 
 The package contains exactly `captain-definition`, `Dockerfile`, `.dockerignore`,
-`service.py` and `source_policy.py`. The packaging command checks names and exact
+`service.py`, `source_policy.py` and the shared `acquisition_limits.py`. The packaging command checks names and exact
 source bytes; no tests, hooks, configuration, environment files or credentials
 enter the image. Deploy only with current explicit user authorization.
 
 Local tests use synthetic HTTP adapters. They cover correct routing/key
 isolation, metadata/error sanitation, one submission on transport failure,
-limits, response framing/truncation, disconnect/deadline cancellation, per-route
-serialization, independent health and archive contents. They do not establish
+limits, response framing/truncation, disconnect/deadline cancellation, shared
+concurrent capacity, independent health and archive contents. They do not establish
 vendor, production, S3, worker or account-quota availability. Run backend
 verification/import/processing integration checks separately before releasing.
 

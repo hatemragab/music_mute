@@ -1,7 +1,7 @@
 FROM python:3.12-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
-COPY service.py official_metadata.py /app/
+COPY service.py official_metadata.py acquisition_limits.py acquisition_scratch.py /app/
 RUN mkdir /work && chown 10001:10001 /work
 USER 10001:10001
 EXPOSE 8080

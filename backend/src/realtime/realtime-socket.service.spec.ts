@@ -154,6 +154,46 @@ it('fences an in-flight read after unsubscribe', async () => {
   );
 });
 
+it('tracks concurrent imports alongside shared views within a bounded subscription limit', async () => {
+  const f = await fixture();
+  let active = 0;
+  let maximum = 0;
+  f.resources.read.mockImplementation(async () => {
+    active++;
+    maximum = Math.max(maximum, active);
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    active--;
+    return { status: 'queued' };
+  });
+  for (let i = 0; i < 128; i++) {
+    f.socket.send(
+      JSON.stringify({
+        type: 'subscribe',
+        subscription_id: `import-${i}`,
+        resource: 'import',
+        params: { id: `fixture-${i}` },
+      }),
+    );
+  }
+  await vi.waitFor(() =>
+    expect(
+      f.messages.filter((message) => message.type === 'snapshot'),
+    ).toHaveLength(128),
+  );
+  expect(maximum).toBe(4);
+  expect(f.socket.readyState).toBe(WebSocket.OPEN);
+  const closed = once(f.socket, 'close');
+  f.socket.send(
+    JSON.stringify({
+      type: 'subscribe',
+      subscription_id: 'import-overflow',
+      resource: 'import',
+      params: { id: 'fixture-overflow' },
+    }),
+  );
+  expect((await closed)[0]).toBe(1008);
+});
+
 it('reruns a snapshot dirtied while its first read was pending', async () => {
   const f = await fixture();
   let resolve!: (value: unknown) => void;

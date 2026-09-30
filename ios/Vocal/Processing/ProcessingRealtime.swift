@@ -106,7 +106,7 @@ private final class SocketRedirectPolicy: NSObject, URLSessionTaskDelegate {
     nextID &+= 1
     let id = "s\(nextID)"
     return AsyncThrowingStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-      guard subscriptions.count < 16 else {
+      guard subscriptions.count < 128 else {
         continuation.finish(throwing: JobsFailure.serviceUnavailable)
         return
       }

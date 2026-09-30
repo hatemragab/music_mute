@@ -1,6 +1,6 @@
-import { useLiveQuery } from "../realtime/RealtimeProvider";
-import { Link, useNavigate } from "react-router";
-import { useEffect, useState, type FormEvent } from "react";
+import { useLiveQuery, useRealtime } from "../realtime/RealtimeProvider";
+import { Link } from "react-router";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { jobsApi } from "../api/jobs";
 import type { MediaImportView, ProcessingPolicyView } from "../api/types";
 import { useSignedIn } from "../auth/AuthProvider";
@@ -13,7 +13,6 @@ import { SoloSignalMark } from "../brand/SoloSignalMark";
 export function HomePage() {
   const { api, user, session } = useSignedIn();
   const { t, lang } = useI18n();
-  const navigate = useNavigate();
   const jobs = useJobs();
   const policy = useLiveQuery<ProcessingPolicyView>(
     [user.uid, "processing-policy"],
@@ -27,31 +26,53 @@ export function HomePage() {
   const [error, setError] = useState("");
   const storageKey = `musicmute.web.import.${user.uid}`;
   const requestKey = `${storageKey}.request`;
-  const [importId, setImportId] = useState<string | null>(() =>
-    sessionStorage.getItem(storageKey),
-  );
-  const importQuery = useLiveQuery<MediaImportView>(
-    [user.uid, "import", importId],
-    "import",
-    { id: importId ?? "" },
-    !!importId,
-  );
-  useEffect(() => {
-    const current = importQuery.data;
-    if (current?.status === "submitted" && current.jobId) {
-      sessionStorage.removeItem(storageKey);
-      sessionStorage.removeItem(requestKey);
-      navigate(`/jobs/${current.jobId}`);
+  const [importIds, setImportIds] = useState<string[]>(() => {
+    const saved = sessionStorage.getItem(storageKey);
+    if (!saved) return [];
+    try {
+      const values: unknown = JSON.parse(saved);
+      if (Array.isArray(values))
+        return [
+          ...new Set(
+            values.filter(
+              (id): id is string =>
+                typeof id === "string" && /^[a-f0-9]{24}$/.test(id),
+            ),
+          ),
+        ];
+    } catch {
+      /* restore the previous single-import format */
     }
-  }, [importQuery.data, navigate, requestKey, storageKey, user.uid]);
+    if (/^[a-f0-9]{24}$/.test(saved)) {
+      sessionStorage.removeItem(requestKey);
+      return [saved];
+    }
+    return [];
+  });
+  const [finishedImports, setFinishedImports] = useState<Set<string>>(
+    new Set(),
+  );
+  const markFinished = useCallback((id: string) => {
+    setFinishedImports((previous) => new Set([...previous, id]));
+  }, []);
+  const watchedImports = new Set(
+    importIds.filter((id) => !finishedImports.has(id)).slice(0, 100),
+  );
+  function saveImportIds(ids: string[]) {
+    if (ids.length) sessionStorage.setItem(storageKey, JSON.stringify(ids));
+    else sessionStorage.removeItem(storageKey);
+    setImportIds(ids);
+  }
 
   async function submitUrl(event: FormEvent) {
     event.preventDefault();
+    if (busy) return;
     setError("");
     if (!rights) {
       setError(t("missingRights"));
       return;
     }
+    const submittedDraft = url;
     let source: string;
     try {
       source = supportedAudioUrl(url);
@@ -81,8 +102,9 @@ export function HomePage() {
         trim,
         requestId,
       );
-      sessionStorage.setItem(storageKey, result.importId);
-      setImportId(result.importId);
+      saveImportIds([...new Set([...importIds, result.importId])]);
+      sessionStorage.removeItem(requestKey);
+      setUrl((current) => (current === submittedDraft ? "" : current));
     } catch (error) {
       setError(friendlyError(error, t));
     } finally {
@@ -193,7 +215,7 @@ export function HomePage() {
             )}
             <button
               className="primary"
-              disabled={!allowed || busy || !!importId}
+              disabled={!allowed || busy}
               type="submit"
             >
               {busy ? t("loading") : t("startImport")}
@@ -202,34 +224,17 @@ export function HomePage() {
         ) : (
           <AudioUpload allowed={allowed} policy={policy.data} />
         )}
-        {importId && (
-          <div className="import-state" role="status">
-            {importQuery.data?.status !== "failed" &&
-              importQuery.data?.status !== "submitted" && (
-                <>
-                  <span className="spinner" aria-hidden="true" />
-                  {t("importPending")} ·{" "}
-                </>
-              )}
-            {importQuery.data?.status
-              ? statusLabel(importQuery.data.status, lang)
-              : t("loading")}
-            {importQuery.data?.status === "failed" && (
-              <>
-                <p role="alert">{friendlyError(importQuery.data.error, t)}</p>
-                <button
-                  onClick={() => {
-                    sessionStorage.removeItem(storageKey);
-                    sessionStorage.removeItem(requestKey);
-                    setImportId(null);
-                  }}
-                >
-                  {t("close")}
-                </button>
-              </>
-            )}
-          </div>
-        )}
+        {importIds.map((id) => (
+          <ImportProgress
+            key={id}
+            id={id}
+            active={watchedImports.has(id)}
+            onTerminal={markFinished}
+            onClose={() => {
+              saveImportIds(importIds.filter((value) => value !== id));
+            }}
+          />
+        ))}
       </section>
       <section>
         <div className="section-heading">
@@ -248,6 +253,57 @@ export function HomePage() {
           <div className="empty-state">{t("noJobs")}</div>
         )}
       </section>
+    </div>
+  );
+}
+
+function ImportProgress({
+  id,
+  active,
+  onTerminal,
+  onClose,
+}: {
+  id: string;
+  active: boolean;
+  onTerminal: (id: string) => void;
+  onClose: () => void;
+}) {
+  const { user } = useSignedIn();
+  const { t, lang } = useI18n();
+  const client = useRealtime();
+  const [current, setCurrent] = useState<MediaImportView | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const terminal =
+    current?.status === "failed" || current?.status === "submitted";
+  useEffect(() => {
+    if (!active || terminal) return;
+    return client.watch("import", { id }, (result) => {
+      if (result.error) setError(result.error);
+      else {
+        const value = result.data as MediaImportView;
+        setCurrent(value);
+        setError(null);
+        if (["failed", "submitted"].includes(value.status)) onTerminal(id);
+      }
+    });
+  }, [client, id, active, terminal, onTerminal, user.uid]);
+  return (
+    <div className="import-state" role="status">
+      {!terminal && (
+        <>
+          <span className="spinner" aria-hidden="true" />
+          {t("importPending")} ·{" "}
+        </>
+      )}
+      {current?.status ? statusLabel(current.status, lang) : t("loading")}
+      {error != null && <p role="alert">{friendlyError(error, t)}</p>}
+      {current?.status === "failed" && (
+        <p role="alert">{friendlyError(current.error, t)}</p>
+      )}
+      {current?.status === "submitted" && current.jobId && (
+        <Link to={`/jobs/${current.jobId}`}>{t("details")}</Link>
+      )}
+      {terminal && <button onClick={onClose}>{t("close")}</button>}
     </div>
   );
 }

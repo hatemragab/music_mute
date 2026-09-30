@@ -3,7 +3,11 @@ import argparse
 import pathlib
 import tarfile
 
-FILES = ('captain-definition', 'Dockerfile', '.dockerignore', 'service.py', 'source_policy.py')
+FILES = ('captain-definition', 'Dockerfile', '.dockerignore', 'service.py', 'source_policy.py', 'acquisition_limits.py')
+
+
+def source(root, name):
+    return root.parent / name if name == 'acquisition_limits.py' else root / name
 
 
 def package(output):
@@ -11,7 +15,7 @@ def package(output):
     output = pathlib.Path(output).resolve()
     with tarfile.open(output, 'w') as archive:
         for name in FILES:
-            path = root / name
+            path = source(root, name)
             if not path.is_file() or path.is_symlink():
                 raise ValueError('Missing regular package source')
             archive.add(path, arcname=name, recursive=False)
@@ -19,7 +23,7 @@ def package(output):
         if tuple(archive.getnames()) != FILES:
             raise ValueError('Unexpected archive content')
         for name in FILES:
-            if archive.extractfile(name).read() != (root / name).read_bytes():
+            if archive.extractfile(name).read() != source(root, name).read_bytes():
                 raise ValueError('Package content differs from source')
 
 

@@ -14,8 +14,11 @@ Vimeo, SoundCloud and Facebook/Reels. Actual separate audio availability is
 checked per request; enabled sites are not universal acquisition guarantees. Live import/job updates use
 WebSocket snapshots. See [provider architecture](../video_providers/README.md).
 Failed imports stop their loading indicator and show localized source/service
-errors. Closing a failed import allows a deliberate new submission; the UI does
-not automatically retry provider downloads.
+errors. The submission form becomes available as soon as NestJS accepts the request.
+Multiple imports keep independent WebSocket progress and account-scoped recovery
+identities; completed imports expose an explicit job link without navigating
+away from the next draft. Failed imports can be dismissed, and provider
+downloads are never automatically resubmitted.
 
 ## Development setup
 

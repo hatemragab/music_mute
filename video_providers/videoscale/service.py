@@ -6,10 +6,12 @@ import ipaddress
 import json
 import math
 import os
+from pathlib import Path
 import re
 import select
 import socket
 import ssl
+import sys
 import tempfile
 import threading
 import time
@@ -17,6 +19,14 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 from official_metadata import OfficialMetadata, merge_metadata
+try:
+    from acquisition_limits import AcquisitionLimits, Admission, retry_seconds, wait_for_slot
+except ModuleNotFoundError as error:
+    if error.name != 'acquisition_limits':
+        raise
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from acquisition_limits import AcquisitionLimits, Admission, retry_seconds, wait_for_slot
+from acquisition_scratch import ScratchBudget, ScratchUnavailable
 
 API_HOST = 'gate.apiscrape.net'
 API_PORT = 16262
@@ -227,7 +237,7 @@ def metadata(f, site='youtube'):
 
 
 class Provider:
-    def __init__(self, authorization, check, connection=PublicTLS, log=None):
+    def __init__(self, authorization, check, connection=PublicTLS, log=None, admission=None):
         self.authorization, self.check, self.connection = authorization, check, connection
         self.stage = 'formats'
         self.http_status = None
@@ -240,6 +250,7 @@ class Provider:
         self.selected = None
         self.rejected_formats = {}
         self.read_connection = None
+        self.admission = admission or Admission()
 
     def close(self):
         conn, self.read_connection = self.read_connection, None
@@ -298,6 +309,13 @@ class Provider:
         retain = False
         response_headers_ms = None
         try:
+            if body is not None:
+                # Dedicated transport connects before the paid-start window;
+                # DNS/TLS delays cannot release an oversized paid burst later.
+                conn.connect()
+                self.check()
+                self.admission.reserve(self.check)
+                self.check()
             headers = {'Authorization': self.authorization, 'Accept': 'application/json',
                        'Accept-Encoding': 'identity'}
             if body is not None:
@@ -307,6 +325,8 @@ class Provider:
             response = conn.getresponse()
             response_headers_ms = round((time.monotonic() - started) * 1000)
             self.http_status = response.status
+            if response.status == 429:
+                self.admission.cooldown(retry_seconds(response.getheader('Retry-After')))
             if response.status in (403, 429):
                 raise Failure('IMPORT_UPSTREAM_REFUSED', 502,
                               reason='VideoScale refused access (403) or rate-limited the request (429); no automatic retry.')
@@ -552,10 +572,6 @@ class Handler(BaseHTTPRequestHandler):
                     or not finite(duration) or not 0 < duration <= MAX_DURATION_SECONDS):
                 raise Failure('IMPORT_INVALID_REQUEST', 400)
             url = source_url(body['url'])
-            acquired = self.server.slots.acquire(blocking=False)
-            if not acquired:
-                raise Failure('IMPORT_QUEUE_FULL', 503, reason='Adapter is already acquiring another item; no vendor request was started.')
-
             def check():
                 if time.monotonic() - started > 600:
                     raise Failure(reason='The 600-second acquisition deadline expired; no further upstream requests will be made.')
@@ -564,17 +580,24 @@ class Handler(BaseHTTPRequestHandler):
                     if not self.connection.recv(1, socket.MSG_PEEK):
                         raise ConnectionAbortedError()
 
+            wait_for_slot(self.server.slots, check)
+            acquired = True
+            try:
+                reservation = self.server.scratch_budget.reserve(limit)
+            except ScratchUnavailable:
+                raise Failure('IMPORT_DISK_FULL', 503,
+                              reason='Dedicated scratch cannot safely reserve the requested audio bytes.') from None
             # Unlinked immediately by TemporaryFile: crash/restart cannot leave
             # named media orphans. Deployment mounts this directory as tmpfs.
-            with tempfile.TemporaryFile(dir=self.server.scratch) as audio:
+            with reservation, tempfile.TemporaryFile(dir=self.server.scratch) as audio:
                 def log(**fields):
                     print(json.dumps({'event': 'audio-acquisition-step', 'acquisition_id': acquisition_id,
                                       'elapsed_ms': round((time.monotonic() - started) * 1000),
                                       **fields}), flush=True)
 
-                provider = Provider(self.server.provider_auth, check, log=log)
+                provider = Provider(self.server.provider_auth, check, log=log, admission=self.server.admission)
                 title_lookup = self.server.metadata.start(url)
-                size, extra = provider.acquire(url, limit, audio)
+                size, extra = provider.acquire(url, limit, reservation.wrap(audio))
                 extra = merge_metadata(extra, title_lookup)
                 log(stage='metadata', message='Optional official metadata lookup finished or skipped; audio acquisition is not retried.',
                     metadata_ready=title_lookup.done(), has_title='title' in extra)
@@ -633,9 +656,9 @@ class Handler(BaseHTTPRequestHandler):
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     metadata = OfficialMetadata(PublicTLS)
-    request_queue_size = 8
+    request_queue_size = 64
     # Bound even unauthenticated slow-client handler threads.
-    threads = threading.BoundedSemaphore(16)
+    threads = threading.BoundedSemaphore(64)
 
     def process_request(self, request, client_address):
         if not self.threads.acquire(blocking=False):
@@ -665,9 +688,12 @@ def main():
     scratch = os.environ.get('ACQUISITION_TEMP_ROOT', '/work')
     if not os.path.isdir(scratch) or os.path.islink(scratch) or scratch in ('/', '/tmp'):
         raise SystemExit('Dedicated acquisition scratch directory required')
+    limits = AcquisitionLimits.from_env()
     server = Server(('0.0.0.0', 8080), Handler)
     server.api_key, server.provider_auth, server.scratch = key, basic, scratch
-    server.slots = threading.BoundedSemaphore(1)
+    server.slots = threading.BoundedSemaphore(limits.concurrency)
+    server.admission = Admission(limits.requests_per_second)
+    server.scratch_budget = ScratchBudget(scratch)
     print('Private audio acquisition ready', flush=True)
     server.serve_forever()
 

@@ -33,7 +33,7 @@ function page(
   importStatus = "queued",
   importErrorCode = "IMPORT_SOURCE_UNAVAILABLE",
 ) {
-  const { client } = realtimeFixture((resource) => {
+  const { client } = realtimeFixture((resource, params) => {
     if (resource === "policy") {
       if (policyFailure) throw new ApiError(503, "SERVICE_UNAVAILABLE");
       return {
@@ -48,9 +48,9 @@ function page(
     if (resource === "jobs") return { items: [], nextCursor: null };
     if (resource === "import")
       return {
-        importId: "0123456789abcdef01234567",
+        importId: params.id,
         status: importStatus,
-        jobId: null,
+        jobId: importStatus === "submitted" ? "0123456789abcdef01234569" : null,
         error: importStatus === "failed" ? { code: importErrorCode } : null,
       };
     throw new Error(`Unexpected subscription: ${resource}`);
@@ -287,4 +287,89 @@ test("unknown links show unsupported locally without creating an import or retry
   expect(
     sessionStorage.getItem("musicmute.web.import.test-user.request"),
   ).toBeNull();
+});
+
+test("another URL can be submitted while an earlier import is downloading, and both survive reload", async () => {
+  const ids = ["0123456789abcdef01234567", "0123456789abcdef01234568"];
+  const requests: Record<string, unknown>[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(init?.body as string));
+      return new Response(
+        JSON.stringify({
+          import_id: ids[requests.length - 1],
+          status: "queued",
+          job_id: null,
+          error: null,
+        }),
+        { status: 202 },
+      );
+    }),
+  );
+  const first = page(false, "downloading");
+  const user = userEvent.setup();
+  const input = screen.getByRole("textbox", { name: "Public media URL" });
+  await user.click(
+    screen.getByRole("checkbox", {
+      name: "I have the rights to process this audio",
+    }),
+  );
+  await user.type(input, "https://youtu.be/UXqq0ZvbOnk");
+  await user.click(screen.getByRole("button", { name: "Start import" }));
+  await waitFor(() => expect(requests).toHaveLength(1));
+  expect(
+    await screen.findByRole("button", { name: "Start import" }),
+  ).toBeEnabled();
+  await user.type(input, "https://youtu.be/dQw4w9WgXcQ");
+  await user.click(screen.getByRole("button", { name: "Start import" }));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[0].request_id).not.toBe(requests[1].request_id);
+  await waitFor(() =>
+    expect(
+      first.container.querySelectorAll(".import-state .spinner"),
+    ).toHaveLength(2),
+  );
+  expect(
+    JSON.parse(sessionStorage.getItem("musicmute.web.import.test-user")!),
+  ).toEqual(ids);
+  first.unmount();
+  const restored = page(false, "downloading");
+  await waitFor(() =>
+    expect(
+      restored.container.querySelectorAll(".import-state .spinner"),
+    ).toHaveLength(2),
+  );
+  expect(requests).toHaveLength(2);
+});
+
+test("twenty restored imports remain visible and keep the intake available", async () => {
+  const ids = Array.from({ length: 20 }, (_, index) =>
+    index.toString(16).padStart(24, "0"),
+  );
+  sessionStorage.setItem("musicmute.web.import.test-user", JSON.stringify(ids));
+  const { container } = page(false, "downloading");
+  await waitFor(() =>
+    expect(container.querySelectorAll(".import-state .spinner")).toHaveLength(
+      20,
+    ),
+  );
+  expect(screen.getByRole("button", { name: "Start import" })).toBeEnabled();
+});
+
+test("completed imports offer a job link while preserving the next draft", async () => {
+  sessionStorage.setItem(
+    "musicmute.web.import.test-user",
+    "0123456789abcdef01234567",
+  );
+  page(false, "submitted");
+  const user = userEvent.setup();
+  const input = screen.getByRole("textbox", { name: "Public media URL" });
+  await user.type(input, "https://youtu.be/dQw4w9WgXcQ");
+  expect(await screen.findByRole("link", { name: "Details" })).toHaveAttribute(
+    "href",
+    "/jobs/0123456789abcdef01234569",
+  );
+  expect(input).toHaveValue("https://youtu.be/dQw4w9WgXcQ");
+  expect(screen.getByRole("button", { name: "Start import" })).toBeEnabled();
 });

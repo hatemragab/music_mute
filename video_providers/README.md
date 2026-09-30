@@ -67,6 +67,57 @@ The owner requires a clean implementation without compatibility aliases,
 migration bridges or device-side/server-side extraction fallbacks. Do not
 reintroduce these paths to support old clients.
 
+## Shared import capacity
+
+URL import capacity is shared across providers. The backend now defaults to
+20 active imports, five starts per second and 100 outstanding imports total.
+The remaining 80 slots form a durable waiting backlog. Users can submit another
+link while a previous link is downloading; account, media and usage limits still
+apply. A provider request is made only when active capacity and a start slot are
+available. Twenty requests start over at least three seconds under the five-per-
+rolling-second ceiling, then up to twenty downloads can remain active together.
+
+The router and both adapters use the same shared module and settings:
+
+```dotenv
+ACQUISITION_CONCURRENCY=20
+ACQUISITION_REQUESTS_PER_SECOND=5
+```
+
+Keep those identical in all three private apps; there are no separate Tunelio
+or VideoScale capacity settings. The backend retains its generic import settings:
+
+```dotenv
+URL_IMPORT_CONCURRENCY=20
+URL_IMPORT_REQUESTS_PER_SECOND=5
+URL_IMPORT_MAX_OUTSTANDING=100
+```
+
+The start ceiling uses the owner's stated paid-plan allowance; source changes do
+not establish the subscribed vendor plan or its live availability. Upstream
+cooldowns pause new paid starts within each operation's original deadline.
+Waiting never repeats an already submitted paid request or switches providers.
+
+Each adapter's deployment override provides 2 GiB dedicated temporary storage
+and a 3 GiB memory limit for twenty bounded 100 MB files plus free-space headroom.
+Scratch reservations happen before paid work and account for allocated writes.
+The backend keeps container-local disk reservations too; allow approximately
+4 GB plus its 128 MB headroom for worst-case concurrent transfer reservations.
+Memory limits are ceilings, not a claim that the host has this capacity.
+
+To activate this change, deploy the updated adapters with their resource
+overrides, then the router, then the backend and clients. Explicit environment
+values from earlier deployments override the new defaults. No production
+configuration is changed by these local source edits. All three private apps must
+remain one replica for their process-local admission and scratch accounting;
+the backend's BullMQ concurrency and start limiter are Redis-global.
+
+API preflight read the [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+on 2026-09-30. Rules 104, 106, 176, 177 and 178 preserve private bearer admission,
+compatibility, sanitized problem responses and bounded binary transfer headers.
+The existing private 503/Retry-After dependency contract is retained for upstream
+429 responses; no public endpoint or provider-specific error format is added.
+
 ## Current support and verification
 
 Tunelio accepts public single-item YouTube URLs and requests native Opus audio

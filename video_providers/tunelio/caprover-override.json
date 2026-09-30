@@ -8,12 +8,12 @@
         {
           "Type": "tmpfs",
           "Target": "/work",
-          "TmpfsOptions": { "SizeBytes": 134217728, "Mode": 1023 }
+          "TmpfsOptions": { "SizeBytes": 2147483648, "Mode": 1023 }
         }
       ]
     },
     "Resources": {
-      "Limits": { "NanoCPUs": 1000000000, "MemoryBytes": 268435456 }
+      "Limits": { "NanoCPUs": 1000000000, "MemoryBytes": 3221225472 }
     },
     "LogDriver": {
       "Name": "json-file",

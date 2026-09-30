@@ -39,6 +39,7 @@ interface Subscription {
   sequence: number;
   dirty: boolean;
   running: boolean;
+  waitingForRead?: boolean;
   refreshOnHeartbeat: boolean;
   timer?: NodeJS.Timeout;
 }
@@ -272,7 +273,7 @@ export class RealtimeSocketService implements OnModuleDestroy {
           this.dispose(client);
         });
         ws.on('message', (data, binary) => {
-          if (binary || ++client.controls > 120) {
+          if (binary || ++client.controls > 512) {
             ws.close(1008, 'invalid request');
             return;
           }
@@ -292,7 +293,7 @@ export class RealtimeSocketService implements OnModuleDestroy {
           } else if (command.type === 'resync') {
             if (previous) this.invalidate(client, previous);
           } else {
-            if (!previous && client.subscriptions.size >= 16) {
+            if (!previous && client.subscriptions.size >= 128) {
               ws.close(1008, 'subscription limit');
               return;
             }
@@ -323,7 +324,12 @@ export class RealtimeSocketService implements OnModuleDestroy {
 
   private invalidate(client: Client, subscription: Subscription): void {
     subscription.dirty = true;
-    if (subscription.running || subscription.timer) return;
+    if (
+      subscription.running ||
+      subscription.timer ||
+      subscription.waitingForRead
+    )
+      return;
     subscription.timer = setTimeout(() => {
       subscription.timer = undefined;
       void this.flush(client, subscription);
@@ -336,9 +342,10 @@ export class RealtimeSocketService implements OnModuleDestroy {
   ): Promise<void> {
     if (subscription.running || !this.current(client, subscription)) return;
     if (client.pendingReads >= 4) {
-      this.invalidate(client, subscription);
+      subscription.waitingForRead = true;
       return;
     }
+    subscription.waitingForRead = false;
     client.pendingReads++;
     subscription.running = true;
     subscription.dirty = false;
@@ -404,6 +411,12 @@ export class RealtimeSocketService implements OnModuleDestroy {
       subscription.running = false;
       if (subscription.dirty && this.current(client, subscription))
         this.invalidate(client, subscription);
+      // Drain cold subscriptions without a one-second pause per batch of four.
+      // Reads remain bounded; committed change invalidations still coalesce.
+      for (const pending of client.subscriptions.values()) {
+        if (client.pendingReads >= 4) break;
+        if (pending.waitingForRead) void this.flush(client, pending);
+      }
     }
   }
 

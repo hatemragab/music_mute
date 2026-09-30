@@ -9,9 +9,10 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from package_caprover import FILES, package
+from package_caprover import FILES, package, source
 from service import Destination, Server, clean_metadata, destination
 from source_policy import Failure, route_for, source_url
 
@@ -37,7 +38,7 @@ class UpstreamHandler(BaseHTTPRequestHandler):
         self.close_connection = True
         mode = self.server.mode
         if mode == 'wait':
-            self.server.release.wait(3)
+            self.server.release.wait(15)
         if mode in ('cancel-headers', 'cancel-body'):
             if mode == 'cancel-body':
                 self.send_response(200)
@@ -128,7 +129,7 @@ class RouterHTTPTests(unittest.TestCase):
         self.other.finish()
 
     def start_request(self, body=None, headers=None, path='/audio-imports'):
-        connection = http.client.HTTPConnection('127.0.0.1', self.router.server_port, timeout=4)
+        connection = http.client.HTTPConnection('127.0.0.1', self.router.server_port, timeout=15)
         content = json.dumps(BODY if body is None else body).encode()
         request_headers = {'Authorization': 'Bearer ' + INGRESS, 'Content-Type': 'application/json',
                            'X-Import-Request-ID': EXECUTION_ID}
@@ -137,12 +138,18 @@ class RouterHTTPTests(unittest.TestCase):
         return connection
 
     def request(self, *args, **kwargs):
+        previous_logs = len(self.logs)
         connection = self.start_request(*args, **kwargs)
         try:
             response = connection.getresponse()
             return response.status, dict(response.headers), response.read()
         finally:
             connection.close()
+            # A complete response can arrive before the handler's finally log.
+            # Synchronize assertions with that observable completion event.
+            deadline = time.monotonic() + 1
+            while len(self.logs) == previous_logs and time.monotonic() < deadline:
+                time.sleep(0.005)
 
     def assert_problem(self, response, status, code):
         actual, headers, content = response
@@ -168,6 +175,40 @@ class RouterHTTPTests(unittest.TestCase):
         self.assertNotIn('X-Vendor-Key', supplied)
         self.assertEqual(self.other.calls, [])
         self.assertEqual(self.logs[-1]['result'], 'SUCCEEDED')
+
+    def test_start_is_reserved_after_connection_and_before_submission(self):
+        connections = []
+
+        def factory(*args, **kwargs):
+            connection = http.client.HTTPConnection(*args, **kwargs)
+            connections.append(connection)
+            return connection
+
+        self.router.connection_factory = factory
+        original = self.router.admission.reserve
+
+        def reserve(check):
+            self.assertIsNotNone(connections[-1].sock)
+            self.assertEqual(self.youtube.calls, [])
+            original(check)
+
+        with patch.object(self.router.admission, 'reserve', side_effect=reserve) as start:
+            self.assertEqual(self.request()[0], 200)
+            start.assert_called_once()
+        self.assertEqual(len(self.youtube.calls), 1)
+
+    def test_cancelled_start_rate_wait_never_submits(self):
+        self.router.admission.cooldown(30)
+        connection = self.start_request()
+        time.sleep(0.15)
+        self.assertEqual(self.youtube.calls, [])
+        connection.close()
+        deadline = time.monotonic() + 2
+        while not self.logs and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(self.logs[-1]['result'], 'CLIENT_DISCONNECTED')
+        self.assertEqual(self.youtube.calls, [])
+        self.assertEqual(self.other.calls, [])
 
     def test_other_sites_route_to_other_once(self):
         status, _, _ = self.request({**BODY, 'url': OTHER + '?tracking=removed'})
@@ -319,11 +360,17 @@ class RouterHTTPTests(unittest.TestCase):
         self.assertTrue(self.youtube.closed.wait(1))
         self.assertEqual(len(self.youtube.calls), 1)
 
-    def test_two_handlers_same_destination_serialize_before_submission_and_health_responds(self):
+    def test_twenty_imports_run_across_both_destinations_and_next_waits_for_completion(self):
         self.youtube.mode = 'wait'
-        first = self.start_request()
-        self.assertTrue(self.youtube.started.wait(1))
-        second = self.start_request()
+        self.other.mode = 'wait'
+        requests = [self.start_request(BODY if index % 2 == 0 else {**BODY, 'url': OTHER})
+                    for index in range(20)]
+        deadline = time.monotonic() + 8
+        while len(self.youtube.calls) + len(self.other.calls) < 20 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(len(self.youtube.calls), 10)
+        self.assertEqual(len(self.other.calls), 10)
+        waiting = self.start_request()
         health = http.client.HTTPConnection('127.0.0.1', self.router.server_port, timeout=1)
         health.request('GET', '/health')
         response = health.getresponse()
@@ -331,18 +378,19 @@ class RouterHTTPTests(unittest.TestCase):
         self.assertEqual(response.read(), b'{"status":"ok"}')
         health.close()
         time.sleep(0.15)
-        self.assertEqual(len(self.youtube.calls), 1)
-        self.assert_problem(self.request({**BODY, 'url': OTHER}), 503, 'IMPORT_QUEUE_FULL')
-        self.assertEqual(self.other.calls, [])
+        self.assertEqual(len(self.youtube.calls) + len(self.other.calls), 20)
         self.youtube.release.set()
-        for connection in (first, second):
+        self.other.release.set()
+        for connection in (*requests, waiting):
             response = connection.getresponse()
             self.assertEqual(response.status, 200)
             response.read()
             connection.close()
-        self.assertEqual(len(self.youtube.calls), 2)
+        self.assertEqual(len(self.youtube.calls), 11)
+        self.assertEqual(len(self.other.calls), 10)
 
     def test_waiting_same_route_cancellation_never_submits(self):
+        self.router.slots = threading.BoundedSemaphore(1)
         self.youtube.mode = 'wait'
         first = self.start_request()
         self.assertTrue(self.youtube.started.wait(1))
@@ -441,7 +489,7 @@ class PolicyAndPackageTests(unittest.TestCase):
                 for name in FILES:
                     self.assertTrue(archive.getmember(name).isfile())
                     self.assertEqual(archive.extractfile(name).read(),
-                                     pathlib.Path(__file__).with_name(name).read_bytes())
+                                     source(pathlib.Path(__file__).resolve().parent, name).read_bytes())
 
     def test_captain_hook_injects_only_protected_service_keys(self):
         script = r'''

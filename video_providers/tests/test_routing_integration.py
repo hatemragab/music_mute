@@ -125,6 +125,7 @@ class RoutingIntegration(unittest.TestCase):
         self.adapter.api_key = 't' * 48
         self.adapter.provider_key = 'tnl_fixture_never_real'
         self.adapter.scratch = self.directory
+        self.adapter.scratch_budget = tunelio.ScratchBudget(self.directory)
         self.adapter.slots = threading.BoundedSemaphore(1)
         self.adapter.admission = tunelio.Admission()
         title = Future()

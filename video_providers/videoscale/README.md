@@ -39,9 +39,11 @@ upgraded to HTTPS. All TLS certificates are verified. Public DNS answers are
 validated and pinned per connection; redirects and credential forwarding are
 disabled. A new provider delivery host requires qualification and adapter update.
 
-One acquisition at a time, sixteen bounded HTTP handlers, 25-second upstream
-socket timeouts and a 600-second operation deadline. Capacity rejects rather
-than queues another paid submission. There is **no automatic POST retry**: the
+Up to twenty acquisitions at a time, sixty-four bounded HTTP handlers,
+25-second upstream socket timeouts and a 600-second operation deadline. Busy
+slots wait cancellably within the original operation deadline before any
+upstream request. Excess imports remain in the backend's durable queue until
+active capacity is available. There is **no automatic POST retry**: the
 provider has no verified idempotency/cancellation API. Cancellation stops local
 work, but already-submitted SaaS work may still consume provider quota.
 
@@ -100,10 +102,32 @@ adapter code line, not exception text, stack locals, URLs, bodies or credentials
 Each vendor request and storage transfer logs `request_duration_ms`,
 `response_headers_ms` and `reused_connection` beside its stage. The first two
 measure elapsed time through completion/failure and through response headers
-(null if no headers arrive). They exclude local retry/polling waits and never
+(null if no headers arrive). They include connection setup and pre-submission pacing, exclude local
+retry/polling waits and never
 contain request URLs or bodies.
 See [latency investigation](docs/PERFORMANCE.md) for measured baseline and the
 boundary between local optimization checks and live release proof.
+
+## Shared acquisition capacity
+
+The router and both adapters use one shared limit implementation with the same
+generic configuration: `ACQUISITION_CONCURRENCY=20` and
+`ACQUISITION_REQUESTS_PER_SECOND=5`. The router enforces active capacity
+across providers. This adapter also waits before the first paid task-creation
+POST until its rolling one-second allowance is available. DNS/TLS connection
+completes before reserving the paid start, preventing connection delays from
+bunching requests at the provider. Read-only status
+polling does not consume paid-start reservations. A vendor 429 applies an
+in-memory cooldown honoring bounded Retry-After while the failed task remains
+failed; it is never resubmitted. Capacity, rate and cooldown waits check
+cancellation and the original deadline every 100 ms.
+
+The same settings apply to Tunelio and VideoScale; no provider-specific
+capacity knobs exist. Five starts per second differs from twenty concurrent
+downloads: the first twenty start in paced groups, then finished downloads free
+slots. Configure the providers' paid allowances to support these limits before
+deployment. Local tests do not establish VideoScale's account-wide allowance;
+its own limits and other uses of the credentials remain authoritative.
 
 ## Included metadata
 
@@ -151,8 +175,12 @@ See [implementation and verification](docs/OFFICIAL-METADATA.md).
 
 Create CapRover app `music-mute-videoscale` as **not exposed as a web app**, with no
 host port mapping or public domain, one replica. Apply `caprover-override.json`:
-non-root read-only container, dropped capabilities, 128 MiB tmpfs, 256 MiB memory,
+non-root read-only container, dropped capabilities, 2 GiB tmpfs, 3 GiB memory,
 one CPU, and bounded logs. No persistent media volume.
+The new scratch size fits twenty maximum 100 MB files plus 128 MB headroom.
+Tmpfs consumes RAM as used; the memory cap is not a memory reservation.
+Apply this override with the release; the previous small resource limits
+cannot support twenty large concurrent files.
 
 Set private runtime `AUDIO_ACQUISITION_API_KEY` and `VIDEOSCALE_BASIC_AUTH`.
 Never put actual credentials into files here or deployment archives. NestJS uses
@@ -161,25 +189,44 @@ Never put actual credentials into files here or deployment archives. NestJS uses
 adapter implementing this contract can be deployed and selected through these
 two generic settings without editing NestJS code.
 
+Set `ACQUISITION_CONCURRENCY=20` and
+`ACQUISITION_REQUESTS_PER_SECOND=5` identically in the router and both adapters
+(these are also the shared defaults, with ranges 1–20 and 1–5 respectively).
+`ACQUISITION_TEMP_ROOT` defaults to `/work`. Each private service keeps one
+replica so that in-memory capacity, pacing and cooldown bounds remain valid.
+
 Adapter scratch files are anonymous/unlinked TemporaryFile handles; success,
 failure, disconnect, process death and container recreation reclaim them. Tmpfs
 provides a hard media-storage bound. NestJS retains its existing dedicated scratch
 directory, byte limits, deadline/finally cleanup, free-space checks and orphan
 sweeper. Disk usage cannot be promised literally zero: logs/images and unrelated
 services still need operational retention policies.
+Before any provider request, the adapter atomically reserves the request's
+maximum bytes against current free space, outstanding reservations and the
+128 MB headroom. Flushed writes reduce outstanding reserved bytes; this avoids
+counting already-written files twice. All reservations release on exit.
 
 From this directory:
 
 ```sh
 python3 -m unittest -v test_service.py test_official_metadata.py
-COPYFILE_DISABLE=1 tar -cf videoscale.tar captain-definition Dockerfile .dockerignore service.py official_metadata.py
+python3 -B package_caprover.py /tmp/musicmute-videoscale.tar
 ```
 
-Upload the allowlisted tar through CapRover Deployment. Only five files enter the
-archive. Run backend `pnpm run verify`, `pnpm run test:imports:integration` and
+Upload the allowlisted tar through CapRover Deployment. Only seven files enter the
+byte-verified archive: captain-definition, Dockerfile, .dockerignore, service.py,
+official_metadata.py and shared acquisition_limits.py/acquisition_scratch.py
+(sourced from the parent directory and bundled by basename).
+Run backend `pnpm run verify`, `pnpm run test:imports:integration` and
 `pnpm run test:processing:integration` before releasing. Keep release proof in
 [TASKS.md](TASKS.md) and [deployment evidence](docs/DEPLOYMENT.md).
 
 [Research and API qualification](docs/README.md) predates implementation. No
 availability SLA, unlimited requests or guaranteed immunity to YouTube blocking
 is implied by this integration.
+
+For this capacity change, the current
+[official Zalando RESTful API guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+were read on 2026-09-30. The private bearer contract and measured binary headers
+remain compatible under rules 104, 148, 176, 177, 178 and 106; OpenAPI describes
+the new bounded pre-submission waits. Local tests do not establish deployment.

@@ -74,7 +74,7 @@ before(async () => {
     usage,
     new ConfigService({
       URL_IMPORT_ENABLED: true,
-      URL_IMPORT_MAX_OUTSTANDING: 20,
+      URL_IMPORT_MAX_OUTSTANDING: 100,
     }),
     queue,
     { assertAllowed: async () => {} },
@@ -443,20 +443,30 @@ test('native acquisition cleans upload/finalization failures and preserves commi
   }
 });
 
-test('simultaneous admissions enforce the global outstanding boundary and owner isolation', async () => {
-  const requests = Array.from({ length: 30 }, () => randomUUID());
+test('simultaneous admissions allow a waiting backlog while enforcing owner isolation and the total boundary', async () => {
+  const running = await records.create({
+    userId: owner,
+    requestId: randomUUID(),
+    jobRequestId: randomUUID(),
+    provider: 'youtube',
+    sourceUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
+    status: 'downloading',
+    executionId: randomUUID(),
+  });
+  const requests = Array.from({ length: 109 }, () => randomUUID());
   const settled = await Promise.allSettled(
     requests.map((id) =>
       imports.create(owner.toHexString(), 'https://youtu.be/abcdefghijk', id),
     ),
   );
-  assert.equal(settled.filter((r) => r.status === 'fulfilled').length, 20);
+  assert.equal(settled.filter((r) => r.status === 'fulfilled').length, 99);
   const failures = settled.filter((r) => r.status === 'rejected');
   assert.equal(failures.length, 10);
   assert.ok(
     failures.every((r) => r.reason.getResponse().code === 'IMPORT_QUEUE_FULL'),
   );
-  assert.equal(await records.countDocuments({ status: 'queued' }), 20);
+  assert.equal(await records.countDocuments({ status: 'queued' }), 99);
+  assert.equal((await records.findById(running._id)).status, 'downloading');
   const first = await records.findOne({ status: 'queued' }).lean();
   const replay = await imports.create(
     owner.toHexString(),
@@ -478,20 +488,23 @@ test('simultaneous admissions enforce the global outstanding boundary and owner 
   );
   await records.updateOne({ _id: first._id }, { $set: { status: 'failed' } });
   await imports.create(owner.toHexString(), first.sourceUrl, randomUUID());
-  assert.equal(await records.countDocuments({ status: 'queued' }), 20);
+  assert.equal(await records.countDocuments({ status: 'queued' }), 99);
 });
 
-test('BullMQ enforces global concurrency across two processors without job delays', async () => {
+test('BullMQ starts at most five imports per second across replicas, runs twenty concurrently and releases queued work', async () => {
   const name = 'global-concurrency-fixture';
   const q = new Queue(name, { connection: redis, prefix: 'isolated-imports' });
-  await q.setGlobalConcurrency(2);
+  await q.setGlobalConcurrency(20);
+  await q.setGlobalRateLimit(5, 1000);
   let active = 0,
     maximum = 0,
     started = 0;
   const releases = [];
+  const starts = [];
   const process = async () => {
     active++;
     started++;
+    starts.push(performance.now());
     maximum = Math.max(maximum, active);
     await new Promise((resolve) => releases.push(resolve));
     active--;
@@ -500,24 +513,36 @@ test('BullMQ enforces global concurrency across two processors without job delay
     new Worker(name, process, {
       connection: redis,
       prefix: 'isolated-imports',
-      concurrency: 4,
+      concurrency: 20,
     }),
     new Worker(name, process, {
       connection: redis,
       prefix: 'isolated-imports',
-      concurrency: 4,
+      concurrency: 20,
     }),
   ];
   try {
     await q.addBulk(
-      Array.from({ length: 5 }, (_, i) => ({ name: 'fixture', data: { i } })),
+      Array.from({ length: 25 }, (_, i) => ({ name: 'fixture', data: { i } })),
     );
-    await until(() => started === 2, 'two global slots');
-    assert.equal(maximum, 2);
+    await until(() => started === 5, 'first five global starts');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(started, 5);
+    await until(() => started === 20, 'twenty global slots');
+    assert.equal(maximum, 20);
+    assert.equal(await q.getWaitingCount(), 5);
+    // Every group of five is paced by Redis, even with two independent workers.
+    for (let i = 5; i < starts.length; i++)
+      assert.ok(starts[i] - starts[i - 5] >= 950);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.equal(started, 20);
     releases.shift()();
-    await until(() => started === 3, 'next ready import starts immediately');
-    assert.equal(active, 2);
-    while (started < 5 || active > 0) {
+    await until(
+      () => started === 21,
+      'next ready import starts when a slot opens',
+    );
+    assert.equal(active, 20);
+    while (started < 25 || active > 0) {
       const before = started;
       for (const release of releases.splice(0)) release();
       await until(
@@ -525,8 +550,8 @@ test('BullMQ enforces global concurrency across two processors without job delay
         'release import slots',
       );
     }
-    await until(async () => (await q.getCompletedCount()) === 5, 'completion');
-    assert.equal(maximum, 2);
+    await until(async () => (await q.getCompletedCount()) === 25, 'completion');
+    assert.equal(maximum, 20);
     assert.equal(await q.getDelayedCount(), 0);
   } finally {
     for (const release of releases) release();

@@ -2,3 +2,5 @@
 !Dockerfile
 !service.py
 !official_metadata.py
+!acquisition_limits.py
+!acquisition_scratch.py

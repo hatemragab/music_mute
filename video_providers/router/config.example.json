@@ -6,6 +6,8 @@
   "ports": [],
   "volumes": [],
   "environment": {
+    "ACQUISITION_CONCURRENCY": "20",
+    "ACQUISITION_REQUESTS_PER_SECOND": "5",
     "YOUTUBE_AUDIO_ACQUISITION_API_URL": "http://srv-captain--music-mute-tunelio:8080/",
     "OTHER_AUDIO_ACQUISITION_API_URL": "http://srv-captain--music-mute-videoscale:8080/"
   },

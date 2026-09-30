@@ -43,6 +43,10 @@ export class ImportRuntime
       'URL_IMPORT_CONCURRENCY',
     );
     await this.queue.setGlobalConcurrency(concurrency);
+    await this.queue.setGlobalRateLimit(
+      this.config.getOrThrow<number>('URL_IMPORT_REQUESTS_PER_SECOND'),
+      1_000,
+    );
     this.processor.worker.concurrency = concurrency;
     this.running = true;
     void this.processor.worker

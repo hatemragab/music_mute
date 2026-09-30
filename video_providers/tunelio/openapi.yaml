@@ -3,7 +3,7 @@ info:
   title: MusicMute private Tunelio audio acquisition
   version: 1.0.0
   x-audience: component-internal
-  description: Contract-compatible YouTube-only binary acquisition. Never automatically retry POST or Tunelio's paid GET /create. NestJS validates audio and duration before S3 upload.
+  description: Contract-compatible YouTube-only binary acquisition. Up to twenty active acquisitions use the same capacity and five paid starts per rolling second settings as the other adapter. Capacity and rate waits are cancellable within the operation deadline and occur before any paid request. Never automatically retry POST or Tunelio's paid GET /create. NestJS validates audio and duration before S3 upload.
 security:
   - service_key: []
 paths:
@@ -72,7 +72,7 @@ components:
     service_key: { type: http, scheme: bearer }
   responses:
     problem:
-      description: Sanitized problem JSON; code is a stable IMPORT_* identifier. 503 includes Retry-After for adapter capacity, trial admission and upstream cooldown, but does not authorize automatic paid resubmission. Provider 429 is mapped to this existing private dependency-error contract.
+      description: Sanitized problem JSON; code is a stable IMPORT_* identifier. 503 includes Retry-After for unavailable scratch, expired operation deadlines and upstream cooldown, but does not authorize automatic paid resubmission. Busy slots and local start limits wait before paid work. Provider 429 is mapped to this existing private dependency-error contract.
       headers:
         X-Import-Error:
           description: Same stable IMPORT_* code as the body, consumed by the bounded binary client.

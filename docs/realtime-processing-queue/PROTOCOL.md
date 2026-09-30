@@ -128,10 +128,11 @@ closes sockets instead of leaving clients marked live. Each API replica observes
 the database independently; Redis is for single-use tickets and distributed leases.
 
 Limits: six concurrent connections per account/audience across replicas, 3,000
-connections per process, 3,000 upgrades globally/minute, 60 upgrades per IP/minute, 16 subscriptions/connection,
-120 control messages/30 seconds, four concurrent reads/connection, 8 KiB inbound
+connections per process, 3,000 upgrades globally/minute, 60 upgrades per IP/minute, 128 subscriptions/connection,
+512 control messages/30 seconds, four concurrent reads/connection, 8 KiB inbound
 frames, 256 KiB snapshots and 1 MiB buffered outbound data. No compression.
-Invalidations coalesce for one second. Time-dependent reads are refreshed from the
+Cold subscriptions wait for a read slot and drain as earlier reads finish;
+committed change invalidations coalesce for one second. Time-dependent reads are refreshed from the
 server heartbeat; active job views continue that refresh for elapsed and progress
 staleness fields, while fully terminal job views and change-driven policy views do
 not reread periodically. Existing health sampling and overview caches are reused.

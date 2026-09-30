@@ -1,4 +1,4 @@
-"""Build and byte-verify the allowlisted, secret-free Tunelio deployment archive."""
+"""Build and byte-verify the allowlisted, secret-free VideoScale deployment archive."""
 import argparse
 import io
 import os
@@ -19,7 +19,7 @@ def package(output):
     output = Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     # Never include working tree/config/test files beyond the fixed allowlist.
-    with tempfile.NamedTemporaryFile(dir=output.parent, prefix='.tunelio-package-', delete=False) as handle:
+    with tempfile.NamedTemporaryFile(dir=output.parent, prefix='.videoscale-package-', delete=False) as handle:
         temporary = Path(handle.name)
     try:
         with tarfile.open(temporary, 'w', format=tarfile.USTAR_FORMAT) as archive:

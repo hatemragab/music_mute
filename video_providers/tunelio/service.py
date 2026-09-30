@@ -1,18 +1,18 @@
 """Private Tunelio adapter. Standard library only; no local media extractor."""
 import base64
-from collections import deque
 from concurrent.futures import Future, TimeoutError as FutureTimeout
-from email.utils import parsedate_to_datetime
 import hmac
 import http.client
 import ipaddress
 import json
 import math
 import os
+from pathlib import Path
 import re
 import select
 import socket
 import ssl
+import sys
 import tempfile
 import threading
 import time
@@ -21,6 +21,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from official_metadata import OfficialMetadata, merge_metadata
+try:
+    from acquisition_limits import AcquisitionLimits, Admission, retry_seconds, wait_for_slot
+except ModuleNotFoundError as error:
+    if error.name != 'acquisition_limits':
+        raise
+    # Deployment bundles the shared module beside this file; direct local
+    # execution uses its single source in the provider directory instead.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from acquisition_limits import AcquisitionLimits, Admission, retry_seconds, wait_for_slot
+from acquisition_scratch import ScratchBudget, ScratchUnavailable
 
 API_HOST = 'tunelio.dev'
 MAX_BYTES = 100_000_000
@@ -31,9 +41,9 @@ CONTENT_TYPES = {'audio/webm': ('webm', 'webm'), 'video/webm': ('webm', 'webm'),
                  'audio/ogg': ('ogg', 'ogg'), 'application/ogg': ('ogg', 'ogg'),
                  'audio/opus': ('opus', None),
                  'application/octet-stream': (None, None)}
-# One acquisition plus one nonfatal metadata lookup can resolve concurrently.
+# Twenty acquisitions plus one nonfatal metadata lookup can resolve concurrently.
 # Separate from HTTP handlers; stalled OS resolvers cannot accumulate threads.
-DNS_SLOT = threading.BoundedSemaphore(2)
+DNS_SLOT = threading.BoundedSemaphore(21)
 
 
 class Failure(Exception):
@@ -98,44 +108,6 @@ def tunnel_url(value):
         return p
     except ValueError:
         raise Failure(reason='Delivery URL failed the signed Tunelio tunnel policy.') from None
-
-
-def retry_seconds(value, wall_clock=time.time):
-    """Honor numeric or HTTP-date Retry-After, bounded to a day."""
-    try:
-        if isinstance(value, str) and value.isdigit():
-            return max(1, min(int(value), 86400))
-        date = parsedate_to_datetime(value)
-        return max(1, min(math.ceil(date.timestamp() - wall_clock()), 86400))
-    except (TypeError, ValueError, OverflowError):
-        return 60
-
-
-class Admission:
-    """One process/key: at most 15 paid starts per rolling minute; no waits/replay."""
-    def __init__(self, clock=time.monotonic):
-        self.clock = clock
-        self.lock = threading.Lock()
-        self.started = deque()
-        self.cooldown_until = 0
-
-    def reserve(self):
-        with self.lock:
-            now = self.clock()
-            while self.started and self.started[0] <= now - 60:
-                self.started.popleft()
-            wait = self.cooldown_until - now
-            if len(self.started) >= 15:
-                wait = max(wait, self.started[0] + 60 - now)
-            if wait > 0:
-                raise Failure('IMPORT_QUEUE_FULL', 503,
-                              reason='Provider request allowance or cooldown is active; no paid request started.',
-                              retry_after=math.ceil(wait))
-            self.started.append(now)
-
-    def cooldown(self, seconds):
-        with self.lock:
-            self.cooldown_until = max(self.cooldown_until, self.clock() + seconds)
 
 
 def public_addresses(host, port, timeout):
@@ -296,10 +268,16 @@ class Provider:
     def create(self, url):
         self.step('create', 'Requesting native Opus audio once; no paid metadata, retries or job polling.')
         self.guard()
-        self.admission.reserve()
         conn = self.connect()
         started, headers_ms = time.monotonic(), None
         try:
+            # Complete DNS/TLS first, then pace immediately before paid bytes.
+            # Variable connection latency must not bunch previously reserved
+            # requests into a larger provider-visible burst.
+            conn.connect()
+            self.guard()
+            self.admission.reserve(self.guard)
+            self.guard()
             conn.request('GET', '/create?' + urlencode({'url': url, 'quality': 'opus', 'audioBitrate': 128}),
                          headers={'Authorization': 'Bearer ' + self.key,
                                   'Accept': 'application/json', 'Accept-Encoding': 'identity'})
@@ -459,11 +437,6 @@ class Handler(BaseHTTPRequestHandler):
                     or not finite(duration) or not 0 < duration <= MAX_DURATION_SECONDS):
                 raise Failure('IMPORT_INVALID_REQUEST', 400)
             url = source_url(body['url'])
-            acquired = self.server.slots.acquire(blocking=False)
-            if not acquired:
-                raise Failure('IMPORT_QUEUE_FULL', 503,
-                              reason='Adapter is already acquiring an item; no upstream request started.')
-
             def check():
                 remaining = DEADLINE_SECONDS - (time.monotonic() - started)
                 if remaining <= 0:
@@ -473,7 +446,14 @@ class Handler(BaseHTTPRequestHandler):
                     if not self.connection.recv(1, socket.MSG_PEEK):
                         raise ConnectionAbortedError()
 
-            with tempfile.TemporaryFile(dir=self.server.scratch) as audio:
+            wait_for_slot(self.server.slots, check)
+            acquired = True
+            try:
+                reservation = self.server.scratch_budget.reserve(limit)
+            except ScratchUnavailable:
+                raise Failure('IMPORT_DISK_FULL', 503,
+                              reason='Dedicated scratch cannot safely reserve the requested audio bytes.') from None
+            with reservation, tempfile.TemporaryFile(dir=self.server.scratch) as audio:
                 def log(**fields):
                     print(json.dumps({'event': 'audio-acquisition-step', 'acquisition_id': acquisition_id,
                                       'elapsed_ms': round((time.monotonic() - started) * 1000),
@@ -481,7 +461,7 @@ class Handler(BaseHTTPRequestHandler):
                 provider = Provider(self.server.provider_key, check, self.server.admission, log=log,
                                     deadline=started + DEADLINE_SECONDS)
                 lookup = self.server.metadata.start(url)
-                size, extra = provider.acquire(url, limit, audio)
+                size, extra = provider.acquire(url, limit, reservation.wrap(audio))
                 extra = merge_metadata(extra, lookup)
                 provider.step('backend-transfer', 'Sending bounded audio to NestJS for independent media validation.')
                 check()
@@ -531,8 +511,8 @@ class Handler(BaseHTTPRequestHandler):
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
-    request_queue_size = 8
-    threads = threading.BoundedSemaphore(16)
+    request_queue_size = 64
+    threads = threading.BoundedSemaphore(64)
 
     def process_request(self, request, client_address):
         if not self.threads.acquire(blocking=False):
@@ -563,10 +543,12 @@ def main():
     scratch = os.environ.get('ACQUISITION_TEMP_ROOT', '/work')
     if not os.path.isdir(scratch) or os.path.islink(scratch) or scratch in ('/', '/tmp'):
         raise SystemExit('Dedicated acquisition scratch directory required')
+    limits = AcquisitionLimits.from_env()
     server = Server(('0.0.0.0', 8080), Handler)
     server.api_key, server.provider_key, server.scratch = key, vendor, scratch
-    server.slots = threading.BoundedSemaphore(1)
-    server.admission = Admission()
+    server.slots = threading.BoundedSemaphore(limits.concurrency)
+    server.admission = Admission(limits.requests_per_second)
+    server.scratch_budget = ScratchBudget(scratch)
     server.metadata = OfficialMetadata(PublicTLS)
     print('Private Tunelio audio acquisition ready', flush=True)
     server.serve_forever()

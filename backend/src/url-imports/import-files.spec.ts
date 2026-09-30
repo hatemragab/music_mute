@@ -5,6 +5,7 @@ import {
   readdir,
   readFile,
   rm,
+  statfs,
   symlink,
   utimes,
   writeFile,
@@ -14,12 +15,18 @@ import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { ImportFiles } from './import-files.js';
 
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...original, statfs: vi.fn(original.statfs) };
+});
+
 describe('bounded temporary imports', () => {
   let root: string;
   let files: ImportFiles;
   let server: Server;
   let origin: string;
   beforeEach(async () => {
+    vi.mocked(statfs).mockClear();
     root = await mkdtemp(join(tmpdir(), 'musicmute-import-test-'));
     files = new ImportFiles(join(root, 'imports'), 0);
     server = createServer((req, res) => {
@@ -208,6 +215,73 @@ describe('bounded temporary imports', () => {
       'Temporary import storage',
     );
     expect(await readdir(files.root)).toEqual([]);
+  });
+  it('reserves disk before concurrent paid requests and releases it after failure', async () => {
+    await files.initialize();
+    // Each request requires 20 bytes; the same 30 free bytes can admit only one.
+    vi.mocked(statfs).mockResolvedValue({
+      bavail: 30,
+      bsize: 1,
+    } as Awaited<ReturnType<typeof statfs>>);
+    let submissions = 0;
+    let release!: () => void;
+    const delivery = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.removeAllListeners('request');
+    server.on('request', async (req, res) => {
+      submissions++;
+      req.resume();
+      await delivery;
+      res.writeHead(403);
+      res.end();
+    });
+    const request = { method: 'POST', headers: {}, body: '{}' };
+    try {
+      const outcomes = Promise.allSettled(
+        ['first.audio', 'second.audio'].map((name) =>
+          files.download(
+            origin,
+            join(files.root, name),
+            20,
+            AbortSignal.timeout(5000),
+            request,
+          ),
+        ),
+      );
+      await vi.waitFor(() => expect(submissions).toBe(1));
+      release();
+      const results = await outcomes;
+      expect(results.filter((r) => r.status === 'rejected')).toHaveLength(2);
+      expect(
+        results.some(
+          (r) =>
+            r.status === 'rejected' &&
+            r.reason.getResponse().code === 'IMPORT_DISK_FULL',
+        ),
+      ).toBe(true);
+      // A failed transfer releases its reservation, so another POST can proceed.
+      await expect(
+        files.download(
+          origin,
+          join(files.root, 'third.audio'),
+          20,
+          AbortSignal.timeout(5000),
+          request,
+        ),
+      ).rejects.toThrow();
+      expect(submissions).toBe(2);
+    } finally {
+      release();
+      vi.mocked(statfs).mockReset();
+      vi.mocked(statfs).mockImplementation(
+        (
+          await vi.importActual<typeof import('node:fs/promises')>(
+            'node:fs/promises',
+          )
+        ).statfs,
+      );
+    }
   });
   it('reclaims expired crash leftovers but preserves active, foreign, and symlink paths', async () => {
     await files.initialize();

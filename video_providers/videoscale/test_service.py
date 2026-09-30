@@ -1,9 +1,13 @@
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import http.client
 import io
 import json
+from pathlib import Path
+import tarfile
 import tempfile
 import threading
+import time
 import unittest
 import socket
 import ssl
@@ -12,7 +16,10 @@ import urllib.request
 from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from service import Failure, Handler, Provider, PublicTLS, Server, metadata, select_format, source_url, source_site, storage_url
+from service import Failure, Handler, Provider, PublicTLS, Server, metadata, select_format, source_url, source_site, storage_url, wait_for_slot
+from acquisition_limits import Admission
+from acquisition_scratch import ScratchBudget
+from package_caprover import FILES, package, source_path
 
 FORMAT = {'format_id': '140', 'ext': 'm4a', 'acodec': 'mp4a.40.2', 'vcodec': 'none',
           'protocol': 'https', 'audio_channels': 2, 'abr': 129.4, 'asr': 44100,
@@ -21,6 +28,55 @@ FORMAT = {'format_id': '140', 'ext': 'm4a', 'acodec': 'mp4a.40.2', 'vcodec': 'no
 
 
 class ContractTests(unittest.TestCase):
+    def test_cancellation_during_rate_wait_stops_before_paid_creation(self):
+        cancelled = threading.Event()
+        admission = Admission()
+        admission.cooldown(60)
+        admission.sleep = lambda _seconds: cancelled.set()
+        def check():
+            if cancelled.is_set():
+                raise ConnectionAbortedError()
+        connection = unittest.mock.Mock()
+        provider = Provider('Basic synthetic', check, connection, admission=admission)
+        with self.assertRaises(ConnectionAbortedError):
+            provider.request('/api/download', {'url': 'synthetic', 'format_id': '140'})
+        connection.assert_called_once()
+        connection.return_value.connect.assert_called_once()
+        connection.return_value.request.assert_not_called()
+        connection.return_value.close.assert_called_once()
+        self.assertEqual(len(admission.started), 0)
+
+    def test_connection_delays_do_not_bunch_paid_requests_above_five_per_second(self):
+        now, paid_starts = [0], []
+        admission = Admission(clock=lambda: now[0], sleep=lambda seconds: now.__setitem__(0, now[0] + seconds))
+        for index in range(6):
+            response = unittest.mock.Mock(status=200, length=0)
+            response.read1 = io.BytesIO(b'{}').read
+            connection = unittest.mock.Mock(sock=None)
+            if index == 0:
+                connection.connect.side_effect = lambda: now.__setitem__(0, 5)
+            connection.request.side_effect = lambda *_args, **_kwargs: paid_starts.append(now[0])
+            connection.getresponse.return_value = response
+            provider = Provider('Basic synthetic', lambda: None, unittest.mock.Mock(return_value=connection), admission=admission)
+            provider.request('/api/download', {'url': 'synthetic', 'format_id': '140'})
+        self.assertEqual(paid_starts[:5], [5] * 5)
+        self.assertGreaterEqual(paid_starts[5] - paid_starts[0], 1)
+
+    def test_upstream_429_sets_cooldown_without_repeating_paid_creation(self):
+        admission = Admission()
+        connection = unittest.mock.Mock()
+        response = connection.getresponse.return_value
+        response.status = 429
+        response.getheader.return_value = '90'
+        factory = unittest.mock.Mock(return_value=connection)
+        provider = Provider('Basic synthetic', lambda: None, factory, admission=admission)
+        with self.assertRaises(Failure) as error:
+            provider.request('/api/download', {'url': 'synthetic', 'format_id': '140'})
+        self.assertEqual(error.exception.code, 'IMPORT_UPSTREAM_REFUSED')
+        connection.request.assert_called_once()
+        factory.assert_called_once()
+        self.assertGreaterEqual(admission.cooldown_until - time.monotonic(), 89)
+
     def test_public_item_platforms_and_metadata(self):
         for site, url in [
             ('instagram', 'https://www.instagram.com/reel/Example/?igsh=secret'),
@@ -88,6 +144,8 @@ class ContractTests(unittest.TestCase):
         replies = iter(responses)
         class Connection:
             def __init__(self, *args, **kwargs):
+                pass
+            def connect(self):
                 pass
             def request(self, method, path, body, headers):
                 calls.append(method)
@@ -720,6 +778,8 @@ class ServerTests(unittest.TestCase):
         self.server.provider_auth = 'Basic synthetic'
         self.server.scratch = self.directory.name
         self.server.slots = threading.BoundedSemaphore(1)
+        self.server.admission = Admission()
+        self.server.scratch_budget = ScratchBudget(self.directory.name)
         from concurrent.futures import Future
         title = Future()
         title.set_result({'title': 'Official fixture title', 'channel': 'Fixture creator'})
@@ -830,23 +890,118 @@ class ServerTests(unittest.TestCase):
         import os
         self.assertEqual(os.listdir(self.directory.name), [])
 
-    def test_capacity(self):
+    def test_capacity_waits_and_starts_after_a_slot_is_released(self):
         self.server.slots.acquire()
-        with patch('service.Provider.acquire') as acquire:
+        def acquire(_self, url, limit, out):
+            out.write(b'fixture-audio')
+            return 13, metadata(FORMAT)
+        with ThreadPoolExecutor(max_workers=1) as pool, patch('service.Provider.acquire', acquire):
+            pending = pool.submit(self.request)
+            try:
+                time.sleep(.15)
+                self.assertFalse(pending.done())
+            finally:
+                self.server.slots.release()
+            with pending.result(timeout=2) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.read(), b'fixture-audio')
+
+    def test_twenty_acquisitions_run_and_twenty_first_waits_for_one_to_finish(self):
+        self.server.slots = threading.BoundedSemaphore(20)
+        lock = threading.Lock()
+        first_twenty, twenty_first = threading.Event(), threading.Event()
+        finish_one, finish_all = threading.Event(), threading.Event()
+        starts, active, maximum = 0, 0, 0
+        def acquire(_self, url, limit, out):
+            nonlocal starts, active, maximum
+            with lock:
+                index = starts
+                starts += 1
+                active += 1
+                maximum = max(maximum, active)
+                if starts == 20:
+                    first_twenty.set()
+                if starts == 21:
+                    twenty_first.set()
+            try:
+                (finish_one if index == 0 else finish_all).wait(3)
+                out.write(b'fixture-audio')
+                return 13, metadata(FORMAT)
+            finally:
+                with lock:
+                    active -= 1
+        with ThreadPoolExecutor(max_workers=21) as pool, patch('service.Provider.acquire', acquire), \
+                patch('builtins.print'):
+            requests = [pool.submit(self.request) for _ in range(20)]
+            try:
+                self.assertTrue(first_twenty.wait(2))
+                requests.append(pool.submit(self.request))
+                self.assertFalse(twenty_first.wait(.15))
+                finish_one.set()
+                self.assertTrue(twenty_first.wait(2))
+            finally:
+                finish_one.set()
+                finish_all.set()
+            for pending in requests:
+                with pending.result(timeout=2) as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.read(), b'fixture-audio')
+        self.assertEqual(maximum, 20)
+        self.assertEqual(self.server.scratch_budget.remaining, 0)
+
+    def test_insufficient_reserved_scratch_stops_before_provider_work(self):
+        with patch('acquisition_scratch.os.statvfs') as space, patch('service.Provider.acquire') as acquire:
+            space.return_value.f_bavail = 128_000_000
+            space.return_value.f_frsize = 1
             with self.request() as response:
                 self.assertEqual(response.status, 503)
-                self.assertEqual(json.load(response)['code'], 'IMPORT_QUEUE_FULL')
+                self.assertEqual(json.load(response)['code'], 'IMPORT_DISK_FULL')
             acquire.assert_not_called()
+        self.assertTrue(self.server.slots.acquire(timeout=2))
+        self.assertEqual(self.server.scratch_budget.remaining, 0)
+
+    def test_disconnect_during_capacity_wait_never_starts_provider(self):
+        entered, finished = threading.Event(), threading.Event()
+        def wait(slots, check):
+            entered.set()
+            try:
+                return wait_for_slot(slots, check)
+            finally:
+                finished.set()
+        self.server.slots.acquire()
+        data = json.dumps({'url': 'https://youtu.be/aqz-KE-bpKQ', 'max_bytes': 2048,
+                           'max_duration_seconds': 1200}).encode()
+        with patch('service.wait_for_slot', wait), patch('service.Provider.acquire') as acquire:
+            client = socket.create_connection(('127.0.0.1', self.server.server_port))
+            try:
+                client.sendall(('POST /audio-imports HTTP/1.1\r\nHost: localhost\r\n'
+                                'Content-Type: application/json\r\nAuthorization: Bearer ' + 's' * 32 +
+                                '\r\nContent-Length: ' + str(len(data)) + '\r\n\r\n').encode() + data)
+                self.assertTrue(entered.wait(2))
+                client.shutdown(socket.SHUT_RDWR)
+                client.close()
+                self.assertTrue(finished.wait(2))
+                acquire.assert_not_called()
+                self.assertEqual(self.server.scratch_budget.remaining, 0)
+            finally:
+                client.close()
+                self.server.slots.release()
 
     def test_disconnect_stops_work_and_reclaims_scratch(self):
         entered, proceed, finished = threading.Event(), threading.Event(), threading.Event()
+        disconnected = threading.Event()
         def acquire(provider, url, limit, out):
             out.write(b'partial')
             entered.set()
             proceed.wait(2)
             try:
-                provider.check()
+                for _ in range(100):
+                    provider.check()
+                    time.sleep(.01)
                 raise AssertionError('Disconnected client was not detected')
+            except ConnectionAbortedError:
+                disconnected.set()
+                raise
             finally:
                 finished.set()
         data = json.dumps({'url': 'https://youtu.be/aqz-KE-bpKQ', 'max_bytes': 2048,
@@ -861,9 +1016,22 @@ class ServerTests(unittest.TestCase):
             client.close()
             proceed.set()
             self.assertTrue(finished.wait(2))
+            self.assertTrue(disconnected.is_set())
             self.assertTrue(self.server.slots.acquire(timeout=2))
         import os
         self.assertEqual(os.listdir(self.directory.name), [])
+
+
+class PackageTests(unittest.TestCase):
+    def test_allowlist_exact_bytes_no_secrets_configuration_or_tests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = package(Path(directory) / 'videoscale.tar')
+            with tarfile.open(path) as archive:
+                self.assertEqual(tuple(archive.getnames()), FILES)
+                for entry in archive.getmembers():
+                    self.assertTrue(entry.isfile())
+                    self.assertEqual(archive.extractfile(entry).read(), source_path(entry.name).read_bytes())
+                    self.assertEqual((entry.uid, entry.gid, entry.mtime), (0, 0, 0))
 
 
 if __name__ == '__main__':

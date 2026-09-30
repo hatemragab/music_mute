@@ -7,6 +7,7 @@ import os
 import re
 import select
 import socket
+import sys
 import threading
 import time
 import unicodedata
@@ -14,6 +15,13 @@ import uuid
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
+from pathlib import Path
+
+try:
+    from acquisition_limits import AcquisitionLimits, Admission, wait_for_slot
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from acquisition_limits import AcquisitionLimits, Admission, wait_for_slot
 
 from source_policy import Failure, MAX_BYTES, MAX_DURATION_SECONDS, finite, route_for, source_url
 
@@ -277,19 +285,12 @@ class Handler(BaseHTTPRequestHandler):
                 raise Failure('IMPORT_NOT_FOUND', 404)
             body = self.body()
             route = route_for(body['url'])
-            acquired = self.server.slots.acquire(blocking=False)
-            if not acquired:
-                raise Failure('IMPORT_QUEUE_FULL', 503)
             target = self.server.destinations[route]
             remaining = self.server.operation_timeout - (time.monotonic() - started)
             with Operation(self.connection, remaining) as operation:
-                route_slot = self.server.route_slots[route]
-                while not route_slot.acquire(timeout=0.1):
-                    operation.check()
-                try:
-                    self.relay(body, target, request_id, operation)
-                finally:
-                    route_slot.release()
+                wait_for_slot(self.server.slots, operation.check)
+                acquired = True
+                self.relay(body, target, request_id, operation)
                 result = 'SUCCEEDED'
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             disconnected = operation and not operation.timed_out and operation.disconnected()
@@ -325,6 +326,9 @@ class Handler(BaseHTTPRequestHandler):
         operation.attach(connection)
         connection.connect()
         operation.attach_transport(connection.sock)
+        operation.check()
+        # Pace sends after connecting: uneven DNS/TCP latency must not bunch starts.
+        self.server.admission.reserve(operation.check)
         operation.check()
         connection.sock.settimeout(max(0.1, operation.deadline - time.monotonic()))
         # Exactly one POST. Never repeat or switch providers after any result.
@@ -388,16 +392,17 @@ class Server(ThreadingHTTPServer):
     request_queue_size = 8
 
     def __init__(self, address, api_key, destinations, *, connection_factory=http.client.HTTPConnection,
-                 operation_timeout=600, log=None):
+                 operation_timeout=600, log=None, limits=None):
         super().__init__(address, Handler)
         self.api_key = api_key
         self.destinations = destinations
         self.secrets = [api_key, *(target.key for target in destinations.values())]
         self.connection_factory = connection_factory
         self.operation_timeout = operation_timeout
-        self.slots = threading.BoundedSemaphore(2)
-        self.route_slots = {route: threading.BoundedSemaphore(1) for route in destinations}
-        self.threads = threading.BoundedSemaphore(16)
+        self.limits = limits or AcquisitionLimits.from_env()
+        self.slots = threading.BoundedSemaphore(self.limits.concurrency)
+        self.admission = Admission(self.limits.requests_per_second)
+        self.threads = threading.BoundedSemaphore(64)
         self.log = log or (lambda fields: print(json.dumps(fields), flush=True))
 
     def process_request(self, request, client_address):
@@ -433,7 +438,11 @@ def main():
         }
     except ValueError:
         raise SystemExit('Missing valid private adapter configuration') from None
-    server = Server(('0.0.0.0', 8080), key, targets)
+    try:
+        limits = AcquisitionLimits.from_env()
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
+    server = Server(('0.0.0.0', 8080), key, targets, limits=limits)
     print('Private audio acquisition router ready', flush=True)
     server.serve_forever()
 
