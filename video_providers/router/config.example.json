@@ -1,0 +1,17 @@
+{
+  "caproverApp": "music-mute-audio-router",
+  "notExposedAsWebApp": true,
+  "containerHttpPort": 8080,
+  "instanceCount": 1,
+  "ports": [],
+  "volumes": [],
+  "environment": {
+    "YOUTUBE_AUDIO_ACQUISITION_API_URL": "http://srv-captain--music-mute-tunelio:8080/",
+    "OTHER_AUDIO_ACQUISITION_API_URL": "http://srv-captain--music-mute-videoscale:8080/"
+  },
+  "secretsFromPreDeployHook": [
+    "AUDIO_ACQUISITION_API_KEY",
+    "YOUTUBE_AUDIO_ACQUISITION_API_KEY",
+    "OTHER_AUDIO_ACQUISITION_API_KEY"
+  ]
+}

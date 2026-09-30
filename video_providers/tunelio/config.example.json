@@ -1,0 +1,13 @@
+{
+  "caproverApp": "music-mute-tunelio",
+  "notExposedAsWebApp": true,
+  "containerHttpPort": 8080,
+  "instanceCount": 1,
+  "ports": [],
+  "volumes": [],
+  "environment": {
+    "ACQUISITION_TEMP_ROOT": "/work"
+  },
+  "secretsInCaproverEnvironment": ["TUNELIO_API_KEY"],
+  "secretsFromPreDeployHook": ["AUDIO_ACQUISITION_API_KEY"]
+}
