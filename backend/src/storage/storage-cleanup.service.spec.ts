@@ -6,7 +6,10 @@ import {
   type ScheduleStorageCleanup,
 } from './storage-cleanup.service.js';
 import type { StorageCleanupTask } from './storage-cleanup-task.schema.js';
-import { StorageCleanupTaskSchema } from './storage-cleanup-task.schema.js';
+import {
+  STORAGE_CLEANUP_REASONS,
+  StorageCleanupTaskSchema,
+} from './storage-cleanup-task.schema.js';
 
 type TaskRecord = ScheduleStorageCleanup & {
   _id: Types.ObjectId;
@@ -122,6 +125,49 @@ describe('StorageCleanupService', () => {
   const owner = new Types.ObjectId('507f1f77bcf86cd799439011');
   const key = `users/${owner.toHexString()}/jobs/job/input/file.mp3`;
   const due = new Date('2026-09-12T00:00:00.000Z');
+  const sharedKey = `shared/url/${'a'.repeat(64)}/2f237a2e-031e-4b58-b9a7-9f9e7c0e31a9/input/source.mp3`;
+
+  it.each(STORAGE_CLEANUP_REASONS)(
+    'rejects shared-media cleanup for reason %s',
+    async (reason) => {
+      const { service, tasks, deleteObject } = setup();
+      await expect(
+        service.schedule({
+          key: sharedKey,
+          ownerUserId: null,
+          reason,
+          nextAt: due,
+          settleUntil: due,
+        }),
+      ).rejects.toThrow('Shared media is permanently retained');
+      expect(tasks.records).toHaveLength(0);
+      expect(deleteObject).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fences shared objects even if an obsolete cleanup task is already stored', async () => {
+    const { service, tasks, deleteObject } = setup();
+    await service.schedule({
+      key,
+      ownerUserId: owner,
+      reason: 'AUDIO_INPUT_TERMINAL',
+      nextAt: due,
+      settleUntil: due,
+    });
+    tasks.records[0].key = sharedKey;
+    tasks.records[0].ownerUserId = null;
+
+    await expect(service.cleanupDue(due)).resolves.toBe(true);
+
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(tasks.reference).not.toHaveBeenCalled();
+    expect(tasks.records[0]).toMatchObject({
+      completedAt: null,
+      firstDeletedAt: null,
+      attempts: 1,
+      leaseToken: null,
+    });
+  });
 
   it('waits for the replica-safety index before maintenance can start', async () => {
     const { service, tasks } = setup();

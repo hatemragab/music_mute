@@ -15,6 +15,7 @@ import { jobError } from './job-errors.js';
 import type { WorkerExecutionOwnership } from './job.types.js';
 import { WorkerAttempt } from '../worker-fleet/jobs/worker-attempt.schema.js';
 import { WorkerSlot } from '../worker-fleet/machines/worker-slot.schema.js';
+import { isSharedMediaKey } from '../shared-media/shared-media-key.js';
 
 const CLEANUP_LEASE_MS = 60_000;
 
@@ -208,7 +209,10 @@ export class JobDeletionService {
           job.inputReservation.key,
           job.inputObject?.key,
           job.outputObject?.key,
-        ].filter((key): key is string => Boolean(key)),
+        ].filter(
+          (key): key is string =>
+            typeof key === 'string' && key.length > 0 && !isSharedMediaKey(key),
+        ),
       );
       for (const key of keys) {
         if (!key.startsWith(`users/${job.userId.toHexString()}/jobs/`))

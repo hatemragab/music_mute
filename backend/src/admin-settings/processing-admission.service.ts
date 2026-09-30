@@ -19,7 +19,10 @@ import type { JobMetadata } from '../jobs/job-metadata.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { User } from '../users/user.schema.js';
 import { ProcessingAdmissionFence } from './processing-settings.schema.js';
-import { AccountPolicyService } from './account-policy.service.js';
+import {
+  AccountPolicyService,
+  type EffectiveAccountPolicy,
+} from './account-policy.service.js';
 
 @Injectable()
 export class ProcessingAdmissionService {
@@ -40,6 +43,69 @@ export class ProcessingAdmissionService {
     newJobId: Types.ObjectId,
     metadata: JobMetadata = {},
   ): Promise<AdmissionSnapshot> {
+    const { accountId, policy } = await this.assertAdmissionPolicy(
+      userId,
+      input,
+      session,
+      metadata,
+    );
+    await this.usage.assertRetainedCapacity(
+      accountId,
+      policy.values.maxRetainedOutputBytes,
+      session,
+    );
+
+    const [waitingJobs, processingJobs] = await Promise.all([
+      this.countCapacity(userId, WAITING_CAPACITY_STATUSES, session),
+      this.countCapacity(userId, PROCESSING_CAPACITY_STATUSES, session),
+    ]);
+    const maxWaitingJobs = policy.values.maxWaitingJobs;
+    const maxProcessingJobs = policy.values.maxProcessingJobs;
+    if (waitingJobs >= maxWaitingJobs)
+      throw jobError('PROCESSING_LIMIT_REACHED', {
+        nextResetAt: null,
+        capacity: {
+          waitingJobs,
+          maxWaitingJobs,
+          processingJobs,
+          maxProcessingJobs,
+        },
+        action: 'wait_for_job_to_finish',
+      });
+
+    await this.usage.reserveForJob(
+      newJobId,
+      accountId,
+      input.durationSeconds,
+      session,
+    );
+    return this.snapshot(policy, metadata);
+  }
+
+  /** A completed cache result does not consume queue or processing capacity. */
+  async assertCachedWork(
+    userId: string | Types.ObjectId,
+    input: Pick<InputDeclaration, 'bytes' | 'durationSeconds'>,
+    session: ClientSession,
+    metadata: JobMetadata,
+  ): Promise<AdmissionSnapshot> {
+    const { policy } = await this.assertAdmissionPolicy(
+      userId,
+      input,
+      session,
+      metadata,
+    );
+    // The exact retained input and output bytes are claimed and checked by
+    // recordRetainedCachedMedia in the same creation transaction.
+    return this.snapshot(policy, metadata);
+  }
+
+  private async assertAdmissionPolicy(
+    userId: string | Types.ObjectId,
+    input: Pick<InputDeclaration, 'bytes' | 'durationSeconds'>,
+    session: ClientSession,
+    metadata: JobMetadata,
+  ): Promise<{ accountId: Types.ObjectId; policy: EffectiveAccountPolicy }> {
     if (!session.inTransaction())
       throw new Error('Processing admission requires a transaction');
 
@@ -87,46 +153,22 @@ export class ProcessingAdmissionService {
     )
       throw jobError('PROCESSING_UNAVAILABLE');
 
-    await this.usage.assertRetainedCapacity(
-      accountId,
-      policy.values.maxRetainedOutputBytes,
-      session,
-    );
+    return { accountId, policy };
+  }
 
-    const [waitingJobs, processingJobs] = await Promise.all([
-      this.countCapacity(userId, WAITING_CAPACITY_STATUSES, session),
-      this.countCapacity(userId, PROCESSING_CAPACITY_STATUSES, session),
-    ]);
-    const maxWaitingJobs = policy.values.maxWaitingJobs;
-    const maxProcessingJobs = policy.values.maxProcessingJobs;
-    if (waitingJobs >= maxWaitingJobs)
-      throw jobError('PROCESSING_LIMIT_REACHED', {
-        nextResetAt: null,
-        capacity: {
-          waitingJobs,
-          maxWaitingJobs,
-          processingJobs,
-          maxProcessingJobs,
-        },
-        action: 'wait_for_job_to_finish',
-      });
-
-    await this.usage.reserveForJob(
-      newJobId,
-      accountId,
-      input.durationSeconds,
-      session,
-    );
-
+  private snapshot(
+    policy: EffectiveAccountPolicy,
+    metadata: JobMetadata,
+  ): AdmissionSnapshot {
     return {
       policyVersion: 2 as const,
       maxDurationSeconds: policy.values.maxDurationSeconds,
       maxInputBytes: policy.values.maxPreparedAudioBytes,
-      preparationProfileId: metadata.preparationProfileId,
+      preparationProfileId: metadata.preparationProfileId!,
       source: metadata.source!,
       settingsRevision: policy.globalRevision,
-      maxWaitingJobs,
-      maxProcessingJobs,
+      maxWaitingJobs: policy.values.maxWaitingJobs,
+      maxProcessingJobs: policy.values.maxProcessingJobs,
       maxInfrastructureAttempts: policy.values.maxInfrastructureAttempts,
       maxClientInputAttempts: policy.values.maxClientInputAttempts,
       reservationExpiresAt: new Date(

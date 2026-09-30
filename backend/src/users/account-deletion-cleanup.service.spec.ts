@@ -239,6 +239,46 @@ describe('account deletion cleanup', () => {
     });
   });
 
+  it.each(['private', 'shared'] as const)(
+    'purges shared attempt references while scheduling only %s temporary reservations',
+    async (reservationStorage) => {
+      const jobId = new Types.ObjectId();
+      const attempts: Array<Record<string, unknown>> = [];
+      const f = fixture({
+        phase: 'jobs',
+        jobs: [{ _id: jobId, status: 'ready' }],
+        attempts,
+      });
+      const sharedKey = `shared/url/${'a'.repeat(64)}/2f237a2e-031e-4b58-b9a7-9f9e7c0e31a9/output/vocals.mp3`;
+      const reservationKey =
+        reservationStorage === 'private'
+          ? `users/${f.user._id.toHexString()}/jobs/${jobId}/attempts/a/vocals.mp3`
+          : sharedKey;
+      attempts.push({
+        _id: 'attempt-one',
+        outputReservation: { key: reservationKey },
+        outputObject: { key: sharedKey, etag: '"shared-result"' },
+      });
+
+      await f.service.advanceDeletion(new Date('2026-10-01T00:00:00.000Z'));
+
+      expect(f.storageCleanup.schedule).toHaveBeenCalledTimes(
+        reservationStorage === 'private' ? 1 : 0,
+      );
+      if (reservationStorage === 'private')
+        expect(f.storageCleanup.schedule).toHaveBeenCalledWith(
+          expect.objectContaining({
+            key: reservationKey,
+            ownerUserId: f.user._id,
+          }),
+        );
+      expect(f.collection.deleteMany).toHaveBeenCalledWith({
+        jobId,
+        _id: { $in: ['attempt-one'] },
+      });
+    },
+  );
+
   it('walks every account-owned branch 1-4 collection with a durable records cursor', async () => {
     const f = fixture({ phase: 'records' });
 

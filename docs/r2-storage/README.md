@@ -2,7 +2,7 @@
 
 This is the current storage setup and contract for MusicMute. The owner approved
 an R2-only breaking change on 2026-09-30 and will recreate MongoDB themselves.
-There is no AWS fallback, old-record bridge, automatic object copy, or database
+There is no AWS fallback, old-record bridge, migration copy, or database
 reset command. Dated AWS/S3 validation records elsewhere describe earlier releases;
 they do not establish R2 behavior and their provider setup/acceleration commands
 must not be used for this implementation.
@@ -174,8 +174,16 @@ acceleration, or extra metered proxy is enabled. Standard has no minimum storage
 duration; Infrequent Access adds retrieval charges and a minimum duration, which
 is unsuitable for short-lived processing files.
 
-Preserve current application retention: completed originals remain available for
-Original/Voice playback and successful results remain until job/account deletion.
+Local uploads retain private account/job storage: completed originals remain
+available for Original/Voice playback and successful results remain until
+job/account deletion. New URL imports use
+[permanent shared media](../url-imports/shared-media.md) under `shared/url/`.
+User jobs reference the same confirmed original and matching recipe output;
+worker output is copied once during first publication, never once per user.
+Shared files/catalog rows have no TTL and are excluded from job/account deletion
+and application cleanup. The storage service rejects shared deletion. Do not
+configure bucket lifecycle expiration for this namespace.
+
 Invalid, abandoned, cancelled, failed and stale attempt files use existing durable
 leased cleanup by exact key. Never scan or delete a bucket prefix during routine
 cleanup. Cleanup waits through the recorded grant deadline plus a one-hour transfer
@@ -188,8 +196,8 @@ R2 may finish a request begun before signed expiry after that expiry; the settle
 application policy, not proof of an unlimited external transfer having stopped.
 Late PUT/cleanup races require explicit bounded integration verification. Account
 purge still removes completed key records; this migration does not add long-term
-key tombstones or retain a deleted account's object metadata. A manual retry after
-input cleanup has committed requires a fresh input rather than reusing the old key.
+key tombstones or retain a deleted account's private object metadata. A manual retry
+after private input cleanup requires a fresh input rather than reusing the old key.
 Do not expire stored originals/results globally just to reduce storage cost. If multipart is introduced later, add narrowly scoped incomplete
 multipart cleanup; ordinary media currently uses single PUTs.
 

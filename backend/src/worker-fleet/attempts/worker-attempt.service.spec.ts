@@ -16,7 +16,7 @@ function query(value: () => unknown) {
   return chain;
 }
 
-function fixture() {
+function fixture(sharedAvailable = true) {
   const jobId = new Types.ObjectId();
   const userId = new Types.ObjectId();
   const leaseExpiresAt = new Date(Date.now() + 120_000);
@@ -148,6 +148,10 @@ function fixture() {
     recordRetainedOutput: vi.fn().mockResolvedValue(undefined),
     settleJob: vi.fn().mockResolvedValue(undefined),
   };
+  const sharedMedia = {
+    publishOutput: vi.fn(),
+    completeResult: vi.fn().mockResolvedValue(undefined),
+  };
   const service = new WorkerAttemptService(
     { startSession: vi.fn().mockResolvedValue(transaction) } as never,
     attempts as never,
@@ -157,6 +161,7 @@ function fixture() {
     cleanup as never,
     accountAccess as never,
     usage as never,
+    sharedAvailable ? (sharedMedia as never) : undefined,
   );
   return {
     service,
@@ -170,6 +175,8 @@ function fixture() {
     accountAccess,
     outbox,
     usage,
+    sharedMedia,
+    transaction,
   };
 }
 
@@ -210,6 +217,181 @@ const completion = {
 };
 
 describe('worker attempt transfers and finalization', () => {
+  async function prepareSharedCompletion(f: ReturnType<typeof fixture>) {
+    f.job.sharedSourceKey = 'c'.repeat(64);
+    f.job.sharedResultKey = 'd'.repeat(64);
+    f.job.inputObject.key = `shared/url/${f.job.sharedSourceKey}/c9107c58-bf4a-493f-8079-4bfbcf9bbb06/input/source.mp3`;
+    await f.service.outputGrant(principal, attemptId, output);
+    const privateObject = {
+      key: f.attempt.outputReservation.key,
+      etag: completion.etag,
+      bytes: output.bytes,
+      sha256: output.sha256,
+      contentType: output.contentType,
+    };
+    const sharedObject = {
+      ...privateObject,
+      key: `shared/url/${f.job.sharedResultKey}/c9107c58-bf4a-493f-8079-4bfbcf9bbb06/output/voice.mp3`,
+      etag: '"shared-output-v1"',
+    };
+    f.storage.verifyUploadedObject.mockResolvedValue(privateObject);
+    f.sharedMedia.publishOutput.mockResolvedValue(sharedObject);
+    return { privateObject, sharedObject };
+  }
+
+  it('publishes one shared result while retaining the private attempt identity for completion replay', async () => {
+    const f = fixture();
+    const { privateObject, sharedObject } = await prepareSharedCompletion(f);
+    const sharedCompletion = { ...completion, comparisonRanges: [[0, 44_100]] };
+    await expect(
+      f.service.complete(principal, attemptId, sharedCompletion),
+    ).resolves.toMatchObject({ status: 'ready', replayed: false });
+    expect(f.sharedMedia.publishOutput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: f.job._id,
+        sharedResultKey: 'd'.repeat(64),
+      }),
+      privateObject,
+    );
+    expect(f.sharedMedia.completeResult).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: f.job._id }),
+      sharedObject,
+      sharedCompletion.comparisonRanges,
+      f.transaction,
+    );
+    expect(f.attempt.outputObject).toEqual(privateObject);
+    expect(f.job.outputObject).toEqual(sharedObject);
+    expect(f.job.comparisonRanges).toEqual(sharedCompletion.comparisonRanges);
+    expect(f.job.workerStageTimings).toEqual(completion.stageTimings);
+    expect(f.usage.recordRetainedOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: f.job._id }),
+      sharedObject.bytes + f.job.inputObject.bytes,
+      f.transaction,
+    );
+    expect(f.cleanup.cancelScheduled).not.toHaveBeenCalled();
+    expect(f.cleanup.schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: privateObject.key,
+        reason: 'AUDIO_OUTPUT_ORPHANED',
+      }),
+      f.transaction,
+    );
+    expect(
+      f.cleanup.schedule.mock.calls.some(
+        ([task]) => task.key === sharedObject.key,
+      ),
+    ).toBe(false);
+    await expect(
+      f.service.complete(principal, attemptId, sharedCompletion),
+    ).resolves.toMatchObject({ replayed: true });
+    expect(f.storage.verifyUploadedObject).toHaveBeenCalledOnce();
+    expect(f.sharedMedia.publishOutput).toHaveBeenCalledOnce();
+    expect(f.sharedMedia.completeResult).toHaveBeenCalledOnce();
+    expect(f.outbox.updateOne).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed without shared publication dependencies while local completions stay compatible', async () => {
+    const f = fixture(false);
+    await prepareSharedCompletion(f);
+    await expect(
+      f.service.complete(principal, attemptId, completion),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+    });
+    expect(f.storage.verifyUploadedObject).not.toHaveBeenCalled();
+    expect(f.sharedMedia.publishOutput).not.toHaveBeenCalled();
+    expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes publication errors and leaves the verified private output scheduled for cleanup', async () => {
+    const f = fixture();
+    await prepareSharedCompletion(f);
+    f.sharedMedia.publishOutput.mockRejectedValue(
+      new Error('provider credential and signed URL must stay private'),
+    );
+    await expect(
+      f.service.complete(principal, attemptId, completion),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'WORKER_DEPENDENCY_UNAVAILABLE',
+        message: 'Worker dependency is unavailable',
+      },
+    });
+    expect(f.sharedMedia.completeResult).not.toHaveBeenCalled();
+    expect(f.attempts.updateOne).toHaveBeenCalledTimes(1);
+    expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(f.cleanup.cancelScheduled).not.toHaveBeenCalled();
+  });
+
+  it('rechecks attempt ownership before publishing when verification races a newer execution', async () => {
+    const f = fixture();
+    const { privateObject } = await prepareSharedCompletion(f);
+    f.storage.verifyUploadedObject.mockImplementation(async () => {
+      f.job.currentExecution.attemptId = 'a719bfce-c6f5-44e9-8902-51b0cfab3a02';
+      return privateObject;
+    });
+    await expect(
+      f.service.complete(principal, attemptId, completion),
+    ).rejects.toMatchObject({ response: { code: 'WORKER_CONFLICT' } });
+    expect(f.sharedMedia.publishOutput).not.toHaveBeenCalled();
+    expect(f.sharedMedia.completeResult).not.toHaveBeenCalled();
+    expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rechecks account access before verification and after publication', async () => {
+    const f = fixture();
+    const { sharedObject } = await prepareSharedCompletion(f);
+    f.sharedMedia.publishOutput.mockImplementation(async () => {
+      f.accountAccess.assertActive.mockRejectedValue(
+        new Error('Account access disabled'),
+      );
+      return sharedObject;
+    });
+    await expect(
+      f.service.complete(principal, attemptId, completion),
+    ).rejects.toThrow('Account access disabled');
+    expect(f.accountAccess.assertActive).toHaveBeenCalledWith(f.job.userId);
+    expect(f.accountAccess.assertActive).toHaveBeenLastCalledWith(
+      f.job.userId,
+      f.transaction,
+    );
+    expect(f.sharedMedia.completeResult).not.toHaveBeenCalled();
+    expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(f.cleanup.cancelScheduled).not.toHaveBeenCalled();
+  });
+
+  it('does not publish ready job or billing when shared cache completion cannot commit', async () => {
+    const f = fixture();
+    await prepareSharedCompletion(f);
+    f.sharedMedia.completeResult.mockRejectedValue(
+      new Error('Mongo shared result fence lost'),
+    );
+    await expect(
+      f.service.complete(principal, attemptId, completion),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+    });
+    expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(f.usage.recordRetainedOutput).not.toHaveBeenCalled();
+    expect(f.usage.settleJob).not.toHaveBeenCalled();
+    expect(f.outbox.updateOne).not.toHaveBeenCalled();
+    expect(f.cleanup.cancelScheduled).not.toHaveBeenCalled();
+  });
+
+  it('preserves Mongo transaction labels so the driver can retry shared completion conflicts', async () => {
+    const f = fixture();
+    await prepareSharedCompletion(f);
+    const conflict = Object.assign(new Error('Shared result write conflict'), {
+      errorLabels: ['TransientTransactionError'],
+    });
+    f.sharedMedia.completeResult.mockRejectedValue(conflict);
+    await expect(
+      f.service.complete(principal, attemptId, completion),
+    ).rejects.toBe(conflict);
+    expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(f.usage.recordRetainedOutput).not.toHaveBeenCalled();
+  });
+
   it('accepts only current-attempt monotonic progress', async () => {
     const f = fixture();
     const update = {

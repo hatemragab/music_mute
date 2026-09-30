@@ -1,5 +1,6 @@
 import { ProcessingUsageController } from '../processing-usage/processing-usage.controller.js';
 import { Module } from '@nestjs/common';
+import { SharedMediaModule } from '../shared-media/shared-media.module.js';
 import { ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -43,6 +44,7 @@ import { AccountDeletionMaintenanceService } from '../users/account-deletion-mai
 
 @Module({
   imports: [
+    SharedMediaModule,
     MongooseModule.forFeature([
       { name: MediaImport.name, schema: MediaImportSchema },
     ]),

@@ -797,6 +797,87 @@ export class ProcessingUsageService {
     if (updated.modifiedCount !== 1) throw jobError('PROCESSING_UNAVAILABLE');
   }
 
+  /** Claim the job's existing retained-media receipt without counting an upload. */
+  async recordRetainedCachedMedia(
+    job: Pick<Job, '_id' | 'userId' | 'inputObject' | 'outputObject'>,
+    session: ClientSession,
+    now = new Date(),
+  ): Promise<void> {
+    this.assertTransaction(session);
+    const inputBytes = job.inputObject?.bytes;
+    const outputBytes = job.outputObject?.bytes;
+    if (
+      !Number.isSafeInteger(inputBytes) ||
+      !inputBytes ||
+      inputBytes < 1 ||
+      !Number.isSafeInteger(outputBytes) ||
+      !outputBytes ||
+      outputBytes < 1 ||
+      !Number.isSafeInteger(inputBytes + outputBytes)
+    )
+      throw new Error('Invalid retained cached media size');
+    const bytes = inputBytes + outputBytes;
+    const claimed = await this.jobs.updateOne(
+      {
+        _id: job._id,
+        userId: job.userId,
+        status: 'ready',
+        deletedAt: null,
+        retainedOutputAccountedAt: null,
+        retainedOutputReleasedAt: null,
+        'inputObject.key': job.inputObject!.key,
+        'inputObject.bytes': inputBytes,
+        'outputObject.key': job.outputObject!.key,
+        'outputObject.bytes': outputBytes,
+      },
+      {
+        $set: {
+          retainedOutputAccountedAt: now,
+          retainedInputBytes: inputBytes,
+        },
+      },
+      { session, runValidators: true },
+    );
+    if (claimed.modifiedCount !== 1) {
+      const existing = await this.jobs
+        .findById(job._id)
+        .session(session)
+        .lean();
+      if (
+        existing?.userId.equals(job.userId) &&
+        existing.status === 'ready' &&
+        !existing.deletedAt &&
+        existing.retainedOutputAccountedAt &&
+        !existing.retainedOutputReleasedAt &&
+        existing.retainedInputBytes === inputBytes &&
+        existing.inputObject?.key === job.inputObject!.key &&
+        existing.outputObject?.key === job.outputObject!.key &&
+        existing.outputObject.bytes === outputBytes
+      )
+        return;
+      throw jobError('JOB_STATE_CONFLICT');
+    }
+    const policy = await this.policies.effective(job.userId, now, session);
+    const updated = await this.users.updateOne(
+      {
+        _id: job.userId,
+        status: 'active',
+        $expr: trusted({
+          $lte: [
+            {
+              $add: [{ $ifNull: ['$retainedOutputBytes', 0] }, bytes],
+            },
+            policy.values.maxRetainedOutputBytes,
+          ],
+        }),
+      },
+      { $inc: { retainedOutputBytes: bytes } },
+      { session, runValidators: true },
+    );
+    if (updated.modifiedCount !== 1)
+      throw jobError('RETAINED_STORAGE_LIMIT_REACHED');
+  }
+
   async releaseRetainedOutput(
     job: Pick<
       Job,

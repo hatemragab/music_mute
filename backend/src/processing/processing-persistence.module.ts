@@ -20,6 +20,14 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Job, JobSchema } from '../jobs/job.schema.js';
 import {
+  SharedMediaSource,
+  SharedMediaSourceSchema,
+  SharedMediaResult,
+  SharedMediaResultSchema,
+  SharedMediaArtifact,
+  SharedMediaArtifactSchema,
+} from '../shared-media/shared-media.schema.js';
+import {
   PurgedJobRequest,
   PurgedJobRequestSchema,
 } from '../jobs/purged-job-request.schema.js';
@@ -42,6 +50,9 @@ import {
 } from '../notifications/notification-delivery.schema.js';
 
 export const PROCESSING_MODELS = [
+  { name: SharedMediaSource.name, schema: SharedMediaSourceSchema },
+  { name: SharedMediaResult.name, schema: SharedMediaResultSchema },
+  { name: SharedMediaArtifact.name, schema: SharedMediaArtifactSchema },
   {
     name: ProcessingAdmissionFence.name,
     schema: ProcessingAdmissionFenceSchema,

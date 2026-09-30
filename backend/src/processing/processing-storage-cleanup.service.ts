@@ -6,6 +6,7 @@ import { safeJobMessage } from '../job-errors/safe-job-error.js';
 import { Job } from '../jobs/job.schema.js';
 import { StorageCleanupService } from '../storage/storage-cleanup.service.js';
 import { ProcessingTransactions } from './processing-transactions.js';
+import { isSharedMediaKey } from '../shared-media/shared-media-key.js';
 
 const UPLOAD_EXPIRY_GRACE_MS = 300_000;
 const TRANSFER_SETTLEMENT_MS = 3_600_000;
@@ -50,16 +51,23 @@ export class ProcessingStorageCleanupService {
       const due = new Date(
         Math.max(now.getTime(), reservationExpiry + UPLOAD_EXPIRY_GRACE_MS),
       );
-      await this.cleanup.schedule(
-        {
-          key: known?.key ?? candidate.inputReservation.key,
-          ownerUserId: candidate.userId,
-          reason: 'AUDIO_INPUT_TERMINAL',
-          nextAt: due,
-          settleUntil: new Date(due.getTime() + TRANSFER_SETTLEMENT_MS),
-        },
-        session,
+      const keys = new Set(
+        [candidate.inputReservation.key, known?.key].filter(
+          (key): key is string =>
+            typeof key === 'string' && key.length > 0 && !isSharedMediaKey(key),
+        ),
       );
+      for (const key of keys)
+        await this.cleanup.schedule(
+          {
+            key,
+            ownerUserId: candidate.userId,
+            reason: 'AUDIO_INPUT_TERMINAL',
+            nextAt: due,
+            settleUntil: new Date(due.getTime() + TRANSFER_SETTLEMENT_MS),
+          },
+          session,
+        );
       const changed = await this.jobs.updateOne(
         {
           _id: candidate._id,
@@ -93,16 +101,17 @@ export class ProcessingStorageCleanupService {
         candidate.admissionSnapshot!.reservationExpiresAt.getTime() +
           UPLOAD_EXPIRY_GRACE_MS,
       );
-      await this.cleanup.schedule(
-        {
-          key: candidate.inputReservation.key,
-          ownerUserId: candidate.userId,
-          reason: 'AUDIO_INPUT_EXPIRED',
-          nextAt: due,
-          settleUntil: new Date(due.getTime() + TRANSFER_SETTLEMENT_MS),
-        },
-        session,
-      );
+      if (!isSharedMediaKey(candidate.inputReservation.key))
+        await this.cleanup.schedule(
+          {
+            key: candidate.inputReservation.key,
+            ownerUserId: candidate.userId,
+            reason: 'AUDIO_INPUT_EXPIRED',
+            nextAt: due,
+            settleUntil: new Date(due.getTime() + TRANSFER_SETTLEMENT_MS),
+          },
+          session,
+        );
       const changed = await this.jobs.updateOne(
         {
           _id: candidate._id,

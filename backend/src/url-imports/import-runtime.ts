@@ -11,6 +11,8 @@ import { trusted } from 'mongoose';
 import { IMPORT_QUEUE, ImportsService } from './imports.service.js';
 import { ImportProcessor } from './import-processor.js';
 import { importError } from './import-errors.js';
+import { SharedMediaService } from '../shared-media/shared-media.service.js';
+import { Optional } from '@nestjs/common';
 
 @Injectable()
 export class ImportRuntime
@@ -26,6 +28,7 @@ export class ImportRuntime
     private readonly imports: ImportsService,
     private readonly processor: ImportProcessor,
     @InjectQueue(IMPORT_QUEUE) private readonly queue: Queue,
+    @Optional() private readonly shared?: SharedMediaService,
   ) {}
 
   async onApplicationBootstrap() {
@@ -67,6 +70,7 @@ export class ImportRuntime
   }
 
   async reconcile(): Promise<void> {
+    await this.shared?.reconcile();
     const pending = await this.imports.records
       .find({
         status: trusted({

@@ -59,6 +59,75 @@ function fixture(enabled = true) {
 }
 
 describe('processing admission', () => {
+  it('admits completed cache media without queue reads or monthly reservations', async () => {
+    const f = fixture();
+    f.countDocuments.mockImplementation(() => {
+      throw new Error('Cache hits must not read queue capacity');
+    });
+    f.usage.reserveForJob.mockRejectedValue(
+      jobError('PROCESSING_ALLOWANCE_EXHAUSTED'),
+    );
+    await expect(
+      f.service.assertCachedWork(
+        new Types.ObjectId(),
+        { bytes: 1_024, durationSeconds: 30 },
+        session as never,
+        { ...metadata, source: 'youtube' },
+      ),
+    ).resolves.toMatchObject({
+      policyVersion: 2,
+      source: 'youtube',
+      settingsRevision: 4,
+    });
+    expect(f.policies.touchGlobalFence).toHaveBeenCalledOnce();
+    expect(f.fences.updateOne).toHaveBeenCalledOnce();
+    expect(f.users.updateOne).toHaveBeenCalledOnce();
+    expect(f.countDocuments).not.toHaveBeenCalled();
+    expect(f.usage.reserveForJob).not.toHaveBeenCalled();
+  });
+
+  it.each(['feature_gate', 'account_status', 'global_policy', 'media_limit'])(
+    'still enforces %s for completed cache results',
+    async (restriction) => {
+      const f = fixture(restriction !== 'feature_gate');
+      if (restriction === 'account_status')
+        f.users.updateOne.mockResolvedValue({ modifiedCount: 0 });
+      if (restriction === 'global_policy')
+        f.policies.effective.mockResolvedValue({
+          globalRevision: 4,
+          overrideRevision: null,
+          source: 'global',
+          acceptNewJobs: false,
+          values: DEFAULT_ACCOUNT_POLICY_VALUES,
+        });
+      await expect(
+        f.service.assertCachedWork(
+          new Types.ObjectId(),
+          {
+            bytes: 1_024,
+            durationSeconds: restriction === 'media_limit' ? 1_801 : 30,
+          },
+          session as never,
+          metadata,
+        ),
+      ).rejects.toMatchObject({ response: { code: 'PROCESSING_UNAVAILABLE' } });
+      expect(f.usage.reserveForJob).not.toHaveBeenCalled();
+    },
+  );
+
+  it('requires a transaction even when no processing allowance is consumed', async () => {
+    const f = fixture();
+    await expect(
+      f.service.assertCachedWork(
+        new Types.ObjectId(),
+        { bytes: 1_024, durationSeconds: 30 },
+        { inTransaction: () => false } as never,
+        metadata,
+      ),
+    ).rejects.toThrow('Processing admission requires a transaction');
+    expect(f.policies.touchGlobalFence).not.toHaveBeenCalled();
+  });
+
   it('fails closed behind the explicit processing feature gate', async () => {
     const f = fixture(false);
     await expect(

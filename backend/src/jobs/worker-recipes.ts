@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
-import type { WorkerRecipeId } from '../worker-fleet/protocol/v1/protocol.js';
+import {
+  WORKER_RECIPE_IDS,
+  WORKER_RECIPE_STEP_IDS,
+  type WorkerRecipeId,
+} from '../worker-fleet/protocol/v1/protocol.js';
 import type { WorkerRecipeSnapshot } from './job.types.js';
 
 export const QUALIFIED_MODEL_DIGEST =
@@ -25,6 +29,73 @@ function canonical(value: unknown): string {
       )
       .join(',')}}`;
   throw new TypeError('Recipe contains a noncanonical value');
+}
+
+const RECIPE_FIELDS = [
+  'recipeId',
+  'recipeRevision',
+  'protocolVersion',
+  'recipeDigest',
+  'modelFilename',
+  'modelDigest',
+  'modelBytes',
+  'inputProfileId',
+  'stepIds',
+  'trimEnabled',
+  'denoiseEnabled',
+  'denoisePresetId',
+  'trimProfileId',
+  'outputFormat',
+  'outputBitrateKbps',
+] as const satisfies readonly (keyof WorkerRecipeSnapshot)[];
+
+function recipeDigest(material: Omit<WorkerRecipeSnapshot, 'recipeDigest'>) {
+  return createHash('sha256').update(canonical(material)).digest('hex');
+}
+
+/** Validate persisted recipes without requiring the current deployment's revision. */
+export function isWorkerRecipeSnapshot(
+  value: unknown,
+): value is WorkerRecipeSnapshot {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const recipe = value as Record<string, unknown>;
+  if (
+    Object.keys(recipe).length !== RECIPE_FIELDS.length ||
+    RECIPE_FIELDS.some((key) => !Object.hasOwn(recipe, key)) ||
+    !WORKER_RECIPE_IDS.some((id) => id === recipe.recipeId) ||
+    typeof recipe.recipeRevision !== 'number' ||
+    !Number.isSafeInteger(recipe.recipeRevision) ||
+    recipe.recipeRevision < 1 ||
+    recipe.protocolVersion !== 1 ||
+    typeof recipe.recipeDigest !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(recipe.recipeDigest) ||
+    recipe.modelFilename !== 'Kim_Vocal_2.onnx' ||
+    typeof recipe.modelDigest !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(recipe.modelDigest) ||
+    typeof recipe.modelBytes !== 'number' ||
+    !Number.isSafeInteger(recipe.modelBytes) ||
+    recipe.modelBytes < 1 ||
+    recipe.inputProfileId !== 'direct-input-v1' ||
+    !Array.isArray(recipe.stepIds) ||
+    recipe.stepIds.length < 2 ||
+    recipe.stepIds.length > 6 ||
+    new Set(recipe.stepIds).size !== recipe.stepIds.length ||
+    !recipe.stepIds.every((step) =>
+      WORKER_RECIPE_STEP_IDS.some((id) => id === step),
+    ) ||
+    typeof recipe.trimEnabled !== 'boolean' ||
+    typeof recipe.denoiseEnabled !== 'boolean' ||
+    (recipe.denoisePresetId !== null &&
+      recipe.denoisePresetId !== 'afftdn-conservative-v1') ||
+    (recipe.trimProfileId !== null &&
+      recipe.trimProfileId !== 'trim-vocal-mp3-v1' &&
+      recipe.trimProfileId !== 'trim-vocal-wav-v1') ||
+    recipe.outputFormat !== 'mp3' ||
+    recipe.outputBitrateKbps !== 160
+  )
+    return false;
+  const { recipeDigest: digest, ...material } = value as WorkerRecipeSnapshot;
+  return digest === recipeDigest(material);
 }
 
 function createRecipe(
@@ -58,9 +129,7 @@ function createRecipe(
     stepIds: Object.freeze([
       ...stepIds,
     ]) as unknown as WorkerRecipeSnapshot['stepIds'],
-    recipeDigest: createHash('sha256')
-      .update(canonical(material))
-      .digest('hex'),
+    recipeDigest: recipeDigest(material),
   });
 }
 

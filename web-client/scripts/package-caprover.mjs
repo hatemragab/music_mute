@@ -22,7 +22,7 @@ function collect(directory) {
     withFileTypes: true,
   })) {
     const path = `${directory}/${entry.name}`;
-    if (path === "src/tests") continue;
+    if (path === "src/tests" || path === "src/site-policy/fixtures") continue;
     if (entry.isSymbolicLink()) throw new Error(`Refusing symlink: ${path}`);
     if (entry.isDirectory()) collect(path);
     else if (!/\.(test|spec)\.[cm]?[jt]sx?$/.test(entry.name)) files.push(path);

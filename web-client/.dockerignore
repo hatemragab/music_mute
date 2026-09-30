@@ -8,4 +8,6 @@
 !public/**
 !src/
 !src/**
+src/site-policy/fixtures/
+src/site-policy/fixtures/**
 !server.mjs

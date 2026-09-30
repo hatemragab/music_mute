@@ -11,6 +11,12 @@ import { ProcessingTransactions } from '../processing/processing-transactions.js
 import { processingIo } from '../processing/processing-io.js';
 import { StorageTransfersService } from '../storage/storage-transfers.service.js';
 import { StorageCleanupService } from '../storage/storage-cleanup.service.js';
+import {
+  isStorageEtag,
+  validateObjectReservation,
+} from '../storage/object-identity.js';
+import { isSharedMediaObjectKey } from '../shared-media/shared-media-key.js';
+import { NotificationOutbox } from '../notifications/notification-outbox.schema.js';
 import { AccountAccessService } from '../users/account-access.service.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { jobError } from './job-errors.js';
@@ -18,9 +24,15 @@ import { normalizeJobMetadata, type JobMetadata } from './job-metadata.js';
 import { isDuplicateKey, objectId, requestHash } from './job-request.js';
 import { Job } from './job.schema.js';
 import { assertInputDeclaration } from './job-state.js';
-import type { InputDeclaration, ObjectIdentity } from './job.types.js';
+import type {
+  InputDeclaration,
+  ObjectIdentity,
+  WorkerRecipeSnapshot,
+} from './job.types.js';
+import { validComparisonRanges } from './comparison-ranges.js';
 import {
   DEFAULT_WORKER_RECIPE_ID,
+  isWorkerRecipeSnapshot,
   workerRecipeSnapshot,
 } from './worker-recipes.js';
 import { WorkerHintService } from '../worker-hints/worker-hint.service.js';
@@ -28,6 +40,23 @@ import { assertJobRequestNotPurged } from './purged-job-request.js';
 
 const UPLOAD_EXPIRY_GRACE_MS = 300_000;
 const TRANSFER_SETTLEMENT_MS = 3_600_000;
+
+export interface SharedJobInput {
+  input: InputDeclaration;
+  inputObject: ObjectIdentity;
+  outputObject: ObjectIdentity;
+  recipeSnapshot: WorkerRecipeSnapshot;
+  metadata: JobMetadata & { extraData?: JobExtraData | null };
+  comparisonRanges: number[][] | null;
+  sourceKey: string;
+  resultKey: string;
+}
+
+interface SharedJobReservation extends Omit<SharedJobInput, 'outputObject'> {
+  outputObject?: ObjectIdentity;
+  serverTiming?: ImportMeasurements;
+  importReservationId?: Types.ObjectId;
+}
 
 @Injectable()
 export class JobsService {
@@ -41,6 +70,267 @@ export class JobsService {
     private readonly cleanup: StorageCleanupService,
     @Optional() private readonly hints?: WorkerHintService,
   ) {}
+
+  /** Create an account-owned Library entry referencing permanent shared media. */
+  async createFromCache(
+    userId: string,
+    requestId: string,
+    cached: SharedJobInput,
+  ): Promise<{ jobId: string }> {
+    return this.createSharedJob(userId, requestId, cached);
+  }
+
+  /** Queue an already verified shared URL input without an upload entitlement. */
+  async createForSharedInput(
+    userId: string,
+    input: InputDeclaration,
+    requestId: string,
+    metadata: JobMetadata,
+    trimEnabled: boolean,
+    inputObject: ObjectIdentity,
+    sourceKey: string,
+    resultKey: string,
+    serverTiming?: ImportMeasurements,
+    extraData: JobExtraData | null = null,
+    importReservationId?: Types.ObjectId,
+    frozenRecipe?: WorkerRecipeSnapshot,
+  ): Promise<{ jobId: string }> {
+    if (
+      typeof trimEnabled !== 'boolean' ||
+      (frozenRecipe && frozenRecipe.trimEnabled !== trimEnabled)
+    )
+      throw authError('INVALID_INPUT');
+    return this.createSharedJob(userId, requestId, {
+      input,
+      inputObject,
+      sourceKey,
+      resultKey,
+      recipeSnapshot:
+        frozenRecipe ??
+        workerRecipeSnapshot(DEFAULT_WORKER_RECIPE_ID, trimEnabled),
+      metadata: { ...metadata, extraData },
+      comparisonRanges: null,
+      serverTiming,
+      importReservationId,
+    });
+  }
+
+  private async createSharedJob(
+    userId: string,
+    requestId: string,
+    shared: SharedJobReservation,
+  ): Promise<{ jobId: string }> {
+    const metadata = normalizeJobMetadata(shared.metadata);
+    if (
+      metadata.sourceKind !== 'url' ||
+      !['youtube', 'audio_file'].includes(metadata.source ?? '') ||
+      !/^[a-f0-9]{64}$/.test(shared.sourceKey) ||
+      !/^[a-f0-9]{64}$/.test(shared.resultKey) ||
+      !isUUID(requestId, '4')
+    )
+      throw authError('INVALID_INPUT');
+    assertInputDeclaration(shared.input);
+    this.assertSharedObject(shared.inputObject, shared.sourceKey, 'input');
+    if (
+      shared.inputObject.bytes !== shared.input.bytes ||
+      shared.inputObject.sha256 !== shared.input.sha256 ||
+      shared.inputObject.contentType !== shared.input.contentType
+    )
+      throw authError('INVALID_INPUT');
+    const recipe = shared.recipeSnapshot;
+    if (!isWorkerRecipeSnapshot(recipe)) throw authError('INVALID_INPUT');
+    if (shared.outputObject) {
+      this.assertSharedObject(shared.outputObject, shared.resultKey, 'output');
+      if (
+        shared.outputObject.contentType !== 'audio/mpeg' ||
+        (shared.comparisonRanges !== null &&
+          !validComparisonRanges(shared.comparisonRanges))
+      )
+        throw authError('INVALID_INPUT');
+    }
+    requestId = requestId.toLowerCase();
+    const owner = objectId(userId);
+    const hash = requestHash({
+      operation: 'create_shared',
+      input: shared.input,
+      metadata,
+      sourceKey: shared.sourceKey,
+      resultKey: shared.resultKey,
+      recipeDigest: recipe.recipeDigest,
+    });
+    let job = await this.jobs.findOne({ userId: owner, requestId }).lean();
+    if (!job) {
+      const id = new Types.ObjectId();
+      try {
+        job = await this.transactions.run(async (session) => {
+          const repeated = await this.jobs
+            .findOne({ userId: owner, requestId })
+            .session(session)
+            .lean();
+          if (repeated) return repeated;
+          await assertJobRequestNotPurged(
+            this.jobs,
+            owner,
+            requestId,
+            hash,
+            session,
+          );
+          if (shared.importReservationId)
+            await this.usage.releaseImport(
+              shared.importReservationId,
+              owner,
+              session,
+              true,
+            );
+          const admissionSnapshot = shared.outputObject
+            ? await this.admission.assertCachedWork(
+                owner,
+                shared.input,
+                session,
+                metadata,
+              )
+            : await this.admission.assertNewWork(
+                owner,
+                shared.input,
+                session,
+                id,
+                metadata,
+              );
+          const now = new Date();
+          const ready = Boolean(shared.outputObject);
+          const accountFreshTransfer =
+            Boolean(shared.importReservationId) && !ready;
+          const [created] = await this.jobs.create(
+            [
+              {
+                _id: id,
+                userId: owner,
+                logicalAudioId: id,
+                requestId,
+                requestHash: hash,
+                sourceTitle: metadata.sourceTitle ?? null,
+                displayName: metadata.sourceTitle ?? null,
+                sourceKind: metadata.sourceKind,
+                sourceUrl: metadata.sourceUrl ?? null,
+                extra_data: normalizeExtraData(shared.metadata.extraData),
+                clientStartedAt: metadata.clientStartedAt
+                  ? new Date(metadata.clientStartedAt)
+                  : null,
+                sharedSourceKey: shared.sourceKey,
+                sharedResultKey: shared.resultKey,
+                inputReservation: {
+                  ...shared.input,
+                  key: shared.inputObject.key,
+                },
+                inputObject: accountFreshTransfer ? null : shared.inputObject,
+                outputObject: shared.outputObject ?? null,
+                measuredDurationSeconds: shared.input.durationSeconds,
+                recipeSnapshot: recipe,
+                admissionSnapshot,
+                status: ready ? 'ready' : 'queued',
+                finishedAt: ready ? now : null,
+                comparisonRanges: ready ? shared.comparisonRanges : null,
+                retryEligibility: {
+                  eligible: !ready,
+                  attemptsRemaining: ready
+                    ? 0
+                    : admissionSnapshot.maxInfrastructureAttempts,
+                  nextAttemptAt: null,
+                },
+                ...(ready
+                  ? {}
+                  : {
+                      queuedAt: now,
+                      serverTimingStartedAt:
+                        shared.serverTiming?.startedAt ?? now,
+                      queueTimingStartedAt: now,
+                      importStageTimings: shared.serverTiming?.stages ?? [],
+                      queueAccumulatedMs: 0,
+                      retryWaitAccumulatedMs: 0,
+                      processingAccumulatedMs: 0,
+                    }),
+              },
+            ],
+            { session },
+          );
+          const result = created.toObject();
+          if (accountFreshTransfer) {
+            // Account the first server acquisition using the established upload
+            // receipts. No second PUT/grant is needed for the verified shared key.
+            await this.usage.reserveUploadGrant(
+              result,
+              requestId,
+              session,
+              now,
+            );
+            await this.usage.confirmUploadBytes(
+              result,
+              shared.input.bytes,
+              session,
+              now,
+            );
+            const attached = await this.jobs.updateOne(
+              { _id: id, userId: owner, status: 'queued', inputObject: null },
+              {
+                $set: { inputObject: shared.inputObject },
+                $inc: { revision: 1 },
+              },
+              { session, runValidators: true },
+            );
+            if (attached.modifiedCount !== 1)
+              throw jobError('JOB_STATE_CONFLICT');
+          }
+          if (ready) {
+            await this.usage.recordRetainedCachedMedia(result, session, now);
+            await this.jobs.db
+              .model<NotificationOutbox>(NotificationOutbox.name)
+              .updateOne(
+                { jobId: id, outcome: 'ready' },
+                {
+                  $setOnInsert: {
+                    jobId: id,
+                    userId: owner,
+                    outcome: 'ready',
+                    state: 'pending',
+                    nextAttemptAt: now,
+                    revision: 0,
+                  },
+                },
+                { session, upsert: true, setDefaultsOnInsert: true },
+              );
+          }
+          return { ...result, inputObject: shared.inputObject };
+        });
+      } catch (error) {
+        if (!isDuplicateKey(error)) throw error;
+        job = await this.jobs.findOne({ userId: owner, requestId }).lean();
+      }
+    }
+    if (!job) throw new Error('Shared job reservation unavailable');
+    if (job.requestHash !== hash) throw jobError('IDEMPOTENCY_CONFLICT');
+    if (job.deletedAt) throw jobError('JOB_NOT_FOUND');
+    const current = await this.findOwned(userId, job._id.toHexString());
+    if (current.status === 'queued')
+      void this.hints?.publish('work_available').catch(() => undefined);
+    return { jobId: job._id.toHexString() };
+  }
+
+  private assertSharedObject(
+    object: ObjectIdentity,
+    assetKey: string,
+    kind: 'input' | 'output',
+  ): void {
+    try {
+      validateObjectReservation(object);
+      if (
+        !isStorageEtag(object.etag) ||
+        !isSharedMediaObjectKey(object.key, assetKey, kind)
+      )
+        throw new TypeError('Invalid shared media identity');
+    } catch {
+      throw authError('INVALID_INPUT');
+    }
+  }
 
   async create(
     userId: string,

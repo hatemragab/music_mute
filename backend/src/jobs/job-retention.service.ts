@@ -12,6 +12,7 @@ import { WorkerAttempt } from '../worker-fleet/jobs/worker-attempt.schema.js';
 import { WorkerSlot } from '../worker-fleet/machines/worker-slot.schema.js';
 import { Job } from './job.schema.js';
 import { PurgedJobRequest } from './purged-job-request.schema.js';
+import { isSharedMediaKey } from '../shared-media/shared-media-key.js';
 
 const DAY_MS = 86_400_000;
 const DELETED_JOB_RETENTION_MS = 30 * DAY_MS;
@@ -248,7 +249,10 @@ export class JobRetentionService {
             attempt.outputReservation?.key,
             attempt.outputObject?.key,
           ]),
-        ].filter((key): key is string => Boolean(key)),
+        ].filter(
+          (key): key is string =>
+            typeof key === 'string' && key.length > 0 && !isSharedMediaKey(key),
+        ),
       ),
     ];
     // Keep the logical root (used for transfer accounting) and shared pinned input

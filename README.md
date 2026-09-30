@@ -23,6 +23,8 @@ policy. Source changes and local test results do not establish live availability
 - **End-user web app:** responsive English/Arabic browser journeys for accounts, imports, jobs, library, and playback.
 - **Processing library:** retain job history and completed voice-only results.
 - **Private transfers:** authenticated APIs and short-lived R2 upload/download grants.
+- **Shared URL media:** store each imported original and matching vocal result once;
+  user jobs reference permanent private shared storage. Local uploads stay private.
 - **Job coordination:** durable processing state, cancellation, and recovery support.
 - **Realtime updates:** raw WebSocket job snapshots and per-job queue position on
   Android, iOS and web, plus live administrator views.
@@ -43,6 +45,10 @@ URL/key contract. Included metadata is saved as nullable
 `extra_data` without paid enrichment. Both adapter and backend scratch are
 bounded and cleaned up. See [provider architecture](video_providers/README.md)
 for the contract, security boundaries, setup and verification.
+
+New URL imports reuse [permanent shared media](docs/url-imports/shared-media.md)
+across accounts. Job/account deletion removes owned access and records while
+preserving shared originals/results; local uploads retain private cleanup.
 
 ```mermaid
 flowchart LR

@@ -69,6 +69,11 @@ reintroduce these paths to support old clients.
 
 ## Shared import capacity
 
+NestJS reuses [permanent shared URL media](../docs/url-imports/shared-media.md)
+before contacting this router. Canonical sources reuse their verified original,
+and matching processing recipes reuse published vocals. Provider credentials and
+adapter contracts stay unchanged; no paid metadata lookup is added.
+
 URL import capacity is shared across providers. The backend now defaults to
 20 active imports, five starts per second and 100 outstanding imports total.
 The remaining 80 slots form a durable waiting backlog. Users can submit another

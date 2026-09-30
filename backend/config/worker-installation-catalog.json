@@ -1,6 +1,35 @@
 {
   "schemaVersion": 1,
-  "releases": {},
+  "releases": {
+    "darwin-arm64": {
+      "version": "0.1.2",
+      "filename": "musicmute-worker-darwin-arm64-0.1.2.tar.gz",
+      "bytes": 330922606,
+      "sha256": "7061f02be30fab9099aba0aedd8741a7d6064065351e866f9cc792b0a8a0e4f4",
+      "contentType": "application/gzip",
+      "key": "worker-installation-artifacts/releases/darwin-arm64/0.1.2.tar.gz",
+      "etag": "\"b2a45e8d626da243218bd8d63a317895\"",
+      "sequence": 4,
+      "publishedAt": "2026-09-30T18:46:11.695Z",
+      "expiresAt": "2027-09-30T18:46:11.695Z",
+      "keyId": "worker-release-2026-01",
+      "signature": "Akei9t41S_GQ-GU35cbj7uDlGuR4TrHaHOLgkKL91Dn6qoU_hlz1GBJbjSYgBQZ5jGTxojdi6H0jUKSlUZTpCw"
+    },
+    "windows-amd64": {
+      "version": "0.1.2",
+      "filename": "musicmute-worker-windows-amd64-0.1.2.zip",
+      "bytes": 354471830,
+      "sha256": "5ba3055da878dc9d1ef2105f7d9e67a198ba41e43b42620e790b58763232f1ba",
+      "contentType": "application/zip",
+      "key": "worker-installation-artifacts/releases/windows-amd64/0.1.2.zip",
+      "etag": "\"beef70c9e2620b0cd0c3642100a19e97\"",
+      "sequence": 3,
+      "publishedAt": "2026-09-30T21:30:07.850Z",
+      "expiresAt": "2027-09-30T21:30:07.850Z",
+      "keyId": "worker-release-2026-01",
+      "signature": "Ae_azyZXwx1sJ5wWlhqfuSxgpe3dWvN0ZDWayRRi2EnnsTvK0QrBhDSZXTFMjaWrtfXw73acCQFCsbhTm7NZCw"
+    }
+  },
   "model": {
     "filename": "Kim_Vocal_2.onnx",
     "bytes": 66759214,
@@ -11,5 +40,12 @@
     "allowedHosts": ["github.com", "release-assets.githubusercontent.com"],
     "maxRedirects": 2
   },
-  "fixture": null
+  "fixture": {
+    "key": "worker-installation-artifacts/fixtures/r2-20260930/qualification-495012a80265.wav",
+    "etag": "\"4e7c3632758308f88762d807899ea730\"",
+    "bytes": 2116878,
+    "sha256": "495012a80265f5ba53d1458c266bb346470c417987dad5048d988a42d182e884",
+    "contentType": "audio/wav",
+    "filename": "qualification.wav"
+  }
 }

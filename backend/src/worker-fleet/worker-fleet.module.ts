@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SharedMediaModule } from '../shared-media/shared-media.module.js';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module.js';
 import { ProcessingPersistenceModule } from '../processing/processing-persistence.module.js';
@@ -33,6 +34,7 @@ import { WorkerHintController } from './control/worker-hint.controller.js';
 
 @Module({
   imports: [
+    SharedMediaModule,
     AdminModule,
     AdminSettingsModule,
     ProcessingPersistenceModule,

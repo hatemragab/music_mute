@@ -7,6 +7,7 @@ import {
   type StorageCleanupReason,
 } from './storage-cleanup-task.schema.js';
 import { StorageTransfersService } from './storage-transfers.service.js';
+import { isSharedMediaKey } from '../shared-media/shared-media-key.js';
 
 export interface ScheduleStorageCleanup {
   key: string;
@@ -87,6 +88,8 @@ export class StorageCleanupService implements OnModuleInit {
       .lean();
     if (!task) return false;
     try {
+      if (isSharedMediaKey(task.key))
+        throw new TypeError('Shared media is permanently retained');
       // Expiry blocks new requests, not a PUT already in flight. Two free exact
       // deletes cover the existing client transfer timeout without HEAD/list loops.
       const readyAt = Math.max(
@@ -214,6 +217,8 @@ export class StorageCleanupService implements OnModuleInit {
       task.settleUntil < task.nextAt
     )
       throw new TypeError('Invalid storage cleanup task');
+    if (isSharedMediaKey(task.key))
+      throw new TypeError('Shared media is permanently retained');
     const owner = /^users\/([a-f0-9]{24})\//.exec(task.key)?.[1];
     const audio = task.reason !== 'RELEASE_UPLOAD_ORPHANED';
     if (

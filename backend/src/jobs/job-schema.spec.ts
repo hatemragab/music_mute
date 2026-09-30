@@ -46,6 +46,28 @@ describe('durable job schema boundaries', () => {
     expect(JobSchema.path('admissionSnapshot')?.options.immutable).toBe(true);
     expect(JobSchema.path('recipeSnapshot')?.options.immutable).toBe(true);
   });
+  it('keeps shared URL references optional, validated and immutable', () => {
+    const local = new Job();
+    expect(local.sharedSourceKey).toBeNull();
+    expect(local.sharedResultKey).toBeNull();
+    const shared = new Job({
+      sharedSourceKey: 'a'.repeat(64),
+      sharedResultKey: 'b'.repeat(64),
+    });
+    expect(shared.validateSync()?.errors).not.toHaveProperty('sharedSourceKey');
+    expect(shared.validateSync()?.errors).not.toHaveProperty('sharedResultKey');
+    expect(
+      new Job({
+        sharedSourceKey: 'raw-url',
+        sharedResultKey: 'f'.repeat(63),
+      }).validateSync()?.errors,
+    ).toHaveProperty('sharedSourceKey');
+    expect(
+      new Job({ sharedResultKey: 'f'.repeat(63) }).validateSync()?.errors,
+    ).toHaveProperty('sharedResultKey');
+    expect(JobSchema.path('sharedSourceKey')?.options.immutable).toBe(true);
+    expect(JobSchema.path('sharedResultKey')?.options.immutable).toBe(true);
+  });
   it('contains no execution ownership or claim queue fields and indexes', () => {
     for (const path of [
       'workerId',

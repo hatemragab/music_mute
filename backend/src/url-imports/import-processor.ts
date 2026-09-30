@@ -1,5 +1,6 @@
 import { elapsedMs, type StageMeasurement } from '../jobs/job-stage-timing.js';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { SharedMediaService } from '../shared-media/shared-media.service.js';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
@@ -33,6 +34,7 @@ export class ImportProcessor extends WorkerHost {
     private readonly actions: JobActionsService,
     private readonly config: ConfigService,
     @InjectModel(Job.name) private readonly jobRecords: Model<Job>,
+    @Optional() private readonly shared?: SharedMediaService,
   ) {
     super();
     this.files = new ImportFiles(
@@ -107,6 +109,17 @@ export class ImportProcessor extends WorkerHost {
       }
     };
     try {
+      const cached = await this.shared?.inspect(record);
+      if (cached && (cached.action === 'failed' || cached.action === 'wait'))
+        throw importError('IMPORT_DEPENDENCY_FAILED');
+      if (
+        cached &&
+        (cached.action === 'source' || cached.action === 'result')
+      ) {
+        timingJobId = await this.submitShared(record, cached, stages);
+        await saveTimings();
+        return;
+      }
       const limits = await this.imports.reserveAcquisition(record);
       await this.files.withFile(async (path, signal) => {
         const downloaded = await measure('source-download', () =>
@@ -133,7 +146,7 @@ export class ImportProcessor extends WorkerHost {
           extraData,
           ...audio
         } = downloaded;
-        const sourceTitle = record.sourceTitle ?? downloadedTitle;
+        const sourceTitle = record.sourceTitle ?? downloadedTitle ?? null;
         if (sourceTitle) {
           const savedTitle = await this.imports.records.updateOne(
             { _id: record._id, executionId, status: 'validating' },
@@ -145,6 +158,62 @@ export class ImportProcessor extends WorkerHost {
         const input = { ...audio, ...measured };
         await this.imports.assertAccountAllowed(record.userId);
         await this.stage(record, 'uploading', signal);
+        if (record.sharedSourceKey && this.shared) {
+          const included = extraData
+            ? {
+                ...extraData,
+                duration_seconds: measured.durationSeconds,
+                file_bytes: audio.bytes,
+              }
+            : null;
+          const sourceReservation = await this.shared.reserveSource(
+            record,
+            input,
+            sourceTitle,
+            included,
+          );
+          const upload = await this.shared.sourceGrant(sourceReservation);
+          await measure('source-upload', async () => {
+            const body = createReadStream(path);
+            try {
+              const response = await fetch(upload.url, {
+                method: 'PUT',
+                headers: {
+                  ...upload.headers,
+                  'Content-Length': String(input.bytes),
+                },
+                redirect: 'error',
+                signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
+                body: Readable.toWeb(body) as ReadableStream<Uint8Array>,
+                duplex: 'half',
+              } as RequestInit & { duplex: 'half' });
+              await response.body?.cancel();
+              if (!response.ok && response.status !== 412)
+                throw importError('IMPORT_DEPENDENCY_FAILED');
+            } finally {
+              body.destroy();
+            }
+          });
+          const identity = await measure('upload-confirmation', () =>
+            this.shared!.verifySource(sourceReservation),
+          );
+          await this.shared.confirmSource(
+            record,
+            identity,
+            sourceTitle,
+            included,
+          );
+          const confirmed = await this.shared.inspect(record);
+          if (confirmed?.action !== 'source')
+            throw importError('IMPORT_DEPENDENCY_FAILED');
+          timingJobId = await this.submitShared(
+            record,
+            confirmed,
+            stages,
+            true,
+          );
+          return;
+        }
         const reserved = await this.jobs.create(
           record.userId.toHexString(),
           input,
@@ -246,6 +315,69 @@ export class ImportProcessor extends WorkerHost {
       throw importError('IMPORT_DEPENDENCY_FAILED');
   }
 
+  private async submitShared(
+    record: MediaImport,
+    cached: NonNullable<Awaited<ReturnType<SharedMediaService['inspect']>>>,
+    stages: StageMeasurement[],
+    acquired = false,
+  ): Promise<string> {
+    const source = cached.source!;
+    const result = cached.result!;
+    const metadata = {
+      policyVersion: 2 as const,
+      preparationProfileId: PREPARATION_PROFILE_ID,
+      source:
+        record.provider === 'youtube'
+          ? ('youtube' as const)
+          : ('audio_file' as const),
+      sourceKind: 'url' as const,
+      ...(source.sourceTitle ? { sourceTitle: source.sourceTitle } : {}),
+      ...(record.provider === 'youtube' ? { sourceUrl: record.sourceUrl } : {}),
+    };
+    await this.imports.assertAccountAllowed(record.userId);
+    const reserved =
+      cached.action === 'result'
+        ? await this.jobs.createFromCache(
+            record.userId.toHexString(),
+            record.jobRequestId,
+            {
+              input: source.input!,
+              inputObject: source.inputObject!,
+              outputObject: result.outputObject!,
+              recipeSnapshot: result.recipeSnapshot,
+              metadata: { ...metadata, extraData: source.extraData },
+              comparisonRanges: result.comparisonRanges,
+              sourceKey: source._id,
+              resultKey: result._id,
+            },
+          )
+        : await this.jobs.createForSharedInput(
+            record.userId.toHexString(),
+            source.input!,
+            record.jobRequestId,
+            metadata,
+            record.trimEnabled ?? true,
+            source.inputObject!,
+            source._id,
+            result._id,
+            { startedAt: record.createdAt, stages },
+            source.extraData,
+            acquired ? record._id : undefined,
+            result.recipeSnapshot,
+          );
+    await this.imports.records.updateOne(
+      { _id: record._id, executionId: record.executionId },
+      { $set: { sourceTitle: source.sourceTitle, input: source.input } },
+    );
+    if (cached.action === 'source')
+      await this.shared!.associateJob(
+        record,
+        new this.jobRecords.base.Types.ObjectId(reserved.jobId),
+      );
+    await this.finish(record, 'submitted', reserved.jobId);
+    return reserved.jobId;
+  }
+
   async reconcileFailure(record: MediaImport, error: unknown): Promise<void> {
     // If confirmation committed just before a crash/network error, preserve its accepted job.
     const current = await this.jobRecords
@@ -254,6 +386,32 @@ export class ImportProcessor extends WorkerHost {
     if (current?.inputObject) {
       await this.finish(record, 'submitted', current._id.toHexString());
       return;
+    }
+    if (record.sharedSourceKey && this.shared) {
+      // A lost PUT/confirmation response can still leave a verified immutable source.
+      // A storage outage leaves recovery pending; it never repeats paid acquisition.
+      await this.shared.recoverSource(record);
+      const cached = await this.shared.inspect(record);
+      if (cached?.action === 'source' || cached?.action === 'result') {
+        const fresh = await this.imports.records.findById(record._id).lean();
+        if (
+          fresh &&
+          fresh.executionId === record.executionId &&
+          ['downloading', 'validating', 'uploading'].includes(fresh.status)
+        ) {
+          try {
+            await this.submitShared(
+              fresh,
+              cached,
+              fresh.stageTimings,
+              Boolean(fresh.acquisitionReservedAt),
+            );
+            return;
+          } catch (recoveryError) {
+            error = recoveryError;
+          }
+        }
+      }
     }
     await this.actions.cancelPendingUpload(
       record.userId.toHexString(),
