@@ -59,7 +59,11 @@ data class AuthUiState(
     val accountRecovery: AccountRecoveryStatus? = null,
     val nextDeviceCursor: String? = null,
     val pendingProfileName: PendingProfileName? = null,
-)
+) {
+    // Quotas follow the synchronized backend profile, which can lag a fresh Firebase identity.
+    val accountEmailVerified: Boolean?
+        get() = profile?.emailVerified ?: identity?.emailVerified
+}
 
 /** Owns auth state only. A generation prevents callbacks from resurrecting a logged-out account. */
 class AuthSessionCoordinator(

@@ -148,6 +148,9 @@ const en = {
   uploadAudio: "Upload audio",
   processingUnavailable: "Processing is unavailable right now",
   verificationRequired: "Verify your email to process audio",
+  verificationQuotaTitle: "Verify your email to unlock your full allowance",
+  verificationQuotaDescription:
+    "Your unverified account has 20% of the normal processing, upload, download and stored audio allowances. Verify your email to unlock the full limits.",
   sendVerification: "Send verification email",
   refreshVerification: "I've verified my email",
   usage: "Usage",
@@ -370,6 +373,9 @@ const ar: Record<MessageKey, string> = {
   uploadAudio: "رفع صوت",
   processingUnavailable: "المعالجة غير متاحة الآن",
   verificationRequired: "تحقق من بريدك لمعالجة الصوت",
+  verificationQuotaTitle: "تحقق من بريدك للحصول على حصتك الكاملة",
+  verificationQuotaDescription:
+    "يحصل حسابك غير الموثق على ٢٠٪ من الحصص المعتادة للمعالجة والرفع والتنزيل وتخزين الصوت. تحقق من بريدك للحصول على الحدود الكاملة.",
   sendVerification: "إرسال رسالة التحقق",
   refreshVerification: "تحققت من بريدي",
   usage: "الاستخدام",

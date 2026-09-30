@@ -54,6 +54,15 @@ Resolution is deterministic:
 4. replace only explicitly supplied fields;
 5. return effective values, global revision, override revision/source, and expiry.
 
+Before returning account quotas, accounts whose synchronized trusted
+`emailVerified` status is not true receive one fifth of the resolved processing,
+upload, download and retained-output quotas, rounded down to integer units.
+Values below five become zero. Media limits, queue capacity, retry limits, signed
+URL lifetime and global service outbound limits stay unchanged. The verification
+status is read in the same MongoDB session as admission; no stored global policy
+or override is rewritten. Verification/profile synchronization restores full
+quotas without resetting used/reserved counters or deleting retained files.
+
 There are no additive bonuses, stacked overrides, device overrides, or raw-counter
 edits. Clearing the record returns the account to global policy.
 
@@ -147,7 +156,8 @@ where currently required, reason validation, optimistic revision, and audit.
 
 ## Boundary behavior
 
-- A new account receives the full current UTC month's limit.
+- A new account receives the current UTC month's effective limit: one fifth until
+  its email is verified, then the full resolved limit, preserving prior usage.
 - A month boundary is resolved on access; no bulk reset cron is required.
 - Decreasing a limit below current usage produces zero remaining capacity without
   mutating history or cancelling accepted jobs.

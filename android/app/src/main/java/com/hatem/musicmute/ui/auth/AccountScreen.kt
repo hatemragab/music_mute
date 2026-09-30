@@ -45,8 +45,8 @@ internal fun AccountScreen(
     var confirmSignOut by remember(state.identity?.uid) { mutableStateOf(false) }
     var confirmGlobalLogout by remember { mutableStateOf(false) }
     var verify by remember { mutableStateOf(false) }
-    LaunchedEffect(state.identity?.emailVerified) {
-        if (state.identity?.emailVerified == true) verify = false
+    LaunchedEffect(state.accountEmailVerified) {
+        if (state.accountEmailVerified == true) verify = false
     }
     fun cancelDeletion() { if (!state.busy) { deletionStep = 0; deletionPassword = "" } }
     BackHandler(deletionStep > 0) { cancelDeletion() }
@@ -78,14 +78,26 @@ internal fun AccountScreen(
                     val name = state.identity?.displayName?.takeIf { it.isNotBlank() } ?: state.profile?.displayName?.takeIf { it.isNotBlank() }
                     name?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
                     SelectionContainer { Text(state.identity?.email ?: state.profile?.email ?: stringResource(R.string.auth_no_email), style = MaterialTheme.typography.bodySmall) }
-                    Text(stringResource(if (state.identity?.emailVerified == true) R.string.auth_verified else R.string.auth_unverified),
+                    Text(stringResource(if (state.accountEmailVerified == true) R.string.auth_verified else R.string.auth_unverified),
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("auth-verification-status"))
-                    if (state.identity?.emailVerified != true) TextButton(onClick = { verify = true }, enabled = !state.busy) {
-                        Text(stringResource(R.string.creative_account_verify))
-                    }
                 }
             }
             CreativeWave(Modifier.fillMaxWidth().height(28.dp))
+        }
+        if (state.accountEmailVerified == false) {
+            CreativeCard(Modifier.testTag("auth-verification-quota-notice"), contentPadding = 16.dp, contentGap = 8.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Outlined.Email, null, tint = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.auth_verification_quota_title), style = MaterialTheme.typography.titleMedium)
+                }
+                Text(stringResource(R.string.auth_verification_quota_description),
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { verify = true }, enabled = !state.busy,
+                    modifier = Modifier.testTag("auth-open-verification")) {
+                    Text(stringResource(R.string.creative_account_verify))
+                }
+            }
         }
         val accessMessage =
             when {

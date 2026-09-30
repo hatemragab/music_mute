@@ -290,6 +290,82 @@ final class AccountDeletionTests: XCTestCase {
   }
 }
 
+@MainActor final class AccountVerificationSessionTests: XCTestCase {
+  func testVerificationRefreshRequiresBackendConfirmationAndFreshToken() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer {
+      RecoveryURLProtocol.handler = nil
+      try? FileManager.default.removeItem(at: root)
+    }
+    let firebase = DeletionFirebase()
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [RecoveryURLProtocol.self]
+    let api = AuthAPIClient(
+      configuration: AuthConfiguration(apiOrigin: URL(string: "https://api.example")!),
+      tokenSource: firebase, sessionConfiguration: configuration)
+    let model = AuthSessionModel(
+      firebase: firebase, apple: AppleCredentialProvider(),
+      installationStore: InstallationStore(file: root.appendingPathComponent("installation.json")),
+      api: api, deletionStore: AccountDeletionStore(root: root.appendingPathComponent("deletion")))
+    var backendVerified = false
+    var synchronizationFails = false
+    var paths: [String] = []
+    let policy = AppPolicy(
+      requireVerifiedEmail: false,
+      platforms: .init(android: .init(minimumBuild: nil), ios: .init(minimumBuild: nil)),
+      revision: 1, updatedAt: Date())
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    RecoveryURLProtocol.handler = { request in
+      let path = request.url!.path
+      paths.append(path)
+      let profile = AccountProfile(
+        id: "owner-a", displayName: "Fixture owner", email: "owned@example.test",
+        emailVerified: backendVerified, providers: [.password])
+      if path == "/auth/profile-synchronizations" {
+        if synchronizationFails { return (503, Data()) }
+        let result = ProfileSyncResponse(user: profile, policy: policy)
+        return (200, try! ApiWireJSON.request(encoder.encode(result))!)
+      }
+      XCTAssertEqual(path, "/auth/sessions")
+      let report = try! JSONDecoder.authDecoder().decode(
+        InstallationReport.self,
+        from: ApiWireJSON.response(recoveryRequestData(request)))
+      let device = RegisteredDevice(
+        installationId: report.installationId, platform: "ios", appVersion: report.appVersion,
+        buildNumber: report.buildNumber, metadataRevision: report.metadataRevision,
+        osVersion: report.osVersion, deviceModel: report.deviceModel,
+        firstSeenAt: Date(), lastSeenAt: Date(), versionHistory: [])
+      let result = SessionResponse(
+        user: profile, device: device, policy: policy, access: .init(allowed: true, reason: nil))
+      return (200, try! ApiWireJSON.request(encoder.encode(result))!)
+    }
+
+    await model.signInEmail(email: "owned@example.test", password: "password")
+    XCTAssertEqual(model.phase, .authenticated)
+    XCTAssertEqual(model.profile?.emailVerified, false)
+    firebase.identity = IdentitySnapshot(
+      uid: "owner-a", email: "owned@example.test", emailVerified: true, providers: [.password])
+    synchronizationFails = true
+    await model.refreshAccount()
+    XCTAssertEqual(model.profile?.emailVerified, false)
+    XCTAssertTrue(model.profileSyncPending)
+
+    synchronizationFails = false
+    await model.refreshAccount()
+    XCTAssertEqual(model.identity?.emailVerified, true)
+    XCTAssertEqual(model.profile?.emailVerified, false)
+
+    backendVerified = true
+    await model.refreshAccount()
+    XCTAssertEqual(model.profile?.emailVerified, true)
+    XCTAssertFalse(model.profileSyncPending)
+    XCTAssertNil(model.lastFailure)
+    XCTAssertEqual(firebase.tokenRefreshRequests.filter { $0 }.count, 3)
+    XCTAssertEqual(paths.filter { $0 == "/auth/profile-synchronizations" }.count, 3)
+  }
+}
+
 @MainActor private final class DeletionFixture {
   let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   let firebase = DeletionFirebase()
@@ -324,6 +400,7 @@ final class AccountDeletionTests: XCTestCase {
   var appleProviderUserID: String? { nil }
   var reauthFailure: AuthFailure?
   var reauthenticated = 0
+  var tokenRefreshRequests: [Bool] = []
   func observe(_ listener: @escaping @MainActor (IdentitySnapshot?) -> Void) -> NSObjectProtocol {
     NSObject()
   }
@@ -341,7 +418,10 @@ final class AccountDeletionTests: XCTestCase {
     guard let identity else { throw AuthFailure.sessionExpired }
     return identity
   }
-  func idToken(forceRefresh: Bool) async throws -> String { "fixture-token" }
+  func idToken(forceRefresh: Bool) async throws -> String {
+    tokenRefreshRequests.append(forceRefresh)
+    return "fixture-token"
+  }
   func reauthenticatePassword(_ password: String) async throws {
     reauthenticated += 1
     if let reauthFailure { throw reauthFailure }

@@ -123,13 +123,13 @@ function OverrideForm({
     currentExpiry ? currentExpiry.slice(0, 16) : "",
   );
   const values = parseValues(draft);
-  const errors = validateAccountPolicyOverride(values, currentValues, expiry);
+  const errors = validateAccountPolicyOverride(values, expiry);
   return (
     <ReasonDialog
       open
       onOpenChange={onOpenChange}
       title="Account policy override"
-      description="Enter only values that should replace the global standard policy for this account. Blank fields continue using the global value."
+      description="Enter only values that should replace the global standard policy for this account. Quota overrides set the full allowance; accounts without verified email receive one fifth of processing, upload, download and retained storage quotas. Blank fields continue using the global value."
       confirmLabel="Save override"
       freshAuth
       onReauthenticate={reauthenticate}
@@ -146,7 +146,7 @@ function OverrideForm({
                   max={field.max}
                   step="1"
                   value={draft[field.key]}
-                  placeholder={`Global: ${currentValues[field.key] ?? "—"}`}
+                  placeholder={`Current account limit: ${currentValues[field.key] ?? "—"}`}
                   onChange={(event) =>
                     setDraft({ ...draft, [field.key]: event.target.value })
                   }
@@ -177,11 +177,7 @@ function OverrideForm({
       }
       onConfirm={async (reason) => {
         const next = parseValues(draft);
-        const currentErrors = validateAccountPolicyOverride(
-          next,
-          currentValues,
-          expiry,
-        );
+        const currentErrors = validateAccountPolicyOverride(next, expiry);
         if (currentErrors.length) throw new Error(currentErrors.join(" "));
         await onSave({
           values: next,

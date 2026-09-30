@@ -103,11 +103,11 @@ data class ProcessingUsage(
             amounts.any { !it.isFinite() || it < 0 } ||
             processing.remainingSeconds > processing.limitSeconds ||
             listOf(
-                uploads.dailyGrantLimit, uploads.monthlyGrantLimit,
-                downloads.monthlyGrantLimit, effectiveLimits.maxDurationSeconds,
+                effectiveLimits.maxDurationSeconds,
                 effectiveLimits.maxClientInputAttempts, effectiveLimits.signedUrlTtlSeconds,
             ).any { it < 1 } ||
             listOf(
+                uploads.dailyGrantLimit, uploads.monthlyGrantLimit, downloads.monthlyGrantLimit,
                 uploads.dailyGrants, uploads.dailyRemainingGrants, uploads.monthlyGrants,
                 uploads.monthlyRemainingGrants, downloads.monthlyGrants,
                 downloads.monthlyRemainingGrants,
