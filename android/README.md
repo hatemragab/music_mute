@@ -129,7 +129,7 @@ simulator or device for runtime proof.
 ## App updates
 
 Android has separate `direct` and `play` distribution variants with the same
-production application ID and signing configuration. Version `0.1.11` is build 12.
+production application ID and signing configuration. Version `0.1.13` is build 14.
 The direct variant uses the built-in version dialog, download service, progress
 callbacks, FileProvider and installer-intent helper from
 [azhon/AppUpdate 4.3.6](https://github.com/azhon/AppUpdate) (Apache-2.0).

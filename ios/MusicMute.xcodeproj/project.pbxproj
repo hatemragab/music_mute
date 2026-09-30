@@ -19,6 +19,7 @@
 		1AEFE931C5907B1F585A14FC /* PushRegistrationAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93035634DAB8A8315FD9C73F /* PushRegistrationAPIClientTests.swift */; };
 		1B233E118FDB39BD6F5953B4 /* supported-audio-sites.json in Resources */ = {isa = PBXBuildFile; fileRef = 2A1A0D995FE497B7F95DA4B4 /* supported-audio-sites.json */; };
 		25F8AAF25127CA985F70F329 /* ArtifactNativeValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A9C17836C4018211E6992FC /* ArtifactNativeValidationTests.swift */; };
+		2645D827399D2D5F56B8EFE4 /* ObjectStorageUploadFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37CDAA374AA6B577696A4719 /* ObjectStorageUploadFile.swift */; };
 		2679C4B9CAB61E2C7A612301 /* UploadRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4FEB45786DF3B7CEE312B4D /* UploadRecoveryTests.swift */; };
 		274C13639D53CD838EF88E59 /* AccountDeletionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338642359BC137704D29D7D7 /* AccountDeletionStore.swift */; };
 		285AB584E3E816B35E743464 /* NotificationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C35DCC712695C754017068BD /* NotificationDelegate.swift */; };
@@ -97,7 +98,6 @@
 		E4A5B4D6D959FE174617B044 /* ProcessingUsageRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCCB228B9EBBB2901CD87B4D /* ProcessingUsageRepository.swift */; };
 		E7CB62336ACEAFA3EC9A88E1 /* ProcessingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D3B46976552B6DC3124085E /* ProcessingStore.swift */; };
 		E85A875C9F6CAA766022EBE6 /* ProcessingUsageRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE456FB8864C45BA72A9D5E5 /* ProcessingUsageRepositoryTests.swift */; };
-		EA831F744456BD4B61F3F511 /* ObjectStorageUploadFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 326664D9C4E33E9F647E5414 /* ObjectStorageUploadFile.swift */; };
 		EC2B1ADE7E3E3FB261A0C095 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 23FA53994AE59BE9C2307305 /* GoogleService-Info.plist */; };
 		ED2D46D59795BD55D63C8A5F /* AudioInputPreparer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7C1E16DD3FDBEC754CCF00 /* AudioInputPreparer.swift */; };
 		ED73E7172B5765ADBE1EA042 /* ClientErrorOutboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFCB20A0300F96084C683D0 /* ClientErrorOutboxTests.swift */; };
@@ -152,10 +152,10 @@
 		2A1A0D995FE497B7F95DA4B4 /* supported-audio-sites.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "supported-audio-sites.json"; sourceTree = "<group>"; };
 		2A853D607BE6F8979A016569 /* ProcessingMediaPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingMediaPolicy.swift; sourceTree = "<group>"; };
 		31F5E38EC5FE5AC9FAC3ECF2 /* AudioInputPreparerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioInputPreparerTests.swift; sourceTree = "<group>"; };
-		326664D9C4E33E9F647E5414 /* ObjectStorageUploadFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjectStorageUploadFile.swift; sourceTree = "<group>"; };
 		3278CCB9EA77606685ADF38B /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		338642359BC137704D29D7D7 /* AccountDeletionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountDeletionStore.swift; sourceTree = "<group>"; };
 		34F6702F528D11A1DC3F44F8 /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
+		37CDAA374AA6B577696A4719 /* ObjectStorageUploadFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjectStorageUploadFile.swift; sourceTree = "<group>"; };
 		3EFCB20A0300F96084C683D0 /* ClientErrorOutboxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientErrorOutboxTests.swift; sourceTree = "<group>"; };
 		423C1004122E9D9621D7C843 /* MediaPreparationEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPreparationEngineTests.swift; sourceTree = "<group>"; };
 		473549C7D7F5FD12B15834A7 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -313,6 +313,7 @@
 				24A8869DBB0C7758EE765073 /* MediaPreparationCoordinator.swift */,
 				13C706BF5535A9BF58717044 /* MediaSourceInspector.swift */,
 				C35DCC712695C754017068BD /* NotificationDelegate.swift */,
+				37CDAA374AA6B577696A4719 /* ObjectStorageUploadFile.swift */,
 				59CC9D22C50AB1BB5B8C0503 /* PreparedInput.swift */,
 				16DE79176F2063180C4548E6 /* PreparedMediaCleanup.swift */,
 				2295DDCB883FDCD273D94AA3 /* ProcessingAppDelegate.swift */,
@@ -322,7 +323,6 @@
 				6D3B46976552B6DC3124085E /* ProcessingStore.swift */,
 				CCCB228B9EBBB2901CD87B4D /* ProcessingUsageRepository.swift */,
 				9A092C9DF86849A843297BED /* PushRegistrationCoordinator.swift */,
-				326664D9C4E33E9F647E5414 /* ObjectStorageUploadFile.swift */,
 				C5EE3E93EC83668D605554D3 /* SupportedAudioSites.swift */,
 				76376826C31F15253D9E8C69 /* UnavailableJobsAPI.swift */,
 				5AEC0138DB7536A57D51B253 /* URLImports.swift */,
@@ -711,6 +711,7 @@
 				51EFF7EE83C23DC1FEBA49DE /* MediaPreparationCoordinator.swift in Sources */,
 				7D8C31C53860CFE69A34CB9D /* MediaSourceInspector.swift in Sources */,
 				285AB584E3E816B35E743464 /* NotificationDelegate.swift in Sources */,
+				2645D827399D2D5F56B8EFE4 /* ObjectStorageUploadFile.swift in Sources */,
 				830CCCD4A731CA10C80FF224 /* PlayerView.swift in Sources */,
 				92E5DD127C5D3A62AF165E45 /* PreparedInput.swift in Sources */,
 				8B9BC4F43DFC14ECC315434A /* PreparedMediaCleanup.swift in Sources */,
@@ -731,7 +732,6 @@
 				E4A5B4D6D959FE174617B044 /* ProcessingUsageRepository.swift in Sources */,
 				DF2612B7FF5D7B68FB37B43A /* ProcessingUsageView.swift in Sources */,
 				5EDBEDB487B17AFEC1249A54 /* PushRegistrationCoordinator.swift in Sources */,
-				EA831F744456BD4B61F3F511 /* ObjectStorageUploadFile.swift in Sources */,
 				6612F3C0B340A9A03674832B /* SentryMonitoring.swift in Sources */,
 				6ECF35AE8B34433D254BCD97 /* SettingsView.swift in Sources */,
 				4BDB8C97FCB2497BB907EB1D /* SupportedAudioSites.swift in Sources */,
@@ -835,7 +835,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -849,7 +849,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.1.1;
+				MARKETING_VERSION = 0.1.2;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				MUSICMUTE_ACCOUNT_DELETION_URL = "https://api.music-mute.com/delete-account";
@@ -973,7 +973,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -993,7 +993,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.1.1;
+				MARKETING_VERSION = 0.1.2;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				MUSICMUTE_ACCOUNT_DELETION_URL = "https://api.music-mute.com/delete-account";
