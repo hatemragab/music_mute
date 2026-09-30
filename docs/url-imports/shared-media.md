@@ -77,7 +77,9 @@ Local uploads and temporary worker outputs retain existing cleanup behavior.
 No bucket change, data migration, existing-job rewrite or cache backfill runs.
 Existing jobs remain compatible. New URL imports populate shared storage after
 backend deployment; native/web requests and grants need no new fields. Automatic
-Mongo initialization only creates registered collections/indexes.
+Mongo initialization only creates registered collections/indexes. The release
+preserves the exact active worker installation catalog (R2 release 0.1.2,
+macOS sequence 4 and Windows sequence 3); no worker package is republished.
 
 The producer remains an account-owned job under the existing scheduler. If it is
 cancelled, deleted or fails permanently, waiting imports fail safely; a new import
@@ -98,10 +100,10 @@ Executed locally on 2026-10-01:
 
 | Command (from backend unless stated)                              | Result                                                                                                           |
 | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `pnpm run verify`                                                 | Format, lint, type checks, secret scan, transfer fixture tests, 1,193 unit tests, 158 API tests and build passed |
+| `pnpm run verify`                                                 | Format, lint, type checks, secret scan, transfer fixture tests, 1,197 unit tests, 158 API tests and build passed |
 | `pnpm run test:imports:integration`                               | 24 tests passed, including 8 shared-media tests                                                                  |
-| `pnpm run test:processing:integration`                            | 18 tests passed                                                                                                  |
-| `pnpm run test:retention:integration`                             | 28 tests passed                                                                                                  |
+| `pnpm run test:processing:integration`                            | 19 tests passed                                                                                                  |
+| `pnpm run test:retention:integration`                             | 29 tests passed                                                                                                  |
 | `pnpm run test:deletion:integration`                              | 3 tests passed                                                                                                   |
 | `pnpm run test:integration`                                       | Compiled API startup, restart and dependency recovery passed                                                     |
 | `node --test test/realtime.integration.mjs`                       | Two API feeds, realtime changes and authorization fences passed                                                  |
