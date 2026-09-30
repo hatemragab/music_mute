@@ -106,7 +106,7 @@
 "auth_offline_session" = "Offline session — remote changes will be checked when connected";
 "auth_sync_pending" = "Your sign-in method changed; backend profile sync is still pending.";
 "auth_verify_email" = "Email verification";
-"auth_verify_body" = "Verification is optional for sign-in. Future online processing may require it.";
+"auth_verify_body" = "Until you verify your email, you receive 20% of your normal processing, upload, download, and cloud storage allowances. Verify to unlock your full allowances.";
 "auth_send_verification" = "Send verification email";
 "auth_i_verified" = "I have verified — refresh";
 "auth_verification_accepted" = "Verification instructions were requested. Check your email, then refresh here.";

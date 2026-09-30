@@ -104,30 +104,37 @@ export function AccountPage() {
         <p dir="ltr">{session.user.email}</p>
         <p>{session.user.emailVerified ? t("verified") : t("unverified")}</p>
         {!session.user.emailVerified && (
-          <div className="action-row">
-            <button
-              disabled={busy}
-              onClick={() =>
-                void action(async () => {
-                  await api.post("/auth/verification-emails", {});
-                  setNotice(t("emailSent"));
-                })
-              }
-            >
-              {t("sendVerification")}
-            </button>
-            <button
-              disabled={busy}
-              onClick={() =>
-                void action(async () => {
-                  await reload(user);
-                  retry();
-                })
-              }
-            >
-              {t("refreshVerification")}
-            </button>
-          </div>
+          <>
+            <div className="notice" role="status">
+              <strong>{t("verificationQuotaTitle")}</strong>
+              <p>{t("verificationQuotaDescription")}</p>
+            </div>
+            <div className="action-row">
+              <button
+                disabled={busy}
+                onClick={() =>
+                  void action(async () => {
+                    await api.post("/auth/verification-emails", {});
+                    setNotice(t("emailSent"));
+                  })
+                }
+              >
+                {t("sendVerification")}
+              </button>
+              <button
+                disabled={busy}
+                onClick={() =>
+                  void action(async () => {
+                    await reload(user);
+                    await user.getIdToken(true);
+                    retry();
+                  })
+                }
+              >
+                {t("refreshVerification")}
+              </button>
+            </div>
+          </>
         )}
       </section>
       <section className="panel">

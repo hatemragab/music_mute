@@ -6168,7 +6168,12 @@ paths:
         - jobs
       operationId: ProcessingUsageController.current
       summary: GET /processing-usage
-      description: none; own usage and effective policy
+      description: >-
+        Own usage and effective policy. Accounts without verified email receive
+        one fifth of the resolved processing, upload, download and retained-output
+        quotas, rounded down to whole units. Verification restores the full
+        resolved quotas without resetting usage. Media limits and queue capacity
+        are unchanged.
       security:
         - FirebaseBearer: []
       x-source: src/processing-usage/processing-usage.controller.ts

@@ -352,6 +352,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     _id: secondAccount,
     firebaseUid: `fixture-${secondAccount}`,
     displayName: 'Second Account',
+    emailVerified: true,
     nameSource: 'numeric_alias',
     profileSyncedAt: new Date(),
     lastSeenAt: new Date(),
@@ -813,6 +814,353 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     false,
   );
   assert.equal((await periods.findById(retentionPeriodId)).purgeAt, null);
+});
+
+test('unverified quotas enforce one fifth and verification preserves usage while restoring full limits', async (t) => {
+  const native = await IsolatedServices.create();
+  t.after(() => native.stop());
+  const { mongoUri } = await native.startDatabases({ replicaSet: true });
+  const connection = await createConnection(mongoUri).asPromise();
+  t.after(() => connection.close());
+  for (const { name, schema } of [
+    ...PROCESSING_MODELS,
+    { name: AccountPolicy.name, schema: AccountPolicySchema },
+    { name: AccountPolicyOverride.name, schema: AccountPolicyOverrideSchema },
+  ])
+    connection.model(name, schema);
+  const owners = Array.from({ length: 8 }, () => new Types.ObjectId());
+  const [
+    owner,
+    uploadOwner,
+    uploadByteOwner,
+    downloadOwner,
+    downloadByteOwner,
+    storageOwner,
+    importOwner,
+    zeroOwner,
+  ] = owners;
+  const { users } = await accountFixture(connection, owners.map(String));
+  await users.updateMany({}, { $set: { emailVerified: false } });
+  const model = (name) => connection.model(name);
+  await Promise.all(
+    Object.values(connection.models).map((value) => value.init()),
+  );
+  const values = {
+    ...DEFAULT_ACCOUNT_POLICY_VALUES,
+    monthlyProcessingSeconds: 50,
+    dailyUploadGrants: 10,
+    monthlyUploadGrants: 10,
+    monthlyConfirmedUploadBytes: 1_000,
+    monthlyDownloadGrants: 10,
+    monthlyEstimatedDownloadBytes: 1_000,
+    maxRetainedOutputBytes: 1_000,
+  };
+  await model(AccountPolicy.name).create({
+    _id: 'standard',
+    revision: 1,
+    acceptNewJobs: true,
+    maintenanceMessageEn: '',
+    maintenanceMessageAr: null,
+    ...values,
+    updatedBy: 'fixture-admin',
+    updatedAt: new Date(),
+  });
+  const { AccountPolicyService } =
+    await import('../dist/admin-settings/account-policy.service.js');
+  const policy = new AccountPolicyService(
+    model(AccountPolicy.name),
+    model(AccountPolicyOverride.name),
+    model('ProcessingAdmissionFence'),
+    users,
+    {},
+    new ConfigService(),
+  );
+  const jobs = model('Job');
+  const usage = new ProcessingUsageService(
+    model('AccountUsagePeriod'),
+    model('AccountDailyUsagePeriod'),
+    model('ProcessingReservation'),
+    model('UploadGrantReceipt'),
+    model('DownloadGrantReceipt'),
+    model('ServiceUsagePeriod'),
+    jobs,
+    users,
+    policy,
+    new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
+  );
+  const transactions = new ProcessingTransactions(connection);
+  const now = new Date('2026-09-30T12:00:00Z');
+  const run = (fn) => transactions.run(fn);
+  const code = (expected) => (error) => error.getResponse().code === expected;
+  const before = await usage.readUsage(owner, undefined, now);
+  assert.equal(before.processing.limitSeconds, 10);
+  assert.equal(before.uploads.dailyGrantLimit, 2);
+  assert.equal(before.uploads.monthlyGrantLimit, 2);
+  assert.equal(before.uploads.monthlyByteLimit, 200);
+  assert.equal(before.downloads.monthlyGrantLimit, 2);
+  assert.equal(before.downloads.monthlyByteLimit, 200);
+  assert.equal(before.storage.limitBytes, 200);
+  assert.equal(before.maxWaitingJobs, 20);
+  assert.equal(before.maxProcessingJobs, 1);
+  assert.equal(before.effectiveLimits.maxDurationSeconds, 1_800);
+  assert.deepEqual((await policy.current()).values, values);
+
+  // Preserve admission of a complete file when any positive allowance remains.
+  const firstJob = await createJob(jobs, owner, 9);
+  const secondJob = await createJob(jobs, owner, 2);
+  await run((session) =>
+    usage.reserveForJob(firstJob._id, owner, 9, session, now),
+  );
+  await run((session) =>
+    usage.settleJob({ ...firstJob.toObject(), status: 'ready' }, session, now),
+  );
+  await run((session) =>
+    usage.reserveForJob(secondJob._id, owner, 2, session, now),
+  );
+  await assert.rejects(
+    run((session) =>
+      usage.reserveForJob(new Types.ObjectId(), owner, 1, session, now),
+    ),
+    code('PROCESSING_ALLOWANCE_EXHAUSTED'),
+  );
+  const exhausted = await usage.readUsage(owner, undefined, now);
+  assert.equal(exhausted.processing.usedSeconds, 9);
+  assert.equal(exhausted.processing.reservedSeconds, 2);
+  assert.equal(exhausted.processing.remainingSeconds, 0);
+
+  const uploadJob = await createJob(jobs, uploadOwner, 1);
+  const grants = await Promise.allSettled(
+    Array.from({ length: 3 }, () =>
+      run((session) =>
+        usage.reserveUploadGrant(uploadJob, randomUUID(), session, now),
+      ),
+    ),
+  );
+  assert.equal(
+    grants.filter((grant) => grant.status === 'fulfilled').length,
+    2,
+  );
+  assert.equal(
+    grants.filter(
+      (grant) =>
+        grant.status === 'rejected' &&
+        code('UPLOAD_GRANT_LIMIT_REACHED')(grant.reason),
+    ).length,
+    1,
+  );
+  const tomorrow = new Date('2026-10-01T12:00:00Z');
+  const laterSameMonth = new Date('2026-09-30T13:00:00Z');
+  // A fresh UTC day cannot bypass the independent monthly grant limit.
+  const yesterday = new Date('2026-09-29T12:00:00Z');
+  const earlierJob = await createJob(jobs, uploadByteOwner, 1);
+  await run((session) =>
+    usage.reserveUploadGrant(earlierJob, randomUUID(), session, yesterday),
+  );
+  await run((session) =>
+    usage.reserveUploadGrant(earlierJob, randomUUID(), session, yesterday),
+  );
+  await assert.rejects(
+    run((session) =>
+      usage.reserveUploadGrant(
+        earlierJob,
+        randomUUID(),
+        session,
+        laterSameMonth,
+      ),
+    ),
+    code('UPLOAD_GRANT_LIMIT_REACHED'),
+  );
+  const uploadOne = await createJob(jobs, uploadByteOwner, 1);
+  const uploadTwo = await createJob(jobs, uploadByteOwner, 1);
+  await run((session) =>
+    usage.confirmUploadBytes(uploadOne, 200, session, now),
+  );
+  await assert.rejects(
+    run((session) => usage.confirmUploadBytes(uploadTwo, 1, session, now)),
+    code('UPLOAD_BYTE_LIMIT_REACHED'),
+  );
+
+  const downloadJobs = new Map(
+    await Promise.all(
+      [downloadOwner, downloadByteOwner, zeroOwner].map(async (accountId) => [
+        String(accountId),
+        await createJob(jobs, accountId, 1),
+      ]),
+    ),
+  );
+  const download = (accountId, bytes) =>
+    run((session) =>
+      usage.reserveDownloadGrant(
+        {
+          accountId,
+          jobId: downloadJobs.get(String(accountId))._id,
+          scope: 'user_result',
+          requestId: randomUUID(),
+          object: { etag: '"verified-quota-fixture"', bytes },
+        },
+        session,
+        now,
+      ),
+    );
+  await download(downloadOwner, 1);
+  await download(downloadOwner, 1);
+  await assert.rejects(
+    download(downloadOwner, 1),
+    code('DOWNLOAD_GRANT_LIMIT_REACHED'),
+  );
+  await download(downloadByteOwner, 200);
+  await assert.rejects(
+    download(downloadByteOwner, 1),
+    code('DOWNLOAD_BYTE_LIMIT_REACHED'),
+  );
+
+  await users.updateOne(
+    { _id: storageOwner },
+    { $set: { retainedOutputBytes: 201 } },
+  );
+  const overStorage = await usage.readUsage(storageOwner, undefined, now);
+  assert.equal(overStorage.storage.remainingBytes, 0);
+  assert.equal(overStorage.storage.retainedBytes, 201);
+  assert.equal(overStorage.availability.reason, 'storage_limit_reached');
+  await run(async (session) => {
+    const effective = await policy.effective(storageOwner, now, session);
+    await assert.rejects(
+      usage.assertRetainedCapacity(
+        storageOwner,
+        effective.values.maxRetainedOutputBytes,
+        session,
+      ),
+      code('RETAINED_STORAGE_LIMIT_REACHED'),
+    );
+  });
+
+  const importId = new Types.ObjectId();
+  await run((session) =>
+    usage.reserveForImport(importId, importOwner, 1_800, session, now),
+  );
+  await assert.rejects(
+    run((session) =>
+      usage.reserveForImport(
+        new Types.ObjectId(),
+        importOwner,
+        1_800,
+        session,
+        now,
+      ),
+    ),
+    code('PROCESSING_ALLOWANCE_EXHAUSTED'),
+  );
+  await run((session) => usage.releaseImport(importId, importOwner, session));
+  assert.equal(
+    (await usage.readUsage(importOwner, undefined, now)).processing
+      .remainingSeconds,
+    10,
+  );
+
+  await model(AccountPolicyOverride.name).create({
+    _id: new Types.ObjectId(),
+    accountId: zeroOwner,
+    revision: 1,
+    monthlyProcessingSeconds: 4,
+    dailyUploadGrants: 4,
+    monthlyUploadGrants: 4,
+    monthlyConfirmedUploadBytes: 4,
+    monthlyDownloadGrants: 4,
+    monthlyEstimatedDownloadBytes: 4,
+    maxRetainedOutputBytes: 4,
+    reason: 'fixture-small-quotas',
+    createdBy: 'fixture-admin',
+    updatedBy: 'fixture-admin',
+    createdAt: now,
+    updatedAt: now,
+    expiresAt: null,
+  });
+  const zero = await usage.readUsage(zeroOwner, undefined, now);
+  assert.equal(zero.effectivePolicySource, 'account_override');
+  assert.equal(zero.processing.limitSeconds, 0);
+  assert.equal(zero.uploads.dailyGrantLimit, 0);
+  assert.equal(zero.uploads.monthlyGrantLimit, 0);
+  assert.equal(zero.uploads.monthlyByteLimit, 0);
+  assert.equal(zero.downloads.monthlyGrantLimit, 0);
+  assert.equal(zero.downloads.monthlyByteLimit, 0);
+  assert.equal(zero.storage.limitBytes, 0);
+  await assert.rejects(
+    run((session) =>
+      usage.reserveForJob(new Types.ObjectId(), zeroOwner, 1, session, now),
+    ),
+    code('PROCESSING_ALLOWANCE_EXHAUSTED'),
+  );
+  await assert.rejects(
+    run((session) =>
+      usage.reserveUploadGrant(
+        downloadJobs.get(String(zeroOwner)),
+        randomUUID(),
+        session,
+        now,
+      ),
+    ),
+    code('UPLOAD_GRANT_LIMIT_REACHED'),
+  );
+  await assert.rejects(
+    download(zeroOwner, 1),
+    code('DOWNLOAD_GRANT_LIMIT_REACHED'),
+  );
+
+  const countersBefore = await model('AccountUsagePeriod').find({}).lean();
+  const holdsBefore = await model('ProcessingReservation').find({}).lean();
+  await users.updateMany({}, { $set: { emailVerified: true } });
+  assert.deepEqual(
+    await model('AccountUsagePeriod').find({}).lean(),
+    countersBefore,
+  );
+  assert.deepEqual(
+    await model('ProcessingReservation').find({}).lean(),
+    holdsBefore,
+  );
+  const verified = await usage.readUsage(owner, undefined, now);
+  assert.equal(verified.processing.limitSeconds, 50);
+  assert.equal(verified.processing.usedSeconds, 9);
+  assert.equal(verified.processing.reservedSeconds, 2);
+  assert.equal(verified.processing.remainingSeconds, 39);
+  assert.equal(verified.uploads.dailyGrantLimit, 10);
+  assert.equal(verified.uploads.monthlyGrantLimit, 10);
+  assert.equal(verified.uploads.monthlyByteLimit, 1_000);
+  assert.equal(verified.downloads.monthlyGrantLimit, 10);
+  assert.equal(verified.downloads.monthlyByteLimit, 1_000);
+  assert.equal(verified.storage.limitBytes, 1_000);
+  assert.equal(
+    (await usage.readUsage(storageOwner, undefined, now)).storage.retainedBytes,
+    201,
+  );
+  await run((session) =>
+    usage.reserveForJob(new Types.ObjectId(), owner, 1, session, now),
+  );
+  await run((session) =>
+    usage.reserveUploadGrant(uploadJob, randomUUID(), session, now),
+  );
+  await run((session) => usage.confirmUploadBytes(uploadTwo, 1, session, now));
+  await download(downloadOwner, 1);
+  await download(downloadByteOwner, 1);
+  await run((session) =>
+    usage.assertRetainedCapacity(
+      storageOwner,
+      values.maxRetainedOutputBytes,
+      session,
+    ),
+  );
+  // Both UTC period rollover and a later verification downgrade retain safe limits.
+  await users.updateOne({ _id: owner }, { $set: { emailVerified: false } });
+  await run((session) =>
+    usage.settleJob({ ...secondJob.toObject(), status: 'ready' }, session, now),
+  );
+  const downgraded = await usage.readUsage(owner, undefined, now);
+  assert.equal(downgraded.processing.usedSeconds, 11);
+  assert.equal(downgraded.processing.remainingSeconds, 0);
+  assert.equal(
+    (await usage.readUsage(owner, undefined, tomorrow)).processing
+      .remainingSeconds,
+    10,
+  );
 });
 
 test('usage retention repair scans candidates without sorting retained or held history', async (t) => {

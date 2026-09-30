@@ -105,7 +105,8 @@
     <string name="auth_no_email">لا يوجد بريد إلكتروني متاح</string>
     <string name="auth_verified">البريد الإلكتروني مؤكّد</string>
     <string name="auth_unverified">البريد الإلكتروني غير مؤكّد</string>
-    <string name="auth_optional_verification">تأكيد البريد اختياري. يمكنك تأكيده في الوقت الذي يناسبك.</string>
+    <string name="auth_verification_quota_title">احصل على رصيدك الكامل</string>
+    <string name="auth_verification_quota_description">حتى تؤكد بريدك الإلكتروني، تحصل على خُمس (20٪) الرصيد المعتاد للمعالجة والرفع والتنزيل وتخزين الصوت المحفوظ. أكّد بريدك الإلكتروني لتحصل على الرصيد الكامل.</string>
     <string name="auth_send_verification">إرسال رسالة التأكيد</string>
     <string name="auth_check_verification">أكّدت بريدي الإلكتروني</string>
     <string name="auth_refresh_account">تحديث</string>

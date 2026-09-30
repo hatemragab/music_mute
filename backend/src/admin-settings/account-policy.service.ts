@@ -35,6 +35,16 @@ const POLICY_VALUE_KEYS = Object.freeze(
   Object.keys(DEFAULT_ACCOUNT_POLICY_VALUES) as AccountPolicyValueKey[],
 );
 
+const EMAIL_VERIFICATION_QUOTA_KEYS = [
+  'monthlyProcessingSeconds',
+  'dailyUploadGrants',
+  'monthlyUploadGrants',
+  'monthlyConfirmedUploadBytes',
+  'monthlyDownloadGrants',
+  'monthlyEstimatedDownloadBytes',
+  'maxRetainedOutputBytes',
+] as const satisfies readonly AccountPolicyValueKey[];
+
 const ENFORCED_FEATURES = Object.freeze([
   'processing_minutes',
   'media_limits',
@@ -224,6 +234,13 @@ export class AccountPolicyService implements OnModuleInit {
       ...(active ? pickOverrideValues(active) : {}),
     };
     validateAccountPolicyValues(values);
+    let userQuery = this.users.findById(accountId).select('emailVerified');
+    if (session) userQuery = userQuery.session(session);
+    const user = await userQuery.lean();
+    if (!user) throw jobError('PROCESSING_UNAVAILABLE');
+    if (user.emailVerified !== true)
+      for (const key of EMAIL_VERIFICATION_QUOTA_KEYS)
+        values[key] = Math.floor(values[key] / 5);
     return {
       plan: STANDARD_ACCOUNT_POLICY_ID,
       globalRevision: global.revision,

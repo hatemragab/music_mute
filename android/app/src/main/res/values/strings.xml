@@ -105,7 +105,8 @@
     <string name="auth_no_email">No email address available</string>
     <string name="auth_verified">Email verified</string>
     <string name="auth_unverified">Email not verified</string>
-    <string name="auth_optional_verification">Verification is optional. You can verify your email whenever you’re ready.</string>
+    <string name="auth_verification_quota_title">Unlock your full allowance</string>
+    <string name="auth_verification_quota_description">Until you verify your email, you get one fifth (20%) of the normal processing, upload, download and retained audio storage allowances. Verify your email to unlock the full allowance.</string>
     <string name="auth_send_verification">Send verification email</string>
     <string name="auth_check_verification">I have verified my email</string>
     <string name="auth_refresh_account">Refresh</string>

@@ -78,6 +78,34 @@ class JobsApiClientTest {
         assertEquals("2026-10-01T00:00:00Z", usage.period.nextResetAt)
     }
 
+    @Test fun zeroReducedQuotasRemainValidAndKeepConsumedUsage() = runTest {
+        val api = client(AuthHttpTransport { _, _, _, _ ->
+            AuthHttpResponse(200, """{"schema_version":2,"plan":"standard","policy_revision":1,"override_revision":1,
+              "effective_policy_source":"account_override","override_expires_at":null,"period":{"key":"2026-09","start":"2026-09-01T00:00:00Z",
+              "end":"2026-10-01T00:00:00Z","next_reset_at":"2026-10-01T00:00:00Z"},"processing":{"limit_seconds":0,
+              "used_seconds":600,"reserved_seconds":0,"released_seconds":100,"remaining_seconds":0},
+              "uploads":{"daily_grant_limit":0,"daily_grants":1,"daily_remaining_grants":0,"daily_reset_at":"2026-09-14T00:00:00Z","monthly_grant_limit":0,"monthly_grants":10,"monthly_remaining_grants":0,"monthly_byte_limit":0,"confirmed_bytes":50000000,"monthly_remaining_bytes":0,"monthly_reset_at":"2026-10-01T00:00:00Z"},
+              "storage":{"limit_bytes":0,"retained_bytes":100000000,"remaining_bytes":0},
+              "effective_limits":{"max_duration_seconds":1200,"max_prepared_audio_bytes":50000000,"max_client_input_attempts":5,"signed_url_ttl_seconds":600},
+              "downloads":{"monthly_grant_limit":0,"monthly_grants":5,"monthly_remaining_grants":0,"monthly_byte_limit":0,"estimated_bytes":250000000,"monthly_remaining_bytes":0,"monthly_reset_at":"2026-10-01T00:00:00Z"},"usage_revision":3,
+              "waiting_jobs":0,"max_waiting_jobs":3,"processing_jobs":0,"max_processing_jobs":1,"availability":{"status":"blocked","reason":"monthly_limit_reached"},"checked_at":"2026-09-13T12:00:00Z"}""")
+        })
+        val usage = api.processingUsage()!!
+        assertEquals(0.0, usage.processing.limitSeconds, 0.0)
+        assertEquals(600.0, usage.processing.usedSeconds, 0.0)
+        assertEquals(0, usage.uploads.dailyGrantLimit)
+        assertEquals(0, usage.uploads.monthlyGrantLimit)
+        assertEquals(0L, usage.uploads.monthlyByteLimit)
+        assertEquals(0, usage.downloads.monthlyGrantLimit)
+        assertEquals(0L, usage.downloads.monthlyByteLimit)
+        assertEquals(0L, usage.storage.limitBytes)
+        assertEquals(100_000_000L, usage.storage.retainedBytes)
+        assertEquals(1_200, usage.effectiveLimits.maxDurationSeconds)
+        assertEquals(50_000_000L, usage.effectiveLimits.maxPreparedAudioBytes)
+        val failure = runCatching { usage.requireAvailable() }.exceptionOrNull() as JobsFailure
+        assertEquals(JobsProblem.PROCESSING_ALLOWANCE_EXHAUSTED, failure.problem)
+    }
+
     @Test fun allRoutesPreserveBodiesAndInstallationHeaders() = runTest {
         val requests = mutableListOf<List<Any?>>()
         val replies = ArrayDeque(listOf("""{"id":"$id","status":"awaiting_upload","upload":$upload}""", upload, mutation, """{"items":[],"next_cursor":null}""", job("queued").dropLast(1) + ",\"worker_available\":false}", mutation, mutation, grant))

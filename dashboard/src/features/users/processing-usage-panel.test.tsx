@@ -92,34 +92,44 @@ describe("UTC monthly account processing usage", () => {
 
   it("allows a positive replacement with optional future expiry", () => {
     const now = new Date("2026-09-13T12:00:00Z");
-    const effective = {
-      monthlyProcessingSeconds: 7_200,
-      dailyUploadGrants: 30,
-      monthlyUploadGrants: 200,
-    };
     expect(
       validateAccountPolicyOverride(
         { monthlyProcessingSeconds: 14_400 },
-        effective,
         "",
         now,
       ),
     ).toEqual([]);
     expect(
-      validateAccountPolicyOverride(
-        { monthlyProcessingSeconds: 0 },
-        effective,
-        "",
-        now,
-      ).length,
+      validateAccountPolicyOverride({ monthlyProcessingSeconds: 0 }, "", now)
+        .length,
     ).toBeGreaterThan(0);
     expect(
       validateAccountPolicyOverride(
         { monthlyProcessingSeconds: 14_400 },
-        effective,
         "2026-09-12T12:00:00Z",
         now,
       ).length,
     ).toBeGreaterThan(0);
+  });
+
+  it("leaves omitted upload quotas to the backend's raw global policy validation", () => {
+    expect(
+      validateAccountPolicyOverride({ dailyUploadGrants: 300 }, ""),
+    ).toEqual([]);
+    expect(
+      validateAccountPolicyOverride({ monthlyUploadGrants: 50 }, ""),
+    ).toEqual([]);
+    expect(
+      validateAccountPolicyOverride(
+        { dailyUploadGrants: 300, monthlyUploadGrants: 200 },
+        "",
+      ),
+    ).toContain("Monthly upload grants cannot be lower than daily grants.");
+    expect(
+      validateAccountPolicyOverride(
+        { dailyUploadGrants: 300, monthlyUploadGrants: 300 },
+        "",
+      ),
+    ).toEqual([]);
   });
 });

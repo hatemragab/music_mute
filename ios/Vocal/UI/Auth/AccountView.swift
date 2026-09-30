@@ -28,6 +28,7 @@ struct AccountView: View {
       if model.profile?.emailVerified != true {
         Section("auth_verify_email") {
           Text("auth_verify_body").font(.subheadline).foregroundStyle(.secondary)
+            .accessibilityIdentifier("emailVerificationAllowanceNotice")
           TimelineView(.periodic(from: .now, by: 1)) { context in
             Button("auth_send_verification") { Task { await model.requestVerification() } }
               .disabled(model.isBusy || verificationCoolingDown(at: context.date))
