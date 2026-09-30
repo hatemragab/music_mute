@@ -6,6 +6,7 @@
 !dashboard/vite.config.ts
 !dashboard/vite-environment.ts
 !dashboard/server.mjs
+!dashboard/server-sentry.mjs
 !dashboard/public/
 !dashboard/public/**
 !dashboard/src/
