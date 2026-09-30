@@ -6,11 +6,11 @@ tests and deployment evidence live under `video_providers/<provider>/`.
 
 ## Supported flow
 
-- Local audio/video: native preparation, review/consent, signed S3 upload and
+- Local audio/video: native preparation, review/consent, signed R2 upload and
   normal processing. Web intake supports local audio only.
 - Public URL: Android, iOS and web submit `POST /media-imports`. NestJS calls a
   private SaaS adapter, receives audio bytes, validates them, uploads to private
-  S3 and submits the existing worker job. Provider media never passes through
+  R2 and submits the existing worker job. Provider media never passes through
   the client, and vendor credentials never leave the adapter.
 - Job/import progress uses existing authenticated WebSocket snapshots. HTTP
   remains for commands, grants, transfers and explicit non-live reads.
@@ -30,7 +30,7 @@ There is no device extraction runtime or compatibility path for retired intake.
 No data migration is required or provided for this provider switch.
 
 Keep account isolation, rights confirmation, source validation, temporary-storage
-limits and cleanup intact. S3 input/output retention follows normal account
+limits and cleanup intact. R2 input/output retention follows normal account
 lifecycle policy. SaaS acquisition does not guarantee uninterrupted access.
 
 ## Verification

@@ -57,7 +57,7 @@ type OwnedPurge = {
 };
 
 type AttemptArtifact = Document & {
-  outputObject?: { key?: unknown; versionId?: unknown } | null;
+  outputObject?: { key?: unknown; etag?: unknown } | null;
   outputReservation?: { key?: unknown } | null;
 };
 
@@ -326,26 +326,21 @@ export class AccountDeletionCleanupService {
         typeof attempt.outputObject?.key === 'string'
           ? attempt.outputObject.key
           : null;
-      const versionId =
-        typeof attempt.outputObject?.versionId === 'string'
-          ? attempt.outputObject.versionId
-          : null;
       if (reservationKey)
         await this.storageCleanup.schedule({
           key: reservationKey,
           ownerUserId: userId,
           reason: 'AUDIO_OUTPUT_ORPHANED',
           nextAt: now,
-          settleUntil: now,
+          settleUntil: new Date(now.getTime() + 4_500_000),
         });
       if (outputKey && outputKey !== reservationKey)
         await this.storageCleanup.schedule({
           key: outputKey,
-          versionId,
           ownerUserId: userId,
           reason: 'AUDIO_OUTPUT_ORPHANED',
           nextAt: now,
-          settleUntil: now,
+          settleUntil: new Date(now.getTime() + 4_500_000),
         });
     }
     await collection.deleteMany({

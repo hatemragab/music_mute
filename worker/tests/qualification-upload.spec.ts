@@ -33,6 +33,7 @@ describe("qualification result upload", () => {
           headers: {
             "Content-Type": "audio/mpeg",
             "x-amz-checksum-sha256": checksum,
+            "x-amz-meta-sha256": checksum,
             "If-None-Match": "*",
           },
           expiresAt: "2099-09-20T12:00:00.000Z",
@@ -55,7 +56,7 @@ describe("qualification result upload", () => {
         ).toEqual(payload);
         return new Response(null, {
           status: 200,
-          headers: { "x-amz-version-id": "version-1" },
+          headers: { ETag: '"version-1"' },
         });
       },
     );
@@ -82,7 +83,7 @@ describe("qualification result upload", () => {
       "installation-id",
       "credential",
       "confirm-request",
-      "version-1",
+      '"version-1"',
     );
   });
 

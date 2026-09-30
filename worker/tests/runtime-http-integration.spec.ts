@@ -186,7 +186,7 @@ describe("worker runtime HTTP integration", () => {
                 deadlineAt: new Date(Date.now() + 300_000).toISOString(),
                 input: {
                   key: "input/source.mp3",
-                  versionId: "input-version",
+                  etag: '"input-version"',
                   bytes: input.length,
                   sha256: inputSha,
                   contentType: "audio/mpeg",
@@ -204,13 +204,13 @@ describe("worker runtime HTTP integration", () => {
               attemptId,
               object: {
                 key: "input/source.mp3",
-                versionId: "input-version",
+                etag: '"input-version"',
                 bytes: input.length,
                 sha256: inputSha,
                 contentType: "audio/mpeg",
               },
               grant: {
-                url: `${origin}/storage/input?versionId=input-version`,
+                url: `${origin}/storage/input?etag=input-version`,
                 expiresAt: new Date(Date.now() + 60_000).toISOString(),
               },
             });
@@ -233,6 +233,7 @@ describe("worker runtime HTTP integration", () => {
                 headers: {
                   "Content-Type": "audio/mpeg",
                   "x-amz-checksum-sha256": outputSha,
+                  "x-amz-meta-sha256": outputSha,
                   "If-None-Match": "*",
                 },
                 expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -242,7 +243,7 @@ describe("worker runtime HTTP integration", () => {
           }
           if (url.pathname.endsWith("/completions")) {
             transitions.push("complete");
-            expect(body.versionId).toBe("output-version");
+            expect(body.etag).toBe('"output-version"');
             return sendJson(response, 200, {
               attemptId,
               jobId: "64b000000000000000000001",
@@ -264,7 +265,7 @@ describe("worker runtime HTTP integration", () => {
           expect(request.headers["if-none-match"]).toBe("*");
           expect(request.headers["x-amz-checksum-sha256"]).toBe(outputSha);
           expect(await rawBody(request)).toEqual(output);
-          response.writeHead(200, { "x-amz-version-id": "output-version" });
+          response.writeHead(200, { ETag: '"output-version"' });
           return response.end();
         }
         sendJson(response, 404, { code: "NOT_FOUND" });

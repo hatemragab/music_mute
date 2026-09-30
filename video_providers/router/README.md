@@ -4,7 +4,7 @@ The router keeps NestJS provider-neutral while selecting one private adapter:
 
 `NestJS → router → Tunelio for YouTube / VideoScale for other enabled sites`
 
-`adapter audio bytes → router → NestJS validation → existing private S3 → worker`
+`adapter audio bytes → router → NestJS validation → existing private R2 → worker`
 
 The existing VideoScale app remains deployed. Routing is decided before any
 upstream submission. YouTube failures never fall back to VideoScale; a fallback
@@ -125,7 +125,7 @@ Local tests use synthetic HTTP adapters. They cover correct routing/key
 isolation, metadata/error sanitation, one submission on transport failure,
 limits, response framing/truncation, disconnect/deadline cancellation, shared
 concurrent capacity, independent health and archive contents. They do not establish
-vendor, production, S3, worker or account-quota availability. Run backend
+vendor, production, R2, worker or account-quota availability. Run backend
 verification/import/processing integration checks separately before releasing.
 
 API preflight read the current [Zalando RESTful API guidelines](https://opensource.zalando.com/restful-api-guidelines/)

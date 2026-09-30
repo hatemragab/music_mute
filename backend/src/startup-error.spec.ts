@@ -6,7 +6,7 @@ import {
 describe('startupFailureReason', () => {
   it('reports a provider code and status without raw diagnostics', () => {
     const error = new StartupDependencyError(
-      'Storage bucket preflight failed: GetBucketVersioning',
+      'Storage bucket preflight failed: HeadBucket',
       Object.assign(new Error('credentials and bucket details'), {
         name: 'AccessDenied',
         $metadata: { httpStatusCode: 403 },
@@ -14,7 +14,7 @@ describe('startupFailureReason', () => {
     );
     error.message = 'mutated secret';
     expect(startupFailureReason(error)).toBe(
-      'Storage bucket preflight failed: GetBucketVersioning (AccessDenied, HTTP 403)',
+      'Storage bucket preflight failed: HeadBucket (AccessDenied, HTTP 403)',
     );
   });
 

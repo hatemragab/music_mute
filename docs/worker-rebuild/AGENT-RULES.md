@@ -24,13 +24,13 @@ git check-ignore -- .local.env backend/.local.env
 
 Only the relevant actual paths need to exist; absence is not evidence that future files are safe. Check whether any such file is already tracked using `git ls-files -- .local.env backend/.local.env`. If it is, do not print its contents or proceed with a push; report the exposure for credential handling. In the control-plane branch, add the tracked `.gitignore` rule and regression test.
 
-Stage explicit paths, never use indiscriminate `git add .`. Review the staged diff and filenames before every commit. Do not include `.local.env`, ordinary `.env` files, S3 URLs, enrollment tokens, machine secrets, SSH details, raw user audio, model weights, caches, binaries, production exports, or log dumps with credentials. Examples use obvious placeholders or synthetic fixtures only.
+Stage explicit paths, never use indiscriminate `git add .`. Review the staged diff and filenames before every commit. Do not include `.local.env`, ordinary `.env` files, R2 URLs, enrollment tokens, machine secrets, SSH details, raw user audio, model weights, caches, binaries, production exports, or log dumps with credentials. Examples use obvious placeholders or synthetic fixtures only.
 
 ## Environment boundaries
 
-Load owner-provided `.local.env` only inside the test/backend process. Do not shell-source arbitrary dotenv content, print the environment, inherit it into the agent/Python child environment, copy it to Windows, or put it in a service configuration. The real worker uses a machine credential and temporary job grants, never AWS/database/Redis credentials.
+Load owner-provided `.local.env` only inside the test/backend process. Do not shell-source arbitrary dotenv content, print the environment, inherit it into the agent/Python child environment, copy it to Windows, or put it in a service configuration. The real worker uses a machine credential and temporary job grants, never R2/database/Redis credentials.
 
-Use a unique test-run ID, isolated local replica-set database name, Redis instance/key namespace, and dedicated S3 test prefix. Verify the namespace before writes or cleanup. Delete only objects/versions and database resources created by that run. Never use `FLUSHALL`, broad bucket deletion, or production destructive tests. Follow existing storage preflight; do not weaken it to fit the test bucket.
+Use a unique test-run ID, isolated local replica-set database name, Redis instance/key namespace, and dedicated private Standard R2 test bucket and run prefix. Verify the namespace before writes or cleanup. Delete only exact object keys and database resources created by that run. Never use `FLUSHALL`, broad bucket deletion, or production destructive tests. Follow existing storage preflight; do not weaken it to fit the test bucket.
 
 The root `.local.env` is not automatically loaded by existing Nest configuration, which selects `.env.<APP_ENV>`. Implement a **test-runner-only** explicit dotenv path in branch C. Preserve production env-loading behavior. Avoid committing real environment values even in evidence reports.
 

@@ -46,7 +46,7 @@ describe('admin media HTTP admission', () => {
     const token = harness.signInAs('support');
     for (const added of [
       { key: 'arbitrary' },
-      { versionId: 'arbitrary' },
+      { etag: 'arbitrary' },
       { asset: 'other' },
       { purpose: 'other' },
       { reason: '' },

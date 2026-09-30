@@ -1,8 +1,9 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { StorageTransfersService } from '../../storage/storage-transfers.service.js';
+import { isStorageEtag } from '../../storage/object-identity.js';
 import type { ObjectIdentity } from '../../jobs/job.types.js';
 import type { WorkerPrincipal } from '../auth/worker-auth.types.js';
 import type { WorkerPlatform } from '../protocol/v1/protocol.js';
@@ -10,7 +11,6 @@ import { workerError } from '../worker-errors.js';
 
 const CATALOG_LIMIT_BYTES = 64 * 1024;
 const SHA256 = /^[a-f0-9]{64}$/u;
-const VERSION_ID = /^[A-Za-z0-9+/=_.,:-]{1,1024}$/u;
 const SAFE_FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/u;
 const SAFE_KEY =
   /^worker-installation-artifacts\/[A-Za-z0-9][A-Za-z0-9/._-]{0,900}$/u;
@@ -22,7 +22,7 @@ const SUPPORTED_PLATFORMS = new Set<WorkerPlatform>([
 interface CatalogArtifact {
   filename: string;
   key: string;
-  versionId: string;
+  etag: string;
   bytes: number;
   sha256: string;
   contentType: string;
@@ -53,12 +53,14 @@ export interface CatalogModel {
 interface InstallationCatalog {
   releases: Partial<Record<WorkerPlatform, CatalogRelease>>;
   model: CatalogModel;
-  fixture: CatalogArtifact;
+  fixture: CatalogArtifact | null;
 }
 
 @Injectable()
 export class WorkerInstallationArtifactsService {
   private readonly catalogPath: string | undefined;
+  private readonly logger = new Logger(WorkerInstallationArtifactsService.name);
+  private unavailableReported = false;
 
   constructor(
     config: ConfigService,
@@ -81,15 +83,10 @@ export class WorkerInstallationArtifactsService {
       throw workerError('WORKER_INVALID_REQUEST');
     const catalog = await this.loadCatalog();
     const release = catalog.releases[platform];
-    if (!release) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+    if (!release || !catalog.fixture) this.unavailableArtifacts();
     const artifacts = [release, catalog.fixture] as const;
     try {
       const objects = artifacts.map(toObjectIdentity);
-      const available = await Promise.all(
-        objects.map((object) => this.transfers.isPinnedObjectAvailable(object)),
-      );
-      if (available.some((value) => !value))
-        throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
       const grants = await Promise.all(
         objects.map((object) => this.transfers.createDownloadGrant(object)),
       );
@@ -121,12 +118,10 @@ export class WorkerInstallationArtifactsService {
       throw workerError('WORKER_INVALID_REQUEST');
     const catalog = await this.loadCatalog();
     const release = catalog.releases[platform];
-    if (!release) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+    if (!release) this.unavailableArtifacts();
     if (!release.update) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
     try {
       const object = toObjectIdentity(release);
-      if (!(await this.transfers.isPinnedObjectAvailable(object)))
-        throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
       const grant = includeGrant
         ? await this.transfers.createDownloadGrant(object)
         : undefined;
@@ -140,6 +135,16 @@ export class WorkerInstallationArtifactsService {
       if (isWorkerException(error)) throw error;
       throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
     }
+  }
+
+  private unavailableArtifacts(): never {
+    if (!this.unavailableReported) {
+      this.logger.warn(
+        'Worker artifacts unavailable: publish immutable runtime and qualification objects to private R2, verify their checksums and ETags, and configure the trusted backend installation catalog.',
+      );
+      this.unavailableReported = true;
+    }
+    throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
   }
 
   private async loadCatalog(): Promise<InstallationCatalog> {
@@ -174,8 +179,6 @@ function parseCatalog(value: unknown): InstallationCatalog {
     root.releases,
     new Set(['darwin-arm64', 'windows-amd64']),
   );
-  if (!('darwin-arm64' in releases) && !('windows-amd64' in releases))
-    throw new TypeError('Worker installation releases are incomplete');
   return {
     releases: Object.fromEntries(
       (['darwin-arm64', 'windows-amd64'] as const)
@@ -183,7 +186,8 @@ function parseCatalog(value: unknown): InstallationCatalog {
         .map((platform) => [platform, parseRelease(releases[platform])]),
     ),
     model: parseModel(root.model),
-    fixture: parseArtifact(root.fixture, 'audio/wav'),
+    fixture:
+      root.fixture === null ? null : parseArtifact(root.fixture, 'audio/wav'),
   };
 }
 
@@ -256,7 +260,7 @@ function parseRelease(value: unknown): CatalogRelease {
       'version',
       'filename',
       'key',
-      'versionId',
+      'etag',
       'bytes',
       'sha256',
       'contentType',
@@ -272,7 +276,7 @@ function parseRelease(value: unknown): CatalogRelease {
     {
       filename: record.filename,
       key: record.key,
-      versionId: record.versionId,
+      etag: record.etag,
       bytes: record.bytes,
       sha256: record.sha256,
       contentType: record.contentType,
@@ -325,7 +329,7 @@ function parseArtifact(
       'version',
       'filename',
       'key',
-      'versionId',
+      'etag',
       'bytes',
       'sha256',
       'contentType',
@@ -333,7 +337,7 @@ function parseArtifact(
   );
   const filename = boundedText(record.filename, 120);
   const key = boundedText(record.key, 1024);
-  const versionId = boundedText(record.versionId, 1024);
+  const etag = boundedText(record.etag, 1024);
   const sha256 = boundedText(record.sha256, 64);
   const contentType = boundedText(record.contentType, 100);
   const accepted = Array.isArray(expectedContentType)
@@ -342,7 +346,7 @@ function parseArtifact(
   if (
     !SAFE_FILENAME.test(filename) ||
     !SAFE_KEY.test(key) ||
-    !VERSION_ID.test(versionId) ||
+    !isStorageEtag(etag) ||
     !Number.isSafeInteger(record.bytes) ||
     (record.bytes as number) < 1 ||
     (record.bytes as number) > 16 * 1024 * 1024 * 1024 ||
@@ -353,7 +357,7 @@ function parseArtifact(
   return {
     filename,
     key,
-    versionId,
+    etag,
     bytes: record.bytes as number,
     sha256,
     contentType,
@@ -363,7 +367,7 @@ function parseArtifact(
 function toObjectIdentity(artifact: CatalogArtifact): ObjectIdentity {
   return {
     key: artifact.key,
-    versionId: artifact.versionId,
+    etag: artifact.etag,
     bytes: artifact.bytes,
     sha256: Buffer.from(artifact.sha256, 'hex').toString('base64'),
     contentType: artifact.contentType,

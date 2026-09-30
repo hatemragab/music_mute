@@ -61,11 +61,13 @@ test("does not forward an APK body through an upload redirect", async ({
             "If-None-Match": "*",
             "x-amz-checksum-sha256":
               "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "x-amz-meta-sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
           },
         },
         file,
         () => undefined,
         new AbortController().signal,
+        "0".repeat(64),
       );
       return { ok: true };
     } catch (error) {

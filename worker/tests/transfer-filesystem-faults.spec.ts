@@ -71,7 +71,7 @@ async function fixture() {
       },
       {
         key: "input.mp3",
-        versionId: "v1",
+        etag: '"v1"',
         bytes: bytes.length,
         sha256: createHash("sha256").update(bytes).digest("base64"),
         contentType: "audio/mpeg",

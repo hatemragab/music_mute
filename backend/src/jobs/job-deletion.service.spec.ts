@@ -127,13 +127,13 @@ describe('job deletion worker fencing', () => {
     );
   });
 
-  it('releases retained bytes once only after exact cleanup is reconciled', async () => {
+  it('releases retained bytes only after both exact deletion passes', async () => {
     const now = new Date('2026-09-20T00:00:00.000Z');
     const userId = new Types.ObjectId();
     const jobId = new Types.ObjectId();
     const outputObject = {
       key: `users/${userId}/jobs/${jobId}/attempts/a/vocals.mp3`,
-      versionId: 'output-v1',
+      etag: '"output-v1"',
       bytes: 2_048,
       sha256: 'B'.repeat(43) + '=',
       contentType: 'audio/mpeg',
@@ -143,6 +143,7 @@ describe('job deletion worker fencing', () => {
       userId,
       deletedAt: now,
       cleanupCompletedAt: null,
+      cleanupFirstDeletedAt: null as Date | null,
       cleanupNextAt: now,
       cleanupLeaseUntil: null,
       cleanupToken: null as string | null,
@@ -156,21 +157,22 @@ describe('job deletion worker fencing', () => {
       retainedOutputReleasedAt: null,
     };
     const jobs = {
-      findOneAndUpdate: vi
-        .fn()
-        .mockImplementationOnce((_filter: unknown, update: any) => {
-          job.cleanupToken = update.$set.cleanupToken;
-          return { lean: vi.fn().mockResolvedValue({ ...job }) };
-        })
-        .mockReturnValue({ lean: vi.fn().mockResolvedValue(null) }),
+      findOneAndUpdate: vi.fn((_filter: unknown, update: any) => {
+        const observedNow = update.$set.cleanupLeaseUntil.getTime() - 60000;
+        if (job.cleanupCompletedAt || job.cleanupNextAt.getTime() > observedNow)
+          return { lean: async () => null };
+        job.cleanupToken = update.$set.cleanupToken;
+        return { lean: async () => ({ ...job }) };
+      }),
       findOne: vi.fn(() => ({
         session: vi.fn().mockReturnValue({
           lean: vi.fn().mockResolvedValue({ ...job }),
         }),
       })),
-      updateOne: vi
-        .fn()
-        .mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
+      updateOne: vi.fn(async (_filter, update) => {
+        Object.assign(job, update.$set ?? {});
+        return { matchedCount: 1, modifiedCount: 1 };
+      }),
       exists: vi.fn().mockResolvedValue(null),
     };
     const transactions = {
@@ -179,7 +181,7 @@ describe('job deletion worker fencing', () => {
       ),
     };
     const storage = {
-      deleteVersionsForKey: vi.fn().mockResolvedValue(true),
+      deleteObject: vi.fn().mockResolvedValue(true),
     };
     const usage = {
       releaseRetainedOutput: vi.fn().mockResolvedValue(undefined),
@@ -194,9 +196,15 @@ describe('job deletion worker fencing', () => {
     );
 
     await expect(service.cleanupDue(now)).resolves.toBe(true);
+    expect(usage.releaseRetainedOutput).not.toHaveBeenCalled();
+    expect(job.cleanupCompletedAt).toBeNull();
+    expect(job.cleanupFirstDeletedAt).toEqual(now);
     await expect(service.cleanupDue(now)).resolves.toBe(false);
+    const recheck = new Date(now.getTime() + 7_200_000);
+    await expect(service.cleanupDue(recheck)).resolves.toBe(true);
+    await expect(service.cleanupDue(recheck)).resolves.toBe(false);
 
-    expect(storage.deleteVersionsForKey).toHaveBeenCalledWith(outputObject.key);
+    expect(storage.deleteObject).toHaveBeenCalledWith(outputObject.key);
     expect(usage.releaseRetainedOutput).toHaveBeenCalledOnce();
     expect(usage.releaseRetainedOutput).toHaveBeenCalledWith(
       expect.objectContaining({ outputObject }),
@@ -206,8 +214,8 @@ describe('job deletion worker fencing', () => {
       expect.objectContaining({ _id: jobId, cleanupToken: expect.any(String) }),
       expect.objectContaining({
         $set: expect.objectContaining({
-          cleanupCompletedAt: now,
-          retainedOutputReleasedAt: now,
+          cleanupCompletedAt: recheck,
+          retainedOutputReleasedAt: recheck,
         }),
       }),
       expect.objectContaining({ runValidators: true }),

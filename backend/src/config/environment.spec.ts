@@ -11,8 +11,13 @@ const local = {
   NODE_ENV: 'development',
   MONGODB_URI: 'mongodb://127.0.0.1:27017/musicmute',
   REDIS_URL: 'redis://127.0.0.1:6379/0',
-  AWS_REGION: 'us-east-1',
-  S3_BUCKET: 'musicmute-local',
+  STORAGE_PROVIDER: 'r2',
+  STORAGE_ENDPOINT:
+    'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com',
+  STORAGE_REGION: 'auto',
+  STORAGE_ACCESS_KEY_ID: 'fixture-access-key',
+  STORAGE_SECRET_ACCESS_KEY: 'fixture-secret-key',
+  STORAGE_BUCKET: 'musicmute-local',
   FIREBASE_PROJECT_ID: 'demo-musicmute',
   FIREBASE_WEB_API_KEY: 'local-fixture-api-key',
   RATE_LIMIT_HASH_SECRET: '0123456789abcdef0123456789abcdef',
@@ -43,7 +48,8 @@ describe('environment boundary', () => {
   it('parses validated defaults', () => {
     expect(validateEnvironment(local)).toMatchObject({
       PORT: 3000,
-      S3_TRANSFER_ACCELERATION_ENABLED: false,
+      STORAGE_PROVIDER: 'r2',
+      STORAGE_REGION: 'auto',
       REDIS_URL: local.REDIS_URL,
       RATE_LIMIT: 60,
       APP_ANDROID_CURRENT_VERSION_NAME: '0.1.0',
@@ -89,29 +95,42 @@ describe('environment boundary', () => {
       PUBLIC_RETENTION_NOTICE: 'Example retention notice.',
     });
   });
-  it('validates acceleration opt-in and rejects dotted bucket names', () => {
-    expect(
-      validateEnvironment({
-        ...local,
-        S3_TRANSFER_ACCELERATION_ENABLED: 'true',
-      }).S3_TRANSFER_ACCELERATION_ENABLED,
-    ).toBe(true);
-    expect(() =>
-      validateEnvironment({
-        ...local,
-        S3_TRANSFER_ACCELERATION_ENABLED: 'maybe',
-      }),
-    ).toThrow('S3_TRANSFER_ACCELERATION_ENABLED');
-    expect(() =>
-      validateEnvironment({
-        ...local,
-        S3_BUCKET: 'dotted.bucket',
-        S3_TRANSFER_ACCELERATION_ENABLED: true,
-      }),
-    ).toThrow('Invalid environment: S3_BUCKET');
-    expect(() =>
-      validateEnvironment({ ...local, S3_BUCKET: 'dotted.bucket' }),
-    ).not.toThrow();
+  it.each([
+    'STORAGE_PROVIDER',
+    'STORAGE_ENDPOINT',
+    'STORAGE_REGION',
+    'STORAGE_BUCKET',
+    'STORAGE_ACCESS_KEY_ID',
+    'STORAGE_SECRET_ACCESS_KEY',
+  ])('requires explicit %s without cloud credential fallbacks', (key) => {
+    const config = { ...local, [key]: undefined };
+    expect(() => validateEnvironment(config)).toThrow(
+      `Invalid environment: ${key}`,
+    );
+  });
+  it.each([
+    'https://example.com',
+    local.STORAGE_ENDPOINT + '/music-mute',
+    local.STORAGE_ENDPOINT + '/',
+    local.STORAGE_ENDPOINT + '?q=x',
+    'http://localhost:9000',
+    'https://user:secret@0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com',
+  ])('rejects non-account-root R2 endpoint %s', (STORAGE_ENDPOINT) => {
+    expect(() => validateEnvironment({ ...local, STORAGE_ENDPOINT })).toThrow(
+      'Invalid environment: STORAGE_ENDPOINT',
+    );
+  });
+  it.each([
+    ['STORAGE_PROVIDER', 's3'],
+    ['STORAGE_REGION', 'WEUR'],
+    ['AWS_REGION', 'eu-west-1'],
+    ['AWS_ACCESS_KEY_ID', 'old-key'],
+    ['S3_BUCKET', 'old-bucket'],
+    ['S3_TRANSFER_ACCELERATION_ENABLED', false],
+  ])('fails clearly on obsolete or invalid %s', (key, value) => {
+    expect(() => validateEnvironment({ ...local, [key]: value })).toThrow(
+      `Invalid environment: ${key}`,
+    );
   });
   it('accepts only an absolute optional worker installation catalog path', () => {
     expect(

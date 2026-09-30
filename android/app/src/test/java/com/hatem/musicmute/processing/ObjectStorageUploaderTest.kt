@@ -12,7 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.*
 import org.junit.Test
 
-class S3FormUploaderTest {
+class ObjectStorageUploaderTest {
     private class Connection(private val status: Int) : HttpURLConnection(URL("https://storage.example/")) {
         val output = ByteArrayOutputStream()
         var disconnected = false
@@ -26,9 +26,9 @@ class S3FormUploaderTest {
     @Test fun signedHeadersAndRawFileAreSentWithoutApiCredentials() = runTest { withContext(Dispatchers.IO) {
         val file=kotlin.io.path.createTempFile("signed-form-", ".mp3").toFile().apply { writeBytes(byteArrayOf(1,2,3)) }
         val input=InputDeclaration("mp3","audio/mpeg",3,1.0,Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(file.readBytes())))
-        val headers=linkedMapOf("Content-Type" to "audio/mpeg", "x-amz-checksum-sha256" to input.sha256, "If-None-Match" to "*")
+        val headers=linkedMapOf("Content-Type" to "audio/mpeg", "x-amz-checksum-sha256" to input.sha256, "x-amz-meta-sha256" to input.sha256, "If-None-Match" to "*")
         val client=Connection(204); val sent=mutableListOf<Long>()
-        S3FormUploader { client }.upload(file,input,UploadGrant(UploadMethod.PUT,"https://storage.example/",headers,Instant.EPOCH)) { bytes,_ -> sent += bytes }
+        ObjectStorageUploader { client }.upload(file,input,UploadGrant(UploadMethod.PUT,"https://storage.example/",headers,Instant.EPOCH)) { bytes,_ -> sent += bytes }
         assertArrayEquals(file.readBytes(), client.output.toByteArray())
         assertEquals("PUT",client.requestMethod)
         headers.forEach { (name, value) -> assertEquals(value, client.getRequestProperty(name)) }
@@ -45,16 +45,38 @@ class S3FormUploaderTest {
         val file=kotlin.io.path.createTempFile("signed-form-failure-", ".mp3").toFile().apply { writeBytes(byteArrayOf(1,2,3)) }
         val digest=Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(file.readBytes()))
         val input=InputDeclaration("mp3","audio/mpeg",3,1.0,digest)
-        val grant=UploadGrant(UploadMethod.PUT,"https://storage.example/",mapOf("Content-Type" to "audio/mpeg", "x-amz-checksum-sha256" to digest, "If-None-Match" to "*"),Instant.EPOCH)
+        val grant=UploadGrant(UploadMethod.PUT,"https://storage.example/",mapOf("Content-Type" to "audio/mpeg", "x-amz-checksum-sha256" to digest, "x-amz-meta-sha256" to digest, "If-None-Match" to "*"),Instant.EPOCH)
         for (status in listOf(307,403,503)) {
             val connection=Connection(status)
-            assertTrue(runCatching { S3FormUploader { connection }.upload(file,input,grant) { _,_ -> } }.isFailure)
+            assertTrue(runCatching { ObjectStorageUploader { connection }.upload(file,input,grant) { _,_ -> } }.isFailure)
             assertFalse(connection.instanceFollowRedirects)
         }
         file.writeBytes(byteArrayOf(3,2,1))
         val failed=Connection(204)
-        val error=runCatching { S3FormUploader { failed }.upload(file,input,grant) { _,_ -> } }.exceptionOrNull() as ProcessingTransferException
+        val error=runCatching { ObjectStorageUploader { failed }.upload(file,input,grant) { _,_ -> } }.exceptionOrNull() as ProcessingTransferException
         assertEquals(ProcessingLocalProblem.INPUT_CHANGED,error.problem)
         assertArrayEquals(file.readBytes(), failed.output.toByteArray())
     } }
+
+    @Test fun rejectsUnboundMetadataUnknownAndDuplicateHeadersBeforeOpeningConnection() = runTest {
+        val file = kotlin.io.path.createTempFile("object-upload-", ".mp3").toFile().apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        try {
+            val checksum = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(file.readBytes()))
+            val input = InputDeclaration("mp3", "audio/mpeg", file.length(), 1.0, checksum)
+            val valid = mapOf("Content-Type" to input.contentType, "x-amz-checksum-sha256" to checksum, "x-amz-meta-sha256" to checksum, "If-None-Match" to "*")
+            val invalidHeaders = listOf(
+                valid - "x-amz-meta-sha256",
+                valid + ("x-amz-meta-sha256" to "wrong"),
+                valid + ("Authorization" to "secret"),
+                valid + ("content-type" to input.contentType),
+                valid + ("Content-Type" to "audio/mpeg\r\nAuthorization: secret"),
+            )
+            var connections = 0
+            val uploader = ObjectStorageUploader { connections++; Connection(204) }
+            for (headers in invalidHeaders) {
+                assertTrue(runCatching { uploader.upload(file, input, UploadGrant(UploadMethod.PUT, "https://storage.example/", headers, Instant.EPOCH)) { _, _ -> } }.isFailure)
+            }
+            assertEquals(0, connections)
+        } finally { file.delete() }
+    }
 }

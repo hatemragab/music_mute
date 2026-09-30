@@ -64,9 +64,20 @@ export function ApkUploadPanel({
         expectedRevision: release.revision,
         operationId: createOperationId(),
       });
+      if (
+        reservation.expectedBytes !== file.size ||
+        reservation.expectedSha256 !== sha256Hex
+      )
+        throw new Error("The upload reservation does not match the APK.");
       setPhase("uploading");
       setProgress(0);
-      await uploadApk(reservation.grant, file, setProgress, controller.signal);
+      await uploadApk(
+        reservation.grant,
+        file,
+        setProgress,
+        controller.signal,
+        sha256Hex,
+      );
       setPhase("verifying");
       setProgress(1);
       let status = await completeReleaseUpload(

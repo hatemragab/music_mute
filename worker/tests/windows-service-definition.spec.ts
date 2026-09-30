@@ -25,7 +25,7 @@ describe("Windows service definition", () => {
     expect(xml).not.toContain("<username>");
     expect(xml).not.toContain("<delayedAutoStart>true");
     expect(xml).not.toContain("password");
-    expect(xml).not.toContain("AWS_");
+    expect(xml).not.toContain("STORAGE_");
   });
 
   it("renders a one-shot DirectML qualification as LocalService", () => {

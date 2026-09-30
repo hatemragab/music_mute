@@ -1,5 +1,11 @@
 # Public worker release progress — 2026-09-27
 
+> **Storage update — 2026-09-30:** AWS/S3 observations and setup commands below
+> belong to earlier releases. They are historical evidence, not R2 acceptance.
+> Do not execute the old provider/versioning/tiering/acceleration setup. Use the
+> [current private R2 Standard setup and verification guide](../docs/r2-storage/README.md); the owner
+> approved fresh MongoDB and quoted ETag identities with no legacy bridge.
+
 This is separate from the earlier local readiness review. The user authorized
 S3 upload, npm publication, replacement of the development CLI and local testing.
 

@@ -3,7 +3,7 @@ info:
   title: MusicMute private Tunelio audio acquisition
   version: 1.0.0
   x-audience: component-internal
-  description: Contract-compatible YouTube-only binary acquisition. Up to twenty active acquisitions use the same capacity and five paid starts per rolling second settings as the other adapter. Capacity and rate waits are cancellable within the operation deadline and occur before any paid request. Never automatically retry POST or Tunelio's paid GET /create. NestJS validates audio and duration before S3 upload.
+  description: Contract-compatible YouTube-only binary acquisition. Up to twenty active acquisitions use the same capacity and five paid starts per rolling second settings as the other adapter. Capacity and rate waits are cancellable within the operation deadline and occur before any paid request. Never automatically retry POST or Tunelio's paid GET /create. NestJS validates audio and duration before R2 upload.
 security:
   - service_key: []
 paths:

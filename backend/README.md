@@ -3,7 +3,7 @@
 NestJS backend for the MusicMute native apps. Includes Firebase authentication,
 profiles, installation/version tracking, voluntary verification, password recovery,
 shared Redis limits, processing-access policy and logout-all. MongoDB, external
-Redis and S3 provide the infrastructure foundation. Audio-processing availability
+Redis and R2 provide the infrastructure foundation. Audio-processing availability
 is controlled by backend policy and capacity. Existing audio history,
 completed-result access, cancellation, deletion, and notifications remain supported.
 
@@ -80,8 +80,9 @@ server. Production Compose also runs only the API.
 
 - Liveness: `GET http://127.0.0.1:3000/health/live`.
 - Readiness: `GET http://127.0.0.1:3000/health/ready` (MongoDB and Redis).
-- Health endpoints do not claim AWS connectivity. Enabled audio processing
-  separately checks S3 privacy, versioning and retention prerequisites at startup.
+- Health endpoints do not prove live R2 connectivity or private-bucket configuration.
+  Storage checks report cached sanitized evidence; transfer operations validate
+  actual object identity. Required configuration is validated at startup.
 - Readiness also does not validate Firebase credentials or provider settings.
 - Public release resources are `GET /privacy`, `GET /delete-account`,
   `GET /support`, and `GET /public-policy`. They use repository-owned defaults,
@@ -125,22 +126,27 @@ verification commands. Successful Library media remains retained. Already-delete
 jobs become eligible for coordinated metadata/attempt cleanup 30 days after media
 cleanup completes, with compact request receipts preserving replay protection.
 
-`AWS_REGION` and `S3_BUCKET` prepare the S3 integration. `StorageClient` uses the
-AWS SDK v3 standard credential chain. Locally use an AWS profile; on the VPS use
-a least-privilege identity with access to only the required bucket/prefix.
-If using environment credentials, supply `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY` and, for temporary credentials, `AWS_SESSION_TOKEN` through
-the ignored production environment or secret manager. Never use root keys.
-Keep the bucket private, enable public access blocking, encryption and lifecycle
-rules for temporary media. Bucket creation and live AWS checks are not performed
-by this starter. The presigner package is installed for future authorized uploads.
+The storage provider is private Cloudflare R2 Standard. Configure all six required
+backend-only values: `STORAGE_PROVIDER=r2`, the account-root HTTPS
+`STORAGE_ENDPOINT`, `STORAGE_REGION=auto`, `STORAGE_BUCKET`,
+`STORAGE_ACCESS_KEY_ID` and `STORAGE_SECRET_ACCESS_KEY`. There is no AWS profile,
+SDK default credential chain, session token or provider fallback. The AWS SDK v3
+is deliberately retained for the S3-compatible protocol. See the
+[current R2 setup and transfer contract](../docs/r2-storage/README.md) for scoped
+credentials, browser CORS, retention, billing and remaining live checks.
+
+The owner approved fresh MongoDB schemas and breaking worker storage identities:
+quoted `etag` replaces `version_id`. The owner resets MongoDB themselves; no code
+here copies old media, deletes AWS objects or resets a database. Worker runtime
+archives, qualification fixtures and APK releases must be republished and verified
+in R2 before the corresponding real installation/release flow becomes usable.
 
 ## Architecture and external Redis
 
 ```text
 Native apps -> TLS reverse proxy -> API (main.ts)
                                       | MongoDB / Atlas
-                                      | private S3 bucket
+                                      | private R2 bucket
                                       | external Redis (REDIS_URL)
 ```
 
@@ -150,12 +156,13 @@ Native apps -> TLS reverse proxy -> API (main.ts)
 - `src/admin/`: verified Google administrator admission and role permissions.
 - `src/rate-limits/`: persistent counters and atomic mail reservations.
 - `src/app-policy/`: live verification and minimum-build policy.
-- `src/infrastructure/`: MongoDB and S3 Nest modules.
+- `src/infrastructure/`: MongoDB and R2 Nest modules.
 - `src/jobs/`, `src/processing/`: durable audio history and temporary unavailable boundary.
 - `src/storage/`: restricted transfers and bucket preflight.
 - `src/notifications/`, `src/job-errors/`: durable push delivery and safe error records.
 - `src/app.module.ts`: HTTP composition.
-- `deploy/` and Compose files: API-only VPS deployment preparation.
+- `Dockerfile`, `captain-definition` and `scripts/package-caprover.mjs`: API-only
+  deployment image and allowlisted CapRover packaging.
 - `AGENTS.md`: commands, conventions and boundaries for AI-assisted development.
 
 ## Media usage and transfer contract
@@ -226,7 +233,7 @@ messages and uses a renewable Redis lease to allow one connection per machine
 across API instances. Each connection rotates after one hour.
 
 Public APK grants retain a 10/IP/minute route limit and have an atomic
-`PUBLIC_RELEASE_GRANTS_PER_MINUTE` service ceiling (default 300). A signed S3
+`PUBLIC_RELEASE_GRANTS_PER_MINUTE` service ceiling (default 300). A signed R2
 URL can be fetched repeatedly until expiry; API issuance limits cannot cap
 those bytes, so production edge/storage egress controls need separate review.
 
@@ -265,7 +272,7 @@ The opt-in integration test requires `mongod` and `redis-server` on PATH (or
 `MONGOD_BINARY`/`REDIS_BINARY`). It allocates isolated ports and temporary data,
 starts an actual API process, verifies URL authentication and database selection,
 forces API and Redis restarts, and checks outage responses and reconnect. It never connects
-to configured Atlas/S3 accounts or existing local databases. Temporary test data
+to configured Atlas/R2 accounts or existing local databases. Temporary test data
 and owned child processes are cleaned up afterward.
 
 For provider runtime isolation and scratch limits, see
@@ -286,7 +293,7 @@ project.
 
 `pnpm run test:auth:integration` uses the pinned Firebase CLI, isolated MongoDB and
 Redis, synthetic accounts and emulator-only email actions. It checks compiled API
-behavior without touching the real Firebase project, Atlas, S3 or a mailbox.
+behavior without touching the real Firebase project, Atlas, R2 or a mailbox.
 
 The runtime audit on 2026-09-09 reports ten package findings: six moderate and
 four high, with no critical findings. Removing BullMQ does not resolve these
@@ -302,7 +309,7 @@ whose major is 12 explicitly support NestJS 11; pnpm resolves without peer bypas
 - [Nest configuration](https://docs.nestjs.com/techniques/configuration)
 - [Nest MongoDB](https://docs.nestjs.com/techniques/mongodb)
 - [Nest rate limiting](https://docs.nestjs.com/security/rate-limiting)
-- [AWS SDK credential chain](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-credentials-node.html)
+- [R2 with the AWS SDK](https://developers.cloudflare.com/r2/examples/aws/aws-sdk-js-v3/)
 - [Caddy reverse proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
 
 ## Optional silence trimming (2026-09-26)
@@ -340,7 +347,7 @@ Follow [provider architecture](../video_providers/README.md).
 `AUDIO_ACQUISITION_API_URL` and `AUDIO_ACQUISITION_API_KEY`.
 Only the adapter holds the vendor credential and knows its task/download APIs.
 Audio bytes return through the adapter to NestJS for independent validation,
-bounded scratch storage, private S3 upload and normal worker submission.
+bounded scratch storage, private R2 upload and normal worker submission.
 Included sanitized metadata is nullable MongoDB `extra_data`; no paid metadata
 request is made. Source titles use its optional `title` field.
 Replace providers by deploying another adapter with the same contract and
@@ -366,10 +373,11 @@ HTTP remains responsible for authentication, commands and file transfers.
 
 ## Audio transfer performance
 
-See [transfer performance](../docs/audio-transfer-performance/README.md) for concurrent
-bucket checks, server/worker diagnostics, the synthetic benchmark and the opt-in
-`S3_TRANSFER_ACCELERATION_ENABLED` flag (default false). Regional management and
-private immutable grants remain required.
+See [R2 setup and verification](../docs/r2-storage/README.md) for create-only
+uploads, ETag/checksum identity, billing-aware checks and the bounded, explicit
+opt-in synthetic benchmark. AWS acceleration and bucket-versioning assumptions
+are removed. [Earlier transfer measurements](../docs/audio-transfer-performance/README.md)
+remain historical and do not prove R2 latency.
 
 ### Monthly admission and URL import reservations
 

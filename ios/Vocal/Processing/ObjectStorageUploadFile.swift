@@ -5,7 +5,7 @@ enum ProcessingTransferFailure: Error, Equatable {
   case invalidGrant, expiredGrant, invalidInput, storage, corruptMultipart, retryLimit
 }
 
-struct S3MultipartFile: Sendable {
+struct ObjectStorageUploadFile: Sendable {
   let fileURL: URL
   let contentType: String
   let checksumSha256: String
@@ -26,7 +26,7 @@ struct S3MultipartFile: Sendable {
       try $0.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         .volumeAvailableCapacityForImportantUsage
     }
-  ) throws -> S3MultipartFile {
+  ) throws -> ObjectStorageUploadFile {
     guard ["m4a", "mp4", "mp3", "aac", "ogg", "opus", "webm"].contains(declaration.extension),
       ["audio/mp4", "audio/mpeg", "audio/aac", "audio/ogg", "audio/webm"].contains(
         declaration.contentType),
@@ -80,7 +80,7 @@ struct S3MultipartFile: Sendable {
     var excluded = URLResourceValues()
     excluded.isExcludedFromBackup = true
     try url.setResourceValues(excluded)
-    let result = S3MultipartFile(
+    let result = ObjectStorageUploadFile(
       fileURL: destination, contentType: declaration.contentType,
       checksumSha256: declaration.sha256,
       bytes: expectedBytes)

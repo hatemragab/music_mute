@@ -8,7 +8,7 @@ import { StorageCleanupService } from '../storage/storage-cleanup.service.js';
 import { ProcessingTransactions } from './processing-transactions.js';
 
 const UPLOAD_EXPIRY_GRACE_MS = 300_000;
-const VERSION_SETTLEMENT_MS = 3_600_000;
+const TRANSFER_SETTLEMENT_MS = 3_600_000;
 
 @Injectable()
 export class ProcessingStorageCleanupService {
@@ -47,21 +47,16 @@ export class ProcessingStorageCleanupService {
       const reservationExpiry =
         candidate.admissionSnapshot?.reservationExpiresAt.getTime() ??
         now.getTime();
-      const due = known
-        ? now
-        : new Date(
-            Math.max(now.getTime(), reservationExpiry + UPLOAD_EXPIRY_GRACE_MS),
-          );
+      const due = new Date(
+        Math.max(now.getTime(), reservationExpiry + UPLOAD_EXPIRY_GRACE_MS),
+      );
       await this.cleanup.schedule(
         {
           key: known?.key ?? candidate.inputReservation.key,
-          versionId: known?.versionId ?? null,
           ownerUserId: candidate.userId,
           reason: 'AUDIO_INPUT_TERMINAL',
           nextAt: due,
-          settleUntil: known
-            ? due
-            : new Date(due.getTime() + VERSION_SETTLEMENT_MS),
+          settleUntil: new Date(due.getTime() + TRANSFER_SETTLEMENT_MS),
         },
         session,
       );
@@ -104,7 +99,7 @@ export class ProcessingStorageCleanupService {
           ownerUserId: candidate.userId,
           reason: 'AUDIO_INPUT_EXPIRED',
           nextAt: due,
-          settleUntil: new Date(due.getTime() + VERSION_SETTLEMENT_MS),
+          settleUntil: new Date(due.getTime() + TRANSFER_SETTLEMENT_MS),
         },
         session,
       );

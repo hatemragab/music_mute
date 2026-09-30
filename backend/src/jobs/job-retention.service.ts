@@ -58,12 +58,16 @@ export class JobRetentionService {
       this.loadPurgeable(candidate, cutoff, now, session),
     );
     if (!snapshot) return true;
-    // Old cleanup records may predate attempt-output cleanup. Sweep every attempt
-    // reservation before discarding the last durable reference to its S3 key.
+    // Reconcile every exact attempt key before discarding its last durable
+    // reference. Completed cleanup is already beyond the upload settlement window.
     for (const key of snapshot.keys) {
       if (!key.startsWith(`users/${candidate.userId.toHexString()}/jobs/`))
         throw new Error('Invalid artifact ownership');
-      if (!(await this.storage.deleteVersionsForKey(key))) return true;
+      try {
+        await this.storage.deleteObject(key);
+      } catch {
+        return true;
+      }
     }
 
     await this.transactions.run(async (session) => {

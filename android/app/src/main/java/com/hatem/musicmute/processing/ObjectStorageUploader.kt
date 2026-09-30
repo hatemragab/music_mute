@@ -21,7 +21,7 @@ fun interface FormUploader {
 class ProcessingTransferException(val problem: ProcessingLocalProblem) : IOException(problem.name)
 
 /** Dedicated unauthenticated whole-file transport. It never accepts API headers or follows redirects. */
-class S3FormUploader(
+class ObjectStorageUploader(
     private val connection: (URI) -> HttpURLConnection = { it.toURL().openConnection() as HttpURLConnection },
 ) : FormUploader {
     override suspend fun upload(file: File, input: InputDeclaration, grant: UploadGrant, progress: (Long, Long) -> Unit) {
@@ -36,12 +36,14 @@ class S3FormUploader(
                                 throw IOException("Upload grant is invalid")
                             if (!file.isFile || file.length() != input.bytes)
                                 throw ProcessingTransferException(ProcessingLocalProblem.INPUT_CHANGED)
-                            val expectedHeaders = setOf("content-type", "x-amz-checksum-sha256", "if-none-match")
+                            val expectedHeaders = setOf("content-type", "x-amz-checksum-sha256", "x-amz-meta-sha256", "if-none-match")
                             if (grant.method != UploadMethod.PUT ||
+                                grant.headers.size != expectedHeaders.size ||
                                 grant.headers.keys.map(String::lowercase).toSet() != expectedHeaders ||
                                 grant.headers.entries.any { (name, value) -> name.any(Char::isISOControl) || value.any(Char::isISOControl) } ||
                                 grant.headers.entries.firstOrNull { it.key.equals("Content-Type", true) }?.value != input.contentType ||
                                 grant.headers.entries.firstOrNull { it.key.equals("x-amz-checksum-sha256", true) }?.value != input.sha256 ||
+                                grant.headers.entries.firstOrNull { it.key.equals("x-amz-meta-sha256", true) }?.value != input.sha256 ||
                                 grant.headers.entries.firstOrNull { it.key.equals("If-None-Match", true) }?.value != "*"
                             ) throw IOException("Upload grant is invalid")
                             val client = connection(uri)

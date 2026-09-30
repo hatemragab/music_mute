@@ -160,7 +160,7 @@ export async function sha256Base64(blob: Blob): Promise<string> {
     "SHA-256",
     await blob.arrayBuffer(),
   );
-  // The API and S3 checksum header require padded base64 of the raw digest.
+  // The API and object storage checksum require padded base64 of the raw digest.
   return btoa(String.fromCharCode(...new Uint8Array(digest)));
 }
 
@@ -173,17 +173,47 @@ export interface UploadGrant {
 export function uploadWithProgress(
   grant: UploadGrant,
   blob: Blob,
+  declaration: { contentType: string; bytes: number; sha256: string },
   signal: AbortSignal,
   onProgress: (percent: number) => void,
 ): Promise<void> {
-  if (grant.method !== "PUT" || new URL(grant.url).protocol !== "https:")
+  const url = new URL(grant.url);
+  const entries = Object.entries(grant.headers);
+  const headers = new Map(
+    entries.map(([name, value]) => [name.toLowerCase(), value]),
+  );
+  if (
+    grant.method !== "PUT" ||
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.hash ||
+    entries.length !== 4 ||
+    headers.size !== 4 ||
+    entries.some(([name, value]) =>
+      Array.from(name + value).some((character) => {
+        const point = character.codePointAt(0) ?? 0;
+        return point < 0x20 || point === 0x7f;
+      }),
+    ) ||
+    headers.get("content-type") !== declaration.contentType ||
+    headers.get("x-amz-checksum-sha256") !== declaration.sha256 ||
+    headers.get("x-amz-meta-sha256") !== declaration.sha256 ||
+    headers.get("if-none-match") !== "*" ||
+    !/^[A-Za-z0-9+/]{43}=$/.test(declaration.sha256) ||
+    blob.size <= 0 ||
+    blob.size !== declaration.bytes
+  )
     throw new Error("INVALID_UPLOAD_GRANT");
   return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Cancelled", "AbortError"));
+      return;
+    }
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", grant.url);
     xhr.withCredentials = false;
-    for (const [key, value] of Object.entries(grant.headers))
-      xhr.setRequestHeader(key, value);
+    for (const [key, value] of entries) xhr.setRequestHeader(key, value);
     const abort = () => xhr.abort();
     signal.addEventListener("abort", abort, { once: true });
     xhr.upload.onprogress = (event) => {

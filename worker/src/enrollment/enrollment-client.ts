@@ -406,19 +406,19 @@ export class WorkerEnrollmentClient {
     installationId: string,
     installationCredential: string,
     requestId: string,
-    versionId: string,
+    etag: string,
     signal?: AbortSignal,
   ): Promise<QualificationUploadConfirmation> {
     assertUuid(installationId, "Installation ID");
     assertCredential(installationCredential, "Installation credential");
     assertUuid(requestId, "Qualification confirmation request ID");
-    if (!/^[A-Za-z0-9+/=_.,:-]{1,1024}$/u.test(versionId))
-      throw new TypeError("Qualification upload version is invalid");
+    if (!/^"[\x21\x23-\x7e]{1,1022}"$/u.test(etag))
+      throw new TypeError("Qualification upload ETag is invalid");
     const value = strictRecord(
       await this.request(
         `worker/installations/${installationId}/qualification-output-confirmations`,
         installationCredential,
-        { requestId, versionId },
+        { requestId, etag },
         signal,
       ),
       new Set(["requestId", "confirmed", "replayed"]),
@@ -727,7 +727,12 @@ function parseQualificationUploadGrant(
     throw new TypeError("Qualification upload method is invalid");
   const headers = strictRecord(
     record.headers,
-    new Set(["Content-Type", "x-amz-checksum-sha256", "If-None-Match"]),
+    new Set([
+      "Content-Type",
+      "x-amz-checksum-sha256",
+      "x-amz-meta-sha256",
+      "If-None-Match",
+    ]),
     "Qualification upload headers",
     true,
   );
@@ -735,6 +740,7 @@ function parseQualificationUploadGrant(
   if (
     headers["Content-Type"] !== "audio/mpeg" ||
     headers["x-amz-checksum-sha256"] !== expectedChecksum ||
+    headers["x-amz-meta-sha256"] !== expectedChecksum ||
     headers["If-None-Match"] !== "*"
   )
     throw new TypeError("Qualification upload headers are invalid");
@@ -748,6 +754,7 @@ function parseQualificationUploadGrant(
     headers: {
       "Content-Type": "audio/mpeg",
       "x-amz-checksum-sha256": expectedChecksum,
+      "x-amz-meta-sha256": expectedChecksum,
       "If-None-Match": "*",
     },
     expiresAt: isoDate(record.expiresAt, "qualification upload expiry"),

@@ -1,5 +1,11 @@
 # Package validation record
 
+> **Storage update — 2026-09-30:** AWS/S3 observations and setup commands below
+> belong to earlier releases. They are historical evidence, not R2 acceptance.
+> Do not execute the old provider/versioning/tiering/acceleration setup. Use the
+> [current private R2 Standard setup and verification guide](../../r2-storage/README.md); the owner
+> approved fresh MongoDB and quoted ETag identities with no legacy bridge.
+
 ## Executed during preparation
 
 The following historical checks were completed while preparing the original

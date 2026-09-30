@@ -169,15 +169,12 @@ describe('worker installation artifact grants', () => {
         expiresAt,
       },
     });
-    expect(JSON.stringify(result)).not.toContain('versionId');
+    expect(JSON.stringify(result)).not.toContain('etag');
     expect(JSON.stringify(result)).not.toContain(
       'worker-installation-artifacts/',
     );
-    expect(f.transfers.isPinnedObjectAvailable).toHaveBeenCalledTimes(2);
+    expect(f.transfers.isObjectAvailable).not.toHaveBeenCalled();
     expect(f.transfers.createDownloadGrant).toHaveBeenCalledTimes(2);
-    expect(
-      f.transfers.isPinnedObjectAvailable.mock.calls.map(([value]) => value),
-    ).toEqual(expectedObjects('darwin-arm64'));
     expect(
       f.transfers.createDownloadGrant.mock.calls.map(([value]) => value),
     ).toEqual(expectedObjects('darwin-arm64'));
@@ -231,7 +228,7 @@ describe('worker installation artifact grants', () => {
         'darwin-arm64',
       ),
     ).rejects.toMatchObject({ response: { code: 'WORKER_NOT_FOUND' } });
-    expect(f.transfers.isPinnedObjectAvailable).not.toHaveBeenCalled();
+    expect(f.transfers.isObjectAvailable).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -256,18 +253,38 @@ describe('worker installation artifact grants', () => {
     expect(f.transfers.createDownloadGrant).not.toHaveBeenCalled();
   });
 
-  it('does not sign any grants when one pinned object is unavailable', async () => {
-    const f = await fixture(catalog());
-    f.transfers.isPinnedObjectAvailable
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
-
+  it('fails closed for a fresh R2 catalog without making storage requests', async () => {
+    const f = await fixture({ ...catalog(), releases: {}, fixture: null });
     await expect(
       f.service.createDownloadGrants(principal, installationId, 'darwin-arm64'),
     ).rejects.toMatchObject({
       response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
     });
+    await expect(
+      f.service.createUpdateGrant(machinePrincipal, 'darwin-arm64'),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+    });
+    expect(f.transfers.isObjectAvailable).not.toHaveBeenCalled();
     expect(f.transfers.createDownloadGrant).not.toHaveBeenCalled();
+  });
+
+  it('rejects unquoted, weak and malformed catalog ETags before signing', async () => {
+    for (const etag of ['bare', 'W/"weak"', '"control\n"', '"inner"quote"']) {
+      const value = catalog();
+      value.releases['darwin-arm64'].etag = etag;
+      const f = await fixture(value);
+      await expect(
+        f.service.createDownloadGrants(
+          principal,
+          installationId,
+          'darwin-arm64',
+        ),
+      ).rejects.toMatchObject({
+        response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+      });
+      expect(f.transfers.createDownloadGrant).not.toHaveBeenCalled();
+    }
   });
 
   it('maps storage failures to the bounded worker dependency error', async () => {
@@ -294,7 +311,7 @@ async function fixture(value: object | string | undefined) {
       typeof value === 'string' ? value : JSON.stringify(value),
     );
   const transfers = {
-    isPinnedObjectAvailable: vi.fn(async (_object: ObjectIdentity) => true),
+    isObjectAvailable: vi.fn(async (_object: ObjectIdentity) => true),
     createDownloadGrant: vi.fn(async (_object: ObjectIdentity) => ({
       url: `https://storage.example.invalid/grant/${transfers.createDownloadGrant.mock.calls.length}`,
       expiresAt,
@@ -317,7 +334,7 @@ function catalog() {
         version: '0.1.1',
         filename: 'musicmute-worker-darwin-arm64.tar.gz',
         key: 'worker-installation-artifacts/releases/darwin-arm64/0.1.1.tar.gz',
-        versionId: 'darwin-version',
+        etag: '"darwin-version"',
         bytes: 101,
         sha256: digest,
         contentType: 'application/gzip',
@@ -326,7 +343,7 @@ function catalog() {
         version: '0.1.1',
         filename: 'musicmute-worker-windows-amd64.zip',
         key: 'worker-installation-artifacts/releases/windows-amd64/0.1.1.zip',
-        versionId: 'windows-version',
+        etag: '"windows-version"',
         bytes: 102,
         sha256: digest,
         contentType: 'application/zip',
@@ -345,7 +362,7 @@ function catalog() {
     fixture: {
       filename: 'qualification.wav',
       key: 'worker-installation-artifacts/fixtures/qualification.wav',
-      versionId: 'fixture-version',
+      etag: '"fixture-version"',
       bytes: 303,
       sha256: digest,
       contentType: 'audio/wav',
@@ -356,9 +373,9 @@ function catalog() {
 function expectedObjects(platform: 'darwin-arm64' | 'windows-amd64') {
   const value = catalog();
   return [value.releases[platform], value.fixture].map(
-    ({ key, versionId, bytes, sha256, contentType }) => ({
+    ({ key, etag, bytes, sha256, contentType }) => ({
       key,
-      versionId,
+      etag,
       bytes,
       sha256: Buffer.from(sha256, 'hex').toString('base64'),
       contentType,

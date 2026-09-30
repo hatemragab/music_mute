@@ -1,3 +1,4 @@
+import { isStorageEtag } from '../storage/object-identity.js';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { QueryFilter, Model } from 'mongoose';
@@ -127,10 +128,7 @@ export class JobsQueryService {
   ) {
     const job = await this.findOwned(userId, jobId);
     const object = this.downloadObject(job, artifact);
-    if (!object) throw jobError('JOB_STATE_CONFLICT');
-    if (
-      !(await processingIo(() => this.storage.isPinnedObjectAvailable(object)))
-    )
+    if (!object || !isStorageEtag(object.etag))
       throw jobError('JOB_STATE_CONFLICT');
     const entitlement = await this.transactions.run(async (session) => {
       await this.access.assertActive(userId, session);
@@ -187,7 +185,7 @@ export class JobsQueryService {
 function sameObject(left: ObjectIdentity, right: ObjectIdentity): boolean {
   return (
     left.key === right.key &&
-    left.versionId === right.versionId &&
+    left.etag === right.etag &&
     left.bytes === right.bytes &&
     left.sha256 === right.sha256 &&
     left.contentType === right.contentType

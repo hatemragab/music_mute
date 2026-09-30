@@ -3,7 +3,7 @@
 All provider-specific implementation, tests, deployment configuration and dated
 evidence live here. NestJS has a provider-neutral client only.
 
-`VideoScale → private adapter → NestJS validation → private S3 → existing worker`
+`VideoScale → private adapter → NestJS validation → private R2 → existing worker`
 
 ## Contract and limits
 

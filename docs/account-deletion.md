@@ -68,7 +68,7 @@ authorization. They are not completed by local tests.
       available before the deadline.
 - [ ] Verify Firebase session revocation, disablement, and deletion in the intended
       test project.
-- [ ] Verify exact test-owned S3 input, output, and stale-attempt versions are gone;
+- [ ] Verify exact test-owned R2 input, output, and stale-attempt keys are gone;
       do not run bucket-prefix or broad deletion commands.
 - [ ] Verify account-owned MongoDB records are absent and unrelated account records
       remain.

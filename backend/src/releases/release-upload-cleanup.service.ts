@@ -12,7 +12,7 @@ import { Release } from './release.schema.js';
 import { ReleaseUpload } from './release-upload.schema.js';
 
 const UPLOAD_EXPIRY_GRACE_MS = 300_000;
-const VERSION_SETTLEMENT_MS = 3_600_000;
+const TRANSFER_SETTLEMENT_MS = 3_600_000;
 
 @Injectable()
 export class ReleaseUploadCleanupService {
@@ -77,7 +77,7 @@ export class ReleaseUploadCleanupService {
         ownerUserId: null,
         reason: 'RELEASE_UPLOAD_ORPHANED',
         nextAt: due,
-        settleUntil: new Date(due.getTime() + VERSION_SETTLEMENT_MS),
+        settleUntil: new Date(due.getTime() + TRANSFER_SETTLEMENT_MS),
       },
       session,
     );

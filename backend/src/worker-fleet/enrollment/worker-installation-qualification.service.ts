@@ -2,6 +2,7 @@ import { HttpException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import { StorageTransfersService } from '../../storage/storage-transfers.service.js';
+import { isStorageEtag } from '../../storage/object-identity.js';
 import type { ObjectIdentity } from '../../jobs/job.types.js';
 import type { WorkerPrincipal } from '../auth/worker-auth.types.js';
 import { workerError } from '../worker-errors.js';
@@ -68,7 +69,7 @@ export class WorkerInstallationQualificationService {
     }
 
     const recovered = await this.storage(() =>
-      this.transfers.findUploadedVersion(reservation),
+      this.transfers.findUploadedObject(reservation),
     );
     if (recovered) {
       await this.persistObject(
@@ -96,7 +97,7 @@ export class WorkerInstallationQualificationService {
     this.assertInstallation(principal, installationId);
     const installation = await this.load(installationId);
     if (installation.qualificationObject) {
-      if (installation.qualificationObject.versionId !== dto.versionId)
+      if (installation.qualificationObject.etag !== dto.etag)
         throw workerError('WORKER_CONFLICT');
       return presentConfirmation(dto, true);
     }
@@ -104,7 +105,7 @@ export class WorkerInstallationQualificationService {
     const reservation = installation.qualificationReservation;
     if (!reservation) throw workerError('WORKER_CONFLICT');
     const object = await this.storage(() =>
-      this.transfers.verifyUploadedVersion(reservation, dto.versionId),
+      this.transfers.verifyUploadedObject(reservation, dto.etag),
     );
     const replayed = await this.persistObject(
       installationId,
@@ -141,7 +142,7 @@ export class WorkerInstallationQualificationService {
     const current = await this.load(installationId);
     if (!current.qualificationObject) throw workerError('WORKER_CONFLICT');
     this.assertObject(current.qualificationObject, reservation);
-    if (current.qualificationObject.versionId !== object.versionId)
+    if (current.qualificationObject.etag !== object.etag)
       throw workerError('WORKER_CONFLICT');
     return true;
   }
@@ -194,8 +195,7 @@ export class WorkerInstallationQualificationService {
     reservation: WorkerQualificationReservation,
   ): void {
     this.assertReservation(object, reservation);
-    if (!object.versionId || object.versionId === 'null')
-      throw workerError('WORKER_CONFLICT');
+    if (!isStorageEtag(object.etag)) throw workerError('WORKER_CONFLICT');
   }
 
   private async storage<T>(operation: () => Promise<T>): Promise<T> {

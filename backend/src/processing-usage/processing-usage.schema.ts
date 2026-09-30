@@ -219,7 +219,7 @@ export class DownloadGrantReceipt {
   requestId!: string;
 
   @Prop({ required: true, immutable: true, maxlength: 1024 })
-  objectVersionId!: string;
+  objectEtag!: string;
 
   @Prop({
     required: true,

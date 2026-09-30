@@ -26,7 +26,7 @@ import { IsolatedServices } from './helpers/isolated-services.mjs';
 const DAY_MS = 86_400_000;
 const codeIs = (code) => (error) => error?.getResponse?.().code === code;
 
-test('deleted job retention coordinates S3 cleanup, usage release, live references, and request replay', async (t) => {
+test('deleted job retention coordinates R2 cleanup, usage release, live references, and request replay', async (t) => {
   const services = await IsolatedServices.create();
   t.after(() => services.stop());
   const { mongoUri } = await services.startDatabases({ replicaSet: true });
@@ -56,9 +56,9 @@ test('deleted job retention coordinates S3 cleanup, usage release, live referenc
   let releaseCount = 0;
   let storageComplete = true;
   const storage = {
-    deleteVersionsForKey: async (key) => {
+    deleteObject: async (key) => {
       swept.push(key);
-      return storageComplete;
+      if (!storageComplete) throw new Error('Storage unavailable');
     },
   };
   const usage = {
@@ -103,7 +103,7 @@ test('deleted job retention coordinates S3 cleanup, usage release, live referenc
     inputReservation: { ...input, key: inputKey },
     outputObject: {
       key: outputKey,
-      versionId: 'output-v1',
+      etag: '"output-v1"',
       bytes: 512,
       sha256: input.sha256,
       contentType: input.contentType,
@@ -163,13 +163,20 @@ test('deleted job retention coordinates S3 cleanup, usage release, live referenc
     'ineligible',
     'deletion closes pending notification children',
   );
-  const cleanupAt = new Date(started.getTime() + 600_000);
+  const cleanupAt = new Date(started.getTime() + 4_000_000);
   storageComplete = false;
   await deletion.cleanupDue(cleanupAt);
   assert.equal((await jobs.findById(id).lean()).cleanupCompletedAt, null);
   assert.equal(releaseCount, 0);
   storageComplete = true;
-  await deletion.cleanupDue(new Date(cleanupAt.getTime() + 2_000));
+  await deletion.cleanupDue(new Date(cleanupAt.getTime() + 31_000));
+  const firstPass = await jobs.findById(id).lean();
+  assert.ok(firstPass.cleanupFirstDeletedAt instanceof Date);
+  assert.equal(firstPass.cleanupCompletedAt, null);
+  assert.equal(releaseCount, 0, 'accounting waits for delayed-upload recheck');
+  await deletion.cleanupDue(
+    new Date(firstPass.cleanupFirstDeletedAt.getTime() + 7_200_000),
+  );
   const cleaned = await jobs.findById(id).lean();
   assert.ok(cleaned.cleanupCompletedAt instanceof Date);
   assert.ok(cleaned.retainedOutputReleasedAt instanceof Date);

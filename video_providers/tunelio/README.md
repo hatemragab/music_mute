@@ -3,7 +3,7 @@
 Tunelio is the YouTube-only SaaS adapter for MusicMute. Its private contract is
 the same as VideoScale: authenticated POST /audio-imports returns bounded audio
 bytes to NestJS, which independently validates audio/duration, stores the input
-in private S3 and starts the existing worker flow. Clients and workers never
+in private R2 and starts the existing worker flow. Clients and workers never
 receive the vendor API key or signed download link.
 
 This app lives beside music-mute-videoscale; it does not replace or configure
@@ -100,7 +100,7 @@ Written bytes reduce the outstanding reservation after flushing, so free-space
 checks do not count existing files twice. Failure releases every reservation.
 CapRover mounts /work as a 2 GiB tmpfs; twenty 100 MB inputs plus the headroom
 fit within this bound. The non-root container has a read-only root, dropped capabilities, 3 GiB memory,
-one CPU, bounded logs and no database, S3, Firebase or persistent media access.
+one CPU, bounded logs and no database, R2, Firebase or persistent media access.
 Logs contain only request correlation IDs, safe stages, HTTP status and numeric
 byte/timing data, with exception type/code line rather than raw exception text.
 
@@ -150,7 +150,7 @@ tests, docs or generated files enter the build context.
 Root deployment orchestration also validates the provider router and backend.
 Run backend verification and imports/processing integration checks sequentially
 as documented in the root provider guide. Local fixture tests do not establish
-live Tunelio availability, S3/worker success, deployment or acquisition latency.
+live Tunelio availability, R2/worker success, deployment or acquisition latency.
 Record those separately after deployment; no unlimited availability or immunity
 from YouTube restrictions is implied.
 

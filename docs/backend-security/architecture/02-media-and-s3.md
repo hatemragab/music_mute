@@ -1,147 +1,100 @@
-# Unified media, S3 lifecycle, and cost accounting
+# Unified media, private R2 lifecycle, and cost accounting
 
-## Objective
+This document describes the R2 storage boundary. The filename is retained for
+existing links; the old AWS bucket/versioning/tiering design is superseded by
+[the current R2 guide](../../r2-storage/README.md). Quota values come from the
+backend's effective policy; this migration does not change quotas or scheduling.
 
-Use one backend-authoritative media policy and protect storage/request/bandwidth
-costs without proxying audio through NestJS. Preserve the existing private-bucket,
-exact-key, checksum, size, version, and attempt-fencing foundations.
+## Admission and transfers
 
-## One media policy
+The backend authorizes account/job/attempt ownership, validates declared size,
+content type, canonical SHA-256 and measured duration, and reserves capacity before
+issuing an upload grant. Clients can reject obvious invalid files but do not own
+counters or limits. Idempotent replay returns the same valid reservation; a new
+grant is counted according to existing account/service budgets.
 
-The only launch acceptance limits are:
-
-- duration `<= 1,200` seconds;
-- prepared upload `<= 50,000,000` bytes.
-
-Delete legacy policy-v1/v2 branches and conflicting client constants. Clients may
-reject obviously invalid input early but must consume the backend policy response.
-The backend repeats every check and remains authoritative.
-
-Validate at two points:
-
-1. declaration/grant time: integer size, supported extension/type, declared
-   duration, account/grant capacity;
-2. confirmation time: exact owner key, immutable version, real size, content type,
-   checksum, media duration, and job state.
-
-Confirmation must fail safely if metadata differs. An invalid object is scheduled
-for exact-object cleanup and never reaches the queue.
-
-## Upload grant accounting
-
-Before creating a new grant, atomically enforce:
-
-- account is active and unrestricted;
-- account has fewer than 30 grants in the UTC day;
-- account has fewer than 200 grants in the UTC month;
-- declared upload can fit within remaining monthly confirmed bytes;
-- logical-audio attempt count is below five;
-- waiting-job and retained-output admission are available;
-- service is not blocked by an operational safety gate.
-
-Idempotent replay of the same request returns the original grant. A genuinely new
-grant increments daily/monthly grant counters even when unused. The grant record
-is short lived, owner scoped, and linked to one server-generated logical-audio
-family so changing a request UUID cannot reset the five-attempt boundary.
-
-At confirmation, atomically count the verified size once. Duplicate confirmation
-returns the prior result. Monthly confirmed-byte accounting never trusts a client
-reported total.
+Media transfers remain direct between the client/worker and private R2. The
+backend uses the S3-compatible SDK to sign locally; no separate Cloudflare service
+or large-media proxy is introduced. URL-import audio still arrives through the
+private adapter for independent NestJS probing and validation before a single
+bounded R2 PUT and normal job submission.
 
 ## Object identity
 
-Continue using owner/job-scoped keys:
+Preserve existing owner/job/attempt key families:
 
 ```text
 users/<account-id>/jobs/<job-id>/input/<random>.<extension>
 users/<account-id>/jobs/<job-id>/attempts/<attempt-id>/vocals.mp3
 ```
 
-MongoDB stores key, immutable version ID, bytes, checksum, type, and ownership.
-Never store a presigned URL. The backend signs only the exact key after ownership
-and limit checks.
+Each key is reserved once and never reused. MongoDB stores key, opaque quoted
+ETag, bytes, canonical padded base64 SHA-256, type and ownership. It stores neither
+permanent provider URLs nor presigned URLs. R2 has no required AWS version ID.
+The owner approved fresh MongoDB and an incompatible `version_id` → `etag` worker
+contract; old records and old workers are not supported by a migration bridge.
 
-## Signed URL rules
+The signed PUT includes approved Content-Type, matching
+`x-amz-checksum-sha256`/`x-amz-meta-sha256` and `If-None-Match: *`. R2 verifies the
+actual upload checksum. One confirmation HEAD validates size, content type,
+ETag and signed checksum metadata, plus returned checksum when present. ETag is
+not a substitute for SHA-256. A conflicting object is rejected and never queued.
 
-- Upload and download grants expire in at most 600 seconds.
-- Required upload headers are part of the signed request.
-- The bucket policy separately rejects query-signed requests with
-  `s3:signatureAge > 600000` milliseconds.
-- A URL is a bearer capability and may be reused until expiry; do not claim it is
-  single use.
-- A refreshed URL is a new grant unless it is an idempotent replay of the same
-  still-valid request.
+Attempt/session fencing, transaction receipts and quota accounting still protect
+confirmation, recovery and completion. An already-confirmed output reused after
+an uncertain response retains its original verified identity instead of rewriting
+the key. Downloads authorize the current owner and exact confirmed key/identity;
+no repeat existence HEAD is needed just to sign another download grant.
 
-## Download accounting
+## Signed grants and metering
 
-Before issuing a result URL:
+Preserve existing bounded URL expiration settings and exact required headers.
+Signed URLs are bearer capabilities and can be replayed until expiry; do not claim
+one-time access. Only create-only conditional uploads prevent replacement of an
+existing key. Never attach Firebase/worker bearer credentials to R2 requests.
 
-1. authorize the account and job ownership;
-2. confirm the immutable result still exists and matches stored identity;
-3. calculate `estimatedBytes = storedResultBytes`;
-4. atomically enforce 150 monthly grants and 10,000,000,000 monthly estimated
-   bytes;
-5. atomically enforce the 80,000,000,000 monthly service outbound ceiling;
-6. record the grant and estimate once;
-7. issue the exact-key URL.
+Download-grant accounting uses verified stored bytes and the existing user/service
+policy. It is an estimate, not invoice-perfect byte metering: a URL can be reused
+and the API cannot observe every direct read. Cached local playback does not need
+a new grant. Worker input grants retain their current service-accounting behavior.
 
-The API cannot reliably observe how many times a presigned URL is used. User-facing
-copy must say "download access" or "download grants," not claim byte-perfect actual
-transfer metering.
+## Retention and deletion
 
-Valid local cached playback does not call the grant endpoint. Worker input grants
-add their object size to the service estimate but not the user's result-download
-grant count.
+Successful originals and outputs remain for Original/Voice playback until
+job/account deletion. Temporary invalid, failed, cancelled, abandoned and stale
+attempt objects use existing durable leased cleanup by exact key. Wait through the
+recorded grant deadline plus one hour, perform exact DELETE
+and record durable `firstDeletedAt`, then repeat exact DELETE two hours later
+before completion to catch delayed uploads. Resume the persisted stage after
+restart/replica contention; both DELETEs are free and require no HEAD/list.
+This is an application settlement policy, not a universal R2 transfer deadline.
+Retry uncertain deletion and reconcile missing objects idempotently. Do not list
+an account or bucket prefix during routine cleanup.
 
-## Retained storage
+Manual retry after committed input cleanup requires a new input; never reuse an
+old upload key. Account purge removes completed key records without retaining
+long-term object tombstones. Deletion still decrements retained usage only when the
+existing durable cleanup contract permits it. An invalid upload is not counted as retained output. Account
+deletion obtains exact keys from owned database records and fences concurrent
+uploads; it does not rely on deleting all bucket-prefix matches.
 
-Count only verified, published, successful output objects against the
-1,000,000,000-byte account retained-output limit. Temporary inputs, stale attempts,
-and objects already in cleanup do not count as retained results.
+## Cost and provider setup
 
-Admission is blocked when retained successful bytes are at or above the effective
-limit. A result already processing may finish and cause a bounded overshoot; retain
-it and block later admissions. Deleting a completed job decrements retained bytes
-only after exact object deletion is durably completed or reconciled as missing.
+All objects use R2 Standard. No Intelligent-Tiering, Infrequent Access, acceleration,
+ACL/versioning API checks or `s3:signatureAge` bucket policy is required.
+One HeadBucket startup request checks connectivity. Health snapshots use cached
+startup/transfer observations; they do not poll R2 or repeatedly inspect bucket
+settings. Stale successful observations become unknown instead of claiming current
+health;
+failed observations remain unavailable until a later success.
 
-## Lifecycle and cleanup
+Local signing makes no R2 request. Accepted uploads each require one identity
+HEAD; direct GETs/HEADs are still metered Class B operations even though R2 egress
+is free. Exact-key DeleteObject is free. Ordinary uploads use single PUTs. Keep
+retention and access safety intact; do not add a global expiry rule for completed
+media just to lower storage cost.
 
-| Object                                | Retention                                                       |
-| ------------------------------------- | --------------------------------------------------------------- |
-| Successful published output           | Indefinite until job/account deletion                           |
-| Current input during eligible retries | Until terminal outcome                                          |
-| Terminal input                        | Cleanup eligible immediately; target completion within 24 hours |
-| Abandoned/unconfirmed upload          | Cleanup eligible after grant/reservation expiry                 |
-| Invalid upload                        | Cleanup eligible immediately                                    |
-| Cancelled/failed/stale attempt output | Cleanup eligible immediately                                    |
-
-Cleanup is exact-key/version, idempotent, leased, retryable, and bounded. A missing
-object is successful reconciliation. Never use owner-prefix deletion during normal
-job cleanup. Account deletion may enumerate owner-scoped records but still deletes
-verified exact objects/versions.
-
-The existing cancelled-upload orphan path must have an explicit regression test.
-
-## Intelligent-Tiering
-
-Use S3 Intelligent-Tiering for successful audio:
-
-- Frequent Access initially;
-- automatic Infrequent Access after 30 days without access;
-- automatic Archive Instant Access after 90 days without access;
-- no optional Archive Access or Deep Archive Access tiers at launch.
-
-The code sets the intended storage class for newly stored successful results. The
-operator configures and verifies the matching bucket/lifecycle policy using the
-provider runbook. Do not silently change the live bucket from a code branch.
-
-## Client and admin behavior
-
-Android and iOS show the same 20-minute/50-MB limits and safe account-limit errors.
-They do not own authoritative counters. Retrying an uncertain identical request
-reuses its idempotency key. A new user-requested replacement follows the five-attempt
-contract.
-
-Admin usage views show upload grants, confirmed bytes, download grants, estimated
-download bytes, retained output, effective limits, and period boundaries. Admins
-change policy/overrides, not raw counters or S3 metadata.
+The operator configures private bucket access, explicit browser CORS and scoped
+backend credentials using [the provider runbook](../runbooks/PROVIDER-CONSOLE-CHANGES.md).
+Local mocks do not prove R2 permissions, CORS, checksum behavior, real transfer
+performance or invoice amounts.

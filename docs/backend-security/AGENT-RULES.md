@@ -45,7 +45,7 @@ Each branch has checkpoint IDs. For every checkpoint:
 - do not replace a failing assertion with a weaker one merely to mark it complete.
 
 When a test cannot run, use `NOT_RUN` or `BLOCKED`. A fixture, mock, typecheck, or
-local build must not be presented as live S3, Atlas, Redis, Firebase, VPS, device,
+local build must not be presented as live R2, Atlas, Redis, Firebase, VPS, device,
 or production proof.
 
 ## Replace product rules, preserve foundations
@@ -63,7 +63,7 @@ foundations unless the assigned branch proves that one is defective:
 - administrator admission, permissions, recent-authentication, and audit logging;
 - MongoDB transaction helpers and durable job history;
 - shared Redis client, hashed keys, and atomic counter script;
-- exact-key S3 grants, checksum/size/version validation, and idempotent cleanup;
+- exact-key R2 grants, checksum/size/ETag validation, and idempotent cleanup;
 - installation/session history;
 - worker claim, lease, attempt-fencing, and exact-output finalization protocols.
 
@@ -74,11 +74,11 @@ tests pass and its callers are updated.
 ## Data and environment safety
 
 - Use synthetic accounts, jobs, audio, and identifiers in tests.
-- Use isolated MongoDB databases, Redis namespaces, and S3 test prefixes.
+- Use isolated MongoDB databases, Redis namespaces, and R2 test prefixes.
 - Never use live services merely because credentials are available locally.
 - Never print connection strings, secrets, bearer tokens, presigned URLs, private
   media, or environment values.
-- Do not run `FLUSHALL`, broad MongoDB drops, prefix-wide S3 deletion, bucket
+- Do not run `FLUSHALL`, broad MongoDB drops, prefix-wide R2 deletion, bucket
   deletion, or user-data cleanup.
 - Local development removes the need for production migrations; it does not grant
   permission to delete local or cloud data.
@@ -119,7 +119,7 @@ operation records administrator identity, reason, time, and the affected account
 ## Provider boundary
 
 Backend branches may produce provider configuration documentation but must not
-modify the AWS, Atlas, Redis/VPS, Firebase, CapRover, DNS, or billing consoles.
+modify the R2, Atlas, Redis/VPS, Firebase, CapRover, DNS, or billing consoles.
 Use [runbooks/PROVIDER-CONSOLE-CHANGES.md](runbooks/PROVIDER-CONSOLE-CHANGES.md)
 for the operator checklist. A provider step stays unchecked until a human executes
 and verifies it.

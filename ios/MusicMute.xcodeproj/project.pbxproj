@@ -97,7 +97,7 @@
 		E4A5B4D6D959FE174617B044 /* ProcessingUsageRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCCB228B9EBBB2901CD87B4D /* ProcessingUsageRepository.swift */; };
 		E7CB62336ACEAFA3EC9A88E1 /* ProcessingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D3B46976552B6DC3124085E /* ProcessingStore.swift */; };
 		E85A875C9F6CAA766022EBE6 /* ProcessingUsageRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE456FB8864C45BA72A9D5E5 /* ProcessingUsageRepositoryTests.swift */; };
-		EA831F744456BD4B61F3F511 /* S3MultipartFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 326664D9C4E33E9F647E5414 /* S3MultipartFile.swift */; };
+		EA831F744456BD4B61F3F511 /* ObjectStorageUploadFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 326664D9C4E33E9F647E5414 /* ObjectStorageUploadFile.swift */; };
 		EC2B1ADE7E3E3FB261A0C095 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 23FA53994AE59BE9C2307305 /* GoogleService-Info.plist */; };
 		ED2D46D59795BD55D63C8A5F /* AudioInputPreparer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7C1E16DD3FDBEC754CCF00 /* AudioInputPreparer.swift */; };
 		ED73E7172B5765ADBE1EA042 /* ClientErrorOutboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFCB20A0300F96084C683D0 /* ClientErrorOutboxTests.swift */; };
@@ -152,7 +152,7 @@
 		2A1A0D995FE497B7F95DA4B4 /* supported-audio-sites.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "supported-audio-sites.json"; sourceTree = "<group>"; };
 		2A853D607BE6F8979A016569 /* ProcessingMediaPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingMediaPolicy.swift; sourceTree = "<group>"; };
 		31F5E38EC5FE5AC9FAC3ECF2 /* AudioInputPreparerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioInputPreparerTests.swift; sourceTree = "<group>"; };
-		326664D9C4E33E9F647E5414 /* S3MultipartFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = S3MultipartFile.swift; sourceTree = "<group>"; };
+		326664D9C4E33E9F647E5414 /* ObjectStorageUploadFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjectStorageUploadFile.swift; sourceTree = "<group>"; };
 		3278CCB9EA77606685ADF38B /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		338642359BC137704D29D7D7 /* AccountDeletionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountDeletionStore.swift; sourceTree = "<group>"; };
 		34F6702F528D11A1DC3F44F8 /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
@@ -322,7 +322,7 @@
 				6D3B46976552B6DC3124085E /* ProcessingStore.swift */,
 				CCCB228B9EBBB2901CD87B4D /* ProcessingUsageRepository.swift */,
 				9A092C9DF86849A843297BED /* PushRegistrationCoordinator.swift */,
-				326664D9C4E33E9F647E5414 /* S3MultipartFile.swift */,
+				326664D9C4E33E9F647E5414 /* ObjectStorageUploadFile.swift */,
 				C5EE3E93EC83668D605554D3 /* SupportedAudioSites.swift */,
 				76376826C31F15253D9E8C69 /* UnavailableJobsAPI.swift */,
 				5AEC0138DB7536A57D51B253 /* URLImports.swift */,
@@ -731,7 +731,7 @@
 				E4A5B4D6D959FE174617B044 /* ProcessingUsageRepository.swift in Sources */,
 				DF2612B7FF5D7B68FB37B43A /* ProcessingUsageView.swift in Sources */,
 				5EDBEDB487B17AFEC1249A54 /* PushRegistrationCoordinator.swift in Sources */,
-				EA831F744456BD4B61F3F511 /* S3MultipartFile.swift in Sources */,
+				EA831F744456BD4B61F3F511 /* ObjectStorageUploadFile.swift in Sources */,
 				6612F3C0B340A9A03674832B /* SentryMonitoring.swift in Sources */,
 				6ECF35AE8B34433D254BCD97 /* SettingsView.swift in Sources */,
 				4BDB8C97FCB2497BB907EB1D /* SupportedAudioSites.swift in Sources */,

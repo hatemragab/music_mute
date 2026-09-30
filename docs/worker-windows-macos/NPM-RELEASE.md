@@ -1,5 +1,10 @@
 # Shared npm release acceptance — 2026-09-30
 
+> Historical S3 release evidence. These archives and version IDs predate the
+> R2 migration and must not be reused as an R2 release. See
+> [the current storage guide](../r2-storage/README.md) for rebuilt runtimes,
+> verified R2 identities and separately authorized publication.
+
 Released CLI: `@music-mute/worker@0.1.1` on npm's `latest` tag, supporting
 macOS ARM64/MPS and Windows x64/DirectML. The documentation-only patch retains
 byte-identical executable/protocol/engine files from the accepted `0.1.0` CLI

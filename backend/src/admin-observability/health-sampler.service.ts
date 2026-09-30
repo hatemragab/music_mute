@@ -87,7 +87,9 @@ export class HealthSamplerService {
     const [mongodb, redis, storage, releases] = await Promise.all([
       this.probeMongo(),
       this.probeRedis(),
-      this.probe('storage', () => this.storage.assertReady()),
+      Promise.resolve({
+        component: { name: 'storage' as const, ...this.storage.snapshot() },
+      }),
       this.readRejectedReleases(),
     ]);
 

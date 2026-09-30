@@ -44,7 +44,7 @@ for (const mode of [
         }
       } else
         request.on("end", () => {
-          response.writeHead(200, { "x-amz-version-id": "fixture-version" });
+          response.writeHead(200, { ETag: '"fixture-version"' });
           response.end();
         });
     });
@@ -63,7 +63,7 @@ for (const mode of [
       });
       const expected = {
         key: "fixture",
-        versionId: "fixture-version",
+        etag: '"fixture-version"',
         bytes: bytes.length,
         sha256,
         contentType: "audio/mpeg" as const,
@@ -90,12 +90,13 @@ for (const mode of [
                 "Content-Type": "audio/mpeg",
                 "If-None-Match": "*",
                 "x-amz-checksum-sha256": sha256,
+                "x-amz-meta-sha256": sha256,
               },
             },
             workspace.input,
             expected,
           ),
-        ).resolves.toBe("fixture-version");
+        ).resolves.toBe('"fixture-version"');
       } else if (
         mode === "corrupt" ||
         mode === "truncated" ||
@@ -164,7 +165,7 @@ it("preserves a live file owner when termination cannot be confirmed", async () 
         },
         {
           key: "fixture",
-          versionId: "v1",
+          etag: '"v1"',
           bytes: 1,
           sha256: "unused",
           contentType: "audio/mpeg",

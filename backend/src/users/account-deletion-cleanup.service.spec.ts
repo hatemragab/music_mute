@@ -220,7 +220,7 @@ describe('account deletion cleanup', () => {
       },
       outputObject: {
         key: `users/${f.user._id.toHexString()}/jobs/job-one/published.mp3`,
-        versionId: 'version-one',
+        etag: '"version-one"',
       },
     });
 
@@ -229,7 +229,6 @@ describe('account deletion cleanup', () => {
     expect(f.storageCleanup.schedule).toHaveBeenCalledTimes(2);
     expect(f.storageCleanup.schedule).toHaveBeenCalledWith(
       expect.objectContaining({
-        versionId: 'version-one',
         ownerUserId: f.user._id,
         reason: 'AUDIO_OUTPUT_ORPHANED',
       }),

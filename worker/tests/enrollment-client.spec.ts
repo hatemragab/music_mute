@@ -296,6 +296,7 @@ describe("worker enrollment client", () => {
               headers: {
                 "Content-Type": "audio/mpeg",
                 "x-amz-checksum-sha256": checksum,
+                "x-amz-meta-sha256": checksum,
                 "If-None-Match": "*",
               },
               expiresAt: "2099-09-20T12:00:00.000Z",
@@ -324,7 +325,7 @@ describe("worker enrollment client", () => {
         installationId,
         installationCredential,
         confirmRequestId,
-        "version-1",
+        '"version-1"',
       ),
     ).resolves.toEqual({
       requestId: confirmRequestId,
@@ -333,7 +334,7 @@ describe("worker enrollment client", () => {
     });
     expect(requests.map((request) => request.body)).toEqual([
       { request_id: grantRequestId, bytes: 1234, sha256: outputDigest },
-      { request_id: confirmRequestId, version_id: "version-1" },
+      { request_id: confirmRequestId, etag: '"version-1"' },
     ]);
   });
 

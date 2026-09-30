@@ -24,11 +24,19 @@ Override the harness's DB/Redis targets with these explicit values after parsing
 
 Apply migrations/index initialization only to that namespace. Use synthetic auth/admin accounts or existing emulator helpers; never hardcode an auth bypass into production controllers.
 
-## 3. S3 test configuration
+## 3. R2 test configuration
 
-The backend/harness may read the owner's AWS credentials from `.local.env`. Workers and children must not receive them. Use a dedicated approved test bucket or an approved narrow prefix such as `worker-tests/<runid>/` in a compliant private versioned bucket. A prefix is not a substitute for an IAM policy; verify actual permissions and preflight without changing bucket settings.
+Normal tests use local storage fixtures. An explicitly authorized real R2 test
+uses backend-only `STORAGE_*` credentials scoped to a dedicated private Standard
+test bucket, supplied by the caller without loading `.env.production`. Workers
+and children never receive them. A narrow object prefix is not a substitute for
+scoped credentials; bound test size and attempt count before making requests.
 
-Provision a short owned/licensed demo fixture with exact SHA-256, S3 version and manifest. Keep input and output keys in a teardown manifest. Reuse existing exact-key/version cleanup; do not add broad lifecycle expiry or delete neighboring user objects. Budget tests by fixture size and attempt count rather than stress-uploading unlimited audio.
+Provision only a short rights-cleared synthetic fixture with verified SHA-256,
+quoted ETag, size/type and signed manifest. Keep exact input/output keys in a
+teardown record. Reuse durable exact-key cleanup after the grant/in-flight window;
+never change lifecycle settings or delete neighboring objects. See
+[the current R2 verification guide](../../r2-storage/README.md).
 
 Store logs/evidence with query strings and account secrets redacted. Backend credentials remain in the local harness process. A child environment is constructed from a small allowlist, not `{...process.env}`.
 
@@ -36,7 +44,7 @@ Store logs/evidence with query strings and account secrets redacted. Backend cre
 
 Read actual component scripts. The backend manifest and reconciled setup documentation use pnpm. Follow the current committed lockfile and do not generate another lockfile. Run the branch's new fleet integration commands only after they exist and are documented.
 
-Start the local backend bound to loopback by default. Enable worker processing only for the isolated test configuration. Register a scoped test machine using real enrollment. Start one M4 worker slot, test `doctor`/benchmark, then process a real S3 job.
+Start the local backend bound to loopback by default. Enable worker processing only for the isolated test configuration. Register a scoped test machine using real enrollment. Start one M4 worker slot, test `doctor`/benchmark, then process a real R2 job.
 
 Capture provider/model/recipe digests, actual acceleration evidence, memory, decode/separation/postprocess/encode/transfer timings and valid output. Run default trim-on/denoise-off, then the other three recipes. Keep audio listening results distinct from numeric smoke checks.
 
@@ -58,6 +66,6 @@ During G, explicitly install a locally verified bad test candidate on this test 
 
 ## 7. Teardown and evidence
 
-Drain/stop test slots, revoke ephemeral credentials, clean exact test-owned S3 versions, drop only marker-verified test database/Redis keys, and stop only services this run created. Leave agreed installed production-intent worker files alone unless uninstall was explicitly part of the test.
+Drain/stop test slots, revoke ephemeral credentials, clean exact test-owned R2 keys, drop only marker-verified test database/Redis keys, and stop only services this run created. Leave agreed installed production-intent worker files alone unless uninstall was explicitly part of the test.
 
 Record commands, versions, outcomes, run IDs, checksums and sanitized traces using the checkpoint template. Do not attach `.local.env`, tokens, raw private audio or absolute personal home-directory dumps. Tests not run are marked `NOT_RUN` with the required next input.

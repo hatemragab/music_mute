@@ -8,7 +8,7 @@ info:
     adapter before exactly one POST, without retry, failover or redirects.
     Twenty active relays share capacity across both routes; additional bounded
     handlers wait before submission. At most five submissions start per rolling second.
-    NestJS independently validates audio and duration before S3 upload.
+    NestJS independently validates audio and duration before R2 upload.
 security:
   - service_key: []
 paths:

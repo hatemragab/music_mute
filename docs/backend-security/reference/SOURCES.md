@@ -3,23 +3,21 @@
 These sources support the cost/security constraints in this package. Recheck them
 before production rollout because provider pricing and limits can change.
 
-## AWS
+## Cloudflare R2
 
-- [Amazon S3 pricing](https://aws.amazon.com/s3/pricing/) — storage, requests, and
-  internet data transfer can create cost; inbound transfer is generally free and
-  the internet-transfer allowance is aggregated across AWS services/regions.
-- [S3 Intelligent-Tiering](https://docs.aws.amazon.com/AmazonS3/latest/userguide/intelligent-tiering-overview.html)
-  — automatic Infrequent Access after 30 inactive days and Archive Instant Access
-  after 90; optional archive tiers require asynchronous restore and are excluded.
-- [AWS presigned URL best practices](https://docs.aws.amazon.com/prescriptive-guidance/latest/presigned-url-best-practices.html)
-  — presigned URLs are bearer capabilities and should be constrained by scope,
-  expiry, logging, and data-perimeter controls.
-- [AWS presigned URL FAQ](https://docs.aws.amazon.com/prescriptive-guidance/latest/presigned-url-best-practices/faq.html)
-  — a presigned request can be reused and is not inherently single-use. This is why
-  MusicMute counts grants and estimated bytes rather than claiming actual GET count.
-- [S3 policy keys for signature age](https://docs.aws.amazon.com/AmazonS3/latest/userguide/amazon-s3-policy-keys.html)
-  — bucket policy can deny overly old SigV4 query signatures through
-  `s3:signatureAge`.
+- [R2 S3 API compatibility](https://developers.cloudflare.com/r2/api/s3/api/)
+  defines supported operations; AWS versioning, bucket ACL/acceleration and tiering
+  assumptions are not part of MusicMute's R2 setup.
+- [R2 pricing](https://developers.cloudflare.com/r2/pricing/): Standard storage and
+  request counts remain billable beyond account allowances; direct egress and
+  DeleteObject are free. Do not claim every read/write is free.
+- [R2 presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/)
+  are temporary bearer capabilities generated locally with the retained AWS SDK;
+  backend authorization and exact signed headers remain mandatory.
+- [R2 CORS](https://developers.cloudflare.com/r2/buckets/cors/) is separate from
+  API CORS and browser CSP; keep explicit origins, methods and signed headers.
+- [Current MusicMute storage guide](../../r2-storage/README.md) records the approved
+  fresh-database ETag identity, cleanup, setup and bounded verification contract.
 
 ## MongoDB Atlas
 
@@ -54,7 +52,7 @@ before production rollout because provider pricing and limits can change.
 ## Project-local evidence
 
 - `backend/src/storage/storage-transfers.service.ts` already verifies exact key,
-  size, content type, checksum, and immutable version.
+  size, content type, signed checksum metadata, and ETag.
 - `backend/src/rate-limits/` already supplies shared Redis, hashed keys, and atomic
   rate budgets.
 - `backend/src/worker-fleet/` already supplies claim, attempt, lease, and stale-owner

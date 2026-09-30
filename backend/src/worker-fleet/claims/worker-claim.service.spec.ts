@@ -157,7 +157,7 @@ describe('worker atomic claims', () => {
       sessionLean({
         _id: jobId,
         currentExecution: { attemptId },
-        inputObject: { key: 'input', versionId: 'v1' },
+        inputObject: { key: 'input', etag: '"v1"' },
         recipeSnapshot: { recipeId: 'kim-vocals-v2' },
       }),
     );
@@ -208,7 +208,7 @@ describe('worker atomic claims', () => {
       admissionSnapshot: { maxProcessingJobs: 1 },
       inputObject: {
         key: 'users/u/jobs/j/input.wav',
-        versionId: 'v1',
+        etag: '"v1"',
         bytes: 10,
         sha256: 'sha',
         contentType: 'audio/wav',
@@ -277,7 +277,7 @@ describe('worker atomic claims', () => {
       attemptNumber: 0,
       processingStartedAt: null,
       admissionSnapshot: { maxProcessingJobs: 1 },
-      inputObject: { key: 'input', versionId: 'v1' },
+      inputObject: { key: 'input', etag: '"v1"' },
       recipeSnapshot: { recipeId: 'kim-vocals-v2' },
     };
     const slot = {
@@ -321,7 +321,7 @@ describe('worker atomic claims', () => {
       admissionSnapshot: { maxProcessingJobs: 1 },
       inputObject: {
         key: 'users/older/jobs/job/input.wav',
-        versionId: 'older-v1',
+        etag: '"older-v1"',
         bytes: 10,
         sha256: 'older-sha',
         contentType: 'audio/wav',
@@ -337,7 +337,7 @@ describe('worker atomic claims', () => {
       inputObject: {
         ...older.inputObject,
         key: 'users/eligible/jobs/job/input.wav',
-        versionId: 'eligible-v1',
+        etag: '"eligible-v1"',
       },
     };
     const candidates = [older, eligible];
@@ -431,7 +431,7 @@ describe('worker atomic claims', () => {
       sessionLean({
         _id: jobId,
         currentExecution: { attemptId },
-        inputObject: { key: 'input', versionId: 'v1' },
+        inputObject: { key: 'input', etag: '"v1"' },
         recipeSnapshot: { recipeId: 'kim-vocals-v2' },
       }),
     );

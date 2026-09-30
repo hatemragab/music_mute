@@ -63,8 +63,6 @@ export class WorkerAttemptService {
     const first = await this.loadCurrent(principal, attemptId, dto);
     if (!first.job.inputObject)
       throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-    if (!(await this.storage.isPinnedObjectAvailable(first.job.inputObject)))
-      throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
     const session = await this.connection.startSession();
     let entitlement: { expiresAt: Date };
     try {
@@ -207,7 +205,7 @@ export class WorkerAttemptService {
     const reservation = this.outputReservation(first.job, first.attempt, dto);
     this.assertReservation(first.attempt.outputReservation, reservation);
     if (first.attempt.outputReservation) {
-      const object = await this.storage.findUploadedVersion(reservation);
+      const object = await this.storage.findUploadedObject(reservation);
       if (object) {
         await this.accountAccess.assertActive(first.job.userId);
         return {
@@ -291,7 +289,8 @@ export class WorkerAttemptService {
                 ownerUserId: job.userId,
                 reason: 'AUDIO_OUTPUT_ORPHANED',
                 nextAt: attempt.deadlineAt,
-                settleUntil: new Date(attempt.deadlineAt.getTime() + 300_000),
+                // R2 is unversioned: wait for expired grants and in-flight PUTs before key deletion.
+                settleUntil: new Date(attempt.deadlineAt.getTime() + 3_600_000),
               },
               session,
             );
@@ -341,7 +340,7 @@ export class WorkerAttemptService {
     const object = await measureTransferOperation(
       'completion_storage_verification',
       attemptId,
-      () => this.storage.verifyUploadedVersion(reservation, dto.versionId),
+      () => this.storage.verifyUploadedObject(reservation, dto.etag),
     );
     const session = await this.connection.startSession();
     try {
@@ -790,7 +789,7 @@ export class WorkerAttemptService {
   ) {
     if (
       !attempt.outputObject ||
-      attempt.outputObject.versionId !== dto.versionId ||
+      attempt.outputObject.etag !== dto.etag ||
       JSON.stringify(attempt.processingStageTimings) !==
         JSON.stringify(dto.stageTimings)
     )
@@ -807,7 +806,7 @@ export class WorkerAttemptService {
 function sameObject(left: ObjectIdentity, right: ObjectIdentity): boolean {
   return (
     left.key === right.key &&
-    left.versionId === right.versionId &&
+    left.etag === right.etag &&
     left.bytes === right.bytes &&
     left.sha256 === right.sha256 &&
     left.contentType === right.contentType

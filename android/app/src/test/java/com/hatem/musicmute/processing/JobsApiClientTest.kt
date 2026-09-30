@@ -28,7 +28,7 @@ class JobsApiClientTest {
     private val requestId = "c21a2eaa-7e73-4f08-89da-6ac35baa83e1"
     private val input = InputDeclaration("mp3", "audio/mpeg", 42, 1.5, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
     private val grant = """{"url":"https://storage.example/file","expires_at":"2026-09-09T12:15:00.000Z"}"""
-    private val upload get() = grant.dropLast(1) + """, "method":"PUT","headers":{"Content-Type":"audio/mpeg","x-amz-checksum-sha256":"${input.sha256}","If-None-Match":"*"}}"""
+    private val upload get() = grant.dropLast(1) + """, "method":"PUT","headers":{"Content-Type":"audio/mpeg","x-amz-checksum-sha256":"${input.sha256}", "x-amz-meta-sha256":"${input.sha256}","If-None-Match":"*"}}"""
     private val mutation get() = """{"id":"$id","status":"queued"}"""
     private fun job(status: String) = """{"id":"$id","status":"$status","created_at":"2026-09-09T12:00:00Z","updated_at":"2026-09-09T12:01:00Z","input":{"extension":"mp3","bytes":42,"duration_seconds":1.5},"can_download_input":true,"can_download_output":false}"""
     private fun client(

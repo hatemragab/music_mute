@@ -169,7 +169,7 @@ in-app prompt and verified download flow.
 ## Link acquisition
 
 URL imports use `POST /media-imports`. A private SaaS adapter returns audio to
-NestJS for validation, temporary-file cleanup and private S3 upload. Android
+NestJS for validation, temporary-file cleanup and private R2 upload. Android
 receives neither vendor credentials nor delivery URLs. See
 [provider architecture](../video_providers/README.md).
 
@@ -213,7 +213,7 @@ behavior still apply; uninterrupted background completion is not guaranteed.
 
 ## Storage and integration boundaries
 
-`processing/` owns local preparation, signed S3 uploads, durable account-scoped
+`processing/` owns local preparation, signed R2 uploads, durable account-scoped
 jobs, server import polling, and result caches. `playback/` uses Media3 and a
 private MediaSessionService. Local source files and user-exported copies remain
 under user control. Playback/export downloads only completed server results.
@@ -473,6 +473,7 @@ Arabic labels explain why repeat one or disabled auto-next leaves Up next empty.
 Local queue regressions are in `QueueEditingTest`, `QueueDisplayTest` and
 `PlaybackQueueTest`. Android gesture, accessibility and uninterrupted playback
 runtime checks still require an explicitly authorized Android device.
+
 ## Listening features
 
 The [plan](tasks/listening-features/PLAN.md),

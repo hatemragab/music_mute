@@ -39,7 +39,7 @@ class ProcessingRepository(
     private val api: JobsApi,
     private val session: () -> ProcessingSession?,
     private val scheduler: ProcessingScheduler,
-    private val uploader: FormUploader = S3FormUploader(),
+    private val uploader: FormUploader = ObjectStorageUploader(),
     private val now: () -> Long = System::currentTimeMillis,
     private val availableSpace: () -> Long = { stagingRoot.usableSpace },
     private val updateBlocked: () -> Boolean = { false },

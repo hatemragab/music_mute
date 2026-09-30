@@ -12,7 +12,7 @@
 
 Only the owner's or explicitly trusted operators' machines join the MVP fleet. A machine can inspect audio assigned to it. Scoped URLs limit access to other objects but cannot hide current input from the machine's owner. No confidential-computing or hostile-worker attestation claim is made.
 
-Machine processes never receive AWS credentials, MongoDB/Redis credentials, Firebase administrator secrets, dashboard sessions, or release signing private keys. They may receive only their machine credential, approved artifact/fixture access, assigned-job grants and narrow configuration. The backend remains the signer/coordinator.
+Machine processes never receive R2 credentials, MongoDB/Redis credentials, Firebase administrator secrets, dashboard sessions, or release signing private keys. They may receive only their machine credential, approved artifact/fixture access, assigned-job grants and narrow configuration. The backend remains the signer/coordinator.
 
 Use separate guards for admin, installation and machine authorization. A worker credential cannot call user/admin routes, read another machine's diagnostics, choose an arbitrary job, or ask for another user's object. Deny mismatched IDs even when a bearer token itself is valid.
 
@@ -53,8 +53,8 @@ Retain or transition the installation log upload permission long enough to ackno
    covers clean machines.
 5. Download the model directly from the exact owner-authorized upstream URL in
    authenticated catalog metadata, download the benchmark fixture from
-   MusicMute S3, verify both digests, and run a cheap preparation check. Never
-   copy or proxy model weights through MusicMute S3. Actual activation depends
+   MusicMute R2, verify both digests, and run a cheap preparation check. Never
+   copy or proxy model weights through MusicMute R2. Actual activation depends
    on the final service-context GPU check.
 6. Register the machine supervisor service under the intended service identity; create restricted credentials/state directories. Start in **installation mode** with user-job claiming disabled.
 7. Through that service, run Kim GPU validation, benchmark and fixture result-upload smoke test. Validate output and record evidence.
@@ -78,11 +78,11 @@ A dedicated non-interactive identity is preferred; grant only GPU/device/filesys
 
 The logged-out GPU test is a release gate. Starting as a service successfully is not proof that its GPU backend works. Reboot/log-out tests require owner scheduling. Encrypted-disk unlock requirements remain; never disable FileVault, Secure Boot, firewall protections or other OS security to satisfy an unattended-start checkbox.
 
-## 6. S3 and audio safety
+## 6. R2 and audio safety
 
-Only the backend signs data access, using approved credentials with restricted policy. Temporary URL scope includes the exact object/version or attempt output key and required method/headers. Request fresh output grants when needed rather than creating long-lived links at job assignment. Signed URLs are bearer access and may be reusable until expiry; treat them as secrets. [T5]
+Only the backend signs data access, using approved credentials with restricted policy. Temporary URL scope includes the exact key/ETag or attempt output key and required method/headers. Request fresh output grants when needed rather than creating long-lived links at job assignment. Signed URLs are bearer access and may be reusable until expiry; treat them as secrets. [T5]
 
-Parse media with pinned dependencies, explicit timeouts and byte/sample limits. Use argument arrays and reject path traversal, symlink escapes and untrusted network-bearing playlists. A Python child receives generated local paths and a validated recipe, not backend/S3 secrets or arbitrary command strings. Spawn children with an explicit environment allowlist; never inherit the development backend's AWS variables merely because both run on the same Mac.
+Parse media with pinned dependencies, explicit timeouts and byte/sample limits. Use argument arrays and reject path traversal, symlink escapes and untrusted network-bearing playlists. A Python child receives generated local paths and a validated recipe, not backend/R2 secrets or arbitrary command strings. Spawn children with an explicit environment allowlist; never inherit the development backend's STORAGE_* variables merely because both run on the same Mac.
 
 The MVP operates trusted workers, but malformed user media is still untrusted input. Full OS sandboxing can improve later; process isolation and least privilege are baseline, not a claim of perfect parser isolation.
 

@@ -60,7 +60,7 @@ Remove or omit:
 
 - Authorization, cookies, Firebase tokens, push tokens, enrollment codes, machine
   credentials, upload auth tokens, database URIs, and environment/config dumps.
-- Request/response bodies, signed S3 URLs, query strings, user-entered URLs,
+- Request/response bodies, signed R2 URLs, query strings, user-entered URLs,
   media names/titles, original filenames, local document paths, and media bytes.
 - Email, display name, IP/user identity collection, admin query results, account
   details, Python locals, `NSError.userInfo`, and arbitrary object serialization.
@@ -164,7 +164,7 @@ setup, release uploads, and production changes are later authorized operations.
 
 SEN-10 starts with sampled API and short worker stage spans. Do not create a
 single span for a multi-hour job. Propagate trace context only to the exact
-MusicMute API origin; exclude S3, signed uploads, Firebase, model owners,
+MusicMute API origin; exclude R2, signed uploads, Firebase, model owners,
 YouTube, and arbitrary user URLs. CORS and trace headers need explicit tests.
 Asynchronous backend-to-worker and Node-to-Python continuation requires reviewed
 protocol/data-model work; existing job IDs alone do not create distributed traces.

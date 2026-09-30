@@ -148,14 +148,20 @@ const grant = () => ({
 const storage = {
   createDownloadGrant: async () => grant(),
   createMediaGrant: async () => grant(),
-  isPinnedObjectAvailable: async () => true,
-  deleteVersionsForKey: async () => true,
+  deleteObject: async () => undefined,
 };
 const builder = Test.createTestingModule({ imports: [AppModule] })
   .overrideProvider(FirebaseIdentityService)
   .useValue(firebase)
   .overrideProvider(StoragePreflightService)
-  .useValue({ assertReady: async () => undefined })
+  .useValue({
+    assertReady: async () => undefined,
+    snapshot: () => ({
+      status: 'healthy',
+      checkedAt: new Date().toISOString(),
+      code: null,
+    }),
+  })
   .overrideProvider(StorageTransfersService)
   .useValue(storage)
   .overrideProvider(ReleaseArtifactStorageService)
@@ -166,10 +172,11 @@ const builder = Test.createTestingModule({ imports: [AppModule] })
       headers: {
         'Content-Type': 'application/vnd.android.package-archive',
         'x-amz-checksum-sha256': 'A'.repeat(43) + '=',
+        'x-amz-meta-sha256': 'A'.repeat(43) + '=',
         'If-None-Match': '*',
       },
     }),
-    pin: async () => 'fixture-apk-version',
+    pin: async () => '"fixture-apk-etag"',
     download: async () => undefined,
   })
   .overrideProvider(ApkVerifierService)
@@ -310,7 +317,7 @@ try {
   ]);
   const input = {
     key: `private/${jobId}/input.mp3`,
-    versionId: 'fixture-input-version',
+    etag: '"fixture-input-version"',
     contentType: 'audio/mpeg',
     bytes: 42,
     sha256: Buffer.alloc(32).toString('base64'),

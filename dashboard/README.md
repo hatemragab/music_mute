@@ -50,7 +50,7 @@ npm run build
 
 `npm run test:e2e` uses installed Google Chrome. It starts the Vite app plus a compiled NestJS fixture backed by test-owned, loopback-only MongoDB and Redis processes. It requires `mongod` and `redis-server` locally, uses synthetic Firebase/storage/APK-verifier doubles, and removes its temporary database files when the run ends.
 
-The browser suite also uses deterministic route fixtures for UI states. Those fixtures prove browser behavior but do not prove live Firebase, S3 CORS/IAM, production data, or deployment.
+The browser suite also uses deterministic route fixtures for UI states. Those fixtures prove browser behavior but do not prove live Firebase, R2 CORS/IAM, production data, or deployment.
 
 ## Security and behavior
 

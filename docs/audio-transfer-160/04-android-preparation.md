@@ -11,7 +11,7 @@ Paths below are under `android/app/src/main/java/com/hatem/musicmute/`:
 
 - `processing/ProcessingMediaPolicy.kt`, `MediaSourceInspector.kt` and `AndroidAudioInspector.kt`
 - `processing/AudioInputPreparer.kt`, `AudioPreparationEngine.kt` and `DecodedAudioValidator.kt`
-- `processing/MediaPreparationWorker.kt`, `AudioUploadWorker.kt` and `S3FormUploader.kt`
+- `processing/MediaPreparationWorker.kt`, `AudioUploadWorker.kt` and `ObjectStorageUploader.kt`
 - Existing tests under `android/app/src/test/java/com/hatem/musicmute/processing/`
 
 ## Planned work

@@ -66,7 +66,7 @@ describe("shared operational logs", () => {
       layout.stderrPath,
       "runtime",
       new Error(
-        `credential=${"x".repeat(43)} https://s3.invalid/a?X-Amz-Signature=secret /Users/private/a`,
+        `credential=${"x".repeat(43)} https://storage.invalid/a?X-Amz-Signature=secret /Users/private/a`,
       ),
     );
     const value = await readFile(layout.stderrPath, "utf8");

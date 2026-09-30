@@ -205,7 +205,7 @@ test('native acquisition cleans upload/finalization failures and preserves commi
       return {
         id: reservation._id.toHexString(),
         upload: {
-          url: `${origin}/s3-input`,
+          url: `${origin}/storage-input`,
           headers: {
             'Content-Type': input.contentType,
           },
@@ -546,7 +546,7 @@ test('BullMQ starts at most five imports per second across replicas, runs twenty
       const before = started;
       for (const release of releases.splice(0)) release();
       await until(
-        () => started > before || active === 0,
+        () => started > before || (started === 25 && active === 0),
         'release import slots',
       );
     }

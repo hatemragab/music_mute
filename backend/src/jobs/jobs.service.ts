@@ -27,7 +27,7 @@ import { WorkerHintService } from '../worker-hints/worker-hint.service.js';
 import { assertJobRequestNotPurged } from './purged-job-request.js';
 
 const UPLOAD_EXPIRY_GRACE_MS = 300_000;
-const VERSION_SETTLEMENT_MS = 3_600_000;
+const TRANSFER_SETTLEMENT_MS = 3_600_000;
 
 @Injectable()
 export class JobsService {
@@ -188,13 +188,39 @@ export class JobsService {
               now.getTime()) + UPLOAD_EXPIRY_GRACE_MS,
           ),
         );
-        await this.cleanup.schedule({
-          key: job.inputReservation.key,
-          versionId: null,
-          ownerUserId: job.userId,
-          reason: 'AUDIO_INPUT_INVALID',
-          nextAt: due,
-          settleUntil: new Date(due.getTime() + VERSION_SETTLEMENT_MS),
+        await this.transactions.run(async (session) => {
+          const pending = await this.jobs
+            .findOne({
+              _id: job._id,
+              userId: job.userId,
+              deletedAt: null,
+              status: 'awaiting_upload',
+              inputObject: null,
+            })
+            .session(session);
+          if (!pending) return;
+          await this.cleanup.schedule(
+            {
+              key: pending.inputReservation.key,
+              ownerUserId: pending.userId,
+              reason: 'AUDIO_INPUT_INVALID',
+              nextAt: due,
+              settleUntil: new Date(due.getTime() + TRANSFER_SETTLEMENT_MS),
+            },
+            session,
+          );
+          // Competes with successful confirmation before the cleanup task commits.
+          const touched = await this.jobs.updateOne(
+            {
+              _id: pending._id,
+              revision: pending.revision,
+              status: 'awaiting_upload',
+              inputObject: null,
+            },
+            { $inc: { revision: 1 } },
+            { session },
+          );
+          if (touched.modifiedCount !== 1) throw jobError('JOB_STATE_CONFLICT');
         });
       }
       throw error;

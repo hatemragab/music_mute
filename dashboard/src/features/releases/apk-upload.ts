@@ -21,8 +21,8 @@ const validatedHeaders = (grant: ApkUploadGrant) => {
     entries.map(([name, value]) => [name.toLowerCase(), value]),
   );
   if (
-    entries.length !== 3 ||
-    headers.size !== 3 ||
+    entries.length !== 4 ||
+    headers.size !== 4 ||
     entries.some(([name, value]) =>
       Array.from(name + value).some((character) => {
         const codePoint = character.codePointAt(0) ?? 0;
@@ -31,7 +31,8 @@ const validatedHeaders = (grant: ApkUploadGrant) => {
     ) ||
     headers.get("content-type") !== "application/vnd.android.package-archive" ||
     headers.get("if-none-match") !== "*" ||
-    !/^[A-Za-z0-9+/]{43}=$/.test(headers.get("x-amz-checksum-sha256") ?? "")
+    !/^[A-Za-z0-9+/]{43}=$/.test(headers.get("x-amz-checksum-sha256") ?? "") ||
+    headers.get("x-amz-meta-sha256") !== headers.get("x-amz-checksum-sha256")
   )
     throw new Error("The upload grant is invalid.");
   return entries;
@@ -102,8 +103,22 @@ export const uploadApk = (
   file: File,
   onProgress: (fraction: number) => void,
   signal: AbortSignal,
+  sha256Hex: string,
 ) => {
   validateUploadGrant(grant);
+  validateApk(file);
+  if (!/^[a-f0-9]{64}$/.test(sha256Hex))
+    throw new Error("The APK hash is invalid.");
+  const checksum = btoa(
+    String.fromCharCode(
+      ...sha256Hex.match(/../g)!.map((byte) => Number.parseInt(byte, 16)),
+    ),
+  );
+  const headers = new Map(
+    validatedHeaders(grant).map(([name, value]) => [name.toLowerCase(), value]),
+  );
+  if (headers.get("x-amz-checksum-sha256") !== checksum)
+    throw new Error("The upload grant does not match the APK hash.");
   if (signal.aborted)
     return Promise.reject(new DOMException("Upload cancelled.", "AbortError"));
   onProgress(0);

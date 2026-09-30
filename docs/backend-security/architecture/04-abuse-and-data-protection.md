@@ -40,7 +40,7 @@ Cost-creating routes use the smallest relevant set of budgets:
 1. existing global/IP HTTP ceiling;
 2. authenticated account/UID endpoint ceiling;
 3. durable account quota/grant counter;
-4. service-wide safety ceiling where S3/worker cost is involved.
+4. service-wide safety ceiling where R2/worker cost is involved.
 
 Apply route-specific budgets to create job, issue upload URL, confirm upload,
 retry/cancel mutations, issue download URL, account deletion/recovery, and
@@ -124,7 +124,7 @@ Design within Atlas Free constraints:
 - bounded cleanup batches and no disk-spilling aggregation assumption;
 - application alerts before the 0.5 GB hard storage ceiling.
 
-Do not store S3 media, error stacks, or large diagnostics in MongoDB. Safe job
+Do not store R2 media, error stacks, or large diagnostics in MongoDB. Safe job
 errors remain bounded and user-presentable.
 
 ## Privacy and deletion integration

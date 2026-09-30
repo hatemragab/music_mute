@@ -65,7 +65,6 @@ describe('ProcessingStorageCleanupService', () => {
     expect(cleanup.schedule).toHaveBeenCalledWith(
       {
         key: job.inputReservation.key,
-        versionId: null,
         ownerUserId: owner,
         reason: 'AUDIO_INPUT_TERMINAL',
         nextAt: new Date('2026-09-12T00:40:00.000Z'),
@@ -84,7 +83,7 @@ describe('ProcessingStorageCleanupService', () => {
     );
   });
 
-  it('schedules a cancelled terminal input by its exact immutable version', async () => {
+  it('schedules a cancelled terminal input by its unique key after transfer settlement', async () => {
     const { service, jobs, cleanup, session } = fixture();
     const job = {
       _id: new Types.ObjectId('507f1f77bcf86cd799439014'),
@@ -98,7 +97,7 @@ describe('ProcessingStorageCleanupService', () => {
       },
       inputObject: {
         key: `users/${owner.toHexString()}/jobs/cancelled/input/file.mp3`,
-        versionId: 'immutable-input-version',
+        etag: '"immutable-input-version"',
       },
       admissionSnapshot: null,
     };
@@ -109,11 +108,10 @@ describe('ProcessingStorageCleanupService', () => {
     expect(cleanup.schedule).toHaveBeenCalledWith(
       {
         key: job.inputObject.key,
-        versionId: job.inputObject.versionId,
         ownerUserId: owner,
         reason: 'AUDIO_INPUT_TERMINAL',
-        nextAt: now,
-        settleUntil: now,
+        nextAt: new Date('2026-09-12T00:35:00.000Z'),
+        settleUntil: new Date('2026-09-12T01:35:00.000Z'),
       },
       session,
     );

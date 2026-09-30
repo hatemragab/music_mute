@@ -68,7 +68,7 @@ const processingStageTiming = new MongoSchema<WorkerProcessingStageTiming>(
 const outputObject = new MongoSchema<ObjectIdentity>(
   {
     key: { type: String, required: true, maxlength: 1024 },
-    versionId: { type: String, required: true, maxlength: 1024 },
+    etag: { type: String, required: true, maxlength: 1024 },
     bytes: {
       type: Number,
       required: true,

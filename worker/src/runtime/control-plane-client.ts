@@ -308,7 +308,7 @@ export class WorkerControlPlaneClient {
     attemptId: string,
     identity: WorkerIdentity,
     completion: {
-      versionId: string;
+      etag: string;
       recipeId: WorkerRecipeId;
       recipeRevision: number;
       recipeDigest: string;

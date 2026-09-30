@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createWebServer, publicConfig } from "./server.mjs";
 
 const env = {
+  PUBLIC_MEDIA_ORIGIN: "https://fixture.r2.cloudflarestorage.com",
   PUBLIC_API_ORIGIN: "https://api.example.com",
   PUBLIC_FIREBASE_API_KEY: "public-key",
   PUBLIC_FIREBASE_AUTH_DOMAIN: "example.firebaseapp.com",
@@ -31,7 +32,7 @@ test("serves runtime config without caching and a health response", async () => 
   assert.match(await config.text(), /api\.example\.com/);
   assert.match(
     config.headers.get("content-security-policy"),
-    /media-src 'self' blob: https:\/\/music-remover\.s3\.us-east-2\.amazonaws\.com/,
+    /media-src 'self' blob: https:\/\/fixture\.r2\.cloudflarestorage\.com/,
   );
   const health = await fetch(`${origin}/healthz`);
   assert.equal(await health.text(), "ok");
@@ -112,49 +113,32 @@ test("exposes the public entry point and crawl assets without indexing private r
   assert.equal(health.headers.get("x-robots-tag"), "noindex");
 });
 
-test("opt-in acceleration allows only this bucket and keeps regional grants valid", async () => {
-  const accelerated = createWebServer({
-    env: { ...env, PUBLIC_MEDIA_ACCELERATION_ENABLED: "true" },
-  });
-  await new Promise((resolve) => accelerated.listen(0, "127.0.0.1", resolve));
-  try {
-    const response = await fetch(
-      `http://127.0.0.1:${accelerated.address().port}/healthz`,
-    );
-    const policy = response.headers.get("content-security-policy");
-    assert.ok(
-      policy.includes(
-        "media-src 'self' blob: https://music-remover.s3.us-east-2.amazonaws.com https://music-remover.s3-accelerate.amazonaws.com",
-      ),
-    );
-    assert.ok(!policy.includes("*.amazonaws"));
-  } finally {
-    await new Promise((resolve) => accelerated.close(resolve));
-  }
+test("CSP permits only the explicit storage origin", async () => {
+  const response = await fetch(`${origin}/healthz`);
+  const policy = response.headers.get("content-security-policy");
+  assert.ok(
+    policy.includes(
+      "media-src 'self' blob: https://fixture.r2.cloudflarestorage.com",
+    ),
+  );
+  assert.ok(policy.includes(" https://fixture.r2.cloudflarestorage.com "));
+  assert.ok(!policy.includes("*."));
+  assert.ok(!policy.includes("amazonaws"));
 });
-test("rejects unsafe media origins and unsupported acceleration configuration", () => {
+test("requires a safe explicit media origin", () => {
   for (const value of [
-    "https://user:password@s3.example.com",
-    "https://s3.example.com/?token=secret",
-    "https://s3.example.com/#fragment",
+    undefined,
+    "",
+    "http://storage.example.com",
+    "https://user:password@storage.example.com",
+    "https://storage.example.com/music-mute",
+    "https://storage.example.com/?token=secret",
+    "https://storage.example.com/#fragment",
   ])
-    assert.throws(() =>
-      createWebServer({ env: { ...env, PUBLIC_MEDIA_ORIGIN: value } }),
+    assert.throws(
+      () => createWebServer({ env: { ...env, PUBLIC_MEDIA_ORIGIN: value } }),
+      /PUBLIC_MEDIA_ORIGIN/,
     );
-  assert.throws(() =>
-    createWebServer({
-      env: { ...env, PUBLIC_MEDIA_ACCELERATION_ENABLED: "maybe" },
-    }),
-  );
-  assert.throws(() =>
-    createWebServer({
-      env: {
-        ...env,
-        PUBLIC_MEDIA_ACCELERATION_ENABLED: "true",
-        PUBLIC_MEDIA_ORIGIN: "https://cdn.example.com",
-      },
-    }),
-  );
 });
 
 test("deployment checks return uncached HTML with a build version", async () => {

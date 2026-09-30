@@ -24,7 +24,8 @@ struct TransferCompletion: Sendable {
 @MainActor protocol BackgroundTransferring: AnyObject {
   var onCompletion: ((TransferCompletion) async -> Void)? { get set }
   var onProgress: ((TransferContext, TransferProgressSnapshot) -> Void)? { get set }
-  func startUpload(file: S3MultipartFile, grant: UploadGrant, context: TransferContext) async throws
+  func startUpload(file: ObjectStorageUploadFile, grant: UploadGrant, context: TransferContext)
+    async throws
     -> Int
   func activeTransfers() async -> [TransferContext]
   func cancel(ownerUid: String, operationId: UUID?) async
@@ -73,7 +74,8 @@ struct TransferCompletion: Sendable {
     return true
   }
 
-  func startUpload(file: S3MultipartFile, grant: UploadGrant, context: TransferContext) async throws
+  func startUpload(file: ObjectStorageUploadFile, grant: UploadGrant, context: TransferContext)
+    async throws
     -> Int
   {
     try Task.checkCancellation()
@@ -86,11 +88,13 @@ struct TransferCompletion: Sendable {
     return task.taskIdentifier
   }
 
-  static func uploadRequest(grant: UploadGrant, multipart: S3MultipartFile) throws -> URLRequest {
+  static func uploadRequest(grant: UploadGrant, multipart: ObjectStorageUploadFile) throws
+    -> URLRequest
+  {
     guard grant.url.scheme == "https", grant.url.host != nil,
       grant.url.user == nil, grant.url.password == nil, grant.url.fragment == nil,
       grant.method == .put,
-      grant.headers.count == 3,
+      grant.headers.count == 4,
       grant.headers.keys.allSatisfy({
         !$0.contains(where: {
           guard let ascii = $0.asciiValue else { return false }
@@ -110,9 +114,10 @@ struct TransferCompletion: Sendable {
         throw ProcessingTransferFailure.invalidGrant
       }
     }
-    guard headers.count == 3,
+    guard headers.count == 4,
       headers["content-type"] == multipart.contentType,
       headers["x-amz-checksum-sha256"] == multipart.checksumSha256,
+      headers["x-amz-meta-sha256"] == multipart.checksumSha256,
       headers["if-none-match"] == "*"
     else { throw ProcessingTransferFailure.invalidGrant }
     var request = URLRequest(

@@ -32,6 +32,32 @@ describe("validateApk", () => {
 });
 
 describe("validateUploadGrant", () => {
+  it("rejects missing or unbound checksum metadata and unknown headers", () => {
+    const headers = {
+      "Content-Type": "application/vnd.android.package-archive",
+      "x-amz-checksum-sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "x-amz-meta-sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "If-None-Match": "*",
+    };
+    for (const invalid of [
+      { ...headers, "x-amz-meta-sha256": "wrong" },
+      { ...headers, Authorization: "secret" },
+      { ...headers, "content-type": headers["Content-Type"] },
+      Object.fromEntries(
+        Object.entries(headers).filter(
+          ([name]) => name !== "x-amz-meta-sha256",
+        ),
+      ),
+    ]) {
+      expect(() =>
+        validateUploadGrant({
+          method: "PUT",
+          url: "https://storage.example/file",
+          headers: invalid,
+        }),
+      ).toThrow("invalid");
+    }
+  });
   it("accepts an HTTPS upload destination without embedded credentials", () => {
     expect(() =>
       validateUploadGrant({
@@ -41,6 +67,7 @@ describe("validateUploadGrant", () => {
           "Content-Type": "application/vnd.android.package-archive",
           "x-amz-checksum-sha256":
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "x-amz-meta-sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
           "If-None-Match": "*",
         },
       }),
@@ -60,6 +87,7 @@ describe("validateUploadGrant", () => {
           "Content-Type": "application/vnd.android.package-archive",
           "x-amz-checksum-sha256":
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "x-amz-meta-sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
           "If-None-Match": "*",
         },
       }),
@@ -85,6 +113,7 @@ describe("validateUploadGrant", () => {
           "Content-Type": "application/vnd.android.package-archive",
           "x-amz-checksum-sha256":
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\r",
+          "x-amz-meta-sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\r",
           "If-None-Match": "*",
         },
       }),
@@ -93,6 +122,30 @@ describe("validateUploadGrant", () => {
 });
 
 describe("uploadApk", () => {
+  it("rejects a grant bound to a different APK hash before transport", () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    expect(() =>
+      uploadApk(
+        {
+          method: "PUT",
+          url: "https://storage.example/file",
+          headers: {
+            "Content-Type": "application/vnd.android.package-archive",
+            "If-None-Match": "*",
+            "x-amz-checksum-sha256":
+              "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "x-amz-meta-sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          },
+        },
+        new File(["fixture"], "release.apk"),
+        () => {},
+        new AbortController().signal,
+        "a".repeat(64),
+      ),
+    ).toThrow("does not match");
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it("uses a transport that rejects redirects", async () => {
     class SuccessfulXMLHttpRequest {
       status = 204;
@@ -122,11 +175,13 @@ describe("uploadApk", () => {
           "If-None-Match": "*",
           "x-amz-checksum-sha256":
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "x-amz-meta-sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         },
       },
       new File([new Uint8Array([1])], "release.apk"),
       () => undefined,
       new AbortController().signal,
+      "0".repeat(64),
     );
 
     expect(fetch).toHaveBeenCalledWith(

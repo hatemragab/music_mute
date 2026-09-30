@@ -23,7 +23,7 @@ export class ReleaseUpload {
     default: 'awaiting_upload',
   })
   artifactState!: ArtifactState;
-  @Prop({ type: String, default: null }) versionId!: string | null;
+  @Prop({ type: String, default: null }) etag!: string | null;
   @Prop({ type: String, default: null }) verificationToken!: string | null;
   @Prop({ type: String, default: null }) completionOperationId!: string | null;
   @Prop({ type: Date, default: null }) verificationDeadline!: Date | null;

@@ -1,7 +1,7 @@
 # MongoDB retention
 
 Implemented on 2026-09-30. These are source policies; deployment and measured
-production storage savings are separate checks. Audio bytes remain in private S3.
+production storage savings are separate checks. Audio bytes remain in private R2.
 
 | Collection                                                          | Retention                                   | Safety condition                                                                                                 |
 | ------------------------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -18,7 +18,7 @@ production storage savings are separate checks. Audio bytes remain in private S3
 Successful Library media and active jobs/imports are retained. Existing URL-import
 (7 days), completed cleanup-task (30 days), abuse detail (90 days), daily usage
 (35 days after day end), grant receipt and settled reservation (12 months after
-month end) policies remain. Outstanding reservations and unfinished S3 cleanup
+month end) policies remain. Outstanding reservations and unfinished R2 cleanup
 never receive a new expiry.
 
 ## Coordinated cleanup
@@ -75,7 +75,7 @@ node --test --test-concurrency=1 test/mongodb-retention.integration.mjs test/mon
 ```
 
 The TTL test changes the monitor interval only inside its owned loopback mongod.
-Fixtures establish local behavior, not Atlas/S3/FCM production health or savings.
+Fixtures establish local behavior, not Atlas/R2/FCM production health or savings.
 
 Validation on 2026-09-30: `pnpm run verify` passed formatting, lint, type checking,
 secret checks, 1,021 unit tests, 158 HTTP tests and the native build. The retention

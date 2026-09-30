@@ -12,17 +12,17 @@ root-mounted HTTP and WebSocket contract.
 
 ## 1. Durable entities
 
-| Entity | Minimum fields and invariants |
-| --- | --- |
-| Enrollment invitation | ID, random-code digest, expiresAt, consumedAt, creator, initial group/policy; one activation path |
-| Installation session | ID, scoped credential digest, invitation ID, phase, outcome, sequence acknowledgements, lastSeenAt, report summary; exists before machine activation |
-| Machine | ID, credential digest/revision, status, policy revision, approved capabilities, hardware report, software version, supervisor generation, desired/applied revisions |
-| Worker slot | ID, machine ID, GPU ID, stable slot index, process incarnation, current session, validated capacity, allowed recipes, current attempt |
-| Existing audio job | Preserve user/metadata/input/output/status/revision fields; add frozen recipe snapshot, retry eligibility, attempt number and current execution ownership |
-| Attempt history | Attempt ID, job ID, machine/worker/session/incarnation, claim request ID, lease and deadline, state, stage/timings, output reservations and terminal reason |
-| Log batch | Installation/machine stream, sequence range, digest, durable archive identity or bounded inline payload, ack state |
-| Heartbeat sample | Machine/time/sanitized measurements, `expiresAt`; history only |
-| Worker release | Immutable release ID, manifest digest, platform/backend and protocol compatibility; added for manual package lifecycle validation in branch G |
+| Entity                | Minimum fields and invariants                                                                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enrollment invitation | ID, random-code digest, expiresAt, consumedAt, creator, initial group/policy; one activation path                                                                   |
+| Installation session  | ID, scoped credential digest, invitation ID, phase, outcome, sequence acknowledgements, lastSeenAt, report summary; exists before machine activation                |
+| Machine               | ID, credential digest/revision, status, policy revision, approved capabilities, hardware report, software version, supervisor generation, desired/applied revisions |
+| Worker slot           | ID, machine ID, GPU ID, stable slot index, process incarnation, current session, validated capacity, allowed recipes, current attempt                               |
+| Existing audio job    | Preserve user/metadata/input/output/status/revision fields; add frozen recipe snapshot, retry eligibility, attempt number and current execution ownership           |
+| Attempt history       | Attempt ID, job ID, machine/worker/session/incarnation, claim request ID, lease and deadline, state, stage/timings, output reservations and terminal reason         |
+| Log batch             | Installation/machine stream, sequence range, digest, durable archive identity or bounded inline payload, ack state                                                  |
+| Heartbeat sample      | Machine/time/sanitized measurements, `expiresAt`; history only                                                                                                      |
+| Worker release        | Immutable release ID, manifest digest, platform/backend and protocol compatibility; added for manual package lifecycle validation in branch G                       |
 
 Choose a small set of Mongoose collections reflecting these boundaries; do not make a collection per telemetry metric. Keep current ownership inside the job for atomic matching. Slot reservations and attempt history can use the replica-set transactions already required by processing startup. [R4, R8]
 
@@ -32,23 +32,23 @@ Use UUIDs for new external fleet identifiers unless existing naming conventions 
 
 Existing public states are `awaiting_upload`, `queued`, `validating`, `processing`, `uploading_result`, `interrupted`, `cancel_requested`, `ready`, `failed`, and `cancelled`. Do not replace them with a new uppercase enum. [R3]
 
-| Event | Public state | Internal detail |
-| --- | --- | --- |
-| Reservation created | awaiting_upload | Input not yet trusted or eligible |
-| Verified upload confirmed | queued | Frozen recipe and queue timestamp present |
-| Claimed; input downloaded/validated | validating | Lease active; stage distinguishes download/validation |
-| Separation/denoise/trim/encode | processing | Fine-grained stage and timings on attempt |
-| Output upload | uploading_result | Attempt-specific reservation |
-| Accepted finalization | ready | Version-pinned output committed |
-| Retryable attempt lost | interrupted briefly or directly queued | Conditional recovery preserves prior attempt history |
-| User cancellation | Existing cancellation contract | Invalidate ownership; signal child; reject any late result |
-| Final failure | failed | Safe public code; richer sanitized internal reason |
+| Event                               | Public state                           | Internal detail                                            |
+| ----------------------------------- | -------------------------------------- | ---------------------------------------------------------- |
+| Reservation created                 | awaiting_upload                        | Input not yet trusted or eligible                          |
+| Verified upload confirmed           | queued                                 | Frozen recipe and queue timestamp present                  |
+| Claimed; input downloaded/validated | validating                             | Lease active; stage distinguishes download/validation      |
+| Separation/denoise/trim/encode      | processing                             | Fine-grained stage and timings on attempt                  |
+| Output upload                       | uploading_result                       | Attempt-specific reservation                               |
+| Accepted finalization               | ready                                  | ETag-confirmed output committed                            |
+| Retryable attempt lost              | interrupted briefly or directly queued | Conditional recovery preserves prior attempt history       |
+| User cancellation                   | Existing cancellation contract         | Invalidate ownership; signal child; reject any late result |
+| Final failure                       | failed                                 | Safe public code; richer sanitized internal reason         |
 
-Do not expose a signed URL, machine secret, local path, internal stack trace or S3 administration field in a public job serializer. Map new fleet errors to compatible safe public errors; extend public enums only with explicit compatibility tests.
+Do not expose a signed URL, machine secret, local path, internal stack trace or R2 administration field in a public job serializer. Map new fleet errors to compatible safe public errors; extend public enums only with explicit compatibility tests.
 
 ## 3. Enqueue and claim
 
-Restore submission/upload-confirm/retry by extending the surviving controller's currently unavailable operations behind the feature gate. Reuse existing validation, idempotency, admission/usage, settings fences and user authorization. Only jobs with verified version-pinned input enter the queue. Historical queued records lacking the new execution version/recipe are not automatically executable; migrate or reject deliberately.
+Restore submission/upload-confirm/retry by extending the surviving controller's currently unavailable operations behind the feature gate. Reuse existing validation, idempotency, admission/usage, settings fences and user authorization. Only jobs with verified ETag-confirmed input enter the queue. Historical queued records lacking the new execution version/recipe are not automatically executable; migrate or reject deliberately.
 
 For a claim request include `requestId`, `workerId`, `gpuId`, `sessionId`, `incarnation`, and applied policy revision. Machine identity comes from the credential. The server validates that the slot belongs to that machine/session and is within approved limits.
 
@@ -78,7 +78,7 @@ A scanner runs approximately every 10 seconds and conditionally handles expired 
 
 Retries use a **new** attempt ID and fresh output key, restart from the pinned input, and keep the original recipe. Maximum three execution attempts is a configurable starting policy. An automatic attempt retry is not the public user action that creates a new linked job; preserve the existing public retry/usage contract.
 
-Reject old progress, renewals, upload-grant requests and completions after reassignment. If an upload began before ownership expired, S3 may still accept it; it remains an orphan and cannot become the job's accepted output. Attempt fencing and pinned object versions, not presigned-link expiry alone, provide correctness. [T5]
+Reject old progress, renewals, upload-grant requests and completions after reassignment. If an upload began before ownership expired, R2 may still accept it; it remains an orphan and cannot become the job's accepted output. Attempt fencing and unique create-only keys, not presigned-link expiry alone, provide correctness. [T5]
 
 ## 5. Cancellation, pause and policy changes
 
@@ -88,44 +88,62 @@ Cancel/delete wins when its conditional job transition commits first. Every fina
 
 Dashboard policy updates use `expectedRevision` compare-and-set. Old-session/old-policy claims fail with a resync response. Active attempts keep their frozen recipe and existing parameters. Disabling denoise on a machine means it cannot claim a denoise-required recipe; it never means silently skipping the step.
 
-## 6. S3 grant and completion protocol
+## 6. R2 grant and completion protocol
 
-Keep the existing media identity: `{key, versionId, bytes, sha256, contentType}`. Here `sha256` is **base64** as enforced by `isSha256`, whereas signed release/model SHA-256 digests use explicitly named hexadecimal fields. [R3, R4, R7]
+The storage identity is `{key, etag, bytes, sha256, contentType}`. `etag` preserves
+the opaque quoted strong HTTP value and `sha256` is canonical padded **base64**;
+release/model document hashes remain explicitly hexadecimal. This owner-approved
+fresh-database change replaces object version IDs. See
+[the current R2 storage contract](../../r2-storage/README.md).
 
-The supervisor downloads only a backend-issued GET URL for the assigned input version and verifies byte count/checksum. Do not use arbitrary user-supplied remote URLs for worker input. Parse/validate local media after download; do not let a playlist fetch a second network resource.
+The supervisor downloads only the backend-issued URL and required headers for the
+assigned confirmed input and verifies byte count/checksum. Arbitrary user-supplied
+URLs, playlists and storage account credentials are forbidden. It declares output
+size, checksum, type and measured duration; the backend reserves the unique
+attempt-scoped key and issues a bounded create-only PUT grant.
 
-Before upload, declare the result size, media checksum, content type and measured duration. The backend derives an exact output key such as `worker-jobs/<jobId>/attempts/<attemptId>/vocals.mp3` within the configured namespace and issues a bounded PUT grant. Store the reservation; do not accept a caller-chosen bucket, key, prefix or arbitrary URL. Request/refresh the grant near upload time and only under valid ownership.
+Upload with exactly Content-Type, `x-amz-checksum-sha256`, `x-amz-meta-sha256`
+(the same base64 digest), and `If-None-Match: *`. Preserve the quoted response ETag
+and submit `etag` at completion. One HEAD verifies key/ETag, size, type and signed
+checksum metadata; a returned provider checksum must match when present. R2
+validates the required PUT checksum. ETag alone is not a cryptographic hash.
 
-Upload with the exact signed headers, obtain the immutable S3 version ID, then call complete with the reservation and version. Before finalization, the backend HEADs that exact version and verifies key, checksum, size and media type. It must not accept the latest version by key as a substitute. Media-format checks on the worker are required; S3 metadata validation is integrity checking, not proof that arbitrary hostile output is a good vocal separation.
+Perform network verification outside a long transaction, then recheck ownership,
+account/policy and reservation inside finalization. Commit `ready`, the verified
+output identity, attempt terminal state, slot release, usage settlement and durable
+notification work coherently. Repeated identical completion returns the accepted
+result; stale/conflicting completion does not publish or double count.
 
-Perform network verification outside a long database transaction, then recheck ownership/policy/account state and the expected output reservation inside the finalization transaction. Commit `ready`, the pinned output reference, attempt terminal state, slot release, usage settlement and durable notification work coherently using existing mechanisms. A repeated identical completion returns the accepted result. A conflicting duplicate or stale attempt returns a conflict, not a second accounting event.
-
-Do not trust ETag as a universal SHA-256. Completed version pinning prevents a still-valid PUT URL from changing what clients retrieve. Track all uploaded attempt keys/version IDs for cleanup, including abandoned results and delete markers; never delete sibling objects or active results. Existing storage preflight/cleanup remains authoritative. [R5, R6, T5]
+Unique never-reused keys and create-only PUTs prevent replacement while a URL is
+valid. Cleanup waits for safe grant/in-flight expiry and deletes exact registered
+keys durably. Track abandoned results; do not list/delete sibling objects, fabricate
+version IDs or require AWS bucket-versioning calls. Existing attempt fencing remains
+authoritative.
 
 ## 7. Proposed endpoint surface
 
 Routes below are relative to the configured application API prefix. One fleet module owns them. Preserve existing user `/jobs` endpoints instead of moving clients to these private routes.
 
-| Route | Credential | Purpose |
-| --- | --- | --- |
-| `POST /worker/v1/installations` | Single-use enrollment code | Exchange invitation for installation session; request replay handled safely |
-| `POST /worker/v1/installations/:id/artifacts` | Scoped installation credential | Obtain verified MusicMute release/fixture grants plus the signed, exact owner-hosted model source descriptor for the declared platform; never return a MusicMute S3 model grant |
-| `POST /worker/v1/installations/:id/qualification-output/grant` | Scoped installation credential | Reserve one immutable fixture-result object and obtain/refresh its exact PUT grant |
-| `POST /worker/v1/installations/:id/qualification-output/confirm` | Scoped installation credential | Verify and pin the uploaded fixture-result S3 version before activation |
-| `POST /worker/v1/installations/:id/logs` | Scoped installation credential | Pre-activation diagnostics, sequence ack |
-| `POST /worker/v1/installations/:id/report` | Installation credential | Preflight, service and benchmark report |
-| `POST /worker/v1/installations/:id/activate` | Installation credential | Idempotent activation with locally generated machine credential digest |
-| `POST /worker/v1/session` | Machine credential | New supervisor generation or resume same boot session |
-| `GET /worker/v1/config` | Machine credential/session | Current effective policy and compatible release |
-| `POST /worker/v1/slots` | Machine credential/session | Register bounded slots/process incarnations |
-| `POST /worker/v1/claims` | Machine credential/session | Claim one job for one free slot |
-| `POST /worker/v1/leases/renew` | Machine credential/session | Per-item batched renewals |
-| `POST /worker/v1/attempts/:id/input-grant` | Valid current attempt | Refresh input access |
-| `POST /worker/v1/attempts/:id/output-grant` | Valid current attempt | Reserve/refresh exact output upload |
-| `POST /worker/v1/attempts/:id/complete` | Current attempt or same terminal operation | Idempotent finalization |
-| `POST /worker/v1/attempts/:id/fail` | Current attempt or same terminal operation | Categorized failure and recovery |
-| `POST /worker/v1/logs` | Machine credential | Ordered runtime diagnostic batches |
-| `GET /worker/v1/logs/cursor?sessionId=UUID&incarnation=UUID` | Machine credential/current session | Returns `{ acknowledgedSequence: number }` from the durable machine cursor; missing legacy value is zero. Revoked, missing or stale sessions return `WORKER_UNAUTHENTICATED`; invalid stored cursor returns `WORKER_CONFLICT`. |
+| Route                                                            | Credential                                 | Purpose                                                                                                                                                                                                                        |
+| ---------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /worker/v1/installations`                                  | Single-use enrollment code                 | Exchange invitation for installation session; request replay handled safely                                                                                                                                                    |
+| `POST /worker/v1/installations/:id/artifacts`                    | Scoped installation credential             | Obtain verified MusicMute release/fixture grants plus the signed, exact owner-hosted model source descriptor for the declared platform; never return a MusicMute R2 model grant                                                |
+| `POST /worker/v1/installations/:id/qualification-output/grant`   | Scoped installation credential             | Reserve one immutable fixture-result object and obtain/refresh its exact PUT grant                                                                                                                                             |
+| `POST /worker/v1/installations/:id/qualification-output/confirm` | Scoped installation credential             | Verify and pin the uploaded fixture-result R2 ETag before activation                                                                                                                                                           |
+| `POST /worker/v1/installations/:id/logs`                         | Scoped installation credential             | Pre-activation diagnostics, sequence ack                                                                                                                                                                                       |
+| `POST /worker/v1/installations/:id/report`                       | Installation credential                    | Preflight, service and benchmark report                                                                                                                                                                                        |
+| `POST /worker/v1/installations/:id/activate`                     | Installation credential                    | Idempotent activation with locally generated machine credential digest                                                                                                                                                         |
+| `POST /worker/v1/session`                                        | Machine credential                         | New supervisor generation or resume same boot session                                                                                                                                                                          |
+| `GET /worker/v1/config`                                          | Machine credential/session                 | Current effective policy and compatible release                                                                                                                                                                                |
+| `POST /worker/v1/slots`                                          | Machine credential/session                 | Register bounded slots/process incarnations                                                                                                                                                                                    |
+| `POST /worker/v1/claims`                                         | Machine credential/session                 | Claim one job for one free slot                                                                                                                                                                                                |
+| `POST /worker/v1/leases/renew`                                   | Machine credential/session                 | Per-item batched renewals                                                                                                                                                                                                      |
+| `POST /worker/v1/attempts/:id/input-grant`                       | Valid current attempt                      | Refresh input access                                                                                                                                                                                                           |
+| `POST /worker/v1/attempts/:id/output-grant`                      | Valid current attempt                      | Reserve/refresh exact output upload                                                                                                                                                                                            |
+| `POST /worker/v1/attempts/:id/complete`                          | Current attempt or same terminal operation | Idempotent finalization                                                                                                                                                                                                        |
+| `POST /worker/v1/attempts/:id/fail`                              | Current attempt or same terminal operation | Categorized failure and recovery                                                                                                                                                                                               |
+| `POST /worker/v1/logs`                                           | Machine credential                         | Ordered runtime diagnostic batches                                                                                                                                                                                             |
+| `GET /worker/v1/logs/cursor?sessionId=UUID&incarnation=UUID`     | Machine credential/current session         | Returns `{ acknowledgedSequence: number }` from the durable machine cursor; missing legacy value is zero. Revoked, missing or stale sessions return `WORKER_UNAUTHENTICATED`; invalid stored cursor returns `WORKER_CONFLICT`. |
 
 | `GET /worker/v1/events` | Authenticated WebSocket upgrade | Notices, heartbeat and progress |
 | `/admin/worker-fleet/...` | Existing admin session + explicit permission | Fleet UI operations, enrollment, policy, reports, releases |
@@ -134,7 +152,7 @@ missing. It starts new batches at cursor plus one; surviving pending batches mus
 be replayed exactly before advancement. The cursor survives diagnostic TTL expiry.
 Deploy this additive backend route before updated workers: a missing/unavailable
 cursor route defers new-outbox delivery instead of guessing sequence zero. This
-does not reconstruct log bytes lost with an outbox or provide S3 archival.
+does not reconstruct log bytes lost with an outbox or provide R2 archival.
 
 Endpoints must support size limits, redacted request logging, request IDs, typed safe errors and purpose-specific rate limiting. Do not make all worker routes globally public to bypass existing user guards. Give them an explicit machine/installation authentication path and retain separate admin checks.
 

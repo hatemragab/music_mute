@@ -9,7 +9,7 @@ engines active.
 ```text
 Android / iOS ── authenticated API ──> NestJS
        │                                │
-       └──── exact signed transfer ──> private S3
+       └──── exact signed transfer ──> private R2
                                         │
                            MongoDB durable truth
                            Redis bounded counters/hints
@@ -18,7 +18,7 @@ Android / iOS ── authenticated API ──> NestJS
 ```
 
 MongoDB is authoritative for accounts, usage, jobs, overrides, restrictions, and
-cleanup. Redis is not a second durable quota or queue. S3 contains audio; MongoDB
+cleanup. Redis is not a second durable quota or queue. R2 contains audio; MongoDB
 contains exact object identity and accounting metadata.
 
 ## Existing behavior to delete or replace
@@ -49,7 +49,7 @@ still exposes the legacy behavior.
 | Admin security         | `backend/src/admin/`                                                                      | Roles, permission checks, fresh auth, rate classes, audit |
 | Transactions           | existing MongoDB transaction helper                                                       | Required for atomic counters/job transitions              |
 | Redis counters         | `backend/src/rate-limits/rate-budget.service.ts`, `quota-script.ts`, `rate-limit-keys.ts` | Atomic, hashed, shared security foundation                |
-| S3 verification        | `backend/src/storage/storage-transfers.service.ts`                                        | Exact key, size, type, checksum, version validation       |
+| R2 verification        | `backend/src/storage/storage-transfers.service.ts`                                        | Exact key, size, type, checksum metadata, ETag validation |
 | Cleanup                | `backend/src/storage/storage-cleanup*`                                                    | Leased, bounded, retryable exact-object cleanup           |
 | Job ownership          | `backend/src/jobs/job.schema.ts` and services                                             | Durable public history and object identity                |
 | Worker control plane   | `backend/src/worker-fleet/`                                                               | Atomic claim, attempt, lease, stale-owner fencing         |
@@ -137,7 +137,7 @@ the purge and recovery tests.
 - Do not append unbounded event arrays to a user document.
 - Declare only indexes used by period lookup, queue eligibility, expiration,
   cleanup leasing, and admin filtering.
-- Use TTL only for disposable records; never TTL durable account/job truth or S3
+- Use TTL only for disposable records; never TTL durable account/job truth or R2
   objects indirectly.
 - Local development does not require a production migration framework, but an
   implementation PR must document obsolete local schemas/indexes and provide a

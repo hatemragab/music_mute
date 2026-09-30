@@ -104,7 +104,7 @@ function fixture() {
       operation(session),
     ),
   };
-  const storage = { deleteVersionsForKey: vi.fn().mockResolvedValue(true) };
+  const storage = { deleteObject: vi.fn().mockResolvedValue(undefined) };
   const service = new JobRetentionService(
     jobs as never,
     transactions as never,
@@ -144,9 +144,10 @@ describe('coordinated deleted job retention', () => {
       expect.anything(),
       expect.anything(),
     );
-    expect(
-      f.storage.deleteVersionsForKey.mock.calls.map(([key]) => key),
-    ).toEqual([f.job.inputReservation.key, f.attempt.outputReservation.key]);
+    expect(f.storage.deleteObject.mock.calls.map(([key]) => key)).toEqual([
+      f.job.inputReservation.key,
+      f.attempt.outputReservation.key,
+    ]);
     expect(f.receipts.updateOne).toHaveBeenCalledWith(
       { accountId: f.job.userId, requestId: f.job.requestId },
       {
@@ -207,7 +208,7 @@ describe('coordinated deleted job retention', () => {
           retainedOutputReleasedAt: null,
         });
       await f.service.purgeDue(now);
-      expect(f.storage.deleteVersionsForKey).not.toHaveBeenCalled();
+      expect(f.storage.deleteObject).not.toHaveBeenCalled();
       expect(f.jobs.deleteOne).not.toHaveBeenCalled();
       expect(f.attempts.deleteMany).not.toHaveBeenCalled();
       expect(f.receipts.updateOne).not.toHaveBeenCalled();
@@ -216,7 +217,7 @@ describe('coordinated deleted job retention', () => {
 
   it('keeps all durable references when storage cleanup is incomplete', async () => {
     const f = fixture();
-    f.storage.deleteVersionsForKey.mockResolvedValue(false);
+    f.storage.deleteObject.mockRejectedValue(new Error('Storage unavailable'));
     await f.service.purgeDue(now);
     expect(f.jobs.deleteOne).not.toHaveBeenCalled();
     expect(f.attempts.deleteMany).not.toHaveBeenCalled();
@@ -254,20 +255,20 @@ describe('coordinated deleted job retention', () => {
     );
     expect(f.jobs.deleteOne).toHaveBeenCalledOnce();
   });
-  it('rechecks references after S3 cleanup before removing durable ownership', async () => {
+  it('rechecks references after object cleanup before removing durable ownership', async () => {
     const f = fixture();
     f.jobs.exists
       .mockReturnValueOnce(query(null))
       .mockReturnValueOnce(query({ _id: new Types.ObjectId() }));
     await f.service.purgeDue(now);
-    expect(f.storage.deleteVersionsForKey).toHaveBeenCalled();
+    expect(f.storage.deleteObject).toHaveBeenCalled();
     expect(f.jobs.deleteOne).not.toHaveBeenCalled();
   });
   it('has no purge work when only retained Library or recent deleted jobs exist', async () => {
     const f = fixture();
     f.jobs.findOneAndUpdate.mockReturnValue(query(null));
     await expect(f.service.purgeDue(now)).resolves.toBe(false);
-    expect(f.storage.deleteVersionsForKey).not.toHaveBeenCalled();
+    expect(f.storage.deleteObject).not.toHaveBeenCalled();
   });
 });
 

@@ -6,7 +6,7 @@ Use HTTPS API origin plus root routes, Firebase bearer tokens, snake_case wire
 JSON, documented installation headers and cursor pagination. Implement bounded
 401 refresh/retry, stable UUID request IDs and reconciliation after ambiguous
 writes. Respect 429 `Retry-After`; do not retry validation/quota errors blindly.
-Never forward a Firebase token to S3. Do not log tokens, private URLs, audio data,
+Never forward a Firebase token to R2. Do not log tokens, private URLs, audio data,
 or private account data. Cancel stale requests and clear UID-scoped query/player
 state on account change or logout.
 
@@ -17,7 +17,7 @@ request ID, and supported options exactly as OpenAPI requires; subscribe to
 existing realtime snapshots until a job is assigned or failure is final, then
 follow that job. Do not download provider media or call vendor APIs in the browser.
 NestJS delegates acquisition to a private SaaS adapter, validates audio and uploads
-it to S3. See [provider architecture](../../video_providers/README.md). Handle disabled
+it to R2. See [provider architecture](../../video_providers/README.md). Handle disabled
 imports, unsupported/single-item sources, invalid/private URLs, capacity and
 size/duration failures. Preserve source title and attribution.
 
@@ -34,7 +34,7 @@ Implement audio selection/drag-drop, metadata and size/duration inspection,
 review/rights confirmation, trim choice, preparation as needed, exact prepared
 byte SHA-256, reservation, signed upload with progress, upload confirmation,
 and authoritative job progress. Read upload-grant headers and methods from the
-API; do not infer them from `S3FormUploader`'s historical name (grants use PUT).
+API; do not infer them from the uploader's name (grants use PUT).
 Use the same request ID for a retry of the same logical submission.
 
 Do a focused feasibility check for browser audio preparation early. Native

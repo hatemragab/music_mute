@@ -44,7 +44,7 @@ export class ReleaseDownloadService {
     const current = await this.active(id);
     if (
       current.revision !== release.revision ||
-      current.artifact?.versionId !== artifact.versionId
+      current.artifact?.etag !== artifact.etag
     )
       throw adminError('RESOURCE_NOT_FOUND');
     return {

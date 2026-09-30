@@ -44,7 +44,7 @@ describe.skipIf(process.platform !== "darwin")("macOS user LaunchAgent", () => {
     expect(plist).not.toContain("UserName");
     expect(plist).not.toContain("GroupName");
     expect(plist).not.toContain("credential");
-    expect(plist).not.toContain("AWS_");
+    expect(plist).not.toContain("STORAGE_");
   });
 
   it("uses only the current user launchctl domain", async () => {

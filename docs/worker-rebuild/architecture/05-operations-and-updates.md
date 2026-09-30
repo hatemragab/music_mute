@@ -12,11 +12,11 @@
 
 These are three separate mechanisms:
 
-| Mechanism | Handling |
-| --- | --- |
-| Machine heartbeat | Every valid message updates current presence; proposed 20-second interval |
-| Job renewal | Every valid item is processed; never sampled or delegated to telemetry storage |
-| Heartbeat history | Sample approximately 10% initially; set expiry 48 hours after receipt |
+| Mechanism         | Handling                                                                       |
+| ----------------- | ------------------------------------------------------------------------------ |
+| Machine heartbeat | Every valid message updates current presence; proposed 20-second interval      |
+| Job renewal       | Every valid item is processed; never sampled or delegated to telemetry storage |
+| Heartbeat history | Sample approximately 10% initially; set expiry 48 hours after receipt          |
 
 Keep fast-changing online state in Redis with an expiry and reconstructable durable machine metadata. Display stale/offline when timestamps expire, not only when a clean disconnect arrives. Null means a metric is unavailable; do not show a missing GPU sensor as zero utilization.
 
@@ -50,9 +50,11 @@ Forced drain bypass remains an explicit `--force` operator choice.
 
 Supervisors/bootstraps send bounded batches over HTTPS. A useful starting maximum is 256 KiB uncompressed per batch, with sequential identifiers, digest and a receipt covering the highest durably stored contiguous sequence. Enforce per-stream rates and decompression limits. Duplicate batches return the same acknowledgement; mismatched payloads for an existing sequence are rejected.
 
-Use MongoDB for searchable installation/job/event summaries and archive compressed diagnostic batches in S3 through the **backend's** storage service. The backend chooses the archive key, uploads an immutable version, then records its metadata before acknowledging. If archival fails, return a retryable failure and keep local data. Clean up orphan backend log uploads idempotently. Do not create a worker-wide permanent S3 credential to simplify logs.
-
-The current media bucket preflight restricts lifecycle actions. Do not add an unsafe blanket expiry. Keep exact-version cleanup under backend control, or propose a separately configured diagnostics bucket without altering the existing media bucket. The worker never decides backend retention.
+The current backend stores bounded searchable diagnostic summaries/events in
+MongoDB. This storage migration does not add R2 diagnostic archival, another
+bucket or a new paid ingestion service. Do not create a worker-wide storage
+credential for logs. Keep existing local spool bounds, receipts and retention;
+any future archival feature needs a separate scoped design and billing decision.
 
 Log dashboard reads are authenticated/paginated, sanitize control characters/HTML and do not offer unbounded full-stream downloads by default. Export only authorized sanitized records. Record download/processing/upload/queue times separately; do not conflate a slow internet connection with GPU performance.
 
@@ -84,7 +86,7 @@ first release. Model files are content-addressed and recipe-versioned
 independently but are included in compatibility checks. The CLI downloads each
 model only from its owner-authorized upstream URL and then stores the verified
 bytes in the local content-addressed cache. MusicMute must not mirror, proxy,
-or upload those model bytes to its S3 buckets.
+or upload those model bytes to its R2 buckets.
 
 Suggested layout under the installation root:
 

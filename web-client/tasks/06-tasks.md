@@ -1,5 +1,9 @@
 # Ordered implementation tasks
 
+> Storage-specific completed tasks/evidence below describe the previous AWS
+> release. The [R2-only setup and ETag contract](../../docs/r2-storage/README.md) supersedes
+> those provider requirements; live R2 acceptance is separate and unverified.
+
 Implementation began after the user authorized it. Execute in dependency order. Use
 this file as the resumable task ledger; append short evidence per task rather
 than marking unchecked work complete. These are files for the next agent, not

@@ -369,7 +369,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
 
   const retainedObject = {
     key: `users/${secondAccount}/jobs/output/vocals.mp3`,
-    versionId: 'retained-v1',
+    etag: '"retained-v1"',
     bytes: 5_000_000_001,
     sha256: Buffer.alloc(32, 2).toString('base64'),
     contentType: 'audio/mpeg',
@@ -418,7 +418,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   const downloadJob = await createJob(jobs, secondAccount, 30);
   const septemberDownload = new Date('2026-09-12T12:00:00.000Z');
   const firstDownloadRequest = randomUUID();
-  const firstResult = { versionId: 'result-v1', bytes: 1_000 };
+  const firstResult = { etag: '"result-v1"', bytes: 1_000 };
   const reserveFirstResult = () =>
     transactions.run((session) =>
       usage.reserveDownloadGrant(
@@ -468,7 +468,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
           jobId: downloadJob._id,
           scope: 'user_result',
           requestId: firstDownloadRequest,
-          object: { versionId: 'result-v2', bytes: 1_000 },
+          object: { etag: '"result-v2"', bytes: 1_000 },
         },
         session,
         septemberDownload,
@@ -490,7 +490,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
           jobId: downloadJob._id,
           scope: 'user_result',
           requestId: randomUUID(),
-          object: { versionId: 'result-v2', bytes: 1_500 },
+          object: { etag: '"result-v2"', bytes: 1_500 },
         },
         session,
         septemberDownload,
@@ -503,7 +503,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
           jobId: downloadJob._id,
           scope: 'user_result',
           requestId: randomUUID(),
-          object: { versionId: 'result-v2', bytes: 1_500 },
+          object: { etag: '"result-v2"', bytes: 1_500 },
         },
         session,
         septemberDownload,
@@ -531,7 +531,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
         jobId: downloadJob._id,
         scope: 'user_input',
         requestId: userInputRequest,
-        object: { versionId: 'input-v1', bytes: 200 },
+        object: { etag: '"input-v1"', bytes: 200 },
       },
       session,
       septemberDownload,
@@ -547,7 +547,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
         scope: 'worker_input',
         requestId: workerInputRequest,
         attemptId,
-        object: { versionId: 'input-v1', bytes: 300 },
+        object: { etag: '"input-v1"', bytes: 300 },
       },
       session,
       septemberDownload,
@@ -559,7 +559,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
         scope: 'worker_input',
         requestId: workerInputRequest,
         attemptId,
-        object: { versionId: 'input-v1', bytes: 300 },
+        object: { etag: '"input-v1"', bytes: 300 },
       },
       session,
       septemberDownload,
@@ -590,7 +590,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
           scope: 'worker_input',
           requestId: randomUUID(),
           attemptId,
-          object: { versionId: 'input-v1', bytes: 1 },
+          object: { etag: '"input-v1"', bytes: 1 },
         },
         session,
         septemberDownload,
@@ -606,7 +606,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
           jobId: downloadJob._id,
           scope: 'user_input',
           requestId: userInputRequest,
-          object: { versionId: 'input-v1', bytes: 200 },
+          object: { etag: '"input-v1"', bytes: 200 },
         },
         session,
         new Date('2026-09-12T12:10:01.000Z'),
@@ -624,7 +624,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
           jobId: downloadJob._id,
           scope: 'user_result',
           requestId: randomUUID(),
-          object: { versionId: 'result-v3', bytes: 1 },
+          object: { etag: '"result-v3"', bytes: 1 },
         },
         session,
         octoberDownload,
@@ -638,7 +638,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
           jobId: downloadJob._id,
           scope: 'user_result',
           requestId: randomUUID(),
-          object: { versionId: 'result-v3', bytes: 1 },
+          object: { etag: '"result-v3"', bytes: 1 },
         },
         session,
         octoberDownload,
@@ -750,7 +750,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
           jobId: retentionJob._id,
           scope: 'user_result',
           requestId: randomUUID(),
-          object: { versionId: 'retention-result', bytes: 1 },
+          object: { etag: '"retention-result"', bytes: 1 },
         },
         session,
         august,

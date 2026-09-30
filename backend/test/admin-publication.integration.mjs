@@ -212,7 +212,7 @@ test(
         createdBy: actors[0].uid,
         artifact: {
           key: 'fixture/private.apk',
-          versionId: 'fixture-version',
+          etag: '"fixture-version"',
           bytes: 1,
           sha256Hex: 'a'.repeat(64),
           signerSha256Hex: 'b'.repeat(64),

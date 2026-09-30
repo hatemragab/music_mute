@@ -28,7 +28,7 @@ Choose compatible, locked versions after inspecting `dashboard/package.json`
 and its lockfile; avoid speculative packages. A new Next.js server, database,
 Firebase Admin SDK, or duplicate media-processing backend is unnecessary.
 
-Use the existing NestJS API and signed S3 transfer contracts. Keep web source
+Use the existing NestJS API and signed R2 transfer contracts. Keep web source
 independent of dashboard source/build output. The dashboard is a reference for
 patterns, not a runtime dependency or an administrator login gate for end users.
 

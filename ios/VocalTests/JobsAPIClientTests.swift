@@ -108,7 +108,7 @@ import XCTest
   private let requestId = UUID(uuidString: "C21A2EAA-7E73-4F08-89DA-6AC35BAA83E1")!
   private let installation = "D7EA7DE6-52E9-4B96-8834-3B517941BDB0"
   private let grant =
-    #"{"method":"PUT","url":"https://storage.example/","headers":{"Content-Type":"audio/mpeg","x-amz-checksum-sha256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","If-None-Match":"*"},"expires_at":"2026-09-09T12:15:00.123Z"}"#
+    #"{"method":"PUT","url":"https://storage.example/","headers":{"Content-Type":"audio/mpeg","x-amz-checksum-sha256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "x-amz-meta-sha256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","If-None-Match":"*"},"expires_at":"2026-09-09T12:15:00.123Z"}"#
   private var input: InputDeclaration {
     InputDeclaration(
       extension: "mp3", contentType: "audio/mpeg", bytes: 123,

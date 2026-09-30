@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — R2 migration
+
+- Replace S3 version IDs with quoted ETags and checksum-bound create-only uploads.
+- Update installer qualification and worker transfer contracts for private R2.
+- Rebuild and sign platform runtimes, publish verified R2 artifacts and select a
+  new npm release version before rollout; existing published runtimes are incompatible.
+
 ## 0.1.1 — 2026-09-30
 
 - Use `npm.cmd` and `mw.cmd` in Windows PowerShell installation instructions so

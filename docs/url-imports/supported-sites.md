@@ -8,7 +8,7 @@ The private [VideoScale adapter](../../video_providers/videoscale/README.md)
 accepts public, single-item links for the shared catalog, now including Instagram
 (posts/Reels), TikTok and Vimeo, as well as YouTube, Facebook/Reels and SoundCloud.
 It requests audio-only formats;
-NestJS independently validates bytes and duration before S3 upload and processing.
+NestJS independently validates bytes and duration before R2 upload and processing.
 Unsupported platforms return `IMPORT_UNSUPPORTED_PROVIDER`. No extractor catalog,
 local downloader or downloader-based qualification command remains in this project.
 
@@ -47,4 +47,4 @@ Do not describe upstream advertised support as successful MusicMute E2E proof.
 
 Save only sanitized qualification fields. Never retain credentials, temporary
 media URLs or raw provider payloads. See [deployment evidence](../../video_providers/videoscale/docs/DEPLOYMENT.md)
-for the last verified import, S3, worker and cleanup result and its limitations.
+for the last verified import, R2, worker and cleanup result and its limitations.

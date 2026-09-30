@@ -198,7 +198,7 @@ import XCTest
     let original = try Data(contentsOf: input.fileURL)
     let destination = root.appendingPathComponent("no-room.multipart")
     XCTAssertThrowsError(
-      try S3MultipartFile.build(
+      try ObjectStorageUploadFile.build(
         inputURL: input.fileURL, declaration: input.declaration,
         destination: destination, policyVersion: input.policyVersion,
         availableCapacity: { _ in 0 })
@@ -257,10 +257,11 @@ import XCTest
       headers: [
         "Content-Type": prepared.declaration.contentType,
         "x-amz-checksum-sha256": prepared.declaration.sha256,
+        "x-amz-meta-sha256": prepared.declaration.sha256,
         "If-None-Match": "*",
       ],
       expiresAt: Date().addingTimeInterval(300))
-    let body = try S3MultipartFile.build(
+    let body = try ObjectStorageUploadFile.build(
       inputURL: prepared.fileURL, declaration: prepared.declaration,
       destination: root.appendingPathComponent("upload"),
       policyVersion: prepared.policyVersion,
@@ -274,6 +275,8 @@ import XCTest
       request.value(forHTTPHeaderField: "Content-Type"), prepared.declaration.contentType)
     XCTAssertEqual(
       request.value(forHTTPHeaderField: "x-amz-checksum-sha256"), prepared.declaration.sha256)
+    XCTAssertEqual(
+      request.value(forHTTPHeaderField: "x-amz-meta-sha256"), prepared.declaration.sha256)
     XCTAssertEqual(request.value(forHTTPHeaderField: "If-None-Match"), "*")
     XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Length"), String(body.bytes))
     XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
@@ -283,7 +286,7 @@ import XCTest
     XCTAssertThrowsError(try body.validate())
     try Data([1]).write(to: prepared.fileURL)
     XCTAssertThrowsError(
-      try S3MultipartFile.build(
+      try ObjectStorageUploadFile.build(
         inputURL: prepared.fileURL, declaration: prepared.declaration,
         destination: root.appendingPathComponent("changed"),
         policyVersion: prepared.policyVersion))
@@ -291,7 +294,7 @@ import XCTest
 
   func testWholeObjectUploadRejectsCaseInsensitiveDuplicateHeaders() throws {
     let prepared = try processingPrepared(root: staging)
-    let body = try S3MultipartFile.build(
+    let body = try ObjectStorageUploadFile.build(
       inputURL: prepared.fileURL, declaration: prepared.declaration,
       destination: root.appendingPathComponent("duplicate-header-upload"),
       policyVersion: prepared.policyVersion,
@@ -302,6 +305,8 @@ import XCTest
       headers: [
         "Content-Type": prepared.declaration.contentType,
         "content-type": prepared.declaration.contentType,
+        "x-amz-checksum-sha256": prepared.declaration.sha256,
+        "x-amz-meta-sha256": prepared.declaration.sha256,
         "If-None-Match": "*",
       ],
       expiresAt: Date().addingTimeInterval(300))
@@ -310,6 +315,32 @@ import XCTest
       try BackgroundTransferCoordinator.uploadRequest(grant: grant, multipart: body)
     ) {
       XCTAssertEqual($0 as? ProcessingTransferFailure, .invalidGrant)
+    }
+  }
+
+  func testWholeObjectUploadRejectsMissingAndMismatchedChecksumMetadata() throws {
+    let prepared = try processingPrepared(root: staging)
+    let body = try ObjectStorageUploadFile.build(
+      inputURL: prepared.fileURL, declaration: prepared.declaration,
+      destination: root.appendingPathComponent("metadata-upload"),
+      policyVersion: prepared.policyVersion, availableCapacity: { _ in 1_000_000 })
+    let validHeaders = [
+      "Content-Type": prepared.declaration.contentType,
+      "x-amz-checksum-sha256": prepared.declaration.sha256,
+      "x-amz-meta-sha256": prepared.declaration.sha256,
+      "If-None-Match": "*",
+    ]
+    for value in [nil, "wrong", prepared.declaration.sha256 + "\r"] as [String?] {
+      var headers = validHeaders
+      headers["x-amz-meta-sha256"] = value
+      let grant = UploadGrant(
+        method: .put, url: URL(string: "https://storage.example")!,
+        headers: headers, expiresAt: Date().addingTimeInterval(300))
+      XCTAssertThrowsError(
+        try BackgroundTransferCoordinator.uploadRequest(grant: grant, multipart: body)
+      ) {
+        XCTAssertEqual($0 as? ProcessingTransferFailure, .invalidGrant)
+      }
     }
   }
 }
@@ -328,7 +359,8 @@ import XCTest
     UploadGrant(
       method: .put, url: URL(string: "https://storage.example")!,
       headers: [
-        "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
+        "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture",
+        "x-amz-meta-sha256": "fixture", "If-None-Match": "*",
       ],
       expiresAt: Date().addingTimeInterval(expired ? -60 : 600))
   }
@@ -384,7 +416,8 @@ import XCTest
   var beforeActive: (() async -> Void)?
   var afterStart: ((TransferContext) async -> Void)?
   var immediateTask: Task<Void, Never>?
-  func startUpload(file: S3MultipartFile, grant: UploadGrant, context: TransferContext) async throws
+  func startUpload(file: ObjectStorageUploadFile, grant: UploadGrant, context: TransferContext)
+    async throws
     -> Int
   {
     try file.validate()

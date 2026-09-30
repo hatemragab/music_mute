@@ -1,5 +1,12 @@
 # Production readiness implementation — 27 September 2026
 
+> **Storage update — 2026-09-30:** AWS/S3 observations and setup commands below
+> belong to earlier releases. They are historical evidence, not R2 acceptance.
+> Do not execute the old provider/versioning/tiering/acceleration setup. Use the
+> [current private R2 Standard setup and verification guide](r2-storage/README.md); the owner
+> approved fresh MongoDB and quoted ETag identities with no legacy bridge.
+
+
 Follow-up to [the initial review](production-readiness-review-2026-09-27.md), after the user authorized implementation. This ledger supersedes the initial review only for the findings explicitly resolved below. A public launch remains conditional on the open gates.
 
 ## Changes completed

@@ -161,7 +161,7 @@ function fixture(
     deadlineAt: new Date(now + 60_000).toISOString(),
     input: {
       key: "users/u/jobs/j/input/source.mp3",
-      versionId: "input-version",
+      etag: '"input-version"',
       bytes: inputBytes.length,
       sha256: inputSha,
       contentType: "audio/mpeg",
@@ -249,6 +249,7 @@ function fixture(
         headers: {
           "Content-Type": "audio/mpeg",
           "x-amz-checksum-sha256": outputSha,
+          "x-amz-meta-sha256": outputSha,
           "If-None-Match": "*",
         },
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -270,7 +271,7 @@ function fixture(
     download: vi.fn(async (_grant, _expected, destination: string) => {
       await writeFile(destination, inputBytes, { flag: "wx", mode: 0o600 });
     }),
-    upload: vi.fn(async () => "output-version"),
+    upload: vi.fn(async () => '"output-version"'),
   };
   const child = new FakeChild(options.hang, options.progress);
   const supervisor = {
@@ -1088,7 +1089,7 @@ describe("worker runtime ownership", () => {
       attemptId,
       expect.objectContaining({ workerId }),
       expect.objectContaining({
-        versionId: "output-version",
+        etag: '"output-version"',
         executionTimings: expect.arrayContaining([
           {
             stage: "input-download",
@@ -1182,7 +1183,7 @@ describe("worker runtime ownership", () => {
       })
       .mockImplementationOnce(async () => {
         clock += 50;
-        return "output-version";
+        return '"output-version"';
       });
     const complete = base.control.complete.getMockImplementation()!;
     base.control.complete.mockImplementation(async () => {
@@ -1378,7 +1379,7 @@ describe("worker runtime ownership", () => {
     await f.runtime.stop();
   });
 
-  it("recovers the exact uploaded version after a lost PUT response", async () => {
+  it("recovers the exact uploaded object after a lost PUT response", async () => {
     const base = fixture();
     base.transfers.upload.mockRejectedValueOnce(
       new TransferError("OUTPUT_UPLOAD_FAILED", true),
@@ -1398,7 +1399,7 @@ describe("worker runtime ownership", () => {
         grant: null,
         object: {
           key: `worker-jobs/${base.claim.jobId}/attempts/${attemptId}/vocals.mp3`,
-          versionId: "recovered-version",
+          etag: '"recovered-version"',
           bytes: outputBytes.length,
           sha256: outputSha,
           contentType: "audio/mpeg",
@@ -1413,7 +1414,7 @@ describe("worker runtime ownership", () => {
     expect(f.control.complete).toHaveBeenCalledWith(
       attemptId,
       expect.any(Object),
-      expect.objectContaining({ versionId: "recovered-version" }),
+      expect.objectContaining({ etag: '"recovered-version"' }),
       expect.any(AbortSignal),
     );
     await f.runtime.stop();
