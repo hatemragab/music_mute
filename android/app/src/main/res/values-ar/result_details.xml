@@ -9,5 +9,4 @@
     <string name="result_status">الحالة</string>
     <string name="result_ready">جاهز</string>
     <string name="result_keep_offline">الاحتفاظ دون إنترنت</string>
-    <string name="result_offline_hint">حفظ داخل هذا التطبيق</string>
 </resources>

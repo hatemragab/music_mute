@@ -115,7 +115,7 @@ fun PlaybackResultDetails(
                         }
                     } else {
                         ResultActionRow(Icons.Outlined.OfflinePin, stringResource(R.string.result_keep_offline),
-                            subtitle = stringResource(R.string.result_offline_hint), enabled = !busy, onClick = onDownload)
+                            enabled = !busy, onClick = onDownload)
                     }
                 }
             }
@@ -184,7 +184,6 @@ fun PlaybackResultDetails(
 private fun ResultActionRow(
     icon: ImageVector,
     title: String,
-    subtitle: String? = null,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
@@ -196,11 +195,7 @@ private fun ResultActionRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, Modifier.size(20.dp), tint = if (enabled) MaterialTheme.colorScheme.primary else color)
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.labelLarge, color = color)
-            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall,
-                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else color) }
-        }
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, color = color)
         Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = color)
     }
 }

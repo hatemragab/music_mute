@@ -9,5 +9,4 @@
     <string name="result_status">Status</string>
     <string name="result_ready">Ready</string>
     <string name="result_keep_offline">Keep offline</string>
-    <string name="result_offline_hint">Store in this app</string>
 </resources>
