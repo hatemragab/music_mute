@@ -122,12 +122,13 @@ fun VocalApp(
     val context = LocalContext.current
     val app = context.applicationContext as VocalApplication
     val urlImports by app.urlImports.records.collectAsStateWithLifecycle()
+    val retryingUrlImports by app.urlImports.retrying.collectAsStateWithLifecycle()
     var linkRequest by rememberSaveable { mutableIntStateOf(0) }
     var urlImportText by rememberSaveable { mutableStateOf("") }
-    var urlImportError by remember { mutableStateOf<String?>(null) }
-    var urlImportBusy by remember { mutableStateOf(false) }
+    var urlImportError by remember(processingSession) { mutableStateOf<String?>(null) }
+    var urlImportBusy by remember(processingSession) { mutableStateOf(false) }
     var trimEnabled by rememberSaveable(processingSession) { mutableStateOf(true) }
-    var confirmUrlImport by remember { mutableStateOf(false) }
+    var confirmUrlImport by remember(processingSession) { mutableStateOf(false) }
     LaunchedEffect(sharedUrlText) {
         if (sharedUrlText != null) {
             val extracted = UrlImportSource.sharedText(sharedUrlText)
@@ -161,17 +162,23 @@ fun VocalApp(
             .collect { (ids, _) -> app.urlImports.observeJobs(ids) }
     }
     val submitUrlImport: () -> Unit = {
-        if (!urlImportBusy) scope.launch {
+        if (!urlImportBusy) {
+            val text = urlImportText
+            val trim = trimEnabled
             urlImportBusy = true
-            try {
-                app.urlImports.submit(urlImportText, trimEnabled)
-                urlImportText = ""
-                urlImportError = null
-            } catch (error: UrlImportFailure) {
-                urlImportError = error.code
-            } catch (_: Exception) {
-                urlImportError = "SERVICE_UNAVAILABLE"
-            } finally { urlImportBusy = false }
+            scope.launch {
+                try {
+                    app.urlImports.submit(text, trim)
+                    urlImportText = ""
+                    urlImportError = null
+                } catch (error: kotlinx.coroutines.CancellationException) {
+                    throw error
+                } catch (error: UrlImportFailure) {
+                    urlImportError = error.code
+                } catch (_: Exception) {
+                    urlImportError = "SERVICE_UNAVAILABLE"
+                } finally { urlImportBusy = false }
+            }
         }
     }
     val startUrlImport: () -> Unit = {
@@ -470,6 +477,7 @@ fun VocalApp(
                             urlImportText = urlImportText,
                             urlImportError = urlImportError,
                             urlImportBusy = urlImportBusy,
+                            retryingImports = retryingUrlImports,
                             onUrlImportText = { urlImportText = it; urlImportError = null },
                             onUrlImport = startUrlImport,
                             onUrlImportPaste = {
@@ -485,7 +493,7 @@ fun VocalApp(
                                     if (extracted != null) urlImportError = null
                                 }
                             },
-                            actionBusy = processing.busy,
+                            actionBusy = processing.busy || urlImportBusy,
                             message = processing.message?.let { stringResource(it) },
                             onNotifications = {
                                 if (Build.VERSION.SDK_INT >= 33) processingNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -502,6 +510,24 @@ fun VocalApp(
                                     catch (error: kotlinx.coroutines.CancellationException) { throw error }
                                     catch (error: UrlImportFailure) { urlImportError = error.code }
                                     catch (_: Exception) { urlImportError = "SERVICE_UNAVAILABLE" }
+                                }
+                            },
+                            onRetry = { task ->
+                                val record = urlImports.firstOrNull { it.requestId == task.importRequestId }
+                                if (!urlImportBusy && record?.retryable == true) {
+                                    urlImportBusy = true
+                                    scope.launch {
+                                        try {
+                                            app.urlImports.retry(record)
+                                            urlImportError = null
+                                        } catch (error: kotlinx.coroutines.CancellationException) {
+                                            throw error
+                                        } catch (error: UrlImportFailure) {
+                                            urlImportError = error.code
+                                        } catch (_: Exception) {
+                                            urlImportError = "SERVICE_UNAVAILABLE"
+                                        } finally { urlImportBusy = false }
+                                    }
                                 }
                             },
                             onOpen = { task ->

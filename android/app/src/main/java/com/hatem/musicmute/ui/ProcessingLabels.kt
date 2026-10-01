@@ -7,6 +7,7 @@ import com.hatem.musicmute.processing.AudioTaskPresentation
 import com.hatem.musicmute.processing.ProcessingLocalProblem
 
 internal fun audioTaskFailureLabel(task: AudioTaskPresentation): Int? {
+    if (task.importOnly && task.errorCode != null) return com.hatem.musicmute.ui.home.urlImportMessage(task.errorCode)
     if (task.errorCode != null) return when (task.errorCode) {
         "UPLOAD_EXPIRED" -> R.string.processing_reason_upload_expired
         "INVALID_AUDIO" -> R.string.processing_reason_invalid

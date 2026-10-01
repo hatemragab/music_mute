@@ -12,8 +12,8 @@ while offline or fall back to `client_started_at`.
 | Stage                                                                                                         | Measurement                                                                                                                                                                                                                   |
 | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Server total                                                                                                  | Job reservation acceptance to terminal transition, or the current server sample. For URL imports, starts at import acceptance, before the audio job exists. Explicit user retries create a new job and a new total.           |
-| Source queue                                                                                                  | Import creation to processor acquisition.                                                                                                                                                                                     |
-| Source download                                                                                               | Monotonic backend elapsed time around source acquisition.                                                                                                                                                                     |
+| Source queue                                                                                                  | Sum of import queue intervals, including persisted acquisition retry backoff.                                                                                                                                                 |
+| Source download                                                                                               | Sum of monotonic backend elapsed time around source acquisition executions.                                                                                                                                                   |
 | Source validation                                                                                             | Monotonic backend elapsed time around media probing.                                                                                                                                                                          |
 | Source upload                                                                                                 | Monotonic backend elapsed time around the signed input upload; omitted when no transfer runs.                                                                                                                                 |
 | Upload confirmation                                                                                           | Backend confirmation operation for imported input.                                                                                                                                                                            |
@@ -150,7 +150,6 @@ snapshot size. Detail includes the bounded attempt history.
 - Source packaging is prepared for manual CapRover upload. No production deploy,
   worker activation, mobile rebuild, commit or push was performed for this fix.
 
-
 ### Production deployment — 2026-09-26
 
 The user authorized direct CapRover deployment. Uploaded the verified archives
@@ -167,7 +166,6 @@ MusicMute CapRover browser session. No production settings or credentials change
   full timing ledger. Historical missing measurements cannot be reconstructed.
 - Production screenshot: `~/Downloads/musicmute-stage-timings-2026-09-26/production-stage-durations.png`.
 - Previous CapRover images remain available for rollback: API 70, dashboard 12.
-
 
 Worker activation completed after backend deployment:
 

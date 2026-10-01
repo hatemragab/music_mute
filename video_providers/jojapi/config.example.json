@@ -1,0 +1,15 @@
+{
+  "caproverApp": "music-mute-jojapi",
+  "notExposedAsWebApp": true,
+  "containerHttpPort": 8080,
+  "instanceCount": 1,
+  "ports": [],
+  "volumes": [],
+  "environment": {
+    "ACQUISITION_TEMP_ROOT": "/work",
+    "ACQUISITION_CONCURRENCY": "20",
+    "ACQUISITION_REQUESTS_PER_SECOND": "1"
+  },
+  "secretsInCaproverEnvironment": ["JOJAPI_API_KEY"],
+  "secretsFromPreDeployHook": ["AUDIO_ACQUISITION_API_KEY"]
+}

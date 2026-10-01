@@ -79,6 +79,8 @@ fun HomeScreen(
     notificationsNeeded: Boolean = false,
     linkRequest: Int = 0,
     onDelete: (AudioTaskPresentation) -> Unit = {},
+    onRetry: (AudioTaskPresentation) -> Unit = {},
+    retryingImports: Set<String> = emptySet(),
 ) {
     val visibleTasks = tasks.filter { it.visibleOnHome }
     var notificationDismissed by rememberSaveable { mutableStateOf(false) }
@@ -166,9 +168,11 @@ fun HomeScreen(
                     JobCard(
                         task = task,
                         busy = busy || actionBusy,
+                        retryBusy = task.importRequestId in retryingImports,
                         onOpen = { onOpen(task) },
                         onCancel = { onCancel(task) },
                         onDelete = { onDelete(task) },
+                        onRetry = { onRetry(task) },
                     )
                     ProcessingQueueStatus(history.jobs.firstOrNull { it.id == task.jobId }, history.connection)
                 }

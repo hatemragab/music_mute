@@ -67,6 +67,12 @@ across all backend replicas (`URL_IMPORT_CONCURRENCY=20`) and at most five new
 executions per second (`URL_IMPORT_REQUESTS_PER_SECOND=5`). These shared limits apply
 to every acquisition provider. The generic private router and adapters use matching
 `ACQUISITION_CONCURRENCY=20` and `ACQUISITION_REQUESTS_PER_SECOND=5` settings.
+The selected [JoJAPI YouTube adapter](../video_providers/jojapi/README.md) further caps paid
+requests at its published one-per-second plan limit while downloads overlap.
+The owner explicitly authorized [production test activation on 2026-10-01](../video_providers/jojapi/docs/ACTIVATION-2026-10-01.md)
+despite the unresolved [source-version mismatch](../video_providers/jojapi/docs/DEPLOYMENT-2026-10-01.md).
+Successful transfer and media probing do not establish requested-source identity.
+Backend configuration and business logic remain provider-neutral.
 
 `URL_IMPORT_MAX_OUTSTANDING=100` counts queued, downloading, validating and uploading
 imports globally: up to 20 can be active while the rest wait for a slot. A full

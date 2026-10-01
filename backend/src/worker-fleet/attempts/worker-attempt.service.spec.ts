@@ -1,5 +1,7 @@
 import { Types } from 'mongoose';
+import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { DEFAULT_ACCOUNT_POLICY_VALUES } from '../../admin-settings/account-policy.schema.js';
 import { WorkerAttemptService } from './worker-attempt.service.js';
 
 const machineId = 'cb56441d-f2df-4b44-a320-6f37dfa81f7f';
@@ -685,5 +687,89 @@ describe('worker attempt transfers and finalization', () => {
     );
     expect(f.outbox.updateOne).toHaveBeenCalledOnce();
     expect(f.slots.updateOne).toHaveBeenCalledOnce();
+  });
+
+  it('requeues three transient failures with backoff and finalizes the fourth exactly once', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-01T12:00:00.000Z'));
+    try {
+      const f = fixture();
+      const maxAttempts =
+        DEFAULT_ACCOUNT_POLICY_VALUES.maxInfrastructureAttempts;
+      expect(maxAttempts).toBe(4);
+      f.job.admissionSnapshot.maxInfrastructureAttempts = maxAttempts;
+      f.job.retryEligibility.attemptsRemaining = maxAttempts;
+      const input = f.job.inputObject;
+      const recipe = f.job.recipeSnapshot;
+      const failure = {
+        ...ownership,
+        code: 'SEPARATOR_FAILED' as const,
+        summary: 'Synthetic transient worker failure',
+      };
+      for (let attemptNumber = 1; attemptNumber <= 4; attemptNumber++) {
+        const now = new Date();
+        const currentAttemptId = randomUUID();
+        Object.assign(f.attempt, {
+          _id: currentAttemptId,
+          attemptNumber,
+          state: 'running',
+          leaseExpiresAt: new Date(now.getTime() + 120_000),
+          deadlineAt: new Date(now.getTime() + 300_000),
+        });
+        Object.assign(f.job, {
+          status: 'processing',
+          attemptNumber,
+          currentExecution: {
+            attemptId: currentAttemptId,
+            machineId,
+            workerId,
+            sessionId,
+            incarnation,
+            leaseExpiresAt: f.attempt.leaseExpiresAt,
+            deadlineAt: f.attempt.deadlineAt,
+          },
+        });
+        const status = attemptNumber < 4 ? 'queued' : 'failed';
+        await expect(
+          f.service.fail(principal, currentAttemptId, failure),
+        ).resolves.toMatchObject({ status, replayed: false });
+        await expect(
+          f.service.fail(principal, currentAttemptId, failure),
+        ).resolves.toMatchObject({ status, replayed: true });
+        expect(f.job.currentExecution).toBeNull();
+        expect(f.job.retryEligibility.attemptsRemaining).toBe(
+          4 - attemptNumber,
+        );
+        expect(f.job.inputObject).toBe(input);
+        expect(f.job.recipeSnapshot).toBe(recipe);
+        expect(f.attempts.updateOne).toHaveBeenCalledTimes(attemptNumber);
+        expect(f.slots.updateOne).toHaveBeenCalledTimes(attemptNumber);
+        if (attemptNumber < 4) {
+          const backoffMs = [5_000, 10_000, 20_000][attemptNumber - 1];
+          expect(f.job.retryEligibility).toEqual({
+            eligible: true,
+            attemptsRemaining: 4 - attemptNumber,
+            nextAttemptAt: new Date(now.getTime() + backoffMs),
+          });
+          expect(f.attempt.failureClass).toBe('infrastructure_transient');
+          expect(f.job.finishedAt).toBeNull();
+          expect(f.usage.settleJob).not.toHaveBeenCalled();
+          expect(f.outbox.updateOne).not.toHaveBeenCalled();
+          vi.setSystemTime(f.job.retryEligibility.nextAttemptAt);
+        } else {
+          expect(f.job.retryEligibility).toEqual({
+            eligible: false,
+            attemptsRemaining: 0,
+            nextAttemptAt: null,
+          });
+          expect(f.attempt.failureClass).toBe('infrastructure_terminal');
+          expect(f.job.finishedAt).toEqual(now);
+          expect(f.usage.settleJob).toHaveBeenCalledOnce();
+          expect(f.outbox.updateOne).toHaveBeenCalledOnce();
+        }
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

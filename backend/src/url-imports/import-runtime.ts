@@ -13,6 +13,7 @@ import { ImportProcessor } from './import-processor.js';
 import { importError } from './import-errors.js';
 import { SharedMediaService } from '../shared-media/shared-media.service.js';
 import { Optional } from '@nestjs/common';
+import { importExecutionJobId } from './import-retry.js';
 
 @Injectable()
 export class ImportRuntime
@@ -81,11 +82,24 @@ export class ImportRuntime
       .limit(this.config.getOrThrow<number>('URL_IMPORT_MAX_OUTSTANDING'))
       .lean();
     for (const record of pending) {
-      const queued = await this.queue.getJob(record._id.toHexString());
+      const queued = await this.queue.getJob(importExecutionJobId(record));
       const queueState = queued ? await queued.getState() : 'unknown';
+      if (
+        record.status === 'queued' &&
+        (record.maxAcquisitionAttempts ?? 1) > 1
+      ) {
+        // Retry generations are durable outbox entries. Ignore prior generations
+        // and replace only a terminal, unclaimed entry for the current generation.
+        if (queued && (queueState === 'failed' || queueState === 'completed'))
+          await queued.remove();
+        if (!queued || queueState === 'failed' || queueState === 'completed')
+          await this.imports.enqueue(record._id.toHexString());
+        continue;
+      }
       if (queueState === 'failed' || queueState === 'completed') {
         // BullMQ has finished this execution, including a crash/stalled attempt.
-        // Never replay acquisition; reconciliation preserves confirmed jobs.
+        // Reconciliation preserves accepted jobs and uncertain uploads before
+        // authorizing a bounded pre-upload retry generation for new imports.
         await this.processor.reconcileFailure(
           record,
           importError('IMPORT_DEPENDENCY_FAILED'),

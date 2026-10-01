@@ -1,5 +1,11 @@
 # Private Tunelio audio adapter
 
+This adapter remains deployed, while production YouTube configuration selects
+[JoJAPI](../jojapi/README.md) for the [owner-authorized test activation](../jojapi/docs/ACTIVATION-2026-10-01.md).
+The [2026-10-01 vendor source-version mismatch](../jojapi/docs/DEPLOYMENT-2026-10-01.md)
+is still unresolved.
+Acquisition failures never trigger automatic provider fallback.
+
 Tunelio is the YouTube-only SaaS adapter for MusicMute. Its private contract is
 the same as VideoScale: authenticated POST /audio-imports returns bounded audio
 bytes to NestJS, which independently validates audio/duration, stores the input
@@ -7,7 +13,7 @@ in private R2 and starts the existing worker flow. Clients and workers never
 receive the vendor API key or signed download link.
 
 This app lives beside music-mute-videoscale; it does not replace or configure
-that app. A private provider router selects Tunelio for canonical YouTube items
+that app. A private provider router can select Tunelio for canonical YouTube items
 and VideoScale for other enabled public sites. There is no fallback or replay
 after a Tunelio request fails. NestJS remains provider-neutral.
 

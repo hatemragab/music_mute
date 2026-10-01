@@ -159,7 +159,7 @@ describe('processing admission', () => {
       settingsRevision: 4,
       maxWaitingJobs: 20,
       maxProcessingJobs: 1,
-      maxInfrastructureAttempts: 3,
+      maxInfrastructureAttempts: 4,
       maxClientInputAttempts: 5,
       maxDurationSeconds: 1_800,
       maxInputBytes: 100_000_000,

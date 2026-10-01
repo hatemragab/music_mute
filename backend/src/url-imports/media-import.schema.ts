@@ -31,6 +31,19 @@ export type ImportState = (typeof IMPORT_STATES)[number];
 })
 export class MediaImport {
   _id!: Types.ObjectId;
+  // Explicitly enabled only by new admissions; legacy records keep one attempt.
+  @Prop({ type: Number, default: 1, min: 1, max: 4, immutable: true })
+  maxAcquisitionAttempts!: number;
+  @Prop({ type: Number, default: 0, min: 0, max: 4 })
+  acquisitionAttempt!: number;
+  @Prop({ type: Date, default: null }) nextAttemptAt!: Date | null;
+  @Prop({ type: Date, default: null }) queuedAt!: Date | null;
+  @Prop({
+    type: { maxBytes: Number, maxDuration: Number },
+    _id: false,
+    default: null,
+  })
+  acquisitionLimits!: { maxBytes: number; maxDuration: number } | null;
   @Prop({
     type: String,
     default: null,

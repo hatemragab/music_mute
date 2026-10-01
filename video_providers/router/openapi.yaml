@@ -4,8 +4,10 @@ info:
   version: 1.0.0
   x-audience: component-internal
   description: >-
-    Provider-neutral binary router. Selects the YouTube or other-sites private
-    adapter before exactly one POST, without retry, failover or redirects.
+    Provider-neutral binary router. Selects one operator-configured private
+    YouTube adapter (Tunelio by default, or explicitly qualified JoJAPI) and
+    VideoScale for other enabled sites before exactly one POST, without retry,
+    failover or redirects. The selected destination never changes after a failure.
     Twenty active relays share capacity across both routes; additional bounded
     handlers wait before submission. At most five submissions start per rolling second.
     NestJS independently validates audio and duration before R2 upload.

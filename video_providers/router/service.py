@@ -70,9 +70,11 @@ def destination(value, key, app):
     """Only operator-configured, exact private CapRover service destinations."""
     if not isinstance(value, str) or any(c.isspace() or c == '\\' for c in value):
         raise ValueError('Invalid private acquisition destination')
+    apps = (app,) if isinstance(app, str) else app
+    hosts = {host for name in apps for host in (name, 'srv-captain--' + name)}
     try:
         p = urlsplit(value)
-        if (p.scheme != 'http' or p.hostname not in (app, 'srv-captain--' + app)
+        if (p.scheme != 'http' or p.hostname not in hosts
                 or p.port != 8080 or p.username or p.password or p.query or p.fragment
                 or p.path not in ('', '/') or not valid_key(key)):
             raise ValueError()
@@ -95,7 +97,7 @@ def clean_metadata(encoded, secrets):
             if not isinstance(field, str):
                 continue
             field = ''.join(c for c in field if unicodedata.category(c) not in ('Cc', 'Cf')).strip()[:maximum]
-            if (not field or re.search(r'https?://|Bearer\s|Basic\s|X-Amz-|Signature=|tnl_', field, re.I)
+            if (not field or re.search(r'https?://|Bearer\s|Basic\s|X-Amz-|Signature=|tnl_|jk_', field, re.I)
                     or any(secret in field for secret in secrets)):
                 continue
             clean[key] = field
@@ -432,7 +434,8 @@ def main():
     try:
         targets = {
             'youtube': destination(os.environ.get('YOUTUBE_AUDIO_ACQUISITION_API_URL', ''),
-                                   os.environ.get('YOUTUBE_AUDIO_ACQUISITION_API_KEY', ''), 'music-mute-tunelio'),
+                                   os.environ.get('YOUTUBE_AUDIO_ACQUISITION_API_KEY', ''),
+                                   ('music-mute-tunelio', 'music-mute-jojapi')),
             'other': destination(os.environ.get('OTHER_AUDIO_ACQUISITION_API_URL', ''),
                                  os.environ.get('OTHER_AUDIO_ACQUISITION_API_KEY', ''), 'music-mute-videoscale'),
         }

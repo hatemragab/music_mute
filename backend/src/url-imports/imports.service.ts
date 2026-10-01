@@ -21,6 +21,11 @@ import { jobError } from '../jobs/job-errors.js';
 import { importError } from './import-errors.js';
 import { parseImportSource } from './import-source.js';
 import { ACTIVE_IMPORT_STATES, MediaImport } from './media-import.schema.js';
+import {
+  acquisitionRetryDelay,
+  importExecutionJobId,
+  MAX_ACQUISITION_ATTEMPTS,
+} from './import-retry.js';
 
 export const IMPORT_QUEUE = 'musicmute-url-imports';
 
@@ -101,11 +106,45 @@ export class ImportsService {
           executionId: record.executionId,
           status: 'downloading',
         },
-        { $set: { acquisitionReservedAt: new Date() } },
+        {
+          $set: {
+            acquisitionReservedAt: record.acquisitionReservedAt ?? new Date(),
+          },
+        },
         { session },
       );
       if (active.matchedCount !== 1)
         throw importError('IMPORT_DEPENDENCY_FAILED');
+      if (record.acquisitionReservedAt) {
+        // An authorized durable retry retains exactly one pre-provider hold.
+        // Legacy or exhausted claims never turn reservation replay into paid work.
+        await this.assertAccountAllowed(record.userId, session);
+        const limits = record.acquisitionLimits;
+        const usage = await this.usage.readUsage(record.userId, session);
+        if (
+          !this.config.get<boolean>('URL_IMPORT_ENABLED') ||
+          usage.availability.reason === 'paused'
+        )
+          throw importError('IMPORT_DISABLED');
+        if (
+          (record.maxAcquisitionAttempts ?? 1) <= 1 ||
+          record.acquisitionAttempt < 2 ||
+          !limits ||
+          !Number.isSafeInteger(limits.maxBytes) ||
+          limits.maxBytes < 1 ||
+          limits.maxBytes > MAX_PREPARED_AUDIO_BYTES ||
+          !Number.isSafeInteger(limits.maxDuration) ||
+          limits.maxDuration < 1 ||
+          limits.maxDuration > MAX_AUDIO_DURATION_SECONDS ||
+          !(await this.usage.hasReservedProcessing(
+            record._id,
+            record.userId,
+            session,
+          ))
+        )
+          throw jobError('IDEMPOTENCY_CONFLICT');
+        return limits;
+      }
       const limits = await this.assertEligible(record.userId, session);
       await this.usage.reserveForImport(
         record._id,
@@ -113,20 +152,72 @@ export class ImportsService {
         limits.maxDuration,
         session,
       );
+      await this.records.updateOne(
+        { _id: record._id, executionId: record.executionId },
+        { $set: { acquisitionLimits: limits } },
+        { session, runValidators: true },
+      );
       return limits;
     });
+  }
+
+  async retryAcquisition(
+    record: MediaImport,
+    error: { code: string; message: string },
+    now = new Date(),
+  ): Promise<boolean> {
+    const delay = acquisitionRetryDelay(record, error.code);
+    if (delay === null) return false;
+    await this.assertAccountAllowed(record.userId);
+    if (!this.config.get<boolean>('URL_IMPORT_ENABLED'))
+      throw importError('IMPORT_DISABLED');
+    const changed = await this.records.updateOne(
+      {
+        _id: record._id,
+        executionId: record.executionId,
+        acquisitionAttempt: record.acquisitionAttempt,
+        status: record.status,
+        jobId: null,
+        input: null,
+      },
+      {
+        $set: {
+          status: 'queued',
+          queuedAt: now,
+          nextAttemptAt: new Date(now.getTime() + delay),
+          executionId: null,
+          deadlineAt: null,
+          error,
+          finishedAt: null,
+          expiresAt: null,
+        },
+      },
+      { runValidators: true },
+    );
+    if (changed.matchedCount !== 1) return false;
+    // Mongo is the outbox; Redis failure is repaired by normal server maintenance.
+    void this.enqueue(record._id.toHexString()).catch(() => undefined);
+    return true;
   }
 
   async failAcquisition(
     record: MediaImport,
     error: { code: string; message: string },
   ) {
-    await this.transactions.run(async (session) => {
-      await this.records.updateOne(
-        { _id: record._id, status: trusted({ $in: ACTIVE_IMPORT_STATES }) },
+    const finalized = await this.transactions.run(async (session) => {
+      const changed = await this.records.updateOne(
+        {
+          _id: record._id,
+          executionId: record.executionId ?? null,
+          ...(record.acquisitionAttempt === undefined
+            ? {}
+            : { acquisitionAttempt: record.acquisitionAttempt }),
+          status: trusted({ $in: ACTIVE_IMPORT_STATES }),
+        },
         {
           $set: {
             status: 'failed',
+            nextAttemptAt: null,
             finishedAt: new Date(),
             error,
             expiresAt: new Date(Date.now() + 7 * 86400_000),
@@ -134,9 +225,11 @@ export class ImportsService {
         },
         { session },
       );
+      if (changed.matchedCount !== 1) return false;
       await this.usage.releaseImport(record._id, record.userId, session);
+      return true;
     });
-    await this.shared?.failImport(record);
+    if (finalized) await this.shared?.failImport(record);
   }
 
   async create(
@@ -206,6 +299,9 @@ export class ImportsService {
             requestId,
             jobRequestId,
             trimEnabled,
+            maxAcquisitionAttempts: MAX_ACQUISITION_ATTEMPTS,
+            acquisitionAttempt: 0,
+            queuedAt: new Date(),
             sourceUrl: source.url,
             provider: source.provider,
             sharedSourceKey: shared?.sourceKey ?? null,
@@ -222,9 +318,9 @@ export class ImportsService {
   }
 
   async enqueue(id: string): Promise<void> {
+    const record = await this.records.findById(id).lean();
+    if (!record || record.status !== 'queued') return;
     if (this.shared) {
-      const record = await this.records.findById(id).lean();
-      if (!record || record.status !== 'queued') return;
       const state = await this.shared.inspect(record);
       if (state?.action === 'wait') return;
       if (state?.action === 'failed') {
@@ -237,9 +333,10 @@ export class ImportsService {
     }
     await this.queue.add(
       'import',
-      { importId: id },
+      { importId: id, attempt: (record.acquisitionAttempt ?? 0) + 1 },
       {
-        jobId: id,
+        jobId: importExecutionJobId(record),
+        delay: Math.max(0, (record.nextAttemptAt?.getTime() ?? 0) - Date.now()),
         attempts: 1,
         removeOnComplete: { age: 7 * 86400 },
         removeOnFail: { age: 7 * 86400 },

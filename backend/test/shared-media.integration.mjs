@@ -24,6 +24,8 @@ import { StorageCleanupTaskSchema } from '../dist/storage/storage-cleanup-task.s
 import { StorageCleanupService } from '../dist/storage/storage-cleanup.service.js';
 import { AccountDeletionCleanupService } from '../dist/users/account-deletion-cleanup.service.js';
 import { ImportProcessor } from '../dist/url-imports/import-processor.js';
+import { importError } from '../dist/url-imports/import-errors.js';
+import { importExecutionJobId } from '../dist/url-imports/import-retry.js';
 import {
   IMPORT_QUEUE,
   ImportsService,
@@ -128,6 +130,8 @@ test('shared URL media deduplicates acquisition, processing and retained objects
   const copies = [];
   const deletes = [];
   let providerCalls = 0;
+  let acquisitionFailureCode = null;
+  const acquisitionExecutions = [];
   let sourceUploads = 0;
   let localUploadGrants = 0;
   let recoveryHeads = 0;
@@ -264,8 +268,10 @@ test('shared URL media deduplicates acquisition, processing and retained objects
   const processor = new ImportProcessor(
     imports,
     {
-      download: async (_url, _files, path) => {
+      download: async (_url, _files, path, _limits, _signal, executionId) => {
         providerCalls++;
+        acquisitionExecutions.push(executionId);
+        if (acquisitionFailureCode) throw importError(acquisitionFailureCode);
         await writeFile(path, audio);
         return {
           bytes: audio.length,
@@ -285,7 +291,12 @@ test('shared URL media deduplicates acquisition, processing and retained objects
   );
   await processor.files.initialize();
   const processImport = (record) =>
-    processor.process({ data: { importId: String(record._id) } });
+    processor.process({
+      data: {
+        importId: String(record._id),
+        attempt: (record.acquisitionAttempt ?? 0) + 1,
+      },
+    });
   let producer, waiter, producerJob, cachedJob, source, result, sharedOutput;
 
   await t.test(
@@ -315,8 +326,8 @@ test('shared URL media deduplicates acquisition, processing and retained objects
       assert.equal(producer.sharedResultKey, waiter.sharedResultKey);
       await imports.enqueue(String(producer._id));
       await imports.enqueue(String(waiter._id));
-      assert.ok(await queue.getJob(String(producer._id)));
-      assert.equal(await queue.getJob(String(waiter._id)), undefined);
+      assert.ok(await queue.getJob(importExecutionJobId(producer)));
+      assert.equal(await queue.getJob(importExecutionJobId(waiter)), undefined);
       assert.equal((await shared.inspect(waiter)).action, 'wait');
 
       await processImport(producer);
@@ -335,7 +346,7 @@ test('shared URL media deduplicates acquisition, processing and retained objects
       assert.equal((await shared.inspect(waiter)).action, 'wait');
       await imports.enqueue(String(waiter._id));
       assert.equal(
-        await queue.getJob(String(waiter._id)),
+        await queue.getJob(importExecutionJobId(waiter)),
         undefined,
         'original audio alone does not unblock the same-recipe waiter',
       );
@@ -433,7 +444,7 @@ test('shared URL media deduplicates acquisition, processing and retained objects
     'cached jobs share exact identities with no processing reservation, upload or duplicate replay charge',
     async () => {
       await imports.enqueue(String(waiter._id));
-      assert.ok(await queue.getJob(String(waiter._id)));
+      assert.ok(await queue.getJob(importExecutionJobId(waiter)));
       await processImport(waiter);
       waiter = await records.findById(waiter._id).lean();
       assert.equal(waiter.status, 'submitted');
@@ -778,6 +789,252 @@ test('shared URL media deduplicates acquisition, processing and retained objects
       assert.equal(sourceUploads, uploadsBefore + 1);
       assert.equal(recoveryHeads, headsBefore + 1);
       assert.equal(deletes.length, 0);
+    },
+  );
+
+  const retryOwners = Array.from({ length: 6 }, () => new Types.ObjectId());
+  await accountFixture(connection, retryOwners.map(String));
+  const admitRetry = async (owner, videoId) => {
+    const created = await imports.create(
+      String(owner),
+      `https://youtu.be/${videoId}`,
+      randomUUID(),
+      false,
+    );
+    return records.findById(created.importId).lean();
+  };
+  const makeDue = async (record) => {
+    await records.updateOne(
+      { _id: record._id, status: 'queued' },
+      { $set: { nextAttemptAt: new Date(Date.now() - 1) } },
+    );
+    return records.findById(record._id).lean();
+  };
+
+  await t.test(
+    'a delayed acquisition retry keeps one usage hold and shared waiter, then succeeds once',
+    async (st) => {
+      st.after(() => {
+        acquisitionFailureCode = null;
+      });
+      const providersBefore = providerCalls;
+      const uploadsBefore = sourceUploads;
+      let retry = await admitRetry(retryOwners[0], 'retry-src01');
+      const follower = await admitRetry(retryOwners[1], 'retry-src01');
+      const sourceBefore = await model('SharedMediaSource')
+        .findById(retry.sharedSourceKey)
+        .lean();
+      const resultBefore = await model('SharedMediaResult')
+        .findById(retry.sharedResultKey)
+        .lean();
+      acquisitionFailureCode = 'IMPORT_DEPENDENCY_FAILED';
+      await processImport(retry);
+      retry = await records.findById(retry._id).lean();
+      assert.equal(retry.status, 'queued');
+      assert.equal(retry.acquisitionAttempt, 1);
+      assert.equal(
+        retry.nextAttemptAt.getTime() - retry.queuedAt.getTime(),
+        5_000,
+      );
+      assert.equal(retry.trimEnabled, false);
+      assert.equal((await shared.inspect(follower)).action, 'wait');
+      assert.equal(
+        (await model('ProcessingReservation').findById(retry._id)).state,
+        'reserved',
+      );
+      assert.equal(
+        await model('ProcessingReservation').countDocuments({
+          accountId: retry.userId,
+        }),
+        1,
+      );
+      await processImport(retry);
+      assert.equal(
+        providerCalls,
+        providersBefore + 1,
+        'a premature queue entry cannot acquire before its durable due time',
+      );
+      await imports.enqueue(String(retry._id));
+      const queuedRetry = await queue.getJob(importExecutionJobId(retry));
+      assert.ok(queuedRetry);
+      assert.equal(queuedRetry.opts.attempts, 1);
+      assert.equal(await queuedRetry.getState(), 'delayed');
+      acquisitionFailureCode = null;
+      retry = await makeDue(retry);
+      await processImport(retry);
+      retry = await records.findById(retry._id).lean();
+      const retryJob = await jobRecords.findById(retry.jobId).lean();
+      assert.equal(retry.status, 'submitted');
+      assert.equal(retry.acquisitionAttempt, 2);
+      assert.equal(retry.error, null);
+      assert.equal(retry.nextAttemptAt, null);
+      assert.equal(retryJob.recipeSnapshot.trimEnabled, false);
+      assert.equal(retryJob.sharedSourceKey, sourceBefore._id);
+      assert.equal(retryJob.sharedResultKey, resultBefore._id);
+      const readySource = await model('SharedMediaSource')
+        .findById(sourceBefore._id)
+        .lean();
+      const processingResult = await model('SharedMediaResult')
+        .findById(resultBefore._id)
+        .lean();
+      assert.equal(readySource.generation, sourceBefore.generation);
+      assert.equal(
+        processingResult.sourceGeneration,
+        resultBefore.sourceGeneration,
+      );
+      assert.equal(String(readySource.producerImportId), String(retry._id));
+      assert.equal(
+        String(processingResult.producerImportId),
+        String(retry._id),
+      );
+      assert.equal((await shared.inspect(follower)).action, 'wait');
+      assert.equal(providerCalls, providersBefore + 2);
+      assert.equal(sourceUploads, uploadsBefore + 1);
+      assert.equal(
+        await jobRecords.countDocuments({ userId: retry.userId }),
+        1,
+      );
+      assert.equal(
+        (await model('ProcessingReservation').findById(retry._id)).state,
+        'released',
+      );
+      assert.equal(
+        (await model('ProcessingReservation').findById(retryJob._id)).state,
+        'reserved',
+      );
+      const downloadTiming = retry.stageTimings.filter(
+        (entry) => entry.stage === 'source-download',
+      );
+      assert.equal(downloadTiming.length, 1);
+      assert.equal(downloadTiming[0].complete, true);
+      assert.equal(new Set(acquisitionExecutions.slice(-2)).size, 2);
+    },
+  );
+
+  await t.test(
+    'three retries exhaust four opaque executions and release the single hold and shared followers once',
+    async (st) => {
+      st.after(() => {
+        acquisitionFailureCode = null;
+      });
+      const providersBefore = providerCalls;
+      const uploadsBefore = sourceUploads;
+      let retry = await admitRetry(retryOwners[2], 'retry-src02');
+      const follower = await admitRetry(retryOwners[3], 'retry-src02');
+      acquisitionFailureCode = 'IMPORT_UPSTREAM_REFUSED';
+      let stale;
+      for (const attempt of [1, 2, 3, 4]) {
+        await processImport(retry);
+        retry = await records.findById(retry._id).lean();
+        assert.equal(retry.acquisitionAttempt, attempt);
+        assert.equal(retry.status, attempt < 4 ? 'queued' : 'failed');
+        if (attempt < 4) {
+          assert.equal(
+            retry.nextAttemptAt.getTime() - retry.queuedAt.getTime(),
+            5_000 * 2 ** (attempt - 1),
+          );
+          assert.equal((await shared.inspect(follower)).action, 'wait');
+          assert.equal(
+            (await model('ProcessingReservation').findById(retry._id)).state,
+            'reserved',
+          );
+          stale ??= {
+            ...retry,
+            status: 'downloading',
+            executionId: acquisitionExecutions.at(-1),
+          };
+          retry = await makeDue(retry);
+        }
+      }
+      assert.equal(retry.error.code, 'IMPORT_UPSTREAM_REFUSED');
+      assert.equal(retry.nextAttemptAt, null);
+      assert.equal(retry.jobId, null);
+      assert.equal(retry.input, null);
+      assert.equal(providerCalls, providersBefore + 4);
+      assert.equal(new Set(acquisitionExecutions.slice(-4)).size, 4);
+      assert.ok(
+        acquisitionExecutions
+          .slice(-4)
+          .every((value) =>
+            /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(
+              value,
+            ),
+          ),
+      );
+      assert.equal(sourceUploads, uploadsBefore);
+      assert.equal(
+        await jobRecords.countDocuments({ userId: retry.userId }),
+        0,
+      );
+      assert.equal(
+        await model('ProcessingReservation').countDocuments({
+          accountId: retry.userId,
+        }),
+        1,
+      );
+      assert.equal(
+        (await model('ProcessingReservation').findById(retry._id)).state,
+        'released',
+      );
+      assert.equal(
+        (await model('SharedMediaSource').findById(retry.sharedSourceKey))
+          .state,
+        'failed',
+      );
+      assert.equal((await shared.inspect(follower)).action, 'failed');
+      await imports.enqueue(String(follower._id));
+      assert.equal((await records.findById(follower._id)).status, 'failed');
+      await processor.reconcileFailure(
+        stale,
+        importError('IMPORT_DEPENDENCY_FAILED'),
+      );
+      await processImport(retry);
+      assert.equal(providerCalls, providersBefore + 4);
+      assert.equal(
+        (await usage.readUsage(retry.userId)).processing.reservedSeconds,
+        0,
+      );
+    },
+  );
+
+  await t.test(
+    'permanent source refusal and disabled accounts terminate without another acquisition',
+    async (st) => {
+      st.after(() => {
+        acquisitionFailureCode = null;
+      });
+      const providersBefore = providerCalls;
+      let permanent = await admitRetry(retryOwners[4], 'retry-src03');
+      acquisitionFailureCode = 'IMPORT_SOURCE_UNAVAILABLE';
+      await processImport(permanent);
+      permanent = await records.findById(permanent._id).lean();
+      assert.equal(permanent.status, 'failed');
+      assert.equal(permanent.acquisitionAttempt, 1);
+      assert.equal(permanent.nextAttemptAt, null);
+      assert.equal(
+        (await model('ProcessingReservation').findById(permanent._id)).state,
+        'released',
+      );
+      let disabled = await admitRetry(retryOwners[5], 'retry-src04');
+      acquisitionFailureCode = 'IMPORT_DEPENDENCY_FAILED';
+      await processImport(disabled);
+      disabled = await records.findById(disabled._id).lean();
+      assert.equal(disabled.status, 'queued');
+      await accounts.users.updateOne(
+        { _id: disabled.userId },
+        { $set: { status: 'disabled' } },
+      );
+      disabled = await makeDue(disabled);
+      await processImport(disabled);
+      disabled = await records.findById(disabled._id).lean();
+      assert.equal(disabled.status, 'failed');
+      assert.equal(disabled.error.code, 'ACCOUNT_DISABLED');
+      assert.equal(disabled.acquisitionAttempt, 2);
+      assert.equal(
+        (await model('ProcessingReservation').findById(disabled._id)).state,
+        'released',
+      );
+      assert.equal(providerCalls, providersBefore + 2);
     },
   );
 });

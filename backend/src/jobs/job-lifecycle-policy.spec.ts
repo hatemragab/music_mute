@@ -1,4 +1,5 @@
 import { JOB_FAILURE_CODES, JOB_STATUSES } from './job.types.js';
+import { DEFAULT_ACCOUNT_POLICY_VALUES } from '../admin-settings/account-policy.schema.js';
 import {
   ACTIVE_ADMISSION_STATUSES,
   JOB_CAPACITY_GROUP_BY_STATUS,
@@ -75,6 +76,49 @@ describe('job lifecycle policy', () => {
       publicAction: 'retry_later',
     });
   });
+
+  it.each([
+    'SEPARATOR_FAILED',
+    'DOWNLOAD_FAILED',
+    'OUTPUT_UPLOAD_FAILED',
+    'LEASE_EXPIRED',
+  ] as const)(
+    'allows three automatic requeues before exhausting %s',
+    (source) => {
+      const maxAttempts =
+        DEFAULT_ACCOUNT_POLICY_VALUES.maxInfrastructureAttempts;
+      expect(maxAttempts).toBe(4);
+      for (
+        let attemptNumber = 1;
+        attemptNumber <= maxAttempts;
+        attemptNumber++
+      ) {
+        const failure = resolveJobFailure(source, {
+          retryEligible: true,
+          attemptsRemaining: maxAttempts - attemptNumber + 1,
+          attemptNumber,
+          maxAttempts,
+        });
+        expect(failure).toMatchObject(
+          attemptNumber < 4
+            ? {
+                classification: 'infrastructure_transient',
+                automaticRetry: true,
+                settlement: 'preserve',
+                cleanup: 'preserve_for_retry',
+                publicAction: 'retry_automatically',
+              }
+            : {
+                classification: 'infrastructure_terminal',
+                automaticRetry: false,
+                settlement: 'release',
+                cleanup: 'cleanup',
+                publicAction: 'retry_later',
+              },
+        );
+      }
+    },
+  );
 
   it('never converts client/input or invalid output failures into worker retry', () => {
     expect(resolveJobFailure('INVALID_AUDIO')).toMatchObject({

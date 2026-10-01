@@ -19,6 +19,7 @@ import { AudioAcquisitionClient } from './audio-acquisition-client.js';
 import { ImportFiles } from './import-files.js';
 import { probeImport } from './import-probe.js';
 import { importError, safeImportError } from './import-errors.js';
+import { MAX_ACQUISITION_ATTEMPTS } from './import-retry.js';
 
 @Injectable()
 @Processor(IMPORT_QUEUE, { autorun: false, concurrency: 1, maxStalledCount: 0 })
@@ -43,27 +44,80 @@ export class ImportProcessor extends WorkerHost {
     );
   }
 
-  async process(job: QueueJob<{ importId: string }>): Promise<void> {
+  async process(
+    job: QueueJob<{ importId: string; attempt?: number }>,
+  ): Promise<void> {
+    const expectedAttempt = job.data.attempt ?? 1;
+    if (
+      !Number.isSafeInteger(expectedAttempt) ||
+      expectedAttempt < 1 ||
+      expectedAttempt > MAX_ACQUISITION_ATTEMPTS
+    )
+      return;
     const executionId = randomUUID();
     const record = await this.imports.records
       .findOneAndUpdate(
-        { _id: job.data.importId, status: 'queued' },
+        {
+          _id: job.data.importId,
+          status: 'queued',
+          $and: [
+            {
+              $or: [
+                { acquisitionAttempt: expectedAttempt - 1 },
+                ...(expectedAttempt === 1
+                  ? [{ acquisitionAttempt: trusted({ $exists: false }) }]
+                  : []),
+              ],
+            },
+            {
+              $or: [
+                { nextAttemptAt: null },
+                { nextAttemptAt: trusted({ $lte: new Date() }) },
+              ],
+            },
+          ],
+          $expr: trusted({
+            $lt: [
+              { $ifNull: ['$acquisitionAttempt', 0] },
+              { $ifNull: ['$maxAcquisitionAttempts', 1] },
+            ],
+          }),
+        },
         {
           $set: {
             status: 'downloading',
             executionId,
+            nextAttemptAt: null,
+            error: null,
             deadlineAt: new Date(Date.now() + 15 * 60_000),
           },
+          $inc: { acquisitionAttempt: 1 },
         },
         { returnDocument: 'after' },
       )
       .lean();
     if (!record) return;
-    const queueMs = elapsedMs(record.createdAt, new Date());
-    const stages: StageMeasurement[] =
-      queueMs === null
-        ? []
-        : [{ stage: 'import-queue', durationMs: queueMs, complete: true }];
+    // Preparation must consume the persisted execution budget, rather than
+    // starting a new full transfer lifetime after slow dependency reads.
+    const remainingMs = record.deadlineAt!.getTime() - Date.now();
+    const executionSignal = AbortSignal.any([
+      this.shutdown.signal,
+      remainingMs > 0 ? AbortSignal.timeout(remainingMs) : AbortSignal.abort(),
+    ]);
+    const queueMs = elapsedMs(record.queuedAt ?? record.createdAt, new Date());
+    const stages: StageMeasurement[] = (record.stageTimings ?? []).map(
+      (stage) => ({ ...stage }),
+    );
+    if (queueMs !== null) {
+      const queued = stages.find((stage) => stage.stage === 'import-queue');
+      if (queued) queued.durationMs += queueMs;
+      else
+        stages.push({
+          stage: 'import-queue',
+          durationMs: queueMs,
+          complete: true,
+        });
+    }
     let timingJobId: string | null = null;
     const saveTimings = async () => {
       await this.imports.records.updateOne(
@@ -82,8 +136,12 @@ export class ImportProcessor extends WorkerHost {
       stage: string,
       operation: () => Promise<T>,
     ): Promise<T> => {
-      const entry: StageMeasurement = { stage, durationMs: 0, complete: false };
-      stages.push(entry);
+      let entry = stages.find((candidate) => candidate.stage === stage);
+      if (!entry) {
+        entry = { stage, durationMs: 0, complete: false };
+        stages.push(entry);
+      }
+      entry.complete = false;
       this.logger.log({
         event: 'import-stage',
         acquisition_id: executionId,
@@ -97,19 +155,22 @@ export class ImportProcessor extends WorkerHost {
         entry.complete = true;
         return result;
       } finally {
-        entry.durationMs = Math.round(performance.now() - start);
+        const durationMs = Math.round(performance.now() - start);
+        entry.durationMs += durationMs;
         this.logger.log({
           event: 'import-stage',
           acquisition_id: executionId,
           stage,
           state: entry.complete ? 'completed' : 'failed',
-          duration_ms: entry.durationMs,
+          duration_ms: durationMs,
         });
         await saveTimings();
       }
     };
     try {
+      executionSignal.throwIfAborted();
       const cached = await this.shared?.inspect(record);
+      executionSignal.throwIfAborted();
       if (cached && (cached.action === 'failed' || cached.action === 'wait'))
         throw importError('IMPORT_DEPENDENCY_FAILED');
       if (
@@ -121,6 +182,7 @@ export class ImportProcessor extends WorkerHost {
         return;
       }
       const limits = await this.imports.reserveAcquisition(record);
+      executionSignal.throwIfAborted();
       await this.files.withFile(async (path, signal) => {
         const downloaded = await measure('source-download', () =>
           this.downloader.download(
@@ -284,7 +346,7 @@ export class ImportProcessor extends WorkerHost {
           this.jobs.confirmUpload(record.userId.toHexString(), reserved.id),
         );
         await this.finish(record, 'submitted', reserved.id);
-      }, this.shutdown.signal);
+      }, executionSignal);
     } catch (error) {
       this.logger.warn({
         event: 'import-failure',
@@ -379,6 +441,17 @@ export class ImportProcessor extends WorkerHost {
   }
 
   async reconcileFailure(record: MediaImport, error: unknown): Promise<void> {
+    const fresh = await this.imports.records.findById(record._id).lean();
+    if (
+      !fresh ||
+      fresh.executionId !== record.executionId ||
+      (fresh.acquisitionAttempt ?? 0) !== (record.acquisitionAttempt ?? 0) ||
+      !['queued', 'downloading', 'validating', 'uploading'].includes(
+        fresh.status,
+      )
+    )
+      return;
+    record = fresh;
     // If confirmation committed just before a crash/network error, preserve its accepted job.
     const current = await this.jobRecords
       .findOne({ userId: record.userId, requestId: record.jobRequestId })
@@ -387,11 +460,13 @@ export class ImportProcessor extends WorkerHost {
       await this.finish(record, 'submitted', current._id.toHexString());
       return;
     }
+    let safeToAcquire = !record.sharedSourceKey;
     if (record.sharedSourceKey && this.shared) {
       // A lost PUT/confirmation response can still leave a verified immutable source.
       // A storage outage leaves recovery pending; it never repeats paid acquisition.
       await this.shared.recoverSource(record);
       const cached = await this.shared.inspect(record);
+      safeToAcquire = cached?.action === 'acquire' && !cached.source?.inputKey;
       if (cached?.action === 'source' || cached?.action === 'result') {
         const fresh = await this.imports.records.findById(record._id).lean();
         if (
@@ -413,6 +488,27 @@ export class ImportProcessor extends WorkerHost {
         }
       }
     }
+    if (!current && safeToAcquire) {
+      try {
+        if (await this.imports.retryAcquisition(record, safeImportError(error)))
+          return;
+      } catch (retryError) {
+        // Access/policy changes end the series. Dependency outages leave Mongo
+        // recovery pending instead of manufacturing another paid execution.
+        const safe = safeImportError(retryError);
+        if (safe.code === 'IMPORT_DEPENDENCY_FAILED') throw retryError;
+        error = retryError;
+      }
+    }
+    const stillCurrent = await this.imports.records.findById(record._id).lean();
+    if (
+      !stillCurrent ||
+      stillCurrent.executionId !== record.executionId ||
+      (stillCurrent.acquisitionAttempt ?? 0) !==
+        (record.acquisitionAttempt ?? 0) ||
+      stillCurrent.status !== record.status
+    )
+      return;
     await this.actions.cancelPendingUpload(
       record.userId.toHexString(),
       record.jobRequestId,
@@ -440,6 +536,7 @@ export class ImportProcessor extends WorkerHost {
           finishedAt: new Date(),
           jobId,
           error: null,
+          nextAttemptAt: null,
           expiresAt: new Date(Date.now() + 7 * 86400_000),
         },
       },

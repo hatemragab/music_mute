@@ -327,12 +327,14 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
   );
   const first = await createJob(jobs, owner, 40);
   const second = await createJob(jobs, owner, 40);
+  // Keep this allowance scenario separate from the consumed October fixture.
+  const quotaDate = new Date('2026-11-01T00:00:01.000Z');
   const outcomes = await Promise.allSettled([
     transactions.run((session) =>
-      usage.reserveForJob(first._id, owner, 40, session),
+      usage.reserveForJob(first._id, owner, 40, session, quotaDate),
     ),
     transactions.run((session) =>
-      usage.reserveForJob(second._id, owner, 40, session),
+      usage.reserveForJob(second._id, owner, 40, session, quotaDate),
     ),
   ]);
   assert.equal(
@@ -343,7 +345,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     outcomes.filter((outcome) => outcome.status === 'rejected').length,
     0,
   );
-  const current = await usage.readUsage(owner);
+  const current = await usage.readUsage(owner, undefined, quotaDate);
   assert.equal(current.processing.reservedSeconds, 80);
   assert.equal(current.processing.remainingSeconds, 0);
 
@@ -729,7 +731,7 @@ test('UTC-month reservations are idempotent, bounded, and fully released on fail
     updatedAt: new Date(),
     revision: 1,
   });
-  const reduced = await usage.readUsage(owner);
+  const reduced = await usage.readUsage(owner, undefined, quotaDate);
   assert.equal(reduced.effectivePolicySource, 'account_override');
   assert.equal(reduced.processing.limitSeconds, 10);
   assert.equal(reduced.processing.reservedSeconds, 80);

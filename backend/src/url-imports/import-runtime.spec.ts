@@ -19,6 +19,7 @@ function fixture(status: string, queueState?: string, expired = false) {
       ? undefined
       : {
           getState: vi.fn().mockResolvedValue(queueState),
+          remove: vi.fn(),
         },
   );
   const imports = {
@@ -85,5 +86,39 @@ describe('import recovery', () => {
     await expect(f.runtime.reconcile()).rejects.toThrow('unavailable');
     expect(f.reconcileFailure).not.toHaveBeenCalled();
     expect(f.enqueue).not.toHaveBeenCalled();
+  });
+  it('recreates a missing delayed retry after restart, using only the next queue generation', async () => {
+    const f = fixture('queued');
+    Object.assign(f.record, {
+      maxAcquisitionAttempts: 4,
+      acquisitionAttempt: 1,
+      nextAttemptAt: new Date(Date.now() + 20_000),
+    });
+    await f.runtime.reconcile();
+    expect(f.getJob).toHaveBeenCalledWith(`${f.record._id}-2`);
+    expect(f.enqueue).toHaveBeenCalledWith(String(f.record._id));
+    expect(f.reconcileFailure).not.toHaveBeenCalled();
+  });
+  it('replaces a prematurely completed unclaimed retry entry without treating it as another failure', async () => {
+    const f = fixture('queued', 'completed');
+    Object.assign(f.record, {
+      maxAcquisitionAttempts: 4,
+      acquisitionAttempt: 2,
+    });
+    const job = await f.getJob();
+    await f.runtime.reconcile();
+    expect(job.remove).toHaveBeenCalledOnce();
+    expect(f.enqueue).toHaveBeenCalledOnce();
+    expect(f.reconcileFailure).not.toHaveBeenCalled();
+  });
+  it('recovers the crashed current attempt instead of inspecting a future generation', async () => {
+    const f = fixture('downloading', 'failed');
+    Object.assign(f.record, {
+      maxAcquisitionAttempts: 4,
+      acquisitionAttempt: 2,
+    });
+    await f.runtime.reconcile();
+    expect(f.getJob).toHaveBeenCalledWith(`${f.record._id}-2`);
+    expect(f.reconcileFailure).toHaveBeenCalledOnce();
   });
 });

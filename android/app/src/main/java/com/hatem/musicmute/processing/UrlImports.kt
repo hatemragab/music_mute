@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -41,9 +43,15 @@ data class UrlImportRecord(
     val failedAtMillis: Long = 0,
 ) {
     val removable: Boolean get() = status in setOf("failed", "attention") && jobId == null
+    val retryable: Boolean get() = removable && errorCode in retryableErrors
     companion object {
         val terminalStatuses = setOf("submitted", "failed")
         const val FAILURE_RETENTION_MILLIS = 7 * 86_400_000L
+        private val retryableErrors = setOf(
+            "OFFLINE", "SERVICE_UNAVAILABLE", "RATE_LIMITED", "IMPORT_QUEUE_FULL",
+            "IMPORT_DEPENDENCY_FAILED", "IMPORT_DISK_FULL", "IMPORT_UPSTREAM_REFUSED",
+            "IMPORT_SOURCE_UNAVAILABLE", "IMPORT_DISABLED", "PROCESSING_UNAVAILABLE",
+        )
     }
 }
 
@@ -175,6 +183,9 @@ class UrlImportCoordinator(
 ) {
     private val mutableRecords = MutableStateFlow<List<UrlImportRecord>>(emptyList())
     val records = mutableRecords.asStateFlow()
+    private val mutableRetrying = MutableStateFlow<Set<String>>(emptySet())
+    val retrying = mutableRetrying.asStateFlow()
+    private val retryMutex = Mutex()
     private var owner: ProcessingSession? = null
     private var observeTask: CoroutineJob? = null
     private val tasks = mutableMapOf<String, CoroutineJob>()
@@ -186,6 +197,7 @@ class UrlImportCoordinator(
         tasks.clear()
         owner = value
         mutableRecords.value = emptyList()
+        mutableRetrying.value = emptySet()
         if (value == null) return
         observeTask = scope.launch {
             store.pruneFailedUrlImports(value.uid)
@@ -214,7 +226,10 @@ class UrlImportCoordinator(
         val url = UrlImportSource.canonical(text)
         val record = store.addUrlImport(ticket.uid,
             UrlImportRecord(ticket.uid, url, UUID.randomUUID().toString(), createdAtMillis = System.currentTimeMillis(), trimEnabled = trimEnabled))
-        if (record.status == "attention") retry(record)
+        if (record.status == "attention") {
+            if (record.errorCode == "IMPORT_REQUEST_CONFLICT") throw UrlImportFailure("IMPORT_REQUEST_CONFLICT")
+            retrySaved(record, allowAttentionRecovery = true)
+        }
     }
 
     suspend fun observeJobs(jobIds: Set<String>) {
@@ -224,18 +239,38 @@ class UrlImportCoordinator(
         }
     }
 
-    suspend fun retry(record: UrlImportRecord) {
+    suspend fun retry(record: UrlImportRecord) = retrySaved(record, allowAttentionRecovery = false)
+
+    private suspend fun retrySaved(record: UrlImportRecord, allowAttentionRecovery: Boolean) {
         val ticket = owner?.takeIf { it == session() && it.uid == record.ownerUid }
             ?: throw UrlImportFailure("UNAUTHENTICATED")
-        tasks.remove(record.requestId)?.cancel()
-        store.updateUrlImport(ticket.uid, record.requestId) { current ->
-            if (current.status == "attention" && current.errorCode == "IMPORT_REQUEST_CONFLICT")
-                current.copy(status = "failed")
-            else if (current.status == "attention")
-                current.copy(status = if (current.importId == null) "pending" else "queued", errorCode = null)
-            else current
+        retryMutex.withLock {
+            if (owner != ticket || session() != ticket) throw UrlImportFailure("UNAUTHENTICATED")
+            val current = store.urlImports(ticket.uid).first()
+                .firstOrNull { it.requestId == record.requestId } ?: return
+            if (owner != ticket || session() != ticket) throw UrlImportFailure("UNAUTHENTICATED")
+            if (!current.retryable && !(allowAttentionRecovery && current.removable && current.status == "attention" &&
+                    current.errorCode != "IMPORT_REQUEST_CONFLICT")) return
+            mutableRetrying.value += current.requestId
+            try {
+                if (current.status == "failed") {
+                    // A known terminal execution needs a new identity; preserve the saved source choice.
+                    store.addUrlImport(ticket.uid, UrlImportRecord(ticket.uid, current.url,
+                        UUID.randomUUID().toString(), sourceTitle = current.sourceTitle,
+                        createdAtMillis = System.currentTimeMillis(), trimEnabled = current.trimEnabled))
+                } else {
+                    // An uncertain admission resumes the same identity and any existing import subscription.
+                    tasks.remove(current.requestId)?.cancel()
+                    store.updateUrlImport(ticket.uid, current.requestId) {
+                        if (it.removable && it.status == "attention" && (it.retryable || allowAttentionRecovery))
+                            it.copy(status = if (it.importId == null) "pending" else "queued", errorCode = null)
+                        else it
+                    }
+                }
+            } finally {
+                mutableRetrying.value -= current.requestId
+            }
         }
-        if (record.status == "failed" || record.errorCode == "IMPORT_REQUEST_CONFLICT") submit(record.url)
     }
 
     suspend fun remove(record: UrlImportRecord) {

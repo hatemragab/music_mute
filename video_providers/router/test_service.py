@@ -13,7 +13,7 @@ from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from package_caprover import FILES, package, source
-from service import Destination, Server, clean_metadata, destination
+from service import Destination, Server, clean_metadata, destination, main
 from source_policy import Failure, route_for, source_url
 
 INGRESS = 'synthetic-ingress-service-key-000000000'
@@ -230,8 +230,9 @@ class RouterHTTPTests(unittest.TestCase):
 
     def test_metadata_sanitized_and_url_headers_never_forwarded(self):
         encoded = base64.b64encode(json.dumps({
-            'schema_version': 1, 'provider': 'tunelio', 'audio_codec': 'opus',
+            'schema_version': 1, 'provider': 'jojapi', 'audio_codec': 'opus',
             'title': 'allowed title', 'channel': YOUTUBE_KEY,
+            'artist': 'jk_synthetic_vendor_credential',
             'description': 'https://delivery.example/private', 'raw': 'private',
             'bitrate_kbps': 128, 'file_bytes': 200000000,
         }).encode()).decode()
@@ -241,7 +242,7 @@ class RouterHTTPTests(unittest.TestCase):
         status, headers, _ = self.request()
         self.assertEqual(status, 200)
         metadata = json.loads(base64.b64decode(headers['X-Import-Extra-Data-Base64']))
-        self.assertEqual(metadata, {'schema_version': 1, 'provider': 'tunelio', 'audio_codec': 'opus',
+        self.assertEqual(metadata, {'schema_version': 1, 'provider': 'jojapi', 'audio_codec': 'opus',
                                     'title': 'allowed title', 'bitrate_kbps': 128})
         for header in ('Location', 'X-Signed-URL', 'Set-Cookie'):
             self.assertNotIn(header, headers)
@@ -466,19 +467,69 @@ class PolicyAndPackageTests(unittest.TestCase):
                 source_url(url)
 
     def test_private_configuration_cannot_target_arbitrary_destinations(self):
-        for host in ('music-mute-tunelio', 'srv-captain--music-mute-tunelio'):
-            parsed = destination('http://' + host + ':8080/', YOUTUBE_KEY, 'music-mute-tunelio')
+        apps = ('music-mute-tunelio', 'music-mute-jojapi')
+        for host in ('music-mute-tunelio', 'srv-captain--music-mute-tunelio',
+                     'music-mute-jojapi', 'srv-captain--music-mute-jojapi'):
+            parsed = destination('http://' + host + ':8080/', YOUTUBE_KEY, apps)
             self.assertEqual(parsed.host, host)
-        urls = ['https://srv-captain--music-mute-tunelio:8080/',
-                'http://srv-captain--music-mute-tunelio:80/',
-                'http://srv-captain--music-mute-tunelio:8080/override',
-                'http://srv-captain--music-mute-tunelio:8080/?url=private',
-                'http://user:pass@srv-captain--music-mute-tunelio:8080/',
+        urls = ['https://srv-captain--music-mute-jojapi:8080/',
+                'http://srv-captain--music-mute-jojapi:80/',
+                'http://srv-captain--music-mute-jojapi:8080/override',
+                'http://srv-captain--music-mute-jojapi:8080/?url=private',
+                'http://user:pass@srv-captain--music-mute-jojapi:8080/',
                 'http://127.0.0.1:8080/', 'http://attacker.example:8080/',
-                'http://srv-captain--music-mute-videoscale:8080/']
+                'http://srv-captain--music-mute-videoscale:8080/',
+                'http://srv-captain--music-mute-unknown:8080/']
         for url in urls:
             with self.subTest(url=url), self.assertRaises(ValueError):
-                destination(url, YOUTUBE_KEY, 'music-mute-tunelio')
+                destination(url, YOUTUBE_KEY, apps)
+        for host in ('music-mute-tunelio', 'music-mute-jojapi'):
+            with self.subTest(other_route_host=host), self.assertRaises(ValueError):
+                destination('http://' + host + ':8080/', OTHER_KEY, 'music-mute-videoscale')
+
+    def test_runtime_routes_youtube_to_jojapi_with_separate_private_key(self):
+        environment = {
+            'AUDIO_ACQUISITION_API_KEY': INGRESS,
+            'YOUTUBE_AUDIO_ACQUISITION_API_URL': 'http://srv-captain--music-mute-jojapi:8080/',
+            'YOUTUBE_AUDIO_ACQUISITION_API_KEY': YOUTUBE_KEY,
+            'OTHER_AUDIO_ACQUISITION_API_URL': 'http://srv-captain--music-mute-videoscale:8080/',
+            'OTHER_AUDIO_ACQUISITION_API_KEY': OTHER_KEY,
+        }
+        with patch.dict('os.environ', environment, clear=True), patch('service.Server') as server, patch('builtins.print'):
+            main()
+        self.assertEqual(server.call_args.args[1], INGRESS)
+        self.assertEqual(server.call_args.args[2], {
+            'youtube': Destination('srv-captain--music-mute-jojapi', 8080, YOUTUBE_KEY),
+            'other': Destination('srv-captain--music-mute-videoscale', 8080, OTHER_KEY),
+        })
+        server.return_value.serve_forever.assert_called_once_with()
+
+    def test_runtime_keeps_existing_tunelio_destination_and_private_key(self):
+        environment = {
+            'AUDIO_ACQUISITION_API_KEY': INGRESS,
+            'YOUTUBE_AUDIO_ACQUISITION_API_URL': 'http://srv-captain--music-mute-tunelio:8080/',
+            'YOUTUBE_AUDIO_ACQUISITION_API_KEY': YOUTUBE_KEY,
+            'OTHER_AUDIO_ACQUISITION_API_URL': 'http://srv-captain--music-mute-videoscale:8080/',
+            'OTHER_AUDIO_ACQUISITION_API_KEY': OTHER_KEY,
+        }
+        with patch.dict('os.environ', environment, clear=True), patch('service.Server') as server, patch('builtins.print'):
+            main()
+        self.assertEqual(server.call_args.args[2]['youtube'],
+                         Destination('srv-captain--music-mute-tunelio', 8080, YOUTUBE_KEY))
+        server.return_value.serve_forever.assert_called_once_with()
+
+    def test_runtime_rejects_unqualified_youtube_destination_without_fallback(self):
+        environment = {
+            'AUDIO_ACQUISITION_API_KEY': INGRESS,
+            'YOUTUBE_AUDIO_ACQUISITION_API_URL': 'http://srv-captain--music-mute-videoscale:8080/',
+            'YOUTUBE_AUDIO_ACQUISITION_API_KEY': YOUTUBE_KEY,
+            'OTHER_AUDIO_ACQUISITION_API_URL': 'http://srv-captain--music-mute-videoscale:8080/',
+            'OTHER_AUDIO_ACQUISITION_API_KEY': OTHER_KEY,
+        }
+        with patch.dict('os.environ', environment, clear=True), patch('service.Server') as server:
+            with self.assertRaisesRegex(SystemExit, 'Missing valid private adapter configuration'):
+                main()
+        server.assert_not_called()
 
     def test_package_allowlist_and_exact_source_bytes(self):
         with tempfile.TemporaryDirectory() as scratch:
@@ -498,7 +549,10 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const hook = fs.readFileSync('caprover-adapter-hook.js', 'utf8');
 const common = 'synthetic-common-private-service-key-0000';
-const youtube = 'synthetic-youtube-private-service-key-000';
+const youtube = {
+  tunelio: 'synthetic-tunelio-private-service-key-000',
+  jojapi: 'synthetic-jojapi-private-service-key-0000'
+};
 let paths = [];
 const context = {
   require(name) {
@@ -507,26 +561,50 @@ const context = {
       assert.equal(encoding, 'utf8');
       paths.push(path);
       if (path.endsWith('/api-key')) return common;
-      if (path.endsWith('/tunelio-api-key')) return youtube;
+      if (path.endsWith('/tunelio-api-key')) return youtube.tunelio;
+      if (path.endsWith('/jojapi-api-key')) return youtube.jojapi;
       throw new Error('Unknown protected runtime key path');
     }};
   }
 };
 vm.runInNewContext(hook, context);
 (async () => {
-  const update = {TaskTemplate: {ContainerSpec: {Env: [
-    'AUDIO_ACQUISITION_API_KEY=old', 'OTHER_AUDIO_ACQUISITION_API_KEY=old',
-    'YOUTUBE_AUDIO_ACQUISITION_API_KEY=old', 'UNRELATED=preserved'
-  ]}}};
-  const returned = await context.preDeployFunction({}, update);
-  assert.equal(returned, update);
-  assert.deepEqual([...returned.TaskTemplate.ContainerSpec.Env], [
-    'UNRELATED=preserved', 'AUDIO_ACQUISITION_API_KEY=' + common,
-    'OTHER_AUDIO_ACQUISITION_API_KEY=' + common,
-    'YOUTUBE_AUDIO_ACQUISITION_API_KEY=' + youtube
-  ]);
-  assert.deepEqual(paths, ['/captain/data/musicmute-acquisition/api-key',
-                           '/captain/data/musicmute-acquisition/tunelio-api-key']);
+  for (const provider of ['tunelio', 'jojapi']) {
+    for (const prefix of ['', 'srv-captain--']) {
+      paths = [];
+      const update = {TaskTemplate: {ContainerSpec: {Env: [
+        'AUDIO_ACQUISITION_API_KEY=old', 'OTHER_AUDIO_ACQUISITION_API_KEY=old',
+        'YOUTUBE_AUDIO_ACQUISITION_API_KEY=old', 'UNRELATED=preserved'
+      ]}}};
+      const app = {envVars: [{key: 'YOUTUBE_AUDIO_ACQUISITION_API_URL',
+                             value: 'http://' + prefix + 'music-mute-' + provider + ':8080/'}]};
+      const returned = await context.preDeployFunction(app, update);
+      assert.equal(returned, update);
+      assert.deepEqual([...returned.TaskTemplate.ContainerSpec.Env], [
+        'UNRELATED=preserved', 'AUDIO_ACQUISITION_API_KEY=' + common,
+        'OTHER_AUDIO_ACQUISITION_API_KEY=' + common,
+        'YOUTUBE_AUDIO_ACQUISITION_API_KEY=' + youtube[provider]
+      ]);
+      assert.deepEqual(paths, ['/captain/data/musicmute-acquisition/api-key',
+                               '/captain/data/musicmute-acquisition/' + provider + '-api-key']);
+    }
+  }
+  const key = 'YOUTUBE_AUDIO_ACQUISITION_API_URL';
+  const valid = 'http://music-mute-tunelio:8080/';
+  const rejected = [
+    {}, {envVars: []}, {envVars: [{key, value: valid}, {key, value: valid}]},
+    {envVars: [{key, value: valid}, {key, value: 'http://music-mute-jojapi:8080/'}]},
+    ...['http://music-mute-unknown:8080/', 'http://music-mute-videoscale:8080/',
+        'https://music-mute-tunelio:8080/', 'http://music-mute-tunelio:80/',
+        'http://music-mute-tunelio:8080/override', valid + '?x=1', valid + '#x',
+        'http://user:pass@music-mute-tunelio:8080/', 'http://127.0.0.1:8080/',
+        valid + '\n', valid + '\\', null].map(value => ({envVars: [{key, value}]}))
+  ];
+  for (const app of rejected) {
+    paths = [];
+    await assert.rejects(context.preDeployFunction(app, {}), /Missing valid private YouTube destination/);
+    assert.deepEqual(paths, []);
+  }
 })().catch(error => { process.stderr.write(error.name); process.exitCode = 1; });
 '''
         result = subprocess.run(['node', '-e', script], cwd=pathlib.Path(__file__).parent,

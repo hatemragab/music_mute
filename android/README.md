@@ -179,9 +179,15 @@ receives neither vendor credentials nor delivery URLs. See
   including a pasted or Android-shared text link. After rights confirmation the app
   sends only the canonical URL and a durable request ID to `POST /media-imports`.
   It never downloads or reuploads that source. Per-account import state survives
-  process recreation; uncertain submissions reuse their request ID. The app polls
-  import progress, then opens the existing job and result experience after
+  process recreation; uncertain submissions reuse their request ID. The app follows
+  authenticated import snapshots, then opens the existing job and result experience after
   `submitted`. Failed imports and account/provider limits are shown separately.
+  Failed service-availability imports offer **Try again** beside Delete. The explicit
+  action keeps the original rights-confirmed URL and trim choice. A known
+  failed execution receives one new request ID; uncertain admission resumes the saved
+  identity. Duplicate taps cannot create additional attempts. A fresh admission uses
+  the server's current recipe and access checks. Invalid inputs and policy failures
+  remain removable without a retry action; the app adds no automatic paid retry.
   A bundled verified-site catalog rejects unsupported sites and link shapes locally,
   including restored submissions, before any import request. The backend still
   verifies audio-only availability, private/live media and playlists. See the

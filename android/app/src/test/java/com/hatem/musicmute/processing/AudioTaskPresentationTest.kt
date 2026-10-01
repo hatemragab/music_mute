@@ -61,6 +61,59 @@ class AudioTaskPresentationTest {
         assertEquals(record.errorCode, task.errorCode)
     }
 
+    @Test fun onlyServiceAvailabilityImportFailuresOfferRetryAndOtherFailuresRemainRemovable() {
+        val record = UrlImportRecord("owner", "https://soundcloud.com/artist/track", "request",
+            status = "failed", errorCode = "IMPORT_DEPENDENCY_FAILED")
+        for (code in listOf("IMPORT_DEPENDENCY_FAILED", "IMPORT_DISK_FULL", "IMPORT_QUEUE_FULL",
+            "IMPORT_UPSTREAM_REFUSED", "IMPORT_SOURCE_UNAVAILABLE", "IMPORT_DISABLED", "PROCESSING_UNAVAILABLE",
+            "OFFLINE", "SERVICE_UNAVAILABLE", "RATE_LIMITED")) {
+            val task = audioTaskPresentations(emptyList(), emptyList(), 0,
+                listOf(record.copy(errorCode = code))).single()
+            assertTrue(code, task.canRetry)
+            assertTrue(task.importOnly)
+            assertNull(task.operationId)
+            assertNull(task.jobId)
+            assertFalse(task.canCancel)
+        }
+        for (code in listOf("IMPORT_INVALID_URL", "IMPORT_UNSUPPORTED_PROVIDER", "IMPORT_SINGLE_ITEM_REQUIRED",
+            "IMPORT_INVALID_AUDIO", "IMPORT_TOO_LARGE", "IMPORT_TOO_LONG", "IMPORT_REQUEST_CONFLICT",
+            "ACCOUNT_DISABLED", "PROCESSING_ALLOWANCE_EXHAUSTED", "FUTURE_ERROR", null)) {
+            val task = audioTaskPresentations(emptyList(), emptyList(), 0,
+                listOf(record.copy(errorCode = code))).single()
+            assertFalse(code, task.canRetry)
+            assertTrue(task.canDelete)
+            assertTrue(task.visibleOnHome)
+        }
+        assertFalse(record.copy(status = "downloading").retryable)
+        assertFalse(record.copy(jobId = job("failed").id).retryable)
+        assertEquals(com.hatem.musicmute.R.string.url_import_dependency,
+            com.hatem.musicmute.ui.audioTaskFailureLabel(
+                audioTaskPresentations(emptyList(), emptyList(), 0, listOf(record)).single()))
+    }
+
+    @Test fun queuedAutomaticRetryHidesPreviousFailureUntilTheSeriesFinallyFails() {
+        val record = UrlImportRecord("owner", "https://soundcloud.com/artist/track", "request",
+            status = "queued", errorCode = "IMPORT_DEPENDENCY_FAILED")
+        val queued = audioTaskPresentations(emptyList(), emptyList(), 0, listOf(record)).single()
+        assertEquals(AudioTaskStage.WAITING, queued.stage)
+        assertTrue(queued.active)
+        assertFalse(queued.canRetry)
+        assertFalse(queued.canDelete)
+        assertNull(queued.errorCode)
+        assertNull(com.hatem.musicmute.ui.audioTaskFailureLabel(queued))
+        assertEquals("IMPORT_DEPENDENCY_FAILED", record.errorCode)
+
+        val failed = audioTaskPresentations(emptyList(), emptyList(), 0,
+            listOf(record.copy(status = "failed"))).single()
+        assertEquals(AudioTaskStage.FAILED, failed.stage)
+        assertFalse(failed.active)
+        assertTrue(failed.canRetry)
+        assertTrue(failed.canDelete)
+        assertEquals(record.errorCode, failed.errorCode)
+        assertEquals(com.hatem.musicmute.R.string.url_import_dependency,
+            com.hatem.musicmute.ui.audioTaskFailureLabel(failed))
+    }
+
     @Test fun audioDurationUsesSecondsFromMediaAndIsIndependentOfProcessingTime() {
         val ready = job("ready").copy(input = JobInput("mp3", 1000, 125.75),
             timing = JobTiming(totalElapsedMs = 9_000))

@@ -32,7 +32,7 @@ export const DEFAULT_ACCOUNT_POLICY_VALUES: Readonly<AccountPolicyValues> =
     monthlyConfirmedUploadBytes: 5_000_000_000,
     maxWaitingJobs: 20,
     maxProcessingJobs: 1,
-    maxInfrastructureAttempts: 3,
+    maxInfrastructureAttempts: 4,
     maxClientInputAttempts: 5,
     monthlyDownloadGrants: 1_000,
     monthlyEstimatedDownloadBytes: 50_000_000_000,

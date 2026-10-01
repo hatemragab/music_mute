@@ -8,12 +8,17 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -159,6 +164,207 @@ class UrlImportsTest {
         runCurrent()
         assertEquals(requestId, observedId)
         assertEquals("submitted", store.urlImports("owner").first().single().status)
+    }
+
+    @Test fun terminalRetryRequiresExplicitActionAndPreservesSavedSourceAndTrimWithOneNewIdentity() = runTest {
+        val store = ProcessingStore(kotlin.io.path.createTempDirectory("url-import-retry-").toFile(), backgroundScope)
+        val original = store.addUrlImport("owner", UrlImportRecord("owner", source,
+            UUID.randomUUID().toString(), sourceTitle = "Saved title", trimEnabled = false))
+        store.updateUrlImport("owner", original.requestId) {
+            it.copy(status = "failed", errorCode = "IMPORT_DEPENDENCY_FAILED", importId = importId)
+        }
+        val ticket = ProcessingSession("owner", 1)
+        val requests = mutableListOf<Triple<String, String, Boolean>>()
+        val api = object : UrlImportsApi {
+            override suspend fun create(url: String, requestId: String): UrlImportView = error("trim must be explicit")
+            override suspend fun create(url: String, requestId: String, trimEnabled: Boolean): UrlImportView {
+                requests += Triple(url, requestId, trimEnabled)
+                return UrlImportView(importId, "queued", null, null, "time", "time")
+            }
+            override suspend fun detail(importId: String): UrlImportView = error("snapshots own progress")
+            override fun updates(importId: String) = flow {
+                emit(UrlImportView(importId, "submitted", jobId, null, "time", "time"))
+            }
+        }
+        val coordinator = UrlImportCoordinator(store, api, backgroundScope, { ticket })
+        coordinator.bindSession(ticket)
+        runCurrent()
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertTrue(requests.isEmpty())
+        val saved = coordinator.records.value.single()
+        // The stored settings, rather than an old or altered UI snapshot, own the retry.
+        val stale = saved.copy(url = "https://soundcloud.com/other/track", trimEnabled = true)
+        backgroundScope.launch { coordinator.retry(stale) }
+        backgroundScope.launch { coordinator.retry(stale) }
+        runCurrent()
+        assertEquals(1, requests.size)
+        assertEquals(source, requests.single().first)
+        assertNotEquals(saved.requestId, requests.single().second)
+        assertEquals(4, UUID.fromString(requests.single().second).version())
+        assertFalse(requests.single().third)
+        assertEquals("submitted", coordinator.records.value.single().status)
+        assertEquals("Saved title", coordinator.records.value.single().sourceTitle)
+        assertTrue(coordinator.retrying.value.isEmpty())
+        coordinator.retry(saved)
+        runCurrent()
+        assertEquals(1, requests.size)
+    }
+
+    @Test fun uncertainAdmissionRetryReusesIdentityAndExistingImportUsesOnlySnapshots() = runTest {
+        for (existingImport in listOf(null, importId)) {
+            val store = ProcessingStore(kotlin.io.path.createTempDirectory("url-import-attention-").toFile(), backgroundScope)
+            val original = store.addUrlImport("owner", UrlImportRecord("owner", source,
+                UUID.randomUUID().toString(), trimEnabled = false))
+            store.updateUrlImport("owner", original.requestId) {
+                it.copy(status = "attention", errorCode = "SERVICE_UNAVAILABLE", importId = existingImport)
+            }
+            val requests = mutableListOf<String>()
+            val watched = mutableListOf<String>()
+            val api = object : UrlImportsApi {
+                override suspend fun create(url: String, requestId: String): UrlImportView {
+                    requests += requestId
+                    return UrlImportView(importId, "queued", null, null, "time", "time")
+                }
+                override suspend fun detail(importId: String): UrlImportView = error("snapshots own progress")
+                override fun updates(importId: String) = flow {
+                    watched += importId
+                    emit(UrlImportView(importId, "submitted", jobId, null, "time", "time"))
+                }
+            }
+            val ticket = ProcessingSession("owner", 1)
+            val coordinator = UrlImportCoordinator(store, api, backgroundScope, { ticket })
+            coordinator.bindSession(ticket)
+            runCurrent()
+            val saved = coordinator.records.value.single()
+            coordinator.retry(saved)
+            coordinator.retry(saved)
+            runCurrent()
+            assertEquals(if (existingImport == null) listOf(saved.requestId) else emptyList<String>(), requests)
+            assertEquals(listOf(importId), watched)
+            assertEquals(saved.requestId, coordinator.records.value.single().requestId)
+            assertFalse(coordinator.records.value.single().trimEnabled)
+            assertEquals("submitted", coordinator.records.value.single().status)
+            coordinator.bindSession(null)
+        }
+    }
+
+    @Test fun terminalInputFailureCannotRetryEvenWhenCallerClaimsTransientError() = runTest {
+        val store = ProcessingStore(kotlin.io.path.createTempDirectory("url-import-invalid-retry-").toFile(), backgroundScope)
+        val original = store.addUrlImport("owner", UrlImportRecord("owner", source, UUID.randomUUID().toString()))
+        store.updateUrlImport("owner", original.requestId) {
+            it.copy(status = "failed", errorCode = "IMPORT_INVALID_AUDIO")
+        }
+        val ticket = ProcessingSession("owner", 1)
+        val api = object : UrlImportsApi {
+            override suspend fun create(url: String, requestId: String): UrlImportView = error("must not retry")
+            override suspend fun detail(importId: String): UrlImportView = error("must not read")
+        }
+        val coordinator = UrlImportCoordinator(store, api, backgroundScope, { ticket })
+        coordinator.bindSession(ticket)
+        runCurrent()
+        val saved = coordinator.records.value.single()
+        coordinator.retry(saved.copy(errorCode = "IMPORT_DEPENDENCY_FAILED"))
+        runCurrent()
+        assertEquals(saved, coordinator.records.value.single())
+        assertTrue(coordinator.retrying.value.isEmpty())
+    }
+
+    @Test fun explicitFormResubmissionRecoversPolicyBlockedAdmissionWithoutChangingIdentityOrTrim() = runTest {
+        val store = ProcessingStore(kotlin.io.path.createTempDirectory("url-import-policy-resume-").toFile(), backgroundScope)
+        val original = store.addUrlImport("owner", UrlImportRecord("owner", source,
+            UUID.randomUUID().toString(), trimEnabled = false))
+        store.updateUrlImport("owner", original.requestId) {
+            it.copy(status = "attention", errorCode = "EMAIL_VERIFICATION_REQUIRED")
+        }
+        val requests = mutableListOf<Pair<String, Boolean>>()
+        val api = object : UrlImportsApi {
+            override suspend fun create(url: String, requestId: String): UrlImportView = error("trim must be explicit")
+            override suspend fun create(url: String, requestId: String, trimEnabled: Boolean): UrlImportView {
+                requests += requestId to trimEnabled
+                return UrlImportView(importId, "submitted", jobId, null, "time", "time")
+            }
+            override suspend fun detail(importId: String): UrlImportView = error("must not read")
+        }
+        val ticket = ProcessingSession("owner", 1)
+        val coordinator = UrlImportCoordinator(store, api, backgroundScope, { ticket })
+        coordinator.bindSession(ticket)
+        runCurrent()
+        assertFalse(coordinator.records.value.single().retryable)
+        coordinator.submit(source, trimEnabled = true)
+        runCurrent()
+        assertEquals(listOf(original.requestId to false), requests)
+        assertEquals("submitted", coordinator.records.value.single().status)
+    }
+
+    @Test fun rejectedNewAttemptKeepsSafeErrorAndDoesNotAutomaticallyCreateAnotherAttempt() = runTest {
+        val store = ProcessingStore(kotlin.io.path.createTempDirectory("url-import-retry-rejection-").toFile(), backgroundScope)
+        val original = store.addUrlImport("owner", UrlImportRecord("owner", source, UUID.randomUUID().toString()))
+        store.updateUrlImport("owner", original.requestId) {
+            it.copy(status = "failed", errorCode = "IMPORT_DEPENDENCY_FAILED")
+        }
+        var calls = 0
+        val api = object : UrlImportsApi {
+            override suspend fun create(url: String, requestId: String): UrlImportView {
+                calls++
+                throw UrlImportFailure("ACCOUNT_DISABLED")
+            }
+            override suspend fun detail(importId: String): UrlImportView = error("must not read")
+        }
+        val ticket = ProcessingSession("owner", 1)
+        val coordinator = UrlImportCoordinator(store, api, backgroundScope, { ticket })
+        coordinator.bindSession(ticket)
+        runCurrent()
+        coordinator.retry(coordinator.records.value.single())
+        runCurrent()
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals(1, calls)
+        val rejected = coordinator.records.value.single()
+        assertEquals("attention", rejected.status)
+        assertEquals("ACCOUNT_DISABLED", rejected.errorCode)
+        assertFalse(rejected.retryable)
+        assertTrue(rejected.removable)
+        coordinator.retry(rejected)
+        runCurrent()
+        assertEquals(1, calls)
+    }
+
+    @Test fun retryRejectsOtherOwnerAndIgnoresLateReplyFromPreviousSessionEpoch() = runTest {
+        val store = ProcessingStore(kotlin.io.path.createTempDirectory("url-import-session-retry-").toFile(), backgroundScope)
+        val original = store.addUrlImport("owner", UrlImportRecord("owner", source, UUID.randomUUID().toString()))
+        store.updateUrlImport("owner", original.requestId) {
+            it.copy(status = "failed", errorCode = "IMPORT_DEPENDENCY_FAILED")
+        }
+        val reply = CompletableDeferred<UrlImportView>()
+        var calls = 0
+        val api = object : UrlImportsApi {
+            override suspend fun create(url: String, requestId: String): UrlImportView {
+                calls++
+                return withContext(NonCancellable) { reply.await() }
+            }
+            override suspend fun detail(importId: String): UrlImportView = error("must not read")
+        }
+        var ticket: ProcessingSession? = ProcessingSession("owner", 1)
+        val coordinator = UrlImportCoordinator(store, api, backgroundScope, { ticket })
+        coordinator.bindSession(ticket)
+        runCurrent()
+        val saved = coordinator.records.value.single()
+        assertEquals("UNAUTHENTICATED", (runCatching {
+            coordinator.retry(saved.copy(ownerUid = "other"))
+        }.exceptionOrNull() as UrlImportFailure).code)
+        assertEquals(0, calls)
+        coordinator.retry(saved)
+        runCurrent()
+        assertEquals(1, calls)
+        ticket = ProcessingSession("owner", 2)
+        coordinator.bindSession(null)
+        reply.complete(UrlImportView(importId, "submitted", jobId, null, "time", "time"))
+        runCurrent()
+        assertTrue(coordinator.records.value.isEmpty())
+        assertTrue(coordinator.retrying.value.isEmpty())
+        assertEquals("pending", store.urlImports("owner").first().single().status)
+        assertNull(store.urlImports("owner").first().single().jobId)
     }
 
     @Test fun boundedHistoryNeverDropsUnfinishedImportIdentities() = runTest {

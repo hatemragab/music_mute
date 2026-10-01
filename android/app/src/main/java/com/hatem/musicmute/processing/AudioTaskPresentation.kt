@@ -38,7 +38,7 @@ data class AudioTaskPresentation(
 ) {
     // Keep unfinished local reviews/recovery accessible without restoring terminal cloud history.
     val visibleOnHome: Boolean
-        get() = active || stage == AudioTaskStage.REVIEW || (jobId == null && canRetry)
+        get() = active || stage == AudioTaskStage.REVIEW || (jobId == null && (canRetry || canDelete))
 }
 
 fun audioTaskPresentations(
@@ -83,8 +83,9 @@ private fun importPresentation(record: UrlImportRecord): AudioTaskPresentation {
         totalElapsedMs = record.serverStageTimings?.totalMs,
         totalElapsedApproximate = true, processingElapsedMs = null,
         processingElapsedApproximate = false, workerAvailable = null,
-        canCancel = false, canRetry = stage == AudioTaskStage.FAILED,
-        canDelete = record.removable, canPlay = false, errorCode = record.errorCode,
+        canCancel = false, canRetry = record.retryable,
+        canDelete = record.removable, canPlay = false,
+        errorCode = record.errorCode.takeIf { stage == AudioTaskStage.FAILED },
         importRequestId = record.requestId, importOnly = true,
         createdAtMillis = record.createdAtMillis,
     )

@@ -91,6 +91,15 @@ No cache hashes, global cache lookup or additional grant fields are exposed.
 Use owner-scoped realtime import snapshots until `submitted` or `failed`.
 After `submitted`, subscribe to the job for worker progress and results.
 HTTP detail reads remain available for explicit non-live reads.
+New imports automatically retry transient acquisition failures up to three times
+after the initial attempt, with persisted 5/10/20-second backoff. During backoff
+the existing import remains `queued`; clients keep the same request/import identity
+and owner-scoped subscription. No client retry timer or new request is needed.
+The original URL, trim setting, recipe and single duration hold are retained.
+Validation, source-unavailable, account/policy failures and exhausted retries are
+terminal. Upload or job-reservation recovery verifies existing state instead of
+starting another acquisition. Historical failed imports are not automatically
+replayed. See [retry behavior](../url-imports/retries-2026-10-01.md).
 Android sends only the source URL; the backend acquires validated native audio
 and uses the existing R2 pipeline. Existing file-upload calls remain available.
 

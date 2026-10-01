@@ -45,7 +45,10 @@ describe('account policy', () => {
     await expect(fixture().current()).resolves.toMatchObject({
       plan: 'standard',
       revision: 0,
-      values: DEFAULT_ACCOUNT_POLICY_VALUES,
+      values: {
+        ...DEFAULT_ACCOUNT_POLICY_VALUES,
+        maxInfrastructureAttempts: 4,
+      },
       enforcedFeatures: [
         'processing_minutes',
         'media_limits',
@@ -55,6 +58,32 @@ describe('account policy', () => {
         'service_outbound',
       ],
       updatedBy: 'system',
+    });
+  });
+
+  it('retains a saved three-attempt policy after the default increases', async () => {
+    const service = fixture({
+      global: {
+        _id: 'standard',
+        revision: 9,
+        acceptNewJobs: true,
+        maintenanceMessageEn: '',
+        maintenanceMessageAr: null,
+        ...DEFAULT_ACCOUNT_POLICY_VALUES,
+        maxInfrastructureAttempts: 3,
+        updatedBy: 'admin',
+        updatedAt: new Date('2026-09-30T00:00:00.000Z'),
+      },
+    });
+    await expect(service.current()).resolves.toMatchObject({
+      revision: 9,
+      values: { maxInfrastructureAttempts: 3 },
+    });
+    await expect(
+      service.effective(new Types.ObjectId()),
+    ).resolves.toMatchObject({
+      globalRevision: 9,
+      values: { maxInfrastructureAttempts: 3 },
     });
   });
 

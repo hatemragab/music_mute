@@ -1,8 +1,13 @@
 # Audio acquisition providers
 
 URL imports use SaaS providers behind private adapters. The private
-[router](router/README.md) sends YouTube items to [Tunelio](tunelio/README.md)
-and other enabled items to [VideoScale](videoscale/README.md). Each provider owns
+[router](router/README.md) is configured to send YouTube items to [JoJAPI](jojapi/README.md)
+for the [owner-authorized production test activation](jojapi/docs/ACTIVATION-2026-10-01.md)
+and other enabled items to [VideoScale](videoscale/README.md). The reproduced
+vendor source-version mismatch in the [earlier qualification record](jojapi/docs/DEPLOYMENT-2026-10-01.md)
+remains unresolved; valid transfer and media probing do not establish requested-source
+identity. [Tunelio](tunelio/README.md) remains deployed without automatic fallback.
+Each provider owns
 its source, tests, configuration and documentation under
 `video_providers/<provider>/`.
 
@@ -50,9 +55,9 @@ retained objects under account lifecycle policy, not VPS scratch.
 NestJS has only `AUDIO_ACQUISITION_API_URL` and
 `AUDIO_ACQUISITION_API_KEY` for provider access. Its URL points to the private
 `music-mute-audio-router` service. The router has separate URL/key pairs for the
-YouTube and other-site adapters; it never receives SaaS credentials. The Tunelio
-key belongs only in `music-mute-tunelio`; the VideoScale credential remains only
-in `music-mute-videoscale`. Run all three as private CapRover apps without public
+YouTube and other-site adapters; it never receives SaaS credentials. The JoJAPI
+key belongs only in `music-mute-jojapi`; the VideoScale credential remains only
+in `music-mute-videoscale`. Run the router and adapters as private CapRover apps without public
 exposure or published ports. The adapters and router have no MongoDB, R2 or
 Firebase credentials.
 
@@ -82,15 +87,18 @@ apply. A provider request is made only when active capacity and a start slot are
 available. Twenty requests start over at least three seconds under the five-per-
 rolling-second ceiling, then up to twenty downloads can remain active together.
 
-The router and both adapters use the same shared module and settings:
+The router and adapters use the same shared admission module. The router and
+VideoScale allow five starts per second; selected JoJAPI allows one:
 
 ```dotenv
 ACQUISITION_CONCURRENCY=20
 ACQUISITION_REQUESTS_PER_SECOND=5
 ```
 
-Keep those identical in all three private apps; there are no separate Tunelio
-or VideoScale capacity settings. The backend retains its generic import settings:
+Use concurrency twenty in all active private apps. Configure JoJAPI with
+`ACQUISITION_REQUESTS_PER_SECOND=1` to respect its published plan limit; its code
+also caps any larger shared setting at one. Concurrent downloads still use the
+shared twenty-request capacity. The backend retains its generic import settings:
 
 ```dotenv
 URL_IMPORT_CONCURRENCY=20
@@ -125,19 +133,29 @@ The existing private 503/Retry-After dependency contract is retained for upstrea
 
 ## Current support and verification
 
-Tunelio accepts public single-item YouTube URLs and requests native Opus audio
-without an additional paid metadata call or audio conversion. VideoScale accepts
+The owner-authorized YouTube test configuration uses JoJAPI, which admits public single-item
+YouTube URLs and requests highest native audio without an additional paid metadata
+call or audio conversion. Live testing reproduced audio belonging to a different
+requested video, so valid format and media probing do not qualify source identity.
+The owner explicitly accepted test activation while that issue remains unresolved;
+see the [activation evidence](jojapi/docs/ACTIVATION-2026-10-01.md). A vendor fix
+and fresh source correlation are still needed to establish correct-source acquisition.
+Its direct Google media download is also subject to source-IP,
+expiry and availability restrictions. VideoScale accepts
 the other public single-item URLs in the shared catalog, including
 Instagram/Reels, TikTok, Vimeo, SoundCloud and Facebook/Reels. Each request must
 expose eligible separate audio. VideoScale's existing direct YouTube capability
-is retained, but the router selects Tunelio for YouTube. Enabled URL admission
+is retained, while the configured YouTube test route selects JoJAPI. Enabled URL admission
 is not evidence of successful acquisition; see the dated provider evidence for
 the exact sources and journeys verified.
 See [site policy](../docs/url-imports/supported-sites.md). No provider guarantees
 unlimited requests, uninterrupted availability or immunity to source blocking.
 
 - [VideoScale implementation and setup](videoscale/README.md)
-- [Tunelio implementation and setup](tunelio/README.md)
+- [JoJAPI implementation and setup](jojapi/README.md)
+- [JoJAPI owner-authorized production test activation, 2026-10-01](jojapi/docs/ACTIVATION-2026-10-01.md)
+- [JoJAPI deployment, source mismatch and restored routing, 2026-10-01](jojapi/docs/DEPLOYMENT-2026-10-01.md)
+- [Tunelio implementation and historical setup](tunelio/README.md)
 - [Private routing and configuration](router/README.md)
 - [Tunelio routing deployment and live proof, 2026-09-30](docs/TUNELIO-ROUTING-2026-09-30.md)
 - [Current-main private provider rollout, 2026-09-30](docs/R2-ROLLOUT-2026-09-30.md)

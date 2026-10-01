@@ -51,8 +51,13 @@ client polling loop is introduced.
 `shared_media_sources`, `shared_media_results` and `shared_media_artifacts` have
 no TTL. The artifact catalog records every destination before transfer and retains
 confirmed or uncertain identities even after a failed generation/publication is
-replaced. Recovery performs bounded HEAD verification of a recorded PUT/copy and
-never automatically repeats paid acquisition. Recovery scans rotate by cursor
+replaced. Recovery performs bounded HEAD verification of a recorded PUT/copy before
+any further action. New imports may retry transient acquisition failures at most
+three times before an upload intent or job reservation exists, retaining the
+same source/result producer, generation and single usage hold. A recorded PUT or
+accepted job is recovered without another paid acquisition. Historical failed
+imports are not replayed. See [the retry policy](retries-2026-10-01.md).
+Recovery scans rotate by cursor
 and fence the observed producer/generation so an old scan cannot fail a newer retry.
 
 ## Limits and deletion

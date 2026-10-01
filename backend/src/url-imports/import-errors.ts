@@ -3,6 +3,7 @@ import { authError, type AuthErrorCode } from '../auth/auth.errors.js';
 import { jobError, type JobHttpErrorCode } from '../jobs/job-errors.js';
 
 const businessCodes: JobHttpErrorCode[] = [
+  'IDEMPOTENCY_CONFLICT',
   'PROCESSING_ALLOWANCE_EXHAUSTED',
   'PROCESSING_LIMIT_REACHED',
   'PROCESSING_UNAVAILABLE',

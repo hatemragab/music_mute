@@ -31,6 +31,7 @@ import com.hatem.musicmute.ui.audioTaskFailureLabel
 import com.hatem.musicmute.ui.design.CreativeCard
 import com.hatem.musicmute.ui.design.CreativeStatusPill
 import com.hatem.musicmute.ui.design.CreativeTokens
+import com.hatem.musicmute.ui.design.CreativePrimaryButton
 import com.hatem.musicmute.ui.formatElapsed
 import com.hatem.musicmute.ui.listenerStageLabel
 import kotlin.math.roundToInt
@@ -42,6 +43,8 @@ fun JobCard(
     onOpen: () -> Unit,
     onCancel: () -> Unit,
     onDelete: () -> Unit = {},
+    onRetry: () -> Unit = {},
+    retryBusy: Boolean = false,
 ) {
     val canOpen = !task.importOnly && (task.jobId != null || task.operationId != null)
     if (task.stage == AudioTaskStage.READY) {
@@ -96,9 +99,11 @@ fun JobCard(
         if (task.active) JobProgress(task)
         JobActions(
             task = task,
-            busy = busy,
+            busy = busy || retryBusy,
+            retryBusy = retryBusy,
             onCancel = onCancel,
             onDelete = onDelete,
+            onRetry = onRetry,
         )
     }
 }
@@ -244,9 +249,17 @@ private fun JobProgress(task: AudioTaskPresentation) {
 private fun JobActions(
     task: AudioTaskPresentation,
     busy: Boolean,
+    retryBusy: Boolean,
     onCancel: () -> Unit,
     onDelete: () -> Unit,
+    onRetry: () -> Unit,
 ) {
+    if (task.importOnly && task.canRetry) {
+        CreativePrimaryButton(onClick = onRetry, enabled = !busy, busy = retryBusy,
+            modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.retry))
+        }
+    }
     if (task.importOnly && task.canDelete) {
         TextButton(onClick = onDelete, enabled = !busy,
             modifier = Modifier.heightIn(min = CreativeTokens.TouchTarget)) {

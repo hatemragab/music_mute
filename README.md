@@ -36,8 +36,14 @@ policy. Source changes and local test results do not establish live availability
 URL imports use private SaaS adapters:
 `client → NestJS → private router → private adapter → SaaS`, then
 `audio bytes → adapter → router → NestJS validation → private R2 → worker`.
-The private acquisition router selects Tunelio for YouTube and VideoScale for
-the other enabled public item sites, including Instagram, TikTok, Vimeo,
+Production YouTube configuration selects the private [JoJAPI adapter](video_providers/jojapi/README.md)
+for an owner-authorized test activation on 2026-10-01; VideoScale handles the
+other enabled public item sites. The known vendor source-version mismatch remains
+unresolved. See the [activation record](video_providers/jojapi/docs/ACTIVATION-2026-10-01.md)
+for deployment evidence and the [earlier qualification record](video_providers/jojapi/docs/DEPLOYMENT-2026-10-01.md)
+for the defect and initial Tunelio restoration. Valid media probing does not
+establish requested-source identity.
+Other enabled sites include Instagram, TikTok, Vimeo,
 SoundCloud and Facebook/Reels; usable separate audio is required. Consult the
 provider documentation for dated end-to-end proof. Provider-specific APIs and
 credentials stay outside NestJS; the router and adapters preserve the generic

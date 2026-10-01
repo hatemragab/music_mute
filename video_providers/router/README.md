@@ -1,8 +1,13 @@
 # MusicMute private audio acquisition router
 
+Production YouTube configuration selects JoJAPI for the
+[owner-authorized test activation](../jojapi/docs/ACTIVATION-2026-10-01.md).
+The known vendor source-version mismatch remains unresolved; see the
+[earlier qualification and Tunelio restoration](../jojapi/docs/DEPLOYMENT-2026-10-01.md).
+Successful transfer or media probing does not establish requested-source identity.
 The router keeps NestJS provider-neutral while selecting one private adapter:
 
-`NestJS → router → Tunelio for YouTube / VideoScale for other enabled sites`
+`NestJS → router → configured YouTube adapter / VideoScale for other enabled sites`
 
 `adapter audio bytes → router → NestJS validation → existing private R2 → worker`
 
@@ -21,7 +26,8 @@ at 1800 seconds. Lower caller limits are forwarded unchanged.
 
 [Source admission](source_policy.py) matches the existing VideoScale catalog's
 public single-item shapes. Exact qualified YouTube hosts canonicalize to
-`https://www.youtube.com/watch?v=<id>` and use Tunelio. Instagram, TikTok, Vimeo,
+`https://www.youtube.com/watch?v=<id>` and use the single configured YouTube
+adapter. Instagram, TikTok, Vimeo,
 SoundCloud, Facebook, Bandcamp, Mixcloud, hearthis.at, Clyp, Vocaroo and Whyp
 use VideoScale. Playlists, profiles, credentials, ports, fragments, unsafe URLs
 and unqualified destinations are rejected before submission. Tracking query
@@ -83,21 +89,38 @@ Use [config.example.json](config.example.json) for nonsecret settings:
 | `ACQUISITION_REQUESTS_PER_SECOND`   | Shared start rate, 1–5; default 5                 |
 | `AUDIO_ACQUISITION_API_KEY`         | Private NestJS/router service key                 |
 | `YOUTUBE_AUDIO_ACQUISITION_API_URL` | `http://srv-captain--music-mute-tunelio:8080/`    |
-| `YOUTUBE_AUDIO_ACQUISITION_API_KEY` | Private router/Tunelio adapter service key        |
+| `YOUTUBE_AUDIO_ACQUISITION_API_KEY` | Private bearer for the selected YouTube adapter   |
 | `OTHER_AUDIO_ACQUISITION_API_URL`   | `http://srv-captain--music-mute-videoscale:8080/` |
 | `OTHER_AUDIO_ACQUISITION_API_KEY`   | Existing private VideoScale service key           |
 
-Startup accepts only these exact private CapRover service names (or their short
-app-name aliases), HTTP port 8080 and an empty/root path. Arbitrary URLs, public
-hosts, redirects and user-controlled destinations are never permitted.
+Startup accepts exactly one YouTube destination: `music-mute-tunelio` or
+`music-mute-jojapi`, with their `srv-captain--` aliases. The other-site destination
+accepts only `music-mute-videoscale` or its alias. All destinations require HTTP
+port 8080 and an empty/root path. Arbitrary URLs, public hosts, redirects and
+user-controlled destinations are never permitted. Selection comes only from
+operator configuration and does not change after any execution failure.
 
 [caprover-adapter-hook.js](caprover-adapter-hook.js) injects the existing private
 key from `/captain/data/musicmute-acquisition/api-key` for ingress and VideoScale,
-and the separate private Tunelio service key from
-`/captain/data/musicmute-acquisition/tunelio-api-key`. These are protected runtime
-files, not vendor credentials or package files. Never place secret values in
+and the selected adapter's separate private service key from
+`/captain/data/musicmute-acquisition/tunelio-api-key` or
+`/captain/data/musicmute-acquisition/jojapi-api-key`. The hook reads exactly one
+`YOUTUBE_AUDIO_ACQUISITION_API_URL` entry from CapRover's `envVars`, validates the
+exact private URL and reads only that adapter's key. Missing, duplicate or
+unqualified URLs fail before any key read. These are protected runtime files,
+not vendor credentials or package files. Never place secret values in
 configuration examples, archives, source or logs. The operator installs the
 hook in CapRover; it is excluded from the runtime image/archive.
+
+The example retains Tunelio, while production test configuration now selects
+JoJAPI by explicit owner instruction despite the documented unresolved defect.
+An explicit
+operator switch sets `YOUTUBE_AUDIO_ACQUISITION_API_URL` to
+`http://srv-captain--music-mute-jojapi:8080/`; its matching internal bearer comes
+from the selected protected key file. Keep the vendor key exclusive to the
+JoJAPI app. Successful download or ffprobe validation does not establish that the
+vendor defect is fixed. The allowlist supports an explicit operator switch, not automatic
+retry or fallback.
 
 NestJS retains only its existing generic settings:
 
@@ -128,8 +151,15 @@ concurrent capacity, independent health and archive contents. They do not establ
 vendor, production, R2, worker or account-quota availability. Run backend
 verification/import/processing integration checks separately before releasing.
 
+After building the backend, run `python3.12 -B -m unittest discover -s
+video_providers/tests -v` from the repository root. Its JoJAPI fixture qualifies
+both private HTTP hops with generated native Opus and the real NestJS media
+probe, plus Google refusal/expired-delivery failures without replay or fallback.
+The existing Tunelio qualifier remains available. These fixtures make no real
+provider or Google request.
+
 API preflight read the current [Zalando RESTful API guidelines](https://opensource.zalando.com/restful-api-guidelines/)
-on 2026-09-30. Rules 104 (security), 148 (methods), 176 (problem JSON),
+on 2026-10-01. Rules 104 (security), 148 (methods), 176 (problem JSON),
 177 (no stack traces), 106 (compatibility), 178 (content headers) and 227
 (cache semantics) shaped this contract-compatible private relay. Existing
 internal bearer keys/private HTTP and the explicitly unauthenticated process
