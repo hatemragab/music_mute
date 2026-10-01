@@ -2,9 +2,10 @@
 
 This review covers mobile intake, private Tunelio acquisition, NestJS validation,
 private R2 storage, worker processing, durable publication and user downloads.
-The improvements below are local source changes. No component was deployed,
-published or committed, and no new paid acquisition or real-storage write was
-performed for this review.
+The review initially produced local source changes. All changes were subsequently
+committed and pushed, and the backend was deployed as recorded below. Tunelio,
+router, worker and native changes remain source-only. No new paid acquisition or
+real-storage test write was performed for verification.
 
 ## Current production evidence
 
@@ -118,11 +119,42 @@ and existing full-snapshot WebSocket contracts remain compatible.
 
 ## Remaining boundaries
 
-These changes require separate authorized delivery of Tunelio, router, backend,
-worker and native builds. Production speed after deployment and a fresh complete
+Tunelio, router, worker and native changes still require separate authorized
+delivery. Production speed after deployment and a fresh complete
 mobile-to-user processing run remain unmeasured. Unknown-length provider responses
 still stage to scratch. Provider wait, network throughput, scheduler capacity,
 model inference, trim/encoding and durable storage publication remain real costs.
 Do not remove authentication, quotas, immutable-object confirmation, media limits
 or process-boundary hashes to claim a shorter time. More inference/batching/codec
 changes need native capacity and listening-quality qualification.
+
+## Backend release evidence — 2026-10-01
+
+The user authorized pushing all changes and deploying the backend through
+CapRover. Source commit `6681389a60c0873ba4018ee87cf854cc3d3aac06` was pushed to
+`origin/main`, with the remote hash independently verified.
+
+`pnpm run package:caprover` produced an archive of 342 allowlisted regular files.
+Every file matched the staged source bytes, including the new shared feed module.
+The archive excludes credentials, environment files, tests, generated output and
+other components. SHA-256:
+`c558db4a0a0fc6d0c4e813d5a8a5ba93d9f719c57f8f3cae311d240b1c64448d`.
+The tracked secret scanner and staged diff checks passed before delivery.
+
+CapRover CLI deployment to saved machine `musicmute`, app `api`, completed its
+Docker build and deployment successfully. CapRover then reported active image
+`img-captain-api:103`, replacing `:102`, one configured instance, no build in
+progress and no build failure.
+
+Live checks at 18:15:43 UTC against `https://api.music-mute.com` passed:
+
+- `/health/live` and `/health/ready`: HTTP 200, `{"status":"ok"}`.
+- `/privacy`, `/delete-account`, `/support`, `/public-policy` and `/app-policy`:
+  HTTP 200.
+- Unauthenticated POST `/realtime-tickets` and `/admin/realtime-tickets`:
+  HTTP 401.
+- Unauthenticated HTTP/1.1 WebSocket upgrade `/realtime/socket`: HTTP 401.
+
+This activates the backend shared-import wakeup and truncated-transfer handling.
+It does not establish authenticated media processing or a production latency
+improvement, and does not activate the other components' pushed changes.
