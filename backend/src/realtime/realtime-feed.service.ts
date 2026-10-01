@@ -11,6 +11,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 const COLLECTIONS = [
   'audio_jobs',
   'media_imports',
+  'shared_media_sources',
+  'shared_media_results',
   'users',
   'admin_access',
   'account_policies',

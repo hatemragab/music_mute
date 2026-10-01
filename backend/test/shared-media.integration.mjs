@@ -24,6 +24,7 @@ import { StorageCleanupTaskSchema } from '../dist/storage/storage-cleanup-task.s
 import { StorageCleanupService } from '../dist/storage/storage-cleanup.service.js';
 import { AccountDeletionCleanupService } from '../dist/users/account-deletion-cleanup.service.js';
 import { ImportProcessor } from '../dist/url-imports/import-processor.js';
+import { ImportRuntime } from '../dist/url-imports/import-runtime.js';
 import { importError } from '../dist/url-imports/import-errors.js';
 import { importExecutionJobId } from '../dist/url-imports/import-retry.js';
 import {
@@ -290,6 +291,7 @@ test('shared URL media deduplicates acquisition, processing and retained objects
     shared,
   );
   await processor.files.initialize();
+  const runtime = new ImportRuntime(config, imports, processor, queue, shared);
   const processImport = (record) =>
     processor.process({
       data: {
@@ -344,7 +346,7 @@ test('shared URL media deduplicates acquisition, processing and retained objects
       assert.equal(source.state, 'ready');
       assert.deepEqual(producerJob.inputObject, source.inputObject);
       assert.equal((await shared.inspect(waiter)).action, 'wait');
-      await imports.enqueue(String(waiter._id));
+      await runtime.enqueueSharedImports();
       assert.equal(
         await queue.getJob(importExecutionJobId(waiter)),
         undefined,
@@ -443,7 +445,7 @@ test('shared URL media deduplicates acquisition, processing and retained objects
   await t.test(
     'cached jobs share exact identities with no processing reservation, upload or duplicate replay charge',
     async () => {
-      await imports.enqueue(String(waiter._id));
+      await runtime.enqueueSharedImports();
       assert.ok(await queue.getJob(importExecutionJobId(waiter)));
       await processImport(waiter);
       waiter = await records.findById(waiter._id).lean();

@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { getQueueToken } from '@nestjs/bullmq';
-import { IsolatedServices } from './helpers/isolated-services.mjs';
+import { getConnectionToken } from '@nestjs/mongoose';
+import { IsolatedServices, until } from './helpers/isolated-services.mjs';
 import { spawnSync } from 'node:child_process';
 
 test('fatal diagnostic survives process exit without swallowing exceptions or rejections', () => {
@@ -67,6 +68,10 @@ test(
         await import('../dist/url-imports/import-processor.js');
       const { IMPORT_QUEUE } =
         await import('../dist/url-imports/imports.service.js');
+      const { ImportRuntime } =
+        await import('../dist/url-imports/import-runtime.js');
+      const { RealtimeFeedService } =
+        await import('../dist/realtime/realtime-feed.service.js');
       app = await NestFactory.createApplicationContext(AppModule, {
         logger: false,
         abortOnError: false,
@@ -80,6 +85,48 @@ test(
       });
       assert.equal(processor.worker.isRunning(), true);
       assert.equal(processor.worker.concurrency, 20);
+      const runtime = app.get(ImportRuntime);
+      const feed = app.get(RealtimeFeedService);
+      assert.equal(
+        runtime.feed,
+        feed,
+        'imports and realtime share one feed instance',
+      );
+      await until(
+        () => feed.healthy && !runtime.maintenance,
+        'shared feed ready',
+      );
+      let wakeups = 0;
+      const enqueue = runtime.enqueueSharedImports.bind(runtime);
+      runtime.enqueueSharedImports = async () => {
+        wakeups++;
+        await enqueue();
+      };
+      const db = app.get(getConnectionToken());
+      const session = await db.startSession();
+      const start = performance.now();
+      try {
+        await session.withTransaction(() =>
+          db.collection('shared_media_sources').insertOne(
+            {
+              _id: randomUUID(),
+              state: 'ready',
+            },
+            { session },
+          ),
+        );
+      } finally {
+        await session.endSession();
+      }
+      await until(
+        () => wakeups > 0,
+        'committed shared source wakes import maintenance',
+        5000,
+      );
+      assert.ok(
+        performance.now() - start < 5000,
+        'does not wait for the 30-second recovery cycle',
+      );
       await app.close();
       app = undefined;
       assert.equal(processor.shutdown.signal.aborted, true);

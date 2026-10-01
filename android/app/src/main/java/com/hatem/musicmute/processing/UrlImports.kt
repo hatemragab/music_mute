@@ -291,7 +291,8 @@ class UrlImportCoordinator(
                         if (owner != ticket || session() != ticket) throw CancellationException()
                         store.updateUrlImport(ticket.uid, requestId) {
                             it.copy(importId = view.importId, status = view.status, jobId = view.jobId,
-                                errorCode = view.error?.code, sourceTitle = view.sourceTitle ?: it.sourceTitle)
+                                errorCode = view.error?.code, sourceTitle = view.sourceTitle ?: it.sourceTitle,
+                                serverStageTimings = view.serverStageTimings)
                         }
                         view.status in UrlImportRecord.terminalStatuses
                     }

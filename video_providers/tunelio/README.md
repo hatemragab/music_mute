@@ -31,6 +31,8 @@ Tunelio. Audio repackaging parameters are rejected. The anonymous tunnel request
 receives no Authorization, cookies or vendor response headers. Redirects are
 never followed. Every DNS answer must be public and is pinned when connecting;
 TLS verifies the provider hostname. DNS time and resolver threads are bounded.
+The verified TLS context/trust store is shared across connections; DNS answers,
+hostname checks and certificate validation still run for every new socket.
 
 Both creation and media requests execute once. Even though /create uses GET,
 it is paid and has no verified idempotency contract: transport errors, 429,
@@ -45,6 +47,26 @@ match the measured audio bytes. Unknown types, compressed bodies, empty or
 truncated media and oversized bodies fail. Native WebM/Opus may use audio/webm
 or video/webm MIME: MIME alone is not evidence of audio-only media; NestJS probes
 the downloaded file before accepting it.
+
+A positive, unambiguous delivery Content-Length allows audio to stream directly
+through the router to NestJS as it arrives. Its length must fit the caller limit
+and agree with provider-advertised size before streaming starts. Each chunk is
+bounded, completion still requires the exact byte count, and truncation/failure
+closes the binary response without retry. NestJS accepts only the completed,
+independently probed file. Delivery without Content-Length retains anonymous
+scratch staging so the private response still has a measured Content-Length.
+This removes the whole-file staging/readback barrier for framed delivery without
+adding an adapter media probe or weakening NestJS validation.
+
+Local timing on 2026-10-01 used an 8 MiB synthetic payload, 64 KiB chunks and
+5 ms delays in both the HTTP vendor fixture and the downstream writer. Across
+three runs, median first-byte time fell from 921.4 ms with staging to 1.0 ms
+with streaming; median completion fell from 1867.5 ms to 945.0 ms. The framed
+path wrote zero scratch media bytes instead of 8 MiB. This measures overlap of
+two deliberately paced local stages, excludes real provider/TLS/R2/worker/mobile
+time and does not establish production savings. The tests below also hold the
+vendor's remaining body behind a gate and require the first byte to reach the
+backend before releasing it, plus complete/truncated and scratch-fallback checks.
 
 The hard input limits are 100,000,000 bytes and 1,800 seconds. Lower caller limits
 are honored. Duration is independently measured/enforced by NestJS because this
@@ -102,6 +124,8 @@ Anonymous/unlinked TemporaryFile handles keep scratch bounded and clean on
 success, upstream failure, client disconnect and process/container termination.
 Before any provider request, the adapter atomically reserves the requested byte
 limit plus 128 MB of free headroom against all unfinished scratch reservations.
+Framed transfers keep that reservation until completion but write no media to
+scratch; unframed transfers use the reserved anonymous file.
 Written bytes reduce the outstanding reservation after flushing, so free-space
 checks do not count existing files twice. Failure releases every reservation.
 CapRover mounts /work as a 2 GiB tmpfs; twenty 100 MB inputs plus the headroom

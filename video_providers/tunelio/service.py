@@ -44,6 +44,10 @@ CONTENT_TYPES = {'audio/webm': ('webm', 'webm'), 'video/webm': ('webm', 'webm'),
 # Twenty acquisitions plus one nonfatal metadata lookup can resolve concurrently.
 # Separate from HTTP handlers; stalled OS resolvers cannot accumulate threads.
 DNS_SLOT = threading.BoundedSemaphore(21)
+# Loading the trust store is relatively expensive and SSLContext is safe to use
+# for concurrent connections. Every new socket still verifies TLS and its host.
+TLS_CONTEXT = ssl.create_default_context()
+TLS_CONTEXT.set_alpn_protocols(['http/1.1'])
 
 
 class Failure(Exception):
@@ -147,6 +151,9 @@ def public_addresses(host, port, timeout):
 
 class PublicTLS(http.client.HTTPSConnection):
     """Validate every DNS answer, pin connections, verify hostname/TLS, no redirects."""
+    def __init__(self, host, port, timeout):
+        super().__init__(host, port, timeout=timeout, context=TLS_CONTEXT)
+
     def connect(self):
         expires = time.monotonic() + self.timeout
         candidates = public_addresses(self.host, self.port, self.timeout)
@@ -163,7 +170,7 @@ class PublicTLS(http.client.HTTPSConnection):
                     sock.close()
                     break
                 sock.settimeout(remaining)
-                self.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
+                self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
                 return
             except ssl.SSLCertVerificationError:
                 sock.close()
@@ -212,6 +219,7 @@ class Provider:
         self.deadline = deadline if deadline is not None else time.monotonic() + DEADLINE_SECONDS
         self.active_connection = None
         self.active_response = None
+        self.prepare_stream = None
 
     def diagnostics(self):
         return {'stage': self.stage, 'upstream_http_status': self.http_status}
@@ -341,6 +349,16 @@ class Provider:
                 raise Failure('IMPORT_UNSUPPORTED_AUDIO_SOURCE', 422,
                               reason='Audio delivery Content-Type is not a recognized native Opus container.')
             length = response_length(response, limit)
+            if length == 0 or (length is not None and declared is not None and length != declared):
+                raise Failure('IMPORT_INVALID_AUDIO', 422,
+                              reason='Audio delivery length is empty or differs from its declared size.')
+            extra = included_metadata(payload, content_type)
+            streamed = length is not None and self.prepare_stream is not None
+            if streamed:
+                # NestJS enforces exact bytes and probes the complete file before
+                # admission. A framed body can pass through immediately; failure
+                # closes the binary response rather than replaying paid work.
+                output = self.prepare_stream(length, extra)
             size = 0
             while True:
                 self.guard()
@@ -352,13 +370,14 @@ class Provider:
                 if size > limit:
                     raise Failure('IMPORT_TOO_LARGE', 422, reason='Actual audio bytes exceeded the byte limit.')
                 output.write(chunk)
+                self.guard()
             if (size == 0 or (length is not None and size != length)
                     or (declared is not None and size != declared)):
                 raise Failure('IMPORT_INVALID_AUDIO', 422,
                               reason='Audio delivery was empty, truncated or differed from its declared size.')
-            self.log(message='Complete audio stored in bounded anonymous scratch for NestJS validation.',
-                     file_bytes=size, **self.diagnostics())
-            return size, included_metadata(payload, content_type)
+            self.log(message='Complete audio transferred for independent NestJS validation.',
+                     file_bytes=size, transfer_mode='stream' if streamed else 'scratch', **self.diagnostics())
+            return size, extra
         finally:
             self.close()
             self.log(message='Credential-free audio transfer ended; no media retry or paid fallback.',
@@ -461,22 +480,30 @@ class Handler(BaseHTTPRequestHandler):
                 provider = Provider(self.server.provider_key, check, self.server.admission, log=log,
                                     deadline=started + DEADLINE_SECONDS)
                 lookup = self.server.metadata.start(url)
-                size, extra = provider.acquire(url, limit, reservation.wrap(audio))
-                extra = merge_metadata(extra, lookup)
-                provider.step('backend-transfer', 'Sending bounded audio to NestJS for independent media validation.')
-                check()
-                audio.seek(0)
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/octet-stream')
-                self.send_header('Content-Length', str(size))
-                self.send_header('Cache-Control', 'no-store')
-                self.send_header('Connection', 'close')
-                self.send_header('X-Import-Extra-Data-Base64', base64.b64encode(json.dumps(extra).encode()).decode())
-                streaming = True
-                self.end_headers()
-                while chunk := audio.read(65536):
+                def prepare_stream(size, extra, transfer_mode='stream'):
+                    nonlocal streaming
                     check()
-                    self.wfile.write(chunk)
+                    extra = merge_metadata(extra, lookup)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/octet-stream')
+                    self.send_header('Content-Length', str(size))
+                    self.send_header('Cache-Control', 'no-store')
+                    self.send_header('Connection', 'close')
+                    self.send_header('X-Import-Extra-Data-Base64', base64.b64encode(json.dumps(extra).encode()).decode())
+                    streaming = True
+                    self.end_headers()
+                    log(message='Sending bounded audio to NestJS for independent media validation.',
+                        stage='backend-transfer', transfer_mode=transfer_mode)
+                    return self.wfile
+                provider.prepare_stream = prepare_stream
+                size, extra = provider.acquire(url, limit, reservation.wrap(audio))
+                if not streaming:
+                    provider.step('backend-transfer', 'Sending measured scratch audio to NestJS for independent media validation.')
+                    prepare_stream(size, extra, 'scratch')
+                    audio.seek(0)
+                    while chunk := audio.read(65536):
+                        check()
+                        self.wfile.write(chunk)
                 result, message = 'SUCCEEDED', 'Audio sent to NestJS; scratch released. Validation is a separate step.'
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             result, message = 'CLIENT_DISCONNECTED', 'NestJS disconnected; local work stopped without a second paid request.'

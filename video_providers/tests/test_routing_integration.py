@@ -41,7 +41,7 @@ tunelio = load('qualified_tunelio', 'tunelio')
 router = load('qualified_router', 'router')
 
 
-class RoutingIntegration(unittest.TestCase):
+class RoutingFixture:
     @classmethod
     def setUpClass(cls):
         cls.ffmpeg = shutil.which('ffmpeg')
@@ -74,6 +74,9 @@ class RoutingIntegration(unittest.TestCase):
         self.directory = self.stack.enter_context(tempfile.TemporaryDirectory())
         self.calls, self.other_calls = [], []
         self.vendor_failure = False
+        self.delivery_release = None
+        self.delivery_started = threading.Event()
+        self.truncate_delivery = False
         owner = self
 
         class Vendor(BaseHTTPRequestHandler):
@@ -97,7 +100,19 @@ class RoutingIntegration(unittest.TestCase):
                 self.send_header('Content-Type', content_type)
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                try:
+                    if path.path == '/tunnel' and owner.delivery_release is not None:
+                        self.wfile.write(body[:1])
+                        self.wfile.flush()
+                        owner.delivery_started.set()
+                        owner.delivery_release.wait(3)
+                        self.wfile.write(body[1:])
+                    elif path.path == '/tunnel' and owner.truncate_delivery:
+                        self.wfile.write(body[:1])
+                    else:
+                        self.wfile.write(body)
+                except OSError:
+                    pass
 
         class Other(BaseHTTPRequestHandler):
             def log_message(self, *_args):
@@ -154,6 +169,7 @@ class RoutingIntegration(unittest.TestCase):
         finally:
             connection.close()
 
+class RoutingIntegration(RoutingFixture, unittest.TestCase):
     def test_youtube_native_bytes_survive_router_and_real_backend_probe(self):
         status, headers, audio = self.request('https://youtu.be/aqz-KE-bpKQ')
         self.assertEqual(status, 200)
@@ -200,6 +216,63 @@ class RoutingIntegration(unittest.TestCase):
         self.assertEqual(self.other_calls, [])
         self.assertEqual(list(Path(self.directory).iterdir()), [])
 
+
+class TunelioStreamingIntegration(RoutingFixture, unittest.TestCase):
+    def test_framed_audio_passes_both_hops_before_vendor_finishes(self):
+        self.delivery_release = threading.Event()
+        connection = http.client.HTTPConnection('127.0.0.1', self.route_port, timeout=2)
+        try:
+            connection.request('POST', '/audio-imports', json.dumps({
+                'url': 'https://youtu.be/aqz-KE-bpKQ', 'max_bytes': 100_000, 'max_duration_seconds': 30,
+            }), {'Authorization': 'Bearer ' + 'r' * 48, 'Content-Type': 'application/json'})
+            response = connection.getresponse()
+            self.assertTrue(self.delivery_started.wait(1))
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.read(1), self.audio[:1])
+            self.assertFalse(self.delivery_release.is_set())
+            self.delivery_release.set()
+            self.assertEqual(response.read(), self.audio[1:])
+            self.assertEqual([call[0] for call in self.calls], ['/create', '/tunnel'])
+            self.assertEqual(self.other_calls, [])
+        finally:
+            self.delivery_release.set()
+            connection.close()
+
+    def test_truncated_vendor_stream_is_incomplete_at_backend_without_replay(self):
+        self.truncate_delivery = True
+        with self.assertRaises(http.client.IncompleteRead):
+            self.request('https://youtu.be/aqz-KE-bpKQ')
+        self.assertEqual([call[0] for call in self.calls], ['/create', '/tunnel'])
+        self.assertEqual(self.other_calls, [])
+        self.assertEqual(list(Path(self.directory).iterdir()), [])
+
+    def test_truncated_vendor_stream_is_permanent_invalid_audio_in_real_nestjs_client(self):
+        self.truncate_delivery = True
+        modules = ROOT.parent / 'backend/dist/url-imports'
+        body = {'url': 'https://youtu.be/aqz-KE-bpKQ', 'max_bytes': 100_000, 'max_duration_seconds': 30}
+        script = ('import {ImportFiles} from ' + json.dumps((modules / 'import-files.js').as_uri()) + ';'
+                  'import {safeImportError} from ' + json.dumps((modules / 'import-errors.js').as_uri()) + ';'
+                  'import {acquisitionRetryDelay} from ' + json.dumps((modules / 'import-retry.js').as_uri()) + ';'
+                  'import {readdir} from "node:fs/promises";'
+                  'const files=new ImportFiles(process.argv[1]);'
+                  'let failure;'
+                  'try {await files.withFile((path,signal)=>files.download(process.argv[2],path,100000,signal,{'
+                  'method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer ' + 'r' * 48 + '"},'
+                  'body:' + json.dumps(json.dumps(body)) + '}));} catch(error) {failure=error;}'
+                  'if(!failure) throw new Error("Truncated fixture unexpectedly accepted");'
+                  'const safe=safeImportError(failure);'
+                  'console.log(JSON.stringify({code:safe.code,status:failure.getStatus?.(),'
+                  'retry:acquisitionRetryDelay({status:"downloading",acquisitionAttempt:1,'
+                  'maxAcquisitionAttempts:4,jobId:null,input:null},safe.code),entries:await readdir(files.root)}));')
+        with tempfile.TemporaryDirectory(dir=self.directory) as scratch:
+            result = subprocess.run(['node', '--input-type=module', '-e', script, scratch,
+                                     'http://127.0.0.1:' + str(self.route_port) + '/audio-imports'],
+                                    check=True, capture_output=True, text=True, timeout=10)
+        self.assertEqual(json.loads(result.stdout),
+                         {'code': 'IMPORT_INVALID_AUDIO', 'status': 422, 'retry': None, 'entries': []})
+        self.assertEqual([call[0] for call in self.calls], ['/create', '/tunnel'])
+        self.assertEqual(self.other_calls, [])
+        self.assertEqual(list(Path(self.directory).iterdir()), [])
 
 if __name__ == '__main__':
     unittest.main()

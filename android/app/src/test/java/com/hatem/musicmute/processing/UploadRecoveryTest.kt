@@ -61,6 +61,21 @@ class UploadRecoveryTest {
         return PreparedInput(op,"owner",file,InputDeclaration("mp3","audio/mpeg",3,1.0,hash),"clip.mp3")
     }
 
+    @Test fun freshReservationUploadsBeforeItsOnlyConfirmation() = runTest {
+        val root = kotlin.io.path.createTempDirectory("upload-fresh-").toFile()
+        val store = ProcessingStore(root, backgroundScope)
+        val api = Api()
+        val stages = mutableListOf<String>()
+        api.during = { stages += it }
+        val repository = ProcessingRepository(store, root, api, { ProcessingSession("owner", 1) }, Scheduler(),
+            FormUploader { _, _, _, _ -> stages += "upload"; api.exists = true })
+        val operation = repository.submit(prepared(root))
+        assertEquals(ProcessingRunResult.COMPLETE, repository.runUpload("owner", operation.operationId, 1))
+        assertEquals(listOf("create", "upload", "confirm"), stages)
+        assertEquals(1, api.confirms)
+        assertEquals(0, api.renewals)
+    }
+
     @Test fun intentIsDurableBeforeNetworkingAndLostCreateReusesId() = runTest {
         val root = kotlin.io.path.createTempDirectory("upload-recovery-").toFile()
         val store = ProcessingStore(root, backgroundScope)
@@ -75,6 +90,7 @@ class UploadRecoveryTest {
         assertEquals(ProcessingRunResult.RETRY,repository.runUpload("owner",first.operationId,1))
         assertEquals(ProcessingRunResult.COMPLETE,repository.runUpload("owner",first.operationId,1))
         assertEquals(2,api.requests.size); assertEquals(api.requests[0],api.requests[1])
+        assertEquals(2,api.confirms)
         assertEquals("queued",store.get("owner",first.operationId)!!.serverStatus)
     }
 
@@ -136,7 +152,7 @@ class UploadRecoveryTest {
         assertEquals(2,uploads)
         assertEquals(1,api.renewals)
         assertEquals(api.renewalRequestIds.single(), store.get("owner",op.operationId)!!.uploadGrantRequestId)
-        assertEquals(3,api.confirms)
+        assertEquals(2,api.confirms)
     }
 
     @Test fun cancellationResolvesLostCreateBeforeServerCancel() = runTest {
@@ -181,7 +197,7 @@ class UploadRecoveryTest {
         free=10_000_000
         val op=repository.submit(input)
         assertTrue(runCatching { repository.runUpload("owner",op.operationId,1) }.exceptionOrNull() is CancellationException)
-        assertEquals(1,api.confirms)
+        assertEquals(0,api.confirms)
         assertEquals("awaiting_upload",store.get("owner",op.operationId)!!.serverStatus)
     }
 
@@ -189,7 +205,9 @@ class UploadRecoveryTest {
         for (stage in listOf("create", "confirm", "detail", "renew")) {
             val root=kotlin.io.path.createTempDirectory("upload-await-$stage-").toFile(); val store=ProcessingStore(root,backgroundScope)
             val api=Api(); var owner=ProcessingSession("owner",1)
-            val repository=ProcessingRepository(store,root,api,{owner},Scheduler(),FormUploader { _,_,_,_ -> throw IOException("uncertain transfer") })
+            val repository=ProcessingRepository(store,root,api,{owner},Scheduler(),FormUploader { _,_,_,_ ->
+                if (stage == "confirm") api.exists = true else throw IOException("uncertain transfer")
+            })
             val op=repository.submit(prepared(root))
             if (stage in listOf("detail", "renew")) assertEquals(ProcessingRunResult.RETRY,repository.runUpload("owner",op.operationId,1))
             api.during={ if(it == stage) owner=ProcessingSession("owner",2) }

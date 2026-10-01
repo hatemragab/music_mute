@@ -70,6 +70,7 @@ import XCTest
     XCTAssertEqual(first, second)
     XCTAssertEqual(transfer.calls, 1)
     XCTAssertEqual(api.downloadCalls, 1)
+    XCTAssertEqual(api.detailCalls, 0)
     XCTAssertEqual(try Data(contentsOf: first), Data("fixture-mp3".utf8))
     XCTAssertTrue(
       try first.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
@@ -103,7 +104,7 @@ import XCTest
     }
     _ = try await repository.ensureOutput(jobId: jobId)
     XCTAssertEqual(transfer.calls, 2)
-    XCTAssertEqual(api.detailCalls, 2)
+    XCTAssertEqual(api.detailCalls, 0)
     XCTAssertEqual(api.downloadCalls, 2)
     XCTAssertNotEqual(api.requestIDs[0], api.requestIDs[1])
   }
@@ -122,7 +123,8 @@ import XCTest
       XCTAssertEqual(error as? JobArtifactFailure, .unavailable)
     }
     XCTAssertEqual(transfer.calls, 1)
-    XCTAssertEqual(api.downloadCalls, 1)
+    XCTAssertEqual(api.downloadCalls, 2)
+    XCTAssertEqual(api.detailCalls, 0)
   }
 
   func testRepeatedForbiddenResponseHasBoundedRenewal() async throws {
@@ -274,6 +276,9 @@ import XCTest
     XCTAssertEqual(artifact, expectedArtifact)
     downloadCalls += 1
     requestIDs.append(requestId)
+    if artifact == "output", status != "ready" {
+      throw JobsFailure.conflict(code: "JOB_STATE_CONFLICT")
+    }
     return DownloadGrant(
       url: URL(string: "https://storage.fixture.invalid/output?attempt=\(downloadCalls)")!,
       expiresAt: grantExpiry)

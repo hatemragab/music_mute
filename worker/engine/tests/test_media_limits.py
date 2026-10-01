@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import time
+import threading
 import unittest
 
 import numpy as np
@@ -15,6 +16,7 @@ from musicmute_engine.limits import (
     MAX_INPUT_BYTES,
     MAX_LOSSLESS_SAMPLES,
     MAX_PCM16_BYTES,
+    MAX_OUTPUT_BYTES,
     MAX_TOOL_OUTPUT_BYTES,
 )
 from musicmute_engine.media import (
@@ -101,6 +103,91 @@ class MediaLimitTests(unittest.TestCase):
                 _, identity = validate_mp3(source, Path("/ffprobe"))
                 self.assertEqual(identity.sha256, "digest")
                 digest.assert_called_once_with(source)
+
+    def test_final_output_probe_and_hash_run_concurrently(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "output.mp3"
+            source.write_bytes(b"fixture")
+            hash_started = threading.Event()
+            probe_finished = threading.Event()
+            info = AudioInfo(1, 44100, 2)
+
+            def checksum(_path: Path) -> str:
+                hash_started.set()
+                self.assertTrue(probe_finished.wait(2))
+                return "digest"
+
+            def probe(_path: Path, _ffprobe: Path) -> AudioInfo:
+                self.assertTrue(hash_started.wait(2))
+                probe_finished.set()
+                return info
+
+            with patch("musicmute_engine.media.probe_audio", side_effect=probe), patch(
+                "musicmute_engine.media.sha256_base64", side_effect=checksum
+            ):
+                output_info, identity = validate_mp3(source, Path("/ffprobe"))
+            self.assertEqual(output_info, info)
+            self.assertEqual(identity.bytes, len(b"fixture"))
+            self.assertEqual(identity.sha256, "digest")
+
+    def test_failed_output_probe_settles_hash_before_returning(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "output.mp3"
+            source.write_bytes(b"fixture")
+            hash_started = threading.Event()
+            hash_release = threading.Event()
+            hash_finished = threading.Event()
+            probe_failed = threading.Event()
+            validation_finished = threading.Event()
+            failures: list[BaseException] = []
+
+            def checksum(_path: Path) -> str:
+                hash_started.set()
+                self.assertTrue(hash_release.wait(2))
+                hash_finished.set()
+                return "digest"
+
+            def probe(_path: Path, _ffprobe: Path) -> AudioInfo:
+                self.assertTrue(hash_started.wait(2))
+                probe_failed.set()
+                raise MediaProcessingError("invalid output")
+
+            def validate() -> None:
+                try:
+                    validate_mp3(source, Path("/ffprobe"))
+                except BaseException as error:
+                    failures.append(error)
+                finally:
+                    validation_finished.set()
+
+            with patch("musicmute_engine.media.probe_audio", side_effect=probe), patch(
+                "musicmute_engine.media.sha256_base64", side_effect=checksum
+            ):
+                validator = threading.Thread(target=validate)
+                validator.start()
+                try:
+                    self.assertTrue(probe_failed.wait(2))
+                    self.assertFalse(validation_finished.wait(0.05))
+                finally:
+                    hash_release.set()
+                    validator.join(2)
+                self.assertFalse(validator.is_alive())
+            self.assertTrue(hash_finished.is_set())
+            self.assertEqual(len(failures), 1)
+            self.assertIsInstance(failures[0], MediaProcessingError)
+
+    def test_oversized_output_is_rejected_before_probe_or_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "output.mp3"
+            with source.open("wb") as output:
+                output.truncate(MAX_OUTPUT_BYTES + 1)
+            with patch("musicmute_engine.media.probe_audio") as probe, patch(
+                "musicmute_engine.media.sha256_base64"
+            ) as digest:
+                with self.assertRaisesRegex(MediaProcessingError, "Output size"):
+                    validate_mp3(source, Path("/ffprobe"))
+            probe.assert_not_called()
+            digest.assert_not_called()
 
     def test_final_mp3_encoding_uses_the_catalog_bitrate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

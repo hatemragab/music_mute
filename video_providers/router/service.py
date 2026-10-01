@@ -391,7 +391,7 @@ class Handler(BaseHTTPRequestHandler):
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
-    request_queue_size = 8
+    request_queue_size = 64
 
     def __init__(self, address, api_key, destinations, *, connection_factory=http.client.HTTPConnection,
                  operation_timeout=600, log=None, limits=None):

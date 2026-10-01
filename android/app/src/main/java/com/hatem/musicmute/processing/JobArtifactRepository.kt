@@ -300,11 +300,21 @@ class JobArtifactRepository(
 
     private suspend fun readyGrant(request: Request, requestId: String): DownloadGrant {
         requireCurrent(request)
-        val job = api.detail(request.jobId)
-        requireCurrent(request)
-        if (job.id != request.jobId || job.status != "ready" || !(if (request.artifact == "input") job.canDownloadInput else job.canDownloadOutput))
-            throw ArtifactException(ArtifactProblem.NOT_READY)
-        return api.download(request.jobId, request.artifact, requestId).also { requireCurrent(request) }
+        if (request.artifact == "input") {
+            val job = api.detail(request.jobId)
+            requireCurrent(request)
+            if (job.id != request.jobId || job.status != "ready" || !job.canDownloadInput)
+                throw ArtifactException(ArtifactProblem.NOT_READY)
+        }
+        // Output grants already enforce ownership, ready state and immutable object
+        // identity. A separate detail read adds a round trip and can still go stale.
+        return try {
+            api.download(request.jobId, request.artifact, requestId).also { requireCurrent(request) }
+        } catch (error: JobsFailure) {
+            requireCurrent(request)
+            if (error.problem == JobsProblem.JOB_STATE_CONFLICT) throw ArtifactException(ArtifactProblem.NOT_READY)
+            throw error
+        }
     }
 }
 

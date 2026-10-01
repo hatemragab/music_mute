@@ -11,7 +11,7 @@ import { AudioProcessingModule } from '../processing/processing.module.js';
 import { ReleasesModule } from '../releases/releases.module.js';
 import { WorkerFleetModule } from '../worker-fleet/worker-fleet.module.js';
 import { RealtimeResourcesService } from './realtime-resources.service.js';
-import { RealtimeFeedService } from './realtime-feed.service.js';
+import { RealtimeFeedModule } from './realtime-feed.module.js';
 import { Module } from '@nestjs/common';
 import { AdminModule } from '../admin/admin.module.js';
 import { FirebaseModule } from '../auth/firebase.module.js';
@@ -25,6 +25,7 @@ import {
 
 @Module({
   imports: [
+    RealtimeFeedModule,
     ProcessingPersistenceModule,
     AdminModule,
     FirebaseModule,
@@ -46,7 +47,6 @@ import {
     RealtimeSocketService,
     RealtimeAuthService,
     RealtimeResourcesService,
-    RealtimeFeedService,
   ],
   exports: [RealtimeAuthService, RealtimeSocketService],
 })

@@ -57,8 +57,10 @@ allowlisted `IMPORT_*` error/status pairs survive; other failures become a
 sanitized `IMPORT_DEPENDENCY_FAILED` problem response. A bounded numeric
 `Retry-After` on 503 does not authorize automatic paid resubmission.
 
-Twenty admitted relays and sixty-four HTTP handlers are bounded. One shared
-capacity pool covers both destinations; there is no per-provider serialization.
+Twenty admitted relays and sixty-four HTTP handlers are bounded. A
+sixty-four-connection accept backlog prevents the twenty-import burst from
+waiting on a smaller kernel queue. No audio is staged or probed by the router.
+One shared capacity pool covers both destinations; there is no per-provider serialization.
 Additional requests wait for a slot before submission, within the original
 600-second operation deadline, with cancellation checks. A shared rolling-second
 admission gate starts at most five adapter requests per second across both routes.

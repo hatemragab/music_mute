@@ -213,15 +213,25 @@ struct JobArtifactProgress: Equatable, Sendable {
     grantRequestIDs[jobId] = grantRequestID
     for attempt in 0...1 {
       try check(fence, jobId: jobId)
-      let job = try await api.detail(id: jobId)
-      try check(fence, jobId: jobId)
-      guard job.status == "ready", original ? job.canDownloadInput : job.canDownloadOutput else {
+      if original {
+        let job = try await api.detail(id: jobId)
+        try check(fence, jobId: jobId)
+        guard job.status == "ready", job.canDownloadInput else {
+          throw JobArtifactFailure.unavailable
+        }
+        try JSONEncoder().encode(job).write(
+          to: directory.appendingPathComponent("job.json"), options: .atomic)
+      }
+      // The output grant validates ownership, ready state and object identity in
+      // one command. Originals still retain the metadata needed for offline export.
+      let grant: DownloadGrant
+      do {
+        grant = try await api.download(
+          id: jobId, artifact: original ? "input" : "output", requestId: grantRequestID)
+      } catch JobsFailure.conflict(let code) where code == "JOB_STATE_CONFLICT" {
+        try check(fence, jobId: jobId)
         throw JobArtifactFailure.unavailable
       }
-      try JSONEncoder().encode(job).write(
-        to: directory.appendingPathComponent("job.json"), options: .atomic)
-      let grant = try await api.download(
-        id: jobId, artifact: original ? "input" : "output", requestId: grantRequestID)
       try check(fence, jobId: jobId)
       let partial = directory.appendingPathComponent(".download-\(UUID().uuidString).partial")
       progress[jobId] = JobArtifactProgress(receivedBytes: 0, totalBytes: nil)

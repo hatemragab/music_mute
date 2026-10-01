@@ -1,7 +1,9 @@
 import base64
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from email.message import Message
+import functools
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
@@ -147,20 +149,29 @@ class PolicyTests(unittest.TestCase):
         answers = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('8.8.8.8', 443))]
         sock = Mock()
         context = Mock()
-        conn = PublicTLS('tunelio.dev', 443, timeout=2)
+        with patch('service.TLS_CONTEXT', context):
+            conn = PublicTLS('tunelio.dev', 443, timeout=2)
         with patch('service.public_addresses', return_value=answers), \
-                patch('service.socket.socket', return_value=sock), \
-                patch('service.ssl.create_default_context', return_value=context):
+                patch('service.socket.socket', return_value=sock):
             conn.connect()
         sock.connect.assert_called_once_with(('8.8.8.8', 443))
         context.wrap_socket.assert_called_once_with(sock, server_hostname='tunelio.dev')
         context.wrap_socket.side_effect = ssl.SSLCertVerificationError()
         with patch('service.public_addresses', return_value=answers * 2), \
                 patch('service.socket.socket', return_value=sock), \
-                patch('service.ssl.create_default_context', return_value=context), \
                 self.assertRaises(ssl.SSLCertVerificationError):
             conn.connect()
         self.assertEqual(context.wrap_socket.call_count, 2)
+
+    def test_tls_reuses_verified_context_without_reloading_trust_store(self):
+        from service import TLS_CONTEXT
+        with patch('service.ssl.create_default_context') as create:
+            connections = [PublicTLS('tunelio.dev', 443, timeout=2),
+                           PublicTLS('www.youtube.com', 443, timeout=3)]
+        create.assert_not_called()
+        self.assertTrue(all(conn._context is TLS_CONTEXT for conn in connections))
+        self.assertTrue(TLS_CONTEXT.check_hostname)
+        self.assertEqual(TLS_CONTEXT.verify_mode, ssl.CERT_REQUIRED)
 
     def test_optional_metadata_dns_does_not_block_acquisition_dns(self):
         release, entered = threading.Event(), threading.Event()
@@ -360,6 +371,41 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 'IMPORT_TOO_LARGE')
         self.assertEqual(len(self.calls), 2)
 
+    def test_framed_delivery_uses_stream_without_staging(self):
+        self.create_reply()
+        self.audio_reply()
+        scratch, stream = io.BytesIO(), io.BytesIO()
+        prepare = Mock(return_value=stream)
+        self.provider.prepare_stream = prepare
+        size, extra = self.provider.acquire(URL, 2048, scratch)
+        prepare.assert_called_once_with(len(AUDIO), extra)
+        self.assertEqual((size, stream.getvalue(), scratch.getvalue()), (len(AUDIO), AUDIO, b''))
+        self.assertEqual([event['transfer_mode'] for event in self.events if 'transfer_mode' in event], ['stream'])
+
+    def test_bad_framed_delivery_never_starts_stream_or_replays(self):
+        for length in [0, len(AUDIO) + 1, 2049]:
+            with self.subTest(length=length):
+                self.calls.clear()
+                self.provider.admission = Admission()
+                self.create_reply()
+                self.audio_reply(headers=[('Content-Type', 'audio/webm'), ('Content-Length', str(length))])
+                self.provider.prepare_stream = Mock()
+                with self.assertRaises(Failure):
+                    self.provider.acquire(URL, 2048, io.BytesIO())
+                self.provider.prepare_stream.assert_not_called()
+                self.assertEqual(len(self.calls), 2)
+
+    def test_stream_failure_closes_upstream_without_replay(self):
+        self.create_reply()
+        self.audio_reply()
+        stream = Mock()
+        stream.write.side_effect = ConnectionAbortedError()
+        self.provider.prepare_stream = Mock(return_value=stream)
+        with self.assertRaises(ConnectionAbortedError):
+            self.provider.acquire(URL, 2048, io.BytesIO())
+        self.assertEqual(len(self.calls), 2)
+        self.assertTrue(all(conn.sock is None for conn in self.connections))
+
     def test_cancellation_after_paid_create_prevents_tunnel_and_closes_connection(self):
         self.create_reply()
         original = self.provider.create
@@ -462,6 +508,97 @@ class ServerTests(unittest.TestCase):
             return urllib.request.urlopen(request, timeout=5)
         except urllib.error.HTTPError as error:
             return error
+
+    @contextmanager
+    def vendor(self, *, body=AUDIO, framed=True, gate=None):
+        calls, first_byte = [], threading.Event()
+        class Fixture(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_GET(self):
+                path = urlsplit(self.path).path
+                calls.append(path)
+                payload = json.dumps(PAYLOAD).encode() if path == '/create' else body
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json' if path == '/create' else 'audio/webm')
+                if path == '/create' or framed:
+                    self.send_header('Content-Length', str(len(payload) if path == '/create' else len(AUDIO)))
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                try:
+                    if path == '/tunnel' and gate is not None:
+                        self.wfile.write(payload[:1])
+                        self.wfile.flush()
+                        first_byte.set()
+                        gate.wait(3)
+                        self.wfile.write(payload[1:])
+                    else:
+                        self.wfile.write(payload)
+                except OSError:
+                    pass
+        upstream = ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
+        worker = threading.Thread(target=upstream.serve_forever, daemon=True)
+        worker.start()
+        provider = functools.partial(Provider, connection=lambda *_a, **_kw:
+                                     http.client.HTTPConnection('127.0.0.1', upstream.server_port, timeout=3))
+        try:
+            with patch('service.Provider', provider):
+                yield calls, first_byte
+        finally:
+            if gate is not None:
+                gate.set()
+            upstream.shutdown()
+            upstream.server_close()
+            worker.join()
+
+    def test_framed_audio_reaches_backend_before_vendor_finishes(self):
+        release = threading.Event()
+        with self.vendor(gate=release) as (calls, first_byte), patch('builtins.print'):
+            try:
+                with self.request() as response:
+                    self.assertTrue(first_byte.wait(1))
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.read(1), AUDIO[:1])
+                    self.assertFalse(release.is_set())
+                    release.set()
+                    self.assertEqual(response.read(), AUDIO[1:])
+            finally:
+                release.set()
+            self.assertEqual(calls, ['/create', '/tunnel'])
+        self.assertTrue(self.server.slots.acquire(timeout=2))
+        self.assertEqual(self.server.scratch_budget.remaining, 0)
+        self.assertEqual(os.listdir(self.directory.name), [])
+
+    def test_unknown_length_stages_before_measured_binary_response(self):
+        release = threading.Event()
+        with self.vendor(framed=False, gate=release) as (calls, first_byte), \
+                ThreadPoolExecutor(max_workers=1) as pool, patch('builtins.print'):
+            pending = pool.submit(self.request)
+            try:
+                self.assertTrue(first_byte.wait(1))
+                self.assertFalse(pending.done())
+            finally:
+                release.set()
+            with pending.result(timeout=2) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(int(response.headers['Content-Length']), len(AUDIO))
+                self.assertEqual(response.read(), AUDIO)
+            self.assertEqual(calls, ['/create', '/tunnel'])
+        self.assertTrue(self.server.slots.acquire(timeout=2))
+        self.assertEqual(self.server.scratch_budget.remaining, 0)
+
+    def test_truncated_stream_closes_binary_response_and_releases_capacity(self):
+        with self.vendor(body=AUDIO[:2]) as (calls, _first_byte), patch('builtins.print') as log:
+            with self.request() as response:
+                self.assertEqual(response.status, 200)
+                with self.assertRaises(http.client.IncompleteRead):
+                    response.read()
+            self.assertTrue(self.server.slots.acquire(timeout=2))
+            self.assertEqual(calls, ['/create', '/tunnel'])
+            self.assertNotIn('"result": "SUCCEEDED"', ' '.join(str(call) for call in log.call_args_list))
+        self.assertEqual(self.server.scratch_budget.remaining, 0)
+        self.assertEqual(os.listdir(self.directory.name), [])
 
     def test_auth_url_schema_caps_and_health(self):
         with urllib.request.urlopen(self.origin + '/health') as response:

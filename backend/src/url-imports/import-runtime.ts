@@ -14,6 +14,7 @@ import { importError } from './import-errors.js';
 import { SharedMediaService } from '../shared-media/shared-media.service.js';
 import { Optional } from '@nestjs/common';
 import { importExecutionJobId } from './import-retry.js';
+import { RealtimeFeedService } from '../realtime/realtime-feed.service.js';
 
 @Injectable()
 export class ImportRuntime
@@ -22,6 +23,9 @@ export class ImportRuntime
   private readonly logger = new Logger(ImportRuntime.name);
   private timer?: NodeJS.Timeout;
   private maintenance?: Promise<void>;
+  private wakeup?: NodeJS.Timeout;
+  private unsubscribe?: () => void;
+  private wakePending = false;
   private running = false;
 
   constructor(
@@ -30,6 +34,7 @@ export class ImportRuntime
     private readonly processor: ImportProcessor,
     @InjectQueue(IMPORT_QUEUE) private readonly queue: Queue,
     @Optional() private readonly shared?: SharedMediaService,
+    @Optional() private readonly feed?: RealtimeFeedService,
   ) {}
 
   async onApplicationBootstrap() {
@@ -53,6 +58,15 @@ export class ImportRuntime
     );
     this.processor.worker.concurrency = concurrency;
     this.running = true;
+    this.unsubscribe = this.feed?.subscribe((event) => {
+      if (
+        event.healthy &&
+        (!event.collection ||
+          event.collection === 'shared_media_sources' ||
+          event.collection === 'shared_media_results')
+      )
+        this.wake();
+    });
     void this.processor.worker
       .run()
       .catch(() => this.logger.error('URL import processor stopped'));
@@ -61,13 +75,47 @@ export class ImportRuntime
     this.timer.unref();
   }
 
-  private tick() {
+  private tick(sharedChanges = false) {
     if (this.maintenance || !this.running) return;
-    this.maintenance = this.reconcile()
+    this.wakePending = false;
+    if (this.wakeup) clearTimeout(this.wakeup);
+    this.wakeup = undefined;
+    this.maintenance = (
+      sharedChanges ? this.enqueueSharedImports() : this.reconcile()
+    )
       .catch(() => this.logger.warn('URL import recovery or cleanup pending'))
       .finally(() => {
         this.maintenance = undefined;
+        if (this.wakePending) this.wake();
       });
+  }
+
+  private wake() {
+    if (!this.running) return;
+    this.wakePending = true;
+    if (this.maintenance || this.wakeup) return;
+    // Coalesce committed source/result transitions without losing a change that
+    // arrives during reconciliation. Recovery still handles feed/Redis outages.
+    this.wakeup = setTimeout(() => {
+      this.wakeup = undefined;
+      this.tick(true);
+    }, 50);
+    this.wakeup.unref();
+  }
+
+  /** Changes wake only queued shared imports; expensive recovery remains periodic. */
+  async enqueueSharedImports(): Promise<void> {
+    const pending = await this.imports.records
+      .find({
+        status: 'queued',
+        sharedSourceKey: trusted({ $ne: null }),
+        sharedResultKey: trusted({ $ne: null }),
+      })
+      .sort({ createdAt: 1 })
+      .limit(this.config.getOrThrow<number>('URL_IMPORT_MAX_OUTSTANDING'))
+      .lean();
+    for (const record of pending)
+      await this.imports.enqueue(record._id.toHexString());
   }
 
   async reconcile(): Promise<void> {
@@ -122,6 +170,9 @@ export class ImportRuntime
 
   async beforeApplicationShutdown() {
     this.running = false;
+    this.unsubscribe?.();
+    if (this.wakeup) clearTimeout(this.wakeup);
+    this.wakePending = false;
     if (this.timer) clearInterval(this.timer);
     this.processor.shutdown.abort();
     await this.processor.worker.close();

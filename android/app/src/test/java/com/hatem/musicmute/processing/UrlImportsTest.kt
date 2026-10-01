@@ -166,6 +166,37 @@ class UrlImportsTest {
         assertEquals("submitted", store.urlImports("owner").first().single().status)
     }
 
+    @Test fun realtimeSnapshotsRetainMeasuredImportDurationsThroughSubmission() = runTest {
+        val store = ProcessingStore(kotlin.io.path.createTempDirectory("url-import-timings-").toFile(), backgroundScope)
+        val ticket = ProcessingSession("owner", 1)
+        val uploading = ServerStageTimings(2_300, false, listOf(
+            ServerStageMeasurement("source-download", 1_800, true),
+            ServerStageMeasurement("input-upload", 500, false),
+        ))
+        val submitted = uploading.copy(totalMs = 2_800, totalComplete = true)
+        val finish = CompletableDeferred<Unit>()
+        val api = object : UrlImportsApi {
+            override suspend fun create(url: String, requestId: String) =
+                UrlImportView(importId, "queued", null, null, "time", "time")
+            override suspend fun detail(importId: String): UrlImportView = error("snapshots own progress")
+            override fun updates(importId: String) = flow {
+                emit(UrlImportView(importId, "uploading", null, null, "time", "time", uploading))
+                finish.await()
+                emit(UrlImportView(importId, "submitted", jobId, null, "time", "time", submitted))
+            }
+        }
+        val coordinator = UrlImportCoordinator(store, api, backgroundScope, { ticket })
+        coordinator.bindSession(ticket)
+        coordinator.submit(source)
+        runCurrent()
+        assertEquals(uploading, coordinator.records.value.single().serverStageTimings)
+        assertEquals(2_300L, audioTaskPresentations(emptyList(), emptyList(), 0,
+            coordinator.records.value).single().totalElapsedMs)
+        finish.complete(Unit)
+        runCurrent()
+        assertEquals(submitted, store.urlImports("owner").first().single().serverStageTimings)
+    }
+
     @Test fun terminalRetryRequiresExplicitActionAndPreservesSavedSourceAndTrimWithOneNewIdentity() = runTest {
         val store = ProcessingStore(kotlin.io.path.createTempDirectory("url-import-retry-").toFile(), backgroundScope)
         val original = store.addUrlImport("owner", UrlImportRecord("owner", source,

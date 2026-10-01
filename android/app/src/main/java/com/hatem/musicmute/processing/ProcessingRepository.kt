@@ -376,6 +376,7 @@ class ProcessingRepository(
     private suspend fun process(owner: ProcessingSession, operationId: String, runId: String): ProcessingRunResult {
         var operation = current(owner, operationId, runId)
         var grant: UploadGrant? = null
+        var freshReservation = false
         if (operation.jobId == null) {
             if (operation.cancellationRequested && !operation.reservationAttempted) {
                 change(owner, operationId, runId) {
@@ -385,6 +386,7 @@ class ProcessingRepository(
                 return ProcessingRunResult.COMPLETE
             }
             if (operation.retryOfJobId == null && !operation.cancellationRequested) verifyInput(operation)
+            val firstReservationAttempt = !operation.reservationAttempted
             change(owner, operationId, runId) {
                 it.copy(phase = ProcessingPhase.RESERVING, reservationAttempted = true)
             }
@@ -421,6 +423,7 @@ class ProcessingRepository(
                     )
                 }
                 grant = result.upload
+                freshReservation = firstReservationAttempt && grant != null
                 if (operation.displayName.isNotBlank() && operation.displayName != operation.sourceTitle) {
                     val renamed = api.rename(result.id, operation.displayName)
                     operation = change(owner, operationId, runId) { it.copy(serverStatus = renamed.status) }
@@ -444,27 +447,32 @@ class ProcessingRepository(
         }
         if (operation.serverStatus != "awaiting_upload") return finishKnown(owner, operationId, runId, operation.serverStatus)
 
-        // Confirmation always precedes any renewed grant or repeat of a whole-file transfer.
-        change(owner, operationId, runId) { it.copy(phase = ProcessingPhase.CONFIRMING) }
-        try {
-            val confirmed = api.confirmUpload(jobId)
-            change(owner, operationId, runId) { it.copy(serverStatus = confirmed.status) }
-            return finishKnown(owner, operationId, runId, confirmed.status)
-        } catch (error: JobsFailure) {
-            checkSession(owner)
-            if (error.problem == JobsProblem.JOB_STATE_CONFLICT) {
-                val detail = api.detail(jobId)
-                change(owner, operationId, runId) { it.copy(serverStatus = detail.status) }
-                if (detail.status != "awaiting_upload") return finishKnown(owner, operationId, runId, detail.status)
-                throw error
-            }
-            if (error.problem != JobsProblem.UPLOAD_NOT_READY) throw error
-            if (operation.hasUploadedInput) {
-                change(owner, operationId, runId) { it.copy(uploadGrantRequestId = null) }
+        // No transfer can precede the first acknowledged reservation. Recovered or
+        // replayed intent still confirms before renewing or repeating a PUT.
+        if (!freshReservation) {
+            change(owner, operationId, runId) { it.copy(phase = ProcessingPhase.CONFIRMING) }
+            try {
+                val confirmed = api.confirmUpload(jobId)
+                change(owner, operationId, runId) { it.copy(serverStatus = confirmed.status) }
+                return finishKnown(owner, operationId, runId, confirmed.status)
+            } catch (error: JobsFailure) {
+                checkSession(owner)
+                if (error.problem == JobsProblem.JOB_STATE_CONFLICT) {
+                    val detail = api.detail(jobId)
+                    change(owner, operationId, runId) { it.copy(serverStatus = detail.status) }
+                    if (detail.status != "awaiting_upload") return finishKnown(owner, operationId, runId, detail.status)
+                    throw error
+                }
+                if (error.problem != JobsProblem.UPLOAD_NOT_READY) throw error
+                if (operation.hasUploadedInput) {
+                    change(owner, operationId, runId) { it.copy(uploadGrantRequestId = null) }
+                }
             }
         }
         operation = current(owner, operationId, runId)
-        val file = verifyInput(operation)
+        // The PUT hashes the actual streamed bytes and R2 checks the signed checksum.
+        // Recheck confinement, size and policy here without a separate full-file read.
+        val file = verifyInput(operation, checkHash = false)
         current(owner, operationId, runId)
         if (grant == null) {
             operation = current(owner, operationId, runId)

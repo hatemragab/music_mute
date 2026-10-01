@@ -282,12 +282,28 @@ export class ImportFiles {
           callback(null, chunk);
         },
       });
-      await pipeline(
-        response,
-        counter,
-        createWriteStream(path, { flags: 'wx', mode: 0o600 }),
-        { signal: transferSignal },
-      );
+      try {
+        await pipeline(
+          response,
+          counter,
+          createWriteStream(path, { flags: 'wx', mode: 0o600 }),
+          { signal: transferSignal },
+        );
+      } catch (error) {
+        if (
+          !transferSignal.aborted &&
+          !response.complete &&
+          error instanceof Error &&
+          'code' in error &&
+          ['ECONNRESET', 'ERR_STREAM_PREMATURE_CLOSE'].includes(
+            String(error.code),
+          )
+        )
+          // A begun binary delivery that cannot finish is invalid media. Do not
+          // classify it as a transient dependency failure and reacquire paid audio.
+          throw importError('IMPORT_INVALID_AUDIO');
+        throw error;
+      }
       if (
         bytes === 0 ||
         !response.complete ||

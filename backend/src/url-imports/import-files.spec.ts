@@ -14,6 +14,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { ImportFiles } from './import-files.js';
+import { safeImportError } from './import-errors.js';
+import { acquisitionRetryDelay } from './import-retry.js';
+import type { MediaImport } from './media-import.schema.js';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs/promises')>();
@@ -163,7 +166,7 @@ describe('bounded temporary imports', () => {
       fetchSpy.mockRestore();
     }
   });
-  it('rejects truncated bodies without replaying the POST and cleans scratch', async () => {
+  it('rejects truncated bodies as permanent invalid media without replay and cleans scratch', async () => {
     let submissions = 0;
     server.removeAllListeners('request');
     server.on('request', (req, res) => {
@@ -172,15 +175,32 @@ describe('bounded temporary imports', () => {
       res.writeHead(200, { 'Content-Length': 100, Connection: 'close' });
       res.end('short');
     });
-    await expect(
-      files.withFile((path, signal) =>
+    const failure = await files
+      .withFile((path, signal) =>
         files.download(origin, path, 200, signal, {
           method: 'POST',
           headers: {},
           body: '{}',
         }),
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    const safe = safeImportError(failure);
+    expect(safe.code).toBe('IMPORT_INVALID_AUDIO');
+    expect(
+      acquisitionRetryDelay(
+        {
+          status: 'downloading',
+          acquisitionAttempt: 1,
+          maxAcquisitionAttempts: 4,
+          jobId: null,
+          input: null,
+        } as MediaImport,
+        safe.code,
       ),
-    ).rejects.toThrow();
+    ).toBeNull();
     expect(submissions).toBe(1);
     expect(await readdir(files.root)).toEqual([]);
   });

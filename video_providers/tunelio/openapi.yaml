@@ -51,7 +51,7 @@ paths:
                   }
       responses:
         "200":
-          description: Audio-only bytes. No redirects; Content-Length is measured. Cache-Control no-store. Metadata is optional and must not be trusted for admission.
+          description: Audio bytes for independent NestJS validation. No redirects; Content-Length is taken from validated positive delivery framing or measured scratch bytes. Exact completion is required; failures after streaming starts close the binary response. Cache-Control no-store. Metadata is optional and must not be trusted for admission.
           headers:
             X-Import-Extra-Data-Base64:
               description: At most 4096 ASCII characters; base64 UTF-8 JSON with schema_version 1, provider and allowlisted audio metadata. Optional sanitized title/channel may come from included metadata or best-effort official oEmbed lookup. Title supplies the import source title; there is no separate title header. Lookup failure never fails audio acquisition. See README for fields. Missing or invalid means null.

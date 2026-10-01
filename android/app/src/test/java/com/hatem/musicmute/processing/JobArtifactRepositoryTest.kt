@@ -104,6 +104,7 @@ class JobArtifactRepositoryTest {
         assertEquals(file, repository.ensureOutput(id))
         assertEquals(1, transfers)
         assertEquals(1, api.grants)
+        assertEquals(0, api.details)
         assertTrue(repository.progress.value.isEmpty())
     }
 
@@ -155,7 +156,7 @@ class JobArtifactRepositoryTest {
         assertArrayEquals(mp3, repository.ensureOutput(id).readBytes())
         assertEquals(2, api.grants)
         assertNotEquals(api.grantRequestIds[0], api.grantRequestIds[1])
-        assertEquals(2, api.details)
+        assertEquals(0, api.details)
         assertEquals(1, downloads)
     }
 
@@ -258,12 +259,13 @@ class JobArtifactRepositoryTest {
         assertFalse(first.path.contains("../"))
     }
 
-    @Test fun nonReadyJobNeverRequestsGrant() = runTest {
+    @Test fun authoritativeGrantRejectsNonReadyJobWithoutTransfer() = runTest {
         val api = FakeApi().apply { status = "processing" }
         val repository = repository(api, ArtifactDownloader { _, _, _ -> fail("Unexpected download") }, backgroundScope)
         try { repository.ensureOutput(id); fail("Expected not ready") }
         catch (error: ArtifactException) { assertEquals(ArtifactProblem.NOT_READY, error.problem) }
-        assertEquals(0, api.grants)
+        assertEquals(1, api.grants)
+        assertEquals(0, api.details)
     }
 
     @Test fun originalAndVoiceUseSeparateCachesAndDownloadGrants() = runTest {
@@ -277,7 +279,7 @@ class JobArtifactRepositoryTest {
         val restored = repository(api, ArtifactDownloader { _, _, _ -> error("Offline transfer") }, backgroundScope)
         assertEquals(original, restored.ensureOriginal(id))
         assertEquals(voice, restored.ensureOutput(id))
-        assertEquals(2, api.details)
+        assertEquals(1, api.details)
         assertEquals(2, api.grants)
         repository.evict(id)
         assertFalse(original.exists())
@@ -311,6 +313,7 @@ class JobArtifactRepositoryTest {
             artifacts += artifact
             grantRequestIds += requestId
             grants++
+            if (artifact == "output" && status != "ready") throw JobsFailure(JobsProblem.JOB_STATE_CONFLICT)
             return onGrant?.invoke(grants) ?: grant
         }
         override suspend fun create(requestId: String, input: InputDeclaration): CreateReservation = error("unused")

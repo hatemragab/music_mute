@@ -55,6 +55,10 @@ Existing routes, authorization and response shapes are preserved.
 
 ## URL import throughput
 
+The [2026-10-01 pipeline performance review](../docs/media-pipeline-performance/README.md)
+maps mobile-to-user stages, the current read-only CapRover routing check, local
+transfer/native/worker improvements and remaining deployment boundaries.
+
 New URL jobs reference [permanent shared media](../docs/url-imports/shared-media.md)
 in private R2. Canonical URL hashes deduplicate acquisition; recipe hashes separate
 trim/model/output variants. Later users reuse originals and matching vocals without
