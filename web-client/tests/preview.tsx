@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import type { User } from "firebase/auth";
-import type { ApiClient } from "../src/api/client";
+import { ApiClient } from "../src/api/client";
 import { Shell } from "../src/App";
 import { AuthContext } from "../src/auth/AuthProvider";
 import { StartupScreen } from "../src/auth/StartupScreen";
@@ -14,6 +14,15 @@ import { realtimeFixture } from "./realtime-fixture";
 const networkRealtime = new URLSearchParams(location.search).has(
   "network-realtime",
 );
+const importRetryPreview = new URLSearchParams(location.search).has(
+  "import-retry",
+);
+const failedImportId = "4123456789abcdef01234567";
+const retryHttp = new ApiClient({
+  origin: "http://127.0.0.1:3000",
+  token: async () => "synthetic-preview-token",
+  installationId: () => "a68f0a23-57dc-4e15-bb3e-e13dc4ed7d01",
+});
 const createdAt = "2026-09-24T11:00:00.000Z";
 const jobs = [
   {
@@ -143,12 +152,27 @@ const api = {
       };
     throw new Error(`Unmocked read: ${path}`);
   },
-  post: async () => {
+  post: async (path: string, body: unknown, signal?: AbortSignal) => {
+    if (importRetryPreview && path === "/media-imports")
+      return retryHttp.post(path, body, signal);
     throw new Error("Preview is read-only");
   },
 } as unknown as ApiClient;
 
 const { client: fixtureClient } = realtimeFixture((resource, params) => {
+  if (importRetryPreview && resource === "import")
+    return {
+      importId: params.id,
+      sourceTitle: "Synthetic import retry",
+      sourceUrl: "https://www.youtube.com/watch?v=abcdefghijk",
+      trimEnabled: false,
+      status: params.id === failedImportId ? "failed" : "submitted",
+      jobId: params.id === failedImportId ? null : "5123456789abcdef01234567",
+      error:
+        params.id === failedImportId
+          ? { code: "IMPORT_DEPENDENCY_FAILED", message: "Synthetic failure" }
+          : null,
+    };
   const path =
     resource === "jobs"
       ? "/jobs?limit=20"

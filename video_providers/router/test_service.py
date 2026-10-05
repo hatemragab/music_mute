@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -176,6 +177,16 @@ class RouterHTTPTests(unittest.TestCase):
         self.assertEqual(self.other.calls, [])
         self.assertEqual(self.logs[-1]['result'], 'SUCCEEDED')
 
+    def test_playlist_radio_context_routes_only_the_selected_video(self):
+        shared = 'https://www.youtube.com/watch?v=e6WT8RwRwt4&list=RDe6WT8RwRwt4&start_radio=1'
+        canonical = 'https://www.youtube.com/watch?v=e6WT8RwRwt4'
+        status, _, content = self.request({**BODY, 'url': shared})
+        self.assertEqual(status, 200)
+        self.assertEqual(content, b'synthetic audio bytes')
+        self.assertEqual(len(self.youtube.calls), 1)
+        self.assertEqual(self.youtube.calls[0][1], {**BODY, 'url': canonical})
+        self.assertEqual(self.other.calls, [])
+
     def test_start_is_reserved_after_connection_and_before_submission(self):
         connections = []
 
@@ -217,6 +228,64 @@ class RouterHTTPTests(unittest.TestCase):
         self.assertEqual(self.other.calls[0][2]['Authorization'], 'Bearer ' + OTHER_KEY)
         self.assertEqual(len(self.other.calls), 1)
         self.assertEqual(self.youtube.calls, [])
+
+    def test_authenticated_complete_context_forwarded_without_cookies(self):
+        started = datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+        context = {'X-Import-Attempt': '3', 'X-Import-Max-Attempts': '4',
+                   'X-Import-Acquisition-Started-At': started}
+        self.assertEqual(self.request(headers={**context, 'Cookie': 'secret-cookie'})[0], 200)
+        forwarded = self.youtube.calls[0][2]
+        for header, value in context.items():
+            self.assertEqual(forwarded[header], value)
+        self.assertNotIn('Cookie', forwarded)
+
+    def test_legacy_context_absence_preserved(self):
+        self.assertEqual(self.request()[0], 200)
+        for header in ('X-Import-Attempt', 'X-Import-Max-Attempts', 'X-Import-Acquisition-Started-At'):
+            self.assertNotIn(header, self.youtube.calls[0][2])
+
+    def test_partial_and_invalid_context_rejected_before_upstream(self):
+        started = datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+        complete = {'X-Import-Attempt': '1', 'X-Import-Max-Attempts': '4',
+                    'X-Import-Acquisition-Started-At': started}
+        cases = [
+            {'X-Import-Attempt': '1'},
+            {'X-Import-Max-Attempts': '4'},
+            {'X-Import-Acquisition-Started-At': started},
+            {**complete, 'X-Import-Attempt': '5'},
+            {**complete, 'X-Import-Attempt': '4', 'X-Import-Max-Attempts': '3'},
+            {**complete, 'X-Import-Attempt': '01'},
+            {**complete, 'X-Import-Max-Attempts': '0'},
+            {**complete, 'X-Import-Acquisition-Started-At': '2099-01-01T00:00:00.000Z'},
+            {**complete, 'X-Import-Acquisition-Started-At': started.replace('Z', '+00:00')},
+        ]
+        for headers in cases:
+            with self.subTest(headers=headers):
+                self.assert_problem(self.request(headers=headers), 400, 'IMPORT_INVALID_REQUEST')
+        self.assertEqual(self.youtube.calls, [])
+        self.assertEqual(self.other.calls, [])
+
+    def test_duplicate_context_rejected_before_upstream(self):
+        started = datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+        connection = http.client.HTTPConnection('127.0.0.1', self.router.server_port, timeout=5)
+        content = json.dumps(BODY).encode()
+        try:
+            connection.putrequest('POST', '/audio-imports')
+            for header, value in [('Authorization', 'Bearer ' + INGRESS),
+                                  ('Content-Type', 'application/json'),
+                                  ('Content-Length', str(len(content))),
+                                  ('X-Import-Attempt', '1'), ('X-Import-Attempt', '1'),
+                                  ('X-Import-Max-Attempts', '4'),
+                                  ('X-Import-Acquisition-Started-At', started)]:
+                connection.putheader(header, value)
+            connection.endheaders(content)
+            response = connection.getresponse()
+            self.assert_problem((response.status, dict(response.headers), response.read()),
+                                400, 'IMPORT_INVALID_REQUEST')
+        finally:
+            connection.close()
+        self.assertEqual(self.youtube.calls, [])
+        self.assertEqual(self.other.calls, [])
 
     def test_allowlisted_audio_content_types_preserved(self):
         for content_type in ('application/octet-stream', 'audio/webm', 'audio/mpeg',
@@ -269,6 +338,14 @@ class RouterHTTPTests(unittest.TestCase):
         result = self.request()
         self.assert_problem(result, 503, 'IMPORT_QUEUE_FULL')
         self.assertEqual(result[1]['Retry-After'], '86400')
+        self.assertEqual(len(self.youtube.calls), 1)
+
+    def test_exhausted_acquisition_is_terminal_without_retry_hint(self):
+        self.youtube.mode = 'error'
+        self.youtube.headers = {'X-Import-Error': 'IMPORT_ACQUISITION_EXHAUSTED', 'Retry-After': '1'}
+        response = self.request()
+        self.assert_problem(response, 503, 'IMPORT_ACQUISITION_EXHAUSTED')
+        self.assertNotIn('Retry-After', response[1])
         self.assertEqual(len(self.youtube.calls), 1)
 
     def test_unknown_status_code_mismatch_redirect_and_auth_failure_are_sanitized(self):
@@ -406,7 +483,7 @@ class RouterHTTPTests(unittest.TestCase):
 
     def test_invalid_admission_does_not_contact_upstream(self):
         cases = [
-            ({**BODY, 'url': VIDEO + '&list=playlist'}, {}, 422, 'IMPORT_SINGLE_ITEM_REQUIRED'),
+            ({**BODY, 'url': 'https://youtube.com/playlist?list=playlist&v=aqz-KE-bpKQ'}, {}, 422, 'IMPORT_SINGLE_ITEM_REQUIRED'),
             ({**BODY, 'url': 'https://youtube.com.attacker.example/watch?v=aqz-KE-bpKQ'}, {}, 422, 'IMPORT_UNSUPPORTED_PROVIDER'),
             ({**BODY, 'max_bytes': True}, {}, 400, 'IMPORT_INVALID_REQUEST'),
             ({**BODY, 'max_bytes': 100000001}, {}, 400, 'IMPORT_INVALID_REQUEST'),
@@ -437,7 +514,14 @@ class PolicyAndPackageTests(unittest.TestCase):
         youtube = [VIDEO, 'https://m.youtube.com/shorts/aqz-KE-bpKQ',
                    'https://music.youtube.com/watch?v=aqz-KE-bpKQ',
                    'https://youtu.be/aqz-KE-bpKQ', 'https://www.youtu.be/aqz-KE-bpKQ',
-                   'https://youtube.com/embed/aqz-KE-bpKQ']
+                   'https://youtube.com/embed/aqz-KE-bpKQ',
+                   VIDEO + '&list=PL123&index=2&start_radio=1',
+                   'https://youtube.com/watch/?v=aqz-KE-bpKQ&list=PL123',
+                   'https://www.youtu.be/aqz-KE-bpKQ/?list=PL123',
+                   VIDEO + '&%6cist=PL123&playlist=PL123&in=collection',
+                   'https://music.youtube.com/watch?v=aqz-KE-bpKQ&list=RDfixture',
+                   'https://youtu.be/aqz-KE-bpKQ?list=PL123&index=2',
+                   'https://youtube.com/shorts/aqz-KE-bpKQ?list=PL123&v=aqz-KE-bpKQ']
         other = [OTHER, 'https://tiktok.com/@user/video/123', 'https://vm.tiktok.com/synthetic/',
                  'https://vimeo.com/123', 'https://player.vimeo.com/video/123',
                  'https://soundcloud.com/artist/song', 'https://on.soundcloud.com/synthetic',
@@ -456,9 +540,17 @@ class PolicyAndPackageTests(unittest.TestCase):
     def test_unsafe_urls_collections_and_unqualified_hosts_rejected(self):
         urls = ['http://youtube.com/watch?v=aqz-KE-bpKQ', 'https://127.0.0.1/watch?v=aqz-KE-bpKQ',
                 'https://localhost/audio', 'https://user:pass@youtube.com/watch?v=aqz-KE-bpKQ',
-                VIDEO + '#fragment', VIDEO + '&v=aqz-KE-bpKQ', VIDEO + '&index=2',
+                VIDEO + '#fragment', VIDEO + '&v=aqz-KE-bpKQ',
+                VIDEO + '&v=abcdefghijk&list=PL123',
+                'https://youtube.com/watch?list=PL123&index=2',
+                'https://youtube.com/watch?v=short&list=PL123',
+                'https://youtu.be/aqz-KE-bpKQ?v=abcdefghijk&list=PL123',
+                'https://youtu.be/aqz-KE-bpKQ?v=aqz-KE-bpKQ&v=aqz-KE-bpKQ',
+                'https://youtube.com/shorts/aqz-KE-bpKQ?v=abcdefghijk&list=PL123',
+                'https://youtube.com/playlist?list=123&v=aqz-KE-bpKQ',
                 'https://youtube.com/playlist?list=123', 'https://instagram.com/user/',
                 'https://soundcloud.com/user/sets', 'https://mixcloud.com/user/playlists',
+                'https://soundcloud.com/user/track?in=user/sets/album',
                 'https://evil.youtube.com/watch?v=aqz-KE-bpKQ',
                 'https://youtube.com:8080/watch?v=aqz-KE-bpKQ', VIDEO + '\\suffix',
                 VIDEO + ' ']
@@ -467,9 +559,10 @@ class PolicyAndPackageTests(unittest.TestCase):
                 source_url(url)
 
     def test_private_configuration_cannot_target_arbitrary_destinations(self):
-        apps = ('music-mute-tunelio', 'music-mute-jojapi')
+        apps = ('music-mute-tunelio', 'music-mute-jojapi', 'music-mute-ytdlp')
         for host in ('music-mute-tunelio', 'srv-captain--music-mute-tunelio',
-                     'music-mute-jojapi', 'srv-captain--music-mute-jojapi'):
+                     'music-mute-jojapi', 'srv-captain--music-mute-jojapi',
+                     'music-mute-ytdlp', 'srv-captain--music-mute-ytdlp'):
             parsed = destination('http://' + host + ':8080/', YOUTUBE_KEY, apps)
             self.assertEqual(parsed.host, host)
         urls = ['https://srv-captain--music-mute-jojapi:8080/',
@@ -483,9 +576,23 @@ class PolicyAndPackageTests(unittest.TestCase):
         for url in urls:
             with self.subTest(url=url), self.assertRaises(ValueError):
                 destination(url, YOUTUBE_KEY, apps)
-        for host in ('music-mute-tunelio', 'music-mute-jojapi'):
+        for host in apps:
             with self.subTest(other_route_host=host), self.assertRaises(ValueError):
                 destination('http://' + host + ':8080/', OTHER_KEY, 'music-mute-videoscale')
+
+    def test_runtime_routes_youtube_to_ytdlp_with_separate_private_key(self):
+        environment = {
+            'AUDIO_ACQUISITION_API_KEY': INGRESS,
+            'YOUTUBE_AUDIO_ACQUISITION_API_URL': 'http://srv-captain--music-mute-ytdlp:8080/',
+            'YOUTUBE_AUDIO_ACQUISITION_API_KEY': YOUTUBE_KEY,
+            'OTHER_AUDIO_ACQUISITION_API_URL': 'http://srv-captain--music-mute-videoscale:8080/',
+            'OTHER_AUDIO_ACQUISITION_API_KEY': OTHER_KEY,
+        }
+        with patch.dict('os.environ', environment, clear=True), patch('service.Server') as server, patch('builtins.print'):
+            main()
+        self.assertEqual(server.call_args.args[2]['youtube'],
+                         Destination('srv-captain--music-mute-ytdlp', 8080, YOUTUBE_KEY))
+        server.return_value.serve_forever.assert_called_once_with()
 
     def test_runtime_routes_youtube_to_jojapi_with_separate_private_key(self):
         environment = {
@@ -551,7 +658,8 @@ const hook = fs.readFileSync('caprover-adapter-hook.js', 'utf8');
 const common = 'synthetic-common-private-service-key-0000';
 const youtube = {
   tunelio: 'synthetic-tunelio-private-service-key-000',
-  jojapi: 'synthetic-jojapi-private-service-key-0000'
+  jojapi: 'synthetic-jojapi-private-service-key-0000',
+  ytdlp: 'synthetic-ytdlp-private-service-key-00000'
 };
 let paths = [];
 const context = {
@@ -563,13 +671,14 @@ const context = {
       if (path.endsWith('/api-key')) return common;
       if (path.endsWith('/tunelio-api-key')) return youtube.tunelio;
       if (path.endsWith('/jojapi-api-key')) return youtube.jojapi;
+      if (path.endsWith('/ytdlp-api-key')) return youtube.ytdlp;
       throw new Error('Unknown protected runtime key path');
     }};
   }
 };
 vm.runInNewContext(hook, context);
 (async () => {
-  for (const provider of ['tunelio', 'jojapi']) {
+  for (const provider of ['tunelio', 'jojapi', 'ytdlp']) {
     for (const prefix of ['', 'srv-captain--']) {
       paths = [];
       const update = {TaskTemplate: {ContainerSpec: {Env: [

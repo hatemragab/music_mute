@@ -32,28 +32,26 @@ export function parseImportSource(value: string): ImportSource {
       'm.youtube.com',
       'music.youtube.com',
       'youtu.be',
+      'www.youtu.be',
     ].includes(url.hostname)
   ) {
-    if (
-      url.searchParams.has('list') ||
-      url.searchParams.has('index') ||
-      url.pathname === '/playlist'
-    )
-      throw importError('IMPORT_SINGLE_ITEM_REQUIRED');
-    const id =
-      url.hostname === 'youtu.be'
-        ? url.pathname.slice(1)
-        : url.pathname === '/watch'
-          ? url.searchParams.get('v')
-          : /^\/(?:shorts|embed|live|v|watch)\/([\w-]{11})\/?$/.exec(
-              url.pathname,
-            )?.[1];
+    const queryIds = url.searchParams.getAll('v');
+    const id = ['youtu.be', 'www.youtu.be'].includes(url.hostname)
+      ? /^\/([\w-]{11})\/?$/.exec(url.pathname)?.[1]
+      : /^\/watch\/?$/.test(url.pathname)
+        ? url.searchParams.get('v')
+        : /^\/(?:shorts|embed|live|v|watch)\/([\w-]{11})\/?$/.exec(
+            url.pathname,
+          )?.[1];
     if (
       !id ||
       !/^[\w-]{11}$/.test(id) ||
-      url.searchParams.getAll('v').length > 1
+      queryIds.length > 1 ||
+      (queryIds.length === 1 && queryIds[0] !== id)
     )
       throw importError('IMPORT_SINGLE_ITEM_REQUIRED');
+    // A selected video remains a single item when shared from a playlist or mix.
+    // Strip all context before cache identity and acquisition are evaluated.
     return {
       provider: 'youtube',
       url: `https://www.youtube.com/watch?v=${id}`,

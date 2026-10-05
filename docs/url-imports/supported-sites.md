@@ -33,6 +33,22 @@ Private destinations, playlists, unsupported shapes and unsafe URLs must still
 be rejected server-side. Live job/import updates use existing authenticated
 WebSocket snapshots, not timer-driven HTTP polling.
 
+### YouTube links shared from playlists (2026-10-04)
+
+A supported YouTube video link can include playlist or radio context. For example,
+`https://www.youtube.com/watch?v=e6WT8RwRwt4&list=RDe6WT8RwRwt4&start_radio=1`
+imports only `https://www.youtube.com/watch?v=e6WT8RwRwt4`. Web, Android, iOS,
+NestJS and private adapters discard that context after validating one video ID.
+Playlist pages and links without a valid selected video remain unsupported, as do
+duplicate or conflicting video IDs. Other sites retain their collection-query
+restrictions. Existing installed clients need an update for the admission change.
+
+API preflight: the [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+were read on 2026-10-04. Rules 101 (OpenAPI), 104 (security), 106 (compatibility)
+and 151 (success/error responses) shaped this compatible input extension; routes,
+authentication and response schemas are unchanged. Local validation does not
+establish deployed import success.
+
 ## Qualification and maintenance
 
 The [2026-09-26 report](qualification-2026-09-26.json) is historical metadata-only

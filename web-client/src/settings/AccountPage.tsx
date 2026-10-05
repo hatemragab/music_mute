@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { DeviceView } from "../api/types";
 import { useAuth, useSignedIn } from "../auth/AuthProvider";
+import { GoogleGMark } from "../brand/GoogleGMark";
 import { friendlyError, useI18n } from "../i18n";
 
 export function AccountPage() {
@@ -153,6 +154,8 @@ export function AccountPage() {
         <div className="action-row">
           {!providers.includes("google.com") && (
             <button
+              className="google-button"
+              type="button"
               disabled={busy}
               onClick={() =>
                 void action(async () => {
@@ -161,7 +164,8 @@ export function AccountPage() {
                 })
               }
             >
-              {t("google")}
+              <GoogleGMark className="google-mark" />
+              <span>{t("google")}</span>
             </button>
           )}
           {providers.includes("google.com") && providers.length > 1 && (

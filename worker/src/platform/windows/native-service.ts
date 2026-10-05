@@ -27,6 +27,30 @@ export interface WindowsServiceActions {
 export class WindowsServiceController implements WindowsServiceActions {
   constructor(private readonly layout: WindowsServiceLayout) {}
 
+  /** Startup guard that does not require privileged Win32_Process properties. */
+  async isCurrentRuntimeProcess(): Promise<boolean> {
+    const version = await readWindowsActiveVersion(this.layout);
+    const release = createWindowsReleaseLayout(this.layout, version);
+    if (
+      win32.resolve(process.execPath).toLowerCase() !==
+      win32.resolve(release.nodePath).toLowerCase()
+    )
+      return false;
+    const output = await this.run(`
+$Service = Get-CimInstance Win32_Service -Filter "Name='MusicMuteWorker'"
+if ($null -eq $Service) { '0'; return }
+Assert-Service $Service
+if ($Service.State -ne 'Running') { '0'; return }
+[int]$Service.ProcessId
+`);
+    const wrapperPid = Number(output);
+    return (
+      Number.isSafeInteger(wrapperPid) &&
+      wrapperPid > 0 &&
+      wrapperPid === process.ppid
+    );
+  }
+
   async inspect(): Promise<WindowsServiceStatus> {
     const output = await this.run(`
 $Service = Get-CimInstance Win32_Service -Filter "Name='MusicMuteWorker'"

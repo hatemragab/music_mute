@@ -9,7 +9,7 @@ var preDeployFunction = function (captainAppObj, dockerUpdateObject) {
     var selected = configured.length === 1 ? configured[0].value : null;
     var target =
       typeof selected === "string" && !/[\s\\]/.test(selected)
-        ? /^http:\/\/(?:srv-captain--)?music-mute-(tunelio|jojapi):8080\/?$/.exec(
+        ? /^http:\/\/(?:srv-captain--)?music-mute-(tunelio|jojapi|ytdlp):8080\/?$/.exec(
             selected,
           )
         : null;

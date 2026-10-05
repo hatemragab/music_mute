@@ -32,6 +32,28 @@ describe('audio experience job presentation', () => {
     });
   });
 
+  it('presents the requested rendition while retaining the immutable worker recipe internally', () => {
+    const base = {
+      ...job,
+      requestedTrimEnabled: true,
+      recipeSnapshot: { trimEnabled: false, recipeDigest: 'a'.repeat(64) },
+    } as Job;
+    expect(presentJob(base)).toMatchObject({
+      trimEnabled: true,
+      recipeDigest: 'a'.repeat(64),
+    });
+    const completed = {
+      ...base,
+      outputRecipeSnapshot: { trimEnabled: true, recipeDigest: 'b'.repeat(64) },
+    } as Job;
+    expect(presentJob(completed)).toMatchObject({
+      trimEnabled: true,
+      recipeDigest: 'b'.repeat(64),
+    });
+    expect(presentJob(completed)).not.toHaveProperty('outputRecipeSnapshot');
+    expect(presentJob(completed)).not.toHaveProperty('requestedTrimEnabled');
+  });
+
   it('separates recorded processing time from queue and upload time', () => {
     expect(
       presentJob({
@@ -110,4 +132,36 @@ describe('audio experience job presentation', () => {
     expect(presented).not.toHaveProperty('currentExecution');
     expect(presented).not.toHaveProperty('workerAvailable');
   });
+});
+
+it('exposes owner audio integrity metadata but never private keys or arbitrary provider URLs', () => {
+  const hash = Buffer.alloc(32, 1).toString('base64');
+  const presented = presentJob({
+    ...job,
+    sourceUrl: 'https://private-provider.invalid/signed',
+    processingOrigin: 'local_device',
+    measuredOutputDurationSeconds: 10,
+    inputReservation: {
+      ...job.inputReservation,
+      sha256: hash,
+      contentType: 'audio/mpeg',
+    },
+    outputObject: {
+      key: 'users/private/output.mp3',
+      etag: '"private"',
+      bytes: 1234,
+      sha256: hash,
+      contentType: 'audio/mpeg',
+    },
+  } as Job);
+  expect(presented.sourceUrl).toBeNull();
+  expect(presented.output).toMatchObject({
+    bytes: 1234,
+    sha256: hash,
+    durationSeconds: 10,
+  });
+  expect(presented.localProfileId).toBe('kim-vocal-2-full-timeline-v1');
+  expect(JSON.stringify(presented)).not.toContain('users/private');
+  expect(JSON.stringify(presented)).not.toContain('private-provider');
+  expect(presented.output).not.toHaveProperty('etag');
 });

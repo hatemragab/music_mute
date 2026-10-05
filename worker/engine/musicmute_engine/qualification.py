@@ -151,6 +151,41 @@ def mps_memory_snapshot() -> dict[str, int] | None:
 
 
 def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
+    """Keep only the enrollment MP3; benchmark callers export audio explicitly."""
+    work_root = arguments.work_root.resolve(strict=True)
+    if not work_root.is_dir() or work_root.is_symlink():
+        raise QualificationError("Qualification work root is unsafe")
+    qualification_root = work_root / f"qualification-{uuid.uuid4()}"
+    qualification_root.mkdir(mode=0o700)
+    completed = False
+    benchmark_mode = getattr(arguments, "benchmark_mode", False) is True
+    try:
+        report = _run_qualification(arguments, qualification_root)
+        if not benchmark_mode:
+            candidate = report["uploadCandidate"]
+            if not isinstance(candidate, dict):
+                raise QualificationError("Qualification upload candidate is unavailable")
+            output = Path(str(candidate["path"]))
+            retained = qualification_root / "vocals.mp3"
+            shutil.move(output, retained)
+            candidate["path"] = str(retained)
+            for entry in qualification_root.iterdir():
+                if entry == retained:
+                    continue
+                if entry.is_dir() and not entry.is_symlink():
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+        completed = True
+        return report
+    finally:
+        if not completed or benchmark_mode:
+            shutil.rmtree(qualification_root)
+
+
+def _run_qualification(
+    arguments: argparse.Namespace, qualification_root: Path
+) -> dict[str, object]:
     progress = getattr(arguments, "progress", None)
 
     def emit(kind: str, **fields: object) -> None:
@@ -203,8 +238,6 @@ def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
         ffprobe=arguments.ffprobe,
         provider=arguments.provider,
     )
-    qualification_root = work_root / f"qualification-{uuid.uuid4()}"
-    qualification_root.mkdir(mode=0o700)
     qualified_fixture = qualification_root / f"fixture{fixture.suffix.lower()}"
     shutil.copyfile(fixture, qualified_fixture)
     fixture_digest = sha256_hex(qualified_fixture)
@@ -476,7 +509,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     arguments = parse_args()
     report = run_qualification(arguments)
-    write_private_report(arguments.report, report)
+    try:
+        write_private_report(arguments.report, report)
+    except Exception:
+        # Without durable evidence this candidate cannot be uploaded or reused.
+        candidate = Path(str(report["uploadCandidate"]["path"]))
+        shutil.rmtree(candidate.parent)
+        raise
     print(json.dumps({"status": "ok", "report": str(arguments.report)}))
     return 0
 

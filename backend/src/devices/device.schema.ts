@@ -36,7 +36,7 @@ export class Device {
   @Prop({
     type: String,
     required: true,
-    enum: ['android', 'ios', 'web'],
+    enum: ['android', 'ios', 'macos', 'web'],
     immutable: true,
   })
   platform!: ClientPlatform;

@@ -13,6 +13,80 @@ the backend and first-party client release, and verify the deployed routes befor
 releasing a client that requires them. Older app versions are not supported by
 this breaking cutover.
 
+## Shared YouTube audio for guests and accounts
+
+Chrome/Mac YouTube preparation uses the guest capability API documented in
+[YouTube community publication](../url-imports/youtube-community.md), rather than
+uploading an account-private copy through local media sync. Both YouTube URL
+aliases resolve to the same case-sensitive video ID. Guests can consume or publish
+the qualified full-timeline original/vocal pair without Firebase login; account
+clients reuse the same artifacts through ordinary URL imports or the read-only
+cache-delivery command. Private file sync and account authorization are unchanged.
+Community contributions carry unverified source identity and never replace trusted
+adapter/worker artifacts. Release backend support before the matching companion.
+
+## Mac local media sync
+
+The Mac desktop reports platform `macos`, with its own optional `minimum_build`
+policy. It must not impersonate `web` or use an Android/iOS release pin. Cloud
+processing still uses normal jobs/imports and their processing allowance. Local
+separation does not consume cloud processing seconds or waiting slots.
+
+After local separation, `POST /local-media-syncs` reserves an account-private
+original/vocal pair. Send a stable UUID `request_id`,
+`profile_id: "kim-vocal-2-full-timeline-v1"`, `source_kind: "file"` or `"url"`,
+optional `source_title`, canonical YouTube `source_url` for URL inputs, and
+`original`/`vocals` declarations (`extension`, `content_type`, `bytes`,
+`duration_seconds`, canonical **base64** SHA-256). Both declarations have the
+existing 100 MB/30 minute absolute ceilings and may be limited further by account
+policy. WAV/FLAC originals are preserved byte-for-byte; vocals must be stereo
+44.1 kHz MP3. The server derives the full-timeline, non-denoised Kim Vocal 2 recipe.
+The declared device profile is not a trusted attestation of separation quality,
+model execution or YouTube source/track identity.
+
+The response contains `sync_id` and a reserved `job_id` (24-character Mongo IDs),
+`status`, `committed`, `expires_at`, `request_id`, `revision`, `profile_id`, and
+`upload_grants: {original, vocals}`. Upload with every returned header, including
+create-only/checksum headers. Never persist or log signed URLs. Matching creation
+replays recover the same reservation without double charging. Both grants count
+against normal daily/monthly upload allowance. A fresh UUID sent to
+`POST /local-media-syncs/{id}/upload-grants` renews the same immutable keys and
+charges two new grants once; replaying its UUID does not charge again.
+
+`POST /local-media-syncs/{id}/completions` accepts an empty JSON object. It HEADs
+the exact reserved keys, then reads immutable bytes with `If-Match`, verifies
+length/hash, actual audio type, full bounded decode and original/vocal duration
+agreement within 250 ms. Missing/uncertain PUT results and HTTP 412 are reconciled
+by this completion check. It publishes one conventional account-owned ready Job,
+with `processing_origin: "local_device"`, no worker attempts/compute reservation,
+`trim_enabled: false`, and both download actions. Both uploads and the combined
+retained bytes are accounted atomically once. Ordinary Android/mobile Library and
+job snapshots then expose the result. Owner JobView includes canonical-only
+`source_url`, `recipe_digest`, nullable `local_profile_id`, original SHA-256/type,
+and output SHA-256/bytes/type/verified duration (null when not measured). Use these
+integrity declarations to validate account cache downloads; private object keys,
+ETags and transfer URLs remain absent from snapshots. Untrusted client YouTube pairs are never
+published to the permanent global shared-media catalog.
+
+Local playback is independent of syncing. Remove the temporary original on the
+Mac only after the durable `committed: true` / `status: "ready"` receipt. Quota,
+network or validation failures must preserve successful local vocals. An ambiguous
+completion recovers via an explicit `GET /local-media-syncs/{id}` or the owner
+`local_media_sync` WebSocket snapshot (`params: {id}`), never periodic HTTP reads.
+Reads/socket snapshots exclude grants. Expired reservations report `expired`;
+create/grant/completion mutations reject after the 24-hour deadline. Each account
+has at most three unexpired pending pairs, independent of cloud queue capacity.
+Durable exact-key cleanup is scheduled before grants and canceled only in the
+ready publication transaction; account purge removes local-sync records and waits
+for private storage cleanup. Deleting the ready job fences receipt replay.
+
+The [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+were checked on 2026-10-02 for this additive API: 101 (OpenAPI), 104 (security),
+118 (snake_case), 106 (compatibility), 229/231 (idempotent POST/secondary key), and
+176 (Problem JSON). Existing raw WebSocket snapshot framing is retained; REST
+method/header rules do not replace that transport. Source implementation and local
+synthetic tests do not establish deployed Firebase/R2 success.
+
 ## Base URL and routes
 
 Configure the HTTPS **origin** (scheme and host, with an optional port), for
@@ -62,7 +136,29 @@ Server import jobs still carry URL attribution and original titles.
 `POST /media-imports` accepts `url` and a UUIDv4 `request_id`, using the same
 Firebase bearer token and `X-Installation-Id` processing-access checks as job
 creation. HTTP 202 returns `import_id`, `status`, nullable `job_id`/`error`, and
-timestamps. Reuse the request ID for retries of the same URL.
+timestamps. Owner HTTP responses and realtime import snapshots also include
+`source_url` (the canonical public URL, nullable for invalid historical records)
+and boolean `trim_enabled` (the accepted choice, default `true`). These fields
+let clients restore manual retry context after reload; provider/delivery URLs and
+credentials remain private. Reuse the request ID when admission is uncertain.
+After a known terminal failure, an explicit user retry uses a new UUID while
+preserving the source URL and trim choice, with normal access/quota checks.
+Web retry follows Android's transient-error eligibility and never automatically
+resubmits a terminal import. A retry admission with an uncertain response retains
+its UUID, preventing duplicate work on another explicit click.
+
+Retry contract preflight: [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+read on 2026-10-04; rules 104 (secure endpoints), 106 (compatibility), 132
+(snake_case), 177 (sanitized errors) and 229 (idempotent commands). Existing routes,
+owner authorization, no-store caching, quota checks and error shapes remain
+compatible; only owner import view fields are added.
+
+YouTube links shared from a playlist or radio mix are accepted when they identify
+one video. Clients, NestJS and private adapters normalize that selected video to
+`https://www.youtube.com/watch?v=<video_id>` and discard playlist, index, radio and
+tracking parameters before acquisition or shared-media identity. A playlist-only
+URL, missing/invalid video ID, duplicate `v` parameters or conflicting path/query
+video IDs is rejected; no playlist is enumerated or downloaded.
 
 Monthly processing admission uses **used + reserved seconds before the new file**.
 If that total is below the monthly limit, the full file is accepted even when its
@@ -86,16 +182,45 @@ and may succeed after monthly processing or waiting capacity is exhausted;
 account, policy, media, logical Library storage and download limits still apply.
 Source-only hits require normal compute admission. Local uploads remain private.
 URL job/account deletion removes owned records/access and retains shared audio.
-No cache hashes, global cache lookup or additional grant fields are exposed.
+No cache hashes, producer account details or additional grant fields are exposed.
+
+Completed hits are delivered directly, without BullMQ admission or acquisition
+queue capacity. They can be reused while URL acquisition is disabled or the
+outstanding import queue is full; normal account and processing policy checks
+still apply. Both `https://www.youtube.com/watch?v=bZxrIoCPsOc&list=RDbZxrIoCPsOc&start_radio=1`
+and `https://youtu.be/bZxrIoCPsOc?si=RLbbOevlM4lBmXHi` identify `bZxrIoCPsOc`.
+
+`POST /media-imports/cache-deliveries` accepts the same `url`, UUIDv4 `request_id`
+and optional boolean `trim_enabled`. It uses the same authenticated installation
+and account checks, returning the normal HTTP 202 import view with `Location`
+and `Cache-Control: no-store`. A ready hit creates an owned ready Library job
+referencing the verified global original and matching vocals without another
+adapter call, worker attempt, upload grant or media copy. A transient interrupted
+delivery retains its import for normal owner-scoped realtime recovery. A miss
+returns HTTP 404 `IMPORT_CACHE_MISS` and creates no import, source/result producer,
+usage hold or acquisition. A replay of an uncached pending import cannot start
+new work through this route. Clients must distinguish this code from authentication,
+policy and dependency errors. Mac/extension Local mode uses `trim_enabled: false`
+and checks complete-timeline/recipe/source compatibility before playback; a miss
+continues its selected Local path. First-time device-declared uploads remain
+private because media validation does not authenticate source/model provenance.
+
+Cache delivery preflight: [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+read on 2026-10-04; rules 104 (security), 106 (compatibility), 118 (snake_case),
+176/177 (sanitized problem responses) and 229 (idempotent commands). Existing raw
+WebSocket snapshots and download grants are unchanged.
 
 Use owner-scoped realtime import snapshots until `submitted` or `failed`.
 After `submitted`, subscribe to the job for worker progress and results.
 HTTP detail reads remain available for explicit non-live reads.
 New imports automatically retry transient acquisition failures up to three times
-after the initial attempt, with persisted 5/10/20-second backoff. During backoff
+after the initial attempt, with persisted 5/10/20-second backoff unless a trusted
+private adapter supplies a bounded shorter delay. During backoff
 the existing import remains `queued`; clients keep the same request/import identity
 and owner-scoped subscription. No client retry timer or new request is needed.
-The original URL, trim setting, recipe and single duration hold are retained.
+The original URL, trim setting, recipe, first acquisition timestamp and single
+duration hold are retained. An adapter may enforce an acquisition-wide deadline;
+`IMPORT_ACQUISITION_EXHAUSTED` is terminal and does not trigger another request.
 Validation, source-unavailable, account/policy failures and exhausted retries are
 terminal. Upload or job-reservation recovery verifies existing state instead of
 starting another acquisition. Historical failed imports are not automatically
@@ -103,17 +228,19 @@ replayed. See [retry behavior](../url-imports/retries-2026-10-01.md).
 Android sends only the source URL; the backend acquires validated native audio
 and uses the existing R2 pipeline. Existing file-upload calls remain available.
 
-Public single-item links are resolved by the private SaaS acquisition adapter.
-The current VideoScale adapter supports YouTube only; other sites return
-`IMPORT_UNSUPPORTED_PROVIDER`. Only separate audio streams are downloaded; sources
+Public single-item links are resolved by the selected private acquisition adapter.
+Source support depends on the configured, qualified adapter; unsupported sites
+return `IMPORT_UNSUPPORTED_PROVIDER`. Only separate audio streams are downloaded; sources
 requiring video acquisition return `IMPORT_UNSUPPORTED_AUDIO_SOURCE`. Playlists,
 live streams, private-network URLs, and account-cookie access are unsupported.
 
 Clients must handle `IMPORT_DISABLED`, `IMPORT_UNSUPPORTED_PROVIDER`,
 `IMPORT_SINGLE_ITEM_REQUIRED`, `IMPORT_UNSUPPORTED_AUDIO_SOURCE`, size/duration
-errors, and retryable capacity or dependency errors. Source duration is checked
+errors, and retryable capacity or dependency errors.
+Clients also handle terminal `IMPORT_ACQUISITION_EXHAUSTED` through the existing
+failed-import snapshot. No client retry timer is added. Source duration is checked
 against independently measured audio. Internal service credentials and delivery
-URLs are never returned to clients. See [deployment and validation](../../video_providers/videoscale/README.md).
+URLs are never returned to clients. See [provider architecture and qualification](../../video_providers/README.md).
 
 ## Authentication and ownership
 
@@ -133,6 +260,41 @@ authenticated HTTP remains authoritative for jobs, leases, and commands.
 Mobile apps upload and download media directly through short-lived signed R2
 grants returned by the API; use the grant's exact URL and headers, without
 attaching the Firebase bearer token to the R2 request.
+
+### Desktop Google sign-in exchange
+
+Before Firebase sign-in, the native Mac app sends one public
+`POST /auth/desktop-google-token-exchanges` with `authorization_code` (1–4096
+visible ASCII characters), `code_verifier` (43–128 unreserved ASCII characters)
+and `redirect_uri`. The callback must be exactly
+`http://127.0.0.1:<port>/oauth2callback`, with a decimal port from 1 through 65535,
+no leading zero, alias, userinfo, query or fragment. The backend never requests
+this URL; it passes it as a Google token form value. Clients cannot supply a
+client ID, secret or token endpoint.
+
+The server supplies its single configured Desktop OAuth client and contacts only
+`https://oauth2.googleapis.com/token`: one attempt, no redirects, a five-second
+total deadline and at most 32 KiB of response bytes before parsing. HTTP 200
+returns only `{ "google_id_token": "<sensitive Google JWT>" }`. The app passes
+that credential through its existing Firebase `signInWithIdp` flow, then
+bootstraps `POST /auth/sessions` with the Firebase ID token. This exchange itself
+creates no MusicMute session and persists no Google tokens.
+
+All responses use `Cache-Control: no-store`. Never log the request credentials or
+returned token. Errors are standard problem JSON: 400 `INVALID_INPUT`, 400
+`GOOGLE_TOKEN_INVALID_GRANT` only for Google's actual rejected/expired code,
+429 `RATE_LIMITED` with `Retry-After`, or generic 503 `SERVICE_UNAVAILABLE` for
+configuration, Redis, transport or invalid upstream response failures. After an
+ambiguous failure or rejected code, start a new browser sign-in; do not retry the
+consumed code. Public access is intentional: Google verifies the fixed-client
+code/PKCE binding, while shared atomic IP and service budgets fence upstream work
+before authentication is available.
+
+The [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+were read on 2026-10-02 for this additive route: 101 (OpenAPI), 104 (security),
+106 (compatibility), 118 (snake_case), 129 (kebab-case paths), 134 (plural
+resources), 148 (HTTP methods), 151 (status codes), 153 (429/Retry-After),
+176 (problem JSON), 177 (no stack traces) and 227 (cache control).
 
 ## Storage identity (R2-only, approved 2026-09-30)
 
@@ -351,3 +513,17 @@ after 30 days; completed campaign content/history expires after 365 days.
 Native registrations and active ownership are rechecked; web-only users
 are not reachable. FCM acceptance does not mean delivery or reading. Full schemas
 and problem responses are in OpenAPI. All responses are private/no-store.
+
+### Trusted original reuse (2026-10-05)
+
+`POST /youtube-contributions/:id/source-deliveries` accepts an empty JSON body
+with the existing guest bearer. Only the owned active producer can request it.
+It returns `video_id`, `provenance: trusted`, `source_identity_verified: true`,
+and `original: { declaration, grant }` with `Cache-Control: no-store`. The source
+must be a validated, immutable backend-acquired shared source; a ready vocal
+rendition is not required. Missing originals return `IMPORT_CACHE_MISS` (404);
+authentication, ownership and lease errors retain existing 401/404/409/410 codes.
+The delivery reserves original bytes against existing session/IP/global limits
+and rechecks session/producer after signing. It never acquires media or admits
+cloud work. Clients fall back to local acquisition only on that explicit cache
+miss, never on authorization errors or an unrecognized 404.

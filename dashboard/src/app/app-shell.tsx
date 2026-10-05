@@ -10,6 +10,7 @@ import {
   LogOut,
   Menu,
   Moon,
+  MonitorDown,
   PackageOpen,
   Settings,
   ServerCog,
@@ -89,6 +90,12 @@ export const NAV_ITEMS: NavItem[] = [
     to: "/update-policy",
     permission: "releases.read",
     icon: ShieldCheck,
+  },
+  {
+    label: "Mac updates",
+    to: "/macos-updates",
+    permission: "releases.read",
+    icon: MonitorDown,
   },
   {
     label: "Settings",

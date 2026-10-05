@@ -93,6 +93,8 @@
     <string name="auth_send_reset">إرسال رسالة الاستعادة</string>
     <string name="auth_or">أو</string>
     <string name="auth_continue_google">المتابعة باستخدام Google</string>
+    <string name="auth_link_google">ربط Google</string>
+    <string name="auth_unlink_google">إزالة Google</string>
     <string name="auth_forgot_password">نسيت كلمة المرور؟</string>
     <string name="auth_new_account">مستخدم جديد؟ أنشئ حساباً</string>
     <string name="auth_back_login">العودة لتسجيل الدخول</string>

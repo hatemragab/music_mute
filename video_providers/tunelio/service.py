@@ -72,10 +72,10 @@ def source_url(value):
         if p.scheme != 'https' or p.username or p.password or p.port or p.fragment:
             raise ValueError()
         query = parse_qs(p.query, keep_blank_values=True)
-        if any(key in query for key in ('list', 'playlist', 'index', 'in')):
-            raise Failure('IMPORT_SINGLE_ITEM_REQUIRED', 422)
         if p.hostname in ('youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'):
-            if p.path == '/watch' and len(query.get('v', [])) == 1:
+            if p.path == '/playlist':
+                raise Failure('IMPORT_SINGLE_ITEM_REQUIRED', 422)
+            if p.path in ('/watch', '/watch/') and len(query.get('v', [])) == 1:
                 video = query['v'][0]
             elif re.fullmatch(r'/(shorts|embed|live)/[A-Za-z0-9_-]{11}/?', p.path):
                 video = p.path.rstrip('/').rsplit('/', 1)[1]
@@ -84,10 +84,15 @@ def source_url(value):
         elif p.hostname in ('youtu.be', 'www.youtu.be'):
             video = p.path.strip('/')
         else:
+            if any(key in query for key in ('list', 'playlist', 'index', 'in')):
+                raise Failure('IMPORT_SINGLE_ITEM_REQUIRED', 422)
             raise Failure('IMPORT_UNSUPPORTED_PROVIDER', 422,
                           reason='Tunelio accepts YouTube single-item URLs only.')
-        if not re.fullmatch(r'[A-Za-z0-9_-]{11}', video):
+        ids = query.get('v', [])
+        if (not re.fullmatch(r'[A-Za-z0-9_-]{11}', video)
+                or len(ids) > 1 or (ids and ids[0] != video)):
             raise ValueError()
+        # Playlist/radio context does not change an explicitly selected video.
         return 'https://www.youtube.com/watch?v=' + video
     except ValueError:
         raise Failure('IMPORT_INVALID_URL', 400) from None

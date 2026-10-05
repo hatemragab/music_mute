@@ -249,9 +249,21 @@ export class ImportFiles {
           'IMPORT_UPSTREAM_REFUSED',
           'IMPORT_SOURCE_UNAVAILABLE',
           'IMPORT_DISK_FULL',
+          'IMPORT_DEPENDENCY_FAILED',
+          'IMPORT_ACQUISITION_EXHAUSTED',
         ];
-        if (request && safeCodes.includes(code as ImportErrorCode))
-          throw importError(code as ImportErrorCode);
+        if (request && safeCodes.includes(code as ImportErrorCode)) {
+          const retryAfter = header('retry-after');
+          throw importError(
+            code as ImportErrorCode,
+            undefined,
+            [502, 503].includes(response.statusCode ?? 0) &&
+              retryAfter !== null &&
+              /^[1-9]\d?$/.test(retryAfter)
+              ? Number(retryAfter)
+              : undefined,
+          );
+        }
         throw importError(
           response.statusCode === 403 || response.statusCode === 429
             ? 'IMPORT_UPSTREAM_REFUSED'

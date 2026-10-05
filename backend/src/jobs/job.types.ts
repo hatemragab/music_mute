@@ -42,6 +42,8 @@ export const AUDIO_TYPES = {
   ogg: 'audio/ogg',
   aac: 'audio/aac',
   mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  flac: 'audio/flac',
 } as const;
 export interface InputDeclaration {
   extension: keyof typeof AUDIO_TYPES;

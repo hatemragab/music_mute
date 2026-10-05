@@ -46,6 +46,10 @@ import { AdminOperation } from '../../src/admin/admin-operation.schema.js';
 import { AdminOwnerFence } from '../../src/admin/admin-owner-fence.schema.js';
 import { Release } from '../../src/releases/release.schema.js';
 import { ReleaseUpload } from '../../src/releases/release-upload.schema.js';
+import {
+  MacosUpdate,
+  MacosUpdateConfiguration,
+} from '../../src/macos-updates/macos-update.schema.js';
 import { AdminAlert } from '../../src/admin-observability/admin-alert.schema.js';
 import { AdminAlertObservation } from '../../src/admin-observability/admin-alert-observation.schema.js';
 import { ProcessingAdmissionFence } from '../../src/admin-settings/processing-settings.schema.js';
@@ -60,6 +64,15 @@ import type {
 import { StorageCleanupTask } from '../../src/storage/storage-cleanup-task.schema.js';
 import { AbuseEventsService } from '../../src/abuse-protection/abuse-events.service.js';
 import { AccountRestrictionsService } from '../../src/abuse-protection/account-restrictions.service.js';
+import { YouTubeCommunityService } from '../../src/youtube-community/youtube-community.service.js';
+import { JobRenditionService } from '../../src/worker-fleet/attempts/job-rendition.service.js';
+import {
+  YouTubeGuestSession,
+  YouTubeContribution,
+  YouTubeContributionLease,
+  YouTubeCommunityBudget,
+  YouTubeCommunityCleanup,
+} from '../../src/youtube-community/youtube-community.schema.js';
 
 // AppModule's infrastructure is replaced below. Prevent its eager configuration
 // import from consulting any developer dotenv file before that override applies.
@@ -98,6 +111,19 @@ class ProcessingProbeController {
 
 export async function authFixture() {
   const urlImports = { create: vi.fn(), get: vi.fn() };
+  const community = {
+    issueSession: vi.fn(),
+    authenticate: vi.fn(),
+    delivery: vi.fn(),
+    create: vi.fn(),
+    get: vi.fn(),
+    sourceDelivery: vi.fn(),
+    renewLease: vi.fn(),
+    grants: vi.fn(),
+    complete: vi.fn(),
+    fail: vi.fn(),
+    snapshot: vi.fn(),
+  };
   const events: string[] = [];
   const ownerId = new Types.ObjectId();
   const otherId = new Types.ObjectId();
@@ -281,6 +307,7 @@ export async function authFixture() {
         load: [
           () => ({
             APP_ENV: 'test',
+            PUBLIC_SITE_ORIGIN: 'https://example.invalid',
             NODE_ENV: 'test',
             FIREBASE_PROJECT_ID: 'demo-musicmute',
             FIREBASE_WEB_API_KEY: 'fixture-key',
@@ -363,6 +390,8 @@ export async function authFixture() {
   builder.overrideProvider(ImportProcessor).useValue({});
   builder.overrideProvider(ImportRuntime).useValue({});
   builder.overrideProvider(ImportsService).useValue(urlImports);
+  builder.overrideProvider(YouTubeCommunityService).useValue(community);
+  builder.overrideProvider(JobRenditionService).useValue({ wake: vi.fn() });
   for (const name of [
     User.name,
     UserIdentityFence.name,
@@ -376,6 +405,8 @@ export async function authFixture() {
     AdminOwnerFence.name,
     Release.name,
     ReleaseUpload.name,
+    MacosUpdate.name,
+    MacosUpdateConfiguration.name,
     AdminAlert.name,
     AdminAlertObservation.name,
     AccountPolicy.name,
@@ -383,6 +414,11 @@ export async function authFixture() {
     ProcessingAdmissionFence.name,
     StorageCleanupTask.name,
     MediaImport.name,
+    YouTubeGuestSession.name,
+    YouTubeContribution.name,
+    YouTubeContributionLease.name,
+    YouTubeCommunityBudget.name,
+    YouTubeCommunityCleanup.name,
     ...PROCESSING_MODELS.map(({ name }) => name),
   ])
     builder.overrideProvider(getModelToken(name)).useValue({
@@ -412,5 +448,6 @@ export async function authFixture() {
     ownerId,
     otherId,
     urlImports,
+    community,
   };
 }

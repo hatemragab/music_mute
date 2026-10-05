@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useSignedIn } from "../auth/AuthProvider";
 import { useI18n } from "../i18n";
 import { readConfig } from "../config";
+import { MacDownloadCallout } from "../product/MacDownloadCallout";
 import { ACCENTS, accentFor, saveAccent } from "./accent";
 
 interface Usage {
@@ -113,6 +114,7 @@ export function SettingsPage() {
         <Link to="/account">{t("manage")} →</Link>
         <h2>{t("about")}</h2>
         <p>{t("installNotice")}</p>
+        <MacDownloadCallout className="settings-platform-callout" />
         <div className="action-row">
           <a
             href={`${apiOrigin}/privacy`}

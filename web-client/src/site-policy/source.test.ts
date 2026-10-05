@@ -5,9 +5,31 @@ import catalog from "./data/supported-audio-sites.json";
 import { ApiClient } from "../api/client";
 import { jobsApi } from "../api/jobs";
 
-test.each(cases)("offline site policy: $url", ({ url, accepted }) => {
-  if (accepted) expect(() => supportedAudioUrl(url)).not.toThrow();
-  else expect(() => supportedAudioUrl(url)).toThrow();
+test.each(cases)(
+  "offline site policy: $url",
+  ({ url, accepted, canonicalUrl }) => {
+    if (accepted) {
+      const result = supportedAudioUrl(url);
+      if (canonicalUrl) expect(result).toBe(canonicalUrl);
+    } else expect(() => supportedAudioUrl(url)).toThrow();
+  },
+);
+
+test("API submits only the selected YouTube video from a playlist share", async () => {
+  const post = vi
+    .fn()
+    .mockResolvedValue({ importId: "import", status: "queued" });
+  const api = { post } as unknown as ApiClient;
+  await jobsApi(api).createImport(
+    "https://www.youtube.com/watch?v=e6WT8RwRwt4&list=RDe6WT8RwRwt4&start_radio=1",
+    true,
+    "request-id",
+  );
+  expect(post).toHaveBeenCalledExactlyOnceWith("/media-imports", {
+    url: "https://www.youtube.com/watch?v=e6WT8RwRwt4",
+    trimEnabled: true,
+    requestId: "request-id",
+  });
 });
 
 test("enabled platforms retain historical evidence without inventing SaaS proof", () => {

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+output/
+*.dmg
+.dev/
+*.log
+__pycache__/

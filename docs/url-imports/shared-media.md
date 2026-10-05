@@ -5,8 +5,10 @@ source and isolated-fixture behavior, without production or live provider/R2 pro
 
 ## Ownership and storage
 
-All supported public URL imports use permanent shared artifacts. Local audio or
-video prepared and uploaded from a device/browser stays private to that account.
+All supported public URL imports use permanent shared artifacts. Personal audio or
+video files uploaded from a device/browser stay private to that account. YouTube
+URLs acquired by Chrome/Mac use the separate
+[guest community publication flow](youtube-community.md), including when logged out.
 The R2 bucket remains private: shared storage does not grant public access.
 
 ```text
@@ -57,12 +59,26 @@ three times before an upload intent or job reservation exists, retaining the
 same source/result producer, generation and single usage hold. A recorded PUT or
 accepted job is recovered without another paid acquisition. Historical failed
 imports are not replayed. See [the retry policy](retries-2026-10-01.md).
+Confirmed-source submission failures also use [durable database handoff recovery](database-handoff-recovery.md), with a separate queue generation and no additional provider download.
 Recovery scans rotate by cursor
 and fence the observed producer/generation so an old scan cannot fail a newer retry.
+Queued import recovery also rotates bounded pages and delivers ready results
+before acquisition queue dependencies. A full cold backlog, Redis queue failure
+or one interrupted ready delivery cannot starve later ready deliveries.
 
 ## Limits and deletion
 
 Completed matching results consume no processing reservation or upload grant.
+They are submitted directly without entering BullMQ, and bypass the outstanding
+acquisition queue limit and URL acquisition enablement flag. Authenticated
+`POST /media-imports/cache-deliveries` provides the same delivery without admitting
+work on a miss: HTTP 404 `IMPORT_CACHE_MISS` creates no source/result producer,
+import or usage hold. Mac Local and extension clients consult this route after
+their own ready history, so a result produced by another account can be reused
+without another acquisition or inference. Generic local sync pairs remain private.
+The dedicated YouTube contribution path publishes full original/vocal pairs with
+explicit community provenance and guest capabilities; it does not attest the
+uploaded video's identity or model execution. Trusted results retain priority.
 They remain subject to active account, restrictions, processing policy, media
 limits, logical retained-storage and normal download allowances. Monthly compute
 or waiting-job exhaustion can still permit a completed hit. Source-only hits
@@ -76,6 +92,15 @@ replay never charges twice. Job/account deletion releases its logical allowance
 and removes owned records/access. Shared files and catalog rows are never deleted.
 No reference-count garbage collection, age expiry or shared cleanup is enabled.
 Local uploads and temporary worker outputs retain existing cleanup behavior.
+
+New YouTube cloud producers retain a full-timeline master even when the submitting
+user requests silence trimming. Worker completion commits the full shared master,
+releases its slot and settles model usage, while a durable backend finalizer derives
+the requested trim and commits the user's ready rendition. Slow DSP or restart
+cannot requeue the accepted full separation. Later
+full or trimmed requests reuse these artifacts without another model run. The
+derived recipe records its additional MP3 encode; existing exact trimmed worker
+results remain usable. Older trimmed-only entries cannot recover removed vocals.
 
 ## Rollout and limits
 

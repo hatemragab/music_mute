@@ -85,6 +85,8 @@ internal fun SignOutDialog(
 @Composable
 internal fun AccountDeletionReviewScreen(state: AuthUiState, password: String, onPassword: (String) -> Unit,
     onCancel: () -> Unit, onContinue: () -> Unit, dismissMessage: () -> Unit) {
+    val googleReauthentication = PASSWORD_PROVIDER !in state.identity?.providers.orEmpty() &&
+        GOOGLE_PROVIDER in state.identity?.providers.orEmpty()
     AuthPage {
         AccountHeader(stringResource(R.string.account_delete), onCancel, !state.busy)
         Text(stringResource(R.string.creative_account_delete_step), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -101,7 +103,10 @@ internal fun AccountDeletionReviewScreen(state: AuthUiState, password: String, o
             PasswordField(password, onPassword, R.string.auth_current_password, "auth-delete-password", !state.busy)
         else Text(stringResource(R.string.auth_google_reauth))
         CreativePrimaryButton(onContinue, Modifier.fillMaxWidth(), enabled = PASSWORD_PROVIDER !in state.identity?.providers.orEmpty() || password.isNotEmpty(),
-            busy = state.busy, destructive = true) { Text(stringResource(R.string.auth_confirm)) }
+            busy = state.busy, destructive = true) {
+            if (googleReauthentication) GoogleActionLabel(stringResource(R.string.auth_continue_google))
+            else Text(stringResource(R.string.auth_confirm))
+        }
         OutlinedButton(onCancel, Modifier.fillMaxWidth(), enabled = !state.busy) { Text(stringResource(R.string.auth_cancel)) }
     }
 }

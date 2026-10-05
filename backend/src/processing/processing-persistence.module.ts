@@ -1,4 +1,8 @@
 import {
+  LocalMediaSync,
+  LocalMediaSyncSchema,
+} from '../local-media-syncs/local-media-sync.schema.js';
+import {
   ProcessingAdmissionFence,
   ProcessingAdmissionFenceSchema,
 } from '../admin-settings/processing-settings.schema.js';
@@ -50,6 +54,7 @@ import {
 } from '../notifications/notification-delivery.schema.js';
 
 export const PROCESSING_MODELS = [
+  { name: LocalMediaSync.name, schema: LocalMediaSyncSchema },
   { name: SharedMediaSource.name, schema: SharedMediaSourceSchema },
   { name: SharedMediaResult.name, schema: SharedMediaResultSchema },
   { name: SharedMediaArtifact.name, schema: SharedMediaArtifactSchema },

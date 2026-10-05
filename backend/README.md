@@ -1,5 +1,19 @@
 # MusicMute backend
 
+YouTube audio sharing includes guest Chrome/Mac contributions through a
+separate capability API. Personal file uploads remain account-private. Read
+[the guest publication contract](../docs/url-imports/youtube-community.md) for
+producer fencing, durable recovery, quarantine validation, provenance, private
+R2 retention and the native snapshot protocol. All account clients can reuse
+accepted artifacts through existing URL imports. New YouTube cloud producers keep
+full vocals and derive requested trimming without another model run; nullable
+`requestedTrimEnabled`, `outputRecipeSnapshot` and durable `renditionPending`
+fields preserve the immutable worker recipe while presenting the delivered
+rendition. The worker ACK releases its slot before backend trimming; the owner
+job stays `uploading_result` until its rendition is committed, avoiding repeated
+inference after an HTTP timeout or restart. Existing documents need no rewrite.
+Source and isolated fixtures do not establish deployment.
+
 NestJS backend for the MusicMute native apps. Includes Firebase authentication,
 profiles, installation/version tracking, voluntary verification, password recovery,
 shared Redis limits, processing-access policy and logout-all. MongoDB, external
@@ -65,18 +79,100 @@ trim/model/output variants. Later users reuse originals and matching vocals with
 per-user copies. Local uploads stay private. Shared artifacts/catalog rows have no
 TTL and survive job/account deletion.
 
+Completed matching results now create their owned ready job directly, bypassing
+the download queue and its outstanding limit. The authenticated cache-only command
+`POST /media-imports/cache-deliveries` takes the normal URL/request/trim body and
+returns the normal import view. `IMPORT_CACHE_MISS` (404) creates no import,
+producer, quota hold or paid work. Mac Local and extension clients use this
+command after owner-history lookup; a miss preserves their selected Local path.
+Ready reuse does not require URL acquisition to be enabled, while normal account,
+processing policy, media, logical storage and download checks remain in force.
+
 URL submissions return a durable queued import immediately, including while other
 imports are downloading. The BullMQ import queue defaults to 20 active executions
 across all backend replicas (`URL_IMPORT_CONCURRENCY=20`) and at most five new
 executions per second (`URL_IMPORT_REQUESTS_PER_SECOND=5`). These shared limits apply
-to every acquisition provider. The generic private router and adapters use matching
+to every acquisition provider. The generic private router and VideoScale use
 `ACQUISITION_CONCURRENCY=20` and `ACQUISITION_REQUESTS_PER_SECOND=5` settings.
-The selected [JoJAPI YouTube adapter](../video_providers/jojapi/README.md) further caps paid
-requests at its published one-per-second plan limit while downloads overlap.
-The owner explicitly authorized [production test activation on 2026-10-01](../video_providers/jojapi/docs/ACTIVATION-2026-10-01.md)
-despite the unresolved [source-version mismatch](../video_providers/jojapi/docs/DEPLOYMENT-2026-10-01.md).
-Successful transfer and media probing do not establish requested-source identity.
+The selected [yt-dlp YouTube adapter](../video_providers/ytdlp/README.md) allows
+ten overlapping acquisitions and two starts per second. Its three Residential
+attempts and final Mobile attempt share an immutable 120-second acquisition budget,
+with at most thirty seconds per adapter execution. Initial queue time and worker
+processing are excluded. See the [2026-10-03 deployment record](../video_providers/ytdlp/docs/DEPLOYMENT-2026-10-03.md)
+for bounded live qualification and remaining limitations.
 Backend configuration and business logic remain provider-neutral.
+
+After source upload, job admission acquires the global, account and active-user
+fences before exchanging the import allowance hold for measured job usage in the
+same transaction. Reads on a transaction session run sequentially, and policy
+queries preserve MongoDB retry labels so transient conflicts can retry within the
+existing transaction budget. Confirmed-source recovery reuses R2 audio without
+another provider download. Import timings include `shared-source-confirmation`
+and `job-submission`, including inline recovery time.
+
+The 2026-10-04 live diagnostic batch confirmed MongoDB admission contention:
+one confirmed-source handoff retried fourteen callbacks with `WriteConflict`
+code 112 before the ten-second transaction deadline. Recovery submitted that
+source without reacquisition. Shared-source and cached-result job handoffs now
+take FIFO turns before opening their MongoDB session, so waiting does not consume
+the transaction budget. Acquisitions remain parallel. The per-process gate allows
+64 waiting handoffs, expires a wait after 120 seconds and releases its turn after
+session cleanup on success or failure. Existing MongoDB fences, quotas, ten-second
+transaction deadline and idempotency remain authoritative across replicas.
+`processing-transaction-handoff` logs separate queue wait from transaction time.
+The gate reduces contention within one API replica; it is not a distributed lock.
+The real-policy regression fixture uses pool size ten, the global fence, ten
+confirmed inputs and 50 ms of controlled latency per session-bound query. The
+pre-fix runtime accepted five and timed out five; the fixed runtime accepted all
+ten with one callback each, no conflicts and exactly-once usage accounting.
+Queue waiting brought the batch to about 20 seconds while each transaction kept
+its original deadline. This is local qualification, not live capacity proof.
+
+The guarded four-file runtime overlay was deployed through CapRover as API109
+on 2026-10-04 (Cairo time). All replacement checksums matched, 1,021 other
+runtime/dependency files stayed identical, configuration/environment digests
+were unchanged and internal MongoDB/Redis readiness returned HTTP 200. The router
+remained version 9 and yt-dlp remained version 6. Both authenticated post-fix
+ten-source batches finished with ten submitted imports and ten ready jobs.
+The final batch's ten UI starts spanned 7.914 seconds. It reached nine waiting
+handoffs and a 33.577-second maximum wait; complete handoff time was
+14.875–48.219 seconds including queue/recovery. One transaction still exhausted
+its ten-second deadline amid concurrent admissions, then confirmed-source
+reconciliation submitted it successfully without a new provider download. No
+import remained failed and no manual retry was needed. All ten input declarations
+were native WebM audio. These post-fix batches reused the existing media cache;
+they establish the tested live handoff/recovery, not ten fresh proxy acquisitions
+or arbitrary future batch capacity. The earlier diagnostic batch included one
+successful fresh native format-250 acquisition on yt-dlp version 6.
+
+Batch-handoff API preflight: [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+read on 2026-10-04; rules 104 (secure endpoints), 106 (compatibility), 177 (no stack
+traces) and 229 (idempotent commands). Existing authorization, quota checks,
+idempotency and sanitized client errors remain in place; no wire schema changes.
+
+The API emits JSON at error level. Routine realtime socket metrics, successful
+stage/handoff messages and transient callback-retry warnings are muted. Failed
+import stages, reconciliation, timing writes and final transactions retain their
+sanitized correlation and failure context as errors. Fatal/startup diagnostics
+remain enabled; no raw exception message, stack, source URL or credential is added.
+
+Local qualification on 2026-10-04 passed `pnpm run verify` (1,367 unit and 181
+API tests), `pnpm run test:imports:integration` (30) and
+`pnpm run test:processing:integration` (19). The isolated shared-media fixture
+includes ten simultaneous native audio acquisitions, inline handoff recovery
+without reacquisition, exact quota accounting, idempotent replay, near-limit hold
+exchange and denied-admission rollback. These fixtures use loopback storage and
+isolated MongoDB/Redis; they do not establish production batch capacity.
+The guarded candidate Docker build also passed on the server: only the five
+modules and their maps changed, and 1,013 other runtime/dependency files stayed
+byte-identical to API106. The running API service was not changed by that check.
+The same archive was then deployed through CapRover as API107 on 2026-10-04
+(Cairo time). The running replica matched all ten replacement checksums,
+MongoDB/Redis readiness returned HTTP 200, and backend/router/adapter environment
+digests and both provider image IDs were unchanged. This establishes deployment
+and readiness, not a new authenticated production batch qualification.
+The external readiness probe from the server received HTTP 403 with a Cloudflare
+response; the successful check above used the API replica's loopback endpoint.
 
 `URL_IMPORT_MAX_OUTSTANDING=100` counts queued, downloading, validating and uploading
 imports globally: up to 20 can be active while the rest wait for a slot. A full
@@ -207,6 +303,45 @@ Native apps -> TLS reverse proxy -> API (main.ts)
   deployment image and allowlisted CapRover packaging.
 - `AGENTS.md`: commands, conventions and boundaries for AI-assisted development.
 
+## Local desktop media sync
+
+Mac ARM64 local separation can publish an already processed original/vocal pair
+through `/local-media-syncs` without reserving cloud compute or worker capacity.
+The [client contract](../docs/api/client-contract.md#mac-local-media-sync) describes
+idempotent pair upload grants, full audio validation, owner Library publication,
+transfer/storage allowance and bounded pending cleanup. Cloud mode continues to
+use normal `/jobs` and `/media-imports`; it is an explicit user choice.
+
+The additive routes require the normal private R2 configuration and transactional
+Mongo replica set. Full validation uses the existing `URL_IMPORT_FFPROBE_PATH` and
+`ffmpeg` beside it; no new cloud service or model execution is introduced. Local
+sync schema/index initialization and private cleanup run independently of the
+cloud-separation enablement flag. Device-declared YouTube media is account-private
+and is never promoted into the trusted global shared cache.
+
+Fixture checks (no Firebase/R2 credentials or production media):
+
+```sh
+pnpm run build
+node --test test/local-media-sync.integration.mjs
+pnpm exec vitest run src/local-media-syncs
+pnpm exec vitest run --config ./vitest.config.e2e.ts test/local-media-sync.e2e-spec.ts
+```
+
+These checks do not establish deployment, native account login, actual R2 grant
+acceptance or separation quality.
+
+Production checkpoint, 2026-10-02: the user explicitly authorized deployment of
+the allowlisted uncommitted-checkout archive, SHA-256
+`9947d58cb43b61f7bf91646b2d50dcfbb230a40b9983b18597d69d2e8e197c16`.
+CapRover `musicmute` / `api` reported deployed version 104,
+`img-captain-api:104`, one instance and no build in progress. Live
+`/health/live`, `/health/ready` and `/app-policy` returned HTTP 200;
+unauthenticated local-sync creation/recovery and realtime-ticket requests returned
+HTTP 401. No commit or push was made. This establishes deployment and route
+protection, not completed native login, authenticated R2 pair saving/downloads,
+mobile Library appearance or separation quality.
+
 ## Media usage and transfer contract
 
 Standard defaults: 600 successful processing minutes/month, 30-minute/100-MB
@@ -254,6 +389,124 @@ service to preserve security counters across API restarts. Use separate database
 or instances for environments, monitor capacity and test backups/restores.
 
 ## HTTP security
+
+### Native Desktop Google exchange
+
+`POST /auth/desktop-google-token-exchanges` is a public pre-Firebase operation
+for the registered Mac Desktop OAuth client. Its closed body contains only
+`authorization_code`, `code_verifier` and the exact dynamic
+`http://127.0.0.1:<port>/oauth2callback`. The port must be canonical decimal
+1–65535. It is a Google form value, never a fetch destination. The backend uses
+only `https://oauth2.googleapis.com/token`, with no redirect, no retry, a total
+five-second deadline and a 32-KiB counted response limit. HTTP 200 exposes only
+the bounded `google_id_token`; existing native Firebase sign-in and account
+session bootstrap continue independently. The exchange persists no Google access,
+refresh or identity tokens.
+
+Set **both** `GOOGLE_DESKTOP_CLIENT_ID` and `GOOGLE_DESKTOP_CLIENT_SECRET` through
+backend-only secret configuration. The secret must never enter a Mac/browser
+bundle or public config. Both absent preserves existing authentication and makes
+this route return safe 503; partial or malformed configuration fails startup
+without printing values. The configured Desktop client must also be permitted by
+the Firebase Google provider's audience policy. This implementation does not
+change provider permissions or production secrets.
+
+`DESKTOP_GOOGLE_EXCHANGE_IP_PER_MINUTE` defaults to 10 and
+`DESKTOP_GOOGLE_EXCHANGE_SERVICE_PER_MINUTE` to 300. Existing global request
+ceilings apply too. One atomic shared Redis reservation precedes upstream work;
+refusal returns 429 with `Retry-After`, Redis failure returns 503. The only special
+upstream failure is Google's actual 400 `invalid_grant`, exposed as safe
+400 `GOOGLE_TOKEN_INVALID_GRANT` so the app can restart sign-in. All other
+upstream/configuration failures are generic 503 `SERVICE_UNAVAILABLE`. A consumed
+or ambiguous code is never replayed automatically.
+
+All responses are `no-store`. The exchange logs only fixed operator reasons
+(`config_missing`, `config_invalid`, `security_store_unavailable`,
+`upstream_timeout`, `upstream_unavailable`, `upstream_client_invalid`,
+`upstream_request_invalid`, `response_invalid`) and, when available, numeric
+upstream status. Never log code/verifier/body/token/secret/IP. Existing Sentry
+capture strips request data and upstream exception messages globally. Unit and
+HTTP fixtures cover redaction and deadlines; `test/rate-limits.integration.mjs`
+also covers compiled exchange admission with isolated real Redis and absent
+Google configuration, without a credential exchange.
+
+API preflight: [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+read 2026-10-02, rules 101, 104, 106, 118, 129, 134, 148, 151, 153, 176, 177
+and 227. The [client contract](../docs/api/client-contract.md) and
+[OpenAPI](openapi.yaml) define the exact wire shape. This new source is not part
+of the earlier API 104 deployment checkpoint; the later API 105 activation below
+provides separately approved configuration/deployment. The real account sign-in
+acceptance checkpoint is recorded separately below.
+
+Local verification of this exchange passed `pnpm run verify`: **1,329 unit tests
+in 149 files**, **181 HTTP fixtures in 29 files**, format, zero-warning lint,
+typecheck, tracked-secret checks, transfer benchmarks and build. The new route's
+21 HTTP fixtures are included, with trailing-line-terminator regressions for
+code/verifier/callback/config/token validation. `node --test test/rate-limits.integration.mjs`
+passed **12 tests** with isolated real Redis, including cross-instance public
+exchange admission and atomic refusal preserving the other bucket. Neither
+command uses a real Google exchange credential or establishes production login.
+
+Production activation, 2026-10-02: the human explicitly approved retrieval of the
+registered Desktop client secret, private backend configuration and deployment
+of the tested Google fix. The client pair was configured backend-only, with
+private file/directory permissions (600/700) and other environment values
+preserved; no secret values were printed or bundled. The CLI application-setting
+regression and repair below qualify the original preservation claim. Archive SHA-256
+`4e1af692844b0e71558f2c82317fc8f65d61a9b7847e35c13ed9bb40fda65d02`
+deployed successfully as `img-captain-api:105`. Protected CapRover readback
+confirmed `deployedVersion: 105`, the actual deployed image, one instance and
+`isAppBuilding: false`.
+`/health/live`, `/health/ready` and `/app-policy` returned HTTP 200. Empty
+`POST /auth/desktop-google-token-exchanges` returned 400 `INVALID_INPUT`;
+one synthetic invalid code with valid PKCE returned 400
+`GOOGLE_TOKEN_INVALID_GRANT`, both `no-store`. The latter proves the configured
+server-to-Google fixed-client path reached the provider, not successful real
+Google/Firebase sign-in, a backend account session or private R2/media sync.
+
+The CapRover CLI 2.3.1 configuration update unexpectedly cleared
+`websocketSupport` and `serviceUpdateOverride`. HTTP health and protected REST
+checks passed while three bounded synthetic RFC 6455 handshakes reached ordinary
+Nest JSON 404 on realtime/worker-hint socket paths. Both settings were restored
+from the owned before-snapshot through a direct API update containing all 13
+fields; every other application field was deep-compared for preservation.
+Correct unauthenticated `/realtime/socket` upgrade then returned 401, restoring
+the expected upgrade rejection path. Actual image `img-captain-api:105`, one
+instance/no build, health 200 and synthetic exchange 400/no-store remained valid.
+Authenticated WebSocket snapshots require their own acceptance; HTTP health alone
+did not expose this repaired regression.
+
+Real Google consent subsequently completed in installed Mac build 86ee4723.
+The authoritative token-free accepted-account state contains UID and session
+generation, which native source publishes only after Firebase sign-in and
+backend session bootstrap acceptance. This establishes actual sign-in without
+printing tokens or identity values. Signed-in visual inspection remains pending.
+
+The installed 86ee4723 app subsequently completed a live owner-pair acceptance
+with an owned synthetic three-second WAV. The local desktop bridge prepared
+vocals, and the native watcher obtained authorization internally and drained
+automatic `SYNC`. A receipt is accepted only from `LocalSyncTransfer`'s ready
+server view with `committed: true`; the matching outbox was committed/error-free
+with that receipt. The staged original was removed after confirmation, local
+vocals remained **61,170 bytes**, and the selected WAV remained **264,678 bytes**.
+Same-owner/same-file replay returned in **183 ms** with a cache hit, ready sync
+state and the same server job; its progress omitted model-load/processing/
+separation/encoding stages. This establishes one local synthetic result plus a
+live authenticated private-R2 original/vocals commit and warm reuse, without
+extracting Keychain or bearer credentials. See the
+[owner-save proof](../chrome-extension/output/oauth-review/owner-sync-smoke.json)
+and [warm proof](../chrome-extension/output/oauth-review/owner-warm-smoke.json).
+Mobile Library UI, authenticated WebSocket snapshots, cloud quota/processing,
+Chrome end-to-end playback and listening quality remain separate acceptance.
+
+Final protected operator readback reconfirmed API 105, its actual deployed image,
+one instance/no build and WebSocket support enabled. The backend-only Desktop
+pair remains configured and matches the installed public client ID. Owned
+temporary credential/configuration staging was removed once rollback staging
+was unnecessary; no generated Desktop-secret scratch remains. No credentials,
+identity values or staging paths are included in these records.
+
+### Shared HTTP controls
 
 Helmet, a 64 KiB JSON limit, request/header timeouts, strict DTO validation,
 generic errors and shared 60 requests/IP/minute are configured centrally. Redis
@@ -394,6 +647,23 @@ Included sanitized metadata is nullable MongoDB `extra_data`; no paid metadata
 request is made. Source titles use its optional `title` field.
 Replace providers by deploying another adapter with the same contract and
 changing these settings; no migration bridge or vendor-specific NestJS code.
+
+Each backend execution makes one acquisition request. Its private headers carry
+the persisted `X-Import-Attempt` and `X-Import-Max-Attempts` (one through four)
+and the canonical UTC `X-Import-Acquisition-Started-At`. The first active claim
+sets that start once, excluding the initial queue wait; retries preserve it,
+including subsequent backoff and queue time. These headers let an adapter enforce
+an import-wide budget; they do not replace the backend's per-execution deadline
+or provide idempotency. Existing adapters may ignore the added context.
+New admissions retain the four-attempt ceiling; historical records without a
+saved retry budget retain one attempt. Eligible pre-upload transient failures
+keep the existing 5/10/20-second backoff unless a trusted private 502/503 response
+provides an integer `Retry-After` between one and twenty seconds. The hint changes
+only scheduling and is not exposed or persisted in public import errors.
+`IMPORT_ACQUISITION_EXHAUSTED` is a sanitized terminal 503; it never authorizes
+another acquisition attempt. Accepted jobs and uncertain uploads retain their
+existing recovery fences.
+
 VideoScale enables the shared public-item site catalog; separate audio is checked
 per request, with live E2E evidence currently limited to YouTube. Run build-producing checks
 sequentially and distinguish local checks from the dated live evidence.
@@ -496,3 +766,60 @@ read on 2026-09-29. Rules 101 (OpenAPI), 104 (endpoint security), 106
 (compatibility), 118 (snake_case), 159 (pagination), 176 (problem responses)
 shape the additive contract. Existing lowercase states and receipt conventions
 are retained for consistency.
+
+Batch-failure diagnostic follow-up (2026-10-04): the supplied 22:04–22:06 UTC
+batch and a bounded read-only production query identified nine logical imports:
+seven ended failed after validated source upload/confirmation, and two submitted
+successfully. One submitted import recovered after an initial handoff warning.
+Initial post-confirmation warnings appeared 10.46–14.06 seconds later; failed
+imports accumulated 20.12–25.93 seconds in job submission including recovery.
+These timings suggest transaction timeout/contention but do not prove the driver
+exception. Added private acquisition-correlated transaction step/callback/error
+classification, job-submission and reconciliation outcomes. Timing-ledger writes
+are best effort so they cannot replace the original exception or fail an accepted
+job. Original driver retry labels and transaction/retry budgets remain intact.
+No raw error message, stack, source URL/title, account identity or storage key is
+included in these diagnostics. This follows the official Zalando guidelines read
+on 2026-10-04, rules 106 (compatibility), 177 (no stack traces in public errors)
+and 229 (idempotent operations). Live batch retest remains required after rollout.
+
+Diagnostic qualification passed `pnpm run verify` (1,400 unit tests and 181 API
+E2E tests), `pnpm run test:imports:integration` (30 tests), and
+`pnpm run test:processing:integration` (19 tests). The pinned yt-dlp suite passed
+74 tests without skips. Isolated candidate images also passed redaction/original
+error checks and Python acquisition fixtures. Guard tests rejected altered base
+runtime, unexpected helper files and altered backend dependency manifests.
+
+Deployed through CapRover on 2026-10-04 Cairo as API108 (22:40:21 UTC Oct 3) and
+private yt-dlp6 (22:41:44 UTC Oct 3). Eight backend JS/map checksums and four
+adapter module checksums matched the tested overlays; image configuration and
+runtime environment hashes remained unchanged. Internal API readiness and adapter
+health returned HTTP 200/ok. Router9 remained unchanged. Candidate scope comparison
+preserved 1,017 other backend runtime/dependency files and nine other adapter
+files. No user batch was generated during this rollout, so the timeout/contention
+hypothesis still requires a batch retest and the newly classified errors. These
+are backend/adapter changes; no client build or Android installation is required.
+
+### Trusted original reuse (2026-10-05)
+
+`POST /youtube-contributions/:id/source-deliveries` accepts an empty JSON body
+with the existing guest bearer. Only the owned active producer can request it.
+It returns `video_id`, `provenance: trusted`, `source_identity_verified: true`,
+and `original: { declaration, grant }` with `Cache-Control: no-store`. The source
+must be a validated, immutable backend-acquired shared source; a ready vocal
+rendition is not required. Missing originals return `IMPORT_CACHE_MISS` (404);
+authentication, ownership and lease errors retain existing 401/404/409/410 codes.
+The delivery reserves original bytes against existing session/IP/global limits
+and rechecks session/producer after signing. It never acquires media or admits
+cloud work. Clients fall back to local acquisition only on that explicit cache
+miss, never on authorization errors or an unrecognized 404.
+
+Deployment evidence (2026-10-05): the 372-file allowlisted archive
+`e8fd8ee2cff0b5456c0bf04f1cf535dbcab07a303f72868a42495dec6efe3be1`
+was deployed with CapRover CLI to `musicmute` / `api`, active version **115**.
+Readback showed one instance, no build in progress, and identical application
+configuration. `/health/live`, `/health/ready`, and `/app-policy` returned 200;
+the new source-delivery route returned 401 `UNAUTHENTICATED` without a guest
+capability. These probes do not establish authenticated live R2 delivery or
+end-to-end cloud playback. Local source-delivery integration used isolated
+MongoDB/Redis and synthetic audio.

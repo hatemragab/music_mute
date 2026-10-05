@@ -26,11 +26,29 @@ export class PlatformPolicy {
 }
 const PlatformPolicySchema = SchemaFactory.createForClass(PlatformPolicy);
 
+/** Desktop builds have their own gate; mobile store selections do not apply. */
+@Schema({ _id: false, strict: 'throw' })
+export class DesktopPlatformPolicy {
+  @Prop({
+    type: Number,
+    default: null,
+    validate: (value: number | null) =>
+      value === null ||
+      (Number.isInteger(value) && value >= 1 && value <= 2147483647),
+  })
+  minimumBuild!: number | null;
+}
+
 @Schema({ _id: false, strict: 'throw' })
 class Platforms {
   @Prop({ type: PlatformPolicySchema, required: true })
   android!: PlatformPolicy;
   @Prop({ type: PlatformPolicySchema, required: true }) ios!: PlatformPolicy;
+  @Prop({
+    type: SchemaFactory.createForClass(DesktopPlatformPolicy),
+    default: undefined,
+  })
+  macos?: DesktopPlatformPolicy;
 }
 
 @Schema({ collection: 'app_policies', strict: 'throw', versionKey: false })

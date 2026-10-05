@@ -1,0 +1,49 @@
+{
+  "name": "musicmute-local-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.18.0 <25"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:ui-fixtures": "node scripts/build-native-ui-fixtures.mjs",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "oxlint --deny-warnings src tests scripts",
+    "test": "vitest run",
+    "test:native": "node scripts/test-native.mjs",
+    "test:packaged-tools": "node scripts/qualify-packaged-tools.mjs",
+    "doctor": "node dist/companion/cli.js doctor",
+    "diagnostics": "node dist/companion/cli.js diagnostics",
+    "benchmark:local": "node dist/companion/benchmark.js",
+    "setup:downloader": "node scripts/setup-downloader.mjs",
+    "setup:downloader-wheels": "node scripts/setup-downloader-wheels.mjs",
+    "setup:youtube-runtime": "node scripts/setup-youtube-runtime.mjs",
+    "setup:updater": "node scripts/sparkle-artifacts.mjs",
+    "prepare:macos:update": "node scripts/prepare-macos-update.mjs",
+    "test:error-ui": "npm run build && node scripts/test-error-ui.mjs",
+    "install:dev": "node scripts/install-dev.mjs",
+    "package:macos": "npm run build && node scripts/package-macos.mjs",
+    "package:macos:release": "npm run build && node scripts/package-macos.mjs --release",
+    "release:macos": "node scripts/release-macos.mjs",
+    "test:release-runtime": "node scripts/qualify-release-runtime.mjs",
+    "install:macos": "node scripts/install-macos.mjs",
+    "test:e2e": "node scripts/e2e.mjs",
+    "verify": "npm run typecheck && npm run lint && npm test && npm run build && npm run format:check",
+    "smoke:youtube": "node scripts/live-smoke.mjs",
+    "package:chrome": "node scripts/package-chrome.mjs",
+    "test:store": "node scripts/e2e.mjs --store"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.3.4",
+    "@types/node": "24.13.3",
+    "esbuild": "0.28.2",
+    "oxlint": "1.58.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.2",
+    "vitest": "4.1.11"
+  }
+}

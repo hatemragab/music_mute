@@ -36,6 +36,11 @@ export class MediaImport {
   maxAcquisitionAttempts!: number;
   @Prop({ type: Number, default: 0, min: 0, max: 4 })
   acquisitionAttempt!: number;
+  // Confirmed-source job admission retries never authorize another acquisition.
+  @Prop({ type: Boolean, default: false }) handoffPending!: boolean;
+  @Prop({ type: Number, default: 0, min: 0, max: Number.MAX_SAFE_INTEGER })
+  handoffAttempt!: number;
+  @Prop({ type: Date, default: null }) acquisitionStartedAt!: Date | null;
   @Prop({ type: Date, default: null }) nextAttemptAt!: Date | null;
   @Prop({ type: Date, default: null }) queuedAt!: Date | null;
   @Prop({

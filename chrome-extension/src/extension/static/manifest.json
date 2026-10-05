@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "MusicMute Local",
+  "version": "0.1.0",
+  "minimum_chrome_version": "116",
+  "description": "Prepare vocals locally on Apple Silicon and play them with your YouTube video.",
+  "permissions": ["nativeMessaging", "offscreen", "storage"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://youtube.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "MusicMute Local",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*", "https://youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' http://127.0.0.1:*; media-src 'self' http://127.0.0.1:*"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA9UG0PJix+Qbfilg2uOsSwxDVinNT6YhJrna0TQ2FyIc9MsuPzJexzXDF/+KPQfW+2S7BqsrxNxDYPhZ2OsNU2OHVLJZWoXa2CkbbXJFZP5JQH2KQHexiWXsCNpMCq852zg3WbdlZsrhQTGvHPw9PXjuzbJQCXGMGkVKC8jzji9wyp5gT9JTMIuJF6M2sd400vCC/ZxvCIys9KGhQPrU46ThcXg1S0nNaiszlRhCoq46OsSkPzKffo90fcU4A4cwry8uAHoi5aax6moGhRMGS4AczVAUlWWuxV5PqqJ9hNvOC0iK2BwIehDfwMemVT+oRb/U07Ek4HhaJQefUKMcUmQIDAQAB",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}

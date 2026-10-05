@@ -15,12 +15,17 @@ export const jobsApi = (api: ApiClient) => ({
     ),
   detail: (id: string, signal?: AbortSignal) =>
     api.get<JobView>(`/jobs/${encodeURIComponent(id)}`, signal),
-  createImport: (url: string, trimEnabled: boolean, requestId: string) =>
-    api.post<MediaImportView>("/media-imports", {
-      url: supportedAudioUrl(url),
-      trimEnabled,
-      requestId,
-    }),
+  createImport: (
+    url: string,
+    trimEnabled: boolean,
+    requestId: string,
+    signal?: AbortSignal,
+  ) => {
+    const body = { url: supportedAudioUrl(url), trimEnabled, requestId };
+    return signal
+      ? api.post<MediaImportView>("/media-imports", body, signal)
+      : api.post<MediaImportView>("/media-imports", body);
+  },
   import: (id: string, signal?: AbortSignal) =>
     api.get<MediaImportView>(
       `/media-imports/${encodeURIComponent(id)}`,

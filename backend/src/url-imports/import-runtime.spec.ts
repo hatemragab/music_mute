@@ -4,12 +4,18 @@ import type { Queue } from 'bullmq';
 import { ImportRuntime } from './import-runtime.js';
 import type { ImportsService } from './imports.service.js';
 import type { ImportProcessor } from './import-processor.js';
+import type { SharedMediaService } from '../shared-media/shared-media.service.js';
 import type {
   RealtimeFeedEvent,
   RealtimeFeedService,
 } from '../realtime/realtime-feed.service.js';
 
-function fixture(status: string, queueState?: string, expired = false) {
+function fixture(
+  status: string,
+  queueState?: string,
+  expired = false,
+  sharedAction?: string,
+) {
   const record = {
     _id: new Types.ObjectId(),
     status,
@@ -26,7 +32,7 @@ function fixture(status: string, queueState?: string, expired = false) {
           remove: vi.fn(),
         },
   );
-  const find = vi.fn(() => ({
+  const find = vi.fn((_filter: Record<string, unknown>) => ({
     sort: () => ({ limit: () => ({ lean: async () => [record] }) }),
   }));
   const imports = {
@@ -39,16 +45,180 @@ function fixture(status: string, queueState?: string, expired = false) {
     reconcileFailure,
     files: { sweep },
   } as unknown as ImportProcessor;
+  const shared =
+    sharedAction === undefined
+      ? undefined
+      : ({
+          reconcile: vi.fn(),
+          inspect: vi.fn().mockResolvedValue({ action: sharedAction }),
+        } as unknown as SharedMediaService);
   const runtime = new ImportRuntime(
     new ConfigService({ URL_IMPORT_MAX_OUTSTANDING: 20 }),
     imports,
     processor,
     { getJob } as unknown as Queue,
+    shared,
   );
-  return { runtime, reconcileFailure, enqueue, sweep, getJob, record, find };
+  return {
+    runtime,
+    reconcileFailure,
+    enqueue,
+    sweep,
+    getJob,
+    record,
+    find,
+    shared,
+  };
 }
 
 describe('import recovery', () => {
+  it.each([undefined, 'failed', 'completed'])(
+    'repairs missing or terminal handoff %s at exhausted acquisition four and legacy max one',
+    async (state) => {
+      const f = fixture('queued', state, false, 'result');
+      Object.assign(f.record, {
+        acquisitionAttempt: 4,
+        maxAcquisitionAttempts: 1,
+        handoffPending: true,
+        handoffAttempt: 3,
+        nextAttemptAt: new Date(Date.now() + 20_000),
+      });
+      await f.runtime.reconcile();
+      expect(f.getJob).toHaveBeenCalledWith(`${f.record._id}-handoff-3`);
+      expect(f.enqueue).toHaveBeenCalledOnce();
+      expect(f.enqueue).toHaveBeenCalledWith(String(f.record._id));
+      expect(f.reconcileFailure).not.toHaveBeenCalled();
+      expect(f.shared!.inspect).not.toHaveBeenCalled();
+      if (state)
+        expect(
+          (await f.getJob.mock.results[0]!.value).remove,
+        ).toHaveBeenCalledOnce();
+    },
+  );
+  it.each(['active', 'waiting', 'delayed'])(
+    'keeps a live handoff %s generation without overlapping delivery',
+    async (state) => {
+      const f = fixture('queued', state, false, 'result');
+      Object.assign(f.record, {
+        handoffPending: true,
+        handoffAttempt: 3,
+        acquisitionAttempt: 4,
+      });
+      await f.runtime.reconcile();
+      expect(f.getJob).toHaveBeenCalledWith(`${f.record._id}-handoff-3`);
+      expect(f.enqueue).not.toHaveBeenCalled();
+      expect(f.reconcileFailure).not.toHaveBeenCalled();
+      expect(f.shared!.inspect).not.toHaveBeenCalled();
+    },
+  );
+  it('reconciles a crashed active handoff using its saved generation', async () => {
+    const f = fixture('uploading', 'failed');
+    Object.assign(f.record, {
+      handoffPending: true,
+      handoffAttempt: 2,
+      acquisitionAttempt: 4,
+    });
+    await f.runtime.reconcile();
+    expect(f.getJob).toHaveBeenCalledWith(`${f.record._id}-handoff-2`);
+    expect(f.reconcileFailure).toHaveBeenCalledWith(
+      f.record,
+      expect.anything(),
+    );
+    expect(f.enqueue).not.toHaveBeenCalled();
+  });
+  it.each(['reconcile', 'enqueueSharedImports'] as const)(
+    'rotates a bounded %s scan past blocked cold imports and wraps for retry',
+    async (method) => {
+      const f = fixture('queued', undefined, false, 'source');
+      const ready = { ...f.record, _id: new Types.ObjectId() };
+      const filters: Record<string, unknown>[] = [];
+      f.find.mockImplementation((filter) => {
+        const snapshot = { ...filter };
+        filters.push(snapshot);
+        const cursor = (snapshot._id as { $gt?: Types.ObjectId } | undefined)
+          ?.$gt;
+        return {
+          sort: () => ({
+            limit: () => ({
+              lean: async () =>
+                [f.record, ready]
+                  .filter(
+                    (record) => !cursor || String(record._id) > String(cursor),
+                  )
+                  .slice(0, 1),
+            }),
+          }),
+        };
+      });
+      vi.mocked(f.shared!.inspect).mockImplementation(async (record) => ({
+        action: record._id.equals(ready._id) ? 'result' : 'source',
+        source: null,
+        result: null,
+      }));
+      f.getJob.mockRejectedValue(new Error('Redis unavailable'));
+      f.enqueue.mockImplementation(async (id: string) => {
+        if (id === String(f.record._id)) throw new Error('Redis unavailable');
+      });
+      await expect(f.runtime[method]()).rejects.toThrow('Redis unavailable');
+      await f.runtime[method]();
+      expect(f.enqueue).toHaveBeenCalledWith(String(ready._id));
+      expect(filters[1]._id).toEqual(
+        expect.objectContaining({ $gt: f.record._id }),
+      );
+      await expect(f.runtime[method]()).rejects.toThrow('Redis unavailable');
+      expect(filters[2]._id).toEqual(
+        expect.objectContaining({ $gt: ready._id }),
+      );
+      expect(filters[3]).not.toHaveProperty('_id');
+    },
+  );
+  it('recovers ready deliveries without reading an unavailable acquisition queue', async () => {
+    const f = fixture('queued', undefined, false, 'result');
+    f.getJob.mockRejectedValue(new Error('acquisition queue unavailable'));
+    await f.runtime.reconcile();
+    expect(f.enqueue).toHaveBeenCalledWith(String(f.record._id));
+    expect(f.getJob).not.toHaveBeenCalled();
+    expect(f.reconcileFailure).not.toHaveBeenCalled();
+    expect(f.sweep).toHaveBeenCalledOnce();
+  });
+  it.each(['reconcile', 'enqueueSharedImports'] as const)(
+    'delivers ready followers before a cold Redis failure in %s',
+    async (method) => {
+      const f = fixture('queued', undefined, false, 'source');
+      const ready = { ...f.record, _id: new Types.ObjectId() };
+      f.find.mockImplementation(() => ({
+        sort: () => ({
+          limit: () => ({ lean: async () => [f.record, ready] }),
+        }),
+      }));
+      vi.mocked(f.shared!.inspect).mockImplementation(async (record) => ({
+        action: record._id.equals(ready._id) ? 'result' : 'source',
+        source: null,
+        result: null,
+      }));
+      f.getJob.mockRejectedValue(new Error('Redis unavailable'));
+      f.enqueue.mockImplementation(async (id: string) => {
+        if (id === String(f.record._id)) throw new Error('Redis unavailable');
+      });
+      await expect(f.runtime[method]()).rejects.toThrow('Redis unavailable');
+      expect(f.enqueue.mock.calls[0]).toEqual([String(ready._id)]);
+      expect(f.reconcileFailure).not.toHaveBeenCalled();
+    },
+  );
+  it('continues other ready deliveries after one interrupted completion', async () => {
+    const f = fixture('queued', undefined, false, 'result');
+    const ready = { ...f.record, _id: new Types.ObjectId() };
+    f.find.mockImplementation(() => ({
+      sort: () => ({ limit: () => ({ lean: async () => [f.record, ready] }) }),
+    }));
+    f.enqueue.mockRejectedValueOnce(new Error('Write interrupted'));
+    await expect(f.runtime.reconcile()).rejects.toThrow('Write interrupted');
+    expect(f.enqueue.mock.calls).toEqual([
+      [String(f.record._id)],
+      [String(ready._id)],
+    ]);
+    expect(f.getJob).not.toHaveBeenCalled();
+  });
   it('wakes only queued shared imports without queue recovery reads or a scratch sweep', async () => {
     const f = fixture('queued');
     await f.runtime.enqueueSharedImports();

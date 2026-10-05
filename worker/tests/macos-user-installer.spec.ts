@@ -3,6 +3,7 @@ import { fork } from "node:child_process";
 import { once } from "node:events";
 import {
   chmod,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -327,6 +328,9 @@ describe.skipIf(process.platform !== "darwin")(
             launchAgent,
           }),
         ).resolves.toBeNull();
+        await expect(
+          lstat(join(layout.transactionRoot, "install")),
+        ).rejects.toMatchObject({ code: "ENOENT" });
         const config = await loadRuntimeConfig(layout.configPath, {
           platform: "darwin",
           arch: "arm64",

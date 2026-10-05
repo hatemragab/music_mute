@@ -8,16 +8,25 @@ import {
   MediaImportSchema,
 } from '../url-imports/media-import.schema.js';
 import { SharedMediaService } from './shared-media.service.js';
+import { SharedMediaCatalogService } from './shared-media-catalog.service.js';
+import { SharedMediaDerivationService } from './shared-media-derivation.service.js';
+import { StorageModule } from '../infrastructure/storage.module.js';
 
 @Module({
   imports: [
     ProcessingPersistenceModule,
     StorageTransfersModule,
+    StorageModule,
     MongooseModule.forFeature([
       { name: MediaImport.name, schema: MediaImportSchema },
     ]),
   ],
-  providers: [SharedMediaService, ProcessingTransactions],
+  providers: [
+    SharedMediaService,
+    SharedMediaCatalogService,
+    SharedMediaDerivationService,
+    ProcessingTransactions,
+  ],
   exports: [SharedMediaService],
 })
 export class SharedMediaModule {}

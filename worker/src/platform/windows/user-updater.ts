@@ -199,8 +199,15 @@ export async function updateWindowsUserWorker(
     digest?: typeof sha256;
     pending?: typeof windowsOperationPending;
     availableDiskBytes?: () => Promise<number>;
+    removeTransaction?: (path: string) => Promise<void>;
   },
-) {
+): Promise<{
+  status: "current" | "updated";
+  releaseVersion: string;
+  sequence: number;
+  capacityRequalificationRequired?: boolean;
+  cleanupWarning?: string;
+}> {
   const { layout } = options;
   const pending = options.pending ?? windowsOperationPending;
   if (await pending(layout))
@@ -229,6 +236,15 @@ export async function updateWindowsUserWorker(
   const credentialSha256 = await digest(layout.credentialPath);
   const transaction = join(layout.serviceRoot, `update-${randomUUID()}`);
   await mkdir(transaction, { mode: 0o700 });
+  let result:
+    | {
+        status: "updated";
+        releaseVersion: string;
+        sequence: number;
+        capacityRequalificationRequired: boolean;
+        cleanupWarning?: string;
+      }
+    | undefined;
   try {
     const diskBytes = options.availableDiskBytes
       ? await options.availableDiskBytes()
@@ -299,16 +315,39 @@ export async function updateWindowsUserWorker(
       throw new Error(
         "Update transaction did not commit the expected release and sequence",
       );
-    return {
+    result = {
       status: "updated",
       releaseVersion: activeVersion,
       sequence: state.highestSequence,
       capacityRequalificationRequired: true,
     };
+    return result;
   } finally {
     // Recovery uses the installed immutable release and journal snapshots, not
     // downloaded scratch. Keep scratch while recovery is pending for diagnosis.
-    if (!(await pending(layout)))
-      await rm(transaction, { recursive: true, force: true });
+    try {
+      if (!(await pending(layout))) {
+        await (
+          options.service ?? new WindowsServiceController(layout)
+        ).assertPrivateInstallation();
+        await assertUpdateTransactionDirectory(transaction);
+        await (
+          options.removeTransaction ??
+          ((path: string) => rm(path, { recursive: true, force: true }))
+        )(transaction);
+      }
+    } catch {
+      // Cleanup cannot change a committed update into a reported failure or
+      // replace the original update error. Leave it for safe maintenance retry.
+      const warning = "Update scratch cleanup deferred; run mw cleanup --apply";
+      if (result !== undefined) result.cleanupWarning = warning;
+      else process.emitWarning(warning, { code: "WORKER_CLEANUP_DEFERRED" });
+    }
   }
+}
+
+async function assertUpdateTransactionDirectory(path: string): Promise<void> {
+  const directory = await lstat(path);
+  if (!directory.isDirectory() || directory.isSymbolicLink())
+    throw new TypeError("Update transaction directory is unsafe");
 }

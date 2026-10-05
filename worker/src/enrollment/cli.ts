@@ -26,6 +26,7 @@ import {
   parseQualificationEvidence,
 } from "./report-builder.js";
 import { uploadQualificationResult } from "./qualification-upload.js";
+import { cleanupQualificationWorkspace } from "./qualification-cleanup.js";
 import { prepareInstallationRelease } from "./release-archive.js";
 import { verifyWindowsRelease } from "../platform/windows/release-manifest.js";
 import { verifyInstallationSignature } from "./installation-signature.js";
@@ -300,7 +301,7 @@ export async function runEnrollmentCommand(
   );
   let runtimeConfigPath: string | undefined;
   if (!flags.has("report")) {
-    runtimeConfigPath = await writeServiceRuntimeConfig(
+    const runtimeConfig = await writeServiceRuntimeConfig(
       flags,
       outputRoot,
       backendBaseUrl,
@@ -308,6 +309,21 @@ export async function runEnrollmentCommand(
       activated.machineId,
       workerId,
     );
+    runtimeConfigPath = runtimeConfig.path;
+    const qualification = parseQualificationEvidence(
+      await readBoundedJson(
+        absoluteFlag(flags, "qualification"),
+        "Qualification report",
+      ),
+    );
+    await cleanupQualificationWorkspace({
+      workRoot: runtimeConfig.workRoot,
+      outputPath: qualification.uploadCandidate.path,
+    }).catch(() => {
+      // Enrollment is already committed remotely and in the private journal.
+      // A disk cleanup failure must not trigger a new activation or rollback.
+      console.warn("Worker qualification workspace cleanup deferred.");
+    });
   }
   console.log(
     JSON.stringify({
@@ -491,7 +507,7 @@ async function writeServiceRuntimeConfig(
   allowInsecureLoopback: boolean,
   machineId: string,
   workerId: string,
-): Promise<string> {
+): Promise<{ path: string; workRoot: string }> {
   const qualification = parseQualificationEvidence(
     await readBoundedJson(
       absoluteFlag(flags, "qualification"),
@@ -517,7 +533,7 @@ async function writeServiceRuntimeConfig(
   });
   const path = join(outputRoot, RUNTIME_CONFIG_FILE);
   await writeStablePrivateFile(path, `${JSON.stringify(document, null, 2)}\n`);
-  return path;
+  return { path, workRoot: document.workRoot };
 }
 
 export function enrollmentCommandErrorSummary(error: unknown): string {

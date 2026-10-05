@@ -40,9 +40,7 @@ export function supportedAudioUrl(raw: string): string {
   } catch {
     throw invalid();
   }
-  if (catalog.blockedQueryKeys.some((key) => query.has(key)))
-    throw new ApiError(0, "IMPORT_SINGLE_ITEM_REQUIRED");
-  const allowed = catalog.sites.some((site) =>
+  const site = catalog.sites.find((site) =>
     site.rules.some(
       (rule) =>
         exact(rule.host, host) &&
@@ -53,6 +51,20 @@ export function supportedAudioUrl(raw: string): string {
         ),
     ),
   );
-  if (!allowed) throw new ApiError(0, "IMPORT_UNSUPPORTED_PROVIDER");
+  if (site?.id === "youtube") {
+    const videoId = /^\/watch\/?$/.test(path)
+      ? query.get("v") || ""
+      : path.split("/").filter(Boolean).at(-1) || "";
+    if (
+      !/^[A-Za-z0-9_-]{11}$/.test(videoId) ||
+      (query.has("v") && query.get("v") !== videoId)
+    )
+      throw invalid();
+    // Share links may include a playlist, radio or timestamp; import only this video.
+    return `https://www.youtube.com/watch?v=${videoId}`;
+  }
+  if (catalog.blockedQueryKeys.some((key) => query.has(key)))
+    throw new ApiError(0, "IMPORT_SINGLE_ITEM_REQUIRED");
+  if (!site) throw new ApiError(0, "IMPORT_UNSUPPORTED_PROVIDER");
   return `${parts[1].toLowerCase()}://${host}${path}${parts[4] || ""}`;
 }

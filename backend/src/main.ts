@@ -1,7 +1,7 @@
 import { RealtimeSocketService } from './realtime/realtime-socket.service.js';
+import { YouTubeCommunitySocketService } from './youtube-community/youtube-community-socket.service.js';
 import './observability/sentry.js';
 import 'reflect-metadata';
-import { ConsoleLogger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -10,6 +10,7 @@ import { startupFailureReason } from './startup-error.js';
 import { WorkerHintService } from './worker-hints/worker-hint.service.js';
 import { captureBackendStartupFailure } from './observability/sentry.js';
 import { installFatalDiagnostics } from './observability/fatal-errors.js';
+import { createApiLogger } from './observability/api-logger.js';
 
 installFatalDiagnostics();
 
@@ -20,10 +21,11 @@ async function bootstrap() {
     logger: false,
     abortOnError: false,
   });
-  app.useLogger(new ConsoleLogger({ json: true }));
+  app.useLogger(createApiLogger());
   configureHttp(app);
   app.get(WorkerHintService).attach(app.getHttpServer());
   app.get(RealtimeSocketService).attach(app.getHttpServer());
+  app.get(YouTubeCommunitySocketService).attach(app.getHttpServer());
   const config = app.get(ConfigService);
   await app.listen(
     config.getOrThrow<number>('PORT'),

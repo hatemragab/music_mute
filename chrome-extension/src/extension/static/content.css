@@ -1,0 +1,444 @@
+.musicmute-local-button {
+  color: #f2f0f5;
+}
+#musicmute-local-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  line-height: 0;
+  vertical-align: top;
+}
+#musicmute-local-button > svg {
+  display: block;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  max-width: 100%;
+  max-height: 100%;
+}
+.musicmute-local-button[aria-pressed="true"] {
+  color: #96e6c7;
+}
+.musicmute-local-button:focus-visible {
+  outline: 2px solid #96e6c7;
+  outline-offset: -5px;
+  border-radius: 10px;
+}
+#musicmute-local-panel {
+  --musicmute-accent: #96e6c7;
+  --musicmute-muted: #b9b8c3;
+  --musicmute-panel-alpha: 0.95;
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: min(304px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  scrollbar-width: thin;
+  z-index: 70;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid #3a3c47;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, var(--musicmute-panel-alpha));
+  box-shadow: 0 8px 32px #00000045;
+  color: #f2f0f5;
+  font:
+    12px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  text-align: left;
+  text-shadow: none;
+  cursor: default;
+}
+#musicmute-local-panel [hidden] {
+  display: none !important;
+}
+#musicmute-local-panel[hidden] {
+  display: none;
+}
+#musicmute-local-panel .musicmute-panel-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+#musicmute-local-panel .musicmute-panel-move {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+#musicmute-local-panel .musicmute-panel-move:active {
+  cursor: grabbing;
+}
+#musicmute-local-panel .musicmute-panel-move:hover {
+  background: transparent;
+}
+#musicmute-local-panel .musicmute-panel-heading {
+  min-width: 0;
+}
+#musicmute-local-panel .musicmute-panel-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--musicmute-muted);
+  font-size: 22px;
+  line-height: 1;
+}
+#musicmute-local-panel .musicmute-panel-settings-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--musicmute-muted);
+}
+#musicmute-local-panel .musicmute-panel-settings-button svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+#musicmute-local-panel .musicmute-panel-settings-button[aria-expanded="true"] {
+  color: var(--musicmute-accent);
+  background: #25272e;
+}
+#musicmute-local-panel .musicmute-panel-settings {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #454752;
+}
+#musicmute-local-panel .musicmute-settings-heading,
+#musicmute-local-panel .musicmute-settings-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+#musicmute-local-panel .musicmute-settings-heading {
+  margin-bottom: 10px;
+}
+#musicmute-local-panel .musicmute-settings-done {
+  padding: 5px 8px;
+}
+#musicmute-local-panel .musicmute-settings-reset {
+  margin-top: 10px;
+  padding: 5px 8px;
+  font-size: 10px;
+}
+#musicmute-local-panel .musicmute-settings-label {
+  margin-top: 8px;
+}
+#musicmute-local-panel .musicmute-settings-label output {
+  color: var(--musicmute-accent);
+  font-variant-numeric: tabular-nums;
+}
+#musicmute-local-panel .musicmute-panel-settings input {
+  accent-color: var(--musicmute-accent);
+  box-sizing: border-box;
+  color: #f2f0f5;
+  font: inherit;
+}
+#musicmute-local-panel .musicmute-panel-settings input[type="range"] {
+  display: block;
+  width: 100%;
+  height: 28px;
+  margin: 2px 0 6px;
+  cursor: pointer;
+}
+#musicmute-local-panel .musicmute-settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  cursor: pointer;
+}
+#musicmute-local-panel .musicmute-settings-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+#musicmute-local-panel .musicmute-settings-duration {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+#musicmute-local-panel .musicmute-settings-duration input {
+  width: 64px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid #565866;
+  border-radius: 8px;
+  background: #25272e;
+  color-scheme: dark;
+}
+#musicmute-local-panel .musicmute-panel-settings small {
+  display: block;
+  margin-top: 5px;
+  color: var(--musicmute-muted);
+  font-size: 10px;
+}
+#musicmute-local-panel .musicmute-settings-status {
+  margin: 10px 0 0;
+  color: var(--musicmute-muted);
+  font-size: 10px;
+}
+#musicmute-local-panel .musicmute-settings-status[data-error="true"] {
+  color: #ffb4ab;
+}
+#musicmute-local-panel .musicmute-panel-logo {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: #123c37;
+  color: var(--musicmute-accent);
+}
+#musicmute-local-panel .musicmute-panel-logo svg {
+  width: 28px;
+  height: 28px;
+}
+#musicmute-local-panel .musicmute-panel-brand {
+  display: block;
+  color: var(--musicmute-muted);
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+#musicmute-local-panel .musicmute-panel-title {
+  display: block;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 650;
+  letter-spacing: -0.3px;
+  overflow-wrap: anywhere;
+}
+#musicmute-local-panel .musicmute-panel-status {
+  display: block;
+  color: var(--musicmute-muted);
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+#musicmute-local-panel .musicmute-error-details {
+  display: block;
+  margin-top: 6px;
+  color: var(--musicmute-muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+#musicmute-local-panel .musicmute-progress-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+#musicmute-local-panel progress {
+  appearance: none;
+  border: 0;
+  border-radius: 20px;
+  height: 4px;
+  margin-top: 10px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background: #3a3c47;
+  accent-color: var(--musicmute-accent);
+}
+#musicmute-local-panel progress::-webkit-progress-bar {
+  border-radius: 20px;
+  background: #3a3c47;
+}
+#musicmute-local-panel progress::-webkit-progress-value {
+  border-radius: 20px;
+  background: var(--musicmute-accent);
+}
+#musicmute-local-panel progress:indeterminate {
+  background: linear-gradient(90deg, #3a3c47, #96e6c7 50%, #3a3c47);
+  background-size: 200% 100%;
+  animation: musicmute-wait 2s ease-in-out infinite;
+}
+#musicmute-local-panel progress:indeterminate::-webkit-progress-bar {
+  background: transparent;
+}
+#musicmute-local-panel .musicmute-progress-label {
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--musicmute-accent);
+  font-variant-numeric: tabular-nums;
+}
+#musicmute-local-panel .musicmute-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}
+#musicmute-local-panel .musicmute-playback-waveform {
+  margin-top: 10px;
+}
+#musicmute-local-panel .musicmute-wave-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  color: var(--musicmute-muted);
+  font-size: 10px;
+}
+#musicmute-local-panel .musicmute-wave-source {
+  font-weight: 600;
+}
+#musicmute-local-panel
+  .musicmute-playback-waveform[data-vocals="true"]
+  .musicmute-wave-source {
+  color: var(--musicmute-accent);
+}
+#musicmute-local-panel .musicmute-wave-time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+#musicmute-local-panel .musicmute-wave-track {
+  position: relative;
+  height: 28px;
+}
+#musicmute-local-panel .musicmute-wave-bars {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: #454a56;
+}
+#musicmute-local-panel .musicmute-wave-played {
+  color: #8c929e;
+  clip-path: inset(0 calc(100% - var(--musicmute-wave-progress, 0%)) 0 0);
+}
+#musicmute-local-panel
+  .musicmute-playback-waveform[data-vocals="true"]
+  .musicmute-wave-played {
+  color: var(--musicmute-accent);
+}
+#musicmute-local-panel .musicmute-wave-bar {
+  flex: 1;
+  min-width: 0;
+  border-radius: 2px;
+  background: currentColor;
+  transform: scaleY(0.7);
+  animation: musicmute-wave-pulse var(--musicmute-wave-period, 1000ms)
+    ease-in-out infinite alternate;
+  animation-play-state: paused;
+}
+#musicmute-local-panel
+  .musicmute-playback-waveform[data-playing="true"]
+  .musicmute-wave-bar {
+  animation-play-state: running;
+}
+@keyframes musicmute-wave-pulse {
+  from {
+    transform: scaleY(0.4);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+#musicmute-local-panel button,
+#musicmute-local-panel .musicmute-setup-link {
+  cursor: pointer;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border: 1px solid #3a3c47;
+  border-radius: 10px;
+  background: #25272e;
+  color: #f2f0f5;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 150ms;
+}
+#musicmute-local-panel button:hover {
+  background: #34363f;
+}
+#musicmute-local-panel .musicmute-panel-stop {
+  background: #4a2026;
+  border-color: #a9484f;
+  color: #ffc5c5;
+}
+#musicmute-local-panel .musicmute-panel-stop:hover {
+  background: #60272f;
+}
+#musicmute-local-panel .musicmute-panel-stop:focus-visible {
+  outline-color: #ffb4ab;
+}
+#musicmute-local-panel button:focus-visible,
+#musicmute-local-panel a:focus-visible,
+#musicmute-local-panel input:focus-visible {
+  outline: 2px solid var(--musicmute-accent);
+  outline-offset: 3px;
+}
+#musicmute-local-panel .musicmute-setup-link {
+  background: #123c37;
+  border-color: #37574b;
+  color: var(--musicmute-accent);
+}
+#musicmute-local-panel[data-state="ready"] {
+  border-color: #37574b;
+}
+#musicmute-local-panel[data-state="error"] .musicmute-panel-title {
+  color: #ffb4ab;
+}
+@keyframes musicmute-wait {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #musicmute-local-panel .musicmute-wave-bar {
+    animation: none;
+  }
+  #musicmute-local-panel progress {
+    animation: none;
+  }
+  #musicmute-local-panel button {
+    transition: none;
+  }
+}
+@media (max-height: 450px) {
+  #musicmute-local-panel {
+    padding: 12px;
+    border-radius: 14px;
+  }
+  #musicmute-local-panel .musicmute-panel-status {
+    margin-top: 8px;
+  }
+  #musicmute-local-panel .musicmute-panel-actions {
+    margin-top: 10px;
+  }
+}

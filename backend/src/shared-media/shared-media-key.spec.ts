@@ -9,15 +9,54 @@ import {
   isSharedMediaObjectKey,
   sharedSourceKey,
   sharedResultKey,
+  communitySourceKey,
+  derivedResultKey,
 } from './shared-media-key.js';
 
 describe('shared media identity', () => {
+  it('salts guest sources apart from trusted sources and binds derivatives to immutable master bytes', () => {
+    const first =
+      'https://www.youtube.com/watch?v=bZxrIoCPsOc&list=RDbZxrIoCPsOc&start_radio=1';
+    const second = 'https://youtu.be/bZxrIoCPsOc?si=RLbbOevlM4lBmXHi';
+    expect(communitySourceKey(first)).toBe(communitySourceKey(second));
+    expect(communitySourceKey(first)).not.toBe(sharedSourceKey(first));
+    expect(() =>
+      communitySourceKey('https://soundcloud.com/artist/track'),
+    ).toThrow();
+    const master = {
+      key: 'shared/full.mp3',
+      etag: '"full"',
+      bytes: 100,
+      sha256: Buffer.alloc(32, 1).toString('base64'),
+      contentType: 'audio/mpeg',
+    };
+    const key = derivedResultKey(
+      'a'.repeat(64),
+      'generation',
+      'b'.repeat(64),
+      master,
+    );
+    for (const change of [
+      { etag: '"new"' },
+      { key: 'shared/new.mp3' },
+      { sha256: Buffer.alloc(32, 2).toString('base64') },
+    ])
+      expect(
+        derivedResultKey('a'.repeat(64), 'generation', 'b'.repeat(64), {
+          ...master,
+          ...change,
+        }),
+      ).not.toBe(key);
+  });
   it('unifies accepted YouTube links without treating ID case as equivalent', () => {
     const key = sharedSourceKey('https://youtube.com/watch?v=BaW_jenozKc&t=90');
     for (const url of [
       'https://youtu.be/BaW_jenozKc?si=tracking',
       'https://m.youtube.com/shorts/BaW_jenozKc',
       'https://www.youtube.com/embed/BaW_jenozKc',
+      'https://youtube.com/watch?v=BaW_jenozKc&list=PL123&index=2',
+      'https://music.youtube.com/watch?v=BaW_jenozKc&list=RDBaW_jenozKc&start_radio=1',
+      'https://youtu.be/BaW_jenozKc?list=PL123',
     ])
       expect(sharedSourceKey(url)).toBe(key);
     expect(sharedSourceKey('https://youtu.be/baw_jenozkc')).not.toBe(key);

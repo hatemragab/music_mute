@@ -10,9 +10,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const COLLECTIONS = [
   'audio_jobs',
+  'local_media_syncs',
   'media_imports',
   'shared_media_sources',
   'shared_media_results',
+  'youtube_guest_sessions',
+  'youtube_contributions',
+  'youtube_contribution_leases',
   'users',
   'admin_access',
   'account_policies',

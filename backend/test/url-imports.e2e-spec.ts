@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { importError } from '../src/url-imports/import-errors.js';
 import {
   authFixture,
   deviceReport,
@@ -46,6 +47,8 @@ describe('URL import HTTP boundary', () => {
       status: 'queued',
       jobId: null,
       error: null,
+      sourceUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
+      trimEnabled: false,
     });
     const response = await request(f.app.getHttpServer())
       .post('/media-imports')
@@ -57,6 +60,8 @@ describe('URL import HTTP boundary', () => {
       import_id: id,
       status: 'queued',
       job_id: null,
+      source_url: 'https://www.youtube.com/watch?v=abcdefghijk',
+      trim_enabled: false,
     });
     expect(response.headers.location).toBe(`/media-imports/${id}`);
     expect(response.headers['cache-control']).toBe('no-store');
@@ -83,6 +88,77 @@ describe('URL import HTTP boundary', () => {
       false,
     );
   });
+  it('delivers only completed shared media through the authenticated cache-only command', async () => {
+    await request(f.app.getHttpServer())
+      .post('/media-imports/cache-deliveries')
+      .send(body)
+      .expect(401);
+    await request(f.app.getHttpServer())
+      .post('/media-imports/cache-deliveries')
+      .set('Authorization', token)
+      .send(body)
+      .expect(409);
+    expect(f.urlImports.create).not.toHaveBeenCalled();
+    await sync();
+    f.urlImports.create.mockResolvedValue({
+      importId: id,
+      status: 'submitted',
+      jobId: id,
+      sourceUrl: 'https://www.youtube.com/watch?v=bZxrIoCPsOc',
+      trimEnabled: false,
+    });
+    const response = await request(f.app.getHttpServer())
+      .post('/media-imports/cache-deliveries')
+      .set('Authorization', token)
+      .set('X-Installation-Id', deviceReport.installationId)
+      .send({ ...body, trim_enabled: false })
+      .expect(202);
+    expect(response.body).toMatchObject({
+      status: 'submitted',
+      job_id: id,
+      source_url: 'https://www.youtube.com/watch?v=bZxrIoCPsOc',
+      trim_enabled: false,
+    });
+    expect(response.headers.location).toBe(`/media-imports/${id}`);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(f.urlImports.create).toHaveBeenCalledWith(
+      f.ownerId.toHexString(),
+      body.url,
+      body.request_id,
+      false,
+      true,
+    );
+  });
+  it('returns a sanitized cache miss and rejects caller-selected cache identities', async () => {
+    await sync();
+    for (const invalid of [
+      { ...body, shared_source_key: 'a'.repeat(64) },
+      { ...body, user_id: id },
+      { ...body, trim_enabled: null },
+    ])
+      await request(f.app.getHttpServer())
+        .post('/media-imports/cache-deliveries')
+        .set('Authorization', token)
+        .set('X-Installation-Id', deviceReport.installationId)
+        .send(invalid)
+        .expect(400);
+    expect(f.urlImports.create).not.toHaveBeenCalled();
+    f.urlImports.create.mockRejectedValue(importError('IMPORT_CACHE_MISS'));
+    const response = await request(f.app.getHttpServer())
+      .post('/media-imports/cache-deliveries')
+      .set('Authorization', token)
+      .set('X-Installation-Id', deviceReport.installationId)
+      .send(body)
+      .expect(404);
+    expect(response.headers['content-type']).toContain(
+      'application/problem+json',
+    );
+    expect(response.body).toMatchObject({
+      code: 'IMPORT_CACHE_MISS',
+      status: 404,
+    });
+    expect(response.body).not.toHaveProperty('stack');
+  });
   it('rejects caller-selected ownership, keys and invalid request IDs before admission', async () => {
     await sync();
     for (const invalid of [
@@ -107,6 +183,8 @@ describe('URL import HTTP boundary', () => {
       status: 'submitted',
       jobId: id,
       error: null,
+      sourceUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
+      trimEnabled: true,
     });
     await request(f.app.getHttpServer())
       .get(`/media-imports/${id}`)
@@ -116,6 +194,10 @@ describe('URL import HTTP boundary', () => {
       .set('Authorization', token)
       .expect(200);
     expect(response.body.job_id).toBe(id);
+    expect(response.body.source_url).toBe(
+      'https://www.youtube.com/watch?v=abcdefghijk',
+    );
+    expect(response.body.trim_enabled).toBe(true);
     expect(f.urlImports.get).toHaveBeenCalledWith(f.ownerId.toHexString(), id);
   });
 });

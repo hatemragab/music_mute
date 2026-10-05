@@ -1,6 +1,13 @@
 import { HttpException } from '@nestjs/common';
 import { authError, type AuthErrorCode } from '../auth/auth.errors.js';
 import { jobError, type JobHttpErrorCode } from '../jobs/job-errors.js';
+import { boundedRetryAfterSeconds } from './import-retry.js';
+
+export type SafeImportError = {
+  code: string;
+  message: string;
+  retryAfterSeconds?: number;
+};
 
 const businessCodes: JobHttpErrorCode[] = [
   'IDEMPOTENCY_CONFLICT',
@@ -12,8 +19,17 @@ const businessCodes: JobHttpErrorCode[] = [
   'RETAINED_STORAGE_LIMIT_REACHED',
   'SERVICE_BANDWIDTH_LIMIT_REACHED',
   'UPLOAD_RESERVATION_EXPIRED',
+  'PROCESSING_POLICY_INCOMPATIBLE',
+  'MEDIA_TOO_LONG',
+  'MEDIA_TOO_LARGE',
+  'MEDIA_UNSUPPORTED',
+  'MEDIA_DURATION_UNKNOWN',
+  'UPLOAD_ATTEMPT_LIMIT_REACHED',
+  'JOB_NOT_FOUND',
+  'JOB_STATE_CONFLICT',
 ];
 const accountCodes: AuthErrorCode[] = [
+  'INVALID_INPUT',
   'ACCOUNT_RESTRICTED',
   'ACCOUNT_DISABLED',
   'ACCOUNT_DELETION_PENDING',
@@ -50,8 +66,13 @@ const errors = {
     'The source is unavailable or requires unsupported access',
   ],
   IMPORT_DEPENDENCY_FAILED: [503, 'An import dependency is unavailable'],
+  IMPORT_ACQUISITION_EXHAUSTED: [
+    503,
+    'The audio acquisition budget was exhausted',
+  ],
   IMPORT_DISK_FULL: [503, 'Temporary import storage is full; try again later'],
   IMPORT_NOT_FOUND: [404, 'Import not found'],
+  IMPORT_CACHE_MISS: [404, 'No completed matching shared audio is available'],
   IMPORT_REQUEST_CONFLICT: [
     409,
     'This request identifier was used for a different import',
@@ -63,28 +84,28 @@ export type ImportErrorCode = keyof typeof errors;
 export function importError(
   code: ImportErrorCode,
   limit?: number,
+  retryAfterSeconds?: number,
 ): HttpException {
   const [statusCode, message] = errors[code];
   const detail =
     limit === undefined
       ? message
       : `${message} (maximum ${limit} ${code === 'IMPORT_TOO_LONG' ? 'seconds' : 'bytes'})`;
+  const retryAfter = boundedRetryAfterSeconds(retryAfterSeconds);
   return new HttpException(
     {
       statusCode,
       code,
       message: detail,
       ...(limit === undefined ? {} : { limit }),
+      ...(retryAfter === undefined ? {} : { retryAfterSeconds: retryAfter }),
     },
     statusCode,
   );
 }
 
 /** Never persist upstream exception messages, which can contain signed URLs. */
-export function safeImportError(error: unknown): {
-  code: string;
-  message: string;
-} {
+export function safeImportError(error: unknown): SafeImportError {
   if (error instanceof HttpException) {
     const response = error.getResponse();
     if (
@@ -112,11 +133,16 @@ export function safeImportError(error: unknown): {
         response.limit > 0
           ? response.limit
           : undefined;
-      const safe = importError(code, limit).getResponse() as {
-        code: string;
-        message: string;
+      const retryAfterSeconds =
+        'retryAfterSeconds' in response
+          ? boundedRetryAfterSeconds(response.retryAfterSeconds)
+          : undefined;
+      const safe = importError(code, limit).getResponse() as SafeImportError;
+      return {
+        code,
+        message: safe.message,
+        ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
       };
-      return { code, message: safe.message };
     }
     if (
       typeof response === 'object' &&

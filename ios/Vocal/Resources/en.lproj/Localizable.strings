@@ -398,3 +398,8 @@
 "settings_terms" = "Terms";
 "settings_accent" = "Accent color";
 "settings_apply" = "Apply";
+"settings_other_platforms" = "MusicMute on other platforms";
+"platform_web_title" = "MusicMute on the web";
+"platform_web_description" = "Open the full MusicMute app in your browser.";
+"platform_macos_title" = "MusicMute for macOS";
+"platform_macos_description" = "Check the MusicMute Downloads page for future macOS availability.";

@@ -168,7 +168,8 @@ class BenchmarkFileTests(unittest.TestCase):
                         not direct,
                     )
                     self.assertFalse((attempt / "prepared.wav").exists())
-                    self.assertTrue((attempt / f"input.{extension}").is_file())
+                    self.assertFalse((attempt / f"input.{extension}").exists())
+                    self.assertEqual(list(work.iterdir()), [])
                     self.assertTrue(fixture.is_file())
 
     def test_code_digest_changes_with_candidate_source(self) -> None:

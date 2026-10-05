@@ -1,0 +1,22 @@
+:root {
+  color-scheme: dark;
+  font:
+    16px/1.6 system-ui,
+    sans-serif;
+  color: #e2eee9;
+  background: #101b18;
+}
+main {
+  max-width: 720px;
+  margin: 48px auto;
+  padding: 0 24px 48px;
+}
+h1,
+h2 {
+  line-height: 1.2;
+  color: #96e6c7;
+}
+h2 {
+  margin-top: 32px;
+  font-size: 1.25rem;
+}

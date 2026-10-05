@@ -76,5 +76,11 @@ test("zero processing quotas render and full allowances arrive by realtime snaps
   ).toBeInTheDocument();
   expect(screen.getByRole("progressbar")).toHaveAttribute("max", "4");
   expect(screen.queryByText("monthly_limit_reached")).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: "See macOS downloads" }),
+  ).toHaveAttribute("href", "https://music-mute.com/#downloads");
+  expect(
+    screen.getByRole("link", { name: "See macOS downloads" }),
+  ).toHaveAttribute("rel", "noopener noreferrer");
   expect(fetch).not.toHaveBeenCalled();
 });

@@ -1,6 +1,6 @@
 export type SupportedProvider = 'password' | 'google.com' | 'apple.com';
 export type Platform = 'android' | 'ios';
-export type ClientPlatform = Platform | 'web';
+export type ClientPlatform = Platform | 'macos' | 'web';
 
 export interface VerifiedIdentity {
   uid: string;

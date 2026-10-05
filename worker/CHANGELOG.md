@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.3 — 2026-10-02
+
+- Remove completed installation/update archives and extracted staging copies;
+  retain interrupted recovery state and report deferred cleanup without undoing
+  a successful update.
+- Remove generated qualification audio after enrollment and unused intermediate
+  files after qualification/benchmarks; preserve requested saved audio and reports.
+- Add `mw cleanup --dry-run` and `mw cleanup --apply` for existing scratch,
+  old qualification media and caches. Keep the active release plus one verified
+  older rollback, and protect credentials, models, job media and recovery journals.
+- Maintain scratch at service startup and trim reusable caches to 256 MiB;
+  expire caches after thirty days and scratch/qualification leftovers after one day.
+  Windows LocalService cleanup stays within writable state directories.
+
 ## 0.1.2 — 2026-09-30
 
 - Replace S3 version IDs with quoted ETags and checksum-bound create-only uploads.

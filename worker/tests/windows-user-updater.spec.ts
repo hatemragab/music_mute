@@ -93,7 +93,7 @@ describe("Windows signed update checks", () => {
   it("routes manual activation and refuses conflicting check/force flags", async () => {
     const f = fixture();
     const update = vi.fn(async () => ({
-      status: "updated",
+      status: "updated" as const,
       releaseVersion: "0.2.0",
       sequence: 7,
       capacityRequalificationRequired: true,
@@ -186,84 +186,168 @@ describe("Windows signed update checks", () => {
       expect(() => assertWindowsUpdateRequestPath(layout, path)).toThrow();
   });
 
-  it("downloads the signed archive and commits only the expected native release and sequence", async () => {
-    const f = fixture();
-    const root = await mkdtemp(join(tmpdir(), "mw-update-flow-"));
-    try {
-      const layout = { ...f.options.layout, serviceRoot: root };
-      const checked = await checkWindowsUserUpdate(f.options);
-      let active = "0.1.0",
-        highest = 6;
-      const downloadArtifact = vi.fn(async (args: { outputPath: string }) => ({
-        path: args.outputPath,
-        bytes: 12345,
-        sha256: "a".repeat(64),
-        reused: false,
-      }));
-      const prepareRelease = vi.fn(async (args: { outputRoot: string }) => ({
-        path: join(args.outputRoot, "release-0.2.0"),
-        releaseVersion: "0.2.0",
-        reused: false,
-      }));
-      const manager = vi.fn(async (_script: string, args: string[]) => {
-        const request = JSON.parse(
-          await readFile(args[args.indexOf("-UpdateRequest") + 1]!, "utf8"),
+  it.each([false, true])(
+    "commits the expected native release and sequence (cleanup failure=%s)",
+    async (cleanupFails) => {
+      const f = fixture();
+      const root = await mkdtemp(join(tmpdir(), "mw-update-flow-"));
+      try {
+        const layout = { ...f.options.layout, serviceRoot: root };
+        const checked = await checkWindowsUserUpdate(f.options);
+        let active = "0.1.0",
+          highest = 6;
+        const downloadArtifact = vi.fn(
+          async (args: { outputPath: string }) => ({
+            path: args.outputPath,
+            bytes: 12345,
+            sha256: "a".repeat(64),
+            reused: false,
+          }),
         );
-        expect(request).toMatchObject({
-          schemaVersion: 1,
-          previousVersion: "0.1.0",
-          force: true,
-          configSha256: "b".repeat(64),
-        });
-        expect(JSON.stringify(request)).not.toContain("signed-grant");
-        active = "0.2.0";
-        highest = 7;
-      });
-      const result = await updateWindowsUserWorker({
-        ...f.options,
-        layout,
-        force: true,
-        check: async () => checked,
-        pending: async () => false,
-        digest: async () => "b".repeat(64),
-        availableDiskBytes: async () => 1e12,
-        writeRecord: async (path, value) => {
-          await writeFile(path, JSON.stringify(value), {
-            flag: "wx",
-            mode: 0o600,
-          });
-        },
-        downloadArtifact,
-        prepareRelease,
-        verifyRelease: async () => ({
-          schemaVersion: 1,
-          platform: "win32",
-          architecture: "x64",
+        const prepareRelease = vi.fn(async (args: { outputRoot: string }) => ({
+          path: join(args.outputRoot, "release-0.2.0"),
           releaseVersion: "0.2.0",
-          entries: [],
+          reused: false,
+        }));
+        const manager = vi.fn(async (_script: string, args: string[]) => {
+          const request = JSON.parse(
+            await readFile(args[args.indexOf("-UpdateRequest") + 1]!, "utf8"),
+          );
+          expect(request).toMatchObject({
+            schemaVersion: 1,
+            previousVersion: "0.1.0",
+            force: true,
+            configSha256: "b".repeat(64),
+          });
+          expect(JSON.stringify(request)).not.toContain("signed-grant");
+          active = "0.2.0";
+          highest = 7;
+        });
+        const result = await updateWindowsUserWorker({
+          ...f.options,
+          layout,
+          force: true,
+          check: async () => checked,
+          pending: async () => false,
+          digest: async () => "b".repeat(64),
+          availableDiskBytes: async () => 1e12,
+          writeRecord: async (path, value) => {
+            await writeFile(path, JSON.stringify(value), {
+              flag: "wx",
+              mode: 0o600,
+            });
+          },
+          downloadArtifact,
+          prepareRelease,
+          verifyRelease: async () => ({
+            schemaVersion: 1,
+            platform: "win32",
+            architecture: "x64",
+            releaseVersion: "0.2.0",
+            entries: [],
+          }),
+          manager,
+          ...(cleanupFails
+            ? {
+                removeTransaction: async () => {
+                  throw new Error("private cleanup failure");
+                },
+              }
+            : {}),
+          activeVersion: async () => active,
+          state: async () => ({
+            schemaVersion: 1,
+            highestSequence: highest,
+            quarantinedVersions: [],
+          }),
+        });
+        expect(result).toMatchObject({
+          status: "updated",
+          releaseVersion: "0.2.0",
+          sequence: 7,
+        });
+        expect(downloadArtifact).toHaveBeenCalledWith(
+          expect.objectContaining({
+            expectedSha256: "a".repeat(64),
+            expectedContentType: "application/zip",
+          }),
+        );
+        expect(manager).toHaveBeenCalledOnce();
+        if (cleanupFails) {
+          expect(result.cleanupWarning).toBe(
+            "Update scratch cleanup deferred; run mw cleanup --apply",
+          );
+          expect(await readdir(root)).toHaveLength(1);
+        } else {
+          expect(result.cleanupWarning).toBeUndefined();
+          expect(await readdir(root)).toEqual([]);
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("retains update scratch while recovery is pending", async () => {
+    const f = fixture();
+    const root = await mkdtemp(join(tmpdir(), "mw-update-pending-"));
+    try {
+      const checked = await checkWindowsUserUpdate(f.options);
+      let pending = false;
+      const removeTransaction = vi.fn(async () => {});
+      await expect(
+        updateWindowsUserWorker({
+          ...f.options,
+          layout: { ...f.options.layout, serviceRoot: root },
+          check: async () => checked,
+          pending: async () => pending,
+          digest: async () => "b".repeat(64),
+          availableDiskBytes: async () => 1e12,
+          writeRecord: async (path, value) => {
+            await writeFile(path, JSON.stringify(value), { flag: "wx" });
+          },
+          downloadArtifact: async () => {
+            pending = true;
+            throw new Error("interrupted update");
+          },
+          removeTransaction,
         }),
-        manager,
-        activeVersion: async () => active,
-        state: async () => ({
-          schemaVersion: 1,
-          highestSequence: highest,
-          quarantinedVersions: [],
-        }),
-      });
-      expect(result).toMatchObject({
-        status: "updated",
-        releaseVersion: "0.2.0",
-        sequence: 7,
-      });
-      expect(downloadArtifact).toHaveBeenCalledWith(
-        expect.objectContaining({
-          expectedSha256: "a".repeat(64),
-          expectedContentType: "application/zip",
-        }),
-      );
-      expect(manager).toHaveBeenCalledOnce();
-      expect(await readdir(root)).toEqual([]);
+      ).rejects.toThrow("interrupted update");
+      expect(removeTransaction).not.toHaveBeenCalled();
+      expect(await readdir(root)).toHaveLength(1);
     } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves the update error if scratch cleanup also fails", async () => {
+    const f = fixture();
+    const root = await mkdtemp(join(tmpdir(), "mw-update-cleanup-failed-"));
+    const warning = vi
+      .spyOn(process, "emitWarning")
+      .mockImplementation(() => {});
+    try {
+      const checked = await checkWindowsUserUpdate(f.options);
+      await expect(
+        updateWindowsUserWorker({
+          ...f.options,
+          layout: { ...f.options.layout, serviceRoot: root },
+          check: async () => checked,
+          pending: async () => false,
+          digest: async () => "b".repeat(64),
+          availableDiskBytes: async () => 0,
+          removeTransaction: async () => {
+            throw new Error("cleanup error");
+          },
+        }),
+      ).rejects.toThrow("Insufficient disk space");
+      expect(warning).toHaveBeenCalledWith(
+        "Update scratch cleanup deferred; run mw cleanup --apply",
+        { code: "WORKER_CLEANUP_DEFERRED" },
+      );
+      expect(await readdir(root)).toHaveLength(1);
+    } finally {
+      warning.mockRestore();
       await rm(root, { recursive: true, force: true });
     }
   });

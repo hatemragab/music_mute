@@ -384,6 +384,11 @@ try {
       Write-ActiveVersion $StateRoot $Version
       if ($Updating) { Copy-PrivateFile ([string]$UpdatePlan.statePath) (Join-Path $Root 'service\update-state.json') }
       Complete-OperationJournal $Root
+      try {
+        Remove-QualificationWorkspace $Root $QualificationReport
+      } catch {
+        Write-Warning 'Completed qualification media cleanup was deferred; installation remains committed.'
+      }
     }
   } catch {
     try {
@@ -392,6 +397,9 @@ try {
       Write-Warning 'Automatic rollback failed. The durable journal is preserved; run Recover before further mutations.'
     }
     if (-not $BenchmarkOnly -and (Test-Path -LiteralPath $QualificationReport -PathType Leaf)) {
+      try { Remove-QualificationWorkspace $Root $QualificationReport } catch {
+        Write-Warning 'Failed qualification media cleanup was deferred.'
+      }
       Remove-Item -LiteralPath $QualificationReport -Force -ErrorAction SilentlyContinue
     }
     if ($QualificationExported -and (Test-Path -LiteralPath $QualificationOutputPath -PathType Leaf)) {

@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { Types } from 'mongoose';
+import { mongo, Types } from 'mongoose';
 import { DEFAULT_ACCOUNT_POLICY_VALUES } from './account-policy.schema.js';
 import {
   AccountPolicyService,
@@ -41,6 +41,69 @@ function fixture(options?: {
 }
 
 describe('account policy', () => {
+  it('preserves the exact MongoDB query error and retry labels inside a session', async () => {
+    const error = new mongo.MongoServerError({
+      message: 'Synthetic write conflict',
+      code: 112,
+    });
+    error.addErrorLabel('TransientTransactionError');
+    const policyQuery = query(null);
+    policyQuery.lean.mockRejectedValue(error);
+    const service = fixture();
+    Object.assign(service, {
+      policies: { findById: vi.fn(() => policyQuery) },
+    });
+    const session = {} as never;
+    await expect(service.global(session)).rejects.toBe(error);
+    expect(policyQuery.session).toHaveBeenCalledWith(session);
+    expect(error.hasErrorLabel('TransientTransactionError')).toBe(true);
+  });
+
+  it('sanitizes database query failures outside a session', async () => {
+    const error = new mongo.MongoServerError({
+      message: 'Synthetic database failure',
+      code: 112,
+    });
+    error.addErrorLabel('TransientTransactionError');
+    const policyQuery = query(null);
+    policyQuery.lean.mockRejectedValue(error);
+    const service = fixture();
+    Object.assign(service, {
+      policies: { findById: vi.fn(() => policyQuery) },
+    });
+    await expect(service.global()).rejects.toMatchObject({
+      response: {
+        code: 'DEPENDENCY_UNAVAILABLE',
+        message: 'Service unavailable',
+      },
+    });
+    expect(policyQuery.session).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, {} as never])(
+    'sanitizes malformed stored policy independently of transaction query errors (%s)',
+    async (session) => {
+      const service = fixture({
+        global: {
+          ...DEFAULT_ACCOUNT_POLICY_VALUES,
+          revision: 1,
+          acceptNewJobs: true,
+          maintenanceMessageEn: '',
+          maintenanceMessageAr: null,
+          updatedBy: 'system',
+          updatedAt: new Date(),
+          monthlyProcessingSeconds: 0,
+        },
+      });
+      await expect(service.global(session)).rejects.toMatchObject({
+        response: {
+          code: 'DEPENDENCY_UNAVAILABLE',
+          message: 'Service unavailable',
+        },
+      });
+    },
+  );
+
   it('publishes the accepted standard defaults without inserting a document', async () => {
     await expect(fixture().current()).resolves.toMatchObject({
       plan: 'standard',

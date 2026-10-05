@@ -66,6 +66,8 @@ export interface JobListView {
 export interface MediaImportView {
   importId: string;
   sourceTitle: string | null;
+  sourceUrl?: string | null;
+  trimEnabled?: boolean;
   status:
     | "queued"
     | "downloading"

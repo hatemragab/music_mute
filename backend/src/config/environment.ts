@@ -2,6 +2,8 @@ import Joi from 'joi';
 import { PUBLIC_POLICY_DEFAULTS } from './public-policy.js';
 
 export const AUTH_RATE_LIMIT_DEFAULTS = {
+  DESKTOP_GOOGLE_EXCHANGE_IP_PER_MINUTE: 10,
+  DESKTOP_GOOGLE_EXCHANGE_SERVICE_PER_MINUTE: 300,
   AUTH_UID_PER_MINUTE: 120,
   PROFILE_UID_PER_MINUTE: 5,
   PROFILE_IP_PER_MINUTE: 10,
@@ -95,6 +97,13 @@ const schema = Joi.object({
     .optional(),
   FIREBASE_PROJECT_ID: Joi.string().trim().min(1).required(),
   FIREBASE_WEB_API_KEY: Joi.string().trim().min(1).required(),
+  GOOGLE_DESKTOP_CLIENT_ID: Joi.string()
+    .pattern(/^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com(?![\s\S])/)
+    .max(256)
+    .optional(),
+  GOOGLE_DESKTOP_CLIENT_SECRET: Joi.string()
+    .pattern(/^[\x21-\x7e]{1,256}(?![\s\S])/)
+    .optional(),
   FIREBASE_SERVICE_ACCOUNT_BASE64: Joi.string().trim().base64().optional(),
   RATE_LIMIT_HASH_SECRET: Joi.string().required(),
   GOOGLE_APPLICATION_CREDENTIALS: Joi.string().min(1).optional(),
@@ -198,6 +207,12 @@ const schema = Joi.object({
   RATE_IP_CEILING_PER_MINUTE: allowance(600),
   RATE_TTL_MS: Joi.number().integer().min(1000).max(3600000).default(60000),
   AUTH_UID_PER_MINUTE: allowance(AUTH_RATE_LIMIT_DEFAULTS.AUTH_UID_PER_MINUTE),
+  DESKTOP_GOOGLE_EXCHANGE_IP_PER_MINUTE: allowance(
+    AUTH_RATE_LIMIT_DEFAULTS.DESKTOP_GOOGLE_EXCHANGE_IP_PER_MINUTE,
+  ),
+  DESKTOP_GOOGLE_EXCHANGE_SERVICE_PER_MINUTE: allowance(
+    AUTH_RATE_LIMIT_DEFAULTS.DESKTOP_GOOGLE_EXCHANGE_SERVICE_PER_MINUTE,
+  ),
   PROCESSING_READ_UID_PER_MINUTE: allowance(
     AUTH_RATE_LIMIT_DEFAULTS.PROCESSING_READ_UID_PER_MINUTE,
   ),
@@ -307,6 +322,13 @@ export function validateEnvironment(
     );
   }
   const env = result.value as Record<string, unknown>;
+  if (
+    Boolean(env.GOOGLE_DESKTOP_CLIENT_ID) !==
+    Boolean(env.GOOGLE_DESKTOP_CLIENT_SECRET)
+  )
+    throw new Error(
+      'Invalid environment: GOOGLE_DESKTOP_CLIENT_ID, GOOGLE_DESKTOP_CLIENT_SECRET',
+    );
   const publicSiteOrigin = new URL(String(env.PUBLIC_SITE_ORIGIN));
   if (
     publicSiteOrigin.origin !== env.PUBLIC_SITE_ORIGIN ||

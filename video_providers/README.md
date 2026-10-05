@@ -1,20 +1,26 @@
 # Audio acquisition providers
 
-URL imports use SaaS providers behind private adapters. The private
-[router](router/README.md) is configured to send YouTube items to [JoJAPI](jojapi/README.md)
-for the [owner-authorized production test activation](jojapi/docs/ACTIVATION-2026-10-01.md)
-and other enabled items to [VideoScale](videoscale/README.md). The reproduced
-vendor source-version mismatch in the [earlier qualification record](jojapi/docs/DEPLOYMENT-2026-10-01.md)
-remains unresolved; valid transfer and media probing do not establish requested-source
-identity. [Tunelio](tunelio/README.md) remains deployed without automatic fallback.
-Each provider owns
+URL imports use private audio acquisition adapters. The private
+[router](router/README.md) sends YouTube items to [yt-dlp](ytdlp/README.md)
+and other enabled items to [VideoScale](videoscale/README.md). The
+[2026-10-03 deployment record](ytdlp/docs/DEPLOYMENT-2026-10-03.md) distinguishes
+live native-audio, retry and concurrency proof from remaining verification.
+[Tunelio](tunelio/README.md) remains deployed without automatic fallback. The
+historical JoJAPI source-version mismatch remains unresolved; its
+[earlier qualification record](jojapi/docs/DEPLOYMENT-2026-10-01.md) does not
+establish requested-source identity. Each provider owns
 its source, tests, configuration and documentation under
 `video_providers/<provider>/`.
+
+The owner-requested yt-dlp adapter uses Deno, bundled EJS, a persistent private
+PO Token provider and DataImpulse sticky Residential/Mobile sessions. It downloads
+original native audio without video or adapter FFmpeg processing. Credentials stay
+exclusive to the adapter; there is no device extraction path.
 
 ## Request and file flow
 
 1. Clients submit an authorized URL import to NestJS through `POST /media-imports`.
-   Existing realtime snapshots report progress; clients never call the SaaS.
+   Existing realtime snapshots report progress; clients never call the source provider.
 2. NestJS's `AudioAcquisitionClient` calls the private router's
    `POST /audio-imports` with `url`, `max_bytes`, `max_duration_seconds`
    and a shared service bearer key.
@@ -23,6 +29,9 @@ its source, tests, configuration and documentation under
    HTTPS delivery. It returns audio bytes, not a provider delivery URL. Neither
    the router nor the adapters automatically resubmit or switch providers after
    an acquisition failure.
+   The yt-dlp adapter uses NestJS's existing bounded pre-upload retries, carrying
+   generic trusted attempt/deadline headers through the router. Residential/Mobile
+   selection remains inside that adapter; NestJS has no proxy/vendor branches.
 4. NestJS counts/hashes the transfer into bounded temporary storage, probes
    audio and enforces duration/size, then uploads the validated input to private
    R2 and confirms the normal processing job.
@@ -55,7 +64,8 @@ retained objects under account lifecycle policy, not VPS scratch.
 NestJS has only `AUDIO_ACQUISITION_API_URL` and
 `AUDIO_ACQUISITION_API_KEY` for provider access. Its URL points to the private
 `music-mute-audio-router` service. The router has separate URL/key pairs for the
-YouTube and other-site adapters; it never receives SaaS credentials. The JoJAPI
+YouTube and other-site adapters; it never receives vendor credentials. DataImpulse
+credentials belong only in `music-mute-ytdlp`. The JoJAPI
 key belongs only in `music-mute-jojapi`; the VideoScale credential remains only
 in `music-mute-videoscale`. Run the router and adapters as private CapRover apps without public
 exposure or published ports. The adapters and router have no MongoDB, R2 or
@@ -88,17 +98,16 @@ available. Twenty requests start over at least three seconds under the five-per-
 rolling-second ceiling, then up to twenty downloads can remain active together.
 
 The router and adapters use the same shared admission module. The router and
-VideoScale allow five starts per second; selected JoJAPI allows one:
+VideoScale allow twenty active acquisitions and five starts per second:
 
 ```dotenv
 ACQUISITION_CONCURRENCY=20
 ACQUISITION_REQUESTS_PER_SECOND=5
 ```
 
-Use concurrency twenty in all active private apps. Configure JoJAPI with
-`ACQUISITION_REQUESTS_PER_SECOND=1` to respect its published plan limit; its code
-also caps any larger shared setting at one. Concurrent downloads still use the
-shared twenty-request capacity. The backend retains its generic import settings:
+The selected yt-dlp adapter allows ten active acquisitions and two starts per
+second. Its gate spaces starts while downloads overlap. The backend retains its
+generic import settings:
 
 ```dotenv
 URL_IMPORT_CONCURRENCY=20
@@ -106,23 +115,29 @@ URL_IMPORT_REQUESTS_PER_SECOND=5
 URL_IMPORT_MAX_OUTSTANDING=100
 ```
 
-The start ceiling uses the owner's stated paid-plan allowance; source changes do
-not establish the subscribed vendor plan or its live availability. Upstream
+The deployed yt-dlp adapter's private override provides 2 GiB scratch and a 4 GiB
+memory ceiling. Its four trusted attempts have thirty-second ceilings and share
+a 120-second acquisition budget from the first active claim; its one-second retry
+hint shortens existing backoff without increasing the attempt count. Attempts
+1–3 use Residential and attempt 4 uses Mobile. Router/backend capacity settings
+remain unchanged.
+
+Each provider's ceiling follows its qualified operating configuration; source
+changes do not establish a subscribed plan or its live availability. Upstream
 cooldowns pause new paid starts within each operation's original deadline.
 Waiting never repeats an already submitted paid request or switches providers.
 
-Each adapter's deployment override provides 2 GiB dedicated temporary storage
+Existing SaaS adapter deployment overrides provide 2 GiB dedicated temporary storage
 and a 3 GiB memory limit for twenty bounded 100 MB files plus free-space headroom.
 Scratch reservations happen before paid work and account for allocated writes.
 The backend keeps container-local disk reservations too; allow approximately
 4 GB plus its 128 MB headroom for worst-case concurrent transfer reservations.
 Memory limits are ceilings, not a claim that the host has this capacity.
 
-To activate this change, deploy the updated adapters with their resource
-overrides, then the router, then the backend and clients. Explicit environment
-values from earlier deployments override the new defaults. No production
-configuration is changed by these local source edits. All three private apps must
-remain one replica for their process-local admission and scratch accounting;
+Deploy adapters with their resource overrides, then the router and any required
+backend changes. Explicit environment values override source defaults. See dated
+deployment evidence for the actual selected route and runtime checks. Private apps
+must remain one replica for their process-local admission and scratch accounting;
 the backend's BullMQ concurrency and start limiter are Redis-global.
 
 API preflight read the [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
@@ -133,25 +148,25 @@ The existing private 503/Retry-After dependency contract is retained for upstrea
 
 ## Current support and verification
 
-The owner-authorized YouTube test configuration uses JoJAPI, which admits public single-item
-YouTube URLs and requests highest native audio without an additional paid metadata
-call or audio conversion. Live testing reproduced audio belonging to a different
-requested video, so valid format and media probing do not qualify source identity.
-The owner explicitly accepted test activation while that issue remains unresolved;
-see the [activation evidence](jojapi/docs/ACTIVATION-2026-10-01.md). A vendor fix
-and fresh source correlation are still needed to establish correct-source acquisition.
-Its direct Google media download is also subject to source-IP,
-expiry and availability restrictions. VideoScale accepts
+The selected yt-dlp adapter admits public single-item YouTube URLs and prefers
+medium native WebM/Opus, then other WebM/Opus tiers and AAC/M4A. It rejects
+playlists, live streams, video-containing formats and account-restricted sources.
+Both proxy plans and ten concurrent logical acquisitions passed a bounded short
+clip qualification; this is not universal source or sustained-capacity proof.
+Native Google media delivery remains subject to source-IP, expiry and availability
+restrictions. VideoScale accepts
 the other public single-item URLs in the shared catalog, including
 Instagram/Reels, TikTok, Vimeo, SoundCloud and Facebook/Reels. Each request must
 expose eligible separate audio. VideoScale's existing direct YouTube capability
-is retained, while the configured YouTube test route selects JoJAPI. Enabled URL admission
+is retained, while the configured YouTube route selects yt-dlp. Enabled URL admission
 is not evidence of successful acquisition; see the dated provider evidence for
 the exact sources and journeys verified.
 See [site policy](../docs/url-imports/supported-sites.md). No provider guarantees
 unlimited requests, uninterrupted availability or immunity to source blocking.
 
 - [VideoScale implementation and setup](videoscale/README.md)
+- [yt-dlp adapter, DataImpulse settings and qualification limits](ytdlp/README.md)
+- [yt-dlp deployment and live qualification, 2026-10-03](ytdlp/docs/DEPLOYMENT-2026-10-03.md)
 - [JoJAPI implementation and setup](jojapi/README.md)
 - [JoJAPI owner-authorized production test activation, 2026-10-01](jojapi/docs/ACTIVATION-2026-10-01.md)
 - [JoJAPI deployment, source mismatch and restored routing, 2026-10-01](jojapi/docs/DEPLOYMENT-2026-10-01.md)

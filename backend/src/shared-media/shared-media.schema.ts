@@ -41,8 +41,20 @@ export class SharedMediaSource {
   @Prop({ required: true, maxlength: 36 }) generation!: string;
   @Prop({ required: true, enum: ['acquiring', 'ready', 'failed'] }) state!:
     'acquiring' | 'ready' | 'failed';
-  @Prop({ type: MongoSchema.Types.ObjectId, required: true })
-  producerImportId!: Types.ObjectId;
+  @Prop({ type: MongoSchema.Types.ObjectId, default: null })
+  producerImportId!: Types.ObjectId | null;
+  @Prop({ type: MongoSchema.Types.ObjectId, default: null })
+  communityContributionId?: Types.ObjectId | null;
+  @Prop({ type: Date, default: null })
+  communityLeaseUntil?: Date | null;
+  @Prop({
+    type: String,
+    enum: ['trusted', 'community_contributed'],
+    default: 'trusted',
+  })
+  provenance?: 'trusted' | 'community_contributed';
+  @Prop({ type: objectIdentity, default: null })
+  pendingInput?: ObjectIdentity | null;
   @Prop({ type: String, default: null }) inputKey!: string | null;
   @Prop({ type: MongoSchema.Types.Mixed, default: null })
   input!: InputDeclaration | null;
@@ -76,8 +88,22 @@ export class SharedMediaResult {
   @Prop({ required: true, maxlength: 36 }) sourceGeneration!: string;
   @Prop({ required: true, enum: ['processing', 'ready', 'failed'] }) state!:
     'processing' | 'ready' | 'failed';
-  @Prop({ type: MongoSchema.Types.ObjectId, required: true })
-  producerImportId!: Types.ObjectId;
+  @Prop({ type: MongoSchema.Types.ObjectId, default: null })
+  producerImportId!: Types.ObjectId | null;
+  @Prop({ type: MongoSchema.Types.ObjectId, default: null })
+  communityContributionId?: Types.ObjectId | null;
+  @Prop({
+    type: String,
+    enum: ['trusted', 'community_contributed'],
+    default: 'trusted',
+  })
+  provenance?: 'trusted' | 'community_contributed';
+  @Prop({ type: String, default: null, match: /^[a-f0-9]{64}$/ })
+  derivedFromResultKey?: string | null;
+  @Prop({ type: objectIdentity, default: null })
+  derivedFromObject?: ObjectIdentity | null;
+  @Prop({ type: String, default: null, enum: ['full-mp3-gap-trim-v1', null] })
+  derivationProfileId?: 'full-mp3-gap-trim-v1' | null;
   @Prop({ type: MongoSchema.Types.ObjectId, default: null })
   producerJobId!: Types.ObjectId | null;
   @Prop({ type: MongoSchema.Types.Mixed, required: true })
@@ -99,6 +125,11 @@ export const SharedMediaResultSchema =
   SchemaFactory.createForClass(SharedMediaResult);
 SharedMediaResultSchema.index({ state: 1, producerJobId: 1 });
 SharedMediaResultSchema.index({ state: 1, _id: 1 });
+SharedMediaResultSchema.index({
+  derivationProfileId: 1,
+  state: 1,
+  publicationLeaseUntil: 1,
+});
 
 /** Permanent exact-key ledger, including uncertain PUT/copy outcomes. */
 @Schema({

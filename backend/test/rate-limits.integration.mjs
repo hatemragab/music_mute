@@ -10,6 +10,8 @@ import {
   WORKER_ROUTE,
 } from '../dist/worker-fleet/auth/worker-auth.decorators.js';
 import { AUTH_OPERATION } from '../dist/auth/auth.decorators.js';
+import { DesktopGoogleTokenExchangeService } from '../dist/auth/desktop-google-token-exchange.service.js';
+import { RateLimitKeys } from '../dist/rate-limits/rate-limit-keys.js';
 import { Redis } from 'ioredis';
 import { RateBudgetService } from '../dist/rate-limits/rate-budget.service.js';
 import { RedisThrottlerStorage } from '../dist/rate-limits/redis-throttler.storage.js';
@@ -132,6 +134,59 @@ test('shares rolling rate budgets atomically through Redis', async (t) => {
       await firstClient.quit();
       const afterRestart = new RateBudgetService(client());
       assert.equal((await afterRestart.reserve(bucket)).allowed, false);
+    },
+  );
+
+  await t.test(
+    'shares public Desktop Google exchange admission across instances without upstream credentials',
+    async () => {
+      const config = new ConfigService({
+        FIREBASE_PROJECT_ID: 'demo-desktop-exchange-fixture',
+        RATE_LIMIT_HASH_SECRET: 'fixture-only-desktop-exchange-hmac',
+        DESKTOP_GOOGLE_EXCHANGE_IP_PER_MINUTE: 2,
+        DESKTOP_GOOGLE_EXCHANGE_SERVICE_PER_MINUTE: 1,
+      });
+      const createExchange = () =>
+        new DesktopGoogleTokenExchangeService(
+          config,
+          new RateBudgetService(client()),
+          new RateLimitKeys(config),
+        );
+      const declaration = {
+        authorizationCode: 'fixture-code',
+        codeVerifier: 'v'.repeat(43),
+        redirectUri: 'http://127.0.0.1:49153/oauth2callback',
+      };
+      const results = await Promise.allSettled([
+        createExchange().exchange(declaration, '192.0.2.1'),
+        createExchange().exchange(declaration, '192.0.2.2'),
+      ]);
+      // Exactly one admission reaches safe config-missing failure; the other is
+      // rejected by the shared service budget. No Google client is configured.
+      assert.ok(results.every((result) => result.status === 'rejected'));
+      const statuses = results
+        .map((result) => result.reason.getStatus())
+        .sort();
+      assert.deepEqual(statuses, [429, 503]);
+      const quota = results.find((result) => result.reason.getStatus() === 429);
+      assert.ok(quota.reason.retryAfterSeconds > 0);
+      // A refused multi-bucket reservation must not consume the loser's IP.
+      const admittedIndex = results.findIndex(
+        (result) => result.reason.getStatus() === 503,
+      );
+      const deniedIp = admittedIndex === 0 ? '192.0.2.2' : '192.0.2.1';
+      const keys = new RateLimitKeys(config);
+      const ipBudget = [
+        {
+          key: keys.bucket('desktop-google-exchange-ip', deniedIp),
+          limit: 2,
+          windowMs: 60_000,
+        },
+      ];
+      const budgets = new RateBudgetService(client());
+      assert.equal((await budgets.reserve(ipBudget)).allowed, true);
+      assert.equal((await budgets.reserve(ipBudget)).allowed, true);
+      assert.equal((await budgets.reserve(ipBudget)).allowed, false);
     },
   );
 

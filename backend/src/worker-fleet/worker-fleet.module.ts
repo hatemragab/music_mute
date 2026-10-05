@@ -7,6 +7,8 @@ import { StorageTransfersModule } from '../storage/storage-transfers.module.js';
 import { UsersModule } from '../users/users.module.js';
 import { WorkerAttemptController } from './attempts/worker-attempt.controller.js';
 import { WorkerAttemptService } from './attempts/worker-attempt.service.js';
+import { JobRenditionService } from './attempts/job-rendition.service.js';
+import { ProcessingTransactions } from '../processing/processing-transactions.js';
 import { AdminWorkerControlController } from './control/admin-worker-control.controller.js';
 import { WorkerConfigController } from './control/worker-config.controller.js';
 import { WorkerControlService } from './control/worker-control.service.js';
@@ -61,6 +63,8 @@ import { WorkerHintController } from './control/worker-hint.controller.js';
     WorkerClaimService,
     WorkerLeaseService,
     WorkerAttemptService,
+    JobRenditionService,
+    ProcessingTransactions,
     WorkerControlService,
     WorkerRecoveryService,
     WorkerRecoveryMaintenanceService,

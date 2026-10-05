@@ -178,7 +178,16 @@ WindowProgress = Callable[[int, int], None]
 
 
 class RuntimePipeline:
-    def __init__(self, separator_factory: SeparatorFactory | None = None) -> None:
+    def __init__(
+        self,
+        separator_factory: SeparatorFactory | None = None,
+        *,
+        model_resolver: Callable[[Path], Path] | None = None,
+        model_validator: Callable[[Path], Path] | None = None,
+    ) -> None:
+        # Native local applications may own installation validation separately.
+        # Fleet callers and wire requests cannot change the default full verification.
+        self._model_resolver = model_resolver
         self._startup_progress: Progress | None = None
         self._separator_factory = separator_factory or (
             lambda provider, model, device: KimSeparator(
@@ -186,6 +195,7 @@ class RuntimePipeline:
                 model,
                 directml_device_id=device,
                 on_startup_stage=self._startup_progress,
+                model_validator=model_validator,
             )
         )
         self._separator: VocalSeparator | None = None
@@ -433,7 +443,7 @@ class RuntimePipeline:
                     "RUNTIME_CONFIG_CHANGED", "A warm child cannot change model cache"
                 )
             return self._separator_key[1]
-        model = verified_cached_model(cache_root)
+        model = (self._model_resolver or verified_cached_model)(cache_root)
         self._model_cache_root = cache_root
         return model
 

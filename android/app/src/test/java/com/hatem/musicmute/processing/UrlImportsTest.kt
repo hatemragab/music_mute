@@ -50,14 +50,19 @@ class UrlImportsTest {
 
     @Test fun acceptsPublicProviderLinksWithoutDroppingMediaParameters() {
         for (url in listOf(
-            "https://youtu.be/UXqq0ZvbOnk",
-            "https://www.youtube.com/watch?v=UXqq0ZvbOnk",
-            "https://www.youtube.com/shorts/UXqq0ZvbOnk",
             "https://www.facebook.com/share/v/19duj8sfLg/",
             "https://www.facebook.com/watch/?v=123456789",
             "https://benprunty.bandcamp.com/track/lanius-battle",
             "https://www.mixcloud.com/dholbach/cryptkeeper/",
         )) assertEquals(url, UrlImportSource.canonical(url))
+    }
+
+    @Test fun canonicalizesYouTubeAliasesToOneSourceBeforeSubmission() {
+        for (url in listOf(
+            "https://youtu.be/UXqq0ZvbOnk",
+            "https://www.youtube.com/watch?v=UXqq0ZvbOnk",
+            "https://www.youtube.com/shorts/UXqq0ZvbOnk",
+        )) assertEquals("https://www.youtube.com/watch?v=UXqq0ZvbOnk", UrlImportSource.canonical(url))
     }
 
     @Test fun rejectsUnsafeUrlsBeforeSubmission() {

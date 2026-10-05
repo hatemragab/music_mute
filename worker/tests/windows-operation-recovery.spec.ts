@@ -59,6 +59,46 @@ Remove-Item -LiteralPath (Join-Path $Root 'state\\machine.credential')
 describe.skipIf(process.platform !== "win32")(
   "native Windows durable operation recovery",
   () => {
+    it.each([false, true])(
+      "removes committed qualification media while preserving reports (legacy=%s)",
+      async (legacy) => {
+        const root = await mkdtemp(join(tmpdir(), "mw-qualification-cleanup-"));
+        const qualificationId = randomUUID();
+        const attemptId = randomUUID();
+        try {
+          await execute(
+            shell,
+            script(
+              root,
+              `
+$Work=Join-Path $Root 'state\\attempts'
+$Workspace=Join-Path $Work 'qualification-${qualificationId}'
+$Output=Join-Path $Workspace '${legacy ? `${attemptId}\\output\\vocals.mp3` : "vocals.mp3"}'
+New-Item -ItemType Directory -Path (Split-Path -Parent $Output) -Force | Out-Null
+[IO.File]::WriteAllText($Output,'confirmed output')
+[IO.File]::WriteAllText((Join-Path $Workspace 'fixture.wav'),'temporary fixture')
+$Report=Join-Path $Root 'qualification.json'
+[IO.File]::WriteAllText($Report,(@{schemaVersion=1;status='PASS';uploadCandidate=@{path=$Output}}|ConvertTo-Json -Depth 4))
+Remove-QualificationWorkspace $Root $Report
+if(Test-Path $Workspace) {throw 'Qualification workspace remained'}
+if(-not(Test-Path $Report)) {throw 'Qualification report was removed'}
+$Production=Join-Path $Work '${attemptId}'
+New-Item -ItemType Directory -Path (Join-Path $Production 'output') | Out-Null
+$Output=Join-Path $Production 'output\\vocals.mp3'
+[IO.File]::WriteAllText($Output,'preserved production audio')
+[IO.File]::WriteAllText($Report,(@{schemaVersion=1;status='PASS';uploadCandidate=@{path=$Output}}|ConvertTo-Json -Depth 4))
+Remove-QualificationWorkspace $Root $Report
+if([IO.File]::ReadAllText($Output) -cne 'preserved production audio') {throw 'Production attempt was touched'}
+`,
+            ),
+            { timeout: 15_000, maxBuffer: 128 * 1024 },
+          );
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      },
+    );
+
     it("recovers a stopped confirmed-unpaired service without recreating credentials", async () => {
       const root = await mkdtemp(join(tmpdir(), "mw-unpaired-recovery-"));
       const serviceName = `MusicMuteUnpairedFixture-${randomUUID()}`;

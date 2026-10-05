@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="job_card_status_preparing">جارٍ التجهيز للبدء</string>
+    <string name="job_card_status_source_queued">بانتظار جلب الصوت</string>
+    <string name="job_card_status_queued">بانتظار المعالجة</string>
+    <string name="job_card_status_worker_unavailable">بانتظار توفر جهاز معالجة</string>
+    <string name="job_card_status_unknown">جارٍ التحقق من الحالة</string>
+    <string name="job_card_status_elapsed">الوقت المنقضي: %1$s</string>
+    <string name="job_card_status_elapsed_approximate">الوقت المنقضي تقريبًا: %1$s</string>
+    <string name="job_card_source_link">استيراد من رابط</string>
+    <string name="job_card_source_audio">ملف صوتي</string>
+    <string name="job_card_footer_voice">إخراج الصوت فقط</string>
+    <string name="job_card_progress_estimated">التقدم التقريبي لمرحلة %1$s: %2$d%%</string>
+    <string name="job_card_progress_measured">تقدم مرحلة %1$s: %2$d%%</string>
+</resources>

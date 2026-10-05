@@ -42,12 +42,37 @@ export class ProcessingAdmissionService {
     session: ClientSession,
     newJobId: Types.ObjectId,
     metadata: JobMetadata = {},
+    importReservationId?: Types.ObjectId,
   ): Promise<AdmissionSnapshot> {
+    const { admissionSnapshot } = await this.assertNewWorkWithPolicy(
+      userId,
+      input,
+      session,
+      newJobId,
+      metadata,
+      importReservationId,
+    );
+    return admissionSnapshot;
+  }
+
+  /** Reuse only within this fenced transaction callback, never across retries. */
+  async assertNewWorkWithPolicy(
+    userId: string | Types.ObjectId,
+    input: Pick<InputDeclaration, 'bytes' | 'durationSeconds'>,
+    session: ClientSession,
+    newJobId: Types.ObjectId,
+    metadata: JobMetadata = {},
+    importReservationId?: Types.ObjectId,
+  ): Promise<{
+    admissionSnapshot: AdmissionSnapshot;
+    policy: EffectiveAccountPolicy;
+  }> {
     const { accountId, policy } = await this.assertAdmissionPolicy(
       userId,
       input,
       session,
       metadata,
+      importReservationId,
     );
     await this.usage.assertRetainedCapacity(
       accountId,
@@ -55,10 +80,16 @@ export class ProcessingAdmissionService {
       session,
     );
 
-    const [waitingJobs, processingJobs] = await Promise.all([
-      this.countCapacity(userId, WAITING_CAPACITY_STATUSES, session),
-      this.countCapacity(userId, PROCESSING_CAPACITY_STATUSES, session),
-    ]);
+    const waitingJobs = await this.countCapacity(
+      userId,
+      WAITING_CAPACITY_STATUSES,
+      session,
+    );
+    const processingJobs = await this.countCapacity(
+      userId,
+      PROCESSING_CAPACITY_STATUSES,
+      session,
+    );
     const maxWaitingJobs = policy.values.maxWaitingJobs;
     const maxProcessingJobs = policy.values.maxProcessingJobs;
     if (waitingJobs >= maxWaitingJobs)
@@ -78,8 +109,10 @@ export class ProcessingAdmissionService {
       accountId,
       input.durationSeconds,
       session,
+      new Date(),
+      policy,
     );
-    return this.snapshot(policy, metadata);
+    return { admissionSnapshot: this.snapshot(policy, metadata), policy };
   }
 
   /** A completed cache result does not consume queue or processing capacity. */
@@ -88,16 +121,39 @@ export class ProcessingAdmissionService {
     input: Pick<InputDeclaration, 'bytes' | 'durationSeconds'>,
     session: ClientSession,
     metadata: JobMetadata,
+    importReservationId?: Types.ObjectId,
   ): Promise<AdmissionSnapshot> {
+    const { admissionSnapshot } = await this.assertCachedWorkWithPolicy(
+      userId,
+      input,
+      session,
+      metadata,
+      importReservationId,
+    );
+    return admissionSnapshot;
+  }
+
+  /** Cached delivery still resolves current policy after its admission fences. */
+  async assertCachedWorkWithPolicy(
+    userId: string | Types.ObjectId,
+    input: Pick<InputDeclaration, 'bytes' | 'durationSeconds'>,
+    session: ClientSession,
+    metadata: JobMetadata,
+    importReservationId?: Types.ObjectId,
+  ): Promise<{
+    admissionSnapshot: AdmissionSnapshot;
+    policy: EffectiveAccountPolicy;
+  }> {
     const { policy } = await this.assertAdmissionPolicy(
       userId,
       input,
       session,
       metadata,
+      importReservationId,
     );
     // The exact retained input and output bytes are claimed and checked by
     // recordRetainedCachedMedia in the same creation transaction.
-    return this.snapshot(policy, metadata);
+    return { admissionSnapshot: this.snapshot(policy, metadata), policy };
   }
 
   private async assertAdmissionPolicy(
@@ -105,6 +161,7 @@ export class ProcessingAdmissionService {
     input: Pick<InputDeclaration, 'bytes' | 'durationSeconds'>,
     session: ClientSession,
     metadata: JobMetadata,
+    importReservationId?: Types.ObjectId,
   ): Promise<{ accountId: Types.ObjectId; policy: EffectiveAccountPolicy }> {
     if (!session.inTransaction())
       throw new Error('Processing admission requires a transaction');
@@ -126,6 +183,16 @@ export class ProcessingAdmissionService {
       typeof userId === 'string'
         ? new this.jobs.base.Types.ObjectId(userId)
         : userId;
+    // All admissions acquire these fences before mutating account usage. The
+    // import hold and measured job reservation are exchanged in one transaction,
+    // so the hold cannot consume the allowance used to admit its replacement.
+    if (importReservationId)
+      await this.usage.releaseImport(
+        importReservationId,
+        accountId,
+        session,
+        true,
+      );
     const policy = await this.policies.effective(
       accountId,
       new Date(),

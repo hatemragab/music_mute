@@ -1135,6 +1135,25 @@ html[dir="rtl"] .skip-icon {
 .auth-card button.secondary {
   margin-top: 0.8rem;
 }
+.google-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  color: #1f1f1f;
+  background: #fff;
+  border-color: #dadce0;
+}
+.google-button:hover:not(:disabled) {
+  color: #1f1f1f;
+  background: #f8f9fa;
+  border-color: #c7c9cc;
+}
+.google-mark {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
 .auth-links {
   display: grid;
   gap: 0.2rem;
@@ -1145,6 +1164,71 @@ html[dir="rtl"] .skip-icon {
   border: 0;
   color: var(--accent);
   font-weight: 500;
+}
+.platform-callout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.7rem 0.85rem;
+  align-items: start;
+  padding: 1rem;
+  text-align: start;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.platform-callout-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  color: var(--accent);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
+}
+.platform-callout-icon svg {
+  width: 22px;
+  height: 22px;
+}
+.platform-callout-copy {
+  min-width: 0;
+}
+.platform-callout-copy strong {
+  display: block;
+  color: #fff;
+}
+.platform-callout-copy p {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+.platform-callout-link {
+  grid-column: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 0.45rem;
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  color: var(--accent);
+  border-radius: 10px;
+  font-weight: 700;
+}
+.platform-callout-link:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  text-decoration: none;
+}
+.platform-callout-link svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+}
+.auth-platform-callout {
+  max-width: 480px;
+  margin-top: 1.5rem;
+}
+.settings-platform-callout {
+  margin-block: 1rem 1.25rem;
 }
 .startup-page {
   min-height: 100vh;
@@ -1459,7 +1543,7 @@ html[lang="ar"] .startup-eyebrow {
     flex: 1 1 auto;
   }
   .auth-page {
-    padding: 18px;
+    padding: 76px 18px 18px;
   }
   .auth-card {
     padding: 22px;

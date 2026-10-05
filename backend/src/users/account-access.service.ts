@@ -9,6 +9,15 @@ import { User } from './user.schema.js';
 export class AccountAccessService {
   constructor(@InjectModel(User.name) private readonly users: Model<User>) {}
 
+  /** Check snapshot access without acquiring the account-owned write fence. */
+  async assertActiveReadOnly(userId: string | Types.ObjectId): Promise<void> {
+    const active = await this.users
+      .exists({ _id: userId, status: 'active' })
+      .read('primary')
+      .exec();
+    if (!active) throw authError('ACCOUNT_DISABLED');
+  }
+
   async assertActive(
     userId: string | Types.ObjectId,
     session?: ClientSession,

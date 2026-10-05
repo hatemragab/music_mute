@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MusicMute Local</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body data-helper-state="checking">
+    <main>
+      <header class="brand">
+        <img
+          class="brand-mark"
+          src="musicmute-mark.svg"
+          width="44"
+          height="44"
+          alt=""
+        />
+        <div>
+          <h1>MusicMute <span>Local</span></h1>
+          <p>Keep the voice. Enjoy the video.</p>
+        </div>
+      </header>
+
+      <section class="helper-card" aria-labelledby="helper-title">
+        <div class="card-topline">
+          <span class="eyebrow">On this Mac</span>
+          <span class="status-pill" id="helper-pill">Checking</span>
+        </div>
+        <h2 id="helper-title">Connecting to MusicMute</h2>
+        <p id="status" role="status">Connecting to the local app…</p>
+        <p id="check-summary" role="status">
+          Full checks run only when you select Check again.
+        </p>
+        <pre id="check-results" aria-live="polite" hidden></pre>
+        <div class="helper-footer">
+          <span id="helper-meta">Apple Silicon · macOS</span>
+          <button id="check" class="text-button" type="button" disabled>
+            Check again
+          </button>
+        </div>
+      </section>
+
+      <section class="watch-guide" aria-labelledby="watch-title">
+        <div class="section-heading">
+          <h2 id="watch-title">Voice-only YouTube</h2>
+          <span class="small-label">Up to 20 min</span>
+        </div>
+        <ol class="steps">
+          <li>
+            <span>1</span>
+            <div>
+              <strong>Open a video</strong>
+              <p>Choose a standard YouTube watch video.</p>
+            </div>
+          </li>
+          <li>
+            <span>2</span>
+            <div>
+              <strong>Tap the MusicMute waveform</strong>
+              <p>We pause the video and prepare its vocals.</p>
+            </div>
+          </li>
+          <li>
+            <span>3</span>
+            <div>
+              <strong>Listen with the video</strong>
+              <p>Play, pause and seek as usual. Stop anytime.</p>
+            </div>
+          </li>
+        </ol>
+        <p class="track-note">
+          Videos with multiple language or described audio tracks are not
+          supported yet. Player-selected audio matching is still being tested.
+        </p>
+      </section>
+
+      <details id="setup" class="setup-card">
+        <summary>
+          Set up the MusicMute app <span aria-hidden="true">⌄</span>
+        </summary>
+        <div class="setup-content">
+          <p>MusicMute runs locally on Apple Silicon.</p>
+          <a class="app-link" href="musicmute-local://setup"
+            >Open MusicMute app <span aria-hidden="true">↗</span></a
+          >
+          <p>
+            If the app doesn't open, install the local MusicMute Mac app first,
+            then open it to complete setup. Return here and use
+            <strong>Check again</strong>.
+          </p>
+        </div>
+      </details>
+
+      <details class="tools">
+        <summary class="section-heading">
+          <span>Local tools</span>
+          <span id="diagnostic-count" class="small-label"
+            >Private on your Mac</span
+          >
+        </summary>
+        <div class="provider-field">
+          <label for="provider">Processing mode</label>
+          <select id="provider" aria-describedby="provider-note" disabled>
+            <option value="LOCAL_MACOS">On this Mac — Apple Silicon</option>
+            <option value="ONLINE_MUSICMUTE">MusicMute cloud</option>
+          </select>
+          <p id="provider-note">
+            Uses the processing choice saved in the MusicMute app. Change it in
+            Home or Preferences. Starting a video uses the saved choice; cloud
+            processing sends audio using the signed-in account's monthly
+            allowance.
+          </p>
+          <button id="cloud" class="tool-button" type="button">
+            Use MusicMute cloud for this video
+          </button>
+          <p>
+            MusicMute opens for account selection and confirmation. New cloud
+            processing uses your monthly allowance; YouTube access is still
+            subject to source availability.
+          </p>
+        </div>
+        <button id="report" class="tool-button" type="button">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          Export local diagnostics
+        </button>
+        <button id="copy-errors" class="tool-button secondary" type="button">
+          Copy local errors
+        </button>
+        <button
+          id="download-errors"
+          class="tool-button secondary"
+          type="button"
+        >
+          Download local errors
+        </button>
+        <button id="clear" class="tool-button secondary" type="button">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5m4-5v5"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          Stop playback and clear local cache
+        </button>
+        <details id="report-details" class="report-details">
+          <summary>Connection details</summary>
+          <pre id="details" aria-live="polite"></pre>
+        </details>
+      </details>
+      <p class="privacy-note">
+        <span aria-hidden="true">●</span> No diagnostics are sent online.
+        <a href="privacy.html" target="_blank" rel="noopener"
+          >Privacy and data use</a
+        >
+      </p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

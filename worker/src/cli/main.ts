@@ -44,6 +44,7 @@ import {
 import { createMacUserLayout } from "../platform/macos/user-paths.js";
 import { createWindowsServiceLayout } from "../platform/windows/service-definition.js";
 import { windowsOperationPending } from "../platform/windows/user-maintenance.js";
+import { maintainStorageAtStartup } from "../platform/shared/startup-storage.js";
 import {
   MacUpdateStartupRecovered,
   recoverMacUpdateAtStartup,
@@ -82,6 +83,7 @@ const macUserCommands = new Set([
   "perf",
   "diagnostics",
   "doctor",
+  "cleanup",
   "pause",
   "drain",
   "resume",
@@ -205,6 +207,7 @@ if (command === "--version" || command === "version" || command === "-v") {
       )
         await recoverMacUpdateAtStartup(logLayout);
       if (logLayout !== null) await maintainWorkerLogs(logLayout);
+      await maintainStorageAtStartup(configPath);
       const config = await loadRuntimeConfig(configPath);
       const supervisor = new MachineSupervisor(
         config.slots.map((slot) => ({

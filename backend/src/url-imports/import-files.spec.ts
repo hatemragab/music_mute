@@ -108,6 +108,77 @@ describe('bounded temporary imports', () => {
     expect(absent.extraData).toBeNull();
     expect(await readdir(files.root)).toEqual([]);
   });
+  it('preserves terminal acquisition exhaustion only from the trusted private adapter', async () => {
+    server.removeAllListeners('request');
+    server.on('request', (req, res) => {
+      req.resume();
+      res.writeHead(503, { 'X-Import-Error': 'IMPORT_ACQUISITION_EXHAUSTED' });
+      res.end('untrusted provider details');
+    });
+    const request = { method: 'POST', headers: {}, body: '{}' };
+    const error = await files
+      .withFile((path, signal) =>
+        files.download(`${origin}/audio`, path, 20, signal, request),
+      )
+      .catch((error: unknown) => error);
+    expect(safeImportError(error)).toEqual({
+      code: 'IMPORT_ACQUISITION_EXHAUSTED',
+      message: 'The audio acquisition budget was exhausted',
+    });
+    expect(
+      acquisitionRetryDelay(
+        {
+          status: 'downloading',
+          acquisitionAttempt: 1,
+          maxAcquisitionAttempts: 4,
+          jobId: null,
+          input: null,
+        } as MediaImport,
+        safeImportError(error).code,
+      ),
+    ).toBeNull();
+    const untrusted = await files
+      .withFile((path, signal) =>
+        files.download(`${origin}/audio`, path, 20, signal),
+      )
+      .catch((error: unknown) => error);
+    expect(safeImportError(untrusted).code).toBe('IMPORT_DEPENDENCY_FAILED');
+    expect(await readdir(files.root)).toEqual([]);
+  });
+  it.each([
+    [503, '1', 1],
+    [502, '20', 20],
+    [503, '21', undefined],
+    [503, '0', undefined],
+    [503, '1.5', undefined],
+    [503, 'Wed, 21 Oct 2015 07:28:00 GMT', undefined],
+    [403, '1', undefined],
+  ])(
+    'accepts only bounded private retry seconds for status %i with Retry-After %s',
+    async (status, retryAfter, expected) => {
+      server.removeAllListeners('request');
+      server.on('request', (req, res) => {
+        req.resume();
+        res.writeHead(status, {
+          'X-Import-Error': 'IMPORT_DEPENDENCY_FAILED',
+          'Retry-After': retryAfter,
+        });
+        res.end();
+      });
+      const request = { method: 'POST', headers: {}, body: '{}' };
+      const error = await files
+        .withFile((path, signal) =>
+          files.download(`${origin}/audio`, path, 20, signal, request),
+        )
+        .catch((error: unknown) => error);
+      expect(safeImportError(error)).toEqual({
+        code: 'IMPORT_DEPENDENCY_FAILED',
+        message: 'An import dependency is unavailable',
+        ...(expected === undefined ? {} : { retryAfterSeconds: expected }),
+      });
+      expect(await readdir(files.root)).toEqual([]);
+    },
+  );
   it.each(['/audio', '/large', '/redirect', '/refused'])(
     'aborts rejected transfers and deletes partial files: %s',
     async (path) => {

@@ -3,11 +3,13 @@ import argparse
 import pathlib
 import tarfile
 
-FILES = ('captain-definition', 'Dockerfile', '.dockerignore', 'service.py', 'source_policy.py', 'acquisition_limits.py')
+FILES = ('captain-definition', 'Dockerfile', '.dockerignore', 'service.py', 'source_policy.py',
+         'acquisition_limits.py', 'acquisition_context.py', 'acquisition_metadata.py')
 
 
 def source(root, name):
-    return root.parent / name if name == 'acquisition_limits.py' else root / name
+    shared = ('acquisition_limits.py', 'acquisition_context.py', 'acquisition_metadata.py')
+    return root.parent / name if name in shared else root / name
 
 
 def package(output):

@@ -71,6 +71,21 @@ function page() {
 }
 
 test.each([
+  ["en", "Continue with Google"],
+  ["ar", "المتابعة باستخدام Google"],
+])(
+  "Google account linking keeps its accessible label and brand mark (%s)",
+  (language, label) => {
+    localStorage.setItem("musicmute.web.language", language);
+    page();
+
+    const linkButton = screen.getByRole("button", { name: label });
+    expect(linkButton).toHaveAccessibleName(label);
+    expect(linkButton.querySelector("svg.google-mark")).toBeInTheDocument();
+  },
+);
+
+test.each([
   [
     "en",
     "Verify your email to unlock your full allowance",

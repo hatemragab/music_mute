@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MusicMute Local — Privacy and data use</title>
+    <link rel="stylesheet" href="privacy.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Privacy and data use</h1>
+      <p>MusicMute Local · Updated October 4, 2026</p>
+      <h2>What the extension reads</h2>
+      <p>
+        On supported YouTube watch pages, MusicMute reads the video identifier,
+        duration, playback position, volume, mute state and player/ad state to
+        prepare and synchronize vocals. It does not read your general browsing
+        history, Google password or browser cookies.
+      </p>
+      <h2>What stays on your Mac</h2>
+      <p>
+        The extension stores playback preferences and a bounded local diagnostic
+        history in Chrome. The required MusicMute Mac app acquires audio online
+        and stores reusable results in a local cache. The extension follows the
+        processing choice saved in the app: local separation or MusicMute cloud.
+        Playback uses a temporary, protected connection to the app on this Mac.
+      </p>
+      <h2>Cloud processing</h2>
+      <p>
+        When MusicMute cloud is selected in the app, manually starting a video
+        sends the acquired audio to MusicMute using the saved choice, without a
+        per-video Chrome confirmation. Cloud processing requires the app's
+        signed-in account and uses its processing allowance. Vocals are
+        downloaded to the Mac for synchronized playback. Automatic preparation
+        never submits new cloud processing. Account credentials remain in the
+        Mac app and are not sent to Chrome.
+      </p>
+      <p>
+        The downloader runs as a logged-out guest without importing your Chrome
+        account or cookies. YouTube and its media servers receive the network
+        requests needed to acquire the selected audio, including your IP
+        address. Guest access may be refused; MusicMute does not bypass login
+        requirements.
+      </p>
+      <h2>Signing into the Mac app</h2>
+      <p>
+        A MusicMute account is optional for local playback. When you sign into
+        the companion app, new local results can be staged for saving to your
+        account, including original audio, vocals and associated video metadata.
+        Account saving uses MusicMute services and private cloud storage,
+        subject to your account's access and storage limits. Local processing
+        does not mean that signed-in results always remain only on your device.
+      </p>
+      <h2>Your controls</h2>
+      <p>
+        You can turn automatic preparation on or off in the video controls, set
+        a duration limit, and stop playback at any time. Stop ends playback; it
+        does not delete previously saved results.
+      </p>
+      <p>
+        Use “Stop playback and clear local cache” in the extension's local tools
+        to clear its managed reusable results. Pending account saves and account
+        Library items are managed separately in the Mac app. Removing the
+        extension removes its Chrome settings, but does not uninstall the Mac
+        app or delete its files or cloud Library.
+      </p>
+      <h2>Diagnostics</h2>
+      <p>
+        Diagnostics are saved locally. MusicMute does not automatically send
+        diagnostic reports, telemetry or analytics from this extension.
+        Exporting diagnostics creates a local report; you choose whether to
+        share it. Reports omit audio, credentials, browser cookies and private
+        media URLs.
+      </p>
+      <h2>Purpose and sharing</h2>
+      <p>
+        Data is used to provide voice playback, selected processing and account
+        saving when signed in. This extension does not sell data, use it for
+        advertising, or send it to analytics services. It is an independent
+        MusicMute product and is not affiliated with YouTube or Google.
+      </p>
+    </main>
+  </body>
+</html>

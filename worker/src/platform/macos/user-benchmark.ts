@@ -80,6 +80,7 @@ export async function benchmarkMacUserWorker(options: {
       fixturePath,
       fixtureSha256,
       launchAgent,
+      false,
     );
     const rawWarmup = JSON.parse(
       await readFile(warmupReportPath, "utf8"),

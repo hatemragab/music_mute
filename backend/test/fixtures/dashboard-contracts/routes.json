@@ -3,6 +3,151 @@
   "roles": ["owner", "release_manager", "support", "viewer"],
   "routes": [
     {
+      "controller": "AdminMacosUpdatesController",
+      "method": "GET",
+      "path": "/admin/macos-updates/configuration",
+      "permissions": ["releases.read"],
+      "roles": ["owner", "release_manager", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "resource",
+      "validationOwner": "none",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminMacosUpdatesController",
+      "method": "PUT",
+      "path": "/admin/macos-updates/configuration",
+      "permissions": ["releases.manage"],
+      "roles": ["owner", "release_manager"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "reason": "Synthetic macOS release fixture",
+        "expected_revision": 0,
+        "public_ed_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminMacosUpdatesController",
+      "method": "GET",
+      "path": "/admin/macos-updates",
+      "permissions": ["releases.read"],
+      "roles": ["owner", "release_manager", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "page",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminMacosUpdatesController",
+      "method": "GET",
+      "path": "/admin/macos-updates/:id",
+      "permissions": ["releases.read"],
+      "roles": ["owner", "release_manager", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminMacosUpdatesController",
+      "method": "POST",
+      "path": "/admin/macos-updates",
+      "permissions": ["releases.manage"],
+      "roles": ["owner", "release_manager"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "reason": "Synthetic macOS release fixture",
+        "appcast_base64": "synthetic",
+        "archive_name": "MusicMute-1.2.3-42-arm64-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.dmg",
+        "bytes": 42,
+        "sha256_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminMacosUpdatesController",
+      "method": "POST",
+      "path": "/admin/macos-updates/:id/uploads",
+      "permissions": ["releases.manage"],
+      "roles": ["owner", "release_manager"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "reason": "Synthetic macOS release fixture",
+        "expected_revision": 0
+      },
+      "responseCategory": "upload_grant",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminMacosUpdatesController",
+      "method": "POST",
+      "path": "/admin/macos-updates/:id/completions",
+      "permissions": ["releases.manage"],
+      "roles": ["owner", "release_manager"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29"
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminMacosUpdatesController",
+      "method": "POST",
+      "path": "/admin/macos-updates/:id/publications",
+      "permissions": ["releases.manage"],
+      "roles": ["owner", "release_manager"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "reason": "Synthetic macOS release fixture",
+        "expected_revision": 0,
+        "expected_configuration_revision": 1
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
+      "controller": "AdminMacosUpdatesController",
+      "method": "POST",
+      "path": "/admin/macos-updates/:id/withdrawals",
+      "permissions": ["releases.manage"],
+      "roles": ["owner", "release_manager"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "reason": "Synthetic macOS release fixture",
+        "expected_revision": 1,
+        "expected_configuration_revision": 2
+      },
+      "responseCategory": "resource",
+      "validationOwner": "service",
+      "successStatus": 201
+    },
+    {
       "controller": "AdminWorkerControlController",
       "method": "POST",
       "path": "/admin/worker-fleet/machines/:id/capacity-approvals",

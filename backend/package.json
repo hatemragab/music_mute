@@ -37,6 +37,7 @@
     "test:transfer-benchmark": "node --test scripts/benchmark-audio-transfers.test.mjs",
     "test:secrets": "node --test scripts/check-tracked-secrets.test.mjs && node scripts/check-tracked-secrets.mjs",
     "test:realtime:integration": "pnpm run build && node --test test/realtime.integration.mjs",
+    "test:youtube-community:integration": "pnpm run build && node --test test/youtube-community.integration.mjs",
     "test:integration": "pnpm run build && node --test test/infrastructure.integration.mjs",
     "test:imports:integration": "pnpm run build && node --test test/url-imports.integration.mjs test/url-import-runtime.integration.mjs test/url-import-admission.integration.mjs test/shared-media.integration.mjs",
     "test:dashboard:integration": "pnpm run build && node --test --test-concurrency=1 test/admin-*.integration.mjs test/apk-verifier.integration.mjs test/release-upload.integration.mjs test/dashboard-contract.integration.mjs",

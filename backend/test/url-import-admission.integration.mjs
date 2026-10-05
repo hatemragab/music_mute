@@ -73,7 +73,10 @@ test('URL acquisition holds allowance before paid work and releases safely', asy
     policies,
     config,
   );
-  const access = { assertActive: async () => {} };
+  const access = {
+    assertActive: async () => {},
+    assertActiveReadOnly: async () => {},
+  };
   const imports = new ImportsService(
     records,
     model('ProcessingAdmissionFence'),

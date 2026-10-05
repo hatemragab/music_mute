@@ -8,6 +8,7 @@ export function presentPolicy(policy: AppPolicy) {
     platforms: {
       android: platform(policy.platforms.android),
       ios: platform(policy.platforms.ios),
+      macos: { minimumBuild: policy.platforms.macos?.minimumBuild ?? null },
     },
     revision: policy.revision,
     updatedAt: policy.updatedAt,

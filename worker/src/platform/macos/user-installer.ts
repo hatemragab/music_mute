@@ -8,6 +8,7 @@ import {
   readdir,
   readFile,
   readlink,
+  rename,
   link,
   rm,
 } from "node:fs/promises";
@@ -17,6 +18,7 @@ import {
   runInstallationPreparationCommand,
 } from "../../enrollment/cli.js";
 import { parseQualificationEvidence } from "../../enrollment/report-builder.js";
+import { cleanupQualificationWorkspace } from "../../enrollment/qualification-cleanup.js";
 import {
   initializeLocalLifecycle,
   loadLocalLifecycle,
@@ -359,6 +361,8 @@ export async function installMacUserWorker(
       qualificationPath,
       "--label",
       options.label,
+      "--service-root",
+      options.layout.homeRoot,
       ...(options.groupId === undefined ? [] : ["--group-id", options.groupId]),
       "--output",
       transactionRoot,
@@ -494,6 +498,19 @@ export async function resumeMacUserInstallation(options: {
   await rm(join(transactionRoot, "enrollment.credential"), { force: true });
   await rm(journalPath);
   await syncDirectory(transactionRoot);
+  // Rename after committing finalization so recovery never mistakes cleanup
+  // leftovers for an installation that still needs backend activation.
+  const completedRoot = join(
+    layout.transactionRoot,
+    `.install-${randomUUID()}.completed`,
+  );
+  try {
+    await rename(transactionRoot, completedRoot);
+    await syncDirectory(layout.transactionRoot);
+    await rm(completedRoot, { recursive: true, force: true });
+  } catch {
+    console.warn("Worker completed installation cleanup deferred.");
+  }
   return result as unknown as MacUserInstallationResult;
 }
 
@@ -577,6 +594,7 @@ export async function qualifyMacUserRelease(
     MacLaunchAgentController,
     "bootstrap" | "bootout" | "status"
   >,
+  retainUploadCandidate = true,
 ): Promise<string> {
   const fixturePath = join(layout.stateRoot, "qualification.wav");
   const reportPath = join(layout.stateRoot, "qualification.json");
@@ -592,6 +610,7 @@ export async function qualifyMacUserRelease(
     reportPath,
     releaseRoot,
   });
+  let uploadCandidatePath: string | undefined;
   try {
     await launchAgent.bootstrap(layout.plistPath);
     for (let attempt = 0; attempt < 9_600; attempt += 1) {
@@ -599,6 +618,7 @@ export async function qualifyMacUserRelease(
         const evidence = parseQualificationEvidence(
           JSON.parse(await readFile(reportPath, "utf8")) as unknown,
         );
+        uploadCandidatePath = evidence.uploadCandidate.path;
         if (evidence.fixtureDigest !== fixtureSha256)
           throw new TypeError("Qualification fixture identity changed");
         return reportPath;
@@ -608,6 +628,13 @@ export async function qualifyMacUserRelease(
     throw new Error("MPS qualification timed out");
   } finally {
     if ((await launchAgent.status()).loaded) await launchAgent.bootout();
+    if (!retainUploadCandidate && uploadCandidatePath !== undefined)
+      await cleanupQualificationWorkspace({
+        workRoot: layout.workRoot,
+        outputPath: uploadCandidatePath,
+      }).catch(() => {
+        console.warn("Worker qualification workspace cleanup deferred.");
+      });
     await writeLaunchAgentPlist(layout);
   }
 }

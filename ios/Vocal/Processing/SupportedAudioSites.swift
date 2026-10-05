@@ -31,6 +31,7 @@ enum SupportedAudioSites {
     let sites: [Site]
   }
   private struct Site: Decodable {
+    let id: String
     let name: String
     let rules: [Rule]
   }
@@ -82,17 +83,28 @@ enum SupportedAudioSites {
       query[name] = content
     }
     guard let catalog else { throw URLImportFailure.unsupportedSite }
+    let site = catalog.sites.first(where: { site in
+      site.rules.contains { rule in
+        matches(rule.host, host) && matches(rule.path, path)
+          && rule.requiredQuery.allSatisfy { matches($0.value, query[$0.key] ?? "") }
+      }
+    })
+    if site?.id == "youtube" {
+      let videoId =
+        matches(#"/watch/?"#, path)
+        ? query["v"] ?? "" : path.split(separator: "/").last.map(String.init) ?? ""
+      guard matches(#"[A-Za-z0-9_-]{11}"#, videoId),
+        query["v"] == nil || query["v"] == videoId
+      else {
+        throw URLImportFailure.invalidURL
+      }
+      // Ignore playlist, radio and time context after validating the complete share URL.
+      return "https://www.youtube.com/watch?v=\(videoId)"
+    }
     if catalog.blockedQueryKeys.contains(where: { query[$0] != nil }) {
       throw URLImportFailure.singleItemRequired
     }
-    guard
-      catalog.sites.contains(where: { site in
-        site.rules.contains { rule in
-          matches(rule.host, host) && matches(rule.path, path)
-            && rule.requiredQuery.allSatisfy { matches($0.value, query[$0.key] ?? "") }
-        }
-      })
-    else { throw URLImportFailure.unsupportedSite }
+    guard site != nil else { throw URLImportFailure.unsupportedSite }
     return "\(scheme)://\(host)\(path)" + (parts.percentEncodedQuery.map { "?\($0)" } ?? "")
   }
 }

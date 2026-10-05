@@ -9,6 +9,7 @@ import {
 import type { MediaImport } from '../url-imports/media-import.schema.js';
 import type { SharedMediaResult } from './shared-media.schema.js';
 import { SharedMediaService } from './shared-media.service.js';
+import { sharedResultKey, sharedSourceKey } from './shared-media-key.js';
 
 const sourceKey = 'a'.repeat(64);
 const resultKey = 'b'.repeat(64);
@@ -145,6 +146,7 @@ function fixture() {
   };
   const sources = {
     findById: vi.fn(),
+    findOneAndUpdate: vi.fn(),
     updateOne: vi.fn().mockResolvedValue({ matchedCount: 1 }),
   };
   const imports = {
@@ -196,6 +198,186 @@ function fixture() {
     artifacts,
   };
 }
+
+function readyClaimFixture() {
+  const f = fixture();
+  const url = 'https://www.youtube.com/watch?v=bZxrIoCPsOc';
+  const canonicalSourceKey = sharedSourceKey(url);
+  const canonicalResultKey = sharedResultKey(
+    canonicalSourceKey,
+    generation,
+    recipe.recipeDigest,
+  );
+  const input = {
+    filename: 'source.mp3',
+    extension: 'mp3',
+    contentType: 'audio/mpeg',
+    bytes: 2_048,
+    sha256: Buffer.alloc(32, 2).toString('base64'),
+    durationSeconds: 12,
+  };
+  const source = {
+    _id: canonicalSourceKey,
+    state: 'ready',
+    generation,
+    input,
+    inputObject: {
+      ...input,
+      key: `shared/url/${canonicalSourceKey}/${generation}/input/source.mp3`,
+      etag: '"original"',
+    },
+  };
+  f.sources.findById.mockReturnValue(query(source));
+  f.rows.clear();
+  Object.assign(f.result, {
+    _id: canonicalResultKey,
+    sourceKey: canonicalSourceKey,
+    state: 'ready',
+    outputObject: {
+      ...output,
+      key: `shared/url/${canonicalResultKey}/${generation}/output/vocals.mp3`,
+    },
+  });
+  f.rows.set(canonicalResultKey, f.result);
+  return { ...f, source, url, canonicalSourceKey, canonicalResultKey };
+}
+
+describe('cache-only shared media claim', () => {
+  it('inspects only its recorded master on read-only trim replay without deriving or switching sources', async () => {
+    const f = readyClaimFixture();
+    f.result.recipeSnapshot = workerRecipeSnapshot(
+      DEFAULT_WORKER_RECIPE_ID,
+      false,
+    );
+    const catalog = {
+      lookupTrimmedForFull: vi.fn(async () => null),
+      lookupReady: vi.fn(async () => ({ sourceKey: 'c'.repeat(64) })),
+      ensureTrimmedFromFull: vi.fn(),
+    };
+    const service = new SharedMediaService(
+      f.sources as never,
+      f.results as never,
+      f.imports as never,
+      f.jobs as never,
+      f.storage as never,
+      f.transactions as never,
+      f.artifacts as never,
+      catalog as never,
+    );
+    const state = await service.inspect(
+      {
+        ...record,
+        sharedSourceKey: f.canonicalSourceKey,
+        sharedResultKey: f.canonicalResultKey,
+        trimEnabled: true,
+      },
+      false,
+    );
+    expect(state).toMatchObject({ action: 'wait', source: f.source });
+    expect(catalog.lookupTrimmedForFull).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceKey: f.canonicalSourceKey,
+        resultKey: f.canonicalResultKey,
+        outputObject: f.result.outputObject,
+      }),
+    );
+    expect(catalog.lookupReady).not.toHaveBeenCalled();
+    expect(catalog.ensureTrimmedFromFull).not.toHaveBeenCalled();
+    expect(f.results.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(f.sources.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('reads an existing ready alias and current recipe without acquiring or changing shared records', async () => {
+    const f = readyClaimFixture();
+    const claimed = await f.service.claim(
+      'https://youtu.be/bZxrIoCPsOc?si=tracking',
+      'youtube',
+      importId,
+      true,
+      session as never,
+      true,
+    );
+
+    expect(claimed).toEqual({
+      sourceKey: f.canonicalSourceKey,
+      resultKey: f.canonicalResultKey,
+      cached: true,
+      hasSource: true,
+    });
+    expect(f.sources.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(f.sources.updateOne).not.toHaveBeenCalled();
+    expect(f.results.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(f.results.updateOne).not.toHaveBeenCalled();
+    expect(f.artifacts.create).not.toHaveBeenCalled();
+    expect(f.storage.copyObject).not.toHaveBeenCalled();
+    expect(f.storage.findUploadedObject).not.toHaveBeenCalled();
+  });
+
+  it('does not create an absent source or recipe result', async () => {
+    for (const missing of ['source', 'result']) {
+      const f = readyClaimFixture();
+      if (missing === 'source') f.sources.findById.mockReturnValue(query(null));
+      else f.rows.clear();
+      await expect(
+        f.service.claim(
+          f.url,
+          'youtube',
+          importId,
+          true,
+          session as never,
+          true,
+        ),
+      ).rejects.toMatchObject({ response: { code: 'IMPORT_CACHE_MISS' } });
+      expect(f.sources.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(f.results.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(f.sources.updateOne).not.toHaveBeenCalled();
+      expect(f.results.updateOne).not.toHaveBeenCalled();
+      expect(f.artifacts.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    'source-acquiring',
+    'source-failed',
+    'input-missing',
+    'original-missing',
+    'result-processing',
+    'result-failed',
+    'output-missing',
+    'wrong-generation',
+    'wrong-recipe',
+    'different-trim',
+  ])('returns a read-only miss for %s', async (condition) => {
+    const f = readyClaimFixture();
+    if (condition === 'source-acquiring') f.source.state = 'acquiring';
+    if (condition === 'source-failed') f.source.state = 'failed';
+    if (condition === 'input-missing') Object.assign(f.source, { input: null });
+    if (condition === 'original-missing')
+      Object.assign(f.source, { inputObject: null });
+    if (condition === 'result-processing') f.result.state = 'processing';
+    if (condition === 'result-failed') f.result.state = 'failed';
+    if (condition === 'output-missing') f.result.outputObject = null;
+    if (condition === 'wrong-generation')
+      f.result.sourceGeneration = 'another-generation';
+    if (condition === 'wrong-recipe')
+      f.result.recipeSnapshot = { ...recipe, recipeDigest: 'c'.repeat(64) };
+    await expect(
+      f.service.claim(
+        f.url,
+        'youtube',
+        importId,
+        condition !== 'different-trim',
+        session as never,
+        true,
+      ),
+    ).rejects.toMatchObject({ response: { code: 'IMPORT_CACHE_MISS' } });
+    expect(f.sources.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(f.results.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(f.sources.updateOne).not.toHaveBeenCalled();
+    expect(f.results.updateOne).not.toHaveBeenCalled();
+    expect(f.artifacts.create).not.toHaveBeenCalled();
+  });
+});
 
 describe('shared-media publication recovery', () => {
   it('recovers a completed copy whose response was lost without copying it again', async () => {

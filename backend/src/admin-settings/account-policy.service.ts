@@ -183,10 +183,17 @@ export class AccountPolicyService implements OnModuleInit {
   }
 
   async global(session?: ClientSession): Promise<StoredAccountPolicy> {
+    let stored: AccountPolicy | null;
     try {
       let query = this.policies.findById(STANDARD_ACCOUNT_POLICY_ID);
       if (session) query = query.session(session);
-      const stored = await query.lean();
+      stored = await query.lean();
+    } catch (error) {
+      // The transaction owner needs the driver's original error and retry labels.
+      if (session) throw error;
+      throw adminError('DEPENDENCY_UNAVAILABLE');
+    }
+    try {
       if (!stored)
         return {
           revision: 0,

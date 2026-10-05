@@ -48,6 +48,7 @@ const ACCOUNT_RECORD_COLLECTIONS = [
   ['abuse_monthly_summaries', 'accountId'],
   ['account_restrictions', 'accountId'],
   ['media_imports', 'userId'],
+  ['local_media_syncs', 'userId'],
 ] as const;
 
 type PurgePhase = NonNullable<User['deletionPhase']>;

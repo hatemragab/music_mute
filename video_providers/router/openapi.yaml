@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: MusicMute private audio acquisition router
-  version: 1.0.0
+  version: 1.1.0
   x-audience: component-internal
   description: >-
     Provider-neutral binary router. Selects one operator-configured private
-    YouTube adapter (Tunelio by default, or explicitly qualified JoJAPI) and
+    YouTube adapter (Tunelio by default, or explicitly selected JoJAPI/yt-dlp) and
     VideoScale for other enabled sites before exactly one POST, without retry,
     failover or redirects. The selected destination never changes after a failure.
     Twenty active relays share capacity across both routes; additional bounded
@@ -35,6 +35,21 @@ paths:
           required: false
           description: Internal execution UUID propagated to the selected private adapter. Not an idempotency key. Invalid or absent values are replaced; never forwarded to a vendor.
           schema: { type: string, format: uuid }
+        - in: header
+          name: X-Import-Attempt
+          required: false
+          description: Service-authenticated acquisition ordinal. The three context headers must either all be absent (legacy callers) or each occur exactly once. Must not exceed X-Import-Max-Attempts. Validated before contacting any adapter.
+          schema: { type: integer, minimum: 1, maximum: 4 }
+        - in: header
+          name: X-Import-Max-Attempts
+          required: false
+          description: Service-authenticated total acquisition budget, including the current attempt. Does not authorize router retries or failover. Required when either other context header is present.
+          schema: { type: integer, minimum: 1, maximum: 4 }
+        - in: header
+          name: X-Import-Acquisition-Started-At
+          required: false
+          description: Canonical UTC acquisition start timestamp with milliseconds and Z suffix. At most five seconds in the future. Required with the two attempt headers; forwarded only after validation. Adapter enforces its bounded total acquisition deadline.
+          schema: { type: string, format: date-time, pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$' }
       requestBody:
         required: true
         content:
@@ -99,7 +114,7 @@ components:
     service_key: { type: http, scheme: bearer }
   responses:
     problem:
-      description: Sanitized IMPORT_* problem JSON. Only known upstream code/status pairs preserved; raw bodies/headers never copied. 503 includes bounded Retry-After; it does not authorize an automatic POST retry. All responses have Cache-Control no-store.
+      description: Sanitized IMPORT_* problem JSON. Only known upstream code/status pairs preserved; raw bodies/headers never copied. IMPORT_ACQUISITION_EXHAUSTED is a terminal 503 after the shared acquisition budget; callers must not retry that execution and no Retry-After is sent. Other 503 responses include bounded Retry-After; it does not authorize an automatic POST retry. All responses have Cache-Control no-store.
       headers:
         X-Import-Error:
           description: Same stable IMPORT_* identifier as the problem body.

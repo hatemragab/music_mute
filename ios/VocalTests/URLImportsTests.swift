@@ -7,6 +7,7 @@ import XCTest
   private struct Case: Decodable {
     let url: String
     let accepted: Bool
+    let canonicalUrl: String?
   }
   func testSharedOfflinePolicy() throws {
     let file = try XCTUnwrap(
@@ -14,7 +15,11 @@ import XCTest
     let cases = try JSONDecoder().decode([Case].self, from: Data(contentsOf: file))
     XCTAssertEqual(SupportedAudioSites.names.count, 12)
     for item in cases {
-      XCTAssertEqual((try? SupportedAudioSites.canonical(item.url)) != nil, item.accepted, item.url)
+      let canonical = try? SupportedAudioSites.canonical(item.url)
+      XCTAssertEqual(canonical != nil, item.accepted, item.url)
+      if let expected = item.canonicalUrl {
+        XCTAssertEqual(canonical, expected, item.url)
+      }
     }
   }
 

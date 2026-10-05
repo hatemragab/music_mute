@@ -398,3 +398,8 @@
 "settings_terms" = "الشروط";
 "settings_accent" = "لون التمييز";
 "settings_apply" = "تطبيق";
+"settings_other_platforms" = "MusicMute على منصات أخرى";
+"platform_web_title" = "MusicMute على الويب";
+"platform_web_description" = "افتح تطبيق MusicMute الكامل في متصفحك.";
+"platform_macos_title" = "MusicMute لنظام macOS";
+"platform_macos_description" = "تحقق من صفحة تنزيلات MusicMute لمعرفة توفر تطبيق macOS مستقبلاً.";

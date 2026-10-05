@@ -33,16 +33,15 @@ policy. Source changes and local test results do not establish live availability
 
 ## Architecture
 
-URL imports use private SaaS adapters:
-`client → NestJS → private router → private adapter → SaaS`, then
+URL imports use private audio acquisition adapters:
+`client → NestJS → private router → private adapter → source platform / SaaS`, then
 `audio bytes → adapter → router → NestJS validation → private R2 → worker`.
-Production YouTube configuration selects the private [JoJAPI adapter](video_providers/jojapi/README.md)
-for an owner-authorized test activation on 2026-10-01; VideoScale handles the
-other enabled public item sites. The known vendor source-version mismatch remains
-unresolved. See the [activation record](video_providers/jojapi/docs/ACTIVATION-2026-10-01.md)
-for deployment evidence and the [earlier qualification record](video_providers/jojapi/docs/DEPLOYMENT-2026-10-01.md)
-for the defect and initial Tunelio restoration. Valid media probing does not
-establish requested-source identity.
+The owner-requested [yt-dlp adapter](video_providers/ytdlp/README.md) is deployed
+privately; [dated deployment evidence](video_providers/ytdlp/docs/DEPLOYMENT-2026-10-03.md)
+records qualification and the selected production route. VideoScale handles the
+other enabled public item sites. The historical JoJAPI source-version mismatch
+remains unresolved; its [earlier qualification record](video_providers/jojapi/docs/DEPLOYMENT-2026-10-01.md)
+does not establish correct-source acquisition.
 Other enabled sites include Instagram, TikTok, Vimeo,
 SoundCloud and Facebook/Reels; usable separate audio is required. Consult the
 provider documentation for dated end-to-end proof. Provider-specific APIs and
@@ -51,6 +50,12 @@ URL/key contract. Included metadata is saved as nullable
 `extra_data` without paid enrichment. Both adapter and backend scratch are
 bounded and cleaned up. See [provider architecture](video_providers/README.md)
 for the contract, security boundaries, setup and verification.
+
+The yt-dlp adapter uses Deno, bundled EJS, a private persistent PO Token provider
+and DataImpulse sticky Residential/Mobile sessions. It returns medium native
+audio with audio-only fallback, ten parallel acquisitions and bounded retries.
+It downloads original-track native audio without FFmpeg processing or video
+transfer; the existing worker performs processing.
 
 New URL imports reuse [permanent shared media](docs/url-imports/shared-media.md)
 across accounts. Job/account deletion removes owned access and records while
@@ -161,6 +166,24 @@ remaining production verification are tracked in the
 [web task ledger](web-client/tasks/06-tasks.md). The deployed app is at
 [app.music-mute.com](https://app.music-mute.com); live health and CORS checks do
 not prove authenticated processing or signed transfers.
+
+## Cross-product discovery
+
+Clients keep public destinations in one platform-owned allowlist instead of
+copying URL literals into individual views. The canonical web app is
+`https://app.music-mute.com`; the reviewed Android listing destination is
+`https://play.google.com/store/apps/details?id=com.hatem.musicmute`; and the
+future public macOS Downloads destination is
+`https://music-mute.com/#downloads`.
+
+The Downloads page and Google Play URL are discovery destinations, not evidence
+that a public artifact is currently available. Verify the network or release
+registry before describing either as a live download, and do not invent direct
+DMG, App Store, Firebase App Distribution or Play artifact URLs. Public links use
+exact HTTPS destinations without credentials or tracking parameters. Google
+sign-in controls use localized accessible text with the recognizable multicolor
+Google G. Sign-in establishes an account session; realtime Library connection and
+cross-device synchronization remain separate observable states.
 
 ## Firebase
 

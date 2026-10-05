@@ -9,6 +9,8 @@ import { useState, type FormEvent } from "react";
 import { auth } from "./AuthProvider";
 import { friendlyError, useI18n } from "../i18n";
 import { SoloSignalMark } from "../brand/SoloSignalMark";
+import { GoogleGMark } from "../brand/GoogleGMark";
+import { MacDownloadCallout } from "../product/MacDownloadCallout";
 
 type Mode = "login" | "register" | "reset";
 export function AuthScreen() {
@@ -78,6 +80,7 @@ export function AuthScreen() {
         <h1>{t("brand")}</h1>
         <p>{t("tagline")}</p>
         <div className="wave-art" aria-hidden="true" />
+        <MacDownloadCallout className="auth-platform-callout" />
       </div>
       <section className="auth-card" aria-labelledby="auth-title">
         <h2 id="auth-title">
@@ -146,12 +149,13 @@ export function AuthScreen() {
         </form>
         {mode !== "reset" && (
           <button
-            className="secondary"
+            className="secondary google-button"
             type="button"
             disabled={busy}
             onClick={google}
           >
-            {t("google")}
+            <GoogleGMark className="google-mark" />
+            <span>{t("google")}</span>
           </button>
         )}
         <div className="auth-links">

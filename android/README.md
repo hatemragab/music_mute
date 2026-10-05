@@ -408,6 +408,30 @@ continues using the shared live session rather than restarting the connection.
 
 ## Current jobs and Library (2026-09-28)
 
+Job cards share the compact Console glow layout on Home and the processing list:
+source/date metadata, two full-width title lines, a dark recessed status console,
+and a tinted Studio pulse footer. CLI-style stage text has a grey base with a moving
+highlight in the stage color; voice separation adds a small animated audio icon.
+Live queue position and reconnect/capacity explanations stay inside the footer.
+Errors use the same reserved space with Retry/Delete beside each other; Details
+opens the full explanation. Every state retains the same 208dp default height for
+the same width and text-size setting. Accessibility font scaling increases the
+shared text slots together. Motion stops in the background, when system animations
+are disabled, and for paused/terminal states.
+
+Active work stages use measured transfer/worker progress when available, otherwise
+a per-stage visual estimate marked `~NN%`. Estimates start at 8%, advance only while
+foreground motion is enabled, and stop below completion at 94%. They reset when the
+task or stage changes and use local visual pacing, without altering authoritative
+server elapsed durations or suggesting an ETA. Queued/waiting, unavailable-worker,
+error and terminal states never receive estimated percentages or a filled queue
+progress bar. All updates continue using the existing WebSocket snapshots.
+
+Populated English/Arabic, 320dp and large-text Compose previews are in
+`ui/home/JobCardPreviews.kt`. JVM tests, lint and assembly verify source/build
+behavior. A connected-device install/launch verifies startup; it does not by itself
+verify every populated card state or a real processing flow.
+
 Home and the processing list hide terminal cloud jobs (`ready`, `failed`,
 `cancelled`); unfinished local reviews and recoverable local imports stay
 accessible. Creation date and time are shown on Home job cards. Filtering is

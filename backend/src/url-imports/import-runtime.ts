@@ -7,7 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { trusted } from 'mongoose';
+import { trusted, type Types } from 'mongoose';
 import { IMPORT_QUEUE, ImportsService } from './imports.service.js';
 import { ImportProcessor } from './import-processor.js';
 import { importError } from './import-errors.js';
@@ -15,6 +15,7 @@ import { SharedMediaService } from '../shared-media/shared-media.service.js';
 import { Optional } from '@nestjs/common';
 import { importExecutionJobId } from './import-retry.js';
 import { RealtimeFeedService } from '../realtime/realtime-feed.service.js';
+import type { MediaImport } from './media-import.schema.js';
 
 @Injectable()
 export class ImportRuntime
@@ -27,6 +28,8 @@ export class ImportRuntime
   private unsubscribe?: () => void;
   private wakePending = false;
   private running = false;
+  private recoveryCursor?: Types.ObjectId;
+  private sharedCursor?: Types.ObjectId;
 
   constructor(
     private readonly config: ConfigService,
@@ -105,36 +108,75 @@ export class ImportRuntime
 
   /** Changes wake only queued shared imports; expensive recovery remains periodic. */
   async enqueueSharedImports(): Promise<void> {
-    const pending = await this.imports.records
-      .find({
-        status: 'queued',
-        sharedSourceKey: trusted({ $ne: null }),
-        sharedResultKey: trusted({ $ne: null }),
-      })
-      .sort({ createdAt: 1 })
-      .limit(this.config.getOrThrow<number>('URL_IMPORT_MAX_OUTSTANDING'))
-      .lean();
-    for (const record of pending)
+    const pending = await this.pendingImports(true);
+    for (const record of await this.deliverReadyImports(pending))
       await this.imports.enqueue(record._id.toHexString());
+  }
+
+  private async pendingImports(sharedOnly: boolean) {
+    const filter: Record<string, unknown> = sharedOnly
+      ? {
+          status: 'queued',
+          sharedSourceKey: trusted({ $ne: null }),
+          sharedResultKey: trusted({ $ne: null }),
+        }
+      : {
+          status: trusted({
+            $in: ['queued', 'downloading', 'validating', 'uploading'],
+          }),
+        };
+    const cursor = sharedOnly ? this.sharedCursor : this.recoveryCursor;
+    if (cursor) filter._id = trusted({ $gt: cursor });
+    const read = () =>
+      this.imports.records
+        .find(filter)
+        .sort({ _id: 1 })
+        .limit(this.config.getOrThrow<number>('URL_IMPORT_MAX_OUTSTANDING'))
+        .lean();
+    let pending = await read();
+    if (!pending.length && cursor) {
+      delete filter._id;
+      pending = await read();
+    }
+    // Advance before external dependencies: one blocked batch cannot starve
+    // later deliveries. Wrapping also revisits older interrupted imports.
+    if (sharedOnly) this.sharedCursor = pending.at(-1)?._id;
+    else this.recoveryCursor = pending.at(-1)?._id;
+    return pending;
+  }
+
+  private async deliverReadyImports(pending: MediaImport[]) {
+    const waiting: MediaImport[] = [];
+    let failure: unknown;
+    for (const record of pending) {
+      if (
+        record.status !== 'queued' ||
+        record.handoffPending ||
+        (await this.shared?.inspect(record))?.action !== 'result'
+      ) {
+        waiting.push(record);
+        continue;
+      }
+      try {
+        // Deliver every ready result before a cold import can wait on Redis.
+        await this.imports.enqueue(record._id.toHexString());
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure) throw failure;
+    return waiting;
   }
 
   async reconcile(): Promise<void> {
     await this.shared?.reconcile();
-    const pending = await this.imports.records
-      .find({
-        status: trusted({
-          $in: ['queued', 'downloading', 'validating', 'uploading'],
-        }),
-      })
-      .sort({ createdAt: 1 })
-      .limit(this.config.getOrThrow<number>('URL_IMPORT_MAX_OUTSTANDING'))
-      .lean();
-    for (const record of pending) {
+    const pending = await this.pendingImports(false);
+    for (const record of await this.deliverReadyImports(pending)) {
       const queued = await this.queue.getJob(importExecutionJobId(record));
       const queueState = queued ? await queued.getState() : 'unknown';
       if (
         record.status === 'queued' &&
-        (record.maxAcquisitionAttempts ?? 1) > 1
+        (record.handoffPending || (record.maxAcquisitionAttempts ?? 1) > 1)
       ) {
         // Retry generations are durable outbox entries. Ignore prior generations
         // and replace only a terminal, unclaimed entry for the current generation.

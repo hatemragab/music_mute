@@ -30,6 +30,7 @@ import { AdminSettingsController } from '../src/admin-settings/admin-settings.co
 import { AdminReleasesController } from '../src/releases/admin-releases.controller.js';
 import { AdminReleaseUploadsController } from '../src/releases/admin-release-uploads.controller.js';
 import { AdminUpdatePolicyController } from '../src/releases/admin-update-policy.controller.js';
+import { AdminMacosUpdatesController } from '../src/macos-updates/admin-macos-updates.controller.js';
 import { AdminOverviewController } from '../src/admin-observability/admin-overview.controller.js';
 import { AdminHealthController } from '../src/admin-observability/admin-health.controller.js';
 import { AdminAlertsController } from '../src/admin-observability/admin-alerts.controller.js';
@@ -87,6 +88,7 @@ const controllers: Type[] = [
   AdminReleasesController,
   AdminReleaseUploadsController,
   AdminUpdatePolicyController,
+  AdminMacosUpdatesController,
   AdminOverviewController,
   AdminHealthController,
   AdminAlertsController,

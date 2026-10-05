@@ -10,6 +10,10 @@ import {
 const en = {
   brand: "MusicMute",
   tagline: "Make room for your voice.",
+  macosAvailableTitle: "MusicMute for macOS",
+  macosAvailableBody:
+    "MusicMute runs on Mac. The DMG will be published with our other apps in Downloads.",
+  macosDownloads: "See macOS downloads",
   home: "Home",
   jobs: "Jobs",
   library: "Library",
@@ -49,6 +53,7 @@ const en = {
   back: "Back",
   signOut: "Sign out",
   retry: "Retry",
+  tryAgain: "Try again",
   loading: "Loading…",
   startupTitle: "Opening your studio",
   startupDescription: "Getting your account and library ready.",
@@ -237,6 +242,10 @@ type MessageKey = keyof typeof en;
 const ar: Record<MessageKey, string> = {
   brand: "ميوزك ميوت",
   tagline: "اترك مساحة لصوتك.",
+  macosAvailableTitle: "ميوزك ميوت على macOS",
+  macosAvailableBody:
+    "يعمل ميوزك ميوت على Mac. سيُنشر ملف DMG مع تطبيقاتنا الأخرى في قسم التنزيلات.",
+  macosDownloads: "عرض تنزيلات macOS",
   home: "الرئيسية",
   jobs: "المهام",
   library: "المكتبة",
@@ -274,6 +283,7 @@ const ar: Record<MessageKey, string> = {
   back: "رجوع",
   signOut: "تسجيل الخروج",
   retry: "إعادة المحاولة",
+  tryAgain: "حاول مرة أخرى",
   loading: "جارٍ التحميل…",
   startupTitle: "جارٍ فتح الاستوديو",
   startupDescription: "نجهز حسابك ومكتبتك.",

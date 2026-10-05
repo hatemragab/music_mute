@@ -3,6 +3,10 @@ import { formatHealth } from "../shared/user-health.js";
 import { watchStatus, waitForReady } from "../shared/status-watch.js";
 export { waitForReady } from "../shared/status-watch.js";
 import { configureWorkerCapacity } from "../shared/worker-capacity.js";
+import {
+  cleanupWorkerStorage,
+  macWorkerStorageLayout,
+} from "../shared/storage-maintenance.js";
 import { dirname, join } from "node:path";
 import { resetRestartBudget } from "../../runtime/restart-budget.js";
 import { lstat, readFile, readlink, rm } from "node:fs/promises";
@@ -125,6 +129,7 @@ export const MAC_USER_USAGE = `Usage:
   mw diagnostics [--job <job-id>] [--since <1s-30d>]
                                [--output </absolute/path.zip>] [--json]
   mw doctor [--full] [--json]
+  mw cleanup [--dry-run | --apply] [--json]
   mw capacity --workers <1|2> [--json]
   mw benchmark [--workers <1|2>] [--json]
   mw benchmark-file --input </absolute/song> [--recipe <kim-vocals-v2|kim-vocals-v2-trim>]
@@ -670,6 +675,23 @@ async function runUnlocked(
       stdout(formatHealth(result, arguments_.includes("--json")));
       return result.healthy ? 0 : 1;
     }
+    case "cleanup": {
+      exactArguments(arguments_, new Set(["--json", "--dry-run", "--apply"]));
+      const apply = arguments_.includes("--apply");
+      if (apply && arguments_.includes("--dry-run"))
+        throw new TypeError("Choose cleanup --dry-run or cleanup --apply");
+      if (apply) {
+        const service = await launchAgent.status();
+        if (service.loaded || service.running)
+          throw new Error("Drain and stop the worker before applying cleanup");
+      }
+      const result = await cleanupWorkerStorage({
+        layout: macWorkerStorageLayout(layout),
+        apply,
+      });
+      stdout(formatActionResult({ ...result }, arguments_.includes("--json")));
+      return result.status === "ok" ? 0 : 1;
+    }
     case "capacity": {
       const jsonFlag = extractBooleanFlag(arguments_, "--json");
       const flags = parseValueFlags(jsonFlag.remaining, new Set(["workers"]));
@@ -825,6 +847,7 @@ function mutatesLocalState(
     "benchmark-file",
     "capacity",
     "diagnostics",
+    "cleanup",
   ]).has(command);
 }
 

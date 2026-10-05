@@ -48,7 +48,6 @@ import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.processing.AudioTaskPresentation
 import com.hatem.musicmute.processing.RealtimeState
-import com.hatem.musicmute.ui.ProcessingQueueStatus
 import com.hatem.musicmute.processing.JobHistoryState
 import com.hatem.musicmute.ui.design.*
 import com.hatem.musicmute.ui.processingFailureLabel
@@ -164,18 +163,17 @@ fun HomeScreen(
                 CreativeCard { CreativeFeedback(stringResource(R.string.creative_jobs_empty)) }
             }
             items(visibleTasks, key = { it.importRequestId?.let { id -> "url:$id" } ?: it.operationId ?: requireNotNull(it.jobId) }) { task ->
-                Column {
-                    JobCard(
-                        task = task,
-                        busy = busy || actionBusy,
-                        retryBusy = task.importRequestId in retryingImports,
-                        onOpen = { onOpen(task) },
-                        onCancel = { onCancel(task) },
-                        onDelete = { onDelete(task) },
-                        onRetry = { onRetry(task) },
-                    )
-                    ProcessingQueueStatus(history.jobs.firstOrNull { it.id == task.jobId }, history.connection)
-                }
+                JobCard(
+                    task = task,
+                    busy = busy || actionBusy,
+                    retryBusy = task.importRequestId in retryingImports,
+                    onOpen = { onOpen(task) },
+                    onCancel = { onCancel(task) },
+                    onDelete = { onDelete(task) },
+                    onRetry = { onRetry(task) },
+                    job = history.jobs.firstOrNull { it.id == task.jobId },
+                    connection = history.connection,
+                )
                 Spacer(Modifier.height(12.dp))
             }
             item {

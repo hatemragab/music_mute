@@ -93,6 +93,8 @@
     <string name="auth_send_reset">Send reset email</string>
     <string name="auth_or">or</string>
     <string name="auth_continue_google">Continue with Google</string>
+    <string name="auth_link_google">Link Google</string>
+    <string name="auth_unlink_google">Remove Google</string>
     <string name="auth_forgot_password">Forgot password?</string>
     <string name="auth_new_account">New here? Create an account</string>
     <string name="auth_back_login">Back to sign in</string>

@@ -1,3 +1,6 @@
+import type { EffectiveAccountPolicy } from '../admin-settings/account-policy.service.js';
+import { DEFAULT_ACCOUNT_POLICY_VALUES } from '../admin-settings/account-policy.schema.js';
+import type { ProcessingTransactionDiagnostics } from '../processing/processing-diagnostics.js';
 import { Types } from 'mongoose';
 import { createHash } from 'node:crypto';
 import { jobError } from './job-errors.js';
@@ -32,6 +35,18 @@ const admissionSnapshot = {
   reservationExpiresAt: new Date(Date.now() + 60_000),
 };
 
+const policy: EffectiveAccountPolicy = {
+  plan: 'standard',
+  globalRevision: 1,
+  overrideRevision: null,
+  source: 'global',
+  overrideExpiresAt: null,
+  acceptNewJobs: true,
+  maintenanceMessageEn: '',
+  maintenanceMessageAr: null,
+  values: { ...DEFAULT_ACCOUNT_POLICY_VALUES },
+};
+
 const directLean = (value: unknown) => ({
   lean: vi.fn().mockResolvedValue(value),
 });
@@ -62,14 +77,26 @@ function fixture() {
     verifyInput: vi.fn(),
   };
   const transactions = {
-    run: vi.fn(async (operation: (session: object) => Promise<unknown>) =>
-      operation({}),
+    run: vi.fn(
+      async (
+        operation: (session: object) => Promise<unknown>,
+        _diagnostics?: ProcessingTransactionDiagnostics,
+        _options?: { serializeHandoff?: boolean },
+      ) => operation({}),
     ),
   };
-  const access = { assertActive: vi.fn().mockResolvedValue(undefined) };
+  const access = {
+    assertActive: vi.fn().mockResolvedValue(undefined),
+    assertActiveReadOnly: vi.fn().mockResolvedValue(undefined),
+  };
   const admission = {
     assertNewWork: vi.fn().mockResolvedValue(admissionSnapshot),
-    assertCachedWork: vi.fn().mockResolvedValue(admissionSnapshot),
+    assertNewWorkWithPolicy: vi
+      .fn()
+      .mockResolvedValue({ admissionSnapshot, policy }),
+    assertCachedWorkWithPolicy: vi
+      .fn()
+      .mockResolvedValue({ admissionSnapshot, policy }),
     assertAcceptedReservation: vi.fn(() => admissionSnapshot),
   };
   const usage = {
@@ -95,6 +122,7 @@ function fixture() {
       cleanup as never,
     ),
     jobs,
+    transactions,
     storage,
     access,
     admission,
@@ -215,7 +243,7 @@ describe('shared URL job creation', () => {
       status: 'queued',
       recipeSnapshot: frozen,
     });
-    expect(f.admission.assertNewWork).toHaveBeenCalledOnce();
+    expect(f.admission.assertNewWorkWithPolicy).toHaveBeenCalledOnce();
   });
 
   it('rejects frozen source recipes with a mismatched trim choice or tampered digest', async () => {
@@ -243,7 +271,7 @@ describe('shared URL job creation', () => {
       ).rejects.toMatchObject({ response: { code: 'INVALID_INPUT' } });
     }
     expect(f.jobs.create).not.toHaveBeenCalled();
-    expect(f.admission.assertNewWork).not.toHaveBeenCalled();
+    expect(f.admission.assertNewWorkWithPolicy).not.toHaveBeenCalled();
   });
 
   it('creates a ready owned entry pointing at shared media without upload or worker work', async () => {
@@ -278,8 +306,8 @@ describe('shared URL job creation', () => {
       'confirmedUploadAccountedAt',
     ])
       expect(created).not.toHaveProperty(field);
-    expect(f.admission.assertCachedWork).toHaveBeenCalledOnce();
-    expect(f.admission.assertNewWork).not.toHaveBeenCalled();
+    expect(f.admission.assertCachedWorkWithPolicy).toHaveBeenCalledOnce();
+    expect(f.admission.assertNewWorkWithPolicy).not.toHaveBeenCalled();
     expect(f.usage.recordRetainedCachedMedia).toHaveBeenCalledOnce();
     expect(f.storage.createInputGrant).not.toHaveBeenCalled();
     expect(f.usage.reserveUploadGrant).not.toHaveBeenCalled();
@@ -300,6 +328,92 @@ describe('shared URL job creation', () => {
     expect(f.jobs.create).toHaveBeenCalledOnce();
     expect(f.usage.recordRetainedCachedMedia).toHaveBeenCalledOnce();
     expect(f.outbox.updateOne).toHaveBeenCalledOnce();
+  });
+
+  it('exchanges a recovered acquisition hold when its shared result became ready', async () => {
+    const f = sharedFixture();
+    const importId = new Types.ObjectId();
+    const args: Parameters<JobsService['createFromCache']> = [
+      ownerId.toHexString(),
+      requestId,
+      shared,
+      undefined,
+      importId,
+    ];
+    const accepted = await f.service.createFromCache(...args);
+    const created = f.jobs.create.mock.calls[0]?.[0][0];
+    expect(created).toMatchObject({ status: 'ready', inputObject: null });
+    expect(f.admission.assertCachedWorkWithPolicy).toHaveBeenCalledWith(
+      ownerId,
+      input,
+      expect.anything(),
+      expect.anything(),
+      importId,
+    );
+    expect(f.usage.reserveUploadGrant).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: created._id }),
+      requestId,
+      expect.anything(),
+      expect.any(Date),
+      policy,
+    );
+    expect(f.usage.confirmUploadBytes).toHaveBeenCalledWith(
+      expect.objectContaining({ inputObject: null }),
+      input.bytes,
+      expect.anything(),
+      expect.any(Date),
+      policy,
+    );
+    expect(f.jobs.updateOne).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'ready', inputObject: null }),
+      expect.objectContaining({ $set: { inputObject: shared.inputObject } }),
+      expect.objectContaining({ session: expect.anything() }),
+    );
+    expect(f.usage.recordRetainedCachedMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ inputObject: shared.inputObject }),
+      expect.anything(),
+      expect.any(Date),
+      policy,
+    );
+    await expect(f.service.createFromCache(...args)).resolves.toEqual(accepted);
+    expect(f.jobs.create).toHaveBeenCalledOnce();
+    expect(f.usage.reserveUploadGrant).toHaveBeenCalledOnce();
+    expect(f.usage.confirmUploadBytes).toHaveBeenCalledOnce();
+    expect(f.usage.recordRetainedCachedMedia).toHaveBeenCalledOnce();
+  });
+
+  it('uses the fresh policy from every retried admission callback', async () => {
+    const f = sharedFixture();
+    const newerPolicy = { ...policy, globalRevision: 2 };
+    f.admission.assertNewWorkWithPolicy
+      .mockResolvedValueOnce({ admissionSnapshot, policy })
+      .mockResolvedValueOnce({ admissionSnapshot, policy: newerPolicy });
+    f.transactions.run.mockImplementation(async (operation) => {
+      await operation({});
+      // The first callback was rolled back, so its newly created row is absent.
+      f.jobs.findOne.mockReturnValueOnce(sessionLean(null));
+      return operation({});
+    });
+    await f.service.createForSharedInput(
+      ownerId.toHexString(),
+      input,
+      requestId,
+      shared.metadata,
+      false,
+      shared.inputObject,
+      sourceKey,
+      resultKey,
+      undefined,
+      null,
+      new Types.ObjectId(),
+    );
+    expect(f.admission.assertNewWorkWithPolicy).toHaveBeenCalledTimes(2);
+    expect(
+      f.usage.reserveUploadGrant.mock.calls.map((call) => call[4]),
+    ).toEqual([policy, newerPolicy]);
+    expect(
+      f.usage.confirmUploadBytes.mock.calls.map((call) => call[4]),
+    ).toEqual([policy, newerPolicy]);
   });
 
   it('queues a fresh shared acquisition and accounts its usual processing and transfer receipts', async () => {
@@ -331,14 +445,17 @@ describe('shared URL job creation', () => {
       sharedSourceKey: sourceKey,
       sharedResultKey: resultKey,
     });
-    expect(f.usage.releaseImport).toHaveBeenCalledWith(
-      importId,
+    expect(f.admission.assertNewWorkWithPolicy).toHaveBeenCalledWith(
       ownerId,
+      input,
       expect.anything(),
-      true,
+      created._id,
+      expect.objectContaining({ policyVersion: 2, source: 'audio_file' }),
+      importId,
     );
-    expect(f.admission.assertNewWork).toHaveBeenCalledOnce();
-    expect(f.admission.assertCachedWork).not.toHaveBeenCalled();
+    expect(f.usage.releaseImport).not.toHaveBeenCalled();
+    expect(f.admission.assertNewWorkWithPolicy).toHaveBeenCalledOnce();
+    expect(f.admission.assertCachedWorkWithPolicy).not.toHaveBeenCalled();
     expect(f.usage.recordRetainedCachedMedia).not.toHaveBeenCalled();
     expect(f.storage.createInputGrant).not.toHaveBeenCalled();
     expect(f.usage.reserveUploadGrant).toHaveBeenCalledOnce();
@@ -347,6 +464,7 @@ describe('shared URL job creation', () => {
       input.bytes,
       expect.anything(),
       expect.any(Date),
+      policy,
     );
     expect(f.jobs.updateOne).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'queued', inputObject: null }),
@@ -357,6 +475,91 @@ describe('shared URL job creation', () => {
       }),
     );
     expect(f.outbox.updateOne).not.toHaveBeenCalled();
+    await f.service.createForSharedInput(
+      ownerId.toHexString(),
+      input,
+      requestId,
+      { ...shared.metadata, source: 'audio_file', sourceUrl: undefined },
+      false,
+      shared.inputObject,
+      sourceKey,
+      resultKey,
+      timing,
+      shared.metadata.extraData,
+      importId,
+    );
+    expect(f.admission.assertNewWorkWithPolicy).toHaveBeenCalledOnce();
+    expect(f.jobs.create).toHaveBeenCalledOnce();
+    expect(f.usage.reserveUploadGrant).toHaveBeenCalledOnce();
+    expect(f.usage.confirmUploadBytes).toHaveBeenCalledOnce();
+  });
+
+  it('correlates URL handoff steps without persisting diagnostic IDs or changing idempotency', async () => {
+    const f = sharedFixture();
+    const acquisitionId = '05531a81-7663-4875-a727-a33dfe2f1581';
+    const steps: string[] = [];
+    let context: ProcessingTransactionDiagnostics | undefined;
+    f.transactions.run.mockImplementation(async (operation, diagnostics) => {
+      context = diagnostics;
+      return operation({});
+    });
+    f.admission.assertNewWorkWithPolicy.mockImplementation(async () => {
+      steps.push(context!.step);
+      return { admissionSnapshot, policy };
+    });
+    f.usage.reserveUploadGrant.mockImplementation(async () => {
+      steps.push(context!.step);
+      return { expiresAt: new Date() };
+    });
+    f.usage.confirmUploadBytes.mockImplementation(async () => {
+      steps.push(context!.step);
+    });
+    const args: Parameters<JobsService['createForSharedInput']> = [
+      ownerId.toHexString(),
+      input,
+      requestId,
+      shared.metadata,
+      false,
+      shared.inputObject,
+      sourceKey,
+      resultKey,
+      { startedAt: new Date(), stages: [], acquisitionId },
+      null,
+      new Types.ObjectId(),
+    ];
+    const first = await f.service.createForSharedInput(...args);
+    expect(f.transactions.run).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.any(Object),
+      { serializeHandoff: true },
+    );
+    expect(context).toEqual({
+      operation: 'url-import-handoff',
+      acquisitionId,
+      step: 'commit',
+    });
+    expect(steps).toEqual([
+      'admission',
+      'upload-reservation',
+      'upload-confirmation',
+    ]);
+    expect(JSON.stringify(f.jobs.create.mock.calls[0])).not.toContain(
+      acquisitionId,
+    );
+    const second = await f.service.createForSharedInput(
+      ...(args.slice(0, 8) as [
+        string,
+        typeof input,
+        string,
+        typeof shared.metadata,
+        boolean,
+        typeof shared.inputObject,
+        string,
+        string,
+      ]),
+    );
+    expect(second).toEqual(first);
+    expect(f.transactions.run).toHaveBeenCalledOnce();
   });
 
   it('queues an existing shared source without charging upload or acquisition receipts', async () => {
@@ -375,7 +578,7 @@ describe('shared URL job creation', () => {
       status: 'queued',
       inputObject: shared.inputObject,
     });
-    expect(f.admission.assertNewWork).toHaveBeenCalledOnce();
+    expect(f.admission.assertNewWorkWithPolicy).toHaveBeenCalledOnce();
     expect(f.usage.releaseImport).not.toHaveBeenCalled();
     expect(f.usage.reserveUploadGrant).not.toHaveBeenCalled();
     expect(f.usage.confirmUploadBytes).not.toHaveBeenCalled();
@@ -436,7 +639,7 @@ describe('shared URL job creation', () => {
         f.service.createFromCache(ownerId.toHexString(), requestId, cached),
       ).rejects.toMatchObject({ response: { code: 'INVALID_INPUT' } });
       expect(f.jobs.create).not.toHaveBeenCalled();
-      expect(f.admission.assertCachedWork).not.toHaveBeenCalled();
+      expect(f.admission.assertCachedWorkWithPolicy).not.toHaveBeenCalled();
     },
   );
 
@@ -451,7 +654,7 @@ describe('shared URL job creation', () => {
 
   it('does not persist cache hits when admission or retained capacity is denied', async () => {
     const f = sharedFixture();
-    f.admission.assertCachedWork.mockRejectedValue(
+    f.admission.assertCachedWorkWithPolicy.mockRejectedValue(
       jobError('PROCESSING_UNAVAILABLE'),
     );
     await expect(
@@ -462,9 +665,16 @@ describe('shared URL job creation', () => {
 });
 
 describe('public job admission', () => {
-  it.each([undefined, true, false])(
-    'stores the selected trim recipe (%s) before issuing a grant',
-    async (trimEnabled) => {
+  it.each(
+    [undefined, true, false].flatMap((trimEnabled) =>
+      [undefined, new Types.ObjectId()].map((importReservationId) => ({
+        trimEnabled,
+        importReservationId,
+      })),
+    ),
+  )(
+    'stores trim $trimEnabled and exchanges import $importReservationId before issuing a grant',
+    async ({ trimEnabled, importReservationId }) => {
       const f = fixture();
       f.jobs.findOne
         .mockReturnValueOnce(directLean(null))
@@ -499,6 +709,9 @@ describe('public job admission', () => {
             preparationProfileId: 'audio-cap-aac-lc-160-v1',
           },
           trimEnabled,
+          undefined,
+          null,
+          importReservationId,
         ),
       ).resolves.toMatchObject({
         requestId,
@@ -509,6 +722,15 @@ describe('public job admission', () => {
       expect(created.recipeSnapshot).toEqual(
         workerRecipeSnapshot(DEFAULT_WORKER_RECIPE_ID, trimEnabled),
       );
+      expect(f.admission.assertNewWork).toHaveBeenCalledWith(
+        ownerId,
+        input,
+        expect.anything(),
+        expect.any(Types.ObjectId),
+        expect.objectContaining({ policyVersion: 2, source: 'audio_file' }),
+        importReservationId,
+      );
+      expect(f.usage.releaseImport).not.toHaveBeenCalled();
       expect(f.storage.createInputGrant).toHaveBeenCalledOnce();
       f.jobs.findOne.mockReturnValue(
         directLean({ ...created, status: 'awaiting_upload', deletedAt: null }),

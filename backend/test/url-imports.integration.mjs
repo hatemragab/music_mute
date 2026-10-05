@@ -70,7 +70,7 @@ before(async () => {
     records,
     fences,
     new ProcessingTransactions(connection),
-    { assertActive: async () => {} },
+    { assertActive: async () => {}, assertActiveReadOnly: async () => {} },
     usage,
     new ConfigService({
       URL_IMPORT_ENABLED: true,

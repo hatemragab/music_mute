@@ -150,8 +150,10 @@ function fixture(sharedAvailable = true) {
     recordRetainedOutput: vi.fn().mockResolvedValue(undefined),
     settleJob: vi.fn().mockResolvedValue(undefined),
   };
+  const renditions = { wake: vi.fn() };
   const sharedMedia = {
     publishOutput: vi.fn(),
+    prepareRequestedOutput: vi.fn(),
     completeResult: vi.fn().mockResolvedValue(undefined),
   };
   const service = new WorkerAttemptService(
@@ -164,6 +166,7 @@ function fixture(sharedAvailable = true) {
     accountAccess as never,
     usage as never,
     sharedAvailable ? (sharedMedia as never) : undefined,
+    renditions as never,
   );
   return {
     service,
@@ -178,6 +181,7 @@ function fixture(sharedAvailable = true) {
     outbox,
     usage,
     sharedMedia,
+    renditions,
     transaction,
   };
 }
@@ -303,6 +307,59 @@ describe('worker attempt transfers and finalization', () => {
     expect(f.storage.verifyUploadedObject).not.toHaveBeenCalled();
     expect(f.sharedMedia.publishOutput).not.toHaveBeenCalled();
     expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges the full master and persists requested trimming without waiting on DSP or another worker', async () => {
+    const f = fixture();
+    const { privateObject, sharedObject } = await prepareSharedCompletion(f);
+    f.job.recipeSnapshot.trimEnabled = false;
+    f.job.requestedTrimEnabled = true;
+    const masterRecipe = { ...f.job.recipeSnapshot };
+    // A slow or unavailable DSP operation must never hold the worker acknowledgement.
+    f.sharedMedia.prepareRequestedOutput.mockImplementation(
+      () => new Promise(() => {}),
+    );
+    const fullCompletion = { ...completion, trimEnabled: false };
+    await expect(
+      f.service.complete(principal, attemptId, fullCompletion),
+    ).resolves.toMatchObject({ status: 'ready', replayed: false });
+    expect(f.sharedMedia.prepareRequestedOutput).not.toHaveBeenCalled();
+    expect(f.sharedMedia.completeResult).toHaveBeenCalledWith(
+      f.job,
+      sharedObject,
+      null,
+      f.transaction,
+    );
+    expect(f.job.recipeSnapshot).toEqual(masterRecipe);
+    expect(f.job.sharedResultKey).toBe('d'.repeat(64));
+    expect(f.job.status).toBe('uploading_result');
+    expect(f.job.renditionPending).toMatchObject({
+      full: sharedObject,
+      attemptId,
+      leaseToken: null,
+      attempts: 0,
+    });
+    expect(f.job.outputObject).toBeNull();
+    expect(f.job.finishedAt).toBeNull();
+    expect(f.job.currentExecution).toBeNull();
+    expect(f.job.retryEligibility.eligible).toBe(false);
+    expect(f.attempt.state).toBe('succeeded');
+    expect(f.attempt.outputObject).toEqual(privateObject);
+    expect(f.slots.updateOne).toHaveBeenCalledOnce();
+    expect(f.usage.recordRetainedOutput).not.toHaveBeenCalled();
+    expect(f.usage.settleJob).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'ready' }),
+      f.transaction,
+    );
+    expect(f.outbox.updateOne).not.toHaveBeenCalled();
+    expect(f.renditions.wake).toHaveBeenCalledOnce();
+    await expect(
+      f.service.complete(principal, attemptId, fullCompletion),
+    ).resolves.toMatchObject({ status: 'ready', replayed: true });
+    expect(f.sharedMedia.publishOutput).toHaveBeenCalledOnce();
+    expect(f.sharedMedia.completeResult).toHaveBeenCalledOnce();
+    expect(f.usage.settleJob).toHaveBeenCalledOnce();
+    expect(f.renditions.wake).toHaveBeenCalledOnce();
   });
 
   it('sanitizes publication errors and leaves the verified private output scheduled for cleanup', async () => {

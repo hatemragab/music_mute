@@ -1,6 +1,10 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 
 const authErrors = {
+  GOOGLE_TOKEN_INVALID_GRANT: {
+    statusCode: HttpStatus.BAD_REQUEST,
+    message: 'Google sign-in expired or was rejected; start sign-in again',
+  },
   REAUTHENTICATION_REQUIRED: {
     statusCode: HttpStatus.UNAUTHORIZED,
     message: 'Sign in again to delete your account',

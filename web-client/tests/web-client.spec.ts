@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import { MUSICMUTE_DOWNLOADS_URL } from "../src/product-links";
 
 test("signed-out layout stays usable in English and Arabic at target widths", async ({
   page,
@@ -10,9 +11,17 @@ test("signed-out layout stays usable in English and Arabic at target widths", as
     await page.goto("/");
     await page.getByRole("button", { name: "English", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Continue with Google" }),
-    ).toBeVisible();
+    const googleButton = page.getByRole("button", {
+      name: "Continue with Google",
+    });
+    await expect(googleButton).toBeVisible();
+    await expect(googleButton.locator("svg.google-mark")).toBeVisible();
+    const macDownloads = page.getByRole("link", {
+      name: "See macOS downloads",
+    });
+    await expect(macDownloads).toHaveAttribute("href", MUSICMUTE_DOWNLOADS_URL);
+    await expect(macDownloads).toHaveAttribute("target", "_blank");
+    await expect(macDownloads).toHaveAttribute("rel", "noopener noreferrer");
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -26,6 +35,9 @@ test("signed-out layout stays usable in English and Arabic at target widths", as
     await expect(
       page.getByRole("heading", { name: "تسجيل الدخول" }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "عرض تنزيلات macOS" }),
+    ).toHaveAttribute("href", MUSICMUTE_DOWNLOADS_URL);
     expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
     expect(
       await page.evaluate(
@@ -214,6 +226,35 @@ test("authenticated preview covers responsive home, jobs, library and settings i
   }
 });
 
+test("YouTube playlist share creates a single-video intent in the browser form", async ({
+  page,
+}) => {
+  await page.goto("/tests/preview.html");
+  await page
+    .getByRole("textbox", { name: "Public media URL" })
+    .fill(
+      "https://www.youtube.com/watch?v=e6WT8RwRwt4&list=RDe6WT8RwRwt4&start_radio=1",
+    );
+  await page
+    .getByRole("checkbox", { name: "I have the rights to process this audio" })
+    .check();
+  await page.getByRole("button", { name: "Start import" }).click();
+  // This preview refuses mutations; the saved intent proves local admission/normalization.
+  await expect(page.locator("form").getByRole("alert")).toContainText(
+    "Request failed",
+  );
+  const intent = await page.evaluate(() =>
+    JSON.parse(
+      sessionStorage.getItem("musicmute.web.import.preview-only.request") ||
+        "null",
+    ),
+  );
+  expect(intent.fingerprint).toBe(
+    "https://www.youtube.com/watch?v=e6WT8RwRwt4:true",
+  );
+  expect(intent.requestId).toMatch(/^[a-f0-9-]{36}$/);
+});
+
 test("unsupported URL is rejected locally in the authenticated browser form", async ({
   page,
 }) => {
@@ -235,3 +276,99 @@ test("unsupported URL is rejected locally in the authenticated browser form", as
   expect(requests).toEqual([]);
   await expect(page.getByText(/Supported sites:/)).toContainText("Bandcamp");
 });
+
+for (const language of ["en", "ar"] as const) {
+  test(`failed import can retry after reload without duplicating uncertain admission (${language})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({
+      width: language === "ar" ? 390 : 1440,
+      height: 900,
+    });
+    await page.addInitScript((lang) => {
+      localStorage.setItem("musicmute.web.language", lang);
+      const key = "musicmute.web.import.preview-only";
+      if (!sessionStorage.getItem(key))
+        sessionStorage.setItem(
+          key,
+          JSON.stringify(["4123456789abcdef01234567"]),
+        );
+    }, language);
+    const bodies: Array<{
+      url: string;
+      trim_enabled: boolean;
+      request_id: string;
+    }> = [];
+    const statusReads: string[] = [];
+    page.on("request", (request) => {
+      if (
+        request.url().includes("/media-imports") &&
+        request.method() === "GET"
+      )
+        statusReads.push(request.url());
+    });
+    await page.route("http://127.0.0.1:3000/media-imports", async (route) => {
+      expect(route.request().method()).toBe("POST");
+      bodies.push(route.request().postDataJSON());
+      await route.fulfill({
+        status: bodies.length === 1 ? 503 : 202,
+        contentType: "application/json",
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify(
+          bodies.length === 1
+            ? { code: "SERVICE_UNAVAILABLE" }
+            : {
+                import_id: "6123456789abcdef01234567",
+                status: "queued",
+                job_id: null,
+                error: null,
+              },
+        ),
+      });
+    });
+    await page.goto("/tests/preview.html?import-retry");
+    const retryName = language === "ar" ? "حاول مرة أخرى" : "Try again";
+    const row = page.locator(".import-state");
+    await expect(
+      row.getByRole("button", { name: retryName, exact: true }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: `test-results/screenshots/import-retry-${language}.png`,
+      fullPage: true,
+    });
+    await row.getByRole("button", { name: retryName, exact: true }).click();
+    await expect(row.getByRole("alert")).toHaveCount(2);
+    expect(bodies).toHaveLength(1);
+    await page.reload();
+    await expect(
+      row.getByRole("button", { name: retryName, exact: true }),
+    ).toBeVisible();
+    await row.getByRole("button", { name: retryName, exact: true }).click();
+    await expect(
+      row.getByRole("link", {
+        name: language === "ar" ? "التفاصيل" : "Details",
+      }),
+    ).toHaveAttribute("href", "/jobs/5123456789abcdef01234567");
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toEqual(bodies[1]);
+    expect(bodies[0]).toMatchObject({
+      url: "https://www.youtube.com/watch?v=abcdefghijk",
+      trim_enabled: false,
+    });
+    expect(bodies[0].request_id).toMatch(
+      /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i,
+    );
+    await expect(row.getByRole("alert")).toHaveCount(0);
+    await expect(
+      row.getByRole("button", { name: retryName, exact: true }),
+    ).toHaveCount(0);
+    expect(statusReads).toEqual([]);
+    expect(
+      await page.evaluate(() =>
+        JSON.parse(
+          sessionStorage.getItem("musicmute.web.import.preview-only") || "null",
+        ),
+      ),
+    ).toEqual(["6123456789abcdef01234567"]);
+  });
+}

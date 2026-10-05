@@ -11,10 +11,10 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
-import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.LaptopMac
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -29,6 +29,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 import com.hatem.musicmute.BuildConfig
@@ -38,6 +40,25 @@ import com.hatem.musicmute.processing.ProcessingUsage
 import com.hatem.musicmute.state.VocalUiState
 import com.hatem.musicmute.ui.auth.AccountPublicLinks
 import com.hatem.musicmute.ui.design.*
+import java.net.URI
+import java.util.Locale
+
+internal const val MUSICMUTE_WEB_APP_URL = "https://app.music-mute.com"
+internal const val MUSICMUTE_MACOS_DOWNLOADS_URL = "https://music-mute.com/#downloads"
+
+internal fun isTrustedMusicMutePlatformUrl(value: String): Boolean =
+    runCatching {
+        val uri = URI(value)
+        val host = uri.host?.lowercase(Locale.ROOT)
+        val rootPath = uri.rawPath.isNullOrEmpty() || uri.rawPath == "/"
+        uri.scheme.equals("https", ignoreCase = true) &&
+            uri.rawUserInfo == null && uri.port == -1 && uri.rawQuery == null && rootPath &&
+            when (host) {
+                "app.music-mute.com" -> uri.rawFragment == null
+                "music-mute.com" -> uri.rawFragment == "downloads"
+                else -> false
+            }
+    }.getOrDefault(false)
 
 @Composable
 fun CreativeSettingsScreen(
@@ -181,6 +202,7 @@ private fun languageLabel(choice: LanguageChoice): Int = when (choice) {
 
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
     CreativePage {
         TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
         CreativeHeader(stringResource(R.string.about_vocal), stringResource(R.string.creative_settings_about_summary))
@@ -194,8 +216,65 @@ fun AboutScreen(onBack: () -> Unit) {
                 Text(stringResource(description), style = MaterialTheme.typography.bodyLarge)
             }
         }
+        Text(
+            stringResource(R.string.creative_settings_other_platforms),
+            modifier = Modifier.semantics { heading() },
+            style = MaterialTheme.typography.titleLarge,
+        )
+        PlatformLinkCard(
+            title = stringResource(R.string.creative_settings_web),
+            description = stringResource(R.string.creative_settings_web_description),
+            icon = Icons.Outlined.Language,
+            modifier = Modifier.testTag("about-platform-web"),
+        ) { context.openMusicMutePlatformUrl(MUSICMUTE_WEB_APP_URL) }
+        PlatformLinkCard(
+            title = stringResource(R.string.creative_settings_macos),
+            description = stringResource(R.string.creative_settings_macos_description),
+            icon = Icons.Outlined.LaptopMac,
+            modifier = Modifier.testTag("about-platform-macos"),
+        ) { context.openMusicMutePlatformUrl(MUSICMUTE_MACOS_DOWNLOADS_URL) }
         Text(stringResource(R.string.creative_settings_version, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         AccountPublicLinks()
     }
+}
+
+@Composable
+private fun PlatformLinkCard(
+    title: String,
+    description: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    CreativeCard(modifier = modifier, onClick = onClick) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(CreativeTokens.ContentGap),
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap),
+            ) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Outlined.OpenInNew,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun android.content.Context.openMusicMutePlatformUrl(url: String) {
+    if (!isTrustedMusicMutePlatformUrl(url)) return
+    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
 }

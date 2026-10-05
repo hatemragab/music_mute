@@ -9,6 +9,10 @@ import { parseSince } from "../shared/operational-logs.js";
 import { inspectWindowsUserHealth } from "./user-health.js";
 import { formatHealth } from "../shared/user-health.js";
 import { configureWorkerCapacity } from "../shared/worker-capacity.js";
+import {
+  cleanupWorkerStorage,
+  windowsWorkerStorageLayout,
+} from "../shared/storage-maintenance.js";
 import { watchStatus, waitForReady } from "../shared/status-watch.js";
 import { join } from "node:path";
 import { lstat, readFile } from "node:fs/promises";
@@ -65,6 +69,7 @@ export const WINDOWS_USER_USAGE = `Usage:
   mw unpair [--force] [--json]
   mw uninstall [--purge] [--json]
   mw doctor [--full] [--json]
+  mw cleanup [--dry-run | --apply] [--json]
   mw diagnostics [--output <new-archive.zip>] [--job <job-id>] [--since <1s-30d>] [--json]
   mw start [--wait-ready] [--json]
   mw stop [--force] [--json]
@@ -121,6 +126,29 @@ export async function runWindowsUserCommand(
     throw new TypeError("Windows worker requires Windows x64");
   const layout = context.layout ?? createWindowsServiceLayout();
   const service = context.service ?? new WindowsServiceController(layout);
+  if (command === "cleanup") {
+    const json = extractBooleanFlag(arguments_, "--json");
+    const dryRun = extractBooleanFlag(json.remaining, "--dry-run");
+    const apply = extractBooleanFlag(dryRun.remaining, "--apply");
+    if (apply.remaining.length || (apply.present && dryRun.present))
+      throw new TypeError("Choose cleanup --dry-run or cleanup --apply");
+    await service.assertPrivateInstallation();
+    const result = await (context.lock ?? withNativeLock)(
+      layout.commandLockPath,
+      async () => {
+        if (apply.present && (await service.inspect()).state !== "stopped")
+          throw new Error("Drain and stop the worker before applying cleanup");
+        return await cleanupWorkerStorage({
+          layout: windowsWorkerStorageLayout(layout),
+          apply: apply.present,
+        });
+      },
+    );
+    (context.stdout ?? console.log)(
+      formatDetailedResult("MusicMute Worker Cleanup", result, json.present),
+    );
+    return result.status === "ok" ? 0 : 1;
+  }
   if (command === "install") {
     const json = extractBooleanFlag(arguments_, "--json");
     if (json.remaining.length === 0) {

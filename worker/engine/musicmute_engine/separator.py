@@ -36,7 +36,7 @@ def _load_verified_mdx(separator: Any, model_path: Path) -> None:
     These parameters belong to MODEL_SHA256 in recipes.py. UVR identifies that
     model with tail-MD5 970b3f9492014d18fefeedfe4773cb42 in its MDX model data:
     https://github.com/TRvlvr/application_data/blob/main/mdx_model_data/model_data_new.json
-    MD5 is provenance only; verify_model enforces the full SHA-256 before here.
+    MD5 is provenance only; the caller owns model integrity validation.
     Keep the pinned upstream device, separation and cleanup implementation.
     """
     from audio_separator.separator.architectures.mdx_separator import MDXSeparator
@@ -195,6 +195,7 @@ class KimSeparator:
         profile_directory: Path | None = None,
         on_startup_stage: Callable[[str], None] | None = None,
         group_size: int | None = None,
+        model_validator: Callable[[Path], Path] | None = None,
     ) -> None:
         if group_size is None:
             group_size = 2 if provider == "mps" else 1
@@ -202,7 +203,7 @@ class KimSeparator:
             raise SeparatorError("Kim window group is unsupported")
         self.provider = provider
         self.group_size = group_size
-        self.model_path = verify_model(model_path)
+        self.model_path = (model_validator or verify_model)(model_path)
         self.directml_device_id = directml_device_id
         self.profile_directory = profile_directory
         self._profile_sessions: list[Any] = []

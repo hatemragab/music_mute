@@ -1,0 +1,23 @@
+{
+  "caproverApp": "music-mute-ytdlp",
+  "notExposedAsWebApp": true,
+  "containerHttpPort": 8080,
+  "instanceCount": 1,
+  "ports": [],
+  "volumes": [],
+  "environment": {
+    "ACQUISITION_TEMP_ROOT": "/work",
+    "ACQUISITION_CONCURRENCY": "10",
+    "ACQUISITION_REQUESTS_PER_SECOND": "2",
+    "DATAIMPULSE_STICKY_PORT_MIN": "10000",
+    "DATAIMPULSE_STICKY_PORT_MAX": "20000",
+    "DATAIMPULSE_STICKY_MINUTES": "30"
+  },
+  "secretsInCaproverEnvironment": [
+    "AUDIO_ACQUISITION_API_KEY",
+    "DATAIMPULSE_RESIDENTIAL_LOGIN",
+    "DATAIMPULSE_RESIDENTIAL_PASSWORD",
+    "DATAIMPULSE_MOBILE_LOGIN",
+    "DATAIMPULSE_MOBILE_PASSWORD"
+  ]
+}

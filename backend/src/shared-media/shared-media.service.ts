@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
 import { trusted, type ClientSession, type Model, type Types } from 'mongoose';
@@ -30,9 +30,23 @@ import {
   sharedResultKey,
   isSharedMediaObjectKey,
 } from './shared-media-key.js';
+import {
+  SharedMediaCatalogService,
+  type CommunityMediaObjects,
+  type SharedMediaReady,
+} from './shared-media-catalog.service.js';
 
 export type SharedImportAction =
   'acquire' | 'source' | 'result' | 'wait' | 'failed';
+
+export interface SharedMediaClaim {
+  sourceKey: string;
+  resultKey: string;
+  cached: boolean;
+  hasSource: boolean;
+  waitingForDerivation?: boolean;
+  waitingForCommunity?: boolean;
+}
 
 /** Durable shared artifacts. These collections and confirmed R2 objects have no TTL. */
 @Injectable()
@@ -50,7 +64,100 @@ export class SharedMediaService {
     private readonly transactions: ProcessingTransactions,
     @InjectModel(SharedMediaArtifact.name)
     readonly artifacts: Model<SharedMediaArtifact>,
+    @Optional() private readonly catalog?: SharedMediaCatalogService,
   ) {}
+
+  lookupSource(url: string) {
+    if (!this.catalog) throw importError('IMPORT_DEPENDENCY_FAILED');
+    return this.catalog.lookupSource(url);
+  }
+
+  lookupReady(url: string, trimEnabled = false, session?: ClientSession) {
+    if (!this.catalog) throw importError('IMPORT_DEPENDENCY_FAILED');
+    return this.catalog.lookupReady(url, trimEnabled, session);
+  }
+
+  reserveCommunity(
+    contributionId: Types.ObjectId,
+    url: string,
+    session: ClientSession,
+  ) {
+    if (!this.catalog) throw importError('IMPORT_DEPENDENCY_FAILED');
+    return this.catalog.reserveCommunity(contributionId, url, session);
+  }
+
+  refreshCommunityLease(
+    contributionId: Types.ObjectId,
+    url: string,
+    expiresAt: Date,
+    session: ClientSession,
+  ) {
+    if (!this.catalog) throw importError('IMPORT_DEPENDENCY_FAILED');
+    return this.catalog.refreshCommunityLease(
+      contributionId,
+      url,
+      expiresAt,
+      session,
+    );
+  }
+
+  inspectCommunity(url: string, session?: ClientSession) {
+    if (!this.catalog) throw importError('IMPORT_DEPENDENCY_FAILED');
+    return this.catalog.inspectCommunity(url, session);
+  }
+
+  failCommunity(
+    contributionId: Types.ObjectId,
+    url: string,
+    session: ClientSession,
+  ) {
+    if (!this.catalog) throw importError('IMPORT_DEPENDENCY_FAILED');
+    return this.catalog.failCommunity(contributionId, url, session);
+  }
+
+  publishCommunity(
+    contributionId: Types.ObjectId,
+    url: string,
+    objects: CommunityMediaObjects,
+  ) {
+    if (!this.catalog) throw importError('IMPORT_DEPENDENCY_FAILED');
+    return this.catalog.publishCommunity(contributionId, url, objects);
+  }
+
+  ensureReadyTrimmed(url: string) {
+    if (!this.catalog) return Promise.resolve(null);
+    return this.catalog.ensureReadyTrimmed(url);
+  }
+
+  ensureTrimmedFromFull(full: SharedMediaReady) {
+    if (!this.catalog) return Promise.resolve(null);
+    return this.catalog.ensureTrimmedFromFull(full);
+  }
+
+  async prepareRequestedOutput(job: Job, full: ObjectIdentity) {
+    if (
+      !this.catalog ||
+      !job.requestedTrimEnabled ||
+      !job.sharedSourceKey ||
+      !job.sharedResultKey
+    )
+      return null;
+    const source = await this.sources.findById(job.sharedSourceKey).lean();
+    if (!source || !source.input || !source.inputObject || !job.recipeSnapshot)
+      throw importError('IMPORT_DEPENDENCY_FAILED');
+    return this.catalog.ensureTrimmedFromFull({
+      sourceKey: source._id,
+      resultKey: job.sharedResultKey,
+      input: source.input,
+      inputObject: source.inputObject,
+      outputObject: full,
+      recipeSnapshot: job.recipeSnapshot,
+      comparisonRanges: null,
+      sourceTitle: source.sourceTitle,
+      provenance: source.provenance ?? 'trusted',
+      sourceIdentityVerified: source.provenance !== 'community_contributed',
+    });
+  }
 
   async initialize() {
     await this.sources.init();
@@ -65,9 +172,24 @@ export class SharedMediaService {
     importId: Types.ObjectId,
     trimEnabled: boolean,
     session: ClientSession,
-  ) {
+    cacheOnly = false,
+  ): Promise<SharedMediaClaim> {
+    const ready = await this.catalog?.lookupReady(url, trimEnabled, session);
+    if (ready)
+      return {
+        sourceKey: ready.sourceKey,
+        resultKey: ready.resultKey,
+        cached: true,
+        hasSource: true,
+      };
+    if (!cacheOnly) {
+      const pending = await this.catalog?.pending(url, trimEnabled, session);
+      if (pending) return pending;
+    }
     const sourceKey = sharedSourceKey(url);
     let source = await this.sources.findById(sourceKey).session(session).lean();
+    if (cacheOnly && source?.state !== 'ready')
+      throw importError('IMPORT_CACHE_MISS');
     if (!source || source.state === 'failed') {
       source = await this.sources
         .findOneAndUpdate(
@@ -97,13 +219,32 @@ export class SharedMediaService {
         .lean();
     }
     if (!source) throw importError('IMPORT_DEPENDENCY_FAILED');
-    const recipe = workerRecipeSnapshot(DEFAULT_WORKER_RECIPE_ID, trimEnabled);
+    const recipe = workerRecipeSnapshot(
+      DEFAULT_WORKER_RECIPE_ID,
+      !cacheOnly && this.catalog && provider === 'youtube'
+        ? false
+        : trimEnabled,
+    );
     const resultKey = sharedResultKey(
       sourceKey,
       source.generation,
       recipe.recipeDigest,
     );
     let result = await this.results.findById(resultKey).session(session).lean();
+    const cached = Boolean(
+      source.state === 'ready' &&
+      source.input &&
+      source.inputObject &&
+      result?.state === 'ready' &&
+      result.outputObject &&
+      result.sourceKey === sourceKey &&
+      result.sourceGeneration === source.generation &&
+      result.recipeSnapshot.recipeDigest === recipe.recipeDigest,
+    );
+    if (cacheOnly) {
+      if (!cached) throw importError('IMPORT_CACHE_MISS');
+      return { sourceKey, resultKey, cached: true, hasSource: true };
+    }
     if (!result || result.state === 'failed') {
       result = await this.results
         .findOneAndUpdate(
@@ -137,17 +278,53 @@ export class SharedMediaService {
     return {
       sourceKey,
       resultKey,
-      cached: result?.state === 'ready' && source.state === 'ready',
+      cached,
       hasSource: source.state === 'ready',
     };
   }
 
-  async inspect(record: MediaImport) {
+  async inspect(record: MediaImport, allowDerivation = true) {
     if (!record.sharedSourceKey || !record.sharedResultKey) return null;
-    const [source, result] = await Promise.all([
+    const [source, storedResult] = await Promise.all([
       this.sources.findById(record.sharedSourceKey).lean(),
       this.results.findById(record.sharedResultKey).lean(),
     ]);
+    let result = storedResult;
+    if (
+      this.catalog &&
+      record.trimEnabled &&
+      result?.state === 'ready' &&
+      result.outputObject &&
+      !result.recipeSnapshot.trimEnabled &&
+      source?.state === 'ready' &&
+      source.input &&
+      source.inputObject &&
+      result.sourceKey === source._id &&
+      result.sourceGeneration === source.generation
+    ) {
+      const full: SharedMediaReady = {
+        sourceKey: source._id,
+        resultKey: result._id,
+        input: source.input!,
+        inputObject: source.inputObject!,
+        outputObject: result.outputObject!,
+        recipeSnapshot: result.recipeSnapshot,
+        comparisonRanges: result.comparisonRanges,
+        sourceTitle: source.sourceTitle,
+        provenance: source.provenance ?? 'trusted',
+        sourceIdentityVerified: source.provenance !== 'community_contributed',
+      };
+      const existing = await this.catalog.lookupTrimmedForFull(full);
+      const trimmed =
+        existing ??
+        (allowDerivation
+          ? await this.catalog.ensureTrimmedFromFull(full)
+          : null);
+      if (!trimmed) return { action: 'wait' as const, source, result };
+      if (trimmed.sourceKey !== source._id)
+        return { action: 'wait' as const, source, result };
+      result = await this.results.findById(trimmed.resultKey).lean();
+    }
     let action: SharedImportAction = 'failed';
     if (
       source &&
@@ -164,11 +341,11 @@ export class SharedMediaService {
       )
         action = 'result';
       else if (result.state === 'processing') {
-        if (!result.producerImportId.equals(record._id)) action = 'wait';
+        if (!result.producerImportId?.equals(record._id)) action = 'wait';
         else if (source.state === 'ready' && source.inputObject && source.input)
           action = 'source';
         else if (source.state === 'acquiring')
-          action = source.producerImportId.equals(record._id)
+          action = source.producerImportId?.equals(record._id)
             ? 'acquire'
             : 'wait';
       }
@@ -233,7 +410,7 @@ export class SharedMediaService {
     const source = await this.sources.findById(record.sharedSourceKey).lean();
     if (
       source?.state !== 'acquiring' ||
-      !source.producerImportId.equals(record._id) ||
+      !source.producerImportId?.equals(record._id) ||
       !source.inputKey ||
       !source.input ||
       !isSharedMediaObjectKey(source.inputKey, source._id, 'input')
@@ -490,6 +667,7 @@ export class SharedMediaService {
 
   /** Recovery never resubmits a paid acquisition or fabricates a worker completion. */
   async reconcile() {
+    await this.catalog?.reconcileDerived();
     const pending = await this.results
       .find({
         state: 'processing',
@@ -501,6 +679,7 @@ export class SharedMediaService {
       .limit(100)
       .lean();
     for (const result of pending) {
+      if (!result.producerImportId) continue;
       const producer = await this.imports
         .findById(result.producerImportId)
         .lean();

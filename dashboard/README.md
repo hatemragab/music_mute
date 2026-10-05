@@ -98,6 +98,39 @@ Configure the backend `CORS_ORIGINS` with the exact public HTTPS dashboard origi
 
 See the [approved scope](../docs/tasks/full-dashboard/scope.md), [API contracts](../docs/tasks/full-dashboard/contracts.md), and [local validation record](../docs/validation/full-dashboard-local.md).
 
+## Mac updates
+
+**Mac updates** is a separate Sparkle release workflow at `/macos-updates`, with
+`releases.read` for inspection and `releases.manage` for upload/publication.
+An owner saves the 32-byte base64 Ed25519 public key with fresh authentication
+and an audit reason. The backend prevents key changes after any Mac release is
+created. The private signing key stays in the Mac's Keychain.
+
+Download `musicmute-macos-updates.json` from the page; it contains only public
+feed/download URLs and the public key. From `chrome-extension/`, build with
+`MUSICMUTE_MAC_VERSION=YOUR_NEW_VERSION MUSICMUTE_MAC_BUILD=YOUR_NEW_BUILD MUSICMUTE_UPDATE_CONFIG_FILE=/path/musicmute-macos-updates.json npm run package:macos:release`,
+then run `npm run prepare:macos:update -- --release-result /path/release-result.json --dashboard-config /path/musicmute-macos-updates.json --keychain-account YOUR_SPARKLE_ACCOUNT`.
+Existing Developer ID signing and notarization prerequisites still apply.
+
+Select the prepared canonical DMG (at most 2 GiB) and signed `appcast.xml`
+(at most 32 KiB). The dashboard hashes the DMG in bounded worker chunks, checks
+the pair's version, build, bytes, filename hash and download URL, creates a
+draft and uploads through an immutable private R2 grant. The server verifies
+the signed appcast and uploaded bytes before publication can be confirmed with
+fresh authentication and a reason. Withdrawals stop advertising the release in the public feed; existing immutable
+archive downloads remain available. The newest withdrawn release can be
+republished with a fresh review. Android/iOS releases and update policy are separate.
+
+Mac release reads have no polling or focus/reconnect refetch. Explicit commands
+read back committed state. Lost create responses recover the draft through its
+receipt; an explicit **Recover upload grant and resume** action replays the same
+operation ID for a fresh grant. Signed URLs stay in memory. Unresolved receipts
+fence new writes until **Check operation outcome** resolves them. Cancelled or
+ambiguous transfers can be verified before retrying. **Resume upload** lets a
+manager recover an awaiting draft after reloading the page using the same prepared
+DMG; the signed appcast already saved by the server is retained. This workflow's local
+fixture checks do not establish live R2, signing, Sparkle or deployment success.
+
 ## Processing administration
 
 User detail includes current UTC-month processing usage, upload grants/confirmed

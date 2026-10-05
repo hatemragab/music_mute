@@ -547,6 +547,31 @@ function Remove-OperationScratch([string]$Path) {
   Remove-Item -LiteralPath $Path -Force
 }
 
+function Remove-QualificationWorkspace([string]$RootPath, [string]$ReportPath) {
+  if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) { return }
+  Assert-RegularFile $ReportPath 'qualification report' 65536 | Out-Null
+  $Report = [IO.File]::ReadAllText($ReportPath) | ConvertFrom-Json
+  if ($Report.status -cne 'PASS' -or $Report.schemaVersion -ne 1) { throw 'Qualification cleanup evidence is invalid.' }
+  $Output = [IO.Path]::GetFullPath([string]$Report.uploadCandidate.path)
+  $WorkRoot = [IO.Path]::GetFullPath((Join-Path $RootPath 'state\attempts'))
+  $Prefix = $WorkRoot.TrimEnd('\') + '\'
+  if (-not $Output.StartsWith($Prefix, [StringComparison]::OrdinalIgnoreCase)) { return }
+  $Relative = $Output.Substring($Prefix.Length)
+  $Uuid = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
+  if ($Relative -notmatch "^qualification-($Uuid)\\(?:vocals\.mp3|$Uuid\\output\\vocals\.mp3)$") { return }
+  $Workspace = Join-Path $WorkRoot ("qualification-" + $Matches[1])
+  if (-not (Test-Path -LiteralPath $Workspace)) { return }
+  foreach ($Directory in @($WorkRoot, (Split-Path -Parent $WorkRoot), $RootPath)) {
+    $Item = Get-Item -LiteralPath $Directory -Force -ErrorAction Stop
+    if (-not $Item.PSIsContainer -or ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+      throw 'Qualification cleanup path is unsafe.'
+    }
+  }
+  # The generated workspace alone is removed. Reports, installed fixtures and
+  # production attempt directories remain outside this bounded path.
+  Remove-OperationScratch $Workspace
+}
+
 function Assert-ManagedService([string]$RootPath) {
   $Service = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
   if ($null -ne $Service -and

@@ -15,7 +15,7 @@ import type { ClientPlatform } from '../../auth/auth.types.js';
 const printable = /^[^\p{Cc}\p{Cf}]+$/u;
 
 export class DeviceMetadataDto {
-  @IsIn(['android', 'ios', 'web'])
+  @IsIn(['android', 'ios', 'macos', 'web'])
   platform!: ClientPlatform;
 
   @IsString()

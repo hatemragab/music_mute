@@ -59,7 +59,10 @@ fun ProcessingHistoryScreen(
         if (state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         if (!state.loading && !preparing && state.failure == null && visibleTasks.isEmpty()) item { Text(stringResource(R.string.processing_empty)) }
         items(visibleTasks, key = { it.operationId ?: it.jobId.orEmpty() }) { task ->
-            AudioTaskCard(task, { onOpen(task) }, { onCancel(task) }, { onRetry(task) }, { onDelete(task) })
+            AudioTaskCard(
+                task, { onOpen(task) }, { onCancel(task) }, { onRetry(task) }, { onDelete(task) },
+                job = state.jobs.firstOrNull { it.id == task.jobId }, connection = state.connection,
+            )
         }
         if (state.nextCursor != null) item {
             TextButton(onClick = onMore, enabled = !state.loadingMore && !state.loading) {

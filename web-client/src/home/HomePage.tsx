@@ -1,6 +1,12 @@
 import { useLiveQuery, useRealtime } from "../realtime/RealtimeProvider";
 import { Link } from "react-router";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { jobsApi } from "../api/jobs";
 import type { MediaImportView, ProcessingPolicyView } from "../api/types";
 import { useSignedIn } from "../auth/AuthProvider";
@@ -9,6 +15,63 @@ import { activeStatuses, JobCard, useJobs } from "../jobs/JobsUI";
 import { supportedAudioSites, supportedAudioUrl } from "../site-policy/source";
 import { AudioUpload } from "./AudioUpload";
 import { SoloSignalMark } from "../brand/SoloSignalMark";
+
+const retryableImportErrors = new Set([
+  "OFFLINE",
+  "SERVICE_UNAVAILABLE",
+  "RATE_LIMITED",
+  "IMPORT_QUEUE_FULL",
+  "IMPORT_DEPENDENCY_FAILED",
+  "IMPORT_DISK_FULL",
+  "IMPORT_UPSTREAM_REFUSED",
+  "IMPORT_SOURCE_UNAVAILABLE",
+  "IMPORT_DISABLED",
+  "PROCESSING_UNAVAILABLE",
+]);
+const requestIdPattern =
+  /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+
+interface ImportSourceChoice {
+  source: string;
+  trimEnabled: boolean;
+  rightsConfirmed: true;
+}
+
+function sourceChoice(
+  view: MediaImportView,
+  key: string,
+): ImportSourceChoice | null {
+  try {
+    if (
+      typeof view.sourceUrl === "string" &&
+      typeof view.trimEnabled === "boolean"
+    )
+      return {
+        source: supportedAudioUrl(view.sourceUrl),
+        trimEnabled: view.trimEnabled,
+        rightsConfirmed: true,
+      };
+    const saved: unknown = JSON.parse(sessionStorage.getItem(key) || "null");
+    if (
+      saved &&
+      typeof saved === "object" &&
+      "source" in saved &&
+      typeof saved.source === "string" &&
+      "trimEnabled" in saved &&
+      typeof saved.trimEnabled === "boolean" &&
+      "rightsConfirmed" in saved &&
+      saved.rightsConfirmed === true
+    )
+      return {
+        source: supportedAudioUrl(saved.source),
+        trimEnabled: saved.trimEnabled,
+        rightsConfirmed: true,
+      };
+  } catch {
+    /* Malformed or unsupported saved links cannot start provider work. */
+  }
+  return null;
+}
 
 export function HomePage() {
   const { api, user, session } = useSignedIn();
@@ -24,6 +87,8 @@ export function HomePage() {
   const [trim, setTrim] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const submitting = useRef<AbortController | null>(null);
+  useEffect(() => () => submitting.current?.abort(), [api, user.uid]);
   const storageKey = `musicmute.web.import.${user.uid}`;
   const requestKey = `${storageKey}.request`;
   const [importIds, setImportIds] = useState<string[]>(() => {
@@ -49,6 +114,7 @@ export function HomePage() {
     }
     return [];
   });
+  const importIdsRef = useRef(importIds);
   const [finishedImports, setFinishedImports] = useState<Set<string>>(
     new Set(),
   );
@@ -58,15 +124,28 @@ export function HomePage() {
   const watchedImports = new Set(
     importIds.filter((id) => !finishedImports.has(id)).slice(0, 100),
   );
-  function saveImportIds(ids: string[]) {
+  function saveImportIds(update: (ids: string[]) => string[]) {
+    const ids = [...new Set(update(importIdsRef.current))];
     if (ids.length) sessionStorage.setItem(storageKey, JSON.stringify(ids));
     else sessionStorage.removeItem(storageKey);
+    importIdsRef.current = ids;
     setImportIds(ids);
+  }
+  function replaceImport(previousId: string, result: MediaImportView) {
+    saveImportIds((ids) =>
+      ids.map((id) => (id === previousId ? result.importId : id)),
+    );
+    setFinishedImports((previous) => {
+      const next = new Set(previous);
+      next.delete(previousId);
+      next.delete(result.importId);
+      return next;
+    });
   }
 
   async function submitUrl(event: FormEvent) {
     event.preventDefault();
-    if (busy) return;
+    if (submitting.current || !allowed) return;
     setError("");
     if (!rights) {
       setError(t("missingRights"));
@@ -81,6 +160,8 @@ export function HomePage() {
       return;
     }
     setBusy(true);
+    const controller = new AbortController();
+    submitting.current = controller;
     try {
       const fingerprint = `${source}:${trim}`;
       let requestId = crypto.randomUUID() as string;
@@ -101,14 +182,21 @@ export function HomePage() {
         source,
         trim,
         requestId,
+        controller.signal,
       );
-      saveImportIds([...new Set([...importIds, result.importId])]);
+      if (controller.signal.aborted) return;
+      sessionStorage.setItem(
+        `${storageKey}.source.${result.importId}`,
+        JSON.stringify({ source, trimEnabled: trim, rightsConfirmed: true }),
+      );
+      saveImportIds((ids) => [...ids, result.importId]);
       sessionStorage.removeItem(requestKey);
       setUrl((current) => (current === submittedDraft ? "" : current));
     } catch (error) {
-      setError(friendlyError(error, t));
+      if (!controller.signal.aborted) setError(friendlyError(error, t));
     } finally {
-      setBusy(false);
+      if (submitting.current === controller) submitting.current = null;
+      if (!controller.signal.aborted) setBusy(false);
     }
   }
   const recent =
@@ -229,9 +317,13 @@ export function HomePage() {
             key={id}
             id={id}
             active={watchedImports.has(id)}
+            allowed={allowed}
             onTerminal={markFinished}
+            onRetried={(result) => replaceImport(id, result)}
             onClose={() => {
-              saveImportIds(importIds.filter((value) => value !== id));
+              sessionStorage.removeItem(`${storageKey}.source.${id}`);
+              sessionStorage.removeItem(`${storageKey}.retry.${id}`);
+              saveImportIds((ids) => ids.filter((value) => value !== id));
             }}
           />
         ))}
@@ -260,19 +352,85 @@ export function HomePage() {
 function ImportProgress({
   id,
   active,
+  allowed,
   onTerminal,
+  onRetried,
   onClose,
 }: {
   id: string;
   active: boolean;
+  allowed: boolean;
   onTerminal: (id: string) => void;
+  onRetried: (result: MediaImportView) => void;
   onClose: () => void;
 }) {
-  const { user } = useSignedIn();
+  const { api, user } = useSignedIn();
   const { t, lang } = useI18n();
   const client = useRealtime();
   const [current, setCurrent] = useState<MediaImportView | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [retryError, setRetryError] = useState<unknown>(null);
+  const [retrying, setRetrying] = useState(false);
+  const retryController = useRef<AbortController | null>(null);
+  useEffect(() => () => retryController.current?.abort(), [api, user.uid]);
+  const storageKey = `musicmute.web.import.${user.uid}`;
+  const sourceKey = `${storageKey}.source.${id}`;
+  const retryKey = `${storageKey}.retry.${id}`;
+  const choice = current ? sourceChoice(current, sourceKey) : null;
+  const retryable =
+    current?.status === "failed" &&
+    !current.jobId &&
+    retryableImportErrors.has(current.error?.code || "") &&
+    choice !== null;
+
+  async function retryImport() {
+    if (!allowed || !retryable || !choice || retryController.current) return;
+    const controller = new AbortController();
+    retryController.current = controller;
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const fingerprint = `${choice.source}:${choice.trimEnabled}`;
+      let requestId: string = crypto.randomUUID();
+      try {
+        const saved = JSON.parse(
+          sessionStorage.getItem(retryKey) || "null",
+        ) as { fingerprint?: string; requestId?: string } | null;
+        if (
+          saved?.fingerprint === fingerprint &&
+          saved.requestId &&
+          requestIdPattern.test(saved.requestId)
+        )
+          requestId = saved.requestId;
+      } catch {
+        /* Replace malformed admission recovery identity before the explicit retry. */
+      }
+      sessionStorage.setItem(
+        retryKey,
+        JSON.stringify({ fingerprint, requestId }),
+      );
+      const result = await jobsApi(api).createImport(
+        choice.source,
+        choice.trimEnabled,
+        requestId,
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      sessionStorage.setItem(
+        `${storageKey}.source.${result.importId}`,
+        JSON.stringify(choice),
+      );
+      onRetried(result);
+      sessionStorage.removeItem(retryKey);
+      if (result.importId !== id) sessionStorage.removeItem(sourceKey);
+    } catch (error) {
+      if (!controller.signal.aborted) setRetryError(error);
+    } finally {
+      if (retryController.current === controller)
+        retryController.current = null;
+      if (!controller.signal.aborted) setRetrying(false);
+    }
+  }
   const terminal =
     current?.status === "failed" || current?.status === "submitted";
   useEffect(() => {
@@ -288,7 +446,11 @@ function ImportProgress({
     });
   }, [client, id, active, terminal, onTerminal, user.uid]);
   return (
-    <div className="import-state" role="status">
+    <div
+      className="import-state"
+      role="status"
+      data-reload-blocked={retrying ? "true" : undefined}
+    >
       {!terminal && (
         <>
           <span className="spinner" aria-hidden="true" />
@@ -300,10 +462,24 @@ function ImportProgress({
       {current?.status === "failed" && (
         <p role="alert">{friendlyError(current.error, t)}</p>
       )}
+      {retryError != null && <p role="alert">{friendlyError(retryError, t)}</p>}
+      {retryable && (
+        <button
+          type="button"
+          disabled={!allowed || retrying}
+          onClick={() => void retryImport()}
+        >
+          {retrying ? t("loading") : t("tryAgain")}
+        </button>
+      )}
       {current?.status === "submitted" && current.jobId && (
         <Link to={`/jobs/${current.jobId}`}>{t("details")}</Link>
       )}
-      {terminal && <button onClick={onClose}>{t("close")}</button>}
+      {terminal && (
+        <button type="button" disabled={retrying} onClick={onClose}>
+          {t("close")}
+        </button>
+      )}
     </div>
   );
 }

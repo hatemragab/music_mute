@@ -11,11 +11,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SupportedAudioSitesTest {
-    @Serializable private data class Case(val url: String, val accepted: Boolean)
+    @Serializable private data class Case(val url: String, val accepted: Boolean, val canonicalUrl: String? = null)
     @Test fun sharedPolicyFixtures() {
         val source = javaClass.getResourceAsStream("/url-policy-cases.json")!!.bufferedReader().use { it.readText() }
         for (case in Json.decodeFromString<List<Case>>(source)) {
-            assertEquals(case.url, case.accepted, runCatching { SupportedAudioSites.canonical(case.url) }.isSuccess)
+            val result = runCatching { SupportedAudioSites.canonical(case.url) }
+            assertEquals(case.url, case.accepted, result.isSuccess)
+            case.canonicalUrl?.let { assertEquals(case.url, it, result.getOrThrow()) }
         }
         assertEquals(12, SupportedAudioSites.names.size)
     }

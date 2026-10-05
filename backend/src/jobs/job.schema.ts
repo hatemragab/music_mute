@@ -85,6 +85,33 @@ const objectIdentity = new MongoSchema<ObjectIdentity>(
   { _id: false, strict: 'throw' },
 );
 
+export interface JobRenditionPending {
+  full: ObjectIdentity;
+  attemptId: string;
+  queuedAt: Date;
+  nextAt: Date;
+  leaseUntil: Date | null;
+  leaseToken: string | null;
+  attempts: number;
+}
+const renditionPending = new MongoSchema<JobRenditionPending>(
+  {
+    full: { type: objectIdentity, required: true },
+    attemptId: { type: String, required: true, match: /^[a-f0-9-]{36}$/i },
+    queuedAt: { type: Date, required: true },
+    nextAt: { type: Date, required: true },
+    leaseUntil: { type: Date, default: null },
+    leaseToken: { type: String, default: null, match: /^[a-f0-9-]{36}$/i },
+    attempts: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: Number.isSafeInteger,
+    },
+  },
+  { _id: false, strict: 'throw' },
+);
+
 const inputReservation = new MongoSchema<InputReservation>(
   {
     key: { type: String, required: true, maxlength: 1024 },
@@ -298,6 +325,13 @@ const workerExecutionOwnership = new MongoSchema<WorkerExecutionOwnership>(
 })
 export class Job {
   _id!: Types.ObjectId;
+  @Prop({
+    type: String,
+    default: null,
+    immutable: true,
+    enum: ['local_device', null],
+  })
+  processingOrigin!: 'local_device' | null;
   @Prop({ type: Date, default: null }) serverTimingStartedAt!: Date | null;
   @Prop({ type: Date, default: null }) queueTimingStartedAt!: Date | null;
   @Prop({
@@ -432,6 +466,12 @@ export class Job {
   retainedOutputReleasedAt!: Date | null;
   @Prop({ type: workerRecipeSnapshot, default: null, immutable: true })
   recipeSnapshot!: WorkerRecipeSnapshot | null;
+  @Prop({ type: Boolean, default: null, immutable: true })
+  requestedTrimEnabled!: boolean | null;
+  @Prop({ type: workerRecipeSnapshot, default: null })
+  outputRecipeSnapshot!: WorkerRecipeSnapshot | null;
+  @Prop({ type: renditionPending, default: null })
+  renditionPending!: JobRenditionPending | null;
   @Prop({ type: workerRetryEligibility, default: null })
   retryEligibility!: WorkerRetryEligibility | null;
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
@@ -458,6 +498,13 @@ export class Job {
         value <= MAX_AUDIO_DURATION_SECONDS),
   })
   measuredDurationSeconds!: number | null;
+  @Prop({
+    type: Number,
+    default: null,
+    min: Number.MIN_VALUE,
+    max: MAX_AUDIO_DURATION_SECONDS,
+  })
+  measuredOutputDurationSeconds!: number | null;
   @Prop({ type: Date, default: null }) uploadingResultAt!: Date | null;
   @Prop({ type: Date, default: null })
   processingIntervalStartedAt!: Date | null;
@@ -479,6 +526,15 @@ export class Job {
   updatedAt!: Date;
 }
 export const JobSchema = SchemaFactory.createForClass(Job);
+JobSchema.index(
+  {
+    status: 1,
+    'renditionPending.nextAt': 1,
+    'renditionPending.leaseUntil': 1,
+    _id: 1,
+  },
+  { name: 'jobs_rendition_pending' },
+);
 // Keep the public administrative CAS authority synchronized across document and query writers.
 // Save uses the driver collection directly, so it does not also invoke query middleware.
 const adminVisibleFields = new Set([
@@ -500,6 +556,8 @@ const adminVisibleFields = new Set([
   'uploadingResultAt',
   'lastError',
   'recipeSnapshot',
+  'requestedTrimEnabled',
+  'outputRecipeSnapshot',
   'retryEligibility',
   'attemptNumber',
   'currentExecution',

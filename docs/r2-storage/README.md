@@ -189,6 +189,17 @@ Shared files/catalog rows have no TTL and are excluded from job/account deletion
 and application cleanup. The storage service rejects shared deletion. Do not
 configure bucket lifecycle expiration for this namespace.
 
+Chrome/Mac YouTube guest publication uses
+`quarantine/youtube/<contribution ID>/input/source.<extension>` and
+`quarantine/youtube/<contribution ID>/output/vocals.mp3` for create-only paired
+upload grants. Backend validation publishes each accepted pair into the same
+permanent shared catalog, with separate community provenance. Guest declarations
+and grants have scoped byte budgets; they create no account job or upload quota
+entry. A dedicated exact-key cleanup ledger waits for grant expiry and transfer
+settlement before removing quarantine objects. It cannot delete `shared/` objects.
+See [YouTube community publication](../url-imports/youtube-community.md) for
+capability expiry, producer claims, immutable recovery and validation boundaries.
+
 Invalid, abandoned, cancelled, failed and stale attempt files use existing durable
 leased cleanup by exact key. Never scan or delete a bucket prefix during routine
 cleanup. Cleanup waits through the recorded grant deadline plus a one-hour transfer

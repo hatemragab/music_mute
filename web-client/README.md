@@ -17,8 +17,14 @@ Failed imports stop their loading indicator and show localized source/service
 errors. The submission form becomes available as soon as NestJS accepts the request.
 Multiple imports keep independent WebSocket progress and account-scoped recovery
 identities; completed imports expose an explicit job link without navigating
-away from the next draft. Failed imports can be dismissed, and provider
-downloads are never automatically resubmitted.
+away from the next draft. Eligible failed imports offer **Try again**, matching
+Android's transient-error allowlist. It preserves the original link, trim choice
+and confirmed intent, keeps the failed card until acceptance, and retains one
+retry UUID across uncertain responses and reloads. Owner import snapshots restore
+the original link/trim for older cards; malformed or missing context cannot start
+a retry. Double clicks and late responses from another session are fenced.
+Failed imports can also be dismissed. Terminal imports are retried only by an
+explicit user action; shared source/result caches remain authoritative.
 
 ## Development setup
 
@@ -116,6 +122,12 @@ from Android's `ic_vocal.xml` brand mark; update `public/favicon.svg` and its
 192-pixel PNG together if the native mark changes. These measures support branded
 discovery; the signed-in application is not a substitute for a public product
 landing page, and indexing is controlled by search engines.
+
+The signed-out entry and authenticated Settings page advertise the macOS app and
+link to the future public landing page's Downloads section. Keep the stable URL
+centralized in `src/product-links.ts` as `https://music-mute.com/#downloads`;
+do not link browser UI directly to a mutable DMG or to the authenticated web-app
+origin. External product links open in a new tab with `noopener noreferrer`.
 
 ## Realtime processing
 

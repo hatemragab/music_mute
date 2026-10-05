@@ -77,6 +77,32 @@ indexed; keep their crawl headers and the root-only sitemap aligned with route
 changes. The favicon derives from Android's `ic_vocal.xml`. Update both the
 vector and rendered PNG if that mark changes.
 
+## Cross-product discovery
+
+Keep public product destinations centralized in each client rather than
+duplicating ad-hoc URLs in views. The reviewed destinations are:
+
+- web app: `https://app.music-mute.com`;
+- future landing-page Downloads section: `https://music-mute.com/#downloads`;
+- Android listing: `https://play.google.com/store/apps/details?id=com.hatem.musicmute`.
+
+The Downloads landing page and Google Play listing may not be live yet. UI and
+documentation must not call either a verified download until a current network
+or release-registry check proves it. Do not invent a direct DMG, Firebase App
+Distribution, App Store or Play artifact URL. Product links must use HTTPS,
+exclude credentials and tracking parameters, preserve English/Arabic RTL and
+accessibility, and use safe external-navigation behavior. Google sign-in actions
+must show the recognizable multicolor Google G together with localized accessible
+text; an unrelated system person icon is not a Google mark.
+
+The macOS local app and Chrome extension live under `chrome-extension/`. Its
+processing runtime and model are installed outside the app under
+`~/Library/Application Support/MusicMuteLocal/` and survive ordinary app
+replacement. Read `chrome-extension/AGENTS.md`, `README.md` and
+`docs/setup-updates.md` before changing packaging, Prepare, installation,
+account sync or cross-product Home UI. A thin bundle with a placeholder runtime
+host is not a fresh-user release even if an already prepared Mac can run it.
+
 For any simulator UI test, use only the existing iPhone 17 Pro, iOS 26.0,
 UDID `3CC14436-EC3C-4419-A079-C84951E5FA07`. Do not substitute devices or
 create/download a simulator. Do not commit, push, deploy, publish, delete real

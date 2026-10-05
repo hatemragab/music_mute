@@ -41,7 +41,7 @@ Mongo expressions or write commands are accepted.
 | Audience | Resource                                     | Parameters / authorization                                           |
 | -------- | -------------------------------------------- | -------------------------------------------------------------------- |
 | Owner    | `jobs`                                       | Existing owner job list filters and cursor; authenticated owner only |
-| Owner    | `job`, `import`                              | `id`; ownership checked by existing service                          |
+| Owner    | `job`, `import`, `local_media_sync`          | `id`; ownership checked by existing service                          |
 | Owner    | `usage`                                      | No parameters                                                        |
 | Owner    | `policy`                                     | Optional `schema_version`                                            |
 | Admin    | `admin.jobs`, `admin.job`                    | Existing list filters / `id`; `jobs.read`                            |
@@ -177,3 +177,24 @@ Older responses without it display freshness as unknown. Existing command metric
 remain bounded name/value/unit arrays; updated workers report additional numeric
 resource metrics through the same command-result route. No new socket resource or
 polling path is introduced.
+
+### Native guest YouTube sharing (2026-10-04)
+
+`/youtube-community-realtime` shares the HTTP upgrade dispatcher and committed
+Mongo feed, with a separate native guest capability protocol. No browser Origin
+or query is accepted. Within five seconds send exactly
+`{type:"authenticate",token,video_id}`; further client commands are rejected.
+The token is a YouTube guest capability, not a Firebase identity. One connection
+observes one valid case-sensitive 11-character video ID. Complete snapshots are
+`{type:"snapshot",video_id,state,expires_at,sequence}`, with monotonic sequence
+and state `missing|preparing|awaiting_upload|validating|ready|failed`. They contain
+no contributor ID, declarations, grants or bearer. On ready, one HTTP cache
+delivery command obtains the current approved artifacts.
+
+The feed also observes `youtube_guest_sessions`, `youtube_contributions` and
+`youtube_contribution_leases`. Feed loss closes 1013, revoked/expired authentication
+closes 1008, and reconnect reads a fresh snapshot. Server heartbeats renew bounded
+Redis leases and revalidate authentication; pending lease expiry wakes a snapshot.
+Clients wait on snapshots and do not add recurring HTTP status reads. See
+[the complete guest contract](../url-imports/youtube-community.md) for capacity,
+privacy and producer recovery details.

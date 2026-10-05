@@ -105,11 +105,13 @@
   },
   {
     "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&list=PL123",
-    "accepted": false
+    "accepted": true,
+    "canonicalUrl": "https://www.youtube.com/watch?v=UXqq0ZvbOnk"
   },
   {
     "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&%6cist=PL123",
-    "accepted": false
+    "accepted": true,
+    "canonicalUrl": "https://www.youtube.com/watch?v=UXqq0ZvbOnk"
   },
   {
     "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&v=UXqq0ZvbOnk",
@@ -254,5 +256,99 @@
   {
     "url": "https://hearthis.at/artist/example.track",
     "accepted": true
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=e6WT8RwRwt4&list=RDe6WT8RwRwt4&start_radio=1",
+    "accepted": true,
+    "canonicalUrl": "https://www.youtube.com/watch?v=e6WT8RwRwt4"
+  },
+  {
+    "url": "https://www.youtube.com/watch/?v=UXqq0ZvbOnk&list=PL123&index=2&t=90&si=share",
+    "accepted": true,
+    "canonicalUrl": "https://www.youtube.com/watch?v=UXqq0ZvbOnk"
+  },
+  {
+    "url": "http://m.youtube.com/watch?v=UXqq0ZvbOnk&list=PL123",
+    "accepted": true,
+    "canonicalUrl": "https://www.youtube.com/watch?v=UXqq0ZvbOnk"
+  },
+  {
+    "url": "https://music.youtube.com/watch?v=UXqq0ZvbOnk&list=RDAMVMUXqq0ZvbOnk",
+    "accepted": true,
+    "canonicalUrl": "https://www.youtube.com/watch?v=UXqq0ZvbOnk"
+  },
+  {
+    "url": "https://youtu.be/UXqq0ZvbOnk?list=PL123&index=3&si=share",
+    "accepted": true,
+    "canonicalUrl": "https://www.youtube.com/watch?v=UXqq0ZvbOnk"
+  },
+  {
+    "url": "https://www.youtube.com/shorts/UXqq0ZvbOnk?list=PL123&start_radio=1",
+    "accepted": true,
+    "canonicalUrl": "https://www.youtube.com/watch?v=UXqq0ZvbOnk"
+  },
+  {
+    "url": "https://www.youtube.com/embed/UXqq0ZvbOnk/?playlist=UXqq0ZvbOnk&start=30",
+    "accepted": true,
+    "canonicalUrl": "https://www.youtube.com/watch?v=UXqq0ZvbOnk"
+  },
+  {
+    "url": "https://www.youtube.com/live/UXqq0ZvbOnk?list=PL123",
+    "accepted": true,
+    "canonicalUrl": "https://www.youtube.com/watch?v=UXqq0ZvbOnk"
+  },
+  {
+    "url": "https://youtu.be/UXqq0ZvbOnk?v=UXqq0ZvbOnk&list=PL123",
+    "accepted": true,
+    "canonicalUrl": "https://www.youtube.com/watch?v=UXqq0ZvbOnk"
+  },
+  {
+    "url": "https://www.youtube.com/watch?%76=UXqq0ZvbOnk&%6cist=PL123",
+    "accepted": true,
+    "canonicalUrl": "https://www.youtube.com/watch?v=UXqq0ZvbOnk"
+  },
+  {
+    "url": "https://www.youtube.com/watch?list=PL123&index=1",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=short&list=PL123",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/playlist?v=UXqq0ZvbOnk&list=PL123",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&v=dQw4w9WgXcQ&list=PL123",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&%76=UXqq0ZvbOnk&list=PL123",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&list=PL123&list=PL456",
+    "accepted": false
+  },
+  {
+    "url": "https://youtu.be/UXqq0ZvbOnk?v=dQw4w9WgXcQ&list=PL123",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/shorts/UXqq0ZvbOnk?v=dQw4w9WgXcQ",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UXqq0ZvbOnk&list=PL123%0a",
+    "accepted": false
+  },
+  {
+    "url": "https://www.youtube.com.evil.example/watch?v=UXqq0ZvbOnk&list=PL123",
+    "accepted": false
+  },
+  {
+    "url": "https://soundcloud.com/artist/track?playlist=album",
+    "accepted": false
   }
 ]

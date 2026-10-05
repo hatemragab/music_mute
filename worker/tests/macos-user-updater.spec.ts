@@ -427,6 +427,14 @@ describe.skipIf(process.platform !== "darwin")(
       });
       expect(await readlink(fixture.layout.currentLink)).toBe("releases/0.2.0");
       expect(qualify).toHaveBeenCalledOnce();
+      expect(qualify).toHaveBeenCalledWith(
+        fixture.layout,
+        join(fixture.layout.releasesRoot, "0.2.0"),
+        join(fixture.layout.stateRoot, "qualification.wav"),
+        expect.any(String),
+        fixture.launchAgent,
+        false,
+      );
       expect(
         JSON.parse(await readFile(fixture.layout.updateStatePath, "utf8")),
       ).toMatchObject({
@@ -442,6 +450,111 @@ describe.skipIf(process.platform !== "darwin")(
       expect(
         JSON.parse(await readFile(fixture.layout.configPath, "utf8")),
       ).toMatchObject({ slots: [{ provider: "mps" }] });
+      await expect(
+        lstat(join(fixture.layout.transactionRoot, "updates", "2")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(
+        (await lstat(join(fixture.layout.releasesRoot, "0.1.0"))).isDirectory(),
+      ).toBe(true);
+      expect(
+        (await lstat(join(fixture.layout.releasesRoot, "0.2.0"))).isDirectory(),
+      ).toBe(true);
+    });
+
+    it("keeps an accepted update healthy when scratch removal fails", async () => {
+      const fixture = await updateFixture();
+      const removeTransaction = vi.fn(async () => {
+        throw new Error("permission denied with private path");
+      });
+      const result = await updateMacUserWorker({
+        layout: fixture.layout,
+        uid: process.getuid!(),
+        candidate: async () => fixture.candidate,
+        now: fixture.now,
+        fetch: fixture.fetch,
+        qualify: async () => "report.json",
+        launchAgent: fixture.launchAgent,
+        confirmStarted: async () => true,
+        health: async () => true,
+        removeTransaction,
+      });
+      expect(result).toEqual({
+        status: "updated",
+        releaseVersion: "0.2.0",
+        sequence: 2,
+        cleanupWarning:
+          "Update scratch cleanup deferred; run mw cleanup --apply",
+      });
+      expect(removeTransaction).toHaveBeenCalledWith(
+        join(fixture.layout.transactionRoot, "updates", "2"),
+      );
+      expect(await readlink(fixture.layout.currentLink)).toBe("releases/0.2.0");
+      expect(
+        JSON.parse(await readFile(fixture.layout.updateStatePath, "utf8")),
+      ).toMatchObject({ status: "healthy", highestSequence: 2 });
+    });
+
+    it("preserves the original update failure when scratch removal fails", async () => {
+      const fixture = await updateFixture();
+      const warning = vi
+        .spyOn(process, "emitWarning")
+        .mockImplementation(() => {});
+      try {
+        await expect(
+          updateMacUserWorker({
+            layout: fixture.layout,
+            uid: process.getuid!(),
+            candidate: async () => fixture.candidate,
+            now: fixture.now,
+            fetch: fixture.fetch,
+            availableDiskBytes: async () => 0,
+            launchAgent: fixture.launchAgent,
+            removeTransaction: async () => {
+              throw new Error("cleanup failure");
+            },
+          }),
+        ).rejects.toThrow("Insufficient disk space");
+        expect(warning).toHaveBeenCalledWith(
+          "Update scratch cleanup deferred; run mw cleanup --apply",
+          { code: "WORKER_CLEANUP_DEFERRED" },
+        );
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
+    it("keeps scratch while rollback still has a pending restart", async () => {
+      const fixture = await updateFixture();
+      const removeTransaction = vi.fn(async () => {});
+      fixture.launchAgent.bootstrap.mockRejectedValueOnce(
+        new Error("recovery bootstrap failed"),
+      );
+      await expect(
+        updateMacUserWorker({
+          layout: fixture.layout,
+          uid: process.getuid!(),
+          candidate: async () => fixture.candidate,
+          now: fixture.now,
+          fetch: fixture.fetch,
+          qualify: async () => {
+            throw new Error("qualification failed");
+          },
+          launchAgent: fixture.launchAgent,
+          removeTransaction,
+        }),
+      ).rejects.toThrow("recovery bootstrap failed");
+      expect(removeTransaction).not.toHaveBeenCalled();
+      expect(
+        JSON.parse(await readFile(fixture.layout.updateStatePath, "utf8")),
+      ).toMatchObject({
+        status: "rolled-back",
+        recovery: { serviceWasLoaded: true },
+      });
+      expect(
+        (
+          await lstat(join(fixture.layout.transactionRoot, "updates", "2"))
+        ).isDirectory(),
+      ).toBe(true);
     });
 
     it("restores lifecycle when failure occurs after service stop but before qualification", async () => {
@@ -649,6 +762,9 @@ describe.skipIf(process.platform !== "darwin")(
         candidateVersion: "0.2.0",
         quarantinedVersions: ["0.2.0"],
       });
+      await expect(
+        lstat(join(fixture.layout.transactionRoot, "updates", "2")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
     });
 
     it("rolls back and quarantines a candidate that fails the runtime doctor", async () => {
@@ -693,6 +809,9 @@ describe.skipIf(process.platform !== "darwin")(
       ).rejects.toThrow("Insufficient disk space");
       expect(fetch).not.toHaveBeenCalled();
       expect(await readlink(fixture.layout.currentLink)).toBe("releases/0.1.0");
+      await expect(
+        lstat(join(fixture.layout.transactionRoot, "updates", "2")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
     });
 
     it("preserves the active release when an offline download is interrupted", async () => {

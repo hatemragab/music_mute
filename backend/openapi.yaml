@@ -23,6 +23,846 @@ tags:
   - name: admin
   - name: worker
 paths:
+  /admin/macos-updates/configuration:
+    get:
+      tags: [admin, releases]
+      operationId: AdminMacosUpdatesController.configuration
+      summary: Read the dedicated macOS Sparkle channel
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/macos-updates/admin-macos-updates.controller.ts
+      x-auth-policy: A(`releases.read`)
+      x-rate-policy: G + Ax read
+      x-required-permissions: [releases.read]
+      responses:
+        '200':
+          description: Successful result; no-store.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacosUpdateConfigurationView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+    put:
+      tags: [admin, releases]
+      operationId: AdminMacosUpdatesController.configure
+      summary: Configure the pinned Sparkle trust key
+      description: Trust-key changes require owner role. Rotation is blocked after any release exists. URLs derive from PUBLIC_SITE_ORIGIN.
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/macos-updates/admin-macos-updates.controller.ts
+      x-auth-policy: A(`releases.manage`) + fresh
+      x-rate-policy: G + Ax sensitive
+      x-required-permissions: [releases.manage]
+      x-fresh-admin-auth: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MacosUpdateConfigurationDto' }
+      responses:
+        '200':
+          description: Successful result; no-store.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacosUpdateConfigurationView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /admin/macos-updates:
+    get:
+      tags: [admin, releases]
+      operationId: AdminMacosUpdatesController.list
+      summary: Read one explicit page of macOS releases
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/macos-updates/admin-macos-updates.controller.ts
+      x-auth-policy: A(`releases.read`)
+      x-rate-policy: G + Ax read
+      x-required-permissions: [releases.read]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            {
+              type: integer,
+              format: int32,
+              minimum: 1,
+              maximum: 100,
+              default: 25,
+            }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string, maxLength: 256 }
+      responses:
+        '200':
+          description: Successful result; no-store.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacosUpdatePageView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+    post:
+      tags: [admin, releases]
+      operationId: AdminMacosUpdatesController.create
+      summary: Validate a signed appcast and reserve an immutable DMG upload
+      description: Exact Sparkle 2.10 signed feed bytes are bounded to 32 KiB so base64 and command metadata fit the existing 64 KiB JSON limit. One arm64 item, minimum macOS 14, generated SHA-256 filename and channel URLs are required. Replay regenerates a grant only while draft and awaiting upload.
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/macos-updates/admin-macos-updates.controller.ts
+      x-auth-policy: A(`releases.manage`) + fresh
+      x-rate-policy: G + Ax sensitive
+      x-required-permissions: [releases.manage]
+      x-fresh-admin-auth: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MacosUpdateCreateDto' }
+      responses:
+        '201':
+          description: Successful result; no-store.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacosUpdateUploadView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /admin/macos-updates/{id}:
+    get:
+      tags: [admin, releases]
+      operationId: AdminMacosUpdatesController.detail
+      summary: Read a macOS release
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/macos-updates/admin-macos-updates.controller.ts
+      x-auth-policy: A(`releases.read`)
+      x-rate-policy: G + Ax read
+      x-required-permissions: [releases.read]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+      responses:
+        '200':
+          description: Successful result; no-store.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacosUpdateView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /admin/macos-updates/{id}/uploads:
+    post:
+      tags: [admin, releases]
+      operationId: AdminMacosUpdatesController.upload
+      summary: Resume an awaiting draft upload
+      description: Fresh create-only PUT grant for the saved exact identity, with expected release revision. No signed URL is stored.
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/macos-updates/admin-macos-updates.controller.ts
+      x-auth-policy: A(`releases.manage`) + fresh
+      x-rate-policy: G + Ax sensitive
+      x-required-permissions: [releases.manage]
+      x-fresh-admin-auth: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MacosUpdateUploadDto' }
+      responses:
+        '201':
+          description: Successful result; no-store.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacosUpdateUploadView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /admin/macos-updates/{id}/completions:
+    post:
+      tags: [admin, releases]
+      operationId: AdminMacosUpdatesController.complete
+      summary: Verify uploaded immutable DMG bytes
+      description: Bounded HEAD then conditional streaming GET, actual SHA-256 and exact byte verification before an audited transaction. Transfer deadline ten minutes; retry reconciles verified state without another R2 read.
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/macos-updates/admin-macos-updates.controller.ts
+      x-auth-policy: A(`releases.manage`) + fresh
+      x-rate-policy: G + Ax sensitive
+      x-required-permissions: [releases.manage]
+      x-fresh-admin-auth: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MacosUpdateCompletionDto' }
+      responses:
+        '201':
+          description: Successful result; no-store.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacosUpdateView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /admin/macos-updates/{id}/publications:
+    post:
+      tags: [admin, releases]
+      operationId: AdminMacosUpdatesController.publish
+      summary: Select a verified macOS update
+      description: Both expected revisions are required. Build must exceed other ever-published builds. Signed bytes remain unchanged.
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/macos-updates/admin-macos-updates.controller.ts
+      x-auth-policy: A(`releases.manage`) + fresh
+      x-rate-policy: G + Ax sensitive
+      x-required-permissions: [releases.manage]
+      x-fresh-admin-auth: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MacosUpdatePublicationDto' }
+      responses:
+        '201':
+          description: Successful result; no-store.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacosUpdatePublicationView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /admin/macos-updates/{id}/withdrawals:
+    post:
+      tags: [admin, releases]
+      operationId: AdminMacosUpdatesController.withdraw
+      summary: Withdraw a macOS update
+      description: Both expected revisions are required. Clears selected feed when withdrawing selected release, while retaining previously published artifact downloads.
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/macos-updates/admin-macos-updates.controller.ts
+      x-auth-policy: A(`releases.manage`) + fresh
+      x-rate-policy: G + Ax sensitive
+      x-required-permissions: [releases.manage]
+      x-fresh-admin-auth: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MacosUpdatePublicationDto' }
+      responses:
+        '201':
+          description: Successful result; no-store.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacosUpdatePublicationView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /macos-updates/appcast.xml:
+    get:
+      tags: [public, releases]
+      operationId: MacosUpdatesController.feed
+      summary: Fetch exact selected signed Sparkle XML
+      description: Anonymous native updater distribution. Exact stored signed bytes; no JSON wrapper. Empty 404 when no release is selected.
+      security: []
+      x-source: src/macos-updates/macos-updates.controller.ts
+      x-auth-policy: P
+      x-rate-policy: G + 30/IP/min
+      responses:
+        '200':
+          description: Exact signed Sparkle feed; no-store.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/xml:
+              schema: { type: string }
+        '404':
+          description: No selected release; empty body; no-store.
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /macos-updates/artifacts/{archiveName}:
+    get:
+      tags: [public, releases]
+      operationId: MacosUpdatesController.artifact
+      summary: Redirect to immutable previously published DMG bytes
+      description: Only exact canonical ever-published names qualify, including withdrawn releases. Five-minute private R2 grant signs host only for Sparkle redirect compatibility; immutable create-only object, server-verified digest and client Ed25519 retain integrity.
+      security: []
+      x-source: src/macos-updates/macos-updates.controller.ts
+      x-auth-policy: P
+      x-rate-policy: G + 10/IP/min
+      parameters:
+        - name: archiveName
+          in: path
+          required: true
+          schema: { type: string, maxLength: 256 }
+      responses:
+        '302':
+          description: Short-lived private R2 artifact URL; no-store.
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+            Cache-Control:
+              schema: { type: string, const: no-store }
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /youtube-guest-sessions:
+    post:
+      tags: [jobs]
+      operationId: YouTubeCommunityController.session
+      summary: Issue a scoped guest YouTube capability
+      security: []
+      x-source: src/youtube-community/youtube-community.controller.ts
+      x-auth-policy: Public session issuance; IP and service budgets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '201':
+          description: Scoped command result; no-store; immutable artifact grants expire independently.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YouTubeGuestSessionView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '410':
+          $ref: '#/components/responses/Problem410'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /youtube-cache-deliveries:
+    post:
+      tags: [jobs]
+      operationId: YouTubeCommunityController.delivery
+      summary: Deliver existing trusted or community YouTube audio without acquisition or inference
+      security:
+        - YouTubeGuestBearer: []
+      x-source: src/youtube-community/youtube-community.controller.ts
+      x-auth-policy: Guest capability; owned contribution commands; no account or Library access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/YouTubeCacheDeliveryDto'
+      responses:
+        '200':
+          description: Scoped command result; no-store; immutable artifact grants expire independently.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YouTubeCacheDeliveryView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '410':
+          $ref: '#/components/responses/Problem410'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /youtube-contributions:
+    post:
+      tags: [jobs]
+      operationId: YouTubeCommunityController.create
+      summary: Reserve one YouTube producer before local acquisition and inference
+      description: A guest may prepare one source at a time while earlier contributions upload or validate in the background. At most four live contributions per guest, ten per IP and 100 globally are admitted across preparation, upload and validation. Existing idempotent requests and ready cache delivery do not reserve another slot.
+      security:
+        - YouTubeGuestBearer: []
+      x-source: src/youtube-community/youtube-community.controller.ts
+      x-auth-policy: Guest capability; owned contribution commands; no account or Library access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateYouTubeContributionDto'
+      responses:
+        '201':
+          description: Scoped command result; no-store; immutable artifact grants expire independently.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YouTubeContributionView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '410':
+          $ref: '#/components/responses/Problem410'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /youtube-contributions/{id}:
+    get:
+      tags: [jobs]
+      operationId: YouTubeCommunityController.get
+      summary: Explicitly recover an owned contribution
+      security:
+        - YouTubeGuestBearer: []
+      x-source: src/youtube-community/youtube-community.controller.ts
+      x-auth-policy: Guest capability; owned contribution commands; no account or Library access
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+      responses:
+        '200':
+          description: Scoped command result; no-store; immutable artifact grants expire independently.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YouTubeContributionView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '410':
+          $ref: '#/components/responses/Problem410'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /youtube-contributions/{id}/source-deliveries:
+    post:
+      tags: [jobs]
+      operationId: YouTubeCommunityController.sourceDelivery
+      summary: Issue a trusted cached original grant for an active producer
+      security:
+        - YouTubeGuestBearer: []
+      x-source: src/youtube-community/youtube-community.controller.ts
+      x-auth-policy: Guest capability; owned contribution commands; no account or Library access
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200':
+          description: Scoped command result; no-store; immutable artifact grants expire independently.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YouTubeSourceDeliveryView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '410':
+          $ref: '#/components/responses/Problem410'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /youtube-contributions/{id}/lease-renewals:
+    post:
+      tags: [jobs]
+      operationId: YouTubeCommunityController.renew
+      summary: Renew the active producer lease
+      security:
+        - YouTubeGuestBearer: []
+      x-source: src/youtube-community/youtube-community.controller.ts
+      x-auth-policy: Guest capability; owned contribution commands; no account or Library access
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200':
+          description: Scoped command result; no-store; immutable artifact grants expire independently.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YouTubeContributionView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '410':
+          $ref: '#/components/responses/Problem410'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /youtube-contributions/{id}/upload-grants:
+    post:
+      tags: [jobs]
+      operationId: YouTubeCommunityController.grants
+      summary: Freeze paired audio declarations or renew their create-only grants
+      description: Paired bytes prepared offline may reclaim the same contribution within its original 24-hour lifetime when the source has no active replacement producer. Reclamation consumes publication capacity without reserving a new preparation slot, so another source may already be preparing. Exact declaration replays retain their immutable keys and do not reserve bytes or capacity again.
+      security:
+        - YouTubeGuestBearer: []
+      x-source: src/youtube-community/youtube-community.controller.ts
+      x-auth-policy: Guest capability; owned contribution commands; no account or Library access
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/YouTubeContributionUploadDto'
+      responses:
+        '200':
+          description: Scoped command result; no-store; immutable artifact grants expire independently.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YouTubeContributionView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '410':
+          $ref: '#/components/responses/Problem410'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /youtube-contributions/{id}/completions:
+    post:
+      tags: [jobs]
+      operationId: YouTubeCommunityController.complete
+      summary: Validate and publish an immutable community contribution
+      security:
+        - YouTubeGuestBearer: []
+      x-source: src/youtube-community/youtube-community.controller.ts
+      x-auth-policy: Guest capability; owned contribution commands; no account or Library access
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200':
+          description: Scoped command result; no-store; immutable artifact grants expire independently.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YouTubeContributionView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '410':
+          $ref: '#/components/responses/Problem410'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+  /youtube-contributions/{id}/failures:
+    post:
+      tags: [jobs]
+      operationId: YouTubeCommunityController.fail
+      summary: Release failed producer preparation
+      security:
+        - YouTubeGuestBearer: []
+      x-source: src/youtube-community/youtube-community.controller.ts
+      x-auth-policy: Guest capability; owned contribution commands; no account or Library access
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200':
+          description: Scoped command result; no-store; immutable artifact grants expire independently.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YouTubeContributionView'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '410':
+          $ref: '#/components/responses/Problem410'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
   /realtime-tickets:
     post:
       tags: [jobs]
@@ -126,7 +966,7 @@ paths:
       tags: [jobs]
       operationId: ImportsController.create
       summary: Import one supported native audio source
-      description: Asynchronous native-audio acquisition through a private provider-neutral adapter into existing private R2 processing. Requires existing processing access. The selected adapter determines qualified public single-item source support; the initial VideoScale adapter supports YouTube. Only separate audio streams are downloaded; no video acquisition, playlists, private-network access, or account cookies. A repeated request_id with the same canonical URL returns the same import; different input returns 409. Submissions are accepted while earlier imports download. The shared queue defaults to 20 simultaneous executions, five execution starts per second and 100 total active plus waiting imports; surplus imports wait for a free execution slot. Monthly processing admission checks used plus reserved seconds before the new file. Any positive remaining allowance admits the complete file even if its duration crosses the monthly limit; accounts at or above the limit receive PROCESSING_ALLOWANCE_EXHAUSTED before uncached acquisition/processing. Canonical supported URL originals are permanently shared in private R2, with processed results keyed by source and recipe digest; each account owns a job referencing the same confirmed objects without per-user copies. A completed matching result skips processing/upload reservations and may be reused after monthly processing or waiting capacity exhaustion, while account, policy, media and logical Library storage checks still apply. Source-only reuse requires normal compute admission. Local file uploads remain private. Job/account deletion removes owned records and access but never shared URL artifacts. Cache keys are not exposed. A temporary duration hold protects admission against concurrent requests and is atomically exchanged for measured duration; terminal failure releases it. New imports retain the same import, URL, trim, recipe and hold through up to three automatic retries after the initial transient pre-upload acquisition failure, using persisted 5/10/20-second backoff and the existing queued status. Account/policy, permanent validation/source failures and exhausted attempts are terminal. Existing job reservations or recorded upload intents are recovered without another acquisition; historical failed imports are not automatically replayed. Independently measured audio must satisfy account limits. Included sanitized metadata is stored privately as nullable job extra_data without additional metadata requests.
+      description: Asynchronous native-audio acquisition through a private provider-neutral adapter into existing private R2 processing. Requires existing processing access. The selected adapter determines qualified public single-item source support; the initial VideoScale adapter supports YouTube. Only separate audio streams are downloaded; no video acquisition, playlist acquisition, private-network access, or account cookies. YouTube item links with a selected video ID are accepted when shared from a playlist or radio mix; playlist, index, radio and tracking parameters are discarded before acquisition and shared-media identity. Playlist-only links, invalid or duplicate video IDs and conflicting path/query IDs remain rejected. A repeated request_id with the same canonical URL returns the same import; different input returns 409. Submissions are accepted while earlier imports download. The shared queue defaults to 20 simultaneous executions, five execution starts per second and 100 total active plus waiting imports; surplus imports wait for a free execution slot. Monthly processing admission checks used plus reserved seconds before the new file. Any positive remaining allowance admits the complete file even if its duration crosses the monthly limit; accounts at or above the limit receive PROCESSING_ALLOWANCE_EXHAUSTED before uncached acquisition/processing. Canonical supported URL originals are permanently shared in private R2, with processed results keyed by source and recipe digest; each account owns a job referencing the same confirmed objects without per-user copies. A completed matching result is delivered directly without BullMQ admission or the global outstanding limit, including while URL acquisition is disabled. It skips processing/upload reservations and may be reused after monthly processing or waiting capacity exhaustion, while account, policy, media and logical Library storage checks still apply. Source-only reuse requires normal compute admission. Local file uploads remain private. Job/account deletion removes owned records and access but never shared URL artifacts. Cache keys are not exposed. A temporary duration hold protects admission against concurrent requests and is atomically exchanged for measured duration; terminal failure releases it. New imports retain the same import, URL, trim, recipe and hold through up to three automatic retries after the initial transient pre-upload acquisition failure, using persisted 5/10/20-second backoff or a bounded shorter delay supplied by the trusted private adapter and the existing queued status. The first acquisition timestamp persists across retries so an adapter can enforce an acquisition-wide deadline; IMPORT_ACQUISITION_EXHAUSTED is terminal. Account/policy, permanent validation/source failures and exhausted attempts are terminal. Existing job reservations or recorded upload intents are recovered without another acquisition; historical failed imports are not automatically replayed. Independently measured audio must satisfy account limits. Included sanitized metadata is stored privately as nullable job extra_data without additional metadata requests.
       security:
         - FirebaseBearer: []
       x-source: src/url-imports/imports.controller.ts
@@ -186,6 +1026,73 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
+  /media-imports/cache-deliveries:
+    post:
+      tags: [jobs]
+      operationId: ImportsController.createCacheDelivery
+      summary: Save completed shared URL audio to the requesting account
+      description: Cache-only delivery of the canonical URL's completed matching processing recipe. Uses the same authenticated installation, account, policy, media and logical Library storage checks as a completed normal import. A hit creates an owned ready job referencing the verified shared R2 original and vocals, without acquisition, processing, upload grants, per-user copies or the acquisition queue. Ready hits bypass the global outstanding-import limit and URL acquisition enablement flag; processing policy and account access remain authoritative. A miss returns IMPORT_CACHE_MISS without creating an import, source generation, result producer, usage hold or paid work. An existing in-flight uncached request_id is also a cache miss and is never converted into an acquisition by this command. Use a UUIDv4 request_id and reuse it after an uncertain response. Accepted deliveries normally return submitted with job_id immediately; a transient delivery interruption retains its durable import for recovery through existing owner-scoped realtime snapshots. Internal global cache keys and producer ownership are not exposed. Mac/extension Local mode can use trim_enabled false to reuse a complete timeline before local acquisition; a miss must not automatically start cloud processing.
+      security:
+        - FirebaseBearer: []
+      x-source: src/url-imports/imports.controller.ts
+      x-auth-policy: U + processing access
+      x-rate-policy: G overall + Ux processing-create
+      parameters:
+        - in: header
+          name: X-Installation-Id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [url, request_id]
+              properties:
+                url: { type: string, format: uri, maxLength: 2048 }
+                request_id: { type: string, format: uuid }
+                trim_enabled:
+                  {
+                    type: boolean,
+                    default: true,
+                    description: Disable to retain the complete audio timeline.,
+                  }
+      responses:
+        '202':
+          description: Completed cache delivery admitted or previous delivery returned.
+          headers:
+            Location:
+              schema: { type: string }
+              description: Owner-scoped import status resource.
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MediaImportView' }
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          description: IMPORT_CACHE_MISS; no completed matching source and recipe result is available, and no new work was admitted.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          description: Invalid single-item URL or retained media exceeds account limits.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
   /media-imports/{id}:
     get:
       tags: [jobs]
@@ -4880,6 +5787,74 @@ paths:
       x-audience:
         - native-app
         - public
+  /auth/desktop-google-token-exchanges:
+    post:
+      tags: [authentication]
+      operationId: DesktopGoogleTokenExchangesController.create
+      summary: Exchange a Desktop Google authorization code using its PKCE verifier
+      description: Public pre-sign-in endpoint for the server's single configured Desktop OAuth client. The backend supplies the client ID and secret and contacts only the fixed Google HTTPS token endpoint, with no redirects, no retry, a five-second deadline and a 32-KiB response limit. The exact native loopback callback is passed as a Google form value and is never fetched. Only the Google ID token is returned; Firebase sign-in and existing backend session bootstrap remain separate. Responses and request credentials must not be cached or logged. After any ambiguous exchange failure, start a fresh sign-in instead of replaying its one-time code. Missing optional backend configuration returns 503 without affecting other authentication routes.
+      security: []
+      x-source: src/auth/desktop-google-token-exchanges.controller.ts
+      x-auth-policy: P; Google enforces fixed-client authorization code and PKCE binding
+      x-rate-policy: G + atomic 10/IP/minute and 300/service/minute defaults
+      x-audience: [native-app]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [authorization_code, code_verifier, redirect_uri]
+              properties:
+                authorization_code:
+                  type: string
+                  minLength: 1
+                  maxLength: 4096
+                  pattern: '^[\x21-\x7e]+(?![\s\S])'
+                  writeOnly: true
+                code_verifier:
+                  type: string
+                  minLength: 43
+                  maxLength: 128
+                  pattern: '^[A-Za-z0-9._~-]+(?![\s\S])'
+                  writeOnly: true
+                redirect_uri:
+                  type: string
+                  maxLength: 64
+                  pattern: '^http://127\.0\.0\.1:([1-9][0-9]{0,4})/oauth2callback(?![\s\S])'
+                  description: Exact canonical callback; the decimal port must be 1 through 65535. No leading zeroes, userinfo, aliases, query or fragment.
+      responses:
+        '200':
+          description: Google identity token obtained for native Firebase sign-in.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [google_id_token]
+                properties:
+                  google_id_token:
+                    type: string
+                    minLength: 20
+                    maxLength: 16384
+                    pattern: '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?![\s\S])'
+                    description: Sensitive Google JWT from the fixed token endpoint, never an access token or refresh token. Firebase independently verifies this credential.
+        '400':
+          $ref: '#/components/responses/Problem400'
+          description: INVALID_INPUT for invalid declarations or GOOGLE_TOKEN_INVALID_GRANT when Google rejects an expired, replayed or PKCE-mismatched code. Start sign-in again after the latter.
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '415':
+          $ref: '#/components/responses/Problem415'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '503':
+          $ref: '#/components/responses/Problem503'
+          description: SERVICE_UNAVAILABLE for missing configuration, security-store failure, timeout, upstream refusal or invalid response. No automatic exchange retry.
   /auth/password-reset-requests:
     post:
       tags:
@@ -5344,6 +6319,137 @@ paths:
           $ref: '#/components/responses/Problem503'
       x-audience:
         - public
+  /local-media-syncs:
+    post:
+      tags: [jobs]
+      operationId: LocalMediaSyncsController.create
+      summary: Reserve private storage for an already locally processed original and vocals
+      description: Owner-scoped UUID secondary key makes retries idempotent. Two immutable signed PUT grants count against upload limits; no processing seconds or worker queue capacity are reserved. The server chooses the full-timeline Kim Vocal 2 profile. Device output is untrusted and never promoted into the global shared catalog.
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/local-media-syncs/local-media-syncs.controller.ts
+      x-auth-policy: U; active owner; cost-creating operation restrictions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLocalMediaSync' }
+      responses:
+        '201':
+          description: Original reservation, including on a matching idempotent replay; no-store
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalMediaSync' }
+        '400': { description: Invalid declaration }
+        '401': { description: Invalid or revoked session }
+        '403':
+          { description: Account disabled, deleting, revoked or restricted }
+        '409':
+          {
+            description: Request conflict,
+            upload or storage allowance exhausted,
+            expired reservation,
+          }
+        '429': { description: Rate limited; Retry-After is supplied }
+        '503': { description: Storage or persistence unavailable }
+  /local-media-syncs/{id}:
+    parameters:
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' },
+        }
+    get:
+      tags: [jobs]
+      operationId: LocalMediaSyncsController.get
+      summary: Explicit owner recovery read; never a status polling fallback
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/local-media-syncs/local-media-syncs.controller.ts
+      responses:
+        '200':
+          description: Durable reservation/commit receipt without transfer grants; no-store
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalMediaSync' }
+        '401': { description: Invalid or revoked session }
+        '403': { description: Account unavailable }
+        '404': { description: No owned resource or ready job was deleted }
+  /local-media-syncs/{id}/upload-grants:
+    parameters:
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' },
+        }
+    post:
+      tags: [jobs]
+      operationId: LocalMediaSyncsController.grants
+      summary: Renew the pair of create-only upload grants
+      description: A new UUID request_id consumes two grants. Replay of the same request never charges again. Keys and content declarations cannot change. A lost PUT response or HTTP 412 is reconciled by completion HEAD verification.
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/local-media-syncs/local-media-syncs.controller.ts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id]
+              properties:
+                request_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Scoped short-lived grants; no-store
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalMediaSync' }
+        '401': { description: Invalid session }
+        '403': { description: Account unavailable or restricted }
+        '404': { description: No owned resource }
+        '409': { description: Expired grant request, quota or attempt limit }
+  /local-media-syncs/{id}/completions:
+    parameters:
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' },
+        }
+    post:
+      tags: [jobs]
+      operationId: LocalMediaSyncsController.complete
+      summary: Validate the uploaded pair and atomically publish one account Library job
+      description: Completion fetches the exact immutable objects and validates byte counts, SHA-256, actual audio format, bounded full decode and matching duration. It does not run source separation. Repeating completion returns the existing committed receipt without transfer or usage charges. No server attestation of source identity or separation quality is implied.
+      security: [{ FirebaseBearer: [] }]
+      x-source: src/local-media-syncs/local-media-syncs.controller.ts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '200':
+          description: Ready job commit receipt; no-store
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalMediaSync' }
+        '401': { description: Invalid session }
+        '403': { description: Account disabled, deleting or restricted }
+        '404': { description: No owned resource }
+        '409':
+          {
+            description: Upload missing,
+            invalid audio,
+            timeline mismatch,
+            validation in progress,
+            expired reservation or allowance exhausted,
+          }
+        '503':
+          {
+            description: Bounded validator capacity or storage unavailable; retry explicitly,
+          }
   /jobs:
     get:
       tags:
@@ -7852,6 +8958,10 @@ paths:
         - worker-runtime
 components:
   securitySchemes:
+    YouTubeGuestBearer:
+      type: http
+      scheme: bearer
+      description: Scoped opaque guest token; no Firebase identity or account privileges.
     FirebaseBearer:
       type: http
       scheme: bearer
@@ -7862,6 +8972,389 @@ components:
       scheme: bearer
       description: Worker invitation, installation, or machine credential as specified per operation by x-worker-principal.
   schemas:
+    MacosUpdateConfigurationView:
+      type: object
+      required:
+        [
+          revision,
+          selected_release_id,
+          public_ed_key,
+          feed_url,
+          download_base_url,
+          configured,
+        ]
+      properties:
+        revision: { type: integer, format: int64, minimum: 0 }
+        selected_release_id:
+          { type: [string, 'null'], pattern: '^[a-f0-9]{24}$' }
+        public_ed_key:
+          {
+            type: [string, 'null'],
+            description: 'Canonical padded base64 Ed25519 public key, 32 bytes.',
+          }
+        feed_url: { type: string, format: uri }
+        download_base_url: { type: string, format: uri }
+        configured: { type: boolean }
+    MacosUpdateView:
+      type: object
+      required:
+        [
+          id,
+          version_name,
+          build_number,
+          archive_name,
+          bytes,
+          sha256_hex,
+          state,
+          artifact_state,
+          revision,
+          created_at,
+          published_at,
+          download_url,
+        ]
+      properties:
+        id: { type: string, pattern: '^[a-f0-9]{24}$' }
+        version_name: { type: string, maxLength: 64 }
+        build_number: { type: string, pattern: '^[1-9][0-9]{0,17}$' }
+        archive_name: { type: string, maxLength: 256 }
+        bytes: { type: integer, format: int64, minimum: 1, maximum: 2147483648 }
+        sha256_hex: { type: string, pattern: '^[a-f0-9]{64}$' }
+        state: { type: string, enum: [draft, published, withdrawn] }
+        artifact_state: { type: string, enum: [awaiting_upload, verified] }
+        revision: { type: integer, format: int64, minimum: 0 }
+        created_at: { type: string, format: date-time }
+        published_at: { type: [string, 'null'], format: date-time }
+        download_url: { type: string, format: uri }
+    MacosUpdatePageView:
+      type: object
+      required: [items, next_cursor, as_of]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/MacosUpdateView' }
+        next_cursor: { type: [string, 'null'] }
+        as_of: { type: string, format: date-time }
+    MacosUpdateUploadView:
+      type: object
+      required: [release, grant]
+      properties:
+        release: { $ref: '#/components/schemas/MacosUpdateView' }
+        grant:
+          oneOf:
+            - { $ref: '#/components/schemas/UploadGrantView' }
+            - { type: 'null' }
+    MacosUpdatePublicationView:
+      type: object
+      required: [release, configuration_revision, operation_id]
+      properties:
+        release: { $ref: '#/components/schemas/MacosUpdateView' }
+        configuration_revision: { type: integer, format: int64, minimum: 0 }
+        operation_id: { type: string, format: uuid }
+    MacosUpdateConfigurationDto:
+      type: object
+      additionalProperties: false
+      required: [operation_id, reason, expected_revision, public_ed_key]
+      properties:
+        operation_id: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        expected_revision:
+          {
+            type: integer,
+            format: int64,
+            minimum: 0,
+            maximum: 9007199254740990,
+          }
+        public_ed_key: { type: string, minLength: 44, maxLength: 44 }
+    MacosUpdateCreateDto:
+      type: object
+      additionalProperties: false
+      required:
+        [operation_id, reason, appcast_base64, archive_name, bytes, sha256_hex]
+      properties:
+        operation_id: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        appcast_base64:
+          {
+            type: string,
+            maxLength: 43692,
+            description: Canonical padded base64 of exactly signed Sparkle feed bytes.,
+          }
+        archive_name: { type: string, maxLength: 256 }
+        bytes: { type: integer, format: int64, minimum: 1, maximum: 2147483648 }
+        sha256_hex: { type: string, pattern: '^[a-f0-9]{64}$' }
+    MacosUpdateUploadDto:
+      type: object
+      additionalProperties: false
+      required: [operation_id, reason, expected_revision]
+      properties:
+        operation_id: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        expected_revision:
+          {
+            type: integer,
+            format: int64,
+            minimum: 0,
+            maximum: 9007199254740990,
+          }
+    MacosUpdateCompletionDto:
+      type: object
+      additionalProperties: false
+      required: [operation_id]
+      properties:
+        operation_id: { type: string, format: uuid }
+    MacosUpdatePublicationDto:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          operation_id,
+          reason,
+          expected_revision,
+          expected_configuration_revision,
+        ]
+      properties:
+        operation_id: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        expected_revision:
+          {
+            type: integer,
+            format: int64,
+            minimum: 0,
+            maximum: 9007199254740990,
+          }
+        expected_configuration_revision:
+          {
+            type: integer,
+            format: int64,
+            minimum: 0,
+            maximum: 9007199254740990,
+          }
+    YouTubeGuestSessionView:
+      type: object
+      additionalProperties: false
+      required: [token, expires_at]
+      properties:
+        token: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+        expires_at: { type: string, format: date-time }
+    YouTubeCacheDeliveryDto:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url:
+          {
+            type: string,
+            minLength: 1,
+            maxLength: 2048,
+            description: Accepted YouTube URL normalized by case-sensitive video ID.,
+          }
+    CreateYouTubeContributionDto:
+      type: object
+      additionalProperties: false
+      required: [request_id, url, profile_id]
+      properties:
+        request_id:
+          { type: string, format: uuid, description: UUIDv4 idempotency key. }
+        url: { type: string, maxLength: 2048 }
+        profile_id: { type: string, const: kim-vocal-2-full-timeline-v1 }
+    YouTubeContributionUploadDto:
+      type: object
+      additionalProperties: false
+      required: [request_id, original, vocals]
+      properties:
+        request_id: { type: string, format: uuid }
+        original: { $ref: '#/components/schemas/InputDeclarationDto' }
+        vocals: { $ref: '#/components/schemas/InputDeclarationDto' }
+    YouTubeCacheArtifact:
+      type: object
+      additionalProperties: false
+      required: [declaration, grant]
+      properties:
+        declaration: { $ref: '#/components/schemas/InputDeclarationDto' }
+        grant: { $ref: '#/components/schemas/DownloadGrantView' }
+    YouTubeCacheDeliveryView:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          video_id,
+          profile_id,
+          provenance,
+          source_identity_verified,
+          original,
+          vocals,
+        ]
+      properties:
+        video_id: { type: string, pattern: '^[A-Za-z0-9_-]{11}$' }
+        profile_id: { type: string, const: kim-vocal-2-full-timeline-v1 }
+        provenance: { type: string, enum: [trusted, community_contributed] }
+        source_identity_verified: { type: boolean }
+        original: { $ref: '#/components/schemas/YouTubeCacheArtifact' }
+        vocals: { $ref: '#/components/schemas/YouTubeCacheArtifact' }
+    YouTubeSourceDeliveryView:
+      type: object
+      additionalProperties: false
+      required: [video_id, provenance, source_identity_verified, original]
+      properties:
+        video_id: { type: string, pattern: '^[A-Za-z0-9_-]{11}$' }
+        provenance: { type: string, const: trusted }
+        source_identity_verified: { type: boolean, const: true }
+        original: { $ref: '#/components/schemas/YouTubeCacheArtifact' }
+    YouTubeContributionView:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          contribution_id,
+          request_id,
+          video_id,
+          profile_id,
+          state,
+          producer,
+          expires_at,
+          lease_expires_at,
+          upload_grants,
+          artifacts,
+        ]
+      properties:
+        contribution_id:
+          {
+            type: [string, 'null'],
+            pattern: '^[a-f0-9]{24}$',
+            description: Null on a ready cache hit with no new contribution row.,
+          }
+        request_id: { type: string, format: uuid }
+        video_id: { type: string, pattern: '^[A-Za-z0-9_-]{11}$' }
+        profile_id: { type: string, const: kim-vocal-2-full-timeline-v1 }
+        state:
+          {
+            type: string,
+            enum:
+              [
+                preparing,
+                waiting,
+                awaiting_upload,
+                validating,
+                ready,
+                expired,
+                failed,
+              ],
+          }
+        producer: { type: boolean }
+        expires_at: { type: string, format: date-time }
+        lease_expires_at: { type: [string, 'null'], format: date-time }
+        upload_grants:
+          anyOf:
+            - type: 'null'
+            - type: object
+              required: [original, vocals]
+              properties:
+                original: { $ref: '#/components/schemas/UploadGrantView' }
+                vocals: { $ref: '#/components/schemas/UploadGrantView' }
+        artifacts:
+          anyOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/YouTubeCacheDeliveryView'
+    LocalMediaArtifactDeclaration:
+      type: object
+      additionalProperties: false
+      required: [extension, content_type, bytes, duration_seconds, sha256]
+      properties:
+        extension:
+          {
+            type: string,
+            enum: [m4a, mp4, webm, opus, ogg, aac, mp3, wav, flac],
+          }
+        content_type:
+          {
+            type: string,
+            enum:
+              [
+                audio/mp4,
+                audio/webm,
+                audio/ogg,
+                audio/aac,
+                audio/mpeg,
+                audio/wav,
+                audio/flac,
+              ],
+          }
+        bytes: { type: integer, format: int64, minimum: 1, maximum: 100000000 }
+        duration_seconds:
+          { type: number, format: double, exclusiveMinimum: 0, maximum: 1800 }
+        sha256:
+          {
+            type: string,
+            pattern: '^[A-Za-z0-9+/]{43}=$',
+            description: Canonical base64 SHA-256 digest,
+            not hexadecimal,
+          }
+    CreateLocalMediaSync:
+      type: object
+      additionalProperties: false
+      required: [request_id, original, vocals, profile_id, source_kind]
+      properties:
+        request_id: { type: string, format: uuid }
+        original: { $ref: '#/components/schemas/LocalMediaArtifactDeclaration' }
+        vocals:
+          allOf:
+            - { $ref: '#/components/schemas/LocalMediaArtifactDeclaration' }
+            - properties:
+                extension: { const: mp3 }
+                content_type: { const: audio/mpeg }
+        profile_id: { type: string, const: kim-vocal-2-full-timeline-v1 }
+        source_kind: { type: string, enum: [file, url] }
+        source_title: { type: string, minLength: 1, maxLength: 200 }
+        source_url:
+          {
+            type: string,
+            pattern: '^https://www\.youtube\.com/watch\?v=[A-Za-z0-9_-]{11}$',
+            description: Required for url; forbidden for file. Device-declared identity only,
+          }
+    LocalMediaUploadGrant:
+      type: object
+      required: [method, url, headers, expires_at]
+      properties:
+        method: { type: string, const: PUT }
+        url: { type: string, format: uri }
+        headers: { type: object, additionalProperties: { type: string } }
+        expires_at: { type: string, format: date-time }
+    LocalMediaSync:
+      type: object
+      required:
+        [
+          sync_id,
+          job_id,
+          request_id,
+          status,
+          expires_at,
+          profile_id,
+          committed,
+          upload_grants,
+          revision,
+        ]
+      properties:
+        sync_id: { type: string }
+        job_id:
+          {
+            type: string,
+            description: Reserved job id; usable in Library only when committed,
+          }
+        request_id: { type: string, format: uuid }
+        status: { type: string, enum: [awaiting_upload, ready, expired] }
+        expires_at: { type: string, format: date-time }
+        profile_id: { type: string, const: kim-vocal-2-full-timeline-v1 }
+        committed: { type: boolean }
+        revision: { type: integer, format: int64, minimum: 0 }
+        upload_grants:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [original, vocals]
+              properties:
+                original: { $ref: '#/components/schemas/LocalMediaUploadGrant' }
+                vocals: { $ref: '#/components/schemas/LocalMediaUploadGrant' }
     NotificationCampaignPage:
       type: object
       required: [items, next_cursor, as_of]
@@ -7921,6 +9414,14 @@ components:
           type: [string, 'null']
           maxLength: 200
           description: Original media title when available; also saved on the resulting job.
+        source_url:
+          type: [string, 'null']
+          format: uri
+          maxLength: 2048
+          description: Canonical public source URL submitted by this authenticated owner; null for invalid historical records. Never a private provider or delivery URL.
+        trim_enabled:
+          type: boolean
+          description: Immutable trimming choice from the accepted import; historical omitted values default to true. Manual retries preserve this choice.
         status:
           type: string
           enum: [queued, downloading, validating, uploading, submitted, failed]
@@ -8625,6 +10126,7 @@ components:
           enum:
             - android
             - ios
+            - macos
             - web
         app_version:
           type: string
@@ -9188,6 +10690,7 @@ components:
           enum:
             - android
             - ios
+            - macos
             - web
         app_version:
           type: string
@@ -9613,6 +11116,8 @@ components:
             - ogg
             - aac
             - mp3
+            - wav
+            - flac
         content_type:
           type: string
           enum:
@@ -9621,6 +11126,8 @@ components:
             - audio/ogg
             - audio/aac
             - audio/mpeg
+            - audio/wav
+            - audio/flac
         bytes:
           type: integer
           minimum: 1
@@ -10024,6 +11531,7 @@ components:
           enum:
             - android
             - ios
+            - macos
             - web
         app_version: *a9
         build_number: *a5
@@ -10094,6 +11602,16 @@ components:
               required:
                 - minimum_build
             ios:
+              type: object
+              additionalProperties: true
+              properties:
+                minimum_build:
+                  anyOf:
+                    - *a5
+                    - type: 'null'
+              required:
+                - minimum_build
+            macos:
               type: object
               additionalProperties: true
               properties:
@@ -10252,6 +11770,40 @@ components:
             - $ref: '#/components/schemas/ServerStageTimings'
             - type: 'null'
         id: *a4
+        processing_origin:
+          type: string
+          enum: [local_device]
+          description: Present for device-reported local separation; no server attestation of model or source identity
+        source_url:
+          type: [string, 'null']
+          pattern: '^https://www\.youtube\.com/watch\?v=[A-Za-z0-9_-]{11}$'
+          description: Canonical public YouTube URL only; never a provider or storage URL
+        recipe_digest:
+          type: [string, 'null']
+          pattern: '^[a-f0-9]{64}$'
+          description: Digest of the immutable server-derived recipe snapshot
+        local_profile_id:
+          type: [string, 'null']
+          description: Locally reported output is never a server attestation of model execution
+          examples: [kim-vocal-2-full-timeline-v1]
+        output:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required:
+                [extension, content_type, bytes, sha256, duration_seconds]
+              properties:
+                extension: { type: string, const: mp3 }
+                content_type: { type: string, const: audio/mpeg }
+                bytes: { type: integer, format: int64, minimum: 1 }
+                sha256: { type: string, pattern: '^[A-Za-z0-9+/]{43}=$' }
+                duration_seconds:
+                  {
+                    type: [number, 'null'],
+                    format: double,
+                    exclusiveMinimum: 0,
+                    description: Verified output duration when available; unknown is null,
+                  }
         request_id: *a7
         source_title: *a11
         display_name: *a11
@@ -10333,6 +11885,8 @@ components:
           additionalProperties: true
           properties:
             extension: *a9
+            content_type: { type: string }
+            sha256: { type: string, pattern: '^[A-Za-z0-9+/]{43}=$' }
             bytes:
               type: integer
               minimum: 1

@@ -44,12 +44,25 @@ class PolicyTests(unittest.TestCase):
                        'https://youtube.com/watch?v=aqz-KE-bpKQ&t=60',
                        'https://www.youtube.com/shorts/aqz-KE-bpKQ',
                        'https://m.youtube.com/embed/aqz-KE-bpKQ/',
-                       'https://music.youtube.com/live/aqz-KE-bpKQ']:
+                       'https://music.youtube.com/live/aqz-KE-bpKQ',
+                       URL + '&list=PL123&index=2&start_radio=1',
+                       'https://youtube.com/watch/?v=aqz-KE-bpKQ&list=PL123',
+                       'https://www.youtu.be/aqz-KE-bpKQ/?list=PL123',
+                       URL + '&%6cist=PL123',
+                       'https://youtu.be/aqz-KE-bpKQ?list=PL123&index=2',
+                       'https://youtube.com/shorts/aqz-KE-bpKQ?list=PL123&v=aqz-KE-bpKQ']:
             self.assertEqual(source_url(source), URL)
+        self.assertEqual(
+            source_url('https://www.youtube.com/watch?v=e6WT8RwRwt4&list=RDe6WT8RwRwt4&start_radio=1'),
+            'https://www.youtube.com/watch?v=e6WT8RwRwt4')
 
     def test_rejects_other_sites_profiles_collections_credentials_and_unsafe_urls(self):
         for source in ['http://youtube.com/watch?v=aqz-KE-bpKQ',
-                       'https://youtube.com/watch?v=aqz-KE-bpKQ&list=123',
+                       'https://youtube.com/playlist?list=123&v=aqz-KE-bpKQ',
+                       'https://youtube.com/watch?list=123',
+                       'https://youtube.com/watch?v=short&list=123',
+                       'https://youtu.be/aqz-KE-bpKQ?v=abcdefghijk&list=123',
+                       'https://youtube.com/shorts/aqz-KE-bpKQ?v=aqz-KE-bpKQ&v=aqz-KE-bpKQ',
                        'https://youtube.com/watch?v=aqz-KE-bpKQ&v=abcdefghijk',
                        'https://youtube.com/watch?v=aqz-KE-bpKQ#index',
                        'https://youtube.com:443/watch?v=aqz-KE-bpKQ',

@@ -65,6 +65,11 @@ const ReleasesPage = lazy(() =>
     default: module.ReleasesPage,
   })),
 );
+const MacosUpdatesPage = lazy(() =>
+  import("@/features/macos-updates/macos-updates-page").then((module) => ({
+    default: module.MacosUpdatesPage,
+  })),
+);
 const UpdatePolicyPage = lazy(() =>
   import("@/features/releases/update-policy-page").then((module) => ({
     default: module.UpdatePolicyPage,
@@ -215,6 +220,14 @@ export function AppRouter() {
           element={
             <Guard permission="releases.read">
               <UpdatePolicyPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="macos-updates"
+          element={
+            <Guard permission="releases.read">
+              <MacosUpdatesPage />
             </Guard>
           }
         />

@@ -1,10 +1,8 @@
 # MusicMute private audio acquisition router
 
-Production YouTube configuration selects JoJAPI for the
-[owner-authorized test activation](../jojapi/docs/ACTIVATION-2026-10-01.md).
-The known vendor source-version mismatch remains unresolved; see the
-[earlier qualification and Tunelio restoration](../jojapi/docs/DEPLOYMENT-2026-10-01.md).
-Successful transfer or media probing does not establish requested-source identity.
+Production YouTube configuration selects the owner-requested [yt-dlp adapter](../ytdlp/README.md).
+See the [2026-10-03 deployment and qualification record](../ytdlp/docs/DEPLOYMENT-2026-10-03.md)
+for the exact native-audio, retry and concurrent acquisition evidence and its limits.
 The router keeps NestJS provider-neutral while selecting one private adapter:
 
 `NestJS → router → configured YouTube adapter / VideoScale for other enabled sites`
@@ -37,8 +35,19 @@ every source offers usable separate audio.
 
 The router receives service keys only, never vendor credentials. It replaces
 the incoming bearer with the selected adapter's key and forwards only JSON
-content headers and a validated/generated execution UUID. That UUID is internal
+content headers, a validated/generated execution UUID, and an optional validated
+acquisition context. That UUID is internal
 correlation, not idempotency. No cookies or incoming user headers are forwarded.
+
+The service-authenticated optional headers `X-Import-Attempt`,
+`X-Import-Max-Attempts` and `X-Import-Acquisition-Started-At` must arrive together,
+each exactly once. Ordinals and totals are integers 1–4, with ordinal no greater
+than total. The timestamp is canonical UTC ISO with milliseconds and `Z`, no
+more than five seconds in the future. Partial, duplicate or invalid context is
+rejected before contacting an adapter. Missing all three preserves the legacy
+contract. The router forwards only validated values; the new yt-dlp adapter
+enforces its 30-second per-attempt and 120-second total budget. Existing adapters
+retain their behavior and the router's own operation deadline is unchanged.
 
 Successful responses require one valid positive `Content-Length` within the
 caller limit and an allowlisted audio/octet-stream content type. Transfer
@@ -56,6 +65,8 @@ upstream header is forwarded. Error bodies are never read or copied. Only
 allowlisted `IMPORT_*` error/status pairs survive; other failures become a
 sanitized `IMPORT_DEPENDENCY_FAILED` problem response. A bounded numeric
 `Retry-After` on 503 does not authorize automatic paid resubmission.
+The generic `IMPORT_ACQUISITION_EXHAUSTED` 503 is terminal for that import and
+has no retry hint, preventing another layer from restarting an exhausted budget.
 
 Twenty admitted relays and sixty-four HTTP handlers are bounded. A
 sixty-four-connection accept backlog prevents the twenty-import burst from
@@ -96,7 +107,7 @@ Use [config.example.json](config.example.json) for nonsecret settings:
 | `OTHER_AUDIO_ACQUISITION_API_KEY`   | Existing private VideoScale service key           |
 
 Startup accepts exactly one YouTube destination: `music-mute-tunelio` or
-`music-mute-jojapi`, with their `srv-captain--` aliases. The other-site destination
+`music-mute-jojapi` or `music-mute-ytdlp`, with their `srv-captain--` aliases. The other-site destination
 accepts only `music-mute-videoscale` or its alias. All destinations require HTTP
 port 8080 and an empty/root path. Arbitrary URLs, public hosts, redirects and
 user-controlled destinations are never permitted. Selection comes only from
@@ -106,7 +117,8 @@ operator configuration and does not change after any execution failure.
 key from `/captain/data/musicmute-acquisition/api-key` for ingress and VideoScale,
 and the selected adapter's separate private service key from
 `/captain/data/musicmute-acquisition/tunelio-api-key` or
-`/captain/data/musicmute-acquisition/jojapi-api-key`. The hook reads exactly one
+`/captain/data/musicmute-acquisition/jojapi-api-key` or
+`/captain/data/musicmute-acquisition/ytdlp-api-key`. The hook reads exactly one
 `YOUTUBE_AUDIO_ACQUISITION_API_URL` entry from CapRover's `envVars`, validates the
 exact private URL and reads only that adapter's key. Missing, duplicate or
 unqualified URLs fail before any key read. These are protected runtime files,
@@ -114,15 +126,12 @@ not vendor credentials or package files. Never place secret values in
 configuration examples, archives, source or logs. The operator installs the
 hook in CapRover; it is excluded from the runtime image/archive.
 
-The example retains Tunelio, while production test configuration now selects
-JoJAPI by explicit owner instruction despite the documented unresolved defect.
-An explicit
-operator switch sets `YOUTUBE_AUDIO_ACQUISITION_API_URL` to
-`http://srv-captain--music-mute-jojapi:8080/`; its matching internal bearer comes
-from the selected protected key file. Keep the vendor key exclusive to the
-JoJAPI app. Successful download or ffprobe validation does not establish that the
-vendor defect is fixed. The allowlist supports an explicit operator switch, not automatic
-retry or fallback.
+The example retains Tunelio. The deployed configuration selects
+`http://music-mute-ytdlp:8080/`, with its matching protected `ytdlp-api-key`.
+DataImpulse credentials stay exclusive to that adapter. The allowlist supports
+an explicit operator switch; it never changes providers after a failed execution.
+Historical JoJAPI qualification and its unresolved vendor source-version mismatch
+are documented in the [2026-10-01 record](../jojapi/docs/DEPLOYMENT-2026-10-01.md).
 
 NestJS retains only its existing generic settings:
 
@@ -142,7 +151,8 @@ caprover deploy -n musicmute -a music-mute-audio-router -t /absolute/path/outsid
 ```
 
 The package contains exactly `captain-definition`, `Dockerfile`, `.dockerignore`,
-`service.py`, `source_policy.py` and the shared `acquisition_limits.py`. The packaging command checks names and exact
+`service.py`, `source_policy.py` and the shared `acquisition_limits.py` and
+`acquisition_context.py` and `acquisition_metadata.py`. The packaging command checks names and exact
 source bytes; no tests, hooks, configuration, environment files or credentials
 enter the image. Deploy only with current explicit user authorization.
 
@@ -161,7 +171,7 @@ The existing Tunelio qualifier remains available. These fixtures make no real
 provider or Google request.
 
 API preflight read the current [Zalando RESTful API guidelines](https://opensource.zalando.com/restful-api-guidelines/)
-on 2026-10-01. Rules 104 (security), 148 (methods), 176 (problem JSON),
+on 2026-10-03. Rules 104 (security), 148 (methods), 176 (problem JSON),
 177 (no stack traces), 106 (compatibility), 178 (content headers) and 227
 (cache semantics) shaped this contract-compatible private relay. Existing
 internal bearer keys/private HTTP and the explicitly unauthenticated process

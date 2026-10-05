@@ -1,6 +1,6 @@
 # MusicMute worker runtime
 
-> **Shared CLI candidate:** `0.1.2` targets Apple
+> **Shared CLI candidate:** `0.1.3` targets Apple
 > Silicon macOS and Windows x64/DirectML. [RELEASING.md](RELEASING.md) describes artifact checks,
 > native acceptance and separately authorized publication/catalog promotion.
 > The npm CLI and managed service runtime are separate artifacts.
@@ -85,6 +85,50 @@ macOS CLI and lifecycle mutations use persistent advisory-lock guard files.
 The OS releases ownership when a command exits or is killed; guard files must not
 be deleted during operation. Complete dead-owner records can be recovered under
 that lock. Ambiguous legacy records require operator inspection.
+
+### Disk storage maintenance
+
+Installers and updaters discard completed download archives and extracted staging
+copies after durable acceptance. Pending installation/rollback journals retain
+their files until recovery finishes. A cleanup error reports a warning while
+preserving the committed update.
+
+Qualification removes copied inputs, generated WAVs and unused result files. Only
+the enrollment MP3 survives until its confirmed upload and durable activation;
+then its temporary workspace is removed. Requested benchmark audio and sanitized
+reports remain available. Normal production attempt cleanup remains unchanged.
+
+Inspect existing leftovers without deleting anything:
+
+```sh
+mw cleanup --dry-run --json
+```
+
+Drain and stop the worker before applying cleanup, then restore its desired intent:
+
+```sh
+mw drain
+mw stop
+mw cleanup --apply --json
+mw resume
+mw start --wait-ready
+```
+
+Cleanup preserves the active release and one verified older release for rollback.
+It removes completed managed transactions, qualification/temp leftovers older than
+one day, caches older than thirty days, and oldest cache files beyond 256 MiB.
+It never follows symlinks or removes models, credentials, configuration, diagnostic
+history, the reusable qualification fixture, or production job attempt directories.
+Recovery or inconsistent active/update identities block cleanup. JSON reports the
+candidate paths and estimated allocated bytes; filesystem clone/compression can
+make the actual free-space change differ.
+
+The managed service also maintains scratch before starting processing when no
+operator command holds its lock. Windows LocalService only prunes writable state
+scratch; its elevated updater/CLI handles protected update/release directories.
+Caches can grow between these safe maintenance points. Windows commands use
+`mw.cmd` from an administrator shell. Keep paused workers paused after maintenance
+instead of running `resume`.
 
 The macOS service controller waits for launchd to remove the registration after
 `bootout`, with a thirty-second deadline. Qualification, update and removal must

@@ -35,7 +35,10 @@ import {
   writeLaunchAgentPlist,
 } from "./launch-agent.js";
 import { qualifyMacUserRelease } from "./user-installer.js";
-import type { MacUserLayout } from "./user-paths.js";
+import {
+  assertSafeExistingAncestors,
+  type MacUserLayout,
+} from "./user-paths.js";
 import {
   activateMacUserRelease,
   rollbackMacUserRelease,
@@ -184,11 +187,13 @@ export async function updateMacUserWorker(options: {
   confirmStarted?: () => Promise<boolean>;
   health?: () => Promise<boolean>;
   availableDiskBytes?: () => Promise<number>;
+  removeTransaction?: (path: string) => Promise<void>;
 }): Promise<{
   status: "current" | "updated";
   releaseVersion: string;
   sequence: number;
   capacityRequalificationRequired?: boolean;
+  cleanupWarning?: string;
 }> {
   await recoverInterruptedMacUpdate(
     options.layout,
@@ -216,166 +221,210 @@ export async function updateMacUserWorker(options: {
   );
   if (checked.candidate.grant === undefined)
     throw new TypeError("Update download grant is missing");
+  await assertSafeExistingAncestors(options.layout.homeRoot, transactionRoot);
   await mkdir(transactionRoot, { recursive: true, mode: 0o700 });
-  await chmod(transactionRoot, 0o700);
-  await assertUpdateDiskBudget(
-    transactionRoot,
-    checked.metadata.release.bytes,
-    options.availableDiskBytes,
-  );
-  const archivePath = join(transactionRoot, checked.metadata.release.filename);
-  await downloadVerifiedArtifact({
-    url: checked.candidate.grant.url,
-    outputPath: archivePath,
-    expectedBytes: checked.metadata.release.bytes,
-    expectedSha256: checked.metadata.release.sha256,
-    expectedContentType: checked.metadata.release.contentType,
-    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-  });
-  const prepared = await prepareInstallationRelease({
-    archivePath,
-    outputRoot: transactionRoot,
-    platform: "darwin-arm64",
-    releaseVersion: checked.metadata.releaseVersion,
-  });
-  const runtime = await inspectInstalledMacRuntime({
-    nodeCandidates: [join(prepared.path, "runtime", "node", "bin", "node")],
-    ffmpegCandidates: [join(prepared.path, "runtime", "bin", "ffmpeg")],
-    ffprobeCandidates: [join(prepared.path, "runtime", "bin", "ffprobe")],
-    uid: options.uid,
-  });
-  if (
-    Object.values(runtime).some((component) => component.decision !== "reuse")
-  )
-    throw new TypeError("Update candidate contains an incompatible runtime");
-  const staged = await stageMacUserRelease(options.layout, prepared.path);
-  const previousLifecycle = await loadLocalLifecycle(
-    options.layout.lifecyclePath,
-  );
-  const previousService = await launchAgent.status();
-  // A loaded but stopped job is deliberately stopped as far as activation is
-  // concerned. Qualification may load a temporary job but must not start it later.
-  const serviceWasLoaded = previousService.loaded && previousService.running;
-  const previousConfig = await readPrivateRecord(options.layout.configPath);
-  const capacityRequalificationRequired =
-    previousConfig.validatedMaxWorkersPerGpu === 2;
-  const previousTarget = await readlink(options.layout.currentLink);
-  if (previousTarget !== `releases/${checked.currentVersion}`)
-    throw new Error("Installed release and active pointer disagree");
-  await verifyMacRelease(
-    join(options.layout.releasesRoot, checked.currentVersion),
-  );
-  const pending: UpdateState = {
-    ...checked.state,
-    status: "staged",
-    candidateVersion: staged.releaseVersion,
-    recovery: {
-      previousVersion: checked.currentVersion,
-      intent: previousLifecycle.intent,
-      serviceWasLoaded,
-      runtimeConfig: previousConfig,
-    },
-    updatedAt: new Date().toISOString(),
-  };
-  // Commit recovery intent before the first lifecycle/service mutation.
-  await writeUpdateState(options.layout.updateStatePath, pending);
+  let result:
+    | {
+        status: "updated";
+        releaseVersion: string;
+        sequence: number;
+        capacityRequalificationRequired?: boolean;
+        cleanupWarning?: string;
+      }
+    | undefined;
   try {
-    const draining = await setLocalLifecycleIntent(
+    await chmod(transactionRoot, 0o700);
+    await assertUpdateDiskBudget(
+      transactionRoot,
+      checked.metadata.release.bytes,
+      options.availableDiskBytes,
+    );
+    const archivePath = join(
+      transactionRoot,
+      checked.metadata.release.filename,
+    );
+    await downloadVerifiedArtifact({
+      url: checked.candidate.grant.url,
+      outputPath: archivePath,
+      expectedBytes: checked.metadata.release.bytes,
+      expectedSha256: checked.metadata.release.sha256,
+      expectedContentType: checked.metadata.release.contentType,
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    });
+    const prepared = await prepareInstallationRelease({
+      archivePath,
+      outputRoot: transactionRoot,
+      platform: "darwin-arm64",
+      releaseVersion: checked.metadata.releaseVersion,
+    });
+    const runtime = await inspectInstalledMacRuntime({
+      nodeCandidates: [join(prepared.path, "runtime", "node", "bin", "node")],
+      ffmpegCandidates: [join(prepared.path, "runtime", "bin", "ffmpeg")],
+      ffprobeCandidates: [join(prepared.path, "runtime", "bin", "ffprobe")],
+      uid: options.uid,
+    });
+    if (
+      Object.values(runtime).some((component) => component.decision !== "reuse")
+    )
+      throw new TypeError("Update candidate contains an incompatible runtime");
+    const staged = await stageMacUserRelease(options.layout, prepared.path);
+    const previousLifecycle = await loadLocalLifecycle(
       options.layout.lifecyclePath,
-      "draining",
     );
-    if (serviceWasLoaded) {
-      await waitForLocalDrain({
-        runtimeStatusPath: options.layout.runtimeStatusPath,
-        expectedRevision: draining.revision,
-        force: options.force === true,
-      });
-    }
-    if (previousService.loaded) await launchAgent.bootout();
-    const fixturePath = join(options.layout.stateRoot, "qualification.wav");
-    const fixtureSha256 = await sha256(fixturePath);
-    const qualify = options.qualify ?? qualifyMacUserRelease;
-    await qualify(
-      options.layout,
-      staged.releaseRoot,
-      fixturePath,
-      fixtureSha256,
-      launchAgent,
+    const previousService = await launchAgent.status();
+    // A loaded but stopped job is deliberately stopped as far as activation is
+    // concerned. Qualification may load a temporary job but must not start it later.
+    const serviceWasLoaded = previousService.loaded && previousService.running;
+    const previousConfig = await readPrivateRecord(options.layout.configPath);
+    const capacityRequalificationRequired =
+      previousConfig.validatedMaxWorkersPerGpu === 2;
+    const previousTarget = await readlink(options.layout.currentLink);
+    if (previousTarget !== `releases/${checked.currentVersion}`)
+      throw new Error("Installed release and active pointer disagree");
+    await verifyMacRelease(
+      join(options.layout.releasesRoot, checked.currentVersion),
     );
-    await writeUpdateState(options.layout.updateStatePath, {
-      ...pending,
-      status: "activating",
+    const pending: UpdateState = {
+      ...checked.state,
+      status: "staged",
       candidateVersion: staged.releaseVersion,
+      recovery: {
+        previousVersion: checked.currentVersion,
+        intent: previousLifecycle.intent,
+        serviceWasLoaded,
+        runtimeConfig: previousConfig,
+      },
       updatedAt: new Date().toISOString(),
-    });
-    await activateMacUserRelease(options.layout, staged.releaseVersion);
-    // Approval is release-bound. Keep the old receipt untouched for rollback;
-    // it cannot authorize the new release. Retain one existing slot per GPU.
-    if (capacityRequalificationRequired) {
-      const seen = new Set<string>();
-      const slots = (
-        previousConfig.slots as { gpuId: string; slotIndex: number }[]
-      ).filter((slot) => {
-        if (seen.has(slot.gpuId)) return false;
-        seen.add(slot.gpuId);
-        return true;
-      });
-      await writePrivateRecord(options.layout.configPath, {
-        ...retainSlotIdentities(previousConfig, slots),
-        validatedMaxWorkersPerGpu: 1,
-      });
-    }
-    // A stopped service must also have a valid configuration before committing.
-    await loadRuntimeConfig(options.layout.configPath);
-    await writeLaunchAgentPlist(options.layout);
-    await setLocalLifecycleIntent(
-      options.layout.lifecyclePath,
-      previousLifecycle.intent,
-    );
-    if (serviceWasLoaded) {
-      await launchAgent.bootstrap(options.layout.plistPath);
-      const service = await (
-        options.confirmStarted ?? (() => waitForLoadedService(launchAgent))
-      )();
-      if (!service) throw new Error("Updated LaunchAgent failed to start");
-      const healthy = await (
-        options.health ??
-        (async () =>
-          (await inspectMacUserHealth(options.layout, launchAgent)).healthy)
-      )();
-      if (!healthy) throw new Error("Updated worker failed runtime doctor");
-    }
-    await writePrivateRecord(options.layout.installationStatePath, {
-      ...checked.installationState,
-      releaseVersion: staged.releaseVersion,
-      updatedAt: new Date().toISOString(),
-    });
-    await writeUpdateState(options.layout.updateStatePath, {
-      schemaVersion: 1,
-      highestSequence: checked.sequence,
-      status: "healthy",
-      knownGoodVersion: staged.releaseVersion,
-      candidateVersion: staged.releaseVersion,
-      quarantinedVersions: checked.state.quarantinedVersions.filter(
-        (version) => version !== staged.releaseVersion,
-      ),
-      updatedAt: new Date().toISOString(),
-    });
-    return {
-      status: "updated",
-      releaseVersion: staged.releaseVersion,
-      sequence: checked.sequence,
-      ...(capacityRequalificationRequired
-        ? { capacityRequalificationRequired: true }
-        : {}),
     };
-  } catch (error) {
-    await recoverInterruptedMacUpdate(
-      options.layout,
-      launchAgent,
-      error instanceof Error ? error.message.slice(0, 240) : "unknown",
-    );
-    throw error;
+    // Commit recovery intent before the first lifecycle/service mutation.
+    await writeUpdateState(options.layout.updateStatePath, pending);
+    try {
+      const draining = await setLocalLifecycleIntent(
+        options.layout.lifecyclePath,
+        "draining",
+      );
+      if (serviceWasLoaded) {
+        await waitForLocalDrain({
+          runtimeStatusPath: options.layout.runtimeStatusPath,
+          expectedRevision: draining.revision,
+          force: options.force === true,
+        });
+      }
+      if (previousService.loaded) await launchAgent.bootout();
+      const fixturePath = join(options.layout.stateRoot, "qualification.wav");
+      const fixtureSha256 = await sha256(fixturePath);
+      const qualify = options.qualify ?? qualifyMacUserRelease;
+      await qualify(
+        options.layout,
+        staged.releaseRoot,
+        fixturePath,
+        fixtureSha256,
+        launchAgent,
+        false,
+      );
+      await writeUpdateState(options.layout.updateStatePath, {
+        ...pending,
+        status: "activating",
+        candidateVersion: staged.releaseVersion,
+        updatedAt: new Date().toISOString(),
+      });
+      await activateMacUserRelease(options.layout, staged.releaseVersion);
+      // Approval is release-bound. Keep the old receipt untouched for rollback;
+      // it cannot authorize the new release. Retain one existing slot per GPU.
+      if (capacityRequalificationRequired) {
+        const seen = new Set<string>();
+        const slots = (
+          previousConfig.slots as { gpuId: string; slotIndex: number }[]
+        ).filter((slot) => {
+          if (seen.has(slot.gpuId)) return false;
+          seen.add(slot.gpuId);
+          return true;
+        });
+        await writePrivateRecord(options.layout.configPath, {
+          ...retainSlotIdentities(previousConfig, slots),
+          validatedMaxWorkersPerGpu: 1,
+        });
+      }
+      // A stopped service must also have a valid configuration before committing.
+      await loadRuntimeConfig(options.layout.configPath);
+      await writeLaunchAgentPlist(options.layout);
+      await setLocalLifecycleIntent(
+        options.layout.lifecyclePath,
+        previousLifecycle.intent,
+      );
+      if (serviceWasLoaded) {
+        await launchAgent.bootstrap(options.layout.plistPath);
+        const service = await (
+          options.confirmStarted ?? (() => waitForLoadedService(launchAgent))
+        )();
+        if (!service) throw new Error("Updated LaunchAgent failed to start");
+        const healthy = await (
+          options.health ??
+          (async () =>
+            (await inspectMacUserHealth(options.layout, launchAgent)).healthy)
+        )();
+        if (!healthy) throw new Error("Updated worker failed runtime doctor");
+      }
+      await writePrivateRecord(options.layout.installationStatePath, {
+        ...checked.installationState,
+        releaseVersion: staged.releaseVersion,
+        updatedAt: new Date().toISOString(),
+      });
+      await writeUpdateState(options.layout.updateStatePath, {
+        schemaVersion: 1,
+        highestSequence: checked.sequence,
+        status: "healthy",
+        knownGoodVersion: staged.releaseVersion,
+        candidateVersion: staged.releaseVersion,
+        quarantinedVersions: checked.state.quarantinedVersions.filter(
+          (version) => version !== staged.releaseVersion,
+        ),
+        updatedAt: new Date().toISOString(),
+      });
+      result = {
+        status: "updated",
+        releaseVersion: staged.releaseVersion,
+        sequence: checked.sequence,
+        ...(capacityRequalificationRequired
+          ? { capacityRequalificationRequired: true }
+          : {}),
+      };
+      return result;
+    } catch (error) {
+      await recoverInterruptedMacUpdate(
+        options.layout,
+        launchAgent,
+        error instanceof Error ? error.message.slice(0, 240) : "unknown",
+      );
+      throw error;
+    }
+  } finally {
+    try {
+      // A completed transaction is only scratch: recovery restores the verified
+      // releases under runtime/releases. Keep all scratch until recovery intent
+      // is durably finalized, including a rollback whose restart still failed.
+      const state = await loadUpdateState(options.layout.updateStatePath);
+      if (
+        state.status !== "staged" &&
+        state.status !== "activating" &&
+        state.recovery === undefined
+      ) {
+        await assertSafeExistingAncestors(
+          options.layout.homeRoot,
+          transactionRoot,
+        );
+        await (
+          options.removeTransaction ??
+          ((path: string) => rm(path, { recursive: true, force: true }))
+        )(transactionRoot);
+      }
+    } catch {
+      // Do not roll back an accepted update or hide its original failure because
+      // scratch could not be removed. The cleanup CLI can retry it safely.
+      const warning = "Update scratch cleanup deferred; run mw cleanup --apply";
+      if (result !== undefined) result.cleanupWarning = warning;
+      else process.emitWarning(warning, { code: "WORKER_CLEANUP_DEFERRED" });
+    }
   }
 }
 
@@ -487,7 +536,7 @@ export async function loadMacUpdateTrust(
   return parseUpdateTrust(record);
 }
 
-async function loadUpdateState(path: string): Promise<UpdateState> {
+export async function loadUpdateState(path: string): Promise<UpdateState> {
   try {
     const record = await readPrivateRecord(path);
     const allowed = new Set([

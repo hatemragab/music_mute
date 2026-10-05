@@ -40,6 +40,70 @@ const testEnvironment = {
 };
 
 describe('environment boundary', () => {
+  it('keeps Desktop Google exchange disabled when both optional credentials are absent', () => {
+    const config = validateEnvironment(local);
+    expect(config.GOOGLE_DESKTOP_CLIENT_ID).toBeUndefined();
+    expect(config.GOOGLE_DESKTOP_CLIENT_SECRET).toBeUndefined();
+    expect(config.DESKTOP_GOOGLE_EXCHANGE_IP_PER_MINUTE).toBe(10);
+    expect(config.DESKTOP_GOOGLE_EXCHANGE_SERVICE_PER_MINUTE).toBe(300);
+  });
+  it('accepts a fixed Desktop client pair without modifying existing Firebase settings', () => {
+    expect(
+      validateEnvironment({
+        ...local,
+        GOOGLE_DESKTOP_CLIENT_ID: '123-fixture.apps.googleusercontent.com',
+        GOOGLE_DESKTOP_CLIENT_SECRET: 'fixture-only-client-secret',
+      }),
+    ).toMatchObject({
+      GOOGLE_DESKTOP_CLIENT_ID: '123-fixture.apps.googleusercontent.com',
+      FIREBASE_PROJECT_ID: local.FIREBASE_PROJECT_ID,
+    });
+  });
+  it.each([
+    { GOOGLE_DESKTOP_CLIENT_ID: '123-fixture.apps.googleusercontent.com' },
+    { GOOGLE_DESKTOP_CLIENT_SECRET: 'fixture-only-client-secret' },
+    {
+      GOOGLE_DESKTOP_CLIENT_ID: 'https://private.invalid',
+      GOOGLE_DESKTOP_CLIENT_SECRET: 'fixture-only-client-secret',
+    },
+    {
+      GOOGLE_DESKTOP_CLIENT_ID: '123-fixture.apps.googleusercontent.com',
+      GOOGLE_DESKTOP_CLIENT_SECRET: 'private\nsecret',
+    },
+    {
+      GOOGLE_DESKTOP_CLIENT_ID: '123-fixture.apps.googleusercontent.com\n',
+      GOOGLE_DESKTOP_CLIENT_SECRET: 'fixture-only-client-secret',
+    },
+    {
+      GOOGLE_DESKTOP_CLIENT_ID: '123-fixture.apps.googleusercontent.com',
+      GOOGLE_DESKTOP_CLIENT_SECRET: 'fixture-only-client-secret\n',
+    },
+  ])(
+    'fails partial or malformed Desktop configuration with key-only errors',
+    (config) => {
+      let error: unknown;
+      try {
+        validateEnvironment({ ...local, ...config });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain('GOOGLE_DESKTOP_CLIENT_');
+      expect((error as Error).message).not.toContain(
+        'fixture-only-client-secret',
+      );
+      expect((error as Error).message).not.toContain('private');
+    },
+  );
+  it.each([
+    'DESKTOP_GOOGLE_EXCHANGE_IP_PER_MINUTE',
+    'DESKTOP_GOOGLE_EXCHANGE_SERVICE_PER_MINUTE',
+  ])('centrally bounds %s', (key) => {
+    for (const value of [0, -1, 1.5, 1_000_001])
+      expect(() => validateEnvironment({ ...local, [key]: value })).toThrow(
+        key,
+      );
+  });
   it('selects exactly one file and rejects arbitrary paths', () => {
     expect(environmentFile('local')).toBe('.env.local');
     expect(environmentFile('production')).toBe('.env.production');

@@ -1,0 +1,14 @@
+*
+!Dockerfile
+!requirements.txt
+!service.py
+!acquirer.py
+!extract.py
+!proxy_sessions.py
+!bootstrap.py
+!patch_provider.py
+!source_policy.py
+!acquisition_context.py
+!acquisition_limits.py
+!acquisition_metadata.py
+!acquisition_scratch.py

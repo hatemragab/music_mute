@@ -128,6 +128,25 @@ describe("Windows PowerShell tooling", () => {
     );
     expect(reset).toContain("service remains stopped");
   });
+
+  it("cleans generated qualification media after commit and retains Stage uploads", async () => {
+    // Source contract only; Windows filesystem and service checks run natively.
+    const source = await serviceManagerSource();
+    const completed = source.indexOf("      Complete-OperationJournal $Root");
+    const cleanup = source.indexOf(
+      "        Remove-QualificationWorkspace $Root $QualificationReport",
+    );
+    expect(cleanup).toBeGreaterThan(completed);
+    const staged = source.slice(
+      source.indexOf("    if ($StagingOnly) {"),
+      source.indexOf("    } else {", source.indexOf("    if ($StagingOnly) {")),
+    );
+    expect(staged).not.toContain("Remove-QualificationWorkspace");
+    expect(source).toContain("$Output.StartsWith($Prefix");
+    expect(source).toContain("Remove-OperationScratch $Workspace");
+    expect(source).toContain("[IO.FileAttributes]::ReparsePoint");
+    expect(source).toContain("installation remains committed");
+  });
 });
 
 async function serviceManagerSource(): Promise<string> {

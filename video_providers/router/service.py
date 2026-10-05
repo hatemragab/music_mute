@@ -1,5 +1,4 @@
 """Private provider-neutral binary router. No vendor keys, retries or scratch."""
-import base64
 import hmac
 import http.client
 import json
@@ -10,7 +9,6 @@ import socket
 import sys
 import threading
 import time
-import unicodedata
 import uuid
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,9 +17,13 @@ from pathlib import Path
 
 try:
     from acquisition_limits import AcquisitionLimits, Admission, wait_for_slot
+    from acquisition_context import parse_context
+    from acquisition_metadata import clean_metadata
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from acquisition_limits import AcquisitionLimits, Admission, wait_for_slot
+    from acquisition_context import parse_context
+    from acquisition_metadata import clean_metadata
 
 from source_policy import Failure, MAX_BYTES, MAX_DURATION_SECONDS, finite, route_for, source_url
 
@@ -39,20 +41,11 @@ UPSTREAM_ERRORS = {
     'IMPORT_UPSTREAM_REFUSED': {502},
     'IMPORT_SOURCE_UNAVAILABLE': {422},
     'IMPORT_DEPENDENCY_FAILED': {503},
+    'IMPORT_ACQUISITION_EXHAUSTED': {503},
     'IMPORT_DISK_FULL': {503},
 }
 CONTENT_TYPES = {'application/octet-stream', 'audio/webm', 'audio/mpeg', 'audio/mp4',
                  'audio/ogg', 'audio/opus', 'application/ogg'}
-TEXT_FIELDS = {
-    'provider': 64, 'site': 64, 'format_id': 64, 'extension': 16,
-    'audio_codec': 64, 'container': 64, 'language': 32, 'title': 200,
-    'artist': 200, 'album': 200, 'channel': 200, 'description': 1000,
-}
-NUMBER_FIELDS = {
-    'bitrate_kbps': 10000, 'sample_rate_hz': 384000, 'audio_channels': 32,
-    'provider_file_bytes': MAX_BYTES, 'duration_seconds': MAX_DURATION_SECONDS,
-    'file_bytes': MAX_BYTES,
-}
 
 
 @dataclass(frozen=True)
@@ -81,36 +74,6 @@ def destination(value, key, app):
         return Destination(p.hostname, 8080, key)
     except ValueError:
         raise ValueError('Invalid private acquisition destination') from None
-
-
-def clean_metadata(encoded, secrets):
-    if (not isinstance(encoded, str) or len(encoded) > 4096
-            or not re.fullmatch(r'[A-Za-z0-9+/]+={0,2}', encoded)):
-        return None
-    try:
-        raw = json.loads(base64.b64decode(encoded, validate=True).decode('utf-8'))
-        if not isinstance(raw, dict) or type(raw.get('schema_version')) is not int or raw['schema_version'] != 1:
-            return None
-        clean = {'schema_version': 1}
-        for key, maximum in TEXT_FIELDS.items():
-            field = raw.get(key)
-            if not isinstance(field, str):
-                continue
-            field = ''.join(c for c in field if unicodedata.category(c) not in ('Cc', 'Cf')).strip()[:maximum]
-            if (not field or re.search(r'https?://|Bearer\s|Basic\s|X-Amz-|Signature=|tnl_|jk_', field, re.I)
-                    or any(secret in field for secret in secrets)):
-                continue
-            clean[key] = field
-        for key, maximum in NUMBER_FIELDS.items():
-            field = raw.get(key)
-            if finite(field) and 0 < field <= maximum:
-                clean[key] = field
-        if len(clean) == 1:
-            return None
-        output = base64.b64encode(json.dumps(clean, ensure_ascii=True, separators=(',', ':')).encode()).decode()
-        return output if len(output) <= 4096 else None
-    except (ValueError, UnicodeError, RecursionError):
-        return None
 
 
 def unique_object(pairs):
@@ -231,7 +194,7 @@ class Handler(BaseHTTPRequestHandler):
         headers = {'X-Import-Error': failure.code}
         if failure.status == 401:
             headers['WWW-Authenticate'] = 'Bearer'
-        if failure.status == 503:
+        if failure.status == 503 and failure.code != 'IMPORT_ACQUISITION_EXHAUSTED':
             headers['Retry-After'] = str(failure.retry_after)
         self.reply(failure.status, json.dumps({
             'type': 'about:blank', 'title': failure.code,
@@ -248,6 +211,10 @@ class Handler(BaseHTTPRequestHandler):
         if len(self.headers.get_all('Authorization', [])) != 1 or not hmac.compare_digest(
                 self.headers.get('Authorization', '').encode(), ('Bearer ' + self.server.api_key).encode()):
             raise Failure('IMPORT_UNAUTHORIZED', 401)
+        try:
+            self.acquisition_context = parse_context(self.headers)
+        except ValueError:
+            raise Failure('IMPORT_INVALID_REQUEST', 400) from None
         if self.headers.get('Content-Type', '').split(';')[0].strip() != 'application/json':
             raise Failure('IMPORT_INVALID_REQUEST', 415)
         lengths = self.headers.get_all('Content-Length', [])
@@ -334,13 +301,16 @@ class Handler(BaseHTTPRequestHandler):
         operation.check()
         connection.sock.settimeout(max(0.1, operation.deadline - time.monotonic()))
         # Exactly one POST. Never repeat or switch providers after any result.
-        connection.request('POST', '/audio-imports', json.dumps(body).encode(), {
+        headers = {
             'Authorization': 'Bearer ' + target.key,
             'Content-Type': 'application/json',
             'Accept': 'application/octet-stream, application/problem+json',
             'X-Import-Request-ID': request_id,
             'Connection': 'close',
-        })
+        }
+        if self.acquisition_context:
+            headers.update(self.acquisition_context.headers())
+        connection.request('POST', '/audio-imports', json.dumps(body).encode(), headers)
         response = connection.getresponse()
         operation.response = response
         operation.check()
@@ -435,7 +405,7 @@ def main():
         targets = {
             'youtube': destination(os.environ.get('YOUTUBE_AUDIO_ACQUISITION_API_URL', ''),
                                    os.environ.get('YOUTUBE_AUDIO_ACQUISITION_API_KEY', ''),
-                                   ('music-mute-tunelio', 'music-mute-jojapi')),
+                                   ('music-mute-tunelio', 'music-mute-jojapi', 'music-mute-ytdlp')),
             'other': destination(os.environ.get('OTHER_AUDIO_ACQUISITION_API_URL', ''),
                                  os.environ.get('OTHER_AUDIO_ACQUISITION_API_KEY', ''), 'music-mute-videoscale'),
         }

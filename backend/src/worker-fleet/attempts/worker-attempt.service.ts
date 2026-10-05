@@ -18,6 +18,7 @@ import { ProcessingUsageService } from '../../processing-usage/processing-usage.
 import { StorageCleanupService } from '../../storage/storage-cleanup.service.js';
 import { StorageTransfersService } from '../../storage/storage-transfers.service.js';
 import { SharedMediaService } from '../../shared-media/shared-media.service.js';
+import { JobRenditionService } from './job-rendition.service.js';
 import { AccountAccessService } from '../../users/account-access.service.js';
 import type { WorkerPrincipal } from '../auth/worker-auth.types.js';
 import {
@@ -51,6 +52,7 @@ export class WorkerAttemptService {
     private readonly accountAccess: AccountAccessService,
     private readonly usage: ProcessingUsageService,
     @Optional() private readonly sharedMedia?: SharedMediaService,
+    @Optional() private readonly renditions?: JobRenditionService,
   ) {}
 
   private get outbox() {
@@ -336,6 +338,13 @@ export class WorkerAttemptService {
     this.assertRecipe(first.job, dto);
     if (first.attempt.state === 'succeeded')
       return this.presentCompletion(first.attempt, dto, true);
+    const needsRendition = Boolean(
+      first.job.sharedResultKey &&
+      first.job.requestedTrimEnabled === true &&
+      first.job.recipeSnapshot?.trimEnabled === false,
+    );
+    if (needsRendition && !this.renditions)
+      throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
     this.assertCurrent(first.attempt, first.job, new Date());
     if (first.job.sharedResultKey) {
       if (!this.sharedMedia) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
@@ -435,11 +444,12 @@ export class WorkerAttemptService {
                 throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
               }
             }
-            await this.usage.recordRetainedOutput(
-              current.job,
-              sharedObject.bytes + (current.job.inputObject?.bytes ?? 0),
-              session,
-            );
+            if (!needsRendition)
+              await this.usage.recordRetainedOutput(
+                current.job,
+                sharedObject.bytes + (current.job.inputObject?.bytes ?? 0),
+                session,
+              );
             const readyAt = new Date();
             const finalizationMs = Math.round(
               performance.now() - completionStarted,
@@ -449,15 +459,30 @@ export class WorkerAttemptService {
                 this.jobOwnershipFilter(current.job, current.attempt, readyAt),
                 {
                   $set: {
-                    status: 'ready',
-                    outputObject: sharedObject,
-                    comparisonRanges: dto.comparisonRanges ?? null,
-                    retainedOutputAccountedAt: readyAt,
-                    retainedInputBytes: current.job.inputObject?.bytes ?? 0,
+                    status: needsRendition ? 'uploading_result' : 'ready',
+                    outputObject: needsRendition ? null : sharedObject,
+                    comparisonRanges: needsRendition
+                      ? null
+                      : (dto.comparisonRanges ?? null),
+                    renditionPending: needsRendition
+                      ? {
+                          full: sharedObject,
+                          attemptId,
+                          queuedAt: readyAt,
+                          nextAt: readyAt,
+                          leaseUntil: null,
+                          leaseToken: null,
+                          attempts: 0,
+                        }
+                      : null,
+                    retainedOutputAccountedAt: needsRendition ? null : readyAt,
+                    retainedInputBytes: needsRendition
+                      ? 0
+                      : (current.job.inputObject?.bytes ?? 0),
                     retainedOutputReleasedAt: null,
                     currentExecution: null,
                     workerProgress: null,
-                    finishedAt: readyAt,
+                    finishedAt: needsRendition ? null : readyAt,
                     workerStageTimings: dto.stageTimings,
                     stageTimingAttempts: withAttemptMeasurements(
                       current.job,
@@ -474,7 +499,7 @@ export class WorkerAttemptService {
                         {
                           stage: 'completion',
                           durationMs: finalizationMs,
-                          complete: true,
+                          complete: !needsRendition,
                         },
                       ],
                     ),
@@ -491,8 +516,10 @@ export class WorkerAttemptService {
               .lean();
             if (!job) throw workerError('WORKER_CONFLICT');
             await this.releaseSlot(current.attempt, now, session);
-            await this.usage.settleJob(job, session);
-            await this.enqueueNotification(job, 'ready', now, session);
+            // Model work has finished even while its requested rendition waits.
+            await this.usage.settleJob({ ...job, status: 'ready' }, session);
+            if (!needsRendition)
+              await this.enqueueNotification(job, 'ready', now, session);
             if (!current.job.sharedResultKey)
               await this.cleanup.cancelScheduled(reservation.key, session);
             return {
@@ -504,6 +531,7 @@ export class WorkerAttemptService {
           }),
       );
       if (!result) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+      if (needsRendition) this.renditions!.wake();
       return result;
     } finally {
       await session.endSession();

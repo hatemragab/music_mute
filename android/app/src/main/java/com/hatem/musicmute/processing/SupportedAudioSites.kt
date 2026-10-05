@@ -11,7 +11,7 @@ object SupportedAudioSites {
         val blockedQueryKeys: List<String>,
         val sites: List<Site>,
     )
-    @Serializable private data class Site(val name: String, val rules: List<Rule>)
+    @Serializable private data class Site(val id: String, val name: String, val rules: List<Rule>)
     @Serializable private data class Rule(
         val host: String,
         val path: String,
@@ -49,13 +49,21 @@ object SupportedAudioSites {
             }
         } catch (_: IllegalArgumentException) { invalid() }
         val policy = catalog ?: throw UrlImportFailure("IMPORT_UNSUPPORTED_PROVIDER")
-        if (policy.blockedQueryKeys.any { query.containsKey(it) })
-            throw UrlImportFailure("IMPORT_SINGLE_ITEM_REQUIRED")
-        val supported = policy.sites.any { site -> site.rules.any { rule ->
+        val site = policy.sites.firstOrNull { site -> site.rules.any { rule ->
             Regex(rule.host).matches(host) && Regex(rule.path).matches(path) &&
                 rule.requiredQuery.all { (key, pattern) -> Regex(pattern).matches(query[key].orEmpty()) }
         } }
-        if (!supported) throw UrlImportFailure("IMPORT_UNSUPPORTED_PROVIDER")
+        if (site?.id == "youtube") {
+            val videoId = if (Regex("/watch/?").matches(path)) query["v"].orEmpty()
+                else path.trimEnd('/').substringAfterLast('/')
+            if (!Regex("[A-Za-z0-9_-]{11}").matches(videoId) ||
+                (query.containsKey("v") && query["v"] != videoId)) invalid()
+            // Share links carry playlist/radio context, but each import targets one video.
+            return "https://www.youtube.com/watch?v=$videoId"
+        }
+        if (policy.blockedQueryKeys.any { query.containsKey(it) })
+            throw UrlImportFailure("IMPORT_SINGLE_ITEM_REQUIRED")
+        if (site == null) throw UrlImportFailure("IMPORT_UNSUPPORTED_PROVIDER")
         // Retain existing SoundCloud identity normalization for saved request deduplication.
         if (host in setOf("soundcloud.com", "www.soundcloud.com", "m.soundcloud.com"))
             return "https://soundcloud.com${path.trimEnd('/')}"

@@ -173,10 +173,12 @@ export class JobsQueryService {
   }
 
   private async findOwned(userId: string, jobId: string) {
-    await this.access.assertActive(userId);
+    await this.access.assertActiveReadOnly(userId);
     const job = await this.jobs
       .findOne({ _id: objectId(jobId), userId: objectId(userId) })
       .lean();
+    // Account disablement during the lookup must fence the returned snapshot.
+    await this.access.assertActiveReadOnly(userId);
     if (!job || job.deletedAt) throw jobError('JOB_NOT_FOUND');
     return job;
   }

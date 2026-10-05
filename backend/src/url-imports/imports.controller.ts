@@ -62,6 +62,27 @@ export class ImportsController {
     return result;
   }
 
+  @Post('cache-deliveries')
+  @HttpCode(202)
+  @Header('Cache-Control', 'no-store')
+  @LimitOperation('processing-create')
+  @RequireProcessingAccess()
+  async createCacheDelivery(
+    @Req() req: AuthRequest,
+    @Body() body: CreateImportDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.imports.create(
+      req.user!._id.toHexString(),
+      body.url,
+      body.requestId,
+      body.trimEnabled,
+      true,
+    );
+    response.setHeader('Location', `/media-imports/${result.importId}`);
+    return result;
+  }
+
   @Get(':id')
   @Header('Cache-Control', 'no-store')
   @LimitOperation('processing-read')

@@ -18,6 +18,28 @@ final class CoreTests: XCTestCase {
     XCTAssertEqual(audioTime(.infinity), "0:00")
   }
 
+  func testSupportedPlatformLinksMatchReviewedProductDestinations() {
+    XCTAssertEqual(
+      musicMutePlatformURL(.web)?.absoluteString,
+      "https://app.music-mute.com")
+    XCTAssertEqual(
+      musicMutePlatformURL(.macOS)?.absoluteString,
+      "https://music-mute.com/#downloads")
+  }
+
+  func testSupportedPlatformLinksRejectUnsafeOrSpeculativeDestinations() {
+    XCTAssertNil(musicMutePlatformURL(.web, candidate: "http://app.music-mute.com"))
+    XCTAssertNil(
+      musicMutePlatformURL(.web, candidate: "https://app.music-mute.com.evil.example"))
+    XCTAssertNil(musicMutePlatformURL(.web, candidate: "https://user@app.music-mute.com"))
+    XCTAssertNil(
+      musicMutePlatformURL(.web, candidate: "https://app.music-mute.com/?campaign=mobile"))
+    XCTAssertNil(musicMutePlatformURL(.macOS, candidate: "https://music-mute.com/#other"))
+    XCTAssertNil(
+      musicMutePlatformURL(
+        .macOS, candidate: "https://music-mute.com/MusicMute.dmg#downloads"))
+  }
+
   @MainActor func testAccentValidationAndPersistence() {
     XCTAssertEqual(AppPreferences.normalizedAccent(" #ff814a "), "#FF814A")
     XCTAssertNil(AppPreferences.normalizedAccent("orange"))

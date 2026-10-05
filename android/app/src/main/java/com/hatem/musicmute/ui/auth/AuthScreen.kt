@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
@@ -223,14 +222,7 @@ internal fun AuthScreen(
                 enabled = enabled,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("auth-google"),
             ) {
-                Icon(
-                    painterResource(R.drawable.google_g),
-                    null,
-                    Modifier.size(20.dp),
-                    tint = androidx.compose.ui.graphics.Color.Unspecified,
-                )
-                Spacer(Modifier.width(12.dp))
-                Text(stringResource(R.string.auth_continue_google))
+                GoogleActionLabel(stringResource(R.string.auth_continue_google))
             }
         }
         if (visibleMode == FormMode.LOGIN) {

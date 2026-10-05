@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
 import com.hatem.musicmute.ui.design.*
@@ -36,6 +37,8 @@ internal fun LinkedMethodsScreen(
     val unlink = action == MethodAction.UNLINK_PASSWORD || action == MethodAction.UNLINK_GOOGLE
     val newPassword = action == MethodAction.LINK_PASSWORD
     val passwordRequired = newPassword || (PASSWORD_PROVIDER in providers && action != MethodAction.UNLINK_PASSWORD)
+    val usesGoogleCredential = action == MethodAction.LINK_GOOGLE ||
+        (action != MethodAction.UNLINK_GOOGLE && GOOGLE_PROVIDER in providers)
     val actionForm: @Composable ColumnScope.() -> Unit = {
         AccountSymbol(Icons.Outlined.Lock, Modifier.align(Alignment.CenterHorizontally))
         Text(stringResource(if (newPassword) R.string.creative_account_add_password else if (unlink) R.string.auth_unlink else R.string.creative_account_confirm_identity),
@@ -68,7 +71,24 @@ internal fun LinkedMethodsScreen(
             }
         }, modifier = Modifier.fillMaxWidth().testTag("auth-confirm-method"),
             busy = state.busy, enabled = (!passwordRequired || password.isNotEmpty()) && (!newPassword || password == confirmation)) {
-            Text(stringResource(if (unlink) R.string.auth_unlink else R.string.auth_confirm))
+            if (usesGoogleCredential) {
+                GoogleActionLabel(
+                    stringResource(
+                        if (action == MethodAction.LINK_GOOGLE) R.string.auth_link_google
+                        else R.string.auth_continue_google
+                    )
+                )
+            } else {
+                Text(
+                    stringResource(
+                        when {
+                            action == MethodAction.UNLINK_GOOGLE -> R.string.auth_unlink_google
+                            unlink -> R.string.auth_unlink
+                            else -> R.string.auth_confirm
+                        }
+                    )
+                )
+            }
         }
         OutlinedButton(::dismiss, Modifier.fillMaxWidth(), enabled = !state.busy) { Text(stringResource(R.string.auth_cancel)) }
     }
@@ -87,7 +107,8 @@ internal fun LinkedMethodsScreen(
                     if (index > 0) HorizontalDivider()
                     Column(verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
-                        Icon(Icons.Outlined.Key, null, tint = MaterialTheme.colorScheme.primary)
+                        if (provider == GOOGLE_PROVIDER) GoogleMark()
+                        else Icon(Icons.Outlined.Key, null, tint = MaterialTheme.colorScheme.primary)
                         Column(Modifier.weight(1f)) {
                             Text(providerLabel(provider), style = MaterialTheme.typography.titleMedium)
                             Text(stringResource(if (provider in providers) R.string.auth_connected else R.string.auth_not_connected),
@@ -103,7 +124,20 @@ internal fun LinkedMethodsScreen(
                                 else -> MethodAction.LINK_GOOGLE
                             }) }, enabled = !state.busy && (if (connected) canUnlink(providers, provider) else provider != PASSWORD_PROVIDER || state.identity?.email != null),
                                 modifier = Modifier.testTag(if (connected) { if (provider == PASSWORD_PROVIDER) "auth-unlink-password" else "auth-unlink-google" } else { if (provider == PASSWORD_PROVIDER) "auth-link-password" else "auth-link-google" })) {
-                                Text(stringResource(if (connected) R.string.auth_unlink else R.string.auth_link_method))
+                                if (provider == GOOGLE_PROVIDER) {
+                                    GoogleMark(Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                }
+                                Text(
+                                    stringResource(
+                                        when {
+                                            provider == GOOGLE_PROVIDER && connected -> R.string.auth_unlink_google
+                                            provider == GOOGLE_PROVIDER -> R.string.auth_link_google
+                                            connected -> R.string.auth_unlink
+                                            else -> R.string.auth_link_method
+                                        }
+                                    )
+                                )
                             }
                         }
                     }

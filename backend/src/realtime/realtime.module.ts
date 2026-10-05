@@ -1,3 +1,4 @@
+import { LocalMediaSyncsModule } from '../local-media-syncs/local-media-syncs.module.js';
 import { AdminNotificationsModule } from '../admin-notifications/admin-notifications.module.js';
 import { RealtimeSocketService } from './realtime-socket.service.js';
 import { QueueProjectionService } from './queue-projection.service.js';
@@ -37,6 +38,7 @@ import {
     AdminSettingsModule,
     AdminUsersModule,
     AudioProcessingModule,
+    LocalMediaSyncsModule,
     ReleasesModule,
     WorkerFleetModule,
     AdminNotificationsModule,

@@ -3,3 +3,5 @@
 !service.py
 !source_policy.py
 !acquisition_limits.py
+!acquisition_context.py
+!acquisition_metadata.py

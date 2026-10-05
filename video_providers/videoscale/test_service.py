@@ -362,11 +362,25 @@ class ContractTests(unittest.TestCase):
 
     def test_sources(self):
         for value in ['https://youtu.be/aqz-KE-bpKQ', 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
-                      'https://youtube.com/shorts/aqz-KE-bpKQ']:
+                      'https://youtube.com/shorts/aqz-KE-bpKQ',
+                      'https://youtube.com/watch?v=aqz-KE-bpKQ&list=PL123&index=2&start_radio=1',
+                      'https://youtube.com/watch/?v=aqz-KE-bpKQ&list=PL123',
+                      'https://www.youtu.be/aqz-KE-bpKQ/?list=PL123',
+                      'https://youtube.com/watch?v=aqz-KE-bpKQ&%6cist=PL123',
+                      'https://youtu.be/aqz-KE-bpKQ?list=PL123&index=2',
+                      'https://youtube.com/shorts/aqz-KE-bpKQ?list=PL123&v=aqz-KE-bpKQ']:
             self.assertEqual(source_url(value), 'https://www.youtube.com/watch?v=aqz-KE-bpKQ')
+        self.assertEqual(
+            source_url('https://www.youtube.com/watch?v=e6WT8RwRwt4&list=RDe6WT8RwRwt4&start_radio=1'),
+            'https://www.youtube.com/watch?v=e6WT8RwRwt4')
         for value in ['http://youtube.com/watch?v=aqz-KE-bpKQ', 'https://127.0.0.1/',
                       'https://youtube.com:443/watch?v=aqz-KE-bpKQ',
-                      'https://youtube.com/watch?v=aqz-KE-bpKQ&list=test',
+                      'https://youtube.com/playlist?list=test&v=aqz-KE-bpKQ',
+                      'https://youtube.com/watch?list=test',
+                      'https://youtube.com/watch?v=short&list=test',
+                      'https://youtube.com/watch?v=aqz-KE-bpKQ&v=abcdefghijk&list=test',
+                      'https://youtu.be/aqz-KE-bpKQ?v=abcdefghijk&list=test',
+                      'https://youtube.com/shorts/aqz-KE-bpKQ?v=aqz-KE-bpKQ&v=aqz-KE-bpKQ',
                       'https://user@youtube.com/watch?v=aqz-KE-bpKQ', None]:
             with self.subTest(value=value), self.assertRaises(Failure):
                 source_url(value)

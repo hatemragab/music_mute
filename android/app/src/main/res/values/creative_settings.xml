@@ -21,6 +21,11 @@
     <string name="creative_settings_about_import">Import audio or use a YouTube link. Review the source and confirm your rights before processing.</string>
     <string name="creative_settings_about_process">Remove music uploads the audio to private cloud storage to create a vocals-only result. Follow each job from Home.</string>
     <string name="creative_settings_about_offline">Completed results appear in Library. Play, Download or Share retrieves the complete audio, which stays on this phone for offline playback.</string>
+    <string name="creative_settings_other_platforms">MusicMute on other platforms</string>
+    <string name="creative_settings_web">MusicMute on the web</string>
+    <string name="creative_settings_web_description">Open the full MusicMute app in your browser.</string>
+    <string name="creative_settings_macos">MusicMute for macOS</string>
+    <string name="creative_settings_macos_description">Check the MusicMute Downloads page for future macOS availability.</string>
     <string name="creative_settings_presets">Preset colors</string>
     <string name="creative_settings_custom">Custom color</string>
     <string name="creative_settings_hex">Hex color</string>
