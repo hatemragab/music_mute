@@ -4,6 +4,47 @@ function acquisitionFailure(
   code: string,
 ): { title: string; message: string } | null {
   switch (code) {
+    case "WORKER_UPDATE_REQUIRED":
+      return {
+        title: "Update the background worker",
+        message:
+          "Open MusicMute and select Worker to update or move the paired worker into the app. Local separation can share this Mac's GPU once the worker supports coordination. Saved vocals remain available.",
+      };
+    case "WORKER_MAINTENANCE_BUSY":
+      return {
+        title: "Worker maintenance in progress",
+        message:
+          "MusicMute is preparing, updating or benchmarking the background worker. Wait for that operation to finish, then try local separation again. Saved vocals remain available.",
+      };
+    case "WORKER_PERSONAL_BUSY":
+      return {
+        title: "Local separation is active",
+        message:
+          "Another local preparation is using the GPU. Wait for it to finish before starting worker maintenance or another separation.",
+      };
+    case "WORKER_WAIT_TIMEOUT":
+      return {
+        title: "Waiting for the background worker",
+        message:
+          "An accepted background job has not released the GPU yet. Check its progress in MusicMute's Worker section and try again after it finishes.",
+      };
+    case "WORKER_COORDINATION_UNSAFE":
+    case "WORKER_COORDINATION_UNAVAILABLE":
+    case "WORKER_RECOVERY_REQUIRED":
+    case "PERSONAL_ADMISSION_UNSAFE":
+    case "PERSONAL_ENGINE_IDENTITY_UNAVAILABLE":
+    case "ENGINE_EXIT_UNCONFIRMED":
+      return {
+        title: "Processing coordination needs attention",
+        message:
+          "MusicMute could not confirm that the GPU is available for local separation. Open Worker diagnostics in the Mac app and check the failed operation before trying again. Saved vocals remain available.",
+      };
+    case "ENGINE_SERVICE_REQUIRED":
+      return {
+        title: "Update MusicMute processing",
+        message:
+          "This installation cannot coordinate its local separation engine with the background worker. Open MusicMute and check for an app update before starting local separation or worker qualification.",
+      };
     case "OUTBOX_BUSY":
       return {
         title: "Local save busy",

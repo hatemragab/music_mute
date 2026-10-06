@@ -394,6 +394,8 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     try playbackClockChecks()
     try playbackVolumeChecks()
     try offlineStorageDefaultChecks()
+    try offlineStorageDecimalChecks()
+    try storageDraftChecks()
     try await offlineStorageSaveChecks()
     try cachePinChecks()
     try await cachePlaybackLeaseChecks()
@@ -700,6 +702,49 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
       "A fresh workspace must show the two-gigabyte offline limit before companion loading")
   }
 
+  static func offlineStorageDecimalChecks() throws {
+    for (text, gigabytes) in [
+      ("٢", Int64(2)), ("۲", 2), ("٥", 5), ("５", 5), ("𝟚", 2),
+      ("۲3٤", 234), ("٠٠٠٠٠٠٢", 2), ("  ٢\n", 2),
+      ("٩٠٠٧١٩٩", DesktopOfflineStoragePolicy.maximumGigabytes),
+      ("۹۰۰۷۱۹۹", DesktopOfflineStoragePolicy.maximumGigabytes),
+    ] {
+      try require(
+        DesktopOfflineStoragePolicy.bytes(gigabytes: text) == gigabytes * 1_000_000_000,
+        "Unicode decimal storage digits must normalize to the exact shared byte budget")
+    }
+    for text in [
+      "٠", "۰", "٩٠٠٧٢٠٠", "۹۰۰۷۲۰۰", "٠٠٠٠٠٠٠٢", "٢٫٥", "٢.٥", "+٢", "−٢",
+      "²", "₂", "½", "Ⅲ", "①", "٢\u{200F}", String(Int64.max),
+      String(repeating: "٩", count: 100),
+    ] {
+      try require(
+        DesktopOfflineStoragePolicy.bytes(gigabytes: text) == nil,
+        "Only bounded decimal digits within the storage policy may be accepted")
+    }
+  }
+
+  static func storageDraftChecks() throws {
+    var draft = DesktopStorageLimitDraft()
+    draft.receive(bytes: 2_000_000_000)
+    draft.text = "٥"
+    draft.receive(bytes: 3_000_000_000)
+    try require(
+      draft.text == "٥" && draft.referenceBytes == 3_000_000_000 && draft.hasChanges,
+      "An external budget publish must retain a dirty Unicode storage draft")
+    draft.text = "٢٫٥"
+    draft.receive(bytes: 4_000_000_000)
+    try require(
+      draft.text == "٢٫٥" && draft.referenceBytes == 4_000_000_000 && draft.hasChanges,
+      "External storage updates must retain invalid edits so validation stays visible")
+
+    draft.text = "٥"
+    draft.receive(bytes: 5_000_000_000, replaceEdits: true)
+    try require(
+      draft.text == "5" && draft.referenceBytes == 5_000_000_000 && !draft.hasChanges,
+      "An explicit successful save must replace the draft with the confirmed normalized limit")
+  }
+
   @MainActor static func offlineStorageSaveChecks() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "musicmute-desktop-storage-\(UUID())")
@@ -744,13 +789,14 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     try require(
       workspace.cacheBudgetStatus == "Enter a whole number of GB, starting at 1."
         && workspace.budgetBytes == 2_000_000_000 && !workspace.savingCacheBudget
-        && !workspace.bridge.busy && !FileManager.default.fileExists(atPath: requests.path),
+        && !workspace.storageOperationBusy
+        && !FileManager.default.fileExists(atPath: requests.path),
       "An invalid storage limit must show validation without invoking the helper")
-    await workspace.saveOfflineStorageLimit(gigabytes: "5")
+    await workspace.saveOfflineStorageLimit(gigabytes: "٥")
     try require(
       workspace.budgetBytes == 5_000_000_000 && workspace.cacheBytes == 1_024
         && workspace.cacheBudgetStatus == "Offline voice storage limit saved."
-        && !workspace.savingCacheBudget && !workspace.bridge.busy,
+        && !workspace.savingCacheBudget && !workspace.storageOperationBusy,
       "A successful storage settings save must update the limit, usage and final status")
     let commands = try recorded()
     guard commands.count == 1, case .object(let fields) = commands[0] else {
@@ -770,13 +816,86 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
       workspace.budgetBytes == 5_000_000_000 && workspace.cacheBytes == 1_024
         && workspace.cacheBudgetStatus
           == "The storage limit could not be saved. Try again after MusicMute finishes its current operation."
-        && !workspace.savingCacheBudget && !workspace.bridge.busy,
+        && !workspace.savingCacheBudget && !workspace.storageOperationBusy,
       "A mismatched helper reply must preserve the prior limit and usage and show a save error")
     let afterMismatch = try recorded()
     try require(
       afterMismatch.count == 2
         && afterMismatch[1]["payload"] == .object(["budget_bytes": .number(6_000_000_000)]),
       "A later storage save must send its newly selected limit")
+
+    func cacheScript(cleared: Int, delayed: Bool = false, malformed: Bool = false) throws {
+      let clearPayload =
+        malformed
+        ? #"{"cleared_entries":-1}"#
+        : #"{"cleared_entries":\#(cleared),"cache_bytes":0,"budget_bytes":5000000000}"#
+      let libraryPayload =
+        #"{"items":[],"cache_bytes":0,"budget_bytes":5000000000,"total":0}"#
+      let body = #"""
+        type=$(printf '%s' "$envelope" | /usr/bin/sed -nE 's/.*"type":"([A-Z_]+)".*/\1/p')
+        if [ "$type" = "CLEAR_CACHE" ]; then
+          payload='\#(clearPayload)'
+        else
+          payload='\#(libraryPayload)'
+        fi
+        printf '{"protocol_version":1,"request_id":"%s","type":"result","payload":%s}\n' "$id" "$payload"
+        """#
+      try Data((prefix + "\n" + (delayed ? "/bin/sleep 0.15\n" : "") + body + "\n").utf8)
+        .write(to: node)
+      try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: node.path)
+    }
+    try cacheScript(cleared: 2)
+    await workspace.clearOfflineVoices()
+    try require(
+      workspace.cacheClearedEntries == 2
+        && workspace.cacheClearStatus == "Eligible offline voices were removed from this Mac."
+        && !workspace.storageOperationBusy,
+      "Successful synthetic cache clearing must publish semantic count separately from its localizable notice"
+    )
+
+    try cacheScript(cleared: 2, delayed: true)
+    var publishedChanges = 0
+    let observation = workspace.objectWillChange.sink { publishedChanges += 1 }
+    let beforeBusy = try recorded().count
+    let cacheLoad = Task { await workspace.loadCache() }
+    let busyDeadline = Date().addingTimeInterval(2)
+    while !workspace.storageOperationBusy, Date() < busyDeadline { await Task.yield() }
+    try require(
+      workspace.storageOperationBusy && !workspace.processing && !workspace.clearingCache
+        && !workspace.savingCacheBudget,
+      "Storage UI busy state must include an in-flight private library bridge operation")
+    await workspace.saveOfflineStorageLimit(gigabytes: "٧")
+    await workspace.clearOfflineVoices()
+    try require(
+      workspace.cacheClearedEntries == nil
+        && workspace.cacheClearStatus
+          == "Wait for the current MusicMute operation to finish, then try again.",
+      "A rejected busy clear must discard an older success count rather than masking its new status"
+    )
+    let loaded = await cacheLoad.value
+    let afterBusy = try recorded()
+    try require(
+      loaded && !workspace.storageOperationBusy && publishedChanges > 0
+        && afterBusy.count == beforeBusy + 1 && afterBusy.last?["type"].string == "LIBRARY_CACHE",
+      "Storage bridge completion must publish idle state and busy mutations must never reach the helper"
+    )
+    withExtendedLifetime(observation) {}
+
+    try cacheScript(cleared: 0)
+    await workspace.clearOfflineVoices()
+    try require(
+      workspace.cacheClearedEntries == nil
+        && workspace.cacheClearStatus
+          == "No eligible offline voices were removed. Protected account saves or active playback may remain.",
+      "A zero-entry clear must use its dedicated guidance without a positive removal count")
+    try cacheScript(cleared: 2)
+    await workspace.clearOfflineVoices()
+    try cacheScript(cleared: 0, malformed: true)
+    await workspace.clearOfflineVoices()
+    try require(
+      workspace.cacheClearedEntries == nil && workspace.failure != nil
+        && !workspace.storageOperationBusy,
+      "A malformed clear reply must remove prior semantic success and leave storage controls idle")
   }
 
   @MainActor static func playbackClockChecks() throws {
@@ -2993,7 +3112,8 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
       if FileManager.default.fileExists(atPath: desktopChildEntered.path) { break }
       try await Task.sleep(for: .milliseconds(10))
     }
-    let overlapReachedVerification = FileManager.default.fileExists(atPath: desktopChildEntered.path)
+    let overlapReachedVerification = FileManager.default.fileExists(
+      atPath: desktopChildEntered.path)
     try require(
       overlapReachedVerification,
       "The first Desktop request must reach the held child without verification")
@@ -3044,7 +3164,8 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
       if FileManager.default.fileExists(atPath: desktopChildEntered.path) { break }
       try await Task.sleep(for: .milliseconds(10))
     }
-    let cancellationReachedVerification = FileManager.default.fileExists(atPath: desktopChildEntered.path)
+    let cancellationReachedVerification = FileManager.default.fileExists(
+      atPath: desktopChildEntered.path)
     try require(
       cancellationReachedVerification,
       "The cancelled Desktop request must reach its child without verification")
@@ -3231,11 +3352,13 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     try Data("tampered!!!".utf8).write(to: leaf)
     try FileManager.default.setAttributes([.posixPermissions: 0o400], ofItemAtPath: leaf.path)
     _ = try await bridge.request(type: "LIBRARY_CACHE", payload: .object([:]), session: nil)
-    try require(desktopCoordinator.verificationRunCount == 0
-      && FileManager.default.fileExists(atPath: marker.path),
+    try require(
+      desktopCoordinator.verificationRunCount == 0
+        && FileManager.default.fileExists(atPath: marker.path),
       "Normal desktop execution trusts installed contents without an inventory scan")
     do {
-      _ = try desktopCoordinator.inspectRuntime(resources: resources, support: support,
+      _ = try desktopCoordinator.inspectRuntime(
+        resources: resources, support: support,
         signatureChecker: desktopChecker)
       throw DesktopTestFailure.failed("Explicit inspection accepted changed runtime contents")
     } catch RuntimeBootstrapFailure.code("RUNTIME_ARCHIVE_INVALID") {}

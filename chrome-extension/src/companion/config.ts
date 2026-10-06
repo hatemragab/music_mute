@@ -343,11 +343,13 @@ export async function resolvePackagedRuntime(
 }
 
 /** Packaged apps own their runtime/model; developer reuse never reads fleet config. */
-export async function loadLocalConfig(): Promise<LocalConfig> {
+export async function loadLocalConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<LocalConfig> {
   if (process.platform !== "darwin" || process.arch !== "arm64") {
     throw new LocalSetupError("UNSUPPORTED_PLATFORM");
   }
-  const appSetting = process.env.MUSICMUTE_LOCAL_APP_RESOURCES;
+  const appSetting = environment.MUSICMUTE_LOCAL_APP_RESOURCES;
   const appResources =
     appSetting !== undefined
       ? await realpath(absoluteSetting(appSetting, "")).catch(() => {
@@ -359,7 +361,7 @@ export async function loadLocalConfig(): Promise<LocalConfig> {
     "Library/Application Support/MusicMuteWorker",
   );
   const root = absoluteSetting(
-    process.env.MUSICMUTE_LOCAL_ROOT,
+    environment.MUSICMUTE_LOCAL_ROOT,
     join(
       homedir(),
       `Library/Application Support/${appResources ? "MusicMuteLocal" : "MusicMuteLocalMvp"}`,
@@ -386,7 +388,7 @@ export async function loadLocalConfig(): Promise<LocalConfig> {
     } else {
       runtime = await realpath(
         absoluteSetting(
-          process.env.MUSICMUTE_LOCAL_RUNTIME,
+          environment.MUSICMUTE_LOCAL_RUNTIME,
           join(workerRoot, "runtime/current"),
         ),
       );
@@ -405,7 +407,7 @@ export async function loadLocalConfig(): Promise<LocalConfig> {
   let downloaderBundle: string | undefined = appResources
     ? wheelBundle
     : undefined;
-  if (!appResources && process.env.MUSICMUTE_LOCAL_YT_DLP === undefined) {
+  if (!appResources && environment.MUSICMUTE_LOCAL_YT_DLP === undefined) {
     try {
       await lstat(join(wheelBundle, "identity.json"));
       downloaderBundle = wheelBundle;
@@ -428,7 +430,7 @@ export async function loadLocalConfig(): Promise<LocalConfig> {
   const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
   const youtubeRuntime = appResources
     ? join(runtime, "tools/youtube")
-    : process.env.MUSICMUTE_YOUTUBE_RUNTIME_TARGET;
+    : environment.MUSICMUTE_YOUTUBE_RUNTIME_TARGET;
   return {
     ...(appResources ? { app_resources: appResources } : {}),
     ...(runtimeId ? { runtime_id: runtimeId } : {}),
@@ -437,7 +439,7 @@ export async function loadLocalConfig(): Promise<LocalConfig> {
     cache_root: join(root, "cache"),
     logs_root: join(root, "logs"),
     models_root: absoluteSetting(
-      appResources ? undefined : process.env.MUSICMUTE_LOCAL_MODELS,
+      appResources ? undefined : environment.MUSICMUTE_LOCAL_MODELS,
       appResources ? join(root, "models") : join(workerRoot, "models"),
     ),
     python_path: python,
@@ -448,7 +450,7 @@ export async function loadLocalConfig(): Promise<LocalConfig> {
     yt_dlp_path: downloaderBundle
       ? python
       : absoluteSetting(
-          appResources ? undefined : process.env.MUSICMUTE_LOCAL_YT_DLP,
+          appResources ? undefined : environment.MUSICMUTE_LOCAL_YT_DLP,
           defaultDownloader,
         ),
     ...(downloaderBundle ? { downloader_bundle_root: downloaderBundle } : {}),
@@ -467,7 +469,7 @@ export async function loadLocalConfig(): Promise<LocalConfig> {
       ? join(appResources, "engine-core")
       : join(workerRoot, "engine"),
     runner_path: absoluteSetting(
-      appResources ? undefined : process.env.MUSICMUTE_LOCAL_RUNNER,
+      appResources ? undefined : environment.MUSICMUTE_LOCAL_RUNNER,
       join(appResources ?? packageRoot, "engine/local_pipeline.py"),
     ),
   };

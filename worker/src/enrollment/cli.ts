@@ -19,7 +19,15 @@ import {
   type ExchangeResult,
   type WorkerInstallationReport,
 } from "./enrollment-client.js";
-import { downloadInstallationArtifacts } from "./artifact-download.js";
+import {
+  downloadInstallationArtifacts,
+  downloadVerifiedArtifact,
+} from "./artifact-download.js";
+import {
+  APP_MODEL_BYTES,
+  APP_MODEL_SHA256,
+  verifyManagedMacRelease,
+} from "../platform/macos/app-installation-binding.js";
 import { buildServiceRuntimeConfig } from "./runtime-config-builder.js";
 import {
   createEnrollmentReport,
@@ -54,6 +62,8 @@ export const ENROLLMENT_USAGE = `Usage:
 export interface InstallationPreparationReuse {
   publicKeys?: Readonly<Record<string, string>>;
   reusableModelPath?: string;
+  /** Private app installer hook; absent from CLI flags and public wire payloads. */
+  appReleaseRoot?: string;
 }
 
 interface EnrollmentState {
@@ -75,7 +85,9 @@ interface EnrollmentState {
 export async function runInstallationPreparationCommand(
   arguments_: string[],
   reuse: InstallationPreparationReuse = {},
+  context: { stdout?: (value: string) => void } = {},
 ): Promise<void> {
+  const stdout = context.stdout ?? console.log;
   const flags = parseFlags(arguments_);
   exactFlags(
     flags,
@@ -121,6 +133,40 @@ export async function runInstallationPreparationCommand(
   verifyInstallationSignature(manifest.release, platform, reuse.publicKeys);
   const artifactRoot = join(outputRoot, ARTIFACTS_DIRECTORY);
   await ensureProtectedDirectory(artifactRoot);
+  if (reuse.appReleaseRoot !== undefined) {
+    if (platform !== "darwin-arm64")
+      throw new TypeError("App worker preparation requires macOS");
+    const binding = await verifyManagedMacRelease(reuse.appReleaseRoot);
+    if (
+      binding.schemaVersion !== 2 ||
+      manifest.model.sha256 !== APP_MODEL_SHA256 ||
+      manifest.model.bytes !== APP_MODEL_BYTES
+    )
+      throw new TypeError("App worker preparation requires the approved model");
+    const fixture = await downloadVerifiedArtifact({
+      url: manifest.fixture.url,
+      outputPath: join(artifactRoot, manifest.fixture.filename),
+      expectedBytes: manifest.fixture.bytes,
+      expectedSha256: manifest.fixture.sha256,
+      expectedContentType: manifest.fixture.contentType,
+      allowInsecureLoopback,
+    });
+    await writeStablePrivateFile(
+      join(outputRoot, ARTIFACTS_FILE),
+      `${JSON.stringify({ schemaVersion: 1, installationId: state.installationId, platform, releaseVersion: binding.releaseVersion, release: { releaseRoot: reuse.appReleaseRoot }, model: { path: join(binding.base.supportRoot, "models", APP_MODEL_SHA256, "Kim_Vocal_2.onnx"), bytes: APP_MODEL_BYTES, sha256: APP_MODEL_SHA256 }, fixture: localArtifact(fixture, manifest.fixture.contentType) }, null, 2)}\n`,
+    );
+    stdout(
+      JSON.stringify({
+        status: "ok",
+        action: "prepare-installation",
+        installationId: exchange.installationId,
+        platform,
+        releaseVersion: binding.releaseVersion,
+        reused: true,
+      }),
+    );
+    return;
+  }
   const downloads = await downloadInstallationArtifacts(manifest, {
     outputRoot: artifactRoot,
     allowInsecureLoopback,
@@ -153,7 +199,7 @@ export async function runInstallationPreparationCommand(
       2,
     )}\n`,
   );
-  console.log(
+  stdout(
     JSON.stringify({
       status: "ok",
       action: "prepare-installation",
@@ -171,7 +217,9 @@ export async function runInstallationPreparationCommand(
 
 export async function runEnrollmentCommand(
   arguments_: string[],
+  context: { stdout?: (value: string) => void } = {},
 ): Promise<void> {
+  const stdout = context.stdout ?? console.log;
   const flags = parseFlags(arguments_);
   exactFlags(
     flags,
@@ -325,7 +373,7 @@ export async function runEnrollmentCommand(
       console.warn("Worker qualification workspace cleanup deferred.");
     });
   }
-  console.log(
+  stdout(
     JSON.stringify({
       status: "ok",
       action: "enroll",

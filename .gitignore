@@ -64,7 +64,9 @@ build/
 
 # Worker runtime local state and private artifacts
 worker/.local.env
-worker/node_modules/
+worker/node_modules
+worker/.venv
+/node_modules/.vite/
 worker/state/
 worker/cache/
 worker/models/

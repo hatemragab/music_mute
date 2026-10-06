@@ -28,6 +28,22 @@ afterEach(async () => {
 
 describe("worker child lifecycle", () => {
   it.skipIf(process.platform === "win32")(
+    "does not resolve stop until the actual descendant process group is gone",
+    async () => {
+      child = new WorkerChildProcess({
+        command: process.execPath,
+        args: [hangingFixture, "--spawn-descendant"],
+        cwd: workerRoot,
+        startTimeoutMs: 2000,
+        stopTimeoutMs: 2000,
+      });
+      const ready = await child.start();
+      const pid = ready.payload.descendantPid as number;
+      await child.stop();
+      expect(() => process.kill(pid, 0)).toThrow();
+    },
+  );
+  it.skipIf(process.platform === "win32")(
     "kills decoder descendants on timeout and forced termination",
     async () => {
       for (const action of ["timeout", "terminate"] as const) {

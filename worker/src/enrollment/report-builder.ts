@@ -9,10 +9,8 @@ import {
   WORKER_RECIPE_IDS,
 } from "../../protocol/v1/protocol.js";
 import { runtimePlatformAdapter } from "../platform/runtime-adapter.js";
-import {
-  MAC_RELEASE_MANIFEST,
-  verifyMacRelease,
-} from "../platform/macos/release-manifest.js";
+import { MAC_RELEASE_MANIFEST } from "../platform/macos/release-manifest.js";
+import { verifyManagedMacRelease as verifyMacRelease } from "../platform/macos/app-installation-binding.js";
 import { DEFAULT_MAC_RECIPE_ID } from "../platform/macos/runtime-recipes.js";
 import {
   WINDOWS_RELEASE_MANIFEST,

@@ -47,6 +47,7 @@ import {
 } from "../src/platform/macos/user-release.js";
 import {
   checkMacUserUpdate,
+  loadUpdateState,
   loadMacUpdateTrust,
   recoverInterruptedMacUpdate,
   recoverMacUpdateAtStartup,
@@ -92,6 +93,7 @@ describe.skipIf(process.platform !== "darwin")(
       { boundary: "activated", twoSlots: false },
       { boundary: "stopped", twoSlots: true },
       { boundary: "activated", twoSlots: true },
+      { boundary: "qualifying", twoSlots: false },
     ])(
       "a fresh process recovers after $boundary (two slots=$twoSlots)",
       async ({ boundary, twoSlots }) => {
@@ -148,7 +150,7 @@ describe.skipIf(process.platform !== "darwin")(
           ]);
           expect(message).toEqual({ boundary });
           expect(JSON.parse(await readFile(servicePath, "utf8"))).toBe(
-            boundary === "activated",
+            boundary === "activated" || boundary === "qualifying",
           );
           expect(
             JSON.parse(await readFile(fixture.layout.updateStatePath, "utf8")),
@@ -166,6 +168,8 @@ describe.skipIf(process.platform !== "darwin")(
           const exited = once(child, "exit");
           child.kill("SIGKILL");
           expect((await exited)[1]).toBe("SIGKILL");
+          if (boundary === "qualifying")
+            await rm(fixture.layout.runtimeStatusPath);
           const recovery = run("recover");
           recovery.stderr!.on("data", (chunk) => {
             stderr += String(chunk);
@@ -673,6 +677,100 @@ describe.skipIf(process.platform !== "darwin")(
         expect(fixture.launchAgent.bootstrap).toHaveBeenCalledTimes(1);
       },
     );
+
+    it("recovers a temporary interrupted qualifier after durable fleet drain without requiring its nonexistent fleet status", async () => {
+      const fixture = await updateFixture();
+      await fixture.launchAgent.bootout();
+      await rm(fixture.layout.runtimeStatusPath);
+      const candidateRoot = join(
+        fixture.layout.transactionRoot,
+        "recovery-qualification",
+      );
+      await releaseFixture(candidateRoot, "0.2.0");
+      await stageMacUserRelease(fixture.layout, candidateRoot);
+      await writeFile(
+        fixture.layout.updateStatePath,
+        JSON.stringify({
+          schemaVersion: 1,
+          highestSequence: 7,
+          status: "staged",
+          candidateVersion: "0.2.0",
+          quarantinedVersions: [],
+          updatedAt: new Date().toISOString(),
+          recovery: {
+            previousVersion: "0.1.0",
+            intent: "paused",
+            serviceWasLoaded: true,
+            fleetDrained: true,
+          },
+        }),
+        { mode: 0o600 },
+      );
+      await fixture.launchAgent.bootstrap();
+      const beforeStart = vi.fn(async () => {
+        expect((await fixture.launchAgent.status()).loaded).toBe(false);
+      });
+      expect(
+        await recoverInterruptedMacUpdate(
+          fixture.layout,
+          fixture.launchAgent,
+          "Interrupted qualification",
+          false,
+          beforeStart,
+        ),
+      ).toBe(true);
+      expect(beforeStart).toHaveBeenCalledOnce();
+      expect(await readlink(fixture.layout.currentLink)).toBe("releases/0.1.0");
+      expect(
+        (await loadUpdateState(fixture.layout.updateStatePath)).highestSequence,
+      ).toBe(7);
+      expect(
+        (await loadLocalLifecycle(fixture.layout.lifecyclePath)).intent,
+      ).toBe("paused");
+    });
+
+    it("never treats an activating candidate's uncertain accepted claims as a disposable qualifier", async () => {
+      const fixture = await updateFixture();
+      const candidateRoot = join(
+        fixture.layout.transactionRoot,
+        "recovery-accepted",
+      );
+      await releaseFixture(candidateRoot, "0.2.0");
+      await stageMacUserRelease(fixture.layout, candidateRoot);
+      await activateMacUserRelease(fixture.layout, "0.2.0");
+      await rm(fixture.layout.runtimeStatusPath);
+      await writeFile(
+        fixture.layout.updateStatePath,
+        JSON.stringify({
+          schemaVersion: 1,
+          highestSequence: 7,
+          status: "activating",
+          candidateVersion: "0.2.0",
+          quarantinedVersions: [],
+          updatedAt: new Date().toISOString(),
+          recovery: {
+            previousVersion: "0.1.0",
+            intent: "active",
+            serviceWasLoaded: true,
+            fleetDrained: true,
+          },
+        }),
+        { mode: 0o600 },
+      );
+      const beforeStart = vi.fn(async () => undefined);
+      await expect(
+        recoverInterruptedMacUpdate(
+          fixture.layout,
+          fixture.launchAgent,
+          "Interrupted activation",
+          false,
+          beforeStart,
+        ),
+      ).rejects.toThrow("runtime status is unavailable");
+      expect(fixture.launchAgent.bootout).not.toHaveBeenCalled();
+      expect(beforeStart).not.toHaveBeenCalled();
+      expect(await readlink(fixture.layout.currentLink)).toBe("releases/0.2.0");
+    });
 
     it("refuses to overwrite an unrelated active release during recovery", async () => {
       const fixture = await updateFixture();

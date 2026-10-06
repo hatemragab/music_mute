@@ -50,6 +50,7 @@ import {
 } from "./macos-runtime-artifact.mjs";
 import { verifyYoutubeRuntime } from "../dist/companion/youtube-runtime.js";
 import { refreshYoutubeRuntimeIdentity } from "./youtube-runtime-artifacts.mjs";
+import { createCompressedWorkerService } from "./worker-service-artifact.mjs";
 
 const executeTool = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
@@ -315,6 +316,28 @@ async function packageMacos() {
     recursive: true,
     filter: (path) => !path.endsWith(".map"),
   });
+  await cp(join(root, "dist/worker"), join(resources, "worker"), {
+    recursive: true,
+    filter: (path) =>
+      !path.endsWith(".map") && path !== join(root, "dist/worker/service"),
+  });
+  const workerService = await createCompressedWorkerService({
+    sourceRoot: join(root, "dist/worker/service"),
+    outputRoot: join(resources, "worker/service"),
+    signNative: async (path) => {
+      const architectures = await exec("/usr/bin/lipo", ["-archs", path]);
+      if (architectures.stdout.trim() !== "arm64")
+        throw new Error("WORKER_NATIVE_ARCHITECTURE_INVALID");
+      await exec("/usr/bin/codesign", [...signingArguments(signing), path]);
+      await exec("/usr/bin/codesign", [
+        "--verify",
+        "--strict",
+        "--all-architectures",
+        path,
+      ]);
+      if (release) await verifyDeveloperIdSignature(path, signing, { exec });
+    },
+  });
   const manifest = JSON.parse(
     await readFile(join(resources, "extension/manifest.json"), "utf8"),
   );
@@ -433,6 +456,8 @@ async function packageMacos() {
         "DesktopOutboxWatcher.swift",
         "DesktopListening.swift",
         "DesktopWorkspace.swift",
+        "DesktopWorker.swift",
+        "DesktopWorkerView.swift",
         "DesktopAccountView.swift",
         "DesktopMediaViews.swift",
         "DesktopPreferences.swift",
@@ -794,7 +819,7 @@ async function packageMacos() {
   }
   await writeFile(
     join(resources, "bundle-audit.json"),
-    `${JSON.stringify({ schema_version: 1, scope: "PRE_OUTER_SEAL", final_inventory: "EXTERNAL_PACKAGE_INVENTORY", inventory_excludes: ["Contents/Resources/bundle-audit.json"], seal_mutated_paths: sealMutatedPaths, architecture: "arm64", minimum_macos: "14.0", runtime_source_version: runtimeSourceVersion, runtime_delivery: "EXTERNAL_PREPARE", runtime_bootstrap: "runtime-bootstrap.json", runtime_id: runtimeArtifact.id, runtime_archive_sha256: runtimeArtifact.archive_sha256, runtime_artifact_reused: runtimeArtifact.reused, ...(runtimeArtifact.reuse_source ? { runtime_reuse_source_build_id: runtimeArtifact.reuse_source.build_id } : {}), runtime_allowlist: runtimeAllowlist, engine_allowlist: engineAllowlist, excluded_optional_intel_package: "samplerate", native_binaries: native.length, removed_absolute_rpaths: cleanedRpaths, signing: signing.signing, release_mode: release, ...(release ? { signing_identity_sha1: identity, team_identifier: signing.teamIdentifier, secure_timestamp: true, hardened_runtime: true, native_signatures: appNativeSignatures } : {}), includes_model_weights: false, includes_worker_state: false, files: inventory }, null, 2)}\n`,
+    `${JSON.stringify({ schema_version: 1, scope: "PRE_OUTER_SEAL", final_inventory: "EXTERNAL_PACKAGE_INVENTORY", inventory_excludes: ["Contents/Resources/bundle-audit.json"], seal_mutated_paths: sealMutatedPaths, architecture: "arm64", minimum_macos: "14.0", runtime_source_version: runtimeSourceVersion, runtime_delivery: "EXTERNAL_PREPARE", runtime_bootstrap: "runtime-bootstrap.json", runtime_id: runtimeArtifact.id, runtime_archive_sha256: runtimeArtifact.archive_sha256, runtime_artifact_reused: runtimeArtifact.reused, ...(runtimeArtifact.reuse_source ? { runtime_reuse_source_build_id: runtimeArtifact.reuse_source.build_id } : {}), runtime_allowlist: runtimeAllowlist, engine_allowlist: engineAllowlist, excluded_optional_intel_package: "samplerate", native_binaries: native.length, removed_absolute_rpaths: cleanedRpaths, signing: signing.signing, release_mode: release, ...(release ? { signing_identity_sha1: identity, team_identifier: signing.teamIdentifier, secure_timestamp: true, hardened_runtime: true, native_signatures: appNativeSignatures } : {}), includes_model_weights: false, includes_worker_state: false, worker_service: workerService, files: inventory }, null, 2)}\n`,
   );
   stage("SIGN_APP", "Contents/MacOS/MusicMuteLocal", 120_000);
   await exec(

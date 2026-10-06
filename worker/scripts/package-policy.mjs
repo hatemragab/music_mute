@@ -18,6 +18,7 @@ async function filesBelow(root, directory) {
 export async function expectedPackageFiles(root) {
   const expected = new Set([
     "package.json",
+    "dist/package.json",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
@@ -68,6 +69,16 @@ export async function inspectPackage(root, packed) {
   const manifest = JSON.parse(
     await readFile(join(root, "package.json"), "utf8"),
   );
+  const compiledManifest = JSON.parse(
+    await readFile(join(root, "dist/package.json"), "utf8"),
+  );
+  if (
+    compiledManifest.name !== manifest.name ||
+    compiledManifest.version !== manifest.version
+  )
+    throw new Error(
+      "Compiled package identity differs from the public package",
+    );
   if (
     manifest.name !== "@music-mute/worker" ||
     manifest.bin?.mw !== "./dist/src/cli/main.js" ||

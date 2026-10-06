@@ -1,5 +1,25 @@
+import Combine
 import Darwin
 import Foundation
+
+@MainActor private final class FixtureUpdateChecking: NSObject, DesktopUpdateChecking {
+  @objc dynamic var canCheckForUpdates = false
+  var automaticallyChecksForUpdates = false {
+    didSet { preferenceWrites += 1 }
+  }
+  var startupFails = false
+  private(set) var starts = 0
+  private(set) var checks = 0
+  private(set) var preferenceWrites = 0
+  var readinessPublisher: AnyPublisher<Bool, Never> {
+    publisher(for: \.canCheckForUpdates, options: [.initial, .new]).eraseToAnyPublisher()
+  }
+  func startChecking() throws {
+    starts += 1
+    if startupFails { throw DesktopUpdateGateFailure.unsafe }
+  }
+  func checkForUpdates() { checks += 1 }
+}
 
 @main struct UpdaterTests {
   private static func readExactly(_ handle: FileHandle, count: Int) throws -> Data {
@@ -13,7 +33,8 @@ import Foundation
   }
 
   private static func createFixtureBundle(
-    at url: URL, helper: URL?, executableHelper: Bool = true
+    at url: URL, helper: URL?, executableHelper: Bool = true,
+    updateConfiguration: [String: Any] = [:]
   ) throws -> Bundle {
     let binaries = url.appendingPathComponent("Contents/MacOS", isDirectory: true)
     try FileManager.default.createDirectory(
@@ -27,11 +48,12 @@ import Foundation
       try FileManager.default.setAttributes(
         [.posixPermissions: executableHelper ? 0o700 : 0o600], ofItemAtPath: destination.path)
     }
-    let information: [String: Any] = [
+    var information: [String: Any] = [
       "CFBundleIdentifier": "com.musicmute.fixture.\(UUID().uuidString)",
       "CFBundleExecutable": "Fixture", "CFBundlePackageType": "APPL",
       "CFBundleVersion": "1", "CFBundleShortVersionString": "1.0.0",
     ]
+    information.merge(updateConfiguration) { _, configured in configured }
     let plist = try PropertyListSerialization.data(
       fromPropertyList: information, format: .xml, options: 0)
     try plist.write(to: url.appendingPathComponent("Contents/Info.plist"))
@@ -39,6 +61,101 @@ import Foundation
       preconditionFailure("Synthetic update bundle did not load")
     }
     return bundle
+  }
+
+  @MainActor private static func awaitReadiness(
+    _ updater: DesktopUpdater, expected: Bool
+  ) async throws {
+    for _ in 0..<200 {
+      if updater.canCheck == expected { return }
+      try await Task.sleep(for: .milliseconds(1))
+    }
+    preconditionFailure("KVO update readiness did not reach the published app state")
+  }
+
+  @MainActor private static func updateAvailabilityChecks(
+    temporary: URL, configuration: [String: Any]
+  ) async throws {
+    let validBundle = try createFixtureBundle(
+      at: temporary.appendingPathComponent("ConfiguredFixture.app"), helper: nil,
+      updateConfiguration: configuration)
+    let unavailable = DesktopUpdater(
+      bundle: validBundle, support: temporary.appendingPathComponent("unavailable"),
+      checkingFactory: { _, _ in nil })
+    precondition(unavailable.configured)
+    precondition(!unavailable.canConfigureAutomaticChecks && !unavailable.canCheck)
+    unavailable.checkForUpdates()
+    precondition(unavailable.status == "Update checks are not configured for this build.")
+
+    let inactiveService = FixtureUpdateChecking()
+    let preview = DesktopUpdater(
+      bundle: validBundle, support: temporary.appendingPathComponent("preview"), fixture: true,
+      checkingFactory: { _, _ in inactiveService })
+    precondition(
+      !preview.configured && !preview.canConfigureAutomaticChecks && !preview.canCheck
+        && inactiveService.starts == 0,
+      "A fixture must never initialize an updater even when the bundle has valid metadata")
+    preview.automaticChecksEnabled = false
+    precondition(inactiveService.preferenceWrites == 0)
+
+    let failedService = FixtureUpdateChecking()
+    failedService.startupFails = true
+    failedService.canCheckForUpdates = true
+    let failed = DesktopUpdater(
+      bundle: validBundle, support: temporary.appendingPathComponent("failed"),
+      checkingFactory: { _, _ in failedService })
+    precondition(
+      failed.configured && failedService.starts == 1
+        && !failed.canConfigureAutomaticChecks && !failed.canCheck)
+    precondition(failed.status == "Update checks could not start. Try opening MusicMute again.")
+    failed.automaticChecksEnabled = false
+    failed.checkForUpdates()
+    precondition(failedService.preferenceWrites == 0 && failedService.checks == 0)
+    failedService.canCheckForUpdates = false
+    failedService.canCheckForUpdates = true
+    await Task.yield()
+    precondition(!failed.canCheck)
+
+    let service = FixtureUpdateChecking()
+    let active = DesktopUpdater(
+      bundle: validBundle, support: temporary.appendingPathComponent("working"),
+      checkingFactory: { _, _ in service })
+    precondition(
+      active.configured && active.canConfigureAutomaticChecks && !active.canCheck
+        && !active.automaticChecksEnabled && service.starts == 1 && service.preferenceWrites == 0,
+      "Initialization must read the saved preference without writing a replacement default")
+    var publishedReadiness: [Bool] = []
+    let observation = active.$canCheck.sink { publishedReadiness.append($0) }
+    active.checkForUpdates()
+    precondition(service.checks == 0)
+    service.canCheckForUpdates = true
+    try await awaitReadiness(active, expected: true)
+    active.checkForUpdates()
+    precondition(service.checks == 1)
+    service.canCheckForUpdates = false
+    // The native guard must honor Sparkle immediately, before queued UI delivery.
+    active.checkForUpdates()
+    precondition(service.checks == 1 && active.status == "An update check is already in progress.")
+    try await awaitReadiness(active, expected: false)
+    service.canCheckForUpdates = true
+    try await awaitReadiness(active, expected: true)
+    precondition(publishedReadiness.suffix(3) == [true, false, true])
+    active.automaticChecksEnabled = true
+    precondition(service.automaticallyChecksForUpdates && service.preferenceWrites == 1)
+    active.automaticChecksEnabled = true
+    precondition(service.preferenceWrites == 1)
+    observation.cancel()
+    // Leave queued KVO delivery pending while releasing a separate owner.
+    let retiringService = FixtureUpdateChecking()
+    var retiring: DesktopUpdater? = DesktopUpdater(
+      bundle: validBundle, support: temporary.appendingPathComponent("retiring"),
+      checkingFactory: { _, _ in retiringService })
+    weak var retired = retiring
+    retiringService.canCheckForUpdates = true
+    retiring = nil
+    precondition(retired == nil, "Readiness observation must not retain the app updater")
+    retiringService.canCheckForUpdates = false
+    await Task.yield()
   }
 
   private static func runGuardianBroker(_ arguments: [String]) throws -> Int32 {
@@ -80,7 +197,7 @@ import Foundation
     precondition(process.terminationStatus != 0 && bytes.isEmpty)
   }
 
-  @MainActor static func main() throws {
+  @MainActor static func main() async throws {
     let arguments = CommandLine.arguments
     if arguments.count > 1, arguments[1] == "--guardian-broker" {
       Darwin.exit(try runGuardianBroker(arguments))
@@ -110,7 +227,9 @@ import Foundation
         "SUPublicEDKey": Data(repeating: 0, count: 31).base64EncodedString(),
       ]) == nil)
     let updater = DesktopUpdater(fixture: true)
-    precondition(!updater.configured && !updater.canCheck && !updater.installationReserved)
+    precondition(
+      !updater.configured && !updater.canCheck && !updater.canConfigureAutomaticChecks
+        && !updater.installationReserved)
     updater.checkForUpdates()
     precondition(updater.status == "Update checks are not configured for this build.")
     updater.isApplicationBusy = { true }
@@ -124,6 +243,7 @@ import Foundation
     try FileManager.default.createDirectory(
       at: temporary, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
     defer { try? FileManager.default.removeItem(at: temporary) }
+    try await updateAvailabilityChecks(temporary: temporary, configuration: configuration)
     let support = temporary.appendingPathComponent("support", isDirectory: true)
     var lease: DesktopUpdateInstallationLease? = try DesktopUpdateInstallationLease(
       support: support)
@@ -186,6 +306,70 @@ import Foundation
     }
     precondition(released)
     _ = close(thinProbe)
+
+    // A UI controller owns this same shared lease until its process actually exits.
+    // Reservation must await its suspension rather than repeatedly failing the exclusive flock.
+    let arbitrationSupport = temporary.appendingPathComponent("arbitration-support")
+    var executionLease: RuntimeUpdateExecutionTestLease? = try RuntimeUpdateExecutionTestLease(
+      support: arbitrationSupport)
+    let arbitration = DesktopUpdater(bundle: thinBundle, support: arbitrationSupport, fixture: true)
+    var preparationStarted = false
+    var preparationWait: CheckedContinuation<Void, Never>?
+    var resumes = 0
+    arbitration.prepareInstallation = {
+      preparationStarted = true
+      await withCheckedContinuation { preparationWait = $0 }
+      executionLease = nil
+    }
+    arbitration.onInstallationReleased = { resumes += 1 }
+    let reservation = Task { @MainActor in await arbitration.prepareAndReserveInstallation() }
+    while !preparationStarted { await Task.yield() }
+    precondition(
+      arbitration.installationPreparing && !arbitration.installationReserved
+        && executionLease != nil)
+    let coalesced = Task { @MainActor in await arbitration.prepareAndReserveInstallation() }
+    await Task.yield()
+    preparationWait?.resume()
+    preparationWait = nil
+    let firstReserved = await reservation.value
+    let secondReserved = await coalesced.value
+    precondition(
+      firstReserved && secondReserved && arbitration.installationReserved
+        && !arbitration.installationPreparing)
+    arbitration.releaseInstallationForTesting()
+    precondition(resumes == 1)
+
+    let cancelled = DesktopUpdater(
+      bundle: thinBundle, support: temporary.appendingPathComponent("cancelled-support"),
+      fixture: true)
+    var cancelledStarted = false
+    var cancelledWait: CheckedContinuation<Void, Never>?
+    var cancelledResumes = 0
+    cancelled.prepareInstallation = {
+      cancelledStarted = true
+      await withCheckedContinuation { cancelledWait = $0 }
+    }
+    cancelled.onInstallationReleased = { cancelledResumes += 1 }
+    let pending = Task { @MainActor in await cancelled.prepareAndReserveInstallation() }
+    while !cancelledStarted { await Task.yield() }
+    cancelled.releaseInstallationForTesting()
+    cancelledWait?.resume()
+    cancelledWait = nil
+    let cancelledReserved = await pending.value
+    precondition(
+      !cancelledReserved && !cancelled.installationReserved && !cancelled.installationPreparing
+        && cancelledResumes == 1)
+
+    let failing = DesktopUpdater(
+      bundle: thinBundle, support: temporary.appendingPathComponent("failing-support"),
+      fixture: true)
+    var failureResumes = 0
+    failing.prepareInstallation = { throw DesktopUpdateGateFailure.unsafe }
+    failing.onInstallationReleased = { failureResumes += 1 }
+    let failureReserved = await failing.prepareAndReserveInstallation()
+    precondition(
+      !failureReserved && !failing.installationPreparing && !failing.installationReserved
+        && failureResumes == 1)
 
     let missingApp = temporary.appendingPathComponent("MissingHelper.app", isDirectory: true)
     let missingBundle = try createFixtureBundle(at: missingApp, helper: nil)
@@ -317,7 +501,7 @@ import Foundation
     precondition(quietReleased && quietElapsed >= 1.8)
     _ = close(quietProbe)
     print(
-      "UpdaterTests: configuration, runtime-independent native update guardian, lifecycle, leases and symlink safety passed"
+      "UpdaterTests: configuration, observable readiness, unavailable/failed startup, runtime-independent native update guardian, lifecycle, leases and symlink safety passed"
     )
   }
 }

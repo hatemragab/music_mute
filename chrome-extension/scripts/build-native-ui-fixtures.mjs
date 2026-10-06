@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -38,6 +38,8 @@ const shared = [
   "DesktopOutboxWatcher.swift",
   "DesktopListening.swift",
   "DesktopWorkspace.swift",
+  "DesktopWorker.swift",
+  "DesktopWorkerView.swift",
   "DesktopAccountView.swift",
   "DesktopMediaViews.swift",
   "DesktopPreferences.swift",
@@ -68,6 +70,7 @@ for (const [fixture, name] of [
   ["progress-overview", "MusicMute Preview Overview"],
   ["progress-diagnostics", "MusicMute Preview Busy Diagnostics"],
   ["diagnostics-alerts", "MusicMute Preview Alerts"],
+  ["worker", "MusicMute Preview Worker"],
 ]) {
   const directory = join(output, fixture);
   const app = join(directory, `${name}.app`);
@@ -79,6 +82,13 @@ for (const [fixture, name] of [
   const projectedPath = join(directory, "MusicMuteLocal.swift");
   await mkdir(join(app, "Contents/MacOS"), { recursive: true, mode: 0o700 });
   await mkdir(join(app, "Contents/Resources"), { mode: 0o700 });
+  for (const language of ["en", "ar"]) {
+    await cp(
+      join(root, "macos/Resources", `${language}.lproj`),
+      join(app, "Contents/Resources", `${language}.lproj`),
+      { recursive: true },
+    );
+  }
   await writeFile(projectedPath, projected, { mode: 0o600, flag: "wx" });
   const bundleId = `com.hatem.musicmute.preview.${fixture}.${id}`;
   await writeFile(

@@ -46,6 +46,7 @@ enum CompanionPage: String, CaseIterable {
   case overview = "Home"
   case library = "Library"
   case account = "Account"
+  case worker = "Worker"
   case setup = "Setup"
   case diagnostics = "Diagnostics"
   var symbol: String {
@@ -53,6 +54,7 @@ enum CompanionPage: String, CaseIterable {
     case .overview: "square.grid.2x2"
     case .library: "music.note.list"
     case .account: "person.crop.circle"
+    case .worker: "server.rack"
     case .setup: "slider.horizontal.3"
     case .diagnostics: "waveform.path.ecg"
     }
@@ -201,10 +203,12 @@ struct SetupPresentation {
   let account: DesktopAccountModel
   let workspace: DesktopWorkspace
   let updater: DesktopUpdater
+  let worker: DesktopWorkerModel
   private var updaterObservation: AnyCancellable?
   private let bridge = ProcessBridge()
   private let journal: UIJournal?
   private var currentCommand: AppCommand?
+  private var commandStart: Task<Void, Never>?
   var onStopped: (() -> Void)?
 
   init() {
@@ -223,9 +227,24 @@ struct SetupPresentation {
     account = desktopAccount
     workspace = DesktopWorkspace(account: desktopAccount, resources: resources, journal: journal)
     updater = DesktopUpdater(fixture: fixture)
+    worker = DesktopWorkerModel(resources: resources, fixture: fixture)
+    worker.canOperate = { [weak self] in
+      guard let self else { return false }
+      return !self.busy && !self.updater.installationReserved
+        && !self.updater.installationPreparing
+    }
+    updater.prepareInstallation = { [weak self] in
+      guard let self else { throw DesktopWorkerFailure("APP_OPERATION_BUSY") }
+      await self.worker.suspendSubscriptions()
+    }
+    updater.onInstallationReleased = { [weak self] in
+      guard let self, self.page == .worker else { return }
+      self.worker.resumeSubscriptionsAfterSuspension()
+    }
     updater.isApplicationBusy = { [weak self] in
       guard let self else { return true }
       return self.busy || self.workspace.updateBusy || self.account.authenticating
+        || self.worker.busy
     }
     updaterObservation = updater.objectWillChange.sink { [weak self] in
       self?.objectWillChange.send()
@@ -283,7 +302,9 @@ struct SetupPresentation {
       notice = "Preview only. No setup or processing commands run in this fixture."
       return
     }
-    guard !busy, !updater.installationReserved else { return }
+    guard !busy, !worker.busy, !updater.installationReserved, !updater.installationPreparing else {
+      return
+    }
     guard let resources else {
       failure = VisibleFailure(
         code: "APP_RESOURCES_INCOMPLETE",
@@ -299,14 +320,22 @@ struct SetupPresentation {
       page = .setup
       progress = SetupProgress(phase: "starting", percent: 0, label: "Preparing your Mac…")
     }
-    bridge.run(
-      command, resources: resources,
-      onEvent: { [weak self] event in
-        DispatchQueue.main.async { self?.receive(event, command: command) }
-      },
-      onFinish: { [weak self] outcome in
-        DispatchQueue.main.async { self?.finish(outcome, command: command) }
-      })
+    commandStart = Task { @MainActor [weak self] in
+      guard let self else { return }
+      // Status subscriptions also own app/runtime execution leases. Release their disposable
+      // controllers before Prepare or an explicit integrity check; fleet attempts stay running.
+      await worker.suspendSubscriptions()
+      guard !Task.isCancelled, busy, currentCommand == command else { return }
+      commandStart = nil
+      bridge.run(
+        command, resources: resources,
+        onEvent: { [weak self] event in
+          DispatchQueue.main.async { self?.receive(event, command: command) }
+        },
+        onFinish: { [weak self] outcome in
+          DispatchQueue.main.async { self?.finish(outcome, command: command) }
+        })
+    }
   }
   private func receive(_ event: ControlEvent, command: AppCommand) {
     switch event.type {
@@ -376,6 +405,7 @@ struct SetupPresentation {
       }
     }
     currentCommand = nil
+    if page == .worker { worker.resumeSubscriptionsAfterSuspension() }
     onStopped?()
     onStopped = nil
   }
@@ -387,6 +417,12 @@ struct SetupPresentation {
     }
     if currentCommand == .setup {
       journal?.record(.appSetupCancelled, code: "SETUP_CANCELLED", command: .setup)
+    }
+    if let commandStart, let command = currentCommand {
+      commandStart.cancel()
+      self.commandStart = nil
+      finish(.cancelled, command: command)
+      return
     }
     bridge.cancel()
   }
@@ -461,6 +497,10 @@ struct SetupPresentation {
     let decoder = JSONDecoder()
     decoder.keyDecodingStrategy = .convertFromSnakeCase
     status = try? decoder.decode(CompanionStatus.self, from: Data(statusJSON.utf8))
+    if name == "worker" {
+      page = .worker
+      worker.applyPreview()
+    }
     if name == "repair" {
       page = .setup
       let repairJSON = statusJSON.replacingOccurrences(
@@ -538,7 +578,21 @@ struct SetupPresentation {
 @MainActor final class CompanionDelegate: NSObject, NSApplicationDelegate {
   weak var model: CompanionModel?
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    if let model, model.updater.installationReserved && !model.updater.canTerminateForUpdate {
+    if let model, model.worker.busy {
+      let alert = NSAlert()
+      alert.messageText = String(localized: "Worker operation in progress")
+      alert.informativeText = String(
+        localized:
+          "Wait until the worker operation finishes before quitting. The background worker and accepted jobs continue independently of the app."
+      )
+      alert.addButton(withTitle: String(localized: "Keep working"))
+      alert.runModal()
+      return .terminateCancel
+    }
+    if let model,
+      (model.updater.installationReserved || model.updater.installationPreparing)
+        && !model.updater.canTerminateForUpdate
+    {
       model.notice =
         "Cancel the update download or wait until it is ready to install before quitting."
       return .terminateCancel
@@ -568,7 +622,10 @@ struct SetupPresentation {
     model.cancel()
     return .terminateLater
   }
-  func applicationWillTerminate(_ notification: Notification) { model?.workspace.shutdown() }
+  func applicationWillTerminate(_ notification: Notification) {
+    model?.worker.hide()
+    model?.workspace.shutdown()
+  }
 }
 
 #if !MUSICMUTE_NATIVE_TESTS
@@ -960,24 +1017,10 @@ struct SetupPresentation {
       }
 
       Settings {
-        VStack(alignment: .leading, spacing: 16) {
-          DesktopPreferencesView(
-            workspace: model.workspace, visualPreferences: visualPreferences)
-          VStack(alignment: .leading, spacing: 8) {
-            Text("App updates").font(.headline)
-            Toggle(
-              "Automatically check for updates",
-              isOn: Binding(
-                get: { model.updater.automaticChecksEnabled },
-                set: { model.updater.automaticChecksEnabled = $0 })
-            )
-            .disabled(!model.updater.configured || model.fixture)
-            Text(LocalizedStringKey(model.updater.status)).font(.caption).foregroundStyle(
-              .secondary)
-            Button("Check for Updates…") { model.updater.checkForUpdates() }
-              .disabled(!model.updater.canCheck || model.fixture)
-          }.padding(.horizontal, 24).padding(.bottom, 16)
-        }
+        DesktopPreferencesView(
+          workspace: model.workspace, visualPreferences: visualPreferences,
+          updater: model.updater, isPreview: model.fixture
+        )
         .preferredColorScheme(visualPreferences.appearance.colorScheme)
         .tint(visualPreferences.accent.color)
         .accentColor(visualPreferences.accent.color)
@@ -985,6 +1028,7 @@ struct SetupPresentation {
         .environment(\.locale, Locale(identifier: resolvedLanguage))
         .environment(\.layoutDirection, resolvedLanguage == "ar" ? .rightToLeft : .leftToRight)
       }
+      .defaultSize(width: 700, height: 660)
     }
     private var resolvedLanguage: String {
       if visualPreferences.language != .system {
@@ -1010,7 +1054,7 @@ private struct CompanionView: View {
     }
     .navigationSplitViewStyle(.balanced)
     .background(Brand.background)
-    .disabled(model.updater.installationReserved)
+    .disabled(model.updater.installationReserved || model.updater.installationPreparing)
     .foregroundStyle(Brand.text)
     .onAppear {
       if !model.fixture, restoreLastPage, let page = CompanionPage(rawValue: lastPage) {
@@ -1053,12 +1097,19 @@ private struct CompanionView: View {
           .accessibilityElement(children: .combine)
         }
         Section("MusicMute") {
-          ForEach([CompanionPage.overview, .library, .account], id: \.self) { page in
+          ForEach([CompanionPage.overview, .library, .account, .worker], id: \.self) { page in
             Label(LocalizedStringKey(page.rawValue), systemImage: page.symbol)
               .tag(page)
               .id(page)
               .accessibilityIdentifier("nav_\(page.rawValue.lowercased())")
           }
+          SettingsLink {
+            Label("Settings", systemImage: "gearshape")
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .accessibilityIdentifier("nav_settings")
         }
         Section("Support") {
           ForEach([CompanionPage.setup, .diagnostics], id: \.self) { page in
@@ -1144,6 +1195,7 @@ private struct CompanionView: View {
               overview
             case .library: DesktopLibraryView(workspace: model.workspace)
             case .account: DesktopAccountView(account: model.account, workspace: model.workspace)
+            case .worker: DesktopWorkerView(worker: model.worker) { model.page = .setup }
             case .setup: setup
             case .diagnostics: diagnostics
             }
@@ -1203,6 +1255,7 @@ private struct CompanionView: View {
     case .overview: "CREATE VOICE-ONLY AUDIO"
     case .library: "YOUR VOICE LIBRARY"
     case .account: "MUSICMUTE ACCOUNT"
+    case .worker: "INDEPENDENT BACKGROUND PROCESSING"
     case .setup: "LOCAL COMPANION"
     case .diagnostics: "LOCAL DIAGNOSTICS"
     }
@@ -1212,6 +1265,7 @@ private struct CompanionView: View {
     case .overview: "Keep the voice. Enjoy the original video."
     case .library: "Your account results and saved voice-only audio."
     case .account: "Your account, sign-in methods and connected devices."
+    case .worker: "Manage this Mac’s paired worker without Terminal."
     case .setup: "Prepare once, then control MusicMute inside YouTube."
     case .diagnostics: "Understand a run with safe evidence stored locally."
     }

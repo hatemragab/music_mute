@@ -1659,11 +1659,14 @@ final class RuntimeVerificationCoordinator: @unchecked Sendable {
     #if MUSICMUTE_NATIVE_TESTS
       let updateLease = external ? try RuntimeUpdateExecutionLease(support: support) : nil
     #else
-      let updateLease: RuntimeUpdateExecutionLease? = try RuntimeUpdateExecutionLease(support: support)
+      let updateLease: RuntimeUpdateExecutionLease? = try RuntimeUpdateExecutionLease(
+        support: support)
     #endif
     let setupLease = try executionLease(resources: resources, support: support)
     if !external {
-      guard let runtime = RuntimeInstallationResolver.runtimeRoot(resources: resources, support: support)
+      guard
+        let runtime = RuntimeInstallationResolver.runtimeRoot(
+          resources: resources, support: support)
       else { return nil }
       return RuntimeVerifiedRuntime(runtimeRoot: runtime, setupLease: nil, updateLease: updateLease)
     }
@@ -1691,8 +1694,11 @@ final class RuntimeVerificationCoordinator: @unchecked Sendable {
     resources: URL, support: URL = LocalPaths.support,
     signatureChecker: any RuntimeSignatureChecking = SystemRuntimeSignatureChecker()
   ) throws -> RuntimeVerifiedRuntime? {
-    guard let installed = try installedRuntime(resources: resources, support: support) else { return nil }
-    let gate = RuntimeExecutionGate(support: support, signatureChecker: signatureChecker,
+    guard let installed = try installedRuntime(resources: resources, support: support) else {
+      return nil
+    }
+    let gate = RuntimeExecutionGate(
+      support: support, signatureChecker: signatureChecker,
       metadataFingerprinter: metadataFingerprinter)
     if case .installed(let candidate) = try gate.resolution(resources: resources) {
       _ = try gate.verify(candidate)
@@ -1964,7 +1970,8 @@ enum NativeHostLauncher {
         "TMPDIR": NSTemporaryDirectory(),
         "MUSICMUTE_LOCAL_APP_RESOURCES": resources.path,
         "MUSICMUTE_LOCAL_ROOT": support.path,
-        "MUSICMUTE_LOCAL_LAUNCH_MS": String((ProcessInfo.processInfo.systemUptime - started) * 1000),
+        "MUSICMUTE_LOCAL_LAUNCH_MS": String(
+          (ProcessInfo.processInfo.systemUptime - started) * 1000),
       ],
       verifiedRuntime: verifiedRuntime)
   }
@@ -2894,6 +2901,14 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
 }
 
 enum RuntimeStorageMaintenance {
+  private struct ConsumerReference: Decodable {
+    let schema_version: Int
+    let consumer: String
+    let runtime_id: String
+    let archive_sha256: String
+    let worker_root: String
+    let service_id: String
+  }
   private static let scratchPattern = try! NSRegularExpression(
     pattern:
       #"\A(?:install|rejected|cleanup)-[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\z"#
@@ -3002,6 +3017,7 @@ enum RuntimeStorageMaintenance {
     }
     try validateContainer(releases)
     try validateContainer(staging)
+    let retained = try referencedRuntimeIDs(releases: releases)
     let entries: [URL]
     do {
       entries = try FileManager.default.contentsOfDirectory(
@@ -3013,7 +3029,9 @@ enum RuntimeStorageMaintenance {
     var candidates = [URL]()
     for entry in entries {
       let name = entry.lastPathComponent
-      guard RuntimePath.safeIdentifier(name), name != currentID else { continue }
+      guard RuntimePath.safeIdentifier(name), name != currentID, !retained.contains(name) else {
+        continue
+      }
       var information = stat()
       guard lstat(entry.path, &information) == 0,
         information.st_mode & S_IFMT == S_IFDIR,
@@ -3059,6 +3077,64 @@ enum RuntimeStorageMaintenance {
   static func discardOwnedTree(_ source: URL, staging: URL) throws {
     try validateContainer(staging)
     try isolateAndRemove(source, staging: staging)
+  }
+
+  /// Cooperative consumers publish under the shared bootstrap lease before activation.
+  /// Prepare holds the exclusive lease here, so a referenced exact release cannot be
+  /// removed between publication and service startup. Unknown references stop pruning.
+  static func referencedRuntimeIDs(releases: URL) throws -> Set<String> {
+    let runtime = releases.deletingLastPathComponent()
+    let consumers = runtime.appendingPathComponent("consumers", isDirectory: true)
+    var information = stat()
+    guard lstat(consumers.path, &information) == 0 else {
+      if errno == ENOENT { return [] }
+      throw RuntimeBootstrapFailure.code("RUNTIME_CONSUMER_REFERENCE_INVALID")
+    }
+    do {
+      try validateContainer(consumers)
+      let references = try FileManager.default.contentsOfDirectory(
+        at: consumers, includingPropertiesForKeys: nil)
+      guard references.count <= 256 else {
+        throw RuntimeBootstrapFailure.code("RUNTIME_CONSUMER_REFERENCE_INVALID")
+      }
+      let workerURL = runtime.deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("MusicMuteWorker", isDirectory: true)
+      var workerInformation = stat()
+      let workerRoot = RuntimePath.canonicalExisting(workerURL)
+      if !references.isEmpty {
+        guard workerRoot != nil, lstat(workerURL.path, &workerInformation) == 0,
+          workerInformation.st_mode & S_IFMT == S_IFDIR,
+          workerInformation.st_uid == getuid(), workerInformation.st_mode & 0o077 == 0
+        else { throw RuntimeBootstrapFailure.code("RUNTIME_CONSUMER_REFERENCE_INVALID") }
+      }
+      let keys: Set<String> = [
+        "schema_version", "consumer", "runtime_id", "archive_sha256", "worker_root", "service_id",
+      ]
+      var retained = Set<String>()
+      for file in references {
+        let data = try RuntimeFileSecurity.readPrivateFile(file, maximumBytes: 16 * 1024)
+        guard let record = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+          Set(record.keys) == keys,
+          let reference = try? JSONDecoder().decode(ConsumerReference.self, from: data),
+          reference.schema_version == 1, reference.consumer == "macos-worker",
+          RuntimePath.safeIdentifier(reference.runtime_id), safeDigest(reference.archive_sha256),
+          safeDigest(reference.service_id),
+          file.lastPathComponent == "\(reference.service_id).json",
+          reference.worker_root == workerRoot
+        else { throw RuntimeBootstrapFailure.code("RUNTIME_CONSUMER_REFERENCE_INVALID") }
+        retained.insert(reference.runtime_id)
+      }
+      return retained
+    } catch {
+      throw RuntimeBootstrapFailure.code("RUNTIME_CONSUMER_REFERENCE_INVALID")
+    }
+  }
+
+  private static func safeDigest(_ value: String) -> Bool {
+    value.utf8.count == 64
+      && value.utf8.allSatisfy {
+        ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102)
+      }
   }
 
   private static func validateContainer(_ directory: URL) throws {

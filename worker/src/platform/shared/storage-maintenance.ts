@@ -3,11 +3,12 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { MacUserLayout } from "../macos/user-paths.js";
 import type { WindowsServiceLayout } from "../windows/service-definition.js";
 import { readWindowsActiveVersion } from "../windows/active-release.js";
-import { verifyMacRelease } from "../macos/release-manifest.js";
+import { verifyManagedMacRelease as verifyMacRelease } from "../macos/app-installation-binding.js";
 import { verifyWindowsRelease } from "../windows/release-manifest.js";
 import { compareWorkerReleaseVersions } from "./release-version.js";
 import { loadUpdateState } from "../macos/user-updater.js";
 import { loadWindowsUpdateState } from "../windows/user-updater.js";
+import { readMacQualifiedRollback } from "../macos/app-installation-state.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 export const WORKER_CACHE_LIMIT_BYTES = 256 * 1024 * 1024;
@@ -25,6 +26,10 @@ export interface WorkerStorageLayout {
   activeVersion: () => Promise<string>;
   verifyRelease: (version: string) => Promise<void>;
   validateUpdateState?: () => Promise<unknown>;
+  qualifiedRollback?: () => Promise<{
+    knownGoodVersion: string;
+    previousVersion: string | null;
+  } | null>;
   transactionName: (name: string) => boolean;
   legacyEnrollment?: {
     statePath: string;
@@ -35,13 +40,20 @@ export interface WorkerStorageLayout {
 
 export function macWorkerStorageLayout(
   layout: MacUserLayout,
+  options: { ownsPreparationFence?: boolean } = {},
 ): WorkerStorageLayout {
   return {
     ...layout,
     updateStatePath: layout.updateStatePath,
-    recoveryPaths: ["finalization.json", "enrollment.credential"].map((name) =>
-      join(layout.transactionRoot, "install", name),
-    ),
+    recoveryPaths: [
+      ...["finalization.json", "enrollment.credential"].map((name) =>
+        join(layout.transactionRoot, "install", name),
+      ),
+      join(layout.stateRoot, "app-activation.json"),
+      ...(options.ownsPreparationFence
+        ? []
+        : [join(layout.stateRoot, "app-preparation.json")]),
+    ],
     activeVersion: async () => {
       const target = resolve(
         dirname(layout.currentLink),
@@ -65,6 +77,7 @@ export function macWorkerStorageLayout(
         throw new TypeError("Rollback worker release identity changed");
     },
     validateUpdateState: () => loadUpdateState(layout.updateStatePath),
+    qualifiedRollback: () => readMacQualifiedRollback(layout),
     legacyEnrollment: {
       statePath: join(
         layout.transactionRoot,
@@ -227,6 +240,12 @@ export async function cleanupWorkerStorage(options: {
       "Active release and known-good update state disagree; inspect recovery before cleanup",
     );
   const quarantined = new Set((update?.quarantinedVersions ?? []) as string[]);
+  const qualified = await layout.qualifiedRollback?.();
+  if (qualified && qualified.knownGoodVersion !== active)
+    return blocked(
+      result,
+      "Active release and qualified rollback state disagree; inspect recovery before cleanup",
+    );
   const older = releases
     .filter(
       (entry) =>
@@ -236,7 +255,31 @@ export async function cleanupWorkerStorage(options: {
     )
     .sort((a, b) => compareWorkerReleaseVersions(b.name, a.name));
   let previous: (typeof older)[number] | undefined;
-  if (!options.stateOnly)
+  if (
+    !options.stateOnly &&
+    qualified?.previousVersion !== undefined &&
+    qualified.previousVersion !== null
+  ) {
+    const release = releases.find(
+      (entry) => entry.name === qualified.previousVersion,
+    );
+    if (!release || quarantined.has(release.name))
+      return blocked(
+        result,
+        "Qualified rollback release is unavailable; inspect recovery before cleanup",
+      );
+    try {
+      await assertSafeAncestors(layout.installRoot, release.path);
+      await layout.verifyRelease(release.name);
+      previous = release;
+    } catch {
+      return blocked(
+        result,
+        "Qualified rollback release failed verification; inspect recovery before cleanup",
+      );
+    }
+  }
+  if (!options.stateOnly && qualified == null)
     for (const release of older) {
       try {
         await assertSafeAncestors(layout.installRoot, release.path);

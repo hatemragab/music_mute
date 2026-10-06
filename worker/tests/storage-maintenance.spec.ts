@@ -97,6 +97,54 @@ async function fixture() {
 }
 
 describe("worker disk maintenance", () => {
+  it("retains the actual qualified previous release across standalone/app/catalog identities", async () => {
+    const f = await fixture();
+    const active = "0.1.3-app.111111111111.aaaaaaaaaaaa";
+    const prior = "0.1.3-app.ffffffffffff.aaaaaaaaaaaa";
+    await f.put(join(f.layout.releasesRoot, active, "runtime.bin"));
+    await f.put(join(f.layout.releasesRoot, prior, "runtime.bin"));
+    f.layout.activeVersion = async () => active;
+    f.layout.qualifiedRollback = async () => ({
+      knownGoodVersion: active,
+      previousVersion: "0.1.3",
+    });
+    await f.put(
+      f.layout.updateStatePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        highestSequence: 4,
+        status: "healthy",
+        knownGoodVersion: active,
+        quarantinedVersions: [],
+      }),
+    );
+    const standalone = await cleanupWorkerStorage({ layout: f.layout, now });
+    expect(standalone.keptReleaseVersions).toEqual([active, "0.1.3"]);
+    f.layout.qualifiedRollback = async () => ({
+      knownGoodVersion: active,
+      previousVersion: prior,
+    });
+    const app = await cleanupWorkerStorage({ layout: f.layout, now });
+    expect(app.keptReleaseVersions).toEqual([active, prior]);
+    f.layout.activeVersion = async () => "0.1.3";
+    f.layout.qualifiedRollback = async () => ({
+      knownGoodVersion: "0.1.3",
+      previousVersion: active,
+    });
+    await f.put(
+      f.layout.updateStatePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        highestSequence: 5,
+        status: "healthy",
+        knownGoodVersion: "0.1.3",
+        quarantinedVersions: [],
+      }),
+    );
+    const catalog = await cleanupWorkerStorage({ layout: f.layout, now });
+    expect(catalog.keptReleaseVersions).toEqual(["0.1.3", active]);
+  });
+
   it("previews then removes only scratch and old releases, preserving rollback, media, credentials and history", async () => {
     const f = await fixture();
     const preview = await cleanupWorkerStorage({ layout: f.layout, now });

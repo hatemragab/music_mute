@@ -10,6 +10,7 @@
     "directory": "worker"
   },
   "files": [
+    "dist/package.json",
     "dist/src/",
     "dist/protocol/",
     "engine/musicmute_engine/*.py",

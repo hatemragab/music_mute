@@ -1,4 +1,18 @@
 import { awaitUnpair } from "../shared/unpair.js";
+import {
+  reconcileMacAppRuntimeReferences,
+  assertMacPreparedRuntimeUnused,
+  resolveMacAppExecutionLayout,
+} from "./app-installation-binding.js";
+import {
+  recoverMacAppMaintenance,
+  requiresMacAppMaintenance,
+  withMacAppMaintenance,
+  recoverMacAppPreparationFence,
+  withMacAppPreparationFence,
+} from "./app-control-maintenance.js";
+import { recoverMacAppActivation } from "./app-installation.js";
+import { reclaimIdlePersonalReservation } from "../../runtime/personal-admission.js";
 import { formatHealth } from "../shared/user-health.js";
 import { watchStatus, waitForReady } from "../shared/status-watch.js";
 export { waitForReady } from "../shared/status-watch.js";
@@ -48,6 +62,7 @@ import {
   checkMacUserUpdate,
   recoverInterruptedMacUpdate,
   updateMacUserWorker,
+  loadUpdateState,
   type MacUserUpdateCheck,
 } from "./user-updater.js";
 import {
@@ -146,6 +161,11 @@ interface LaunchAgentActions {
 }
 
 export interface MacUserCommandContext {
+  /** Private app facade option; never exposed as a CLI flag. */
+  appControl?: boolean;
+  onAppProgress?: (stage: string) => void;
+  beforeRuntimeRemoval?: () => Promise<void>;
+  beforeWorkerLoad?: () => Promise<void>;
   host?: { platform: NodeJS.Platform; arch: string; uid: number; home: string };
   layout?: MacUserLayout;
   launchAgent?: LaunchAgentActions;
@@ -161,8 +181,20 @@ export interface MacUserCommandContext {
     groupId?: string;
   }) => Promise<MacUserInstallationResult>;
   recover?: () => Promise<MacUserRecoveryResult>;
-  checkUpdate?: () => Promise<MacUserUpdateCheck>;
-  update?: (force: boolean) => Promise<{
+  resumeInstallation?: () => Promise<MacUserInstallationResult | null>;
+  adopt?: () => Promise<Record<string, unknown>>;
+  checkUpdate?: (
+    source?: "app" | "catalog",
+  ) => Promise<
+    Pick<
+      MacUserUpdateCheck,
+      "currentVersion" | "availableVersion" | "sequence" | "updateAvailable"
+    >
+  >;
+  update?: (
+    force: boolean,
+    source?: "app" | "catalog",
+  ) => Promise<{
     status: "current" | "updated";
     releaseVersion: string;
     sequence: number;
@@ -203,16 +235,103 @@ export async function runMacUserCommand(
     home: homedir(),
   };
   assertSupportedHost(host);
-  const layout = context.layout ?? createMacUserLayout(host.home);
+  const layout = await resolveMacAppExecutionLayout(
+    context.layout ?? createMacUserLayout(host.home),
+  );
+  context = {
+    ...context,
+    beforeWorkerLoad:
+      context.beforeWorkerLoad ??
+      (async () => {
+        await reclaimIdlePersonalReservation(layout.stateRoot);
+        await assertMacPreparedRuntimeUnused(layout);
+      }),
+  };
   if (!mutatesLocalState(command, arguments_))
     return await runUnlocked(command, arguments_, context, host, layout);
-  if (command === "install") await createMacUserDirectories(layout);
+  if (command === "install" || command === "recover")
+    await createMacUserDirectories(layout);
   else if (command === "unpair" || command === "uninstall")
     await requireManagedInstallation(layout);
   else await requireInstalled(layout);
   return await withMacUserCommandLock(
     layout.commandLockPath,
-    async () => runUnlocked(command, arguments_, context, host, layout),
+    async () => {
+      const ownedService =
+        context.launchAgent ?? new MacLaunchAgentController(host.uid);
+      await recoverMacAppPreparationFence(layout);
+      if (await pathExists(join(layout.stateRoot, "app-activation.json")))
+        await withMacAppPreparationFence(layout, "recover", () =>
+          recoverMacAppActivation(
+            layout,
+            ownedService,
+            false,
+            context.beforeWorkerLoad,
+          ),
+        );
+      await recoverMacAppMaintenance(
+        layout,
+        ownedService,
+        context.onAppProgress,
+        context.beforeWorkerLoad,
+      );
+      if (command === "restart")
+        return await withMacAppPreparationFence(layout, "recover", () =>
+          runUnlocked(command, arguments_, context, host, layout),
+        );
+      if (command === "unpair" || command === "uninstall")
+        return await withMacAppPreparationFence(layout, "recover", () =>
+          runUnlocked(command, arguments_, context, host, layout),
+        );
+      if (
+        !context.appControl &&
+        (["install", "recover"].includes(command) ||
+          (command === "update" && !arguments_.includes("--check")) ||
+          requiresMacAppMaintenance(command, arguments_))
+      ) {
+        if (requiresMacAppMaintenance(command, arguments_)) {
+          const service = await ownedService.status();
+          if (service.loaded || service.running)
+            throw new Error(
+              "Drain and stop the worker before GPU or storage maintenance",
+            );
+        }
+        return await withMacAppPreparationFence(
+          layout,
+          command === "install"
+            ? "install"
+            : command === "update"
+              ? "update"
+              : "recover",
+          () => runUnlocked(command, arguments_, context, host, layout),
+        );
+      }
+      if (!context.appControl)
+        return await runUnlocked(command, arguments_, context, host, layout);
+      const service =
+        context.launchAgent ?? new MacLaunchAgentController(host.uid);
+      if (!requiresMacAppMaintenance(command, arguments_))
+        return await runUnlocked(command, arguments_, context, host, layout);
+      return await withMacAppMaintenance({
+        layout,
+        service,
+        stop: () =>
+          gracefulStop(layout, service, false, {
+            ...(context.wait === undefined ? {} : { wait: context.wait }),
+            ...(context.drainTimeoutMs === undefined
+              ? {}
+              : { timeoutMs: context.drainTimeoutMs }),
+          }),
+        operation: () =>
+          runUnlocked(command, arguments_, context, host, layout),
+        ...(context.onAppProgress === undefined
+          ? {}
+          : { progress: context.onAppProgress }),
+        ...(context.beforeWorkerLoad
+          ? { beforeRestore: context.beforeWorkerLoad }
+          : {}),
+      });
+    },
     command,
   );
 }
@@ -232,6 +351,85 @@ async function runUnlocked(
     return await runOperatorCommand(command, arguments_, layout, context);
 
   switch (command) {
+    case "adopt": {
+      exactArguments(arguments_, new Set(["--apply", "--json"]));
+      if (!arguments_.includes("--apply")) {
+        stdout(
+          formatStatus(
+            await readStatus(layout, launchAgent, undefined, {
+              localOnly: true,
+            }),
+            arguments_.includes("--json"),
+          ),
+        );
+        return 0;
+      }
+      if (!context.adopt)
+        throw new TypeError(
+          "App worker adoption requires the packaged app controller",
+        );
+      const result = await context.adopt();
+      stdout(formatActionResult(result, arguments_.includes("--json")));
+      return 0;
+    }
+    case "recover": {
+      exactArguments(arguments_, new Set(["--json"]));
+      await recoverSignedUpdate(layout, launchAgent, context.beforeWorkerLoad);
+      const resumed = await (
+        context.resumeInstallation ??
+        (() =>
+          resumeMacUserInstallation({
+            layout,
+            uid: host.uid,
+            launchAgent,
+            ...(context.beforeWorkerLoad
+              ? { beforeStart: context.beforeWorkerLoad }
+              : {}),
+          }))
+      )();
+      if (resumed !== null) {
+        stdout(
+          formatActionResult(
+            { status: "ok", action: "recover", ...resumed },
+            arguments_.includes("--json"),
+          ),
+        );
+        return 0;
+      }
+      await requireInstalled(layout);
+      if (await pathExists(layout.currentLink)) {
+        stdout(
+          formatActionResult(
+            {
+              status: "ok",
+              action: "recover",
+              outcome: "no-recovery-required",
+            },
+            arguments_.includes("--json"),
+          ),
+        );
+        return 0;
+      }
+      const result = await (
+        context.recover ??
+        (() =>
+          recoverMacUserWorker({
+            layout,
+            uid: host.uid,
+            launchAgent,
+            ...(context.beforeWorkerLoad
+              ? { beforeStart: context.beforeWorkerLoad }
+              : {}),
+          }))
+      )();
+      stdout(
+        formatActionResult(
+          { status: "ok", action: "recover", ...result },
+          arguments_.includes("--json"),
+        ),
+      );
+      return 0;
+    }
     case "install": {
       const newCodeFlag = extractBooleanFlag(arguments_, "--new-code");
       const jsonFlag = extractBooleanFlag(newCodeFlag.remaining, "--json");
@@ -239,11 +437,18 @@ async function runUnlocked(
         jsonFlag.remaining,
         new Set(["label", "group-id"]),
       );
-      const resumed = await resumeMacUserInstallation({
-        layout,
-        uid: host.uid,
-        launchAgent,
-      });
+      const resumed = await (
+        context.resumeInstallation ??
+        (() =>
+          resumeMacUserInstallation({
+            layout,
+            uid: host.uid,
+            launchAgent,
+            ...(context.beforeWorkerLoad
+              ? { beforeStart: context.beforeWorkerLoad }
+              : {}),
+          }))
+      )();
       if (resumed !== null) {
         stdout(
           formatActionResult(
@@ -265,6 +470,9 @@ async function runUnlocked(
               layout,
               uid: host.uid,
               launchAgent,
+              ...(context.beforeWorkerLoad
+                ? { beforeStart: context.beforeWorkerLoad }
+                : {}),
             }))
         )();
         stdout(
@@ -299,6 +507,9 @@ async function runUnlocked(
           await installMacUserWorker({
             layout,
             uid: host.uid,
+            ...(context.beforeWorkerLoad
+              ? { beforeQualification: context.beforeWorkerLoad }
+              : {}),
             enrollmentCredential: input.enrollmentCredential,
             label: input.label,
             ...(input.groupId === undefined ? {} : { groupId: input.groupId }),
@@ -354,8 +565,23 @@ async function runUnlocked(
     }
     case "start": {
       exactArguments(arguments_, new Set(["--wait-ready", "--json"]));
-      await recoverInterruptedMacUpdate(layout, launchAgent);
-      const result = await start(layout, launchAgent, context.preflight);
+      const result = await withMacAppPreparationFence(
+        layout,
+        "recover",
+        async () => {
+          await recoverSignedUpdate(
+            layout,
+            launchAgent,
+            context.beforeWorkerLoad,
+          );
+          return await start(
+            layout,
+            launchAgent,
+            context.preflight,
+            context.beforeWorkerLoad,
+          );
+        },
+      );
       let readiness: Awaited<ReturnType<typeof readStatus>> | null = null;
       if (arguments_.includes("--wait-ready")) {
         await waitForReady(
@@ -405,7 +631,7 @@ async function runUnlocked(
     }
     case "restart": {
       exactArguments(arguments_, new Set(["--force", "--json"]));
-      await recoverInterruptedMacUpdate(layout, launchAgent);
+      await recoverSignedUpdate(layout, launchAgent, context.beforeWorkerLoad);
       await gracefulStop(layout, launchAgent, arguments_.includes("--force"), {
         ...(context.wait === undefined ? {} : { wait: context.wait }),
         ...(context.drainTimeoutMs === undefined
@@ -415,7 +641,12 @@ async function runUnlocked(
       await resetRestartBudget(
         join(dirname(layout.configPath), "restart-budget.json"),
       );
-      await start(layout, launchAgent, context.preflight);
+      await start(
+        layout,
+        launchAgent,
+        context.preflight,
+        context.beforeWorkerLoad,
+      );
       stdout(
         formatActionResult(
           { status: "ok", action: "restart" },
@@ -478,14 +709,24 @@ async function runUnlocked(
       );
     }
     case "update": {
-      exactArguments(arguments_, new Set(["--check", "--force", "--json"]));
+      const check = extractBooleanFlag(arguments_, "--check");
+      const force = extractBooleanFlag(check.remaining, "--force");
+      const json = extractBooleanFlag(force.remaining, "--json");
+      const flags = parseValueFlags(
+        json.remaining,
+        new Set(context.appControl ? ["source"] : []),
+      );
+      const source = flags.get("source");
+      if (source !== undefined && source !== "app" && source !== "catalog")
+        throw new TypeError("Worker update source is invalid");
       if (arguments_.includes("--check") && arguments_.includes("--force"))
         throw new TypeError("update accepts either --check or --force");
       await requireInstalled(layout);
       if (arguments_.includes("--check")) {
-        const checked = await (
-          context.checkUpdate ?? (() => checkMacUserUpdate(layout))
-        )();
+        const reader =
+          context.checkUpdate ?? (() => checkMacUserUpdate(layout));
+        const checked =
+          source === undefined ? await reader() : await reader(source);
         stdout(
           formatActionResult(
             {
@@ -501,7 +742,7 @@ async function runUnlocked(
         );
         return 0;
       }
-      const result = await (
+      const result =
         context.update ??
         ((force: boolean) =>
           updateMacUserWorker({
@@ -509,11 +750,17 @@ async function runUnlocked(
             uid: host.uid,
             force,
             launchAgent,
-          }))
-      )(arguments_.includes("--force"));
+            ...(context.beforeWorkerLoad
+              ? { beforeQualification: context.beforeWorkerLoad }
+              : {}),
+          }));
+      const updated =
+        source === undefined
+          ? await result(arguments_.includes("--force"))
+          : await result(arguments_.includes("--force"), source);
       stdout(
         formatActionResult(
-          { action: "update", ...result },
+          { action: "update", ...updated },
           arguments_.includes("--json"),
         ),
       );
@@ -604,8 +851,12 @@ async function runUnlocked(
           : { timeoutMs: context.drainTimeoutMs }),
       });
       await rm(layout.plistPath, { force: true });
-      if (purge) await rm(layout.installRoot, { recursive: true, force: true });
-      else await rm(layout.currentLink, { force: true });
+      if (purge) {
+        await reclaimIdlePersonalReservation(layout.stateRoot);
+        await context.beforeRuntimeRemoval?.();
+        await reconcileMacAppRuntimeReferences(layout, true);
+        await rm(layout.installRoot, { recursive: true, force: true });
+      } else await rm(layout.currentLink, { force: true });
       stdout(
         formatActionResult(
           {
@@ -684,11 +935,21 @@ async function runUnlocked(
         const service = await launchAgent.status();
         if (service.loaded || service.running)
           throw new Error("Drain and stop the worker before applying cleanup");
+        await context.beforeWorkerLoad?.();
       }
       const result = await cleanupWorkerStorage({
-        layout: macWorkerStorageLayout(layout),
+        // The source CLI owns this preparation sentinel under the command lock.
+        // Pending fences from another operation were rejected before dispatch.
+        layout: macWorkerStorageLayout(layout, {
+          ownsPreparationFence: apply && context.appControl !== true,
+        }),
         apply,
       });
+      if (apply && result.status !== "blocked") {
+        await reclaimIdlePersonalReservation(layout.stateRoot);
+        await context.beforeRuntimeRemoval?.();
+        await reconcileMacAppRuntimeReferences(layout);
+      }
       stdout(formatActionResult({ ...result }, arguments_.includes("--json")));
       return result.status === "ok" ? 0 : 1;
     }
@@ -698,6 +959,7 @@ async function runUnlocked(
       const workers = flags.get("workers");
       if (workers !== "1" && workers !== "2")
         throw new TypeError("capacity requires --workers 1 or 2");
+      await context.beforeWorkerLoad?.();
       const result = await configureWorkerCapacity({
         configPath: layout.configPath,
         receiptPath: layout.capacityValidationPath,
@@ -721,6 +983,7 @@ async function runUnlocked(
         throw new TypeError("Benchmark workers must be 1 or 2");
       const workers = Number(workersValue) as 1 | 2;
       await requireInstalled(layout);
+      await context.beforeWorkerLoad?.();
       const result = await (
         context.benchmark ??
         ((selectedWorkers) =>
@@ -778,6 +1041,7 @@ async function runUnlocked(
       if (![1, 2, 4].includes(groupSize))
         throw new TypeError("benchmark-file window group must be 1, 2, or 4");
       await requireInstalled(layout);
+      await context.beforeWorkerLoad?.();
       const result = await (
         context.benchmarkFile ??
         ((input) =>
@@ -832,8 +1096,10 @@ function mutatesLocalState(
 ): boolean {
   if (command === "update" && arguments_.includes("--check")) return false;
   if (command === "logs" && arguments_.includes("--clear")) return true;
+  if (command === "adopt") return arguments_.includes("--apply");
   return new Set([
     "install",
+    "recover",
     "start",
     "stop",
     "restart",
@@ -855,11 +1121,13 @@ async function start(
   layout: MacUserLayout,
   launchAgent: LaunchAgentActions,
   preflight?: () => Promise<boolean>,
+  beforeWorkerLoad?: () => Promise<void>,
 ): Promise<"already-running" | "service-started"> {
   await requireInstalled(layout);
   const current = await launchAgent.status();
   if (current.running) return "already-running";
   await maintainWorkerLogs(layout);
+  await beforeWorkerLoad?.();
   const healthy = await (
     preflight ??
     (async () =>
@@ -873,6 +1141,33 @@ async function start(
   if (current.loaded) await launchAgent.kickstart();
   else await launchAgent.bootstrap(layout.plistPath);
   return "service-started";
+}
+
+async function recoverSignedUpdate(
+  layout: MacUserLayout,
+  service: LaunchAgentActions,
+  beforeStart?: () => Promise<void>,
+): Promise<void> {
+  const state = await loadUpdateState(layout.updateStatePath);
+  if (
+    state.status !== "staged" &&
+    state.status !== "activating" &&
+    state.recovery === undefined
+  )
+    return;
+  const action = () =>
+    recoverInterruptedMacUpdate(
+      layout,
+      service,
+      "Interrupted update recovered",
+      false,
+      beforeStart,
+    );
+  if (await pathExists(join(layout.stateRoot, "app-preparation.json"))) {
+    await action();
+    return;
+  }
+  await withMacAppPreparationFence(layout, "recover", action);
 }
 
 async function transition(
