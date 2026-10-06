@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { WorkerChildProcess } from "../src/agent/child-process.js";
 import { MachineSupervisor } from "../src/agent/machine-supervisor.js";
 
 const child = { command: "unused", args: [], cwd: "." };
@@ -46,6 +47,8 @@ describe("machine supervisor capacity", () => {
 
   it("replaces a terminated child even before its exit handler settles", async () => {
     const workerId = randomUUID();
+    const stopErrors: unknown[] = [];
+    let replacement: WorkerChildProcess | undefined;
     const supervisor = new MachineSupervisor([
       {
         workerId,
@@ -70,11 +73,34 @@ describe("machine supervisor capacity", () => {
       terminated.terminateActive();
       await expect(pending).rejects.toThrow("terminated by the supervisor");
 
-      const replacement = await supervisor.restart(workerId);
+      replacement = await supervisor.restart(workerId);
       expect(replacement).not.toBe(terminated);
       expect(supervisor.child(workerId)).toBe(replacement);
+      expect(terminated.isAlive()).toBe(false);
+      const stop = replacement.stop.bind(replacement);
+      vi.spyOn(replacement, "stop").mockImplementation(async () => {
+        try {
+          await stop();
+        } catch (error) {
+          stopErrors.push(error);
+          throw error;
+        }
+      });
     } finally {
-      await supervisor.stop();
+      // Stop the intentionally resident fixture before waiting for cleanup;
+      // stop must still prove the real process group has disappeared.
+      replacement?.terminateActive();
+      await supervisor
+        .stop()
+        .catch((error: unknown) => {
+          // Preserve real child-stop failures hidden by the supervisor's summary.
+          throw new AggregateError(
+            [error, ...stopErrors],
+            "Supervisor cleanup failed",
+          );
+        })
+        .finally(() => vi.restoreAllMocks());
+      if (replacement) expect(replacement.isAlive()).toBe(false);
     }
   });
 });

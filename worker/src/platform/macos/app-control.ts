@@ -1,4 +1,4 @@
-import { watch, type FSWatcher } from "node:fs";
+import { watch, type FSWatcher, type Stats } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -26,6 +26,9 @@ export interface AppControlDependencies {
   runCommand?: typeof runMacUserCommand;
   versions?: () => Promise<Record<string, unknown>>;
   packageVersion?: string;
+  statDirectory?: (
+    path: string,
+  ) => Promise<Pick<Stats, "dev" | "ino" | "isDirectory" | "isSymbolicLink">>;
   watchDirectory?: (
     path: string,
     onChange: () => void,
@@ -217,15 +220,14 @@ export async function subscribeAppControl(
   const reconcileWatchers = async () => {
     const paths = watchedDirectories(layout);
     for (const path of paths) {
-      const info = await lstat(path).catch((error: unknown) => {
-        if (
-          ["ENOENT", "ENOTDIR"].includes(
-            (error as NodeJS.ErrnoException).code ?? "",
-          )
-        )
-          return null;
-        throw error;
-      });
+      if (signal.aborted || failed) return;
+      const info = await (dependencies.statDirectory ?? lstat)(path).catch(
+        (error: unknown) => {
+          if (isMissingDirectory(error)) return null;
+          throw error;
+        },
+      );
+      if (signal.aborted || failed) return;
       if (!info) {
         watchers.get(path)?.watcher.close();
         watchers.delete(path);
@@ -241,16 +243,25 @@ export async function subscribeAppControl(
         previous.watcher.close();
         watchers.delete(path);
       }
-      if (!watchers.has(path))
-        watchers.set(path, {
-          device: info.dev,
-          inode: info.ino,
-          watcher: watchDirectory(path, schedule, () => {
-            watchers.get(path)?.watcher.close();
+      if (!watchers.has(path)) {
+        try {
+          const watcher = watchDirectory(path, schedule, () => {
+            if (watchers.get(path)?.watcher !== watcher) return;
+            watcher.close();
             watchers.delete(path);
             schedule();
-          }),
-        });
+          });
+          watchers.set(path, {
+            device: info.dev,
+            inode: info.ino,
+            watcher,
+          });
+        } catch (error) {
+          if (!isMissingDirectory(error)) throw error;
+          // An ancestor observes replacement; retry a swap between stat and watch.
+          schedule();
+        }
+      }
     }
   };
   const publish = async () => {
@@ -263,6 +274,7 @@ export async function subscribeAppControl(
     pending = false;
     try {
       await reconcileWatchers();
+      if (signal.aborted || failed) return;
       const payload = await readCommandPayload(
         request,
         () => undefined,
@@ -295,6 +307,15 @@ export async function subscribeAppControl(
     for (const entry of watchers.values()) entry.watcher.close();
     watchers.clear();
   }
+}
+
+function isMissingDirectory(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR")
+  );
 }
 
 function watchedDirectories(layout: MacUserLayout): string[] {

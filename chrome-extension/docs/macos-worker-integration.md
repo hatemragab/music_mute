@@ -173,7 +173,7 @@ the current default. Personal GUI imports retain the current cancel-on-Quit
 behavior until the owner asks for durable background ownership; backend worker
 jobs remain independent of GUI connections.
 
-### Current local candidate and acceptance, 2026-10-06
+### Packaged development checkpoint and acceptance, 2026-10-06
 
 Candidate build `14fe400a-4707-465f-8af3-ca3a37908a4d` / `1791257658` is an
 ARM64 ad-hoc signed app of **30,507,817 bytes**. It reuses the existing external
@@ -182,6 +182,11 @@ runtime `macos-arm64-v1-c923b1be1f135d8c48ef81c9`, archive SHA-256
 The service payload has 3,749 inventory entries and digest
 `f45c5fc93ca83dcd69d79bbdc4c16ba1eef0ed65641cb7b7389a1dcef9685987`.
 The app includes neither the 1.30 GB runtime nor the fixed model weights.
+
+This frozen package predates the later Settings UX and subscription race fixes.
+Its receipts validate that artifact; subsequent source checks do not establish
+that a newly packaged or installed app has passed the same acceptance. Rebuild
+and validate the final package before installed-service migration.
 
 The payload excludes package-manager workspace state as well as lock/store
 metadata. A regression test stages identical executable contents with different
@@ -213,8 +218,8 @@ worker, account, Keychain, production backend or public release was modified.
 | GPU admission, warm reuse and cancellation/exit safety                        | `personal-admission.spec.ts`, `worker-admission.test.ts`, engine/process tests                                                                                                                                          | Real socket/process ownership and exit fixtures; resident engine/math unchanged; physical MPS inference/handover acceptance remains pending                                          |
 | App/runtime update coordination and retention                                 | Native/Updater tests, installer/storage tests, final package proof                                                                                                                                                      | Actual controller exit precedes lease release; immutable external runtime remains unchanged after qualification                                                                      |
 | English/Arabic UI and accessibility                                           | Five native suites, catalog-force fixture, 16 offscreen images                                                                                                                                                          | Local compilation/rendering/requests; no real GUI window or account used                                                                                                             |
-| Backend attempt survives controller/GUI-folder removal                        | Current-payload 52-test package receipt                                                                                                                                                                                 | Copied supervisor/guardian and production controller session with an injected status-command adapter; fake inference; no NSApplication Quit                                          |
-| macOS launches/restarts the independent service                               | Current-payload 52-test package receipt                                                                                                                                                                                 | Actual RunAtLoad at bootstrap and KeepAlive restart; UUID-only label, exact bootout and all owned PIDs gone; no login/logout/reboot test                                             |
+| Backend attempt survives controller/GUI-folder removal                        | Checkpoint-payload 52-test package receipt                                                                                                                                                                              | Copied supervisor/guardian and production controller session with an injected status-command adapter; fake inference; no NSApplication Quit                                          |
+| macOS launches/restarts the independent service                               | Checkpoint-payload 52-test package receipt                                                                                                                                                                              | Actual RunAtLoad at bootstrap and KeepAlive restart; UUID-only label, exact bootout and all owned PIDs gone; no login/logout/reboot test                                             |
 | Build/type/lint/format/test checkpoints                                       | Worker full `pnpm run verify`: 711 passed/21 skipped, 13 packaging tests, 102 engine tests/1 Windows skip; companion full suite: 2,096 passed/4 skipped; native: five suites; final worker package: 52 passed/0 skipped | Full worker pipeline, final companion typecheck/lint/format, final build/package, process tests, 27 MPS safety tests and 11 operator tests passed; genuine inference remains pending |
 
 Generated evidence is deliberately ignored and remains below `output/`:
@@ -364,3 +369,27 @@ Current source-only evidence:
 These follow-ups are not present in the older frozen 14fe package. New packaging
 and installed UI acceptance remain separate from these source/build/fixture
 checks and from the still-pending genuine worker GPU acceptance.
+
+### Source merge validation follow-up, 2026-10-06
+
+Local snapshot subscriptions now fence cancellation after asynchronous directory
+inspection, recover directory disappearance between inspection and watch
+registration, and ignore errors from a retired watcher. Only `ENOENT`/`ENOTDIR`
+registration races are retried; unsafe paths and permission failures remain
+terminal. No periodic polling was added. Eight deterministic regression cases
+cover these races and safety checks; the focused suite passed all 19 tests.
+
+The supervisor replacement test now explicitly terminates its deliberately
+resident replacement during cleanup before confirming process-group exit. Its
+one-second bound and original termination assertions remain, and cleanup failures
+retain the underlying child error. The focused suite passed all four tests. The
+original CI failure was not reproduced; this removes a confirmed unnecessary
+shutdown wait without changing production process supervision.
+
+Fresh post-rebase `worker/pnpm run verify` passed: 719 tests passed/21 skipped,
+13 packaging checks passed, 102 engine tests ran with one Windows-only skip, and
+protocol, formatting, lint, type checking and build passed. Post-rebase
+`chrome-extension/npm run verify` passed with 2,096 tests passed/four skipped,
+type checking, lint, build and formatting. These checks validate source and owned
+fixtures; the frozen package checkpoint and pending installed/GPU acceptance
+retain their separate scope.
