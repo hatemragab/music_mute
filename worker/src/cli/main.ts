@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 
 import { dirname, join, resolve } from "node:path";
+import {
+  MacAppStartupRecovered,
+  recoverMacAppActivationAtStartup,
+} from "../platform/macos/app-installation.js";
+import { verifyMacAppServiceConfiguration } from "../platform/macos/app-installation-binding.js";
+import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { printWorkerVersion } from "./version.js";
@@ -9,6 +15,7 @@ import {
   WorkerChildProcess,
 } from "../agent/child-process.js";
 import { MachineSupervisor } from "../agent/machine-supervisor.js";
+import { MacPersonalAdmission } from "../runtime/personal-admission.js";
 import {
   ControlPlaneError,
   WorkerControlPlaneClient,
@@ -48,6 +55,7 @@ import { maintainStorageAtStartup } from "../platform/shared/startup-storage.js"
 import {
   MacUpdateStartupRecovered,
   recoverMacUpdateAtStartup,
+  loadUpdateState,
 } from "../platform/macos/user-updater.js";
 import {
   appendWorkerFatalError,
@@ -204,11 +212,18 @@ if (command === "--version" || command === "version" || command === "-v") {
       if (
         logLayout !== null &&
         resolve(configPath) === resolve(logLayout.configPath)
-      )
+      ) {
+        await recoverMacAppActivationAtStartup(logLayout);
         await recoverMacUpdateAtStartup(logLayout);
+      }
       if (logLayout !== null) await maintainWorkerLogs(logLayout);
       await maintainStorageAtStartup(configPath);
       const config = await loadRuntimeConfig(configPath);
+      if (
+        logLayout !== null &&
+        resolve(configPath) === resolve(logLayout.configPath)
+      )
+        await verifyMacAppServiceConfiguration(logLayout, config);
       const supervisor = new MachineSupervisor(
         config.slots.map((slot) => ({
           workerId: slot.workerId,
@@ -282,6 +297,37 @@ if (command === "--version" || command === "version" || command === "-v") {
           ffmpegPath: config.ffmpegPath,
           ffprobePath: config.ffprobePath,
           commandExecutor,
+          ...(logLayout === null ||
+          resolve(configPath) !== resolve(logLayout.configPath)
+            ? {}
+            : {
+                personalAdmission: new MacPersonalAdmission(
+                  logLayout.stateRoot,
+                ),
+                deferPreloadForMaintenance: true,
+                maintenancePending: async () => {
+                  for (const name of [
+                    "app-maintenance.json",
+                    "app-preparation.json",
+                  ]) {
+                    try {
+                      await lstat(join(logLayout.stateRoot, name));
+                      return true;
+                    } catch (error) {
+                      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+                        throw error;
+                    }
+                  }
+                  const update = await loadUpdateState(
+                    logLayout.updateStatePath,
+                  );
+                  return (
+                    update.status === "staged" ||
+                    update.status === "activating" ||
+                    update.recovery !== undefined
+                  );
+                },
+              }),
           ...(process.platform === "win32"
             ? {
                 maintenancePending: () =>
@@ -310,7 +356,10 @@ if (command === "--version" || command === "version" || command === "-v") {
       await runtime.run(stopping.signal);
       await restartBudget.orderlyStop();
     } catch (error) {
-      if (error instanceof MacUpdateStartupRecovered) {
+      if (
+        error instanceof MacUpdateStartupRecovered ||
+        error instanceof MacAppStartupRecovered
+      ) {
         await restartBudget.orderlyStop();
         console.error(
           "MusicMute worker: interrupted update restored before processing",

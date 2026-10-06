@@ -121,7 +121,13 @@ await withMacUserCommandLock(
             "content-length": String(bytes.length),
           },
         }),
-      qualify: async () => boundary("stopped"),
+      qualify: async () => {
+        if (input.boundary === "qualifying") {
+          await writeFile(input.servicePath, "true");
+          await boundary("qualifying");
+        }
+        await boundary("stopped");
+      },
       confirmStarted: async () => {
         await boundary("activated");
         return true;

@@ -1214,8 +1214,13 @@ Read [the bridge contract](docs/bridge.md), [delivery plan](docs/DELIVERY.md),
 [validation evidence](docs/validation.md) before release claims. The account
 milestone includes the API 105 deployment and the dated authenticated local-file
 pair save in the account-connected ledger. Those checks do not establish all
-account, cloud, mobile or browser journeys. It does not alter fleet-worker runtime
-or native mobile code; worker CLI integration is deferred. Windows installation,
+account, cloud, mobile or browser journeys. Native mobile code remains separate.
+This branch adds a native Worker screen and an independently running macOS worker
+service; see [worker integration](docs/macos-worker-integration.md) for the complete
+operator inventory, installation/adoption contract and current acceptance evidence.
+The app carries compressed worker code while reusing the prepared external runtime
+and model. Paired workers start at login and process backend jobs independently of
+the GUI; personal imports retain their current cancel-on-Quit behavior. Windows installation,
 public signing/notarization and store distribution remain separate work.
 
 ### Playback performance update (2026-10-05)

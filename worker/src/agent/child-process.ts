@@ -5,6 +5,7 @@ import {
 } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { delimiter, isAbsolute } from "node:path";
 import {
@@ -68,6 +69,7 @@ export class ChildCommandError extends Error {
 export class WorkerChildProcess {
   private currentIncarnation = randomUUID();
   private child: ChildProcessWithoutNullStreams | null = null;
+  private processGroupPid: number | undefined;
   private decoder = new ChildFrameDecoder();
   private readonly pending = new Map<string, PendingRequest>();
   private ready: Promise<ChildResponse> | null = null;
@@ -94,6 +96,7 @@ export class WorkerChildProcess {
   async start(): Promise<ChildResponse> {
     if (this.child || this.ready)
       throw new Error("Worker child has already been started");
+    await this.confirmProcessGroupExit();
     this.currentIncarnation = randomUUID();
     this.decoder = new ChildFrameDecoder();
     this.stderr = "";
@@ -149,6 +152,7 @@ export class WorkerChildProcess {
             { ...spawnOptions, stdio: ["pipe", "pipe", "pipe", "ipc"] },
           ) as ChildProcessWithoutNullStreams);
     this.child = child;
+    if (process.platform !== "win32") this.processGroupPid = child.pid;
     child.stdout.on("data", (chunk: Buffer) => this.onData(chunk));
     child.stderr.on("data", (chunk: Buffer) => this.onStderr(chunk));
     child.stdin.on("error", () =>
@@ -206,7 +210,10 @@ export class WorkerChildProcess {
 
   async stop(): Promise<void> {
     const child = this.child;
-    if (!child) return;
+    if (!child) {
+      await this.confirmProcessGroupExit();
+      return;
+    }
     const timeoutMs = boundedTimeout(
       this.options.stopTimeoutMs,
       DEFAULT_STOP_TIMEOUT_MS,
@@ -231,6 +238,33 @@ export class WorkerChildProcess {
           new Promise((resolve) => setTimeout(resolve, timeoutMs)),
         ]);
       }
+    }
+    if (child.exitCode === null && child.signalCode === null)
+      throw new Error("Worker child exit could not be confirmed");
+    await this.confirmProcessGroupExit();
+  }
+
+  private async confirmProcessGroupExit(): Promise<void> {
+    const pid = this.processGroupPid;
+    if (pid === undefined || process.platform === "win32") return;
+    const deadline =
+      performance.now() +
+      boundedTimeout(this.options.stopTimeoutMs, DEFAULT_STOP_TIMEOUT_MS);
+    for (;;) {
+      try {
+        process.kill(-pid, 0);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+          if (this.processGroupPid === pid) this.processGroupPid = undefined;
+          return;
+        }
+        throw new Error("Worker process group exit could not be confirmed");
+      }
+      // Guardian exit alone cannot prove native inference/decoder descendants
+      // have exited after a forced kill. Keep the GPU fence until the OS agrees.
+      if (performance.now() >= deadline)
+        throw new Error("Worker process group exit could not be confirmed");
+      await delay(10);
     }
   }
 

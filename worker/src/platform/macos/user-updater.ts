@@ -43,6 +43,8 @@ import {
   activateMacUserRelease,
   rollbackMacUserRelease,
   stageMacUserRelease,
+  installMacUserModel,
+  macUserModelPath,
 } from "./user-release.js";
 import {
   verifyUpdateMetadata,
@@ -50,7 +52,19 @@ import {
   type UpdateMetadata,
 } from "../shared/update-metadata.js";
 import { waitForLocalDrain } from "../shared/local-drain.js";
-import { verifyMacRelease } from "./release-manifest.js";
+import {
+  verifyManagedMacRelease as verifyMacRelease,
+  resolveMacAppExecutionLayout,
+  APP_MODEL_BYTES,
+  APP_MODEL_SHA256,
+} from "./app-installation-binding.js";
+import { createMacUserLayout } from "./user-paths.js";
+import {
+  readMacQualifiedRollback,
+  validateMacQualifiedRollback,
+  writeMacQualifiedRollback,
+  type QualifiedRollbackReference,
+} from "./app-installation-state.js";
 import { inspectMacUserHealth } from "./user-health.js";
 import { MacCommandBusyError, withMacUserCommandLock } from "./command-lock.js";
 
@@ -112,6 +126,8 @@ interface UpdateState {
     intent: "active" | "paused" | "draining";
     serviceWasLoaded: boolean;
     runtimeConfig?: Record<string, unknown>;
+    qualifiedRollback?: QualifiedRollbackReference | null;
+    fleetDrained?: true;
   };
 }
 
@@ -188,6 +204,7 @@ export async function updateMacUserWorker(options: {
   health?: () => Promise<boolean>;
   availableDiskBytes?: () => Promise<number>;
   removeTransaction?: (path: string) => Promise<void>;
+  beforeQualification?: () => Promise<void>;
 }): Promise<{
   status: "current" | "updated";
   releaseVersion: string;
@@ -198,6 +215,9 @@ export async function updateMacUserWorker(options: {
   await recoverInterruptedMacUpdate(
     options.layout,
     options.launchAgent ?? new MacLaunchAgentController(options.uid),
+    "Interrupted update recovered",
+    false,
+    options.beforeQualification,
   );
   const checked = await checkMacUserUpdate(options.layout, {
     ...(options.candidate === undefined
@@ -293,6 +313,7 @@ export async function updateMacUserWorker(options: {
         intent: previousLifecycle.intent,
         serviceWasLoaded,
         runtimeConfig: previousConfig,
+        qualifiedRollback: await readMacQualifiedRollback(options.layout),
       },
       updatedAt: new Date().toISOString(),
     };
@@ -311,6 +332,12 @@ export async function updateMacUserWorker(options: {
         });
       }
       if (previousService.loaded) await launchAgent.bootout();
+      // Qualification is a temporary LaunchAgent with no fleet status stream.
+      // Commit positive drain/stop before loading it, so interrupted recovery
+      // can retire it without waiting for a nonexistent fleet acknowledgement.
+      pending.recovery!.fleetDrained = true;
+      await writeUpdateState(options.layout.updateStatePath, pending);
+      await options.beforeQualification?.();
       const fixturePath = join(options.layout.stateRoot, "qualification.wav");
       const fixtureSha256 = await sha256(fixturePath);
       const qualify = options.qualify ?? qualifyMacUserRelease;
@@ -327,6 +354,11 @@ export async function updateMacUserWorker(options: {
         status: "activating",
         candidateVersion: staged.releaseVersion,
         updatedAt: new Date().toISOString(),
+      });
+      await writeMacQualifiedRollback(options.layout, {
+        schemaVersion: 1,
+        knownGoodVersion: staged.releaseVersion,
+        previousVersion: checked.currentVersion,
       });
       await activateMacUserRelease(options.layout, staged.releaseVersion);
       // Approval is release-bound. Keep the old receipt untouched for rollback;
@@ -345,9 +377,34 @@ export async function updateMacUserWorker(options: {
           validatedMaxWorkersPerGpu: 1,
         });
       }
+      // A signed full-runtime candidate must stop referencing an older shared
+      // app base. Preserve identities/policy while selecting its own executables.
+      const fullLayout = createMacUserLayout(options.layout.homeRoot);
+      const activeLayout = await resolveMacAppExecutionLayout(fullLayout);
+      if (options.layout.modelRoot !== activeLayout.modelRoot)
+        await installMacUserModel({
+          layout: activeLayout,
+          sourcePath: macUserModelPath(
+            options.layout,
+            APP_MODEL_SHA256,
+            "Kim_Vocal_2.onnx",
+          ),
+          filename: "Kim_Vocal_2.onnx",
+          bytes: APP_MODEL_BYTES,
+          sha256: APP_MODEL_SHA256,
+        });
+      const activeConfig = await readPrivateRecord(options.layout.configPath);
+      await writePrivateRecord(options.layout.configPath, {
+        ...activeConfig,
+        engineRoot: activeLayout.engineRoot,
+        pythonPath: activeLayout.pythonPath,
+        ffmpegPath: activeLayout.ffmpegPath,
+        ffprobePath: activeLayout.ffprobePath,
+        modelCacheRoot: activeLayout.modelRoot,
+      });
       // A stopped service must also have a valid configuration before committing.
       await loadRuntimeConfig(options.layout.configPath);
-      await writeLaunchAgentPlist(options.layout);
+      await writeLaunchAgentPlist(activeLayout);
       await setLocalLifecycleIntent(
         options.layout.lifecyclePath,
         previousLifecycle.intent,
@@ -361,7 +418,7 @@ export async function updateMacUserWorker(options: {
         const healthy = await (
           options.health ??
           (async () =>
-            (await inspectMacUserHealth(options.layout, launchAgent)).healthy)
+            (await inspectMacUserHealth(activeLayout, launchAgent)).healthy)
         )();
         if (!healthy) throw new Error("Updated worker failed runtime doctor");
       }
@@ -395,6 +452,8 @@ export async function updateMacUserWorker(options: {
         options.layout,
         launchAgent,
         error instanceof Error ? error.message.slice(0, 240) : "unknown",
+        false,
+        options.beforeQualification,
       );
       throw error;
     }
@@ -437,6 +496,7 @@ export async function recoverInterruptedMacUpdate(
   >,
   failure = "Interrupted update recovered",
   serviceStartup = false,
+  beforeStart?: () => Promise<void>,
 ): Promise<boolean> {
   const state = await loadUpdateState(layout.updateStatePath);
   if (
@@ -463,16 +523,19 @@ export async function recoverInterruptedMacUpdate(
     "draining",
   );
   if (!serviceStartup && (await launchAgent.status()).loaded) {
-    await waitForLocalDrain({
-      runtimeStatusPath: layout.runtimeStatusPath,
-      expectedRevision: draining.revision,
-      force: false,
-    });
+    if (!(state.status === "staged" && recovery.fleetDrained === true))
+      await waitForLocalDrain({
+        runtimeStatusPath: layout.runtimeStatusPath,
+        expectedRevision: draining.revision,
+        force: false,
+      });
     await launchAgent.bootout();
   }
   await rollbackMacUserRelease(layout, `releases/${recovery.previousVersion}`);
   if (recovery.runtimeConfig !== undefined)
     await writePrivateRecord(layout.configPath, recovery.runtimeConfig);
+  if (recovery.qualifiedRollback !== undefined)
+    await writeMacQualifiedRollback(layout, recovery.qualifiedRollback);
   await writeLaunchAgentPlist(layout);
   const installation = await readPrivateRecord(layout.installationStatePath);
   await writePrivateRecord(layout.installationStatePath, {
@@ -503,6 +566,7 @@ export async function recoverInterruptedMacUpdate(
     },
   });
   if (!serviceStartup && recovery.serviceWasLoaded) {
+    await beforeStart?.();
     await launchAgent.bootstrap(layout.plistPath);
     if (!(await waitForLoadedService(launchAgent)))
       throw new Error("Recovered LaunchAgent failed to start");
@@ -596,12 +660,16 @@ export async function loadUpdateState(path: string): Promise<UpdateState> {
               "intent",
               "serviceWasLoaded",
               "runtimeConfig",
+              "qualifiedRollback",
+              "fleetDrained",
             ].includes(key),
         ) ||
         typeof recovery.previousVersion !== "string" ||
         !/^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u.test(recovery.previousVersion) ||
         !["active", "paused", "draining"].includes(String(recovery.intent)) ||
         typeof recovery.serviceWasLoaded !== "boolean" ||
+        (recovery.fleetDrained !== undefined &&
+          recovery.fleetDrained !== true) ||
         (recovery.runtimeConfig !== undefined &&
           (recovery.runtimeConfig === null ||
             typeof recovery.runtimeConfig !== "object" ||
@@ -611,6 +679,11 @@ export async function loadUpdateState(path: string): Promise<UpdateState> {
             "credential" in recovery.runtimeConfig))
       )
         throw new TypeError("Update recovery state is invalid");
+      if (
+        recovery.qualifiedRollback !== undefined &&
+        recovery.qualifiedRollback !== null
+      )
+        validateMacQualifiedRollback(recovery.qualifiedRollback);
     }
     return record as unknown as UpdateState;
   } catch (error) {
@@ -632,6 +705,88 @@ async function writeUpdateState(
   if (Buffer.byteLength(JSON.stringify(state, null, 2), "utf8") + 1 > 64 * 1024)
     throw new TypeError("Update recovery journal is too large");
   await writePrivateRecord(path, state as unknown as Record<string, unknown>);
+}
+
+/** App qualification updates local known-good identity without resetting signed catalog sequence. */
+export async function acceptMacAppKnownGood(
+  layout: MacUserLayout,
+  version: string,
+): Promise<void> {
+  if (!/^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u.test(version))
+    throw new TypeError("App worker update identity is invalid");
+  const prior = await loadUpdateState(layout.updateStatePath);
+  if (
+    prior.recovery !== undefined ||
+    prior.status === "staged" ||
+    prior.status === "activating"
+  )
+    throw new TypeError("Signed worker update recovery must finish first");
+  await writeUpdateState(layout.updateStatePath, {
+    ...prior,
+    status: "healthy",
+    knownGoodVersion: version,
+    candidateVersion: version,
+    quarantinedVersions: prior.quarantinedVersions.filter(
+      (value) => value !== version,
+    ),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function restoreMacAppUpdateState(
+  layout: MacUserLayout,
+  value: Record<string, unknown>,
+): Promise<void> {
+  validateMacAppUpdateState(value);
+  await writeUpdateState(
+    layout.updateStatePath,
+    value as unknown as UpdateState,
+  );
+}
+
+export function validateMacAppUpdateState(
+  value: unknown,
+): asserts value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new TypeError("App worker update snapshot is invalid");
+  const record = value as Record<string, unknown>;
+  const allowed = [
+    "schemaVersion",
+    "highestSequence",
+    "status",
+    "knownGoodVersion",
+    "candidateVersion",
+    "quarantinedVersions",
+    "updatedAt",
+    "failure",
+  ];
+  if (
+    record.schemaVersion !== 1 ||
+    Object.keys(record).some((key) => !allowed.includes(key)) ||
+    !Number.isSafeInteger(record.highestSequence) ||
+    (record.highestSequence as number) < 0 ||
+    !["none", "healthy", "rolled-back"].includes(String(record.status)) ||
+    !Array.isArray(record.quarantinedVersions) ||
+    record.quarantinedVersions.length > 100 ||
+    record.quarantinedVersions.some(
+      (version) => !/^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u.test(String(version)),
+    ) ||
+    typeof record.updatedAt !== "string" ||
+    !Number.isFinite(Date.parse(record.updatedAt))
+  )
+    throw new TypeError("App worker update snapshot is invalid");
+  for (const field of ["knownGoodVersion", "candidateVersion"])
+    if (
+      record[field] !== undefined &&
+      (typeof record[field] !== "string" ||
+        !/^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u.test(String(record[field])))
+    )
+      throw new TypeError("App worker update identity is invalid");
+  if (
+    record.failure !== undefined &&
+    (typeof record.failure !== "string" || record.failure.length > 240)
+  )
+    throw new TypeError("App worker update snapshot is invalid");
 }
 
 async function writePrivateRecord(

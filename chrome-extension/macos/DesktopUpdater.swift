@@ -137,80 +137,140 @@ private final class DesktopUpdaterStartup: @unchecked Sendable {
   }
 }
 
+/// Update availability is separate from release metadata and installation safety.
+/// The native fixture can exercise availability without scheduling a feed request.
+@MainActor protocol DesktopUpdateChecking: AnyObject {
+  var canCheckForUpdates: Bool { get }
+  var automaticallyChecksForUpdates: Bool { get set }
+  var readinessPublisher: AnyPublisher<Bool, Never> { get }
+  func startChecking() throws
+  func checkForUpdates()
+}
+
 @MainActor final class DesktopUpdater: NSObject, ObservableObject {
   @Published private(set) var status = "Update checks are not configured for this build."
+  @Published private(set) var canCheck = false
+  @Published private(set) var canConfigureAutomaticChecks = false
   @Published private(set) var installationReserved = false
+  @Published private(set) var installationPreparing = false
   @Published private(set) var canTerminateForUpdate = false
   @Published var automaticChecksEnabled = true {
     didSet {
-      #if canImport(Sparkle)
-        updater?.automaticallyChecksForUpdates = automaticChecksEnabled
-      #endif
+      guard canConfigureAutomaticChecks, oldValue != automaticChecksEnabled else { return }
+      updater?.automaticallyChecksForUpdates = automaticChecksEnabled
     }
   }
   var isApplicationBusy: () -> Bool = { false }
+  var prepareInstallation: () async throws -> Void = {}
+  var onInstallationReleased: () -> Void = {}
+  private var preparation: Task<Bool, Never>?
+  private var preparationGeneration: UInt64 = 0
   private let bundle: Bundle
   private let support: URL
   private let configuration: DesktopUpdateConfiguration?
   private var lease: DesktopUpdateInstallationLease?
   private var guardian: Process?
+  private var updater: (any DesktopUpdateChecking)?
+  private var readinessObservation: AnyCancellable?
   #if canImport(Sparkle)
-    private var updater: SPUUpdater?
     private var userDriver: DesktopUpdateUserDriver?
   #endif
   var configured: Bool { configuration != nil }
-  var canCheck: Bool {
-    #if canImport(Sparkle)
-      return updater?.canCheckForUpdates == true
-    #else
-      return false
-    #endif
-  }
-  init(bundle: Bundle = .main, support: URL = LocalPaths.support, fixture: Bool = false) {
+  init(
+    bundle: Bundle = .main, support: URL = LocalPaths.support, fixture: Bool = false,
+    checkingFactory: ((Bundle, DesktopUpdater) -> (any DesktopUpdateChecking)?)? = nil
+  ) {
     self.bundle = bundle
     self.support = support
     configuration = fixture ? nil : DesktopUpdateConfiguration.read(bundle.infoDictionary ?? [:])
     super.init()
-    guard let configuration else { return }
-    #if canImport(Sparkle)
-      let driver = DesktopUpdateUserDriver(bundle: bundle, owner: self)
-      userDriver = driver
-      let service = SPUUpdater(
-        hostBundle: bundle, applicationBundle: bundle, userDriver: driver, delegate: self)
-      updater = service
-      do {
-        try service.start()
-        service.clearFeedURLFromUserDefaults()
-        service.sendsSystemProfile = false
-        // Downloads require a user choice so Sparkle never installs on normal quit.
-        service.automaticallyDownloadsUpdates = false
-        automaticChecksEnabled = service.automaticallyChecksForUpdates
-        status = "Automatic update checks are ready."
-        _ = configuration
-      } catch {
-        updater = nil
-        status = "Update checks could not start. Try opening MusicMute again."
-      }
-    #else
-      _ = configuration
+    guard configuration != nil else { return }
+    if let checkingFactory {
+      updater = checkingFactory(bundle, self)
+    } else {
+      #if canImport(Sparkle)
+        let driver = DesktopUpdateUserDriver(bundle: bundle, owner: self)
+        userDriver = driver
+        updater = SPUUpdater(
+          hostBundle: bundle, applicationBundle: bundle, userDriver: driver, delegate: self)
+      #endif
+    }
+    guard let service = updater else {
       status = "The update framework is unavailable in this preview build."
-    #endif
+      return
+    }
+    do {
+      try service.startChecking()
+      automaticChecksEnabled = service.automaticallyChecksForUpdates
+      canConfigureAutomaticChecks = true
+      canCheck = service.canCheckForUpdates
+      readinessObservation = service.readinessPublisher
+        .removeDuplicates()
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] ready in
+          MainActor.assumeIsolated { self?.canCheck = ready }
+        }
+      status = "Automatic update checks are ready."
+    } catch {
+      readinessObservation?.cancel()
+      readinessObservation = nil
+      updater = nil
+      #if canImport(Sparkle)
+        userDriver = nil
+      #endif
+      canCheck = false
+      canConfigureAutomaticChecks = false
+      status = "Update checks could not start. Try opening MusicMute again."
+    }
   }
   func checkForUpdates() {
-    #if canImport(Sparkle)
-      guard let updater else {
-        status = "Update checks are not configured for this build."
-        return
-      }
-      guard updater.canCheckForUpdates else {
-        status = "An update check is already in progress."
-        return
-      }
-      status = "Checking for updates…"
-      updater.checkForUpdates()
-    #else
+    guard let updater else {
       status = "Update checks are not configured for this build."
-    #endif
+      return
+    }
+    guard updater.canCheckForUpdates else {
+      status = "An update check is already in progress."
+      return
+    }
+    status = "Checking for updates…"
+    updater.checkForUpdates()
+  }
+  /// Sparkle replies only after disposable UI controllers exit and release execution leases.
+  /// Backend service processes are deliberately outside this preparation callback.
+  func prepareAndReserveInstallation() async -> Bool {
+    if installationReserved { return reserveInstallation() }
+    if let preparation { return await preparation.value }
+    guard !isApplicationBusy() else {
+      status = "Finish processing and stop playback before installing an update."
+      return false
+    }
+    preparationGeneration &+= 1
+    let generation = preparationGeneration
+    installationPreparing = true
+    status = "Closing Worker status connections before installing the app update…"
+    let task = Task { @MainActor [weak self] in
+      guard let self else { return false }
+      do {
+        try await prepareInstallation()
+        guard !Task.isCancelled, preparationGeneration == generation else { return false }
+        guard !isApplicationBusy() else {
+          status = "Finish processing and stop playback before installing an update."
+          return false
+        }
+        return reserveInstallation()
+      } catch {
+        guard preparationGeneration == generation else { return false }
+        status = "The update could not safely close Worker controls. Reconnect and try again."
+        return false
+      }
+    }
+    preparation = task
+    let reserved = await task.value
+    guard preparationGeneration == generation else { return false }
+    preparation = nil
+    installationPreparing = false
+    if !reserved { onInstallationReleased() }
+    return reserved
   }
   func reserveInstallation() -> Bool {
     if installationReserved {
@@ -281,11 +341,18 @@ private final class DesktopUpdaterStartup: @unchecked Sendable {
     return false
   }
   fileprivate func releaseInstallation() {
+    let hadReservation =
+      installationReserved || installationPreparing || preparation != nil || guardian != nil
+    preparationGeneration &+= 1
+    preparation?.cancel()
+    preparation = nil
+    installationPreparing = false
     if let guardian { RuntimeProcessRunner.stop(guardian) }
     guardian = nil
     lease = nil
     installationReserved = false
     canTerminateForUpdate = false
+    if hadReservation { onInstallationReleased() }
   }
   #if MUSICMUTE_NATIVE_TESTS
     func releaseInstallationForTesting() { releaseInstallation() }
@@ -296,6 +363,7 @@ private final class DesktopUpdaterStartup: @unchecked Sendable {
         withBundleIdentifier: "org.sparkle-project.Sparkle.Updater"
       ).contains(where: { !$0.isTerminated })
     else {
+      releaseInstallation()
       status = "The update installer is not ready. Cancel the update and try again."
       return false
     }
@@ -305,6 +373,19 @@ private final class DesktopUpdaterStartup: @unchecked Sendable {
 }
 
 #if canImport(Sparkle)
+  extension SPUUpdater: DesktopUpdateChecking {
+    var readinessPublisher: AnyPublisher<Bool, Never> {
+      publisher(for: \.canCheckForUpdates, options: [.initial, .new]).eraseToAnyPublisher()
+    }
+    func startChecking() throws {
+      try start()
+      clearFeedURLFromUserDefaults()
+      sendsSystemProfile = false
+      // Downloads require a user choice so Sparkle never installs on normal quit.
+      automaticallyDownloadsUpdates = false
+    }
+  }
+
   extension DesktopUpdater: SPUUpdaterDelegate {
     func feedURLString(for updater: SPUUpdater) -> String? { configuration?.feed.absoluteString }
     func allowedSystemProfileKeys(for updater: SPUUpdater) -> [String]? { [] }
@@ -362,18 +443,20 @@ private final class DesktopUpdaterStartup: @unchecked Sendable {
     ) {
       standard.showUpdateFound(with: appcastItem, state: state) { [weak self] choice in
         guard choice == .install else {
+          self?.owner?.releaseInstallation()
           reply(choice)
           return
         }
-        let safe =
-          state.stage == .installing
-          ? self?.owner?.confirmInstallerHandoff() == true
-          : self?.owner?.reserveInstallation() == true
-        guard safe else {
-          reply(state.stage == .installing ? .skip : .dismiss)
-          return
+        Task { @MainActor in
+          guard let owner = self?.owner,
+            await owner.prepareAndReserveInstallation(),
+            state.stage != .installing || owner.confirmInstallerHandoff()
+          else {
+            reply(state.stage == .installing ? .skip : .dismiss)
+            return
+          }
+          reply(.install)
         }
-        reply(.install)
       }
     }
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {
@@ -390,7 +473,10 @@ private final class DesktopUpdaterStartup: @unchecked Sendable {
       standard.showUpdaterError(error, acknowledgement: acknowledgement)
     }
     func showDownloadInitiated(cancellation: @escaping () -> Void) {
-      standard.showDownloadInitiated(cancellation: cancellation)
+      standard.showDownloadInitiated(cancellation: { [weak self] in
+        self?.owner?.releaseInstallation()
+        cancellation()
+      })
     }
     func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
       standard.showDownloadDidReceiveExpectedContentLength(expectedContentLength)
@@ -404,11 +490,20 @@ private final class DesktopUpdaterStartup: @unchecked Sendable {
     }
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
       standard.showReady(toInstallAndRelaunch: { [weak self] choice in
-        guard choice == .install, self?.owner?.confirmInstallerHandoff() == true else {
+        guard choice == .install else {
+          self?.owner?.releaseInstallation()
           reply(.skip)
           return
         }
-        reply(.install)
+        Task { @MainActor in
+          guard let owner = self?.owner, await owner.prepareAndReserveInstallation(),
+            owner.confirmInstallerHandoff()
+          else {
+            reply(.skip)
+            return
+          }
+          reply(.install)
+        }
       })
     }
     func showInstallingUpdate(

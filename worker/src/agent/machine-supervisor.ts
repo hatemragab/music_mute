@@ -89,9 +89,11 @@ export class MachineSupervisor {
   }
 
   async stop(): Promise<void> {
-    await Promise.allSettled(
+    const stopped = await Promise.allSettled(
       [...this.children.values()].map((child) => child.stop()),
     );
+    if (stopped.some((result) => result.status === "rejected"))
+      throw new Error("Worker children could not be stopped safely");
     this.children.clear();
   }
 }

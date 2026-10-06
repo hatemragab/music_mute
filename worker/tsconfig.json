@@ -14,6 +14,7 @@
     "sourceMap": true,
     "skipLibCheck": true,
     "resolvePackageJsonExports": true,
+    "resolveJsonModule": true,
     "esModuleInterop": true
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "protocol/**/*.ts"]

@@ -8,10 +8,11 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WORKER_RECIPE_IDS } from "../protocol/v1/protocol.js";
 import { qualifyMacUserRelease } from "../src/platform/macos/user-installer.js";
+import { writeMacReleaseManifest } from "../src/platform/macos/release-manifest.js";
 import {
   createMacUserDirectories,
   createMacUserLayout,
@@ -37,6 +38,24 @@ describe.skipIf(process.platform !== "darwin")(
         const layout = createMacUserLayout(root);
         await createMacUserDirectories(layout);
         const releaseRoot = join(layout.releasesRoot, "0.1.3");
+        for (const path of [
+          "app/dist/src/cli/main.js",
+          "runtime/node/bin/node",
+          "runtime/python/bin/python3",
+          "runtime/bin/ffmpeg",
+          "runtime/bin/ffprobe",
+          "runtime/media-source-manifest.json",
+          "runtime/licenses/ffmpeg/COPYING.LGPLv2.1",
+          "runtime/licenses/lame/COPYING",
+        ]) {
+          await mkdir(dirname(join(releaseRoot, path)), {
+            recursive: true,
+            mode: 0o700,
+          });
+          await writeFile(join(releaseRoot, path), "fixture", { mode: 0o755 });
+        }
+        await mkdir(join(releaseRoot, "app", "engine"), { mode: 0o700 });
+        await writeMacReleaseManifest(releaseRoot, "0.1.3");
         const fixturePath = join(root, "fixture.wav");
         await writeFile(fixturePath, "fixture");
         const fixtureDigest = createHash("sha256")

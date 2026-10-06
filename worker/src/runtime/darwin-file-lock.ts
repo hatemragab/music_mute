@@ -3,6 +3,7 @@ import { open } from "node:fs/promises";
 
 // Darwin sys/fcntl.h: O_EXLOCK is not exported in Node's fs.constants.
 const O_EXLOCK = 0x00000020;
+const O_SHLOCK = 0x00000010;
 
 export class DarwinFileLockBusyError extends Error {
   constructor() {
@@ -15,6 +16,21 @@ export async function withDarwinFileLock<T>(
   path: string,
   operation: () => Promise<T>,
 ): Promise<T> {
+  return await withLock(path, operation, O_EXLOCK);
+}
+
+export async function withDarwinSharedFileLock<T>(
+  path: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return await withLock(path, operation, O_SHLOCK);
+}
+
+async function withLock<T>(
+  path: string,
+  operation: () => Promise<T>,
+  lockFlag: number,
+): Promise<T> {
   if (process.platform !== "darwin")
     throw new Error("Darwin advisory locks require macOS");
   const handle = await open(
@@ -23,7 +39,7 @@ export async function withDarwinFileLock<T>(
       constants.O_CREAT |
       constants.O_NOFOLLOW |
       constants.O_NONBLOCK |
-      O_EXLOCK,
+      lockFlag,
     0o600,
   ).catch((error: unknown) => {
     if (

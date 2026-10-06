@@ -15,6 +15,7 @@
     "lint": "oxlint --deny-warnings src tests scripts",
     "test": "vitest run",
     "test:native": "node scripts/test-native.mjs",
+    "test:worker-package": "node --test scripts/worker-service-artifact.test.mjs scripts/qualify-worker-service.test.mjs scripts/qualify-worker-mps.test.mjs scripts/worker-operator-acceptance.test.mjs",
     "test:packaged-tools": "node scripts/qualify-packaged-tools.mjs",
     "doctor": "node dist/companion/cli.js doctor",
     "diagnostics": "node dist/companion/cli.js diagnostics",

@@ -384,7 +384,8 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
     {"type":"result","protocol_version":1,"status":{"ready":true,"platform":"darwin","arch":"arm64","version":"0.1.0","runtime_ready":true,"model_ready":true,"extension_registered":true,"extension_path":"/fixture/extension","model_bytes":66759214,"cache_bytes":0,"diagnostic_mode":"LOCAL_ONLY","max_duration_seconds":900}}
     """
   static func main() throws {
-    try check(SystemRuntimeVerificationReceiptAuthenticator.noninteractiveContext().interactionNotAllowed,
+    try check(
+      SystemRuntimeVerificationReceiptAuthenticator.noninteractiveContext().interactionNotAllowed,
       "Optional runtime receipts must never prompt for Keychain authentication")
     try parserChecks()
     try readinessChecks()
@@ -3079,21 +3080,28 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
       support: support, signatureChecker: signatures,
       verificationCoordinator: rejectionCoordinator)
     let trustedCommand = try run(resources, bridge: gatedBridge)
-    if case .success? = trustedCommand.outcome {} else {
+    if case .success? = trustedCommand.outcome {
+    } else {
       throw TestFailure.failed("Normal app control must trust installed contents")
     }
-    try check(FileManager.default.fileExists(atPath: executionMarker.path),
+    try check(
+      FileManager.default.fileExists(atPath: executionMarker.path),
       "Normal launch must not run the full inventory audit")
     var nativeReplacementCalled = false
     _ = try NativeHostLauncher.execute(
       arguments: ["chrome-extension://dclpfemnpknfdlpcbfcjkmdbnociippd/"],
       resources: resources, support: support, signatureChecker: signatures,
       coordinator: rejectionCoordinator,
-      replace: { _ in nativeReplacementCalled = true; return 0 })
-    try check(nativeReplacementCalled && rejectionCoordinator.verificationRunCount == 0,
+      replace: { _ in
+        nativeReplacementCalled = true
+        return 0
+      })
+    try check(
+      nativeReplacementCalled && rejectionCoordinator.verificationRunCount == 0,
       "Normal native launch trusts installed contents without verification fallback")
     do {
-      _ = try rejectionCoordinator.inspectRuntime(resources: resources, support: support,
+      _ = try rejectionCoordinator.inspectRuntime(
+        resources: resources, support: support,
         signatureChecker: signatures)
       throw TestFailure.failed("Explicit manual audit must detect a modified runtime leaf")
     } catch RuntimeBootstrapFailure.code("RUNTIME_ARCHIVE_INVALID") {}
@@ -3172,11 +3180,13 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
     try FileManager.default.removeItem(at: executionMarker)
     try replaceNonCriticalLeaf(with: Data("tampered-bytes".utf8))
     let trustedCachedCommand = try run(resources, bridge: processBridge)
-    if case .success? = trustedCachedCommand.outcome {} else {
+    if case .success? = trustedCachedCommand.outcome {
+    } else {
       throw TestFailure.failed("Normal launch must not audit post-install content changes")
     }
-    try check(processCoordinator.verificationRunCount == 0
-      && FileManager.default.fileExists(atPath: executionMarker.path),
+    try check(
+      processCoordinator.verificationRunCount == 0
+        && FileManager.default.fileExists(atPath: executionMarker.path),
       "Repeated normal launch must not fall back to full verification")
     try replaceNonCriticalLeaf(with: originalLeaf)
 
@@ -3234,20 +3244,26 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
       arguments: ["chrome-extension://dclpfemnpknfdlpcbfcjkmdbnociippd/"],
       resources: resources, support: support, signatureChecker: nativeSignatures,
       coordinator: validCoordinator,
-      replace: { _ in trustedSignedResourceReplacement = true; return 0 })
+      replace: { _ in
+        trustedSignedResourceReplacement = true
+        return 0
+      })
     let launchSignatures = nativeSignatures.snapshot()
-    try check(trustedSignedResourceReplacement && launchSignatures.outer == 0
-      && launchSignatures.code == 0,
+    try check(
+      trustedSignedResourceReplacement && launchSignatures.outer == 0
+        && launchSignatures.code == 0,
       "Normal launch must not perform explicit signature audits")
     do {
-      _ = try validCoordinator.inspectRuntime(resources: resources, support: support,
+      _ = try validCoordinator.inspectRuntime(
+        resources: resources, support: support,
         signatureChecker: nativeSignatures)
       throw TestFailure.failed("Explicit check must still validate the app signature")
     } catch RuntimeBootstrapFailure.code("RUNTIME_SIGNATURE_INVALID") {}
     nativeSignatures.setRejectOuterApplication(false)
     try replaceNonCriticalLeaf(with: Data("tampered-bytes".utf8))
     do {
-      _ = try validCoordinator.inspectRuntime(resources: resources, support: support,
+      _ = try validCoordinator.inspectRuntime(
+        resources: resources, support: support,
         signatureChecker: nativeSignatures)
       throw TestFailure.failed("Explicit check must still detect changed runtime contents")
     } catch RuntimeBootstrapFailure.code("RUNTIME_ARCHIVE_INVALID") {}
@@ -3579,6 +3595,75 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
         && FileManager.default.fileExists(atPath: currentRelease.path)
         && FileManager.default.fileExists(atPath: rollbackRelease.path),
       "Failed pruning must restore the prior descriptor and preserve its rollback release")
+
+    let sharedParent = root.appendingPathComponent("SharedConsumers", isDirectory: true)
+    let sharedRuntime = sharedParent.appendingPathComponent(
+      "MusicMuteLocal/runtime", isDirectory: true)
+    let sharedReleases = sharedRuntime.appendingPathComponent("releases", isDirectory: true)
+    let sharedStaging = sharedRuntime.appendingPathComponent("staging", isDirectory: true)
+    let consumers = sharedRuntime.appendingPathComponent("consumers", isDirectory: true)
+    let workerRoot = sharedParent.appendingPathComponent("MusicMuteWorker", isDirectory: true)
+    for directory in [sharedReleases, sharedStaging, consumers, workerRoot] {
+      try FileManager.default.createDirectory(
+        at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    }
+    for name in ["runtime-current", "runtime-worker", "runtime-unused"] {
+      try FileManager.default.createDirectory(
+        at: sharedReleases.appendingPathComponent(name), withIntermediateDirectories: false,
+        attributes: [.posixPermissions: 0o500])
+    }
+    let serviceID = String(repeating: "b", count: 64)
+    let consumerFile = consumers.appendingPathComponent("\(serviceID).json")
+    let consumerRecord: [String: Any] = [
+      "schema_version": 1, "consumer": "macos-worker", "runtime_id": "runtime-worker",
+      "archive_sha256": String(repeating: "a", count: 64),
+      "worker_root": RuntimePath.canonicalExisting(workerRoot)!, "service_id": serviceID,
+    ]
+    try RuntimeFileSecurity.atomicWrite(
+      JSONSerialization.data(withJSONObject: consumerRecord), to: consumerFile, mode: 0o600)
+    try RuntimeStorageMaintenance.pruneReleases(
+      releases: sharedReleases, staging: sharedStaging, currentID: "runtime-current",
+      previousID: nil)
+    try check(
+      FileManager.default.fileExists(
+        atPath: sharedReleases.appendingPathComponent("runtime-worker").path)
+        && !FileManager.default.fileExists(
+          atPath: sharedReleases.appendingPathComponent("runtime-unused").path),
+      "Prepare must retain an independent worker's exact runtime while pruning unused releases")
+    try RuntimeFileSecurity.atomicWrite(Data("{}".utf8), to: consumerFile, mode: 0o600)
+    do {
+      try RuntimeStorageMaintenance.pruneReleases(
+        releases: sharedReleases, staging: sharedStaging, currentID: "runtime-current",
+        previousID: nil)
+      throw TestFailure.failed("Malformed consumer reference allowed runtime pruning")
+    } catch RuntimeBootstrapFailure.code("RUNTIME_CONSUMER_REFERENCE_INVALID") {}
+    try check(
+      FileManager.default.fileExists(
+        atPath: sharedReleases.appendingPathComponent("runtime-worker").path),
+      "Uncertain references must fail before removing a worker runtime")
+    var booleanRecord = consumerRecord
+    booleanRecord["schema_version"] = true
+    try RuntimeFileSecurity.atomicWrite(
+      JSONSerialization.data(withJSONObject: booleanRecord), to: consumerFile, mode: 0o600)
+    do {
+      _ = try RuntimeStorageMaintenance.referencedRuntimeIDs(releases: sharedReleases)
+      throw TestFailure.failed("Boolean consumer schema version was accepted")
+    } catch RuntimeBootstrapFailure.code("RUNTIME_CONSUMER_REFERENCE_INVALID") {}
+    try FileManager.default.removeItem(at: consumerFile)
+    try FileManager.default.createSymbolicLink(at: consumerFile, withDestinationURL: activeFile)
+    do {
+      _ = try RuntimeStorageMaintenance.referencedRuntimeIDs(releases: sharedReleases)
+      throw TestFailure.failed("Symlink consumer reference was accepted")
+    } catch RuntimeBootstrapFailure.code("RUNTIME_CONSUMER_REFERENCE_INVALID") {}
+    try FileManager.default.removeItem(at: consumerFile)
+    var foreignRecord = consumerRecord
+    foreignRecord["worker_root"] = root.path
+    try RuntimeFileSecurity.atomicWrite(
+      JSONSerialization.data(withJSONObject: foreignRecord), to: consumerFile, mode: 0o600)
+    do {
+      _ = try RuntimeStorageMaintenance.referencedRuntimeIDs(releases: sharedReleases)
+      throw TestFailure.failed("Foreign worker root was accepted as a consumer")
+    } catch RuntimeBootstrapFailure.code("RUNTIME_CONSUMER_REFERENCE_INVALID") {}
 
     let abandoned = maintenanceStaging.appendingPathComponent(
       "install-11111111-2222-3333-4444-555555555555", isDirectory: true)

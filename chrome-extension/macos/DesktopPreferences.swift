@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum DesktopAppearancePreference: String, CaseIterable, Identifiable {
@@ -86,6 +87,17 @@ enum DesktopTextSizePreference: String, CaseIterable, Identifiable {
     }
   }
 
+  var fontScale: CGFloat {
+    switch self {
+    case .system, .standard: 1
+    case .compact: 0.85
+    case .small: 0.92
+    case .large: 1.15
+    case .extraLarge: 1.3
+    case .accessibility: 1.55
+    }
+  }
+
   static func clamped(index: Int) -> Self {
     let adjustableCases: [Self] = [
       .compact, .small, .standard, .large, .extraLarge, .accessibility,
@@ -113,21 +125,75 @@ enum DesktopTextSizePreference: String, CaseIterable, Identifiable {
   }
 }
 
+private struct DesktopTextScaleKey: EnvironmentKey {
+  static let defaultValue: CGFloat = 1
+}
+
+extension EnvironmentValues {
+  var desktopTextScale: CGFloat {
+    get { self[DesktopTextScaleKey.self] }
+    set { self[DesktopTextScaleKey.self] = newValue }
+  }
+}
+
 private struct DesktopTextSizeModifier: ViewModifier {
   let preference: DesktopTextSizePreference
+  @Environment(\.dynamicTypeSize) private var inheritedSize
+  @Environment(\.font) private var inheritedFont
 
-  @ViewBuilder func body(content: Content) -> some View {
-    if let size = preference.dynamicTypeSize {
-      content.dynamicTypeSize(size)
-    } else {
-      content
+  func body(content: Content) -> some View {
+    let bodyFont = NSFont.preferredFont(forTextStyle: .body)
+    let font =
+      preference == .system
+      ? (inheritedFont ?? Font(bodyFont))
+      : Font.system(size: bodyFont.pointSize * preference.fontScale)
+    content
+      .dynamicTypeSize(preference.dynamicTypeSize ?? inheritedSize)
+      .environment(\.desktopTextScale, preference.fontScale)
+      .font(font)
+  }
+}
+
+private struct DesktopSemanticFontModifier: ViewModifier {
+  let style: Font.TextStyle
+  let weight: Font.Weight?
+  let design: Font.Design
+  @Environment(\.desktopTextScale) private var scale
+
+  private var nativeStyle: NSFont.TextStyle {
+    switch style {
+    case .largeTitle: .largeTitle
+    case .title: .title1
+    case .title2: .title2
+    case .title3: .title3
+    case .headline: .headline
+    case .subheadline: .subheadline
+    case .callout: .callout
+    case .footnote: .footnote
+    case .caption: .caption1
+    case .caption2: .caption2
+    default: .body
     }
+  }
+
+  func body(content: Content) -> some View {
+    let pointSize = NSFont.preferredFont(forTextStyle: nativeStyle).pointSize * scale
+    content.font(
+      .system(
+        size: pointSize, weight: weight ?? (style == .headline ? .semibold : .regular),
+        design: design))
   }
 }
 
 extension View {
   func desktopTextSize(_ preference: DesktopTextSizePreference) -> some View {
     modifier(DesktopTextSizeModifier(preference: preference))
+  }
+
+  func desktopFont(
+    _ style: Font.TextStyle, weight: Font.Weight? = nil, design: Font.Design = .default
+  ) -> some View {
+    modifier(DesktopSemanticFontModifier(style: style, weight: weight, design: design))
   }
 }
 
@@ -353,16 +419,59 @@ enum DesktopLanguagePreference: String, CaseIterable, Identifiable {
   }
 }
 
+enum DesktopSettingsSection: String, CaseIterable, Identifiable {
+  case appearance, general, storage, shortcuts, updates
+
+  var id: String { rawValue }
+  var title: String {
+    switch self {
+    case .appearance: "Appearance"
+    case .general: "General"
+    case .storage: "Storage"
+    case .shortcuts: "Shortcuts"
+    case .updates: "App updates"
+    }
+  }
+  var symbol: String {
+    switch self {
+    case .appearance: "paintpalette"
+    case .general: "gearshape"
+    case .storage: "externaldrive"
+    case .shortcuts: "keyboard"
+    case .updates: "arrow.triangle.2.circlepath"
+    }
+  }
+}
+
 struct DesktopPreferencesView: View {
   let workspace: DesktopWorkspace
   @ObservedObject var visualPreferences: DesktopVisualPreferences
+  @ObservedObject var updater: DesktopUpdater
+  let isPreview: Bool
+  @State private var section: DesktopSettingsSection
+  @StateObject private var storageState: DesktopStoragePreferencesState
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @AppStorage(DesktopPreferenceKey.importSource) private var importSourceRaw =
     DesktopImportSourcePreference.youtube.rawValue
   @AppStorage(DesktopPreferenceKey.processingMode) private var processingModeRaw =
     DesktopProcessingPreference.local.rawValue
   @AppStorage(DesktopPreferenceKey.expandPlayer) private var autoExpandPlayer = false
   @AppStorage(DesktopPreferenceKey.restoreLastPage) private var restoreLastPage = true
+
+  init(
+    workspace: DesktopWorkspace, visualPreferences: DesktopVisualPreferences,
+    updater: DesktopUpdater, isPreview: Bool = false,
+    initialSection: DesktopSettingsSection = .appearance
+  ) {
+    self.workspace = workspace
+    self.visualPreferences = visualPreferences
+    self.updater = updater
+    self.isPreview = isPreview
+    _section = State(initialValue: initialSection)
+    _storageState = StateObject(
+      wrappedValue: DesktopStoragePreferencesState(workspace: workspace, isPreview: isPreview))
+  }
 
   private var appearance: Binding<DesktopAppearancePreference> {
     $visualPreferences.appearance
@@ -397,64 +506,102 @@ struct DesktopPreferencesView: View {
   }
 
   var body: some View {
-    Form {
-      Section("Theme") {
-        themePreview
+    TabView(selection: $section) {
+      settingsPane(.appearance) { appearanceSettings }
+      settingsPane(.general) { generalSettings }
+      settingsPane(.storage) {
+        DesktopStoragePreferencesSection(workspace: workspace, state: storageState)
+      }
+      .task { await storageState.loadIfNeeded() }
+      settingsPane(.shortcuts) { shortcutSettings }
+      settingsPane(.updates) {
+        DesktopUpdatesPreferencesSection(updater: updater, isPreview: isPreview)
+      }
+    }
+    .padding(.top, 8)
+    .frame(minWidth: 600, idealWidth: 700, minHeight: 580, idealHeight: 660)
+    .accessibilityIdentifier("desktopPreferences.form")
+    .onAppear(perform: repairMalformedOperationalPreferences)
+  }
 
-        VStack(alignment: .leading, spacing: 10) {
-          Text("Appearance")
-            .font(.callout.weight(.semibold))
+  private func settingsPane<Content: View>(
+    _ section: DesktopSettingsSection, @ViewBuilder content: () -> Content
+  ) -> some View {
+    Form { content() }
+      .formStyle(.grouped)
+      .controlSize(.regular)
+      .tabItem { Label(LocalizedStringKey(section.title), systemImage: section.symbol) }
+      .tag(section)
+      .accessibilityIdentifier("desktopPreferences.pane.\(section.rawValue)")
+  }
+
+  private var appearanceSettings: some View {
+    Section("Theme") {
+      themePreview
+
+      VStack(alignment: .leading, spacing: 10) {
+        Text("Appearance")
+          .desktopFont(.callout, weight: .semibold)
+        ViewThatFits(in: .horizontal) {
           HStack(spacing: 10) {
             ForEach(DesktopAppearancePreference.allCases) { option in
               appearanceButton(option)
             }
           }
-        }
-        .accessibilityIdentifier("desktopPreferences.appearance")
-
-        VStack(alignment: .leading, spacing: 10) {
-          Text("Accent color")
-            .font(.callout.weight(.semibold))
-          HStack(spacing: 14) {
-            ForEach(DesktopAccentPreference.allCases) { option in
-              accentButton(option)
+          VStack(spacing: 8) {
+            ForEach(DesktopAppearancePreference.allCases) { option in
+              appearanceButton(option)
             }
           }
         }
-        .accessibilityIdentifier("desktopPreferences.accent")
-
-        VStack(alignment: .leading, spacing: 10) {
-          HStack {
-            Text("Text size")
-              .font(.callout.weight(.semibold))
-            Spacer()
-            Text(LocalizedStringKey(textSize.wrappedValue.title))
-              .foregroundStyle(.secondary)
-          }
-          ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-              decreaseTextButton
-              increaseTextButton
-              Spacer()
-              resetTextButton
-            }
-            VStack(alignment: .leading, spacing: 8) {
-              HStack(spacing: 8) {
-                decreaseTextButton
-                increaseTextButton
-              }
-              resetTextButton
-            }
-          }
-        }
-        .accessibilityIdentifier("desktopPreferences.textSize")
-
-        Text("System follows your Mac appearance. Text size applies throughout MusicMute.")
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
       }
+      .accessibilityIdentifier("desktopPreferences.appearance")
 
+      VStack(alignment: .leading, spacing: 10) {
+        Text("Accent color")
+          .desktopFont(.callout, weight: .semibold)
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 86), alignment: .leading)], spacing: 10) {
+          ForEach(DesktopAccentPreference.allCases) { option in
+            accentButton(option)
+          }
+        }
+      }
+      .accessibilityIdentifier("desktopPreferences.accent")
+
+      VStack(alignment: .leading, spacing: 10) {
+        HStack {
+          Text("Text size")
+            .desktopFont(.callout, weight: .semibold)
+          Spacer()
+          Text(LocalizedStringKey(textSize.wrappedValue.title))
+            .foregroundStyle(.secondary)
+        }
+        ViewThatFits(in: .horizontal) {
+          HStack(spacing: 8) {
+            decreaseTextButton
+            increaseTextButton
+            Spacer()
+            resetTextButton
+          }
+          VStack(alignment: .leading, spacing: 8) {
+            decreaseTextButton
+            increaseTextButton
+            resetTextButton
+          }
+        }
+      }
+      .accessibilityIdentifier("desktopPreferences.textSize")
+
+      Text("System follows your Mac appearance. Adjust text size for easier reading.")
+        .desktopFont(.footnote)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+  }
+
+  private var generalSettings: some View {
+    Group {
       Section("Language") {
         Picker("Language", selection: language) {
           ForEach(DesktopLanguagePreference.allCases) { option in
@@ -464,7 +611,7 @@ struct DesktopPreferencesView: View {
         .accessibilityIdentifier("desktopPreferences.language")
 
         Text("System follows your Mac language setting.")
-          .font(.footnote)
+          .desktopFont(.footnote)
           .foregroundStyle(.secondary)
       }
 
@@ -488,7 +635,7 @@ struct DesktopPreferencesView: View {
         Text(
           "On this Mac keeps processing local. MusicMute cloud is used only after you start an import."
         )
-        .font(.footnote)
+        .desktopFont(.footnote)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
       }
@@ -501,48 +648,44 @@ struct DesktopPreferencesView: View {
           .accessibilityIdentifier("desktopPreferences.restoreLastPage")
       }
 
-      Section("Keyboard Shortcuts") {
-        Text("Use these shortcuts anywhere in MusicMute. They avoid standard typing commands.")
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-
-        LazyVGrid(
-          columns: [GridItem(.adaptive(minimum: 210), alignment: .leading)], spacing: 8
-        ) {
-          ForEach(DesktopAppShortcut.allCases) { shortcut in
-            HStack(spacing: 10) {
-              Text(LocalizedStringKey(shortcut.title))
-                .lineLimit(2)
-              Spacer(minLength: 8)
-              Text(shortcut.display)
-                .font(.caption.monospaced().weight(.semibold))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-                .accessibilityLabel(shortcut.display)
-            }
-          }
-        }
-        .accessibilityIdentifier("desktopPreferences.keyboardShortcuts")
-      }
-
-      DesktopStoragePreferencesSection(workspace: workspace)
-
       Section {
         Text(
           "These preferences stay on this Mac. Changing a default does not upload media or start processing."
         )
-        .font(.footnote)
+        .desktopFont(.footnote)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
       }
     }
-    .formStyle(.grouped)
-    .controlSize(.regular)
-    .frame(minWidth: 560, idealWidth: 640, minHeight: 540)
-    .accessibilityIdentifier("desktopPreferences.form")
-    .onAppear(perform: repairMalformedOperationalPreferences)
+  }
+
+  private var shortcutSettings: some View {
+    Section("Keyboard Shortcuts") {
+      Text("Use these shortcuts anywhere in MusicMute. They avoid standard typing commands.")
+        .desktopFont(.footnote)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+
+      LazyVGrid(
+        columns: [GridItem(.adaptive(minimum: 210), alignment: .leading)], spacing: 8
+      ) {
+        ForEach(DesktopAppShortcut.allCases) { shortcut in
+          HStack(spacing: 10) {
+            Text(LocalizedStringKey(shortcut.title))
+              .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Text(shortcut.display)
+              .desktopFont(.caption, weight: .semibold, design: .monospaced)
+              .padding(.horizontal, 8)
+              .padding(.vertical, 4)
+              .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+              .accessibilityLabel(shortcut.display)
+          }
+        }
+      }
+      .accessibilityIdentifier("desktopPreferences.keyboardShortcuts")
+    }
+
   }
 
   private func repairMalformedOperationalPreferences() {
@@ -560,31 +703,30 @@ struct DesktopPreferencesView: View {
         RoundedRectangle(cornerRadius: 12)
           .fill(accent.wrappedValue.color.opacity(0.16))
         Image(systemName: "waveform")
-          .font(.title2.weight(.semibold))
+          .desktopFont(.title2, weight: .semibold)
           .foregroundStyle(accent.wrappedValue.color)
       }
-      .frame(width: 52, height: 52)
+      .frame(width: 40, height: 40)
 
       VStack(alignment: .leading, spacing: 4) {
         Text("MusicMute")
-          .font(.headline)
+          .desktopFont(.headline)
         Text("Voice ready")
-          .font(.subheadline)
+          .desktopFont(.subheadline)
           .foregroundStyle(.secondary)
       }
 
       Spacer()
 
-      Image(systemName: "play.fill")
-        .font(.headline)
-        .foregroundStyle(accentForeground)
-        .frame(width: 36, height: 36)
-        .background(accent.wrappedValue.color, in: Circle())
+      Text("Aa")
+        .desktopFont(.title2, weight: .semibold)
+        .foregroundStyle(accent.wrappedValue.color)
+        .accessibilityHidden(true)
     }
-    .padding(16)
-    .background(Brand.raised, in: RoundedRectangle(cornerRadius: 16))
+    .padding(12)
+    .background(Brand.raised, in: RoundedRectangle(cornerRadius: 12))
     .overlay {
-      RoundedRectangle(cornerRadius: 16)
+      RoundedRectangle(cornerRadius: 12)
         .stroke(Brand.border, lineWidth: 1)
     }
     .accessibilityElement(children: .combine)
@@ -626,21 +768,35 @@ struct DesktopPreferencesView: View {
     } label: {
       VStack(spacing: 7) {
         Image(systemName: appearanceSymbol(option))
-          .font(.title3)
+          .desktopFont(.title3)
         Text(LocalizedStringKey(option.title))
-          .font(.caption.weight(.medium))
+          .desktopFont(.caption, weight: .medium)
       }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 10)
       .frame(maxWidth: .infinity, minHeight: 58)
+      .fixedSize(horizontal: false, vertical: true)
       .background(selected ? accent.wrappedValue.color.opacity(0.14) : Color.clear)
       .overlay {
         RoundedRectangle(cornerRadius: 10)
           .stroke(selected ? accent.wrappedValue.color : Brand.border, lineWidth: selected ? 2 : 1)
       }
       .clipShape(RoundedRectangle(cornerRadius: 10))
+      .overlay(alignment: .topTrailing) {
+        Image(systemName: "checkmark.circle.fill")
+          .desktopFont(.caption)
+          .foregroundStyle(accent.wrappedValue.color)
+          .opacity(selected ? 1 : 0)
+          .padding(6)
+          .accessibilityHidden(true)
+      }
+      .contentShape(RoundedRectangle(cornerRadius: 10))
+      .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: selected)
     }
     .buttonStyle(.plain)
     .accessibilityLabel(LocalizedStringKey(option.title))
     .accessibilityAddTraits(selected ? .isSelected : [])
+    .accessibilityIdentifier("desktopPreferences.appearance.\(option.rawValue)")
   }
 
   private func appearanceSymbol(_ option: DesktopAppearancePreference) -> String {
@@ -663,19 +819,27 @@ struct DesktopPreferencesView: View {
             .frame(width: 28, height: 28)
           if selected {
             Image(systemName: "checkmark")
-              .font(.caption.bold())
+              .desktopFont(.caption, weight: .bold)
               .foregroundStyle(accentForeground)
           }
         }
         Text(LocalizedStringKey(option.title))
-          .font(.caption2)
+          .desktopFont(.caption2)
           .foregroundStyle(.primary)
       }
-      .frame(minWidth: 54)
+      .frame(maxWidth: .infinity, minHeight: 56)
+      .padding(6)
+      .background(
+        selected ? accent.wrappedValue.color.opacity(0.12) : .clear,
+        in: RoundedRectangle(cornerRadius: 10)
+      )
+      .contentShape(RoundedRectangle(cornerRadius: 10))
+      .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: selected)
     }
     .buttonStyle(.plain)
     .accessibilityLabel(LocalizedStringKey(option.title))
     .accessibilityAddTraits(selected ? .isSelected : [])
+    .accessibilityIdentifier("desktopPreferences.accent.\(option.rawValue)")
   }
 
   private var accentForeground: Color {
@@ -683,123 +847,220 @@ struct DesktopPreferencesView: View {
   }
 }
 
+private struct DesktopUpdatesPreferencesSection: View {
+  @ObservedObject var updater: DesktopUpdater
+  let isPreview: Bool
+
+  var body: some View {
+    Section("App updates") {
+      Toggle("Automatically check for updates", isOn: $updater.automaticChecksEnabled)
+        .disabled(!updater.canConfigureAutomaticChecks || isPreview)
+        .accessibilityIdentifier("desktopPreferences.automaticUpdates")
+      Label(
+        LocalizedStringKey(updater.status),
+        systemImage: updater.configured ? "info.circle" : "info.circle.fill"
+      )
+      .desktopFont(.callout)
+      .foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
+      Button("Check for Updates…") { updater.checkForUpdates() }
+        .disabled(!updater.canCheck || isPreview)
+        .accessibilityIdentifier("desktopPreferences.checkForUpdates")
+    }
+  }
+}
+
+struct DesktopStorageLimitDraft {
+  var text = ""
+  private(set) var referenceBytes: Int64?
+
+  var hasChanges: Bool {
+    guard let referenceBytes else { return !text.isEmpty }
+    return DesktopOfflineStoragePolicy.bytes(gigabytes: text) != referenceBytes
+  }
+
+  mutating func receive(bytes: Int64, replaceEdits: Bool = false) {
+    let preserve = referenceBytes != nil && hasChanges && !replaceEdits
+    if !preserve { text = DesktopOfflineStoragePolicy.gigabytes(bytes) }
+    referenceBytes = bytes
+  }
+}
+
+@MainActor final class DesktopStoragePreferencesState: ObservableObject {
+  @Published var draft = DesktopStorageLimitDraft()
+  @Published private(set) var loadingStorage = false
+  @Published private(set) var storageLoadFailed = false
+  @Published private(set) var hasLoadedStorage = false
+  let isPreview: Bool
+  private let workspace: DesktopWorkspace
+  private let loadCache: @MainActor () async -> Bool
+  private var attemptedInitialLoad = false
+
+  init(
+    workspace: DesktopWorkspace, isPreview: Bool = false,
+    loadCache: (@MainActor () async -> Bool)? = nil
+  ) {
+    self.workspace = workspace
+    self.isPreview = isPreview
+    self.loadCache = loadCache ?? { await workspace.loadCache() }
+  }
+
+  func loadIfNeeded() async {
+    guard !attemptedInitialLoad else { return }
+    attemptedInitialLoad = true
+    if isPreview {
+      draft.receive(bytes: workspace.budgetBytes)
+      hasLoadedStorage = true
+    } else {
+      await reloadStorage()
+    }
+  }
+
+  func reloadStorage() async {
+    guard !loadingStorage, !isPreview else { return }
+    guard !workspace.storageOperationBusy else {
+      storageLoadFailed = true
+      hasLoadedStorage = false
+      return
+    }
+    loadingStorage = true
+    defer { loadingStorage = false }
+    let loaded = await loadCache()
+    // A launched native request owns its completion even if the presenting tab's
+    // task was cancelled. Always settle this window-owned state and its retry path.
+    storageLoadFailed = !loaded
+    hasLoadedStorage = loaded
+    if loaded { draft.receive(bytes: workspace.budgetBytes) }
+  }
+}
+
 private struct DesktopStoragePreferencesSection: View {
   @ObservedObject var workspace: DesktopWorkspace
+  @ObservedObject var state: DesktopStoragePreferencesState
   @State private var confirmClearOfflineVoices = false
-  @State private var storageGigabytes = "2"
-  @State private var loadingStorage = false
-  @State private var storageLoadFailed = false
+  @FocusState private var editingLimit: Bool
+  @Environment(\.locale) private var locale
 
   private var storageBusy: Bool {
-    loadingStorage || workspace.processing || workspace.clearingCache || workspace.savingCacheBudget
+    state.loadingStorage || workspace.storageOperationBusy
+  }
+  private var canChangeStorage: Bool {
+    state.hasLoadedStorage && !storageBusy && !state.isPreview
+  }
+  private var canSave: Bool {
+    canChangeStorage && DesktopOfflineStoragePolicy.bytes(gigabytes: state.draft.text) != nil
+      && state.draft.hasChanges
   }
 
   var body: some View {
-    Section("Storage") {
-      LabeledContent("Offline voices") {
-        Text("\(bytesLabel(workspace.cacheBytes)) of \(bytesLabel(workspace.budgetBytes))")
-          .foregroundStyle(.secondary)
-      }
-      if loadingStorage {
-        ProgressView().controlSize(.small)
-      } else if storageLoadFailed {
+    Group {
+      Section("Storage") {
+        LabeledContent("Offline voices") {
+          if state.hasLoadedStorage {
+            Text("\(storageSize(workspace.cacheBytes)) of \(storageSize(workspace.budgetBytes))")
+              .foregroundStyle(.secondary)
+          } else {
+            Text(LocalizedStringKey(state.loadingStorage ? "Loading storage…" : "Unavailable"))
+              .foregroundStyle(.secondary)
+          }
+        }
+        if state.loadingStorage {
+          ProgressView().controlSize(.small)
+        } else if state.storageLoadFailed {
+          Label(
+            "The saved storage limit could not be read. Finish the current MusicMute operation, then retry.",
+            systemImage: "exclamationmark.circle"
+          )
+          .desktopFont(.callout)
+          .foregroundStyle(Brand.amber)
+          .fixedSize(horizontal: false, vertical: true)
+          Button("Retry") { Task { await state.reloadStorage() } }
+            .disabled(storageBusy || state.isPreview)
+            .accessibilityIdentifier("desktopPreferences.retryStorage")
+        }
+
+        LabeledContent("Offline voice storage limit") {
+          HStack(spacing: 8) {
+            TextField("", text: $state.draft.text)
+              .textFieldStyle(.roundedBorder)
+              .labelsHidden()
+              .frame(width: 110)
+              .disabled(!canChangeStorage)
+              .focused($editingLimit)
+              .onSubmit { saveLimit() }
+              .accessibilityLabel("Offline voice storage limit in GB")
+              .accessibilityIdentifier("desktopPreferences.offlineStorageLimit")
+            Text("GB").foregroundStyle(.secondary)
+          }
+        }
+
+        ViewThatFits(in: .horizontal) {
+          HStack(spacing: 8) { storageActions }
+          VStack(alignment: .leading, spacing: 8) { storageActions }
+        }
         Text(
-          "The saved storage limit could not be read. Finish the current MusicMute operation, then reopen Settings."
+          "Choose a whole number of GB, starting at 1. The default is 2 GB, shared with the Chrome extension. Lowering the limit removes older unused voices only when space is next needed; active playback and pending account saves stay protected."
         )
-        .font(.footnote)
+        .desktopFont(.footnote)
         .foregroundStyle(.secondary)
-      }
+        .fixedSize(horizontal: false, vertical: true)
 
-      LabeledContent("Offline voice storage limit") {
+        if state.hasLoadedStorage
+          && DesktopOfflineStoragePolicy.bytes(gigabytes: state.draft.text) == nil
+        {
+          Text("Enter a whole number from 1 to 9,007,199 GB.")
+            .desktopFont(.footnote)
+            .foregroundStyle(Brand.amber)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("desktopPreferences.storageValidation")
+        }
+        if let status = workspace.cacheBudgetStatus {
+          Label(
+            LocalizedStringKey(status),
+            systemImage: workspace.savingCacheBudget ? "hourglass" : "info.circle"
+          )
+          .desktopFont(.footnote)
+          .foregroundStyle(.secondary)
+          .accessibilityIdentifier("desktopPreferences.offlineStorageStatus")
+        }
+      }
+      Section("Clear Offline Voices") {
+        Text(
+          "Clearing stops current MusicMute playback, then removes eligible voice copies from this Mac. Other voices pinned by extension playback or pending account saves stay protected."
+        )
+        .desktopFont(.footnote)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
         HStack {
-          TextField("GB", text: $storageGigabytes)
-            .textFieldStyle(.roundedBorder)
-            .frame(width: 110)
-            .disabled(storageBusy)
-            .accessibilityLabel("Offline voice storage limit in GB")
-            .accessibilityIdentifier("desktopPreferences.offlineStorageLimit")
-          Text("GB").foregroundStyle(.secondary)
+          Button("Clear Offline Voices…", role: .destructive) { confirmClearOfflineVoices = true }
+            .disabled(!canChangeStorage)
+            .accessibilityIdentifier("desktopPreferences.clearOfflineVoices")
+          if workspace.clearingCache { ProgressView().controlSize(.small) }
         }
-      }
-
-      HStack {
-        Button("Save Storage Limit") {
-          Task { await workspace.saveOfflineStorageLimit(gigabytes: storageGigabytes) }
-        }
-        .disabled(
-          storageBusy || DesktopOfflineStoragePolicy.bytes(gigabytes: storageGigabytes) == nil
-            || DesktopOfflineStoragePolicy.bytes(gigabytes: storageGigabytes)
-              == workspace.budgetBytes
-        )
-        .accessibilityIdentifier("desktopPreferences.saveOfflineStorageLimit")
-        Button("Use Default (2 GB)") {
-          storageGigabytes = "2"
-          Task { await workspace.saveOfflineStorageLimit(gigabytes: "2") }
-        }
-        .disabled(storageBusy || workspace.budgetBytes == DesktopOfflineStoragePolicy.defaultBytes)
-        .accessibilityIdentifier("desktopPreferences.defaultOfflineStorageLimit")
-        if workspace.savingCacheBudget { ProgressView().controlSize(.small) }
-      }
-
-      Text(
-        "Choose a whole number of GB, starting at 1. The default is 2 GB, shared with the Chrome extension. Lowering the limit removes older unused voices only when space is next needed; active playback and pending account saves stay protected."
-      )
-      .font(.footnote)
-      .foregroundStyle(.secondary)
-      .fixedSize(horizontal: false, vertical: true)
-
-      if DesktopOfflineStoragePolicy.bytes(gigabytes: storageGigabytes) == nil {
-        Text("Enter a whole number of GB, starting at 1.")
-          .font(.footnote)
+        if let count = workspace.cacheClearedEntries, count > 0 {
+          Text("Removed \(count) eligible offline voices from this Mac.")
+            .desktopFont(.footnote)
+            .foregroundStyle(.secondary)
+        } else if let status = workspace.cacheClearStatus {
+          Label(
+            LocalizedStringKey(status),
+            systemImage: workspace.clearingCache ? "hourglass" : "info.circle"
+          )
+          .desktopFont(.footnote)
           .foregroundStyle(.secondary)
-      }
-      if let status = workspace.cacheBudgetStatus {
-        Label(
-          LocalizedStringKey(status),
-          systemImage: workspace.savingCacheBudget ? "hourglass" : "info.circle"
-        )
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .accessibilityIdentifier("desktopPreferences.offlineStorageStatus")
-      }
-
-      HStack {
-        Button("Clear Offline Voices…", role: .destructive) {
-          confirmClearOfflineVoices = true
+          .fixedSize(horizontal: false, vertical: true)
         }
-        .disabled(storageBusy)
-        .accessibilityIdentifier("desktopPreferences.clearOfflineVoices")
-        if workspace.clearingCache { ProgressView().controlSize(.small) }
-      }
-
-      Text(
-        "Clearing stops current MusicMute playback, then removes eligible voice copies from this Mac. Other voices pinned by extension playback or pending account saves stay protected."
-      )
-      .font(.footnote)
-      .foregroundStyle(.secondary)
-      .fixedSize(horizontal: false, vertical: true)
-
-      if let status = workspace.cacheClearStatus {
-        Label(status, systemImage: workspace.clearingCache ? "hourglass" : "info.circle")
-          .font(.footnote)
-          .foregroundStyle(.secondary)
       }
     }
-    .onAppear { storageGigabytes = DesktopOfflineStoragePolicy.gigabytes(workspace.budgetBytes) }
-    .task {
-      loadingStorage = true
-      defer { loadingStorage = false }
-      storageLoadFailed = !(await workspace.loadCache())
-      storageGigabytes = DesktopOfflineStoragePolicy.gigabytes(workspace.budgetBytes)
-    }
-    .onChange(of: workspace.budgetBytes) { _, bytes in
-      storageGigabytes = DesktopOfflineStoragePolicy.gigabytes(bytes)
+    .onChange(of: workspace.budgetBytes, initial: true) { _, bytes in
+      guard state.hasLoadedStorage else { return }
+      state.draft.receive(bytes: bytes)
     }
     .confirmationDialog(
-      "Clear eligible offline voices from this Mac?",
-      isPresented: $confirmClearOfflineVoices
+      "Clear eligible offline voices from this Mac?", isPresented: $confirmClearOfflineVoices
     ) {
       Button("Clear Offline Voices", role: .destructive) {
+        guard canChangeStorage else { return }
         Task { await workspace.clearOfflineVoices() }
       }
       Button("Cancel", role: .cancel) {}
@@ -809,4 +1070,41 @@ private struct DesktopStoragePreferencesSection: View {
       )
     }
   }
+
+  @ViewBuilder private var storageActions: some View {
+    Button("Save Storage Limit") { saveLimit() }
+      .disabled(!canSave)
+      .accessibilityIdentifier("desktopPreferences.saveOfflineStorageLimit")
+    Button("Use Default (2 GB)") {
+      guard canChangeStorage else { return }
+      state.draft.text = "2"
+      saveLimit()
+    }
+    .disabled(
+      !canChangeStorage
+        || (workspace.budgetBytes == DesktopOfflineStoragePolicy.defaultBytes
+          && !state.draft.hasChanges)
+    )
+    .accessibilityIdentifier("desktopPreferences.defaultOfflineStorageLimit")
+    if workspace.savingCacheBudget { ProgressView().controlSize(.small) }
+  }
+
+  private func storageSize(_ bytes: Int64) -> String {
+    bytes.formatted(
+      .byteCount(style: .file, allowedUnits: .all, spellsOutZero: false).locale(locale))
+  }
+
+  private func saveLimit() {
+    guard canSave else { return }
+    let submitted = state.draft.text
+    editingLimit = false
+    Task {
+      await workspace.saveOfflineStorageLimit(gigabytes: submitted)
+      guard state.draft.text == submitted,
+        DesktopOfflineStoragePolicy.bytes(gigabytes: submitted) == workspace.budgetBytes
+      else { return }
+      state.draft.receive(bytes: workspace.budgetBytes, replaceEdits: true)
+    }
+  }
+
 }

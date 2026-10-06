@@ -344,6 +344,24 @@ before planned maintenance and `mw.cmd resume` when ready to accept work again.
 
 ## macOS per-user CLI and LaunchAgent
 
+The MusicMute macOS app can also install and manage this worker through its native
+Worker screen. The complete supervisor, operator and Python engine code is copied
+into versioned `MusicMuteWorker` releases outside the replaceable app. An explicit
+app-managed release binding reuses the prepared `MusicMuteLocal` runtime and fixed
+model; private runtime references retain the active and rollback releases.
+The enabled per-user LaunchAgent starts at login and processes backend jobs while
+the GUI is closed, provided the user remains logged in, the Mac is awake and macOS
+allows background execution. App and Chrome personal audio share GPU admission
+with the fleet worker: accepted fleet attempts finish before a personal turn.
+
+Adoption preserves pairing, machine/slot identities, credentials, lifecycle intent
+and recovery state. The current source CLI understands both standalone and
+app-managed release formats. An older globally installed CLI may not understand
+the app-managed format; after adoption use the generated private support interface
+at `~/Library/Application Support/MusicMuteWorker/bin/mw`. The app does not modify
+global npm installations. See the [integration contract and validation ledger](../chrome-extension/docs/macos-worker-integration.md)
+for source, fixture and packaged evidence and their limits.
+
 The public MVP entry point is a current-user install with no `sudo`:
 
 ```bash

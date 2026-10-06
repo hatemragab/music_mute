@@ -18,6 +18,8 @@ const output = join(
 await mkdir(output, { recursive: true, mode: 0o700 });
 const sources = [
   "Models.swift",
+  "DesktopWorker.swift",
+  "DesktopWorkerView.swift",
   "DesktopCloudHandoff.swift",
   "ProcessBridge.swift",
   "UIJournal.swift",
@@ -55,6 +57,8 @@ for (const name of [
   "DesktopTests",
   "UpdaterTests",
   "BrowserProcessingBridgeTests",
+  "WorkerTests",
+  "SettingsTests",
 ]) {
   const binary = join(output, name);
   await exec(

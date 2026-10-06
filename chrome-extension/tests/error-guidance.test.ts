@@ -13,6 +13,25 @@ import { isExtensionMessage } from "../src/extension/messages";
 
 describe("safe user guidance and local reports", () => {
   it.each([
+    ["WORKER_UPDATE_REQUIRED", "update or move"],
+    ["WORKER_MAINTENANCE_BUSY", "Wait for that operation"],
+    ["WORKER_PERSONAL_BUSY", "Another local preparation"],
+    ["WORKER_WAIT_TIMEOUT", "accepted background job"],
+    ["WORKER_COORDINATION_UNSAFE", "Worker diagnostics"],
+    ["WORKER_COORDINATION_UNAVAILABLE", "Worker diagnostics"],
+    ["ENGINE_EXIT_UNCONFIRMED", "Worker diagnostics"],
+  ])(
+    "explains %s as local GPU coordination rather than internet or account failure",
+    (code, fragment) => {
+      const guidance = failureGuidance(code);
+      expect(guidance.message).toContain(fragment);
+      expect(guidance.message).not.toMatch(/internet|sign in|Prepare my Mac/i);
+      expect(guidance.openApp).toBe(true);
+      expect(guidance.cloud).toBe(false);
+      expect(guidance.cloudPrimary).toBe(false);
+    },
+  );
+  it.each([
     ["ACCOUNT_REQUIRED", "sign in to the account"],
     ["ACCOUNT_SESSION_UNAVAILABLE", "sign in again"],
     ["PROCESSING_SELECTION_CHANGED", "saved processing choice changed"],

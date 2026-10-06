@@ -53,6 +53,7 @@ import {
   publicAttemptProgress,
 } from "./progress-reporter.js";
 import type { RuntimeCommandExecutor } from "./remote-command-executor.js";
+import type { PersonalAdmission } from "./personal-admission.js";
 
 export interface RuntimeSlotDefinition {
   workerId: string;
@@ -82,6 +83,8 @@ export interface WorkerRuntimeOptions {
   resources?: Pick<RuntimeResourceGate, "assertAvailable">;
   commandExecutor?: RuntimeCommandExecutor;
   maintenancePending?: () => Promise<boolean>;
+  deferPreloadForMaintenance?: boolean;
+  personalAdmission?: PersonalAdmission;
   onEvent?: (event: RuntimeEvent) => void;
   hintClientFactory?: (onHint: () => void) => RuntimeHintClient;
 }
@@ -339,6 +342,7 @@ export class WorkerRuntime {
   private lastSuccessfulJob?: RuntimeJobSummary;
   private lastFailedJob?: RuntimeJobSummary & { code: string };
   private started = false;
+  private childrenSuspended = false;
   private stopPromise: Promise<void> | undefined;
   private wakeResolver: (() => void) | null = null;
   private wakeGeneration = 0;
@@ -385,16 +389,26 @@ export class WorkerRuntime {
     if (this.started) throw new Error("Worker runtime has already started");
     await this.diagnostics.initialize();
     await this.workspace.initialize();
+    await this.options.personalAdmission?.start(() => this.wake());
     this.childState = "loading";
     await this.publishLocalStatus();
     try {
-      await this.supervisor.start((_workerId, stage) => {
-        this.childState = stage;
-        void this.publishLocalStatus().catch(() => undefined);
-      });
-      this.childState = "ready";
-      for (const slot of this.options.slots)
-        this.emitModelReady(slot, "initial-start");
+      if (
+        this.options.personalAdmission?.pending() ||
+        (this.options.deferPreloadForMaintenance === true &&
+          (await this.options.maintenancePending?.()))
+      ) {
+        this.childrenSuspended = true;
+        this.childState = "stopped";
+      } else {
+        await this.supervisor.start((_workerId, stage) => {
+          this.childState = stage;
+          void this.publishLocalStatus().catch(() => undefined);
+        });
+        this.childState = "ready";
+        for (const slot of this.options.slots)
+          this.emitModelReady(slot, "initial-start");
+      }
     } catch (error) {
       this.childState = "unavailable";
       await this.publishLocalStatus();
@@ -452,7 +466,12 @@ export class WorkerRuntime {
             (_event, filename) => {
               if (
                 filename === null ||
-                String(filename) === basename(lifecyclePath)
+                [
+                  basename(lifecyclePath),
+                  "app-maintenance.json",
+                  "app-preparation.json",
+                  "update.json",
+                ].includes(String(filename))
               )
                 this.wake();
             },
@@ -490,8 +509,10 @@ export class WorkerRuntime {
         if (this.stopping.signal.aborted) break;
         const deferredMs = this.reconcileNotBefore - Date.now();
         if (deferredMs > 0)
-          await abortableDelay(deferredMs, this.stopping.signal).catch(
-            () => undefined,
+          await this.waitForWake(
+            deferredMs,
+            wakeGeneration,
+            this.stopping.signal,
           );
         else
           await this.waitForWake(
@@ -513,7 +534,13 @@ export class WorkerRuntime {
     // Only the serialized claim loop acknowledges intent. A progress/status
     // callback must never acknowledge drain while a claim is still in flight.
     await this.observeLocalLifecycle();
-    if (await this.options.maintenancePending?.()) {
+    // Physical ownership does not depend on a healthy control plane. Uncertain
+    // claim IDs remain an absolute fence until replay resolves their ownership.
+    const yielded = await this.yieldPersonalIfIdle();
+    if (
+      (await this.options.maintenancePending?.()) &&
+      this.pendingClaims.size === 0
+    ) {
       await this.publishLocalStatus();
       return 0;
     }
@@ -522,30 +549,56 @@ export class WorkerRuntime {
     try {
       config = await this.synchronizeConfig();
     } catch (error) {
+      if (yielded && error instanceof ControlPlaneError && error.retryable)
+        return 0;
       if (this.deferReconciliation(error)) return 0;
       throw error;
     }
     await this.publishLocalStatus();
-    await this.processRemoteCommands(config);
-    this.detectIdleChildExit();
-    await this.recoverChildren();
-    await this.recoverResources();
+    const personal = this.options.personalAdmission;
+    await this.processRemoteCommands(config, !personal?.pending());
+    if (yielded || (await this.yieldPersonalIfIdle())) return 0;
+    if (this.childrenSuspended) {
+      if (personal?.pending()) return 0;
+      await this.supervisor.start((_workerId, stage) => {
+        this.childState = stage;
+        void this.publishLocalStatus().catch(() => undefined);
+      });
+      this.childrenSuspended = false;
+      this.childState = "ready";
+      for (const slot of this.options.slots)
+        this.emitModelReady(slot, "slot-recovery");
+      await this.publishLocalStatus();
+    }
+    if (!personal?.pending()) {
+      this.detectIdleChildExit();
+      await this.recoverChildren();
+      await this.recoverResources();
+    }
     await this.publishLocalStatus();
-    if (
-      this.diagnosticRecordingFailed ||
-      !(await this.diagnostics.canAdmitJobs())
-    )
-      return 0;
+    const canAdmit =
+      !this.diagnosticRecordingFailed &&
+      (await this.diagnostics.canAdmitJobs());
+    if (!canAdmit && this.pendingClaims.size === 0) return 0;
     const idle = this.options.slots.filter(
       (slot) =>
-        !this.busy.has(slot.workerId) && !this.unavailable.has(slot.workerId),
+        !this.busy.has(slot.workerId) &&
+        (this.pendingClaims.has(slot.workerId) ||
+          !this.unavailable.has(slot.workerId)),
     );
     if (idle.length === 0) return 0;
-    if (!config.claimAllowed) return 0;
+    if (!config.claimAllowed && this.pendingClaims.size === 0) return 0;
     let claimed = 0;
     for (const slot of idle) {
-      if (!(await this.observeLocalLifecycle())) return claimed;
-      if (await this.options.maintenancePending?.()) return claimed;
+      const uncertain = this.pendingClaims.has(slot.workerId);
+      if (!canAdmit && !uncertain) continue;
+      if (!(await this.observeLocalLifecycle()) && !uncertain) continue;
+      if ((await this.options.maintenancePending?.()) && !uncertain) continue;
+      if (!config.claimAllowed && !uncertain) continue;
+      // Resolve uncertain claims with the same request ID before yielding;
+      // only fresh claims are blocked by a personal reservation.
+      if (personal?.pending() && !this.pendingClaims.has(slot.workerId))
+        continue;
       const requestId = this.pendingClaims.get(slot.workerId) ?? randomUUID();
       this.pendingClaims.set(slot.workerId, requestId);
       let response: Awaited<ReturnType<RuntimeControlPlane["claim"]>>;
@@ -598,6 +651,7 @@ export class WorkerRuntime {
       this.busy.set(slot.workerId, attempt);
       await this.publishLocalStatus();
     }
+    await this.observeLocalLifecycle();
     return claimed;
   }
 
@@ -618,6 +672,7 @@ export class WorkerRuntime {
     request: () => Promise<T>,
   ): Promise<T> {
     for (let attempt = 0; !this.stopping.signal.aborted; attempt += 1) {
+      await this.yieldPersonalIfIdle();
       try {
         return await request();
       } catch (error) {
@@ -627,10 +682,33 @@ export class WorkerRuntime {
           60_000,
           Math.max(200, error.retryAfterMs ?? 500 * 2 ** Math.min(attempt, 6)),
         );
-        await abortableDelay(delayMs, this.stopping.signal);
+        await this.waitForWake(
+          delayMs,
+          this.wakeGeneration,
+          this.stopping.signal,
+        );
       }
     }
     throw this.stopping.signal.reason;
+  }
+
+  private async yieldPersonalIfIdle(): Promise<boolean> {
+    const personal = this.options.personalAdmission;
+    if (
+      !personal?.pending() ||
+      this.busy.size !== 0 ||
+      this.pendingClaims.size !== 0 ||
+      (await this.options.maintenancePending?.())
+    )
+      return false;
+    if (!this.childrenSuspended) {
+      await this.supervisor.stop();
+      this.childrenSuspended = true;
+      this.childState = "stopped";
+    }
+    await this.publishLocalStatus();
+    await personal.grant();
+    return true;
   }
 
   hintAvailableWork(): void {
@@ -664,17 +742,20 @@ export class WorkerRuntime {
         await this.publishLocalStatus();
       } finally {
         await this.diagnostics.flush();
+        await this.options.personalAdmission?.stop();
       }
     }
   }
 
   private async observeLocalLifecycle(): Promise<boolean> {
     if (this.options.localLifecyclePath === undefined) return true;
-    this.observedLifecycle = await loadLocalLifecycle(
-      this.options.localLifecyclePath,
-    );
+    const requested = await loadLocalLifecycle(this.options.localLifecyclePath);
+    // A drain ACK plus an empty active-attempt list is a physical-stop promise.
+    // Do not acknowledge it while a lost claim response might own a real job.
+    if (this.pendingClaims.size === 0 || requested.intent === "active")
+      this.observedLifecycle = requested;
     await this.publishLocalStatus();
-    return localLifecycleAllowsClaims(this.observedLifecycle);
+    return localLifecycleAllowsClaims(requested);
   }
 
   private async publishLocalStatus(): Promise<void> {
@@ -1320,7 +1401,10 @@ export class WorkerRuntime {
     throw lastError ?? new TransferError("OUTPUT_UPLOAD_FAILED", true);
   }
 
-  private async processRemoteCommands(config: ConfigResponse): Promise<void> {
+  private async processRemoteCommands(
+    config: ConfigResponse,
+    allowExecution = true,
+  ): Promise<void> {
     const executor = this.options.commandExecutor;
     if (!executor) return;
     const serverTime = Date.parse(config.serverTime);
@@ -1329,6 +1413,8 @@ export class WorkerRuntime {
       if (command.kind === "benchmark" && this.busy.size > 0) continue;
       let pending = this.pendingCommandResults.get(command.commandId);
       if (!pending) {
+        if (!allowExecution || this.options.personalAdmission?.pending())
+          continue;
         this.emit({
           kind: "command-started",
           code: command.kind,

@@ -26,6 +26,7 @@ export function createAcceptanceFixture({
   claimsEnabled = () => existsSync(`${outputPath}.claims-enabled`),
   corruptInputSlot = null,
   cancelOnSeparationSlot = null,
+  jobsPerSlot = 1,
 }) {
   if (
     !UUID.test(config.machineId) ||
@@ -36,14 +37,16 @@ export function createAcceptanceFixture({
     recipes.length !== 2 ||
     recipes.some((recipe, index) => recipe.recipeId !== recipeIds[index]) ||
     ![null, 0, 1].includes(corruptInputSlot) ||
-    ![null, 0, 1].includes(cancelOnSeparationSlot)
+    ![null, 0, 1].includes(cancelOnSeparationSlot) ||
+    !Number.isSafeInteger(jobsPerSlot) ||
+    jobsPerSlot < 1 ||
+    jobsPerSlot > 4
   )
     throw new Error("Acceptance fixture configuration is invalid");
   for (const suffix of [
     ".evidence.json",
     ".evidence.tmp",
-    ".0.mp3",
-    ".1.mp3",
+    ...Array.from({ length: jobsPerSlot * 2 }, (_, index) => `.${index}.mp3`),
     ".claims-enabled",
   ]) {
     if (existsSync(`${outputPath}${suffix}`))
@@ -56,11 +59,11 @@ export function createAcceptanceFixture({
   let diagnosticCursor = 0;
   let maxActiveAttempts = 0;
   const requests = {};
-  const jobs = recipes.map((recipe, index) => ({
+  const jobs = Array.from({ length: jobsPerSlot * 2 }, (_, index) => ({
     attemptId: randomUUID(),
     jobId: `64b00000000000000000000${index + 1}`,
-    recipe,
-    slotIndex: index,
+    recipe: recipes[index % 2],
+    slotIndex: index % 2,
     workerId: null,
     status: "waiting",
     claim: null,
@@ -219,8 +222,20 @@ export function createAcceptanceFixture({
             serverTime: now,
           });
         }
-        const job = jobs[body.slotIndex];
-        if (!claimsEnabled() || job.status !== "waiting") {
+        const job = jobs.find(
+          (candidate) =>
+            candidate.slotIndex === body.slotIndex &&
+            candidate.status === "waiting",
+        );
+        if (
+          !claimsEnabled() ||
+          !job ||
+          jobs.some(
+            (candidate) =>
+              candidate.slotIndex === body.slotIndex &&
+              candidate.status === "running",
+          )
+        ) {
           claims.set(body.requestId, { workerId: body.workerId, claim: null });
           return send(response, 200, { claim: null, serverTime: now });
         }
@@ -441,12 +456,13 @@ export function createAcceptanceFixture({
             request.headers["x-amz-meta-sha256"] !== actual
           )
             return send(response, 400, { code: "WORKER_INVALID_REQUEST" });
-          const path = `${outputPath}.${job.slotIndex}.mp3`;
+          const outputIndex = jobs.indexOf(job);
+          const path = `${outputPath}.${outputIndex}.mp3`;
           writeFileSync(path, raw, { flag: "wx", mode: 0o600 });
           job.upload = {
             bytes: raw.length,
             sha256: actual,
-            etag: `"acceptance-output-${job.slotIndex}"`,
+            etag: `"acceptance-output-${outputIndex}"`,
           };
           job.outputReceivedAtMs = milliseconds();
           persist();

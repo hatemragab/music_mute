@@ -347,10 +347,16 @@ enum DesktopOfflineStoragePolicy {
 
   static func bytes(gigabytes: String) -> Int64? {
     let value = gigabytes.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !value.isEmpty, value.count <= 7,
-      value.allSatisfy({ $0.isWholeNumber }),
-      let amount = Int64(value), (1...maximumGigabytes).contains(amount)
-    else { return nil }
+    guard !value.isEmpty, value.unicodeScalars.count <= 7 else { return nil }
+    var amount: Int64 = 0
+    for scalar in value.unicodeScalars {
+      guard scalar.properties.generalCategory == .decimalNumber,
+        let number = scalar.properties.numericValue, let digit = Int64(exactly: number),
+        (0...9).contains(digit)
+      else { return nil }
+      amount = amount * 10 + digit
+    }
+    guard (1...maximumGigabytes).contains(amount) else { return nil }
     return amount * bytesPerGigabyte
   }
 
@@ -586,6 +592,8 @@ struct DesktopCloudJobsPage: Equatable {
   @Published private(set) var cacheBudgetStatus: String?
   @Published private(set) var clearingCache = false
   @Published private(set) var cacheClearStatus: String?
+  @Published private(set) var cacheClearedEntries: Int?
+  @Published private var cacheBridgeBusy = false
   @Published private(set) var processing = false
   @Published private(set) var progress = ""
   @Published var failure: String?
@@ -615,7 +623,7 @@ struct DesktopCloudJobsPage: Equatable {
   let playbackClock = DesktopPlaybackClock()
   let playbackVolumeState: DesktopPlaybackVolumeState
   let account: DesktopAccountModel
-  let bridge: DesktopBridge
+  private let bridge: DesktopBridge
   private let syncBridge: DesktopBridge
   private let playbackBridge: DesktopBridge
   private let journal: UIJournal?
@@ -638,6 +646,7 @@ struct DesktopCloudJobsPage: Equatable {
   private var sequences: [String: Double] = [:]
   private var activeSession: DesktopSessionScope?
   private var observer: AnyCancellable?
+  private var busyObserver: AnyCancellable?
   private var sleepTask: Task<Void, Never>?
   private var compare = false
   private var playbackTimelineVariant = DesktopPlaybackVariant.voice
@@ -679,6 +688,9 @@ struct DesktopCloudJobsPage: Equatable {
         lastAudibleLevel: DesktopPlaybackVolume.storedDouble(
           preferences.object(forKey: DesktopPreferenceKey.playbackLastAudibleVolume))))
     observer = bridge.$progress.sink { [weak self] value in self?.progress = value }
+    busyObserver = bridge.$busy.removeDuplicates().sink { [weak self] value in
+      self?.cacheBridgeBusy = value
+    }
     account.onSessionChanged = { [weak self] scope in self?.sessionChanged(scope) }
   }
   func start() async {
@@ -713,8 +725,13 @@ struct DesktopCloudJobsPage: Equatable {
       || playing
       || clearingCache || analyzingSilence || syncOperation != nil
   }
+  var storageOperationBusy: Bool {
+    cacheBridgeBusy || processing || clearingCache || savingCacheBudget
+  }
   private func sessionChanged(_ scope: DesktopSessionScope?) {
     guard !shuttingDown else { return }
+    cacheClearedEntries = nil
+    cacheClearStatus = nil
     bridge.cancel()
     syncBridge.cancel()
     playbackBridge.cancel()
@@ -924,6 +941,7 @@ struct DesktopCloudJobsPage: Equatable {
     }
   }
   func clearOfflineVoices() async {
+    cacheClearedEntries = nil
     guard !bridge.busy, !processing, !clearingCache else {
       cacheClearStatus = "Wait for the current MusicMute operation to finish, then try again."
       return
@@ -954,7 +972,8 @@ struct DesktopCloudJobsPage: Equatable {
       cacheClearStatus =
         outcome.clearedEntries == 0
         ? "No eligible offline voices were removed. Protected account saves or active playback may remain."
-        : "Removed \(outcome.clearedEntries) eligible offline voice\(outcome.clearedEntries == 1 ? "" : "s") from this Mac."
+        : "Eligible offline voices were removed from this Mac."
+      cacheClearedEntries = outcome.clearedEntries > 0 ? outcome.clearedEntries : nil
       notice = cacheClearStatus
     } catch {
       guard account.scope == fence else { return }

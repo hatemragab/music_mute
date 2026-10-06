@@ -21,6 +21,7 @@ import {
   stageExternalRuntimeForQualification,
   verifyExternalRuntimeForQualification,
 } from "./external-runtime-qualification.mjs";
+import { qualifyPackagedWorker } from "./packaged-worker-qualification.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const output = join(
@@ -81,6 +82,11 @@ const qualificationCodes = new Set([
   "QUALIFICATION_THIN_APP_INVALID",
   "RUNTIME_ARCHIVE_LISTING_INVALID",
   "RUNTIME_SIGNATURE_INVALID",
+  "PACKAGED_WORKER_EXTRACTION_FAILED",
+  "PACKAGED_WORKER_CONTROL_FAILED",
+  "PACKAGED_WORKER_CONTROL_INVALID",
+  "PACKAGED_WORKER_ENTRY_INVALID",
+  "PACKAGED_WORKER_SUPPORT_CLI_INVALID",
 ]);
 const appCodes = new Set([
   "APP_COMMAND_FAILED",
@@ -130,7 +136,7 @@ const appCodes = new Set([
 ]);
 const report = {
   schema_version: 1,
-  scope: "LOCAL_PACKAGED_OFFLINE_SETUP_AND_GUI_CLOSED_NATIVE_HELLO",
+  scope: "LOCAL_PACKAGED_OFFLINE_SETUP_NATIVE_HELLO_AND_WORKER_CONTROL",
   passed: false,
   gui_opened: false,
   browser_opened: false,
@@ -238,7 +244,14 @@ function run(
   code,
   executable,
   args,
-  { env, timeout = 120_000, native = false, requestId } = {},
+  {
+    env,
+    timeout = 120_000,
+    native = false,
+    requestId,
+    input,
+    captureStderr = false,
+  } = {},
 ) {
   ensure(!interrupted, "QUALIFICATION_CANCELLED");
   const summary = { code, stdout_bytes: 0, stderr_bytes: 0 };
@@ -248,11 +261,16 @@ function run(
       cwd: output,
       env,
       detached: true,
-      stdio: [native ? "pipe" : "ignore", "pipe", "pipe"],
+      stdio: [
+        native || input !== undefined ? "pipe" : "ignore",
+        "pipe",
+        "pipe",
+      ],
     });
     children.add(child);
     const started = Date.now();
     let stdout = Buffer.alloc(0);
+    let stderr = Buffer.alloc(0);
     let failure;
     let escalation;
     let hello;
@@ -320,6 +338,7 @@ function run(
     child.stderr.on("data", (chunk) => {
       summary.stderr_bytes += chunk.length;
       if (summary.stderr_bytes > 256 * 1024) stop("QUALIFICATION_STDERR_LIMIT");
+      else if (captureStderr) stderr = Buffer.concat([stderr, chunk]);
     });
     child.on("close", (exitCode, signal) => {
       closed = true;
@@ -334,7 +353,14 @@ function run(
       if (interrupted) failure ??= "QUALIFICATION_CANCELLED";
       if (native && !hello) failure ??= "NATIVE_HELLO_MISSING";
       if (failure) reject(new Error(failure));
-      else resolveCommand({ stdout, exitCode, signal, hello });
+      else
+        resolveCommand({
+          stdout,
+          ...(captureStderr ? { stderr } : {}),
+          exitCode,
+          signal,
+          hello,
+        });
     });
     if (native) {
       const message = Buffer.from(
@@ -348,7 +374,7 @@ function run(
       const header = Buffer.alloc(4);
       header.writeUInt32LE(message.length);
       child.stdin.write(Buffer.concat([header, message]));
-    }
+    } else if (input !== undefined) child.stdin.end(input);
   });
 }
 
@@ -723,6 +749,19 @@ finally:
   );
   report.native_hello = hello.hello;
   report.native_loopback_listener_only = true;
+  phase = "PACKAGED_WORKER";
+  const workerPolicy = `(version 1) (allow default) (deny network*) ${protectedWrites} (deny file-write* (subpath ${quoted(releaseRoot)}) (literal ${quoted(activePath)})) (deny process-exec (literal "/bin/launchctl")) ${denyKeychainHelper} ${deniedUserState}`;
+  report.worker = await qualifyPackagedWorker({
+    resources,
+    home,
+    state,
+    output,
+    node,
+    policy: workerPolicy,
+    env,
+    run,
+  });
+  report.checks.push("ACTUAL_PACKAGED_WORKER_STAGED_AND_CONTROLLER_READY");
   phase = "FINAL_EXTERNAL_RUNTIME_AUDIT";
   await verifyExternalRuntimeForQualification({
     releaseRoot,

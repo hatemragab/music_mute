@@ -41,7 +41,10 @@ import {
 } from "./user-release.js";
 import { createMacUserDirectories, type MacUserLayout } from "./user-paths.js";
 import { inspectMacUserHealth } from "./user-health.js";
-import { verifyMacRelease } from "./release-manifest.js";
+import {
+  verifyManagedMacRelease as verifyMacRelease,
+  resolveMacAppExecutionLayout,
+} from "./app-installation-binding.js";
 import { MAC_RECIPE_IDS } from "./runtime-recipes.js";
 
 export const PRODUCTION_BACKEND_BASE_URL = "https://api.music-mute.com";
@@ -88,6 +91,7 @@ export interface MacUserInstallationOptions {
     >,
   ) => Promise<string>;
   inspectRuntime?: typeof inspectInstalledMacRuntime;
+  beforeQualification?: () => Promise<void>;
 }
 
 export interface MacUserInstallationResult {
@@ -205,6 +209,7 @@ export async function recoverMacUserWorker(options: {
     "bootstrap" | "bootout" | "status"
   >;
   confirmHealthy?: () => Promise<boolean>;
+  beforeStart?: () => Promise<void>;
 }): Promise<MacUserRecoveryResult> {
   if (await exists(options.layout.currentLink))
     throw new Error("MusicMute worker runtime is already active");
@@ -237,6 +242,7 @@ export async function recoverMacUserWorker(options: {
       );
     activated = true;
     await writeLaunchAgentPlist(options.layout);
+    await options.beforeStart?.();
     await launchAgent.bootstrap(options.layout.plistPath);
     const healthy = await (
       options.confirmHealthy ??
@@ -308,16 +314,26 @@ export async function installMacUserWorker(
   const receipt = await readInstallationReceipt(
     join(transactionRoot, "installation-artifacts.json"),
   );
+  const preparedLayout = await resolveMacAppExecutionLayout(
+    options.layout,
+    receipt.release.releaseRoot,
+  );
   const inspectRuntime = options.inspectRuntime ?? inspectInstalledMacRuntime;
   const runtime = await inspectRuntime({
     nodeCandidates: [
-      join(receipt.release.releaseRoot, "runtime", "node", "bin", "node"),
+      preparedLayout.nodePath === options.layout.nodePath
+        ? join(receipt.release.releaseRoot, "runtime", "node", "bin", "node")
+        : preparedLayout.nodePath,
     ],
     ffmpegCandidates: [
-      join(receipt.release.releaseRoot, "runtime", "bin", "ffmpeg"),
+      preparedLayout.ffmpegPath === options.layout.ffmpegPath
+        ? join(receipt.release.releaseRoot, "runtime", "bin", "ffmpeg")
+        : preparedLayout.ffmpegPath,
     ],
     ffprobeCandidates: [
-      join(receipt.release.releaseRoot, "runtime", "bin", "ffprobe"),
+      preparedLayout.ffprobePath === options.layout.ffprobePath
+        ? join(receipt.release.releaseRoot, "runtime", "bin", "ffprobe")
+        : preparedLayout.ffprobePath,
     ],
     uid: options.uid,
   });
@@ -326,6 +342,10 @@ export async function installMacUserWorker(
     options.layout,
     receipt.release.releaseRoot,
   );
+  const executionLayout = await resolveMacAppExecutionLayout(
+    options.layout,
+    release.releaseRoot,
+  );
   if (release.releaseVersion !== receipt.releaseVersion) {
     await rollbackMacUserRelease(options.layout, release.previousRelease);
     throw new TypeError("Prepared release version does not match its receipt");
@@ -333,7 +353,7 @@ export async function installMacUserWorker(
   let backendActivated = false;
   try {
     const model = await installMacUserModel({
-      layout: options.layout,
+      layout: executionLayout,
       sourcePath: receipt.model.path,
       filename: "Kim_Vocal_2.onnx",
       bytes: receipt.model.bytes,
@@ -342,8 +362,9 @@ export async function installMacUserWorker(
     const launchAgent =
       options.launchAgent ?? new MacLaunchAgentController(options.uid);
     const qualify = options.qualify ?? qualifyMacUserRelease;
+    await options.beforeQualification?.();
     const qualificationPath = await qualify(
-      options.layout,
+      executionLayout,
       release.releaseRoot,
       receipt.fixture.path,
       receipt.fixture.sha256,
@@ -394,7 +415,7 @@ export async function installMacUserWorker(
       },
     });
     const result = await resumeMacUserInstallation({
-      layout: options.layout,
+      layout: executionLayout,
       uid: options.uid,
       launchAgent,
     });
@@ -416,6 +437,7 @@ export async function resumeMacUserInstallation(options: {
     MacLaunchAgentController,
     "bootstrap" | "bootout" | "status"
   >;
+  beforeStart?: () => Promise<void>;
 }): Promise<MacUserInstallationResult | null> {
   const { layout } = options;
   const transactionRoot = join(layout.transactionRoot, "install");
@@ -456,8 +478,12 @@ export async function resumeMacUserInstallation(options: {
     )
       throw new TypeError("Installation runtime evidence is invalid");
   }
-  const config = buildMacUserRuntimeConfig(
+  const executionLayout = await resolveMacAppExecutionLayout(
     layout,
+    join(layout.releasesRoot, String(result.releaseVersion)),
+  );
+  const config = buildMacUserRuntimeConfig(
+    executionLayout,
     journal.backendBaseUrl,
     journal.allowInsecureLoopback,
     { machineId: identity.machineId, workerId: identity.workerId },
@@ -491,8 +517,10 @@ export async function resumeMacUserInstallation(options: {
   });
   const service =
     options.launchAgent ?? new MacLaunchAgentController(options.uid);
-  if (!(await service.status()).loaded)
+  if (!(await service.status()).loaded) {
+    await options.beforeStart?.();
     await service.bootstrap(layout.plistPath);
+  }
   if (!(await service.status()).loaded)
     throw new Error("MusicMute worker LaunchAgent did not load");
   await rm(join(transactionRoot, "enrollment.credential"), { force: true });

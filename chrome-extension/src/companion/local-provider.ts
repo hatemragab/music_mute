@@ -1,5 +1,10 @@
 import { assertYouTubeSetupReady } from "./app-setup.js";
-import { runLocalEngine, supportsLocalEngine } from "./local-engine.js";
+import {
+  retireLocalEngine,
+  runLocalEngine,
+  supportsLocalEngine,
+} from "./local-engine.js";
+import { acquireWorkerAdmission } from "./worker-admission.js";
 import {
   rememberTransferredAudio,
   verifyPrivateAudio,
@@ -95,6 +100,13 @@ export class LocalProcessingError extends Error {
     super(code);
     this.name = "LocalProcessingError";
   }
+}
+
+function localEngineFailure(error: unknown): unknown {
+  if (error instanceof LocalProcessingError) return error;
+  return error instanceof Error && /^[A-Z_]{1,60}$/.test(error.message)
+    ? new LocalProcessingError(error.message)
+    : error;
 }
 export interface AcquiredYouTubeAudio {
   original: LocalAudioArtifact;
@@ -1491,6 +1503,22 @@ export class LocalMacProvider implements ProcessingProvider {
       ? Buffer.from(verifiedOriginal.sha256, "hex").toString("base64")
       : await sha256(input);
     hooks.onProgress("processing");
+    const admissionStart = performance.now();
+    const admission = this.config.app_resources
+      ? await acquireWorkerAdmission({
+          signal: hooks.signal,
+          workerRoot: join(dirname(this.config.root), "MusicMuteWorker"),
+          onWaiting: () => hooks.onProgress("waiting-for-worker"),
+        }).catch((error: unknown) => {
+          throw localEngineFailure(error);
+        })
+      : null;
+    if (admission) timings.worker_wait = performance.now() - admissionStart;
+    hooks.onProgress("processing");
+    const processingSignal = admission
+      ? AbortSignal.any([hooks.signal, admission.signal])
+      : hooks.signal;
+    let admittedEnginePid: number | undefined;
     let engineResult: Record<string, unknown> | undefined;
     let engineError: string | undefined;
     const engineStart = performance.now();
@@ -1502,7 +1530,15 @@ export class LocalMacProvider implements ProcessingProvider {
           workRoot,
           inputDigest,
           {
-            signal: hooks.signal,
+            signal: processingSignal,
+            ...(admission
+              ? {
+                  beforeProcess: async (pid, endpoint) => {
+                    admittedEnginePid = pid;
+                    await admission.registerEngine(pid, endpoint);
+                  },
+                }
+              : {}),
             onSpawn: (pid) => beginSample(pid, hooks.onDiagnostic),
             onEvent: (event) => {
               if (typeof event.stage !== "string")
@@ -1516,7 +1552,12 @@ export class LocalMacProvider implements ProcessingProvider {
             },
           },
         );
-      } else
+      } else {
+        // One-shot Python starts loading immediately; it cannot await durable
+        // registration before inference. Packaged apps require the resident
+        // service contract. Custom developer fixtures retain their one-shot path.
+        if (this.config.app_resources)
+          throw new LocalProcessingError("ENGINE_SERVICE_REQUIRED");
         await runBounded(
           this.config.python_path,
           [
@@ -1535,7 +1576,7 @@ export class LocalMacProvider implements ProcessingProvider {
             this.config.ffprobe_path,
           ],
           {
-            signal: hooks.signal,
+            signal: processingSignal,
             timeout_ms: 900_000,
             env,
             cwd: workRoot,
@@ -1569,6 +1610,7 @@ export class LocalMacProvider implements ProcessingProvider {
             },
           },
         );
+      }
     } catch (error) {
       if (
         engineError &&
@@ -1576,7 +1618,39 @@ export class LocalMacProvider implements ProcessingProvider {
         error.code === "TOOL_FAILED"
       )
         throw new LocalProcessingError(engineError);
-      throw error;
+      throw localEngineFailure(error);
+    } finally {
+      if (admission) {
+        let parked = false;
+        try {
+          if (
+            admission.keepWarmWhenIdle &&
+            !processingSignal.aborted &&
+            engineResult?.trimEnabled === false &&
+            engineResult.removedSamples === 0 &&
+            engineResult.modelDigest === MODEL_SHA256 &&
+            engineResult.sourceSamples === engineResult.outputSamples
+          ) {
+            await admission.markIdle().catch((error: unknown) => {
+              throw localEngineFailure(error);
+            });
+            parked = true;
+          }
+        } finally {
+          try {
+            if (!parked && admittedEnginePid !== undefined)
+              await retireLocalEngine(this.config, admittedEnginePid).catch(
+                (error: unknown) => {
+                  throw localEngineFailure(error);
+                },
+              );
+          } finally {
+            await admission.release().catch((error: unknown) => {
+              throw localEngineFailure(error);
+            });
+          }
+        }
+      }
     }
     timings.processing = performance.now() - engineStart;
     hooks.onProgress("validating");

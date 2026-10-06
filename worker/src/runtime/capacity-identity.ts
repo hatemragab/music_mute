@@ -5,7 +5,11 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { cpus, release, totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { verifyMacRelease } from "../platform/macos/release-manifest.js";
+import {
+  appBaseRelease,
+  readAppBinding,
+  verifyManagedMacRelease as verifyMacRelease,
+} from "../platform/macos/app-installation-binding.js";
 import { verifyWindowsRelease } from "../platform/windows/release-manifest.js";
 import { parseDirectmlIdentity } from "../platform/shared/file-benchmark.js";
 import { runtimePlatformAdapter } from "../platform/runtime-adapter.js";
@@ -28,20 +32,24 @@ export async function installedCapacityIdentity(options: {
   const releaseRoot = dirname(dirname(engine));
   if (engine !== join(releaseRoot, "app", "engine"))
     throw new TypeError("Capacity requires a packaged engine");
+  const binding = windows ? null : await readAppBinding(releaseRoot);
+  const toolsRoot = binding
+    ? join(appBaseRelease(binding), "runtime")
+    : releaseRoot;
   for (const [configured, packaged] of [
     [
       options.pythonPath,
       windows
         ? join(releaseRoot, "runtime", "python", "python.exe")
-        : join(releaseRoot, "runtime", "python", "bin", "python3"),
+        : join(toolsRoot, "runtime", "python", "bin", "python3"),
     ],
     [
       options.ffmpegPath,
-      join(releaseRoot, "runtime", "bin", windows ? "ffmpeg.exe" : "ffmpeg"),
+      join(toolsRoot, "runtime", "bin", windows ? "ffmpeg.exe" : "ffmpeg"),
     ],
     [
       options.ffprobePath,
-      join(releaseRoot, "runtime", "bin", windows ? "ffprobe.exe" : "ffprobe"),
+      join(toolsRoot, "runtime", "bin", windows ? "ffprobe.exe" : "ffprobe"),
     ],
   ] as const) {
     if ((await realpath(configured)) !== (await realpath(packaged)))

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const root = resolve(import.meta.dirname, "..");
+const execute = promisify(execFile);
 await mkdir(resolve(root, "dist/extension"), { recursive: true });
 await build({
   entryPoints: [
@@ -15,6 +16,7 @@ await build({
     "src/companion/desktop-control.ts",
     "src/companion/downloader-bundle.ts",
     "src/companion/youtube-runtime.ts",
+    "src/companion/worker-preflight.ts",
   ],
   outdir: "dist/companion",
   platform: "node",
@@ -61,6 +63,8 @@ if (process.platform === "darwin") {
       "AppKit",
       ...[
         "Models.swift",
+        "DesktopWorker.swift",
+        "DesktopWorkerView.swift",
         "DesktopCloudHandoff.swift",
         "ProcessBridge.swift",
         "UIJournal.swift",
@@ -82,6 +86,30 @@ if (process.platform === "darwin") {
     { timeout: 120_000, maxBuffer: 128 * 1024 },
   );
 }
+// The controller is bundled independently; worker dependencies stay out of the
+// browser and personal-processing companion. The service payload is staged by
+// packaging as an immutable, independently managed worker release.
+await build({
+  entryPoints: { controller: "../worker/src/cli/app-control.ts" },
+  outdir: "dist/worker",
+  platform: "node",
+  target: "node24",
+  format: "esm",
+  bundle: true,
+  banner: {
+    js: 'import { createRequire as workerCreateRequire } from "node:module"; const require = workerCreateRequire(import.meta.url);',
+  },
+  absWorkingDir: root,
+});
+await execute(
+  process.execPath,
+  [resolve(root, "scripts/worker-service-artifact.mjs")],
+  {
+    cwd: root,
+    timeout: 180_000,
+    maxBuffer: 1024 * 1024,
+  },
+);
 await build({
   entryPoints: [
     "src/extension/background.ts",

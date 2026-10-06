@@ -56,7 +56,9 @@ describe("machine supervisor capacity", () => {
           cwd: workerRoot,
           startTimeoutMs: 2_000,
           requestTimeoutMs: 2_000,
-          stopTimeoutMs: 100,
+          // This replacement-race fixture must await positive group exit even
+          // under full-suite load; keep the production stop bound unchanged.
+          stopTimeoutMs: 1_000,
         },
       },
     ]);

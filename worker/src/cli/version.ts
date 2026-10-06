@@ -10,6 +10,7 @@ const VERSION = /^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u;
 export async function workerVersions(
   options: {
     packagePath?: string;
+    packageVersion?: string;
     home?: string;
     platform?: NodeJS.Platform;
     windowsActiveReleasePath?: string;
@@ -18,10 +19,13 @@ export async function workerVersions(
   const packagePath =
     options.packagePath ??
     fileURLToPath(new URL("../../../package.json", import.meta.url));
-  const manifest = JSON.parse(await readFile(packagePath, "utf8")) as Record<
-    string,
-    unknown
-  >;
+  const manifest =
+    options.packageVersion === undefined
+      ? (JSON.parse(await readFile(packagePath, "utf8")) as Record<
+          string,
+          unknown
+        >)
+      : { version: options.packageVersion };
   if (typeof manifest.version !== "string" || !VERSION.test(manifest.version))
     throw new TypeError("CLI package version is invalid");
   let runtimeVersion: string | null = null;

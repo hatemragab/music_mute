@@ -209,6 +209,110 @@ test("fixture verifies transfer capabilities, conditional checksummed uploads, a
   assert.equal(f.snapshot().jobs[0].upload.sha256, sha256);
 });
 
+test("repeated jobs stay sequential on one slot and retain separate outputs and replay identities", async (t) => {
+  const f = await setup(t, { jobsPerSlot: 3 });
+  f.enable();
+  const attempts = new Set();
+  for (const outputIndex of [0, 2, 4]) {
+    const owner = { ...f.slots[0], request_id: randomUUID() };
+    const first = await f.request("/worker/claims", owner);
+    const claim = first.body.claim;
+    assert.equal(first.status, 200);
+    assert.equal(claim.recipe.recipe_id, "kim-vocals-v2");
+    assert.match(claim.job_id, /^[a-f0-9]{24}$/u);
+    assert.equal(attempts.has(claim.attempt_id), false);
+    attempts.add(claim.attempt_id);
+    assert.equal(
+      (
+        await f.request("/worker/claims", {
+          ...owner,
+          request_id: randomUUID(),
+        })
+      ).body.claim,
+      null,
+      "a second attempt must not enter a busy slot",
+    );
+    const path = `/worker/attempts/${claim.attempt_id}`;
+    const output = Buffer.from(`independent synthetic output ${outputIndex}`);
+    const grant = (
+      await f.request(`${path}/output-grants`, {
+        ...owner,
+        bytes: output.length,
+        sha256: createHash("sha256").update(output).digest("base64"),
+        measured_duration_seconds: 12,
+      })
+    ).body.grant;
+    assert.equal(
+      (
+        await fetch(grant.url, {
+          method: "PUT",
+          headers: grant.headers,
+          body: output,
+        })
+      ).status,
+      200,
+    );
+    const complete = {
+      ...owner,
+      etag: `"acceptance-output-${outputIndex}"`,
+      recipe_id: claim.recipe.recipe_id,
+      recipe_digest: claim.recipe.recipe_digest,
+      model_digest: claim.recipe.model_digest,
+    };
+    assert.equal(
+      (await f.request(`${path}/completions`, complete)).body.status,
+      "ready",
+    );
+    assert.equal(
+      (await f.request(`${path}/completions`, complete)).body.replayed,
+      true,
+    );
+    assert.equal(
+      (await f.request("/worker/claims", owner)).body.claim.attempt_id,
+      claim.attempt_id,
+    );
+    assert.deepEqual(
+      await readFile(`${f.outputPath}.${outputIndex}.mp3`),
+      output,
+    );
+  }
+  assert.equal(attempts.size, 3);
+  assert.equal(f.snapshot().maxActiveAttempts, 1);
+  assert.deepEqual(
+    f.snapshot().jobs.map((job) => job.status),
+    ["ready", "waiting", "ready", "waiting", "ready", "waiting"],
+  );
+  assert.equal(
+    (
+      await f.request("/worker/claims", {
+        ...f.slots[0],
+        request_id: randomUUID(),
+      })
+    ).body.claim,
+    null,
+  );
+});
+
+test("repeated fixture work is bounded before any files or processes are created", () => {
+  for (const jobsPerSlot of [0, 5, 1.5, NaN, "2"]) {
+    assert.throws(
+      () =>
+        createAcceptanceFixture({
+          config: { machineId: randomUUID() },
+          credential: randomBytes(32).toString("base64url"),
+          input: Buffer.from("synthetic input"),
+          recipes: [
+            { recipeId: "kim-vocals-v2" },
+            { recipeId: "kim-vocals-v2-trim" },
+          ],
+          outputPath: "unused-invalid-fixture-output",
+          jobsPerSlot,
+        }),
+      /configuration is invalid/u,
+    );
+  }
+});
+
 test("corrupt-input fixture preserves advertised checksum and records worker failure", async (t) => {
   const f = await setup(t, { corruptInputSlot: 0 });
   f.enable();

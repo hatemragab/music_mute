@@ -779,6 +779,10 @@ describe.skipIf(process.platform !== "darwin")(
             claimsAllowed: true,
           }),
           wait: async () => {
+            // The service cannot preload until its preparation fence is released.
+            await expect(
+              lstat(join(f.layout.stateRoot, "app-preparation.json")),
+            ).rejects.toMatchObject({ code: "ENOENT" });
             await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [], {
               ...identity,
               childState: "ready",
