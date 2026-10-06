@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { join } from "node:path";
 import { projectErrorContext } from "../shared/error-context.js";
 import { loadLocalConfig } from "./config.js";
@@ -108,6 +109,7 @@ let jobAccountScope: ReturnType<NativeAccountState["current"]>;
 let residentLookup: AbortController | undefined;
 let manualCheck: AbortController | undefined;
 let closing = false;
+const commandContext = new AsyncLocalStorage<{ command?: string }>();
 let errorContextEnabled = false;
 let backgroundPublicationEnabled = false;
 let playbackIdentity: CommunityPlaybackIdentity | undefined;
@@ -172,6 +174,10 @@ if (provider instanceof SharedYouTubeProvider) {
     .catch(() => {});
 }
 function send(reply: NativeReply): void {
+  // Cancellation publishes a final snapshot during shutdown. Chrome may have
+  // already closed its pipe; writing then must not become an uncaught EPIPE.
+  if (closing || process.stdout.destroyed || process.stdout.writableEnded)
+    return;
   if (
     !errorContextEnabled &&
     reply.type === "JOB" &&
@@ -539,9 +545,12 @@ async function shutdown(code = 0): Promise<void> {
   process.exitCode = code;
 }
 async function handle(value: unknown): Promise<void> {
+  if (closing) return;
   let currentId: string = randomUUID();
   try {
     const command = validateCommand(value);
+    const context = commandContext.getStore();
+    if (context) context.command = command.type;
     currentId = command.request_id;
     if (command.type === "EVENT") {
       diagnostics.record(command.payload);
@@ -807,7 +816,8 @@ async function handle(value: unknown): Promise<void> {
 const decoder = new FrameDecoder();
 process.stdin.on("data", (chunk) => {
   try {
-    for (const value of decoder.push(Buffer.from(chunk))) void handle(value);
+    for (const value of decoder.push(Buffer.from(chunk)))
+      void commandContext.run({}, () => handle(value));
   } catch {
     diagnostics.record({
       component: "companion",
@@ -835,21 +845,60 @@ for (const signal of ["SIGTERM", "SIGINT"] as const)
   process.on(signal, () => {
     void shutdown();
   });
-process.on("uncaughtException", () => {
+function nativePipeError(error: NodeJS.ErrnoException): void {
+  if (closing) return;
+  const disconnected = error.code === "EPIPE" || error.code === "ECONNRESET";
+  diagnostics.record({
+    component: "companion",
+    severity: disconnected ? "info" : "error",
+    event: "diagnostic_error",
+    code: disconnected ? "NATIVE_PIPE_CLOSED" : "NATIVE_PIPE_FAILED",
+    metrics: { stage: "native_io" },
+  });
+  void shutdown(disconnected ? 0 : 1);
+}
+process.stdout.on("error", nativePipeError);
+process.stdin.on("error", nativePipeError);
+function crashMetrics(error: unknown) {
+  let exceptionKind = "other";
+  try {
+    if (
+      error instanceof Error &&
+      [
+        "Error",
+        "TypeError",
+        "RangeError",
+        "SyntaxError",
+        "ReferenceError",
+      ].includes(error.name)
+    )
+      exceptionKind = error.name;
+  } catch {
+    // Thrown objects can themselves have unsafe accessors.
+  }
+  return {
+    stage: closing ? "cleanup" : "native_command",
+    exception_kind: exceptionKind,
+    native_command: commandContext.getStore()?.command ?? "none",
+  };
+}
+process.on("uncaughtException", (error) => {
   diagnostics.record({
     component: "companion",
     severity: "error",
     event: "diagnostic_error",
     code: "COMPANION_CRASH",
+    metrics: crashMetrics(error),
   });
   void shutdown(1);
 });
-process.on("unhandledRejection", () => {
+process.on("unhandledRejection", (error) => {
   diagnostics.record({
     component: "companion",
     severity: "error",
     event: "diagnostic_error",
     code: "COMPANION_REJECTION",
+    metrics: crashMetrics(error),
   });
   void shutdown(1);
 });

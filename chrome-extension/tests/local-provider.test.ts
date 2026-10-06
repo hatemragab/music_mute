@@ -1172,6 +1172,30 @@ describe("local pipeline policy", () => {
       expect(args).not.toContain(option);
   }
 
+  it.each([
+    "SOURCE_TOKEN_REQUIRED",
+    "PO_TOKEN_PROVIDER_INVALID",
+    "DENO_MISSING",
+    "YT_DLP_EJS_MISSING",
+  ])("keeps %s out of the refusal cooldown", async (code) => {
+    const { root, config } = await acquisitionFixture();
+    await writeFile(
+      config.runner_path,
+      `console.error(${JSON.stringify(code)});process.exit(1)`,
+    );
+    await expect(
+      new LocalMacProvider(config).inspectYouTube(request.video_id, {
+        signal: new AbortController().signal,
+        onProgress: () => {},
+      }),
+    ).rejects.toMatchObject({ code });
+    const state = JSON.parse(
+      await readFile(join(root, "acquisition-state.json"), "utf8"),
+    );
+    expect(state.blocked_until).toBe(0);
+    expect(state.reason).not.toBe("SOURCE_BOT_CHALLENGE");
+  });
+
   it("persists a confirmed bot refusal across inspection and acquisition without a second tool invocation", async () => {
     const { root, work, config } = await acquisitionFixture();
     await writeFile(

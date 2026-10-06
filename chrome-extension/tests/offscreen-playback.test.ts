@@ -196,6 +196,30 @@ afterEach(() => {
 });
 
 describe("offscreen loading and playback through the actual message handler", () => {
+  it("silences a missing clock, then realigns and resumes only on a fresh owned sample", async () => {
+    const audio = await ready();
+    clock(1, { current_time: 2 });
+    await flush();
+    expect(audio.paused).toBe(false);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(audio.paused).toBe(true);
+    clock(1, {
+      sequence: 2,
+      current_time: 8,
+      sampled_at_ms: Date.now() - 6000,
+    });
+    await flush();
+    expect(audio.paused).toBe(true);
+    clock(1, { sequence: 3, current_time: 8 });
+    await flush();
+    expect(audio.currentTime).toBe(8);
+    expect(audio.paused).toBe(false);
+    expect(notifications("MM_AUDIO_STATE")).toEqual([
+      { type: "MM_AUDIO_STATE", generation: 1, playing: true },
+      { type: "MM_AUDIO_STATE", generation: 1, playing: false },
+      { type: "MM_AUDIO_STATE", generation: 1, playing: true },
+    ]);
+  });
   it("settles a stopped load immediately and removes its timer, listeners and element", async () => {
     const first = load();
     const element = elements[0]!;
@@ -368,6 +392,22 @@ describe("offscreen loading and playback through the actual message handler", ()
       ]);
     },
   );
+
+  it("realigns a browser-delayed audio start to the next fresh source clock", async () => {
+    const element = await ready();
+    const play = pending();
+    element.play.mockReturnValueOnce(play.promise);
+    clock(1, { current_time: 0 });
+    await vi.advanceTimersByTimeAsync(600);
+    element.paused = false;
+    play.resolve();
+    await flush();
+    element.seekWrites = [];
+    clock(1, { sequence: 2, current_time: 0.6, sampled_at_ms: Date.now() });
+    await flush();
+    expect(element.seekWrites).toEqual([0.6]);
+    expect(element.play).toHaveBeenCalledOnce();
+  });
 
   it("does not report late playing when a fresh paused/ad clock supersedes the request", async () => {
     const element = await ready();

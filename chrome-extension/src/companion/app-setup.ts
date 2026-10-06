@@ -467,35 +467,19 @@ export async function updateSetupReadiness(
   await saveSetupReadiness(config, next, identity, signal);
 }
 
-export async function inspectAppStatus(
+/** Cheap installed metadata plus execution evidence from Prepare or explicit Check. */
+async function installedYouTubeReadiness(
   config: LocalConfig,
-  userHome = homedir(),
-): Promise<AppStatus> {
-  if (!config.app_resources)
-    throw new LocalSetupError("APP_RESOURCES_REQUIRED");
-  // This is connection/installed-metadata readiness, not a new integrity audit.
-  const resources = config.app_resources;
+  saved: SetupReadiness | undefined,
+) {
+  const resources = config.app_resources!;
   const runtime = config.runtime_root ?? join(resources, "runtime");
-  const executableReady = (path: string): Promise<boolean> =>
-    installedEntryReady(config, path, runtime, { executable: true });
-  const runtimeEntries = await Promise.all([
-    ...[
-      config.python_path,
-      config.node_path,
-      config.ffmpeg_path,
-      config.ffprobe_path,
-    ].map(executableReady),
-    installedEntryReady(config, config.runner_path, resources),
-    installedEntryReady(
-      config,
-      config.engine_root,
-      within(resources, config.engine_root) ? resources : runtime,
-      { directory: true },
-    ),
-  ]);
-  const saved = await savedSetupReadiness(config);
-  const runtimeReady = runtimeEntries.every(Boolean) && (saved?.engine ?? true);
-  let downloaderReady = await executableReady(config.yt_dlp_path);
+  let downloaderReady = await installedEntryReady(
+    config,
+    config.yt_dlp_path,
+    runtime,
+    { executable: true },
+  );
   if (config.downloader_bundle_root) {
     const bundle = config.downloader_bundle_root;
     const bootstrap =
@@ -548,12 +532,77 @@ export async function inspectAppStatus(
     ]);
     tokenProviderReady = entries.every(Boolean);
   }
-  downloaderReady &&= saved?.downloader ?? true;
-  javascriptReady &&= saved?.javascript ?? true;
-  tokenProviderReady &&= saved?.token_provider ?? true;
+  downloaderReady &&= saved?.downloader ?? false;
+  javascriptReady &&= saved?.javascript ?? false;
+  tokenProviderReady &&= saved?.token_provider ?? false;
+  return { downloaderReady, javascriptReady, tokenProviderReady };
+}
+
+/** Only fresh guest acquisition needs these tools; cache and local files bypass this. */
+export async function assertYouTubeSetupReady(
+  config: LocalConfig,
+): Promise<void> {
+  if (!config.app_resources) return; // Developer/fixture runtimes have their own tool contract.
+  const saved = await savedSetupReadiness(config);
+  if (
+    !saved ||
+    SETUP_COMPONENTS.some((component) => saved[component] === undefined)
+  )
+    throw new LocalProcessingError("SETUP_REQUIRED");
+  const ready = await installedYouTubeReadiness(config, saved);
+  for (const [component, valid, fallback] of [
+    ["engine", saved.engine, "DEV_RUNTIME_INCOMPLETE"],
+    ["model", saved.model, "MODEL_CACHE_INVALID"],
+    ["downloader", ready.downloaderReady, "YT_DLP_IDENTITY_INVALID"],
+    ["javascript", ready.javascriptReady, "DENO_MISSING"],
+    ["token_provider", ready.tokenProviderReady, "PO_TOKEN_PROVIDER_INVALID"],
+  ] as const) {
+    if (!valid)
+      throw new LocalProcessingError(saved.errors[component] ?? fallback);
+  }
+}
+
+export async function inspectAppStatus(
+  config: LocalConfig,
+  userHome = homedir(),
+): Promise<AppStatus> {
+  if (!config.app_resources)
+    throw new LocalSetupError("APP_RESOURCES_REQUIRED");
+  // This is connection/installed-metadata readiness, not a new integrity audit.
+  const resources = config.app_resources;
+  const runtime = config.runtime_root ?? join(resources, "runtime");
+  const executableReady = (path: string): Promise<boolean> =>
+    installedEntryReady(config, path, runtime, { executable: true });
+  const runtimeEntries = await Promise.all([
+    ...[
+      config.python_path,
+      config.node_path,
+      config.ffmpeg_path,
+      config.ffprobe_path,
+    ].map(executableReady),
+    installedEntryReady(config, config.runner_path, resources),
+    installedEntryReady(
+      config,
+      config.engine_root,
+      within(resources, config.engine_root) ? resources : runtime,
+      { directory: true },
+    ),
+  ]);
+  const saved = await savedSetupReadiness(config);
+  const runtimeReady = runtimeEntries.every(Boolean) && (saved?.engine ?? true);
+  const { downloaderReady, javascriptReady, tokenProviderReady } =
+    await installedYouTubeReadiness(config, saved);
   const componentErrors = new Map<string, string>(
     Object.entries(saved?.errors ?? {}),
   );
+  for (const component of [
+    "downloader",
+    "javascript",
+    "token_provider",
+  ] as const) {
+    if (saved?.[component] === undefined)
+      componentErrors.set(component, "SETUP_REQUIRED");
+  }
   const modelReady =
     (await installedModelReady(config)) && (saved?.model ?? true);
   let registered = false;
@@ -608,6 +657,7 @@ export async function inspectAppStatus(
     javascript_ready: javascriptReady,
     token_provider_ready: tokenProviderReady,
     youtube_ready:
+      SETUP_COMPONENTS.every((component) => saved?.[component] === true) &&
       downloaderReady &&
       javascriptReady &&
       tokenProviderReady &&

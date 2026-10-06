@@ -365,7 +365,8 @@
   }
 }
 #musicmute-local-panel button,
-#musicmute-local-panel .musicmute-setup-link {
+#musicmute-local-panel .musicmute-setup-link,
+#musicmute-local-panel .musicmute-cloud-link {
   cursor: pointer;
   flex-shrink: 0;
   box-sizing: border-box;
@@ -400,10 +401,20 @@
   outline: 2px solid var(--musicmute-accent);
   outline-offset: 3px;
 }
-#musicmute-local-panel .musicmute-setup-link {
+#musicmute-local-panel .musicmute-setup-link,
+#musicmute-local-panel .musicmute-cloud-link {
   background: #123c37;
   border-color: #37574b;
   color: var(--musicmute-accent);
+}
+#musicmute-local-panel .musicmute-cloud-link[data-primary="true"] {
+  background: var(--musicmute-accent);
+  border-color: var(--musicmute-accent);
+  color: #102a24;
+}
+#musicmute-local-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 #musicmute-local-panel[data-state="ready"] {
   border-color: #37574b;

@@ -10,7 +10,9 @@ import type {
   ExtensionMessage,
   ExtensionStatus,
 } from "../src/extension/messages";
+import { isExtensionMessage } from "../src/extension/messages";
 import { SETTINGS_KEY } from "../src/extension/settings";
+import { PLAYBACK_SESSION_KEY } from "../src/extension/playback-session";
 
 const extensionId = "musicmute-test-extension";
 type MessageHandler = (
@@ -93,6 +95,7 @@ let listener: MessageHandler;
 let onTabRemoved: ((tabId: number) => void) | undefined;
 let ports: ReturnType<typeof mockPort>[];
 let stored: Record<string, unknown>;
+let sessionStored: Record<string, unknown>;
 const runtimeSend = vi.fn<(message: ExtensionMessage) => Promise<unknown>>();
 const hasDocument = vi.fn<() => Promise<boolean>>();
 const getTab = vi.fn<(tabId: number) => Promise<chrome.tabs.Tab>>();
@@ -257,6 +260,7 @@ beforeEach(async () => {
   vi.useFakeTimers();
   ports = [];
   stored = {};
+  sessionStored = {};
   onTabRemoved = undefined;
   runtimeSend.mockReset().mockResolvedValue({ ok: true });
   hasDocument.mockReset().mockResolvedValue(true);
@@ -290,6 +294,12 @@ beforeEach(async () => {
       Reason: { AUDIO_PLAYBACK: "AUDIO_PLAYBACK" },
     },
     storage: {
+      session: {
+        get: vi.fn(async (key: string) => ({ [key]: sessionStored[key] })),
+        set: vi.fn(async (values: Record<string, unknown>) => {
+          Object.assign(sessionStored, values);
+        }),
+      },
       local: {
         get: vi.fn(async (keys: string | string[]) =>
           Object.fromEntries(
@@ -306,6 +316,8 @@ beforeEach(async () => {
     },
     tabs: {
       get: getTab,
+      onUpdated: { addListener: vi.fn() },
+      update: vi.fn(async () => ({})),
       sendMessage: vi.fn(async () => undefined),
       onRemoved: {
         addListener: vi.fn((callback: (tabId: number) => void) => {
@@ -424,6 +436,187 @@ async function completeAdmission(
 }
 
 describe("bounded local reload reuse", () => {
+  it("stores only session identity in browser memory and clears it on Stop", async () => {
+    const snapshot = await start(
+      17,
+      1,
+      "abcdefghijk",
+      documentSender("current"),
+    );
+    await flush();
+    expect(sessionStored[PLAYBACK_SESSION_KEY]).toMatchObject({
+      jobId: snapshot.job_id,
+      documentId: "current",
+    });
+    expect(JSON.stringify(sessionStored)).not.toContain("capability");
+    expect(JSON.stringify(sessionStored)).not.toContain("127.0.0.1");
+    await request(
+      { type: "MM_STOP", generation: 1 },
+      documentSender("current"),
+    );
+    await flush();
+    expect(sessionStored[PLAYBACK_SESSION_KEY]).toBeNull();
+  });
+
+  it.each([
+    "ready",
+    "missing",
+    "different-job",
+    "cloud",
+    "changed-route",
+    "stop-during-status",
+  ])(
+    "attempts recovery without START after background state loss: %s",
+    async (scenario) => {
+      const saved = {
+        version: 1,
+        tabId: 17,
+        documentId: "current",
+        generation: 71,
+        videoId: "abcdefghijk",
+        durationSeconds: 19,
+        requestId: crypto.randomUUID(),
+        jobId: crypto.randomUUID(),
+        savedAt: Date.now(),
+      };
+      sessionStored[PLAYBACK_SESSION_KEY] = saved;
+      getTab.mockResolvedValue({
+        id: 17,
+        url: `https://www.youtube.com/watch?v=${scenario === "changed-route" ? "different_1" : saved.videoId}`,
+      } as chrome.tabs.Tab);
+      const result = request(
+        { type: "MM_CLOCK", payload: clock(71) },
+        documentSender("current"),
+      );
+      await flush();
+      if (scenario === "changed-route") {
+        expect(await result).toEqual({ ok: false });
+        expect(ports).toHaveLength(0);
+        return;
+      }
+      const port = ports[0]!;
+      if (scenario === "stop-during-status") port.holdStatusReply();
+      const snapshot: JobSnapshot = {
+        job_id:
+          scenario === "different-job" ? crypto.randomUUID() : saved.jobId,
+        video_id: saved.videoId,
+        provider: scenario === "cloud" ? "ONLINE_MUSICMUTE" : "LOCAL_MACOS",
+        state: "READY",
+        stage: "ready",
+        media: {
+          url: "http://127.0.0.1:12345/media/fixture",
+          duration_seconds: 19,
+          trim_enabled: false,
+          model_id: "fixture",
+        },
+      };
+      port.emit({
+        protocol_version: 1,
+        request_id: crypto.randomUUID(),
+        type: "JOB",
+        payload: scenario === "missing" ? null : snapshot,
+      });
+      const hello = port.posted.find((command) => command.type === "HELLO")!;
+      port.emit({
+        protocol_version: 1,
+        request_id: hello.request_id,
+        type: "HELLO",
+        payload: {
+          ready: true,
+          version: "0.1.0",
+          platform: "darwin",
+          arch: "arm64",
+          max_duration_seconds: 900,
+        },
+      });
+      await flush();
+      if (scenario === "stop-during-status") {
+        await request(
+          { type: "MM_STOP", generation: 71 },
+          documentSender("current"),
+        );
+        const status = port.posted.find(
+          (command) => command.type === "STATUS",
+        )!;
+        port.emit({
+          protocol_version: 1,
+          request_id: status.request_id,
+          type: "JOB",
+          payload: snapshot,
+        });
+      }
+      expect(await result).toMatchObject({ ok: scenario === "ready" });
+      expect(port.posted.some((command) => command.type === "START")).toBe(
+        false,
+      );
+      if (scenario === "ready") expect(loadedGenerations()).toEqual([71]);
+      else expect(loadedGenerations()).toEqual([]);
+    },
+  );
+
+  it.each(["other", "old"])(
+    "refuses recovery from a different document: %s",
+    async (documentId) => {
+      sessionStored[PLAYBACK_SESSION_KEY] = {
+        version: 1,
+        tabId: 17,
+        documentId: "current",
+        generation: 71,
+        videoId: "abcdefghijk",
+        durationSeconds: 19,
+        requestId: crypto.randomUUID(),
+        jobId: crypto.randomUUID(),
+        savedAt: Date.now(),
+      };
+      expect(
+        await request(
+          { type: "MM_CLOCK", payload: clock(71) },
+          documentSender(documentId),
+        ),
+      ).toEqual({ ok: false });
+      expect(ports).toHaveLength(0);
+    },
+  );
+
+  it("renews a throttled page only after its document returns a fresh clock", async () => {
+    await start(17, 1, "abcdefghijk", documentSender("current"));
+    vi.mocked(chrome.tabs.sendMessage).mockImplementation(
+      async (_tabId, message) =>
+        isExtensionMessage(message) && message.type === "MM_PAGE_PROBE"
+          ? { clock: clock(1) }
+          : undefined,
+    );
+    await vi.advanceTimersByTimeAsync(90_001);
+    expect(ports[0]!.posted.some((command) => command.type === "CANCEL")).toBe(
+      false,
+    );
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
+      17,
+      { type: "MM_PAGE_PROBE", generation: 1 },
+      { documentId: "current" },
+    );
+    vi.mocked(chrome.tabs.sendMessage).mockResolvedValue(undefined);
+    await vi.advanceTimersByTimeAsync(90_001);
+    expect(ports[0]!.posted.some((command) => command.type === "CANCEL")).toBe(
+      true,
+    );
+  });
+
+  it("bounds a page probe that never replies", async () => {
+    await start(17, 1);
+    vi.mocked(chrome.tabs.sendMessage).mockImplementation(
+      async (_tabId, message) => {
+        if (isExtensionMessage(message) && message.type === "MM_PAGE_PROBE")
+          return new Promise(() => {});
+        return undefined;
+      },
+    );
+    await vi.advanceTimersByTimeAsync(93_001);
+    expect(ports[0]!.posted.some((command) => command.type === "CANCEL")).toBe(
+      true,
+    );
+  });
+
   it.each([false, true])(
     "reuses READY on the same port after pagehide (stop settled=%s)",
     async (settled) => {
@@ -475,7 +668,7 @@ describe("bounded local reload reuse", () => {
       );
       expect(
         await request({ type: "MM_CLOCK", payload: clock(2) }, next),
-      ).toEqual({ ok: true });
+      ).toMatchObject({ ok: true });
       for (const type of ["MM_STOP", "MM_CANCEL"] as const)
         expect(await request({ type, generation: 1 }, oldPage)).toEqual({
           ok: false,
@@ -948,7 +1141,7 @@ describe("automatic admission through the actual background handler", () => {
         { type: "MM_CLOCK", payload: clock(1) },
         sender(17, "abcdefghijk"),
       ),
-    ).toEqual({ ok: true });
+    ).toMatchObject({ ok: true });
   });
 
   it("does not let a background automatic request replace another tab's playback", async () => {
@@ -971,7 +1164,7 @@ describe("automatic admission through the actual background handler", () => {
         { type: "MM_CLOCK", payload: clock(1) },
         sender(17, "abcdefghijk"),
       ),
-    ).toEqual({ ok: true });
+    ).toMatchObject({ ok: true });
   });
 
   it("releases a failed settings reservation so the next eligible visit can start", async () => {
@@ -1009,7 +1202,7 @@ describe("automatic admission through the actual background handler", () => {
         { type: "MM_CLOCK", payload: clock(2, "11111111111") },
         sender(18, "11111111111"),
       ),
-    ).toEqual({ ok: true });
+    ).toMatchObject({ ok: true });
     expect(errors()).toEqual([]);
   });
 
@@ -1140,7 +1333,7 @@ describe("automatic admission through the actual background handler", () => {
     );
     expect(
       await request({ type: "MM_CLOCK", payload: clock(2) }, newPage),
-    ).toEqual({ ok: true });
+    ).toMatchObject({ ok: true });
   });
 
   it("waits for an old native Start reply and revokes its job before starting the refreshed page", async () => {
@@ -1331,7 +1524,7 @@ describe("automatic admission through the actual background handler", () => {
       );
       expect(
         await request({ type: "MM_CLOCK", payload: clock(3) }, newPage),
-      ).toEqual({ ok: true });
+      ).toMatchObject({ ok: true });
       expect(errors()).toEqual([]);
     },
   );
@@ -1688,7 +1881,7 @@ describe("playback ownership through the actual background handler", () => {
         { type: "MM_CLOCK", payload: clock(2, "11111111111") },
         sender(17, "11111111111"),
       ),
-    ).toEqual({ ok: true });
+    ).toMatchObject({ ok: true });
     expect(port.posted.filter((command) => command.type === "CANCEL")).toEqual(
       [],
     );
@@ -1783,7 +1976,7 @@ describe("playback ownership through the actual background handler", () => {
         { type: "MM_CLOCK", payload: clock(2) },
         sender(17, "abcdefghijk"),
       ),
-    ).toEqual({ ok: true });
+    ).toMatchObject({ ok: true });
   });
 
   it("keeps a late Stop bound to its retired READY job while a manual successor owns playback", async () => {
@@ -1809,7 +2002,7 @@ describe("playback ownership through the actual background handler", () => {
         { type: "MM_CLOCK", payload: clock(2, "11111111111") },
         sender(18, "11111111111"),
       ),
-    ).toEqual({ ok: true });
+    ).toMatchObject({ ok: true });
   });
 
   it.each([
@@ -1918,19 +2111,21 @@ describe("playback ownership through the actual background handler", () => {
     expect(chrome.tabs.sendMessage).not.toHaveBeenCalledWith(18, {
       type: "MM_READY",
       generation: 2,
+      source_muted: true,
     });
     current.dispatchEvent(new Event("canplay"));
     await flush();
     expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(18, {
       type: "MM_READY",
       generation: 2,
+      source_muted: true,
     });
     expect(
       await request(
         { type: "MM_CLOCK", payload: clock(2, "11111111111") },
         sender(18, "11111111111"),
       ),
-    ).toEqual({ ok: true });
+    ).toMatchObject({ ok: true });
     await flush();
     expect(current.paused).toBe(false);
     expect(retired.paused).toBe(true);
@@ -1961,6 +2156,7 @@ describe("playback ownership through the actual background handler", () => {
     expect(chrome.tabs.sendMessage).not.toHaveBeenCalledWith(18, {
       type: "MM_READY",
       generation: 11,
+      source_muted: true,
     });
     oldLoad.resolve({ ok: false });
     await flush();
@@ -1969,12 +2165,13 @@ describe("playback ownership through the actual background handler", () => {
     expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(18, {
       type: "MM_READY",
       generation: 12,
+      source_muted: true,
     });
     const response = await request(
       { type: "MM_CLOCK", payload: clock(12, "11111111111") },
       sender(18, "11111111111"),
     );
-    expect(response).toEqual({ ok: true });
+    expect(response).toMatchObject({ ok: true });
     expect(errors()).toEqual([]);
   });
 
@@ -2136,7 +2333,7 @@ describe("playback ownership through the actual background handler", () => {
     expect(runtimeSend).not.toHaveBeenCalled();
     listenerReady = true;
     creation.resolve();
-    expect(await Promise.all([resume, concurrent])).toEqual([
+    expect(await Promise.all([resume, concurrent])).toMatchObject([
       { ok: true },
       { ok: true },
     ]);
@@ -2180,7 +2377,7 @@ describe("playback ownership through the actual background handler", () => {
       ),
     ).toBe(false);
     ready.resolve({ ok: true });
-    expect(await Promise.all([older, newer])).toEqual([
+    expect(await Promise.all([older, newer])).toMatchObject([
       { ok: true },
       { ok: true },
     ]);
@@ -2205,7 +2402,7 @@ describe("playback ownership through the actual background handler", () => {
         { type: "MM_CLOCK", payload: clock(54) },
         sender(17, "abcdefghijk"),
       ),
-    ).toEqual({ ok: true });
+    ).toMatchObject({ ok: true });
     await flush();
     expect(loadedGenerations()).toEqual([54]);
     expect(clocks).toBe(2);
@@ -2286,7 +2483,7 @@ describe("playback ownership through the actual background handler", () => {
         { type: "MM_CLOCK", payload: clock(61) },
         sender(17, "abcdefghijk"),
       ),
-    ).toEqual({ ok: true });
+    ).toMatchObject({ ok: true });
     expect(loadedGenerations()).toEqual([61, 61]);
     expect(runtimeSend).toHaveBeenCalledWith({
       type: "MM_AUDIO_CLOCK",
@@ -2789,7 +2986,7 @@ describe("production playback lifecycle regressions", () => {
           },
           sender(17, "abcdefghijk"),
         ),
-      ).toEqual({ ok: true });
+      ).toMatchObject({ ok: true });
     }
     expect(ports[0]!.posted.some((c) => c.type === "CANCEL")).toBe(false);
     expect(ports[0]!.port.disconnect).not.toHaveBeenCalled();
@@ -2884,5 +3081,80 @@ describe("production playback lifecycle regressions", () => {
     const result = await request(value as ExtensionMessage);
     expect(result).toEqual({ ok: false, error: "INVALID_MESSAGE" });
     expect(ports).toEqual([]);
+  });
+});
+
+describe("browser source suppression", () => {
+  it("loading an unrelated browser tab does not stop an orphan offscreen player", async () => {
+    const callback = vi.mocked(chrome.tabs.onUpdated.addListener).mock
+      .calls[0]![0];
+    callback(98, { status: "loading" }, { id: 98 } as chrome.tabs.Tab);
+    await flush();
+    expect(stoppedAudioCount()).toBe(0);
+  });
+
+  it("waits for ad silence before restoring source audio", async () => {
+    await start(17, 1);
+    vi.mocked(chrome.tabs.update).mockClear();
+    const silence = deferred<unknown>();
+    runtimeSend.mockImplementation(async (message) =>
+      message.type === "MM_AUDIO_CLOCK" && message.payload.ad_active
+        ? silence.promise
+        : { ok: true },
+    );
+    const response = request(
+      { type: "MM_CLOCK", payload: { ...clock(1), ad_active: true } },
+      sender(17, "abcdefghijk"),
+    );
+    await flush();
+    expect(chrome.tabs.update).not.toHaveBeenCalled();
+    silence.resolve({ ok: true });
+    expect(await response).toEqual({ ok: true, source_muted: false });
+    expect(chrome.tabs.update).toHaveBeenCalledWith(17, { muted: false });
+    expect(
+      await request(
+        { type: "MM_CLOCK", payload: { ...clock(1), sequence: 2 } },
+        sender(17, "abcdefghijk"),
+      ),
+    ).toEqual({ ok: true, source_muted: true });
+    expect(chrome.tabs.update).toHaveBeenLastCalledWith(17, { muted: true });
+  });
+  it("a delayed ad acknowledgement cannot unmute resumed vocals", async () => {
+    await start(17, 1);
+    vi.mocked(chrome.tabs.update).mockClear();
+    const silence = deferred<unknown>();
+    runtimeSend.mockImplementation(async (message) =>
+      message.type === "MM_AUDIO_CLOCK" && message.payload.ad_active
+        ? silence.promise
+        : { ok: true },
+    );
+    const ad = request(
+      { type: "MM_CLOCK", payload: { ...clock(1), ad_active: true } },
+      sender(17, "abcdefghijk"),
+    );
+    await flush();
+    await request(
+      { type: "MM_CLOCK", payload: { ...clock(1), sequence: 2 } },
+      sender(17, "abcdefghijk"),
+    );
+    silence.resolve({ ok: true });
+    await ad;
+    expect(chrome.tabs.update).not.toHaveBeenCalledWith(17, { muted: false });
+  });
+  it("honors a browser mute change by stopping replacement playback", async () => {
+    await start(17, 1);
+    const callback = vi.mocked(chrome.tabs.onUpdated.addListener).mock
+      .calls[0]![0];
+    callback(17, { mutedInfo: { muted: false, reason: "user" } }, {
+      id: 17,
+    } as chrome.tabs.Tab);
+    await flush();
+    expect(
+      await request(
+        { type: "MM_CLOCK", payload: clock(1) },
+        sender(17, "abcdefghijk"),
+      ),
+    ).toEqual({ ok: false });
+    expect(stoppedAudioCount()).toBeGreaterThan(1);
   });
 });

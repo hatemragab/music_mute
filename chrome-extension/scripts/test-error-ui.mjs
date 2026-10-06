@@ -20,6 +20,7 @@ const cases = [
     "PO-token provider",
   ],
   ["ACQUISITION_COOLDOWN", "YouTube access paused", "request limit"],
+  ["SOURCE_BOT_CHALLENGE", "YouTube access paused", "bot check"],
   ["PO_TOKEN_PROVIDER_INVALID", "YouTube tools need repair", "Prepare my Mac"],
   [
     "ACQUISITION_NETWORK_FAILED",
@@ -28,11 +29,7 @@ const cases = [
   ],
   ["ENOSPC", "Not enough local resources", "Free disk space"],
   ["PROCESSING_QUOTA_EXCEEDED", "Account allowance reached", "reset date"],
-  [
-    "COMPANION_UNAVAILABLE",
-    "Connect the MusicMute app",
-    "app window can be closed",
-  ],
+  ["COMPANION_UNAVAILABLE", "Connect the MusicMute app", "Check again"],
 ];
 const html = (
   code,
@@ -41,7 +38,7 @@ const video=document.querySelector('video');let paused=true;
 Object.defineProperties(video,{duration:{get:()=>19},readyState:{get:()=>4},paused:{get:()=>paused},currentSrc:{get:()=>""}});
 video.pause=()=>{paused=true;video.dispatchEvent(new Event('pause'))};video.play=()=>{paused=false;video.dispatchEvent(new Event('play'));return Promise.resolve()};
 window.fixtureMessages=[];const code=${JSON.stringify(code)};const retryAt=Date.now()+65000;
-globalThis.chrome={storage:{local:{get:async()=>({}),set:async()=>{}},onChanged:{addListener:()=>{},removeListener:()=>{}}},runtime:{id:'fixture-extension',onMessage:{addListener:()=>{},removeListener:()=>{}},sendMessage:async(message)=>{fixtureMessages.push(message);if(message.type==='MM_START')return {ok:false,error:code,...(code==='ACQUISITION_COOLDOWN'?{error_context:{stage:'metadata',block_reason:'ACQUISITION_RATE_LIMITED',retry_at:retryAt}}:{error_context:{stage:'metadata'}})};if(message.type==='MM_CLOUD_HANDOFF')return {ok:false,error:'APP_UPDATE_REQUIRED'};return {ok:true}}}};
+globalThis.chrome={storage:{local:{get:async()=>({}),set:async()=>{}},onChanged:{addListener:()=>{},removeListener:()=>{}}},runtime:{id:'fixture-extension',onMessage:{addListener:()=>{},removeListener:()=>{}},sendMessage:async(message)=>{fixtureMessages.push(message);if(message.type==='MM_START')return {ok:false,error:code,...(['ACQUISITION_COOLDOWN','SOURCE_BOT_CHALLENGE'].includes(code)?{error_context:{stage:'metadata',block_reason:code==='SOURCE_BOT_CHALLENGE'?'SOURCE_BOT_CHALLENGE':'ACQUISITION_RATE_LIMITED',retry_at:retryAt}}:{error_context:{stage:'metadata'}})};if(message.type==='MM_CLOUD_HANDOFF')return {ok:false,error:'APP_UPDATE_REQUIRED'};return {ok:true}}}};
 </script><script src="/content.js"></script></body></html>`;
 const server = createServer((request, response) => {
   const url = new URL(request.url, "http://127.0.0.1");
@@ -105,6 +102,62 @@ try {
     report.checks.push(
       `${code}: rendered guidance and restored original audio`,
     );
+    if (["SOURCE_BOT_CHALLENGE", "ACQUISITION_COOLDOWN"].includes(code)) {
+      const retry = page.getByRole("button", {
+        name: "Remove background music",
+        exact: true,
+      });
+      assert.equal(
+        await retry.isDisabled(),
+        true,
+        "local retry disabled during hold",
+      );
+      const cloud = page.getByRole("link", {
+        name: "Use MusicMute cloud",
+        exact: true,
+      });
+      assert.equal(
+        await cloud.getAttribute("data-primary"),
+        "true",
+        "cloud is primary",
+      );
+      assert.equal(
+        await cloud.evaluate(
+          (link) => link.parentElement.firstElementChild === link,
+        ),
+        true,
+        "cloud comes first",
+      );
+      assert.equal(
+        await page
+          .getByRole("link", { name: "Open Mac app", exact: true })
+          .isVisible(),
+        true,
+      );
+      await page.locator("#musicmute-local-button").click();
+      assert.equal(
+        await page.evaluate(
+          () =>
+            fixtureMessages.filter((message) => message.type === "MM_START")
+              .length,
+        ),
+        1,
+        "waveform cannot retry during hold",
+      );
+      assert.equal(
+        await page.evaluate(
+          () =>
+            fixtureMessages.filter(
+              (message) => message.type === "MM_CLOUD_HANDOFF",
+            ).length,
+        ),
+        0,
+        "no automatic cloud handoff",
+      );
+      report.checks.push(
+        `${code}: cloud primary; retry disabled; no automatic requests`,
+      );
+    }
     if (code === "ACQUISITION_COOLDOWN") {
       await page.waitForTimeout(1150);
       assert.notEqual(

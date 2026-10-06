@@ -188,6 +188,12 @@ beforeEach(async () => {
       },
     },
     storage: {
+      session: {
+        get: vi.fn(async (key: string) => ({ [key]: stored[key] })),
+        set: vi.fn(async (values: Record<string, unknown>) =>
+          Object.assign(stored, values),
+        ),
+      },
       local: {
         get: vi.fn(async (keys: string | string[]) =>
           Object.fromEntries(
@@ -204,6 +210,7 @@ beforeEach(async () => {
     },
     tabs: {
       get: getTab,
+      update: vi.fn(async () => ({})),
       query: vi.fn(async () => [{ id: 17, url: pageSender.url }]),
       sendMessage: vi.fn(async () => undefined),
       onRemoved: { addListener: vi.fn() },

@@ -1,3 +1,4 @@
+import { assertYouTubeSetupReady } from "./app-setup.js";
 import { runLocalEngine, supportsLocalEngine } from "./local-engine.js";
 import {
   rememberTransferredAudio,
@@ -148,7 +149,7 @@ function fixedAcquisitionBootstrapCode(stderr: string): string | undefined {
     errors.at(-1) ??
     lines.filter((line) => line && !nonfatalAcquisitionLine(line)).at(-1);
   return terminal?.match(
-    /^(?:ERROR:\s*)?(DOWNLOADER_ARGUMENTS_INVALID|DOWNLOADER_ISOLATION_REQUIRED)$/,
+    /^(?:ERROR:\s*)?(DOWNLOADER_ARGUMENTS_INVALID|DOWNLOADER_ISOLATION_REQUIRED|SOURCE_TOKEN_REQUIRED|PO_TOKEN_PROVIDER_INVALID|DENO_MISSING|YT_DLP_EJS_MISSING)$/,
   )?.[1];
 }
 
@@ -926,6 +927,7 @@ export class LocalMacProvider implements ProcessingProvider {
     signal: AbortSignal,
     operation: () => Promise<T>,
   ): Promise<T> {
+    await assertYouTubeSetupReady(this.config);
     try {
       return await this.acquisitionGate.run(signal, operation);
     } catch (error) {

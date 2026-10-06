@@ -28,6 +28,12 @@ Refreshing waits for the previous page's playback to stop before starting the ne
 page; reselecting the same video begins a fresh visit. Paused videos wait for Play,
 and the saved duration limit still applies.
 
+Same-video player replacements preserve the current session and panel. Hidden
+pages receive a bounded liveness check before their lease expires, and recovery
+reattaches only a still-valid local playback grant without submitting new work.
+See [playback interruption recovery](docs/playback-recovery.md) for the source,
+diagnostic and qualification boundaries.
+
 Chrome starts the native helper after setup even when the Mac window is closed.
 Idle Chrome connections release the helper so they do not block an app update;
 active or paused playback retains its native grant until stopped. Sparkle provides

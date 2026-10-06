@@ -46,6 +46,12 @@ describe("safe user guidance and local reports", () => {
         failureGuidance("ACQUISITION_COOLDOWN", context, 1_060_000).message,
       ).toContain("YouTube can still refuse");
       expect(guidance.cloud).toBe(true);
+      expect(guidance.cloudPrimary).toBe(true);
+      expect(guidance.message.startsWith("Use MusicMute cloud")).toBe(true);
+      expect(
+        failureGuidance("ACQUISITION_COOLDOWN", context, 1_060_000)
+          .cloudPrimary,
+      ).toBe(false);
     }
   });
   it.each([
@@ -59,6 +65,14 @@ describe("safe user guidance and local reports", () => {
     const guidance = failureGuidance(code);
     expect(guidance.openApp).toBe(true);
     expect(guidance.message).toContain("Prepare my Mac");
+  });
+  it("offers connection guidance for token generation without prescribing reinstallation", () => {
+    const guidance = failureGuidance("SOURCE_TOKEN_REQUIRED");
+    expect(guidance.message).toContain("Check your internet connection");
+    expect(guidance.message).not.toMatch(/Repair|Prepare my Mac/);
+    expect(guidance.cloud).toBe(true);
+    expect(guidance.cloudPrimary).toBe(false);
+    expect(failureGuidance("SETUP_REQUIRED").cloud).toBe(true);
   });
   it("keeps runtime challenges, playback tokens and bot acceptance separate", () => {
     expect(failureGuidance("SOURCE_CHALLENGE_FAILED").message).toContain(

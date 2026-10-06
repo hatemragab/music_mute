@@ -39,7 +39,8 @@ export type ExtensionMessage =
   | { type: "MM_CLOUD_ACTIVE" }
   | { type: "MM_EVENT"; payload: DiagnosticInput }
   | { type: "MM_JOB"; payload: PageJob; generation: number }
-  | { type: "MM_READY"; generation: number }
+  | { type: "MM_READY"; generation: number; source_muted?: boolean }
+  | { type: "MM_PAGE_PROBE"; generation: number }
   | { type: "MM_PLAYBACK"; playing: boolean; generation: number }
   | {
       type: "MM_ERROR";
@@ -220,6 +221,12 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
           value.reason === "navigation")
       );
     case "MM_READY":
+      return (
+        generation(value.generation) &&
+        (value.source_muted === undefined ||
+          typeof value.source_muted === "boolean")
+      );
+    case "MM_PAGE_PROBE":
     case "MM_AUDIO_READY":
       return generation(value.generation);
     case "MM_CLOCK":

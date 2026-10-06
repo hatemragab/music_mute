@@ -177,6 +177,7 @@ const runtimeSend = vi.fn<(message: ExtensionMessage) => Promise<unknown>>();
 type MessageHandler = (
   message: ExtensionMessage,
   sender: chrome.runtime.MessageSender,
+  respond?: (response: unknown) => void,
 ) => unknown;
 let video: VideoFixture;
 let player: ElementFixture;
@@ -197,7 +198,7 @@ let resizeObservers: {
 let ad = false;
 let deferAdClocks = false;
 let deferStarts = false;
-let clockReply: { ok?: boolean; error?: string };
+let clockReply: { ok?: boolean; error?: string; source_muted?: boolean };
 let heldClocks: (() => void)[];
 let heldStarts: ((reply: { ok: boolean; error?: string }) => void)[];
 let windowEvents: Map<string, () => void>;
@@ -1154,6 +1155,18 @@ describe("safe acquisition failure guidance through the content handler", () => 
     expect(panelControl("musicmute-panel-status").textContent).toContain(
       "1:01",
     );
+    const audio = panelControl("musicmute-panel-audio-toggle");
+    expect(audio.disabled).toBe(true);
+    const cloud = panelControl("musicmute-cloud-link");
+    expect(cloud.hidden).toBe(false);
+    expect(cloud.dataset.primary).toBe("true");
+    expect(cloud.parent!.children[0]).toBe(cloud);
+    audio.click();
+    waveform().click();
+    await flush();
+    expect(sent.filter((message) => message.type === "MM_START")).toHaveLength(
+      1,
+    );
     const sends = sent.length;
     await vi.advanceTimersByTimeAsync(2000);
     expect(panelControl("musicmute-panel-status").textContent).toContain(
@@ -1163,6 +1176,8 @@ describe("safe acquisition failure guidance through the content handler", () => 
     panelControl("musicmute-panel-close").click();
     await vi.advanceTimersByTimeAsync(59_000);
     expect(panel().hidden).toBe(true);
+    expect(audio.disabled).toBe(false);
+    expect(cloud.dataset.primary).toBe("false");
     expect(panelControl("musicmute-panel-status").textContent).toContain(
       "YouTube can still refuse",
     );
@@ -1730,7 +1745,8 @@ describe("playback waveform through the actual content handler", () => {
     player.append(video);
     mutation();
     await flush();
-    await begin();
+    playback(true);
+    await flush();
     expect(latestClock().payload.buffering).toBe(false);
     const clocks = sent.filter((message) => message.type === "MM_CLOCK").length;
     previous.dispatchEvent(new Event("waiting"));
@@ -1899,6 +1915,7 @@ describe("playback waveform through the actual content handler", () => {
           { id: extensionId },
         );
       if (ending === "navigation") {
+        documentEvent("yt-navigate-start");
         video = new VideoFixture();
         video.duration = 90;
         video.currentTime = 3;
@@ -1921,6 +1938,7 @@ describe("playback waveform through the actual content handler", () => {
       expect(wave().hidden).toBe(true);
       expect(wave().dataset.playing).toBe("false");
       if (ending === "navigation") {
+        documentEvent("yt-navigate-finish");
         await begin();
         expect(waveTime()).toBe("0:03 / 1:30");
       }
@@ -2753,6 +2771,150 @@ describe("retired playback sessions through the actual content handler", () => {
   });
 
   it.each(["preparing", "ready"])(
+    "preserves a verified same-video replacement while %s",
+    async (state) => {
+      if (state === "ready") await begin();
+      else {
+        waveform().click();
+        await flush();
+      }
+      const owner = generation();
+      const previous = video;
+      const previousPanel = panel();
+      video = new VideoFixture();
+      player.append(video);
+      mutation();
+      await flush();
+      expect(
+        sent.some(
+          (message) =>
+            message.type === "MM_STOP" || message.type === "MM_CANCEL",
+        ),
+      ).toBe(false);
+      expect(generation()).toBe(owner);
+      expect(panel()).toBe(previousPanel);
+      expect(panel().hidden).toBe(false);
+      expect(previous.paused).toBe(true);
+      expect(previous.muted).toBe(false);
+      messageHandler(
+        { type: "MM_READY", generation: owner },
+        { id: extensionId },
+      );
+      playback(true);
+      await flush();
+      expect(video.muted).toBe(true);
+      expect(latestClock().payload.generation).toBe(owner);
+      expect(
+        sent.filter((message) => message.type === "MM_START"),
+      ).toHaveLength(1);
+    },
+  );
+
+  it("keeps replacement media unmuted under a negotiated browser tab mask", async () => {
+    await begin();
+    messageHandler(
+      { type: "MM_READY", generation: generation(), source_muted: true },
+      { id: extensionId },
+    );
+    await flush();
+    expect(video.muted).toBe(false);
+    const owner = generation();
+    video = new VideoFixture();
+    player.append(video);
+    mutation();
+    await flush();
+    playback(true);
+    await flush();
+    expect(video.muted).toBe(false);
+    expect(generation()).toBe(owner);
+    video.muted = true;
+    await flush();
+    expect(latestClock().payload.user_muted).toBe(true);
+    video.muted = false;
+    await flush();
+    expect(latestClock().payload.user_muted).toBe(false);
+  });
+
+  it("holds original audio during the ad-to-vocals mask handoff", async () => {
+    await begin();
+    messageHandler(
+      { type: "MM_READY", generation: generation(), source_muted: true },
+      { id: extensionId },
+    );
+    await flush();
+    await changeAd(true);
+    expect(video.muted).toBe(false);
+    await changeAd(false);
+    expect(video.muted).toBe(true);
+    clockReply = { ok: true, source_muted: true };
+    video.dispatchEvent(new Event("timeupdate"));
+    await flush();
+    expect(video.muted).toBe(false);
+    expect(latestClock().payload.user_muted).toBe(false);
+  });
+
+  it("waits for replacement metadata without hiding controls or following the old playing clock", async () => {
+    await begin();
+    const owner = generation();
+    video = new VideoFixture();
+    video.readyState = 0;
+    video.duration = NaN;
+    player.append(video);
+    mutation();
+    await flush();
+    expect(latestClock().payload.paused).toBe(true);
+    expect(panel().hidden).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    video.readyState = 4;
+    video.duration = 19;
+    documentEvent("loadedmetadata", video);
+    await flush();
+    expect(latestClock().payload.paused).toBe(false);
+    expect(latestClock().payload.generation).toBe(owner);
+    expect(video.muted).toBe(true);
+    expect(sent.some((message) => message.type === "MM_STOP")).toBe(false);
+  });
+
+  it("keeps a user-paused replacement paused and preserves panel dismissal", async () => {
+    await begin(true);
+    panelControl("musicmute-panel-close").click();
+    video = new VideoFixture();
+    video.paused = true;
+    player.append(video);
+    const play = vi.spyOn(video, "play");
+    mutation();
+    await flush();
+    expect(play).not.toHaveBeenCalled();
+    expect(latestClock().payload.paused).toBe(true);
+    expect(latestClock().payload.user_muted).toBe(true);
+    expect(panel().hidden).toBe(true);
+  });
+
+  it("answers an owned page probe with a fresh clock even when the page is hidden", async () => {
+    await begin();
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+    });
+    const respond = vi.fn();
+    messageHandler(
+      { type: "MM_PAGE_PROBE", generation: generation() },
+      { id: extensionId },
+      respond,
+    );
+    expect(respond).toHaveBeenCalledWith({ clock: latestClock().payload });
+    expect(latestClock().payload.sampled_at_ms).toBe(Date.now());
+    expect(panel().hidden).toBe(false);
+    respond.mockClear();
+    messageHandler(
+      { type: "MM_PAGE_PROBE", generation: generation() - 1 },
+      { id: extensionId },
+      respond,
+    );
+    expect(respond).not.toHaveBeenCalled();
+  });
+
+  it.each(["preparing", "ready"])(
     "fences READY after a same-ID video element replacement while %s",
     async (state) => {
       if (state === "ready") await begin();
@@ -2768,6 +2930,7 @@ describe("retired playback sessions through the actual content handler", () => {
       const play = vi.spyOn(video, "play");
       mutation();
       await flush();
+      await vi.advanceTimersByTimeAsync(5001);
       messageHandler(
         { type: "MM_READY", generation: retired },
         { id: extensionId },
@@ -3124,6 +3287,7 @@ describe("original audio ownership during ads in the actual content handler", ()
     video.muted = true;
     mutation();
     await flush();
+    await vi.advanceTimersByTimeAsync(5001);
     await releaseClocks();
     expect(previous.muted).toBe(false);
     expect(video.muted).toBe(true);

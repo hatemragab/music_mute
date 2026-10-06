@@ -22,6 +22,7 @@ import {
   downloadModel,
   extensionOrigin,
   inspectAppStatus,
+  assertYouTubeSetupReady,
   launcherContents,
   MODEL,
   modelPath,
@@ -189,6 +190,8 @@ async function setupReadinessRecord(
         config.runtime_root ?? null,
         "0.1.0",
       ]),
+      engine: true,
+      model: true,
       downloader: true,
       javascript: true,
       token_provider: true,
@@ -266,6 +269,7 @@ describe("standalone app setup", () => {
   });
   it("reads installed metadata without hashing content or executing readiness probes", async () => {
     const { config, userHome } = await metadataReadyFixture();
+    await setupReadinessRecord(config);
     const downloader = vi.spyOn(downloaderModule, "verifyDownloaderBundle");
     const youtube = vi.spyOn(youtubeRuntime, "verifyYoutubeRuntime");
     const localCheck = vi.spyOn(configModule, "inspectLocalReadiness");
@@ -752,6 +756,55 @@ describe("standalone app setup", () => {
       });
     },
   );
+  it("requires execution evidence before guest acquisition, without probes or downloads", async () => {
+    const { config, userHome } = await metadataReadyFixture();
+    const check = vi.spyOn(configModule, "inspectYouTubeReadiness");
+    const run = vi.spyOn(tools, "runBounded");
+    expect((await inspectAppStatus(config, userHome)).youtube_ready).toBe(
+      false,
+    );
+    await expect(assertYouTubeSetupReady(config)).rejects.toMatchObject({
+      code: "SETUP_REQUIRED",
+    });
+    await setupReadinessRecord(config);
+    await expect(assertYouTubeSetupReady(config)).resolves.toBeUndefined();
+    expect((await inspectAppStatus(config, userHome)).youtube_ready).toBe(true);
+    expect(check).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["javascript", "DENO_MISSING"],
+    ["token_provider", "PO_TOKEN_PROVIDER_INVALID"],
+    ["downloader", "YT_DLP_EJS_MISSING"],
+  ])(
+    "blocks fresh acquisition after a failed %s check before invoking any tool",
+    async (component, code) => {
+      const { config } = await metadataReadyFixture();
+      await setupReadinessRecord(config, {
+        [component]: false,
+        errors: { [component]: code },
+      });
+      const run = vi.spyOn(tools, "runBounded");
+      await expect(
+        new tools.LocalMacProvider(config).inspectYouTube("abcdefghijk", {
+          signal: new AbortController().signal,
+          onProgress: () => {},
+        }),
+      ).rejects.toMatchObject({ code });
+      expect(run).not.toHaveBeenCalled();
+      await expect(
+        stat(join(config.root, "acquisition-state.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
+  it("detects a missing Deno after Prepare using only cheap installed checks", async () => {
+    const { config } = await metadataReadyFixture();
+    await setupReadinessRecord(config);
+    await unlink(config.js_runtime_path);
+    await expect(assertYouTubeSetupReady(config)).rejects.toMatchObject({
+      code: "DENO_MISSING",
+    });
+  });
   it("preserves an explicit Prepare failure without rerunning its tool probe", async () => {
     const { config, userHome } = await metadataReadyFixture();
     await setupReadinessRecord(config, {
@@ -1007,7 +1060,7 @@ describe("standalone app setup", () => {
   );
 
   it.each(["different_runtime", "malformed", "public", "replacement_app"])(
-    "ignores %s saved readiness without probing tools or blocking installed metadata",
+    "requires a check for %s saved readiness without probing or blocking local files",
     async (caseName) => {
       const { config, userHome } = await metadataReadyFixture();
       await setupReadinessRecord(config, {
@@ -1022,9 +1075,12 @@ describe("standalone app setup", () => {
         await writeFile(join(config.app_resources!, "new-build"), "fixture");
       const check = vi.spyOn(configModule, "inspectYouTubeReadiness");
 
-      expect((await inspectAppStatus(config, userHome)).youtube_ready).toBe(
-        true,
-      );
+      const status = await inspectAppStatus(config, userHome);
+      expect(status.youtube_ready).toBe(false);
+      expect(status.local_processing_ready).toBe(true);
+      await expect(assertYouTubeSetupReady(config)).rejects.toMatchObject({
+        code: "SETUP_REQUIRED",
+      });
       expect(check).not.toHaveBeenCalled();
     },
   );

@@ -8,7 +8,7 @@ import { PO_TOKEN_PROVIDER_WHEEL } from "./youtube-runtime.js";
 export const DOWNLOADER_VERSION = "2026.08.19";
 export const DOWNLOADER_BOOTSTRAP = "downloader_bootstrap.py";
 export const DOWNLOADER_BOOTSTRAP_SHA256 =
-  "23951cae37000f8358ac5c2b576635db52e2c891604c0cb98e32b20da0e087ab";
+  "ccf96466d04fcf623292471e73ca372ac7b90d5a0ccc7a0875b6258ca921d488";
 export const DOWNLOADER_WHEELS = [
   PO_TOKEN_PROVIDER_WHEEL,
   {

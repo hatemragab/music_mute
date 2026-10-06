@@ -24,7 +24,7 @@ export function emitDiagnostic(
 ): void {
   const payload: DiagnosticInput = {
     component: "extension",
-    severity: code ? "error" : "info",
+    severity: code && event !== "playback_stopped" ? "error" : "info",
     event,
   };
   if (code) payload.code = code;

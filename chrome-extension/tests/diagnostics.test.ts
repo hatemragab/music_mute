@@ -53,6 +53,42 @@ afterEach(() => {
 });
 
 describe("native diagnostic identity and validation evidence", () => {
+  it("retains bounded crash context without thrown text or source data", () => {
+    const directory = root();
+    const writer = new Diagnostics(directory);
+    writer.record({
+      component: "companion",
+      severity: "error",
+      event: "diagnostic_error",
+      code: "COMPANION_CRASH",
+      metrics: {
+        stage: "native_command",
+        native_command: "CANCEL",
+        exception_kind: "TypeError",
+        message: "PRIVATE_MESSAGE",
+        stack: "PRIVATE_STACK",
+        url: "PRIVATE_URL",
+      },
+    });
+    writer.record({
+      component: "companion",
+      severity: "error",
+      event: "diagnostic_error",
+      code: "COMPANION_CRASH",
+      metrics: {
+        native_command: "PRIVATE_COMMAND",
+        exception_kind: "PRIVATE_EXCEPTION",
+      },
+    });
+    writer.close();
+    const stored = readFileSync(join(directory, "events.jsonl"), "utf8");
+    expect(stored).not.toContain("PRIVATE_");
+    expect(JSON.parse(stored.split("\n")[0]!).metrics).toEqual({
+      stage: "native_command",
+      native_command: "CANCEL",
+      exception_kind: "TypeError",
+    });
+  });
   it.each(["INSTALLATION_CHECK_BUSY", "INSTALLATION_CHECK_FAILED"])(
     "preserves manual-check failure code %s",
     (code) => {

@@ -424,8 +424,25 @@ with bootstrap.isolated_downloader_environment():
     from yt_dlp.extractor.youtube.pot.provider import PoTokenContext, PoTokenRequest
     from yt_dlp.networking.common import HTTPHeaderDict
 
-    bootstrap.install_token_provider(sys.argv[2])
+    # Exercise the real launcher/registration and pinned CLI parser for metadata.
+    import yt_dlp
+    from yt_dlp.extractor.youtube.pot._registry import _pot_providers
+    options = {}
+    def parse_metadata(arguments):
+        options.update(yt_dlp.parse_options(arguments).ydl_opts)
+    original_argv = sys.argv[:]
+    sys.argv = [sys.argv[1], '--musicmute-youtube-runtime', sys.argv[2],
+                '--ignore-config', '--no-plugin-dirs', '--skip-download', '--quiet',
+                '--no-warnings', '--no-js-runtimes', '--',
+                'https://www.youtube.com/watch?v=abcdefghijk']
+    with mock.patch.object(yt_dlp, 'main', side_effect=parse_metadata):
+        bootstrap.main()
+    sys.argv = original_argv
+    assert options['extractor_args']['youtube']['player_client'] == ['mweb']
+    assert options['cookiefile'] is None and options['cookiesfrombrowser'] is None
+    assert options['skip_download'] is True
     from yt_dlp_plugins.extractor.getpot_bgutil_script import BgUtilScriptDenoPTP
+    assert list(_pot_providers.value.values()) == [BgUtilScriptDenoPTP]
 
     class Logger:
         def __getattr__(self, _name):
@@ -444,7 +461,7 @@ with bootstrap.isolated_downloader_environment():
         assert not any(option in command for option in ('--cookies', '--proxy', '-p', '--source-address', '--disable-tls-verification'))
         return json.dumps({'poToken': token}), '', 0
 
-    ydl = YoutubeDL({'quiet': True, 'no_warnings': True, 'cachedir': False, 'extractor_args': {'youtube': {'player_client': ['mweb']}}})
+    ydl = YoutubeDL({**options, 'cachedir': False})
     ydl.urlopen = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('network forbidden'))
     ie = YoutubeIE(ydl)
     ie.initialize()
@@ -489,8 +506,12 @@ with bootstrap.isolated_downloader_environment():
                 raise bootstrap.BootstrapError('DOWNLOADER_ARGUMENTS_INVALID')
             return fixed_request(self, item)
         with mock.patch.object(BgUtilScriptDenoPTP, '_real_request_pot', old_request), mock.patch.object(ydl, 'report_error'):
-            assert fetch_token(required=True) is None
-            assert audio_formats(fetch_token) == []
+            for operation in (lambda: fetch_token(required=True), lambda: audio_formats(fetch_token)):
+                try:
+                    operation()
+                    raise AssertionError('missing GVS token was accepted')
+                except bootstrap.BootstrapError as error:
+                    assert str(error) == 'SOURCE_TOKEN_REQUIRED'
 
         assert instance.request_pot(request).po_token == token
         assert names == {cookie.name for cookie in ydl.cookiejar}
@@ -501,6 +522,29 @@ with bootstrap.isolated_downloader_environment():
         assert len(formats) == 1 and formats[0]['format_id'] == '140'
         assert formats[0]['vcodec'] == 'none' and formats[0]['ext'] == 'm4a'
         assert 'pot=' in formats[0]['url']
+
+        # Empty, malformed and timed-out provider responses fail at the GVS
+        # boundary with a fixed code, before a tokenless format can be selected.
+        import subprocess
+        for outcome in ('{}', '{"poToken":""}', '{"poToken":"private-invalid-token!"}', subprocess.TimeoutExpired('fixture', 1)):
+            def failed_run(command, **kwargs):
+                if command[-1] == '--version':
+                    return '2.0.1', '', 0
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return outcome, '', 0
+            with mock.patch('yt_dlp_plugins.extractor.getpot_bgutil_script.Popen.run', side_effect=failed_run), mock.patch.object(ie._pot_director.cache, 'get', return_value=None):
+                try:
+                    audio_formats(fetch_token)
+                    raise AssertionError('provider failure yielded audio')
+                except bootstrap.BootstrapError as error:
+                    assert str(error) == 'SOURCE_TOKEN_REQUIRED'
+        with mock.patch.object(BgUtilScriptDenoPTP, 'is_available', return_value=False), mock.patch.object(ie._pot_director.cache, 'get', return_value=None):
+            try:
+                audio_formats(fetch_token)
+                raise AssertionError('unavailable provider yielded audio')
+            except bootstrap.BootstrapError as error:
+                assert str(error) == 'SOURCE_TOKEN_REQUIRED'
 
         # Capture the jar after validation but before the reviewed script uses
         # its binding. The original guest jar is never cleared or forwarded.
@@ -570,6 +614,51 @@ print('ready')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, b'ready\n')
         self.assertEqual(list(self.tmp.iterdir()), [])
+
+    @unittest.skipUnless(QUALIFIED, "requires explicitly prepared pinned wheels")
+    def test_pinned_cli_reports_missing_gvs_as_a_fixed_terminal_error(self):
+        self.install_archives()
+        command = """
+import contextlib
+import importlib.util
+import io
+import sys
+from unittest import mock
+spec = importlib.util.spec_from_file_location('bootstrap_fixture', sys.argv[1])
+bootstrap = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bootstrap)
+sys.path[:0] = bootstrap.verified_archives()
+with bootstrap.isolated_downloader_environment():
+    import yt_dlp
+    from yt_dlp.extractor.youtube import YoutubeIE
+    from yt_dlp.extractor.youtube.pot.provider import PoTokenContext
+    bootstrap.require_gvs_token()
+    def extract(self, _url):
+        return self.fetch_po_token(client='mweb', context=PoTokenContext.GVS,
+            visitor_data='fixture-guest-visitor', video_id='abcdefghijk',
+            ytcfg=self._get_default_ytcfg('mweb'))
+    output, errors = io.StringIO(), io.StringIO()
+    with mock.patch.object(YoutubeIE, '_real_extract', extract), mock.patch.object(YoutubeIE, '_fetch_po_token', return_value=None), contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+        try:
+            yt_dlp.main(['--ignore-config', '--no-plugin-dirs', '--no-warnings',
+                '--no-cookies', '--no-cookies-from-browser', '--skip-download',
+                '--quiet', '--', 'https://www.youtube.com/watch?v=abcdefghijk'])
+            raise AssertionError('missing GVS token succeeded')
+        except SystemExit as error:
+            assert error.code == 1
+    assert output.getvalue() == ''
+    assert errors.getvalue().strip() == 'ERROR: SOURCE_TOKEN_REQUIRED', errors.getvalue()
+print('ready')
+"""
+        result = subprocess.run(
+            [sys.executable, '-I', '-B', '-S', '-c', command, str(self.script)],
+            cwd=self.home,
+            env={"HOME": str(self.home), "TMPDIR": str(self.tmp), "PATH": "/usr/bin:/bin", "LANG": "en_US.UTF-8"},
+            capture_output=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, b'ready\n')
+        self.assertEqual(result.stderr, b'')
 
     def test_shared_writable_directory_is_rejected(self):
         self.target.chmod(0o770)

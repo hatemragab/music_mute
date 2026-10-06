@@ -157,6 +157,48 @@ const payload = {
   provider: "ONLINE_MUSICMUTE",
 };
 describe("native host saved processing choice", () => {
+  it("does not write cancellation snapshots into Chrome's closed pipe during shutdown", async () => {
+    const host = await fixture(true, true);
+    try {
+      await host.reply(host.send("HELLO", {}));
+      await host.reply(host.send("START", payload));
+      host.child.stdout.destroy();
+      host.child.stdin.end();
+      await vi.waitFor(() => expect(host.child.exitCode).not.toBeNull(), {
+        timeout: 5000,
+      });
+      const events = await readFile(
+        join(host.directory, "logs/events.jsonl"),
+        "utf8",
+      );
+      expect(events).toContain("job_cancelled");
+      expect(events).toContain("companion_stopped");
+      expect(events).not.toContain("COMPANION_CRASH");
+      expect(host.child.exitCode).toBe(0);
+    } finally {
+      if (host.child.exitCode === null) await stop(host.child);
+    }
+  });
+  it("closes cleanly when Chrome closes its reply pipe before a reply", async () => {
+    const host = await fixture(true);
+    try {
+      await host.reply(host.send("HELLO", {}));
+      host.child.stdout.destroy();
+      host.send("STATUS", {});
+      await vi.waitFor(() => expect(host.child.exitCode).not.toBeNull(), {
+        timeout: 5000,
+      });
+      const events = await readFile(
+        join(host.directory, "logs/events.jsonl"),
+        "utf8",
+      );
+      expect(events).not.toContain("COMPANION_CRASH");
+      expect(events).toContain("NATIVE_PIPE_CLOSED");
+      expect(host.child.exitCode).toBe(0);
+    } finally {
+      if (host.child.exitCode === null) await stop(host.child);
+    }
+  });
   it("serves cloud playback without loading the local model, and checks preference changes before START", async () => {
     const host = await fixture(true);
     try {

@@ -390,6 +390,30 @@ def check_challenge_runtime(runtime_root):
         raise BootstrapError("YT_DLP_EJS_MISSING")
 
 
+def require_gvs_token():
+    """Fail closed at the pinned extractor's GVS boundary, not its player API.
+
+    mweb obtains its GVS token during format extraction, after the player
+    response. Preserve that content binding and do not send a GVS token as a
+    player token. Earlier YouTube refusals retain their original classification.
+    """
+    from yt_dlp.extractor.youtube import YoutubeIE
+    from yt_dlp.extractor.youtube.pot.provider import PoTokenContext
+
+    upstream = YoutubeIE.fetch_po_token
+
+    def fetch(self, client='web', context=PoTokenContext.GVS, **kwargs):
+        required = client == 'mweb' and context == PoTokenContext.GVS
+        if required:
+            kwargs['required'] = True
+        token = upstream(self, client=client, context=context, **kwargs)
+        if required and not token:
+            raise BootstrapError("SOURCE_TOKEN_REQUIRED")
+        return token
+
+    YoutubeIE.fetch_po_token = fetch
+
+
 def install_token_provider(runtime_root, check_contents=True, bundle_root=None):
     """Load only the verified pinned plugin, never search any plugin directory."""
     import types
@@ -398,6 +422,8 @@ def install_token_provider(runtime_root, check_contents=True, bundle_root=None):
     import dataclasses
     from yt_dlp.cookies import YoutubeDLCookieJar
     from yt_dlp.extractor.youtube.pot._registry import _pot_providers
+    from yt_dlp.extractor.youtube.pot._director import validate_response
+    from yt_dlp.extractor.youtube.pot.provider import PoTokenProviderError
 
     provider_root = os.path.join(runtime_root, "provider")
     for path in (runtime_root, provider_root, os.path.join(provider_root, "src")):
@@ -464,8 +490,17 @@ def install_token_provider(runtime_root, check_contents=True, bundle_root=None):
             or item.request_headers.get("X-Goog-AuthUser", "0") != "0"
         ):
             raise BootstrapError("DOWNLOADER_ARGUMENTS_INVALID")
-        return original_request(self, dataclasses.replace(item, request_cookiejar=YoutubeDLCookieJar()))
+        try:
+            response = original_request(self, dataclasses.replace(item, request_cookiejar=YoutubeDLCookieJar()))
+            if not validate_response(response):
+                raise ValueError("invalid response")
+            return response
+        except Exception:
+            # Upstream errors can include script output or token values. Only a
+            # fixed code may reach its director/logger; no raw provider text.
+            raise PoTokenProviderError("SOURCE_TOKEN_REQUIRED", expected=True) from None
     provider._real_request_pot = request
+    require_gvs_token()
 
 
 PROVIDER_SCRIPT_SHA256 = "718ba412feecbc67d423c30048fb9a5066c195a610773208abfe1912f6f10b7c"

@@ -247,7 +247,10 @@ async function follow(
     await element.play();
     if (isCurrent(element, token, ownerGeneration)) {
       if (!requestedPlaying) element.pause();
-      else if (attempt === playAttempt && !element.paused) reportState(true);
+      else if (attempt === playAttempt && !element.paused) {
+        synchronizer?.playbackStarted(Date.now());
+        reportState(true);
+      }
     } else element.pause();
   } catch {
     if (

@@ -17,6 +17,7 @@ import {
   isExtensionMessage,
   isJobSnapshot,
   isErrorCode,
+  isMediaClock,
   type ExtensionMessage,
   type ExtensionStatus,
   type PageJob,
@@ -25,6 +26,8 @@ import { loadSettings } from "./settings";
 import { cloudHandoffUrl } from "../shared/app-handoff";
 import { isErrorContext, type ErrorContext } from "../shared/error-context";
 import { safeLocalErrors } from "./local-error-report";
+import { TabAudio } from "./tab-audio";
+import { PlaybackSessionStore } from "./playback-session";
 import {
   isInstallationCheck,
   type InstallationCheck,
@@ -155,6 +158,9 @@ interface ActiveSession {
 let active: ActiveSession | null = null;
 /** Reserve admission synchronously, before storage/native handoffs can yield. */
 let pendingStart: ActiveSession | null = null;
+const playbackSessions = new PlaybackSessionStore();
+const tabAudio = new TabAudio();
+let recovery: Promise<void> | null = null;
 let stopsInFlight = 0;
 const RELOAD_GRACE_MS = 5000;
 interface RetainedSession {
@@ -230,6 +236,46 @@ function isRetiredDocument(tabId: number, documentId?: string): boolean {
   return documents.some((item) => item.documentId === documentId);
 }
 let leaseTimer: ReturnType<typeof setTimeout> | null = null;
+async function probePageLease(owner: ActiveSession): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const message: ExtensionMessage = {
+      type: "MM_PAGE_PROBE",
+      generation: owner.generation,
+    };
+    const response: unknown = await Promise.race([
+      owner.documentId
+        ? chrome.tabs.sendMessage(owner.tabId, message, {
+            documentId: owner.documentId,
+          })
+        : chrome.tabs.sendMessage(owner.tabId, message),
+      new Promise<undefined>((resolve) => {
+        timeout = setTimeout(() => resolve(undefined), 3000);
+      }),
+    ]);
+    if (active !== owner) return;
+    const sample =
+      response && typeof response === "object" && "clock" in response
+        ? response.clock
+        : undefined;
+    if (
+      isMediaClock(sample) &&
+      sample.generation === owner.generation &&
+      sample.video_id === owner.videoId &&
+      Date.now() - sample.sampled_at_ms >= 0 &&
+      Date.now() - sample.sampled_at_ms <= 5000
+    )
+      owner.lastSeenAt = Date.now();
+  } catch {
+    // A discarded/closed document cannot renew its lease.
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+  if (active !== owner) return;
+  if (Date.now() - owner.lastSeenAt >= PAGE_LEASE_MS)
+    await fail("PLAYBACK_PAGE_LOST");
+  else armPageLease(owner);
+}
 function armPageLease(owner: ActiveSession): void {
   if (leaseTimer) clearTimeout(leaseTimer);
   leaseTimer = setTimeout(
@@ -237,7 +283,7 @@ function armPageLease(owner: ActiveSession): void {
       leaseTimer = null;
       if (active !== owner) return;
       if (Date.now() - owner.lastSeenAt >= PAGE_LEASE_MS)
-        fail("PLAYBACK_PAGE_LOST");
+        void probePageLease(owner);
       else armPageLease(owner);
     },
     Math.max(1000, PAGE_LEASE_MS - (Date.now() - owner.lastSeenAt)),
@@ -762,6 +808,14 @@ async function loadAudio(): Promise<void> {
   loading.promise = (async () => {
     if (previous) await previous.catch(() => undefined);
     if (active !== owner) return;
+    const tabWasMuted = await tabAudio.set(
+      owner.tabId,
+      owner.requestId,
+      !owner.clock?.ad_active,
+    );
+    if (tabWasMuted && owner.clock)
+      owner.clock = { ...owner.clock, user_muted: true };
+    if (active !== owner) return;
     try {
       await ensureOffscreen();
     } catch {
@@ -850,6 +904,18 @@ async function receiveJob(
     return;
   }
   if (snapshot.state === "READY" && snapshot.media) {
+    if (snapshot.provider === "LOCAL_MACOS" && owner.documentId)
+      playbackSessions.save({
+        version: 1,
+        tabId: owner.tabId,
+        documentId: owner.documentId,
+        generation: owner.generation,
+        videoId: owner.videoId,
+        durationSeconds: owner.durationSeconds,
+        requestId: owner.requestId,
+        jobId: snapshot.job_id,
+        savedAt: Date.now(),
+      });
     // Save snapshots retain the same media grant and must not reset the player.
     const loadedMedia = active.media;
     if (
@@ -936,7 +1002,19 @@ async function stop(
   context?: ErrorContext,
   retainForNavigation = false,
 ): Promise<void> {
+  playbackSessions.save(null);
   const owner = active ?? pendingStart;
+  if (owner && reason)
+    diagnostic({
+      component: "extension",
+      severity: "info",
+      event: "playback_stopped",
+      code:
+        successor && reason === "SESSION_STOPPED"
+          ? "PLAYBACK_REPLACED"
+          : reason,
+      metrics: { stage: "background" },
+    });
   if (owner) {
     owner.publicationPlaying = false;
     cancelPublicationRetry(owner);
@@ -983,6 +1061,7 @@ async function stop(
     await chrome.runtime
       .sendMessage({ type: "MM_AUDIO_STOP" })
       .catch(() => undefined);
+    if (owner) await tabAudio.release(owner.tabId, owner.requestId);
     if (owner && reason)
       sendToPage(
         {
@@ -1057,6 +1136,120 @@ function senderVideoId(sender: chrome.runtime.MessageSender): string | null {
     isVideoId(candidate)
     ? candidate
     : null;
+}
+async function recoverPlayback(
+  clock: MediaClock,
+  sender: chrome.runtime.MessageSender,
+): Promise<void> {
+  if (recovery) {
+    await recovery;
+    if (active || pendingStart) return;
+  }
+  const recover = async () => {
+    if (
+      active ||
+      pendingStart ||
+      retained ||
+      stopsInFlight ||
+      !sender.documentId
+    )
+      return;
+    const owner: ActiveSession = {
+      tabId: sender.tab!.id!,
+      documentId: sender.documentId,
+      generation: clock.generation,
+      videoId: clock.video_id,
+      durationSeconds: clock.duration_seconds,
+      requestId: crypto.randomUUID(),
+      startedAt: performance.now(),
+      automatic: false,
+      lastSeenAt: Date.now(),
+      clock,
+    };
+    pendingStart = owner;
+    let matched = false;
+    try {
+      const saved = await playbackSessions.read();
+      if (
+        !saved ||
+        pendingStart !== owner ||
+        saved.tabId !== sender.tab?.id ||
+        saved.documentId !== sender.documentId ||
+        saved.generation !== clock.generation ||
+        saved.videoId !== clock.video_id ||
+        Math.abs(saved.durationSeconds - clock.duration_seconds) > 2 ||
+        isRetiredDocument(saved.tabId, saved.documentId) ||
+        (sender.documentLifecycle !== undefined &&
+          sender.documentLifecycle !== "active")
+      )
+        return;
+      matched = true;
+      owner.requestId = saved.requestId;
+      owner.jobId = saved.jobId;
+      // Reserve before any tab/native awaits. Stop/navigation/new Start can retire
+      // this reservation, and every continuation checks that same owner.
+      const tab = await chrome.tabs.get(owner.tabId);
+      if (
+        pendingStart !== owner ||
+        !tab.url ||
+        senderVideoId({ ...sender, url: tab.url }) !== owner.videoId
+      )
+        return;
+      await ensureConnected();
+      if (pendingStart !== owner) return;
+      const reply = await command({
+        protocol_version: PROTOCOL_VERSION,
+        request_id: crypto.randomUUID(),
+        type: "STATUS",
+        payload: {},
+      });
+      if (pendingStart !== owner) return;
+      // STATUS rechecks the native account and saved provider. Never START,
+      // reacquire or submit billable work during automatic recovery.
+      if (
+        reply.type !== "JOB" ||
+        !reply.payload ||
+        !isJobSnapshot(reply.payload) ||
+        reply.payload.job_id !== saved.jobId ||
+        reply.payload.video_id !== saved.videoId ||
+        reply.payload.provider !== "LOCAL_MACOS" ||
+        reply.payload.state !== "READY" ||
+        !reply.payload.media ||
+        Math.abs(reply.payload.media.duration_seconds - saved.durationSeconds) >
+          2
+      )
+        return;
+      active = owner;
+      pendingStart = null;
+      armPageLease(owner);
+      await receiveJob(reply.payload, owner.requestId);
+      if (active === owner)
+        diagnostic({
+          component: "extension",
+          severity: "info",
+          event: "stage_completed",
+          metrics: { stage: "session_recovered" },
+        });
+    } catch {
+      // No valid native grant remains. The page restores original audio and
+      // reports the failed recovery instead of silently starting a new job.
+    } finally {
+      if (pendingStart === owner) {
+        pendingStart = null;
+        if (matched) {
+          playbackSessions.save(null);
+          await chrome.runtime
+            .sendMessage({ type: "MM_AUDIO_STOP" })
+            .catch(() => undefined);
+          await tabAudio.release(owner.tabId, owner.requestId);
+        }
+      }
+    }
+  };
+  recovery = recover().finally(() => {
+    recovery = null;
+  });
+  return recovery;
 }
 async function handle(
   message: ExtensionMessage,
@@ -1208,7 +1401,11 @@ async function handle(
   }
   if (message.type === "MM_AUDIO_READY" && fromOffscreen(sender)) {
     if (active?.generation === message.generation)
-      sendToPage({ type: "MM_READY", generation: message.generation });
+      sendToPage({
+        type: "MM_READY",
+        generation: message.generation,
+        source_muted: !active.clock?.ad_active,
+      });
     return { ok: true };
   }
   if (message.type === "MM_AUDIO_STATE" && fromOffscreen(sender)) {
@@ -1242,6 +1439,8 @@ async function handle(
     return { ok: true };
   }
   if (!validPage(sender)) return { ok: false };
+  if (message.type === "MM_CLOCK" && !active)
+    await recoverPlayback(message.payload, sender);
   if (message.type === "MM_CLOUD_HANDOFF") {
     const tab = await chrome.tabs.get(sender.tab!.id!);
     if (
@@ -1591,6 +1790,11 @@ async function handle(
     owner.clock = message.payload;
     if (owner.media) {
       try {
+        if (!message.payload.ad_active) {
+          const muted = await tabAudio.set(owner.tabId, owner.requestId, true);
+          if (active !== owner) return { ok: false };
+          if (muted) owner.clock = { ...owner.clock, user_muted: true };
+        }
         if (offscreenLoading?.owner === owner) await offscreenLoading.promise;
         else {
           const hasDocument = await chrome.offscreen.hasDocument();
@@ -1654,7 +1858,12 @@ async function handle(
         return { ok: false };
       }
     }
-    return { ok: active === owner };
+    if (active === owner && owner.media && owner.clock?.ad_active)
+      await tabAudio.set(owner.tabId, owner.requestId, false);
+    return {
+      ok: active === owner,
+      ...(owner.media ? { source_muted: !owner.clock?.ad_active } : {}),
+    };
   }
   return { ok: false };
 }
@@ -1711,9 +1920,38 @@ chrome.runtime.onMessage.addListener((value: unknown, sender, sendResponse) => {
     });
   return true;
 });
+chrome.tabs.onUpdated?.addListener((tabId, change) => {
+  if (
+    change.status === "loading" &&
+    active?.tabId !== tabId &&
+    pendingStart?.tabId !== tabId
+  )
+    void (async () => {
+      if (!(await tabAudio.has(tabId))) return;
+      // After background loss, retire any orphan player before restoring its
+      // source. A newly admitted session keeps ownership of its own mask.
+      if (!active && !pendingStart)
+        await chrome.runtime
+          .sendMessage({ type: "MM_AUDIO_STOP" })
+          .catch(() => undefined);
+      if (active?.tabId !== tabId && pendingStart?.tabId !== tabId)
+        await tabAudio.release(tabId);
+    })().catch(() => undefined);
+  if (
+    active?.tabId === tabId &&
+    active.media &&
+    change.mutedInfo &&
+    !(
+      change.mutedInfo.reason === "extension" &&
+      change.mutedInfo.extensionId === chrome.runtime.id
+    )
+  )
+    void stop(false);
+});
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (active?.tabId === tabId || pendingStart?.tabId === tabId) void stop(true);
   if (retained?.owner.tabId === tabId) void releaseRetained();
+  void tabAudio.release(tabId).catch(() => undefined);
   retiredDocuments.delete(tabId);
   currentDocuments.delete(tabId);
 });

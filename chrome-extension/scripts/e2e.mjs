@@ -367,6 +367,15 @@ try {
   // popup as a client, rather than sending a service worker a message to itself.
   const worker = await context.newPage();
   await worker.goto(`chrome-extension://${extensionId}/popup.html`);
+  const sourceSuppressed = () =>
+    worker.evaluate(
+      async (origin) =>
+        (await chrome.tabs.query({})).some(
+          (tab) =>
+            tab.url?.startsWith(origin + "/watch?") && tab.mutedInfo?.muted,
+        ),
+      watchOrigin,
+    );
   const status = await worker.evaluate(
     () =>
       new Promise((resolve) =>
@@ -400,8 +409,12 @@ try {
   );
   check("real offscreen audio plays without autoplay bypass", playingAudio);
   check(
-    "original muted only after vocals start",
-    await page.locator("video").evaluate((v) => v.muted),
+    "original source suppressed at tab level",
+    await worker.evaluate(async () =>
+      (await chrome.tabs.query({})).some(
+        (t) => t.url?.includes("/watch?") && t.mutedInfo?.muted,
+      ),
+    ),
   );
   await page.screenshot({
     path: join(output, "fixture-active.png"),
@@ -413,20 +426,82 @@ try {
   });
   if (storePackage)
     results.store_assets = await createStoreAssets(context, worker, output);
+  await page.bringToFront();
+  // Measure steady synchronization after browser decode/output startup and
+  // its bounded first alignment, rather than sampling during that handoff.
+  await poll(
+    () => audio.evaluate((a) => a.currentTime),
+    (time) => time >= 3,
+    "AUDIO_STARTUP_DID_NOT_ADVANCE",
+  );
   const drift = [];
+  const driftSamples = [];
   for (let sample = 0; sample < 6; sample++) {
-    const audioTime = await audio.evaluate((a) => a.currentTime);
-    const videoTime = await page
-      .locator("video")
-      .evaluate((v) => v.currentTime);
-    drift.push(Math.abs(audioTime - videoTime));
+    const audioSample = await audio.evaluate((a) => ({
+      time: a.currentTime,
+      at: Date.now(),
+      rate: a.paused ? 0 : a.playbackRate,
+    }));
+    const videoSample = await page.locator("video").evaluate((v) => ({
+      time: v.currentTime,
+      at: Date.now(),
+      rate: v.paused ? 0 : v.playbackRate,
+    }));
+    const now = Math.max(audioSample.at, videoSample.at);
+    drift.push(
+      Math.abs(
+        audioSample.time +
+          ((now - audioSample.at) / 1000) * audioSample.rate -
+          videoSample.time -
+          ((now - videoSample.at) / 1000) * videoSample.rate,
+      ),
+    );
+    driftSamples.push({ audio: audioSample, video: videoSample });
     await delay(200);
   }
+  results.drift_samples = driftSamples;
   results.max_observed_drift_ms = Math.round(Math.max(...drift) * 1000);
   check(
-    "synthetic playback clocks stay within 250ms",
+    "settled synthetic playback clocks stay within 250ms",
     results.max_observed_drift_ms <= 250,
   );
+  await page.bringToFront();
+  // Auto-start may already own playback before the initial waveform click,
+  // making that click a dismissal. Establish the visible-panel precondition.
+  if (await page.locator("#musicmute-local-panel").isHidden())
+    await page.locator("#musicmute-local-button").click();
+  check(
+    "replacement begins with visible controls",
+    await page.locator("#musicmute-local-panel").isVisible(),
+  );
+  await page.locator("#replace").click();
+  await poll(
+    () => page.locator("video").evaluate((v) => v.readyState >= 3 && !v.muted),
+    Boolean,
+    "ACTIVE_REPLACEMENT_NOT_REBOUND",
+  );
+  check(
+    "active same-video replacement keeps the panel visible",
+    await page.locator("#musicmute-local-panel").isVisible(),
+  );
+  check(
+    "replacement preserves the new player's paused state",
+    await page.locator("video").evaluate((v) => v.paused),
+  );
+  const rebound = await worker.evaluate(() =>
+    chrome.runtime.sendMessage({ type: "MM_STATUS" }),
+  );
+  check(
+    "replacement reuses the same prepared job",
+    rebound.job?.job_id === status.job.job_id,
+  );
+  await page.locator("#play").click();
+  await poll(
+    () => audio.evaluate((a) => !a.paused),
+    Boolean,
+    "REBOUND_AUDIO_NOT_PLAYING",
+  );
+  check("replacement resumes vocals without processing again", true);
   if (longRun) {
     const pageSession = await context.newCDPSession(page);
     await pageSession.send("Emulation.setFocusEmulationEnabled", {
@@ -563,7 +638,10 @@ try {
     Boolean,
     "ORIGINAL_SOUND_SWITCH_FAILED",
   );
-  check("single sound action restores original audio", true);
+  check(
+    "single sound action restores original audio",
+    !(await sourceSuppressed()),
+  );
   await page
     .getByRole("button", { name: "Remove background music", exact: true })
     .click();
@@ -606,7 +684,8 @@ try {
     Boolean,
     "AD_GATING_FAILED",
   );
-  check("ads suspend vocals", true);
+  await poll(sourceSuppressed, (muted) => !muted, "AD_SOURCE_STILL_SUPPRESSED");
+  check("ads suspend vocals and restore original tab audio", true);
   await page.locator("#ads").click();
   await poll(
     () => audio.evaluate((a) => !a.paused),
@@ -621,7 +700,7 @@ try {
     Boolean,
     "MUTE_RESTORE_FAILED",
   );
-  check("stop restores original mute setting", true);
+  check("stop restores original mute setting", !(await sourceSuppressed()));
   check(
     "Stop hides the MusicMute dialog",
     await page.locator("#musicmute-local-panel").isHidden(),
@@ -665,7 +744,7 @@ try {
   );
   check(
     "second tab takes exclusive playback ownership",
-    await second.locator("video").evaluate((v) => v.muted && !v.paused),
+    await second.locator("video").evaluate((v) => !v.muted && !v.paused),
   );
   await second
     .getByRole("button", { name: "Stop MusicMute", exact: true })
@@ -716,7 +795,7 @@ try {
       { timeout: 20000 },
     );
     await poll(
-      () => page.locator("video").evaluate((v) => v.muted && !v.paused),
+      () => page.locator("video").evaluate((v) => !v.muted && !v.paused),
       Boolean,
       "AUTO_NEXT_NOT_PLAYING",
       20000,
@@ -737,7 +816,7 @@ try {
   );
   check(
     "Stop suppresses automatic restart on same video",
-    afterAutoStop.job === null,
+    afterAutoStop.job === null && !(await sourceSuppressed()),
   );
   check("no page errors", results.errors.length === 0);
   await page.screenshot({ path: join(output, "fixture.png"), fullPage: true });

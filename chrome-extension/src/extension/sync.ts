@@ -23,6 +23,7 @@ export class ClockSynchronizer {
   private sequence = -1;
   private previousClock: MediaClock | null = null;
   private alignmentPending = true;
+  private startupAlignmentUntilMs = 0;
   private explicitAlignmentPending = false;
   private largeDriftSinceMs: number | null = null;
   private largeDriftSign = 0;
@@ -32,6 +33,11 @@ export class ClockSynchronizer {
     private readonly videoId: string,
     private readonly generation: number,
   ) {}
+
+  /** Realign once after the browser finishes asynchronous audio startup. */
+  playbackStarted(nowMs: number): void {
+    this.startupAlignmentUntilMs = nowMs + 1000;
+  }
 
   decide(
     clock: MediaClock,
@@ -151,6 +157,14 @@ export class ClockSynchronizer {
       !audioSeeking &&
       (!settling || this.explicitAlignmentPending)
     ) {
+      if (
+        play &&
+        nowMs < this.startupAlignmentUntilMs &&
+        Math.abs(drift) > 0.25
+      ) {
+        this.alignmentPending = true;
+        this.startupAlignmentUntilMs = 0;
+      }
       if (this.alignmentPending) {
         this.alignmentPending = false;
         this.explicitAlignmentPending = false;

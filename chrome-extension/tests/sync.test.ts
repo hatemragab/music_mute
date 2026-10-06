@@ -406,6 +406,26 @@ describe("synchronized local audio", () => {
     expect(immediateSeek.seek).toBe(true);
     expect(immediateSeek.target).toBe(4);
   });
+  it("realigns once after asynchronous browser playback startup", () => {
+    const sync = new ClockSynchronizer(base.video_id, 1);
+    sync.decide({ ...base, current_time: 0 }, 1000, 0, 60);
+    sync.playbackStarted(1000);
+    const aligned = sync.decide(
+      { ...base, sequence: 2, current_time: 0.6, sampled_at_ms: 1600 },
+      1600,
+      0.25,
+      60,
+    );
+    expect(aligned.seek).toBe(true);
+    expect(aligned.target).toBe(0.6);
+    const next = sync.decide(
+      { ...base, sequence: 3, current_time: 0.85, sampled_at_ms: 1850 },
+      1850,
+      0.85,
+      60,
+    );
+    expect(next.seek).toBe(false);
+  });
   it("respects user mute, volume, and end of media", () => {
     expect(decide({ user_muted: true }).volume).toBe(0);
     expect(decide().volume).toBe(0.7);

@@ -20,7 +20,7 @@ function acquisitionFailure(
       return {
         title: "YouTube access paused",
         message:
-          "YouTube refused this guest download with a bot check. MusicMute waits 15 minutes before another download. Chrome cookies are not used.",
+          "YouTube refused this guest download with a bot check. MusicMute holds fresh downloads for 15 minutes. Signing into Chrome does not authenticate MusicMute's isolated guest downloader.",
       };
     case "ACQUISITION_RATE_LIMITED":
       return {
@@ -32,7 +32,7 @@ function acquisitionFailure(
       return {
         title: "YouTube access paused",
         message:
-          "MusicMute is waiting after a YouTube bot check, request limit or interrupted download. Wait for the 15-minute cooldown, then try again. Original sound is available.",
+          "MusicMute is waiting after a YouTube bot check, request limit or interrupted download. Fresh downloads remain on hold during the 15-minute cooldown. Signing into Chrome does not authenticate MusicMute's isolated guest downloader. Original sound is available.",
       };
     case "ACQUISITION_BUSY":
       return {
@@ -50,7 +50,7 @@ function acquisitionFailure(
       return {
         title: "YouTube playback token required",
         message:
-          "YouTube requires a playback token for this guest download. MusicMute could not get the audio. Check the MusicMute app diagnostics.",
+          "MusicMute's bundled PO-token provider could not obtain a required playback token for this guest download. Check your internet connection and the MusicMute app diagnostics. If this persists, check for an app update.",
       };
     case "SOURCE_HTTP_UNAUTHORIZED":
     case "SOURCE_AUTH_REQUIRED":
@@ -153,6 +153,7 @@ export interface FailureGuidance {
   message: string;
   openApp: boolean;
   cloud: boolean;
+  cloudPrimary: boolean;
 }
 export function failureGuidance(
   code: string,
@@ -282,6 +283,12 @@ export function failureGuidance(
         message:
           "The downloaded audio track did not match. Original audio restored. Choose another video or check MusicMute Diagnostics.",
       };
+    else if (code === "PLAYBACK_SESSION_LOST" || code === "PLAYBACK_PAGE_LOST")
+      result = {
+        title: "Playback connection interrupted",
+        message:
+          "MusicMute could not recover this playback session. Original audio restored. Select Remove background music to reconnect.",
+      };
     else if (code === "SESSION_STOPPED")
       result = {
         title: "Original audio restored",
@@ -299,8 +306,7 @@ export function failureGuidance(
     message +=
       " Check or update the bundled Deno runtime, EJS and YouTube extractor in MusicMute setup.";
   if (code === "SOURCE_TOKEN_REQUIRED")
-    message +=
-      " Repair the bundled PO-token provider or check for an app update. A token cannot guarantee YouTube acceptance.";
+    message += " A token cannot guarantee YouTube acceptance.";
   if (context?.block_reason) {
     message =
       context.block_reason === "ACQUISITION_INTERRUPTED"
@@ -318,9 +324,21 @@ export function failureGuidance(
     message +=
       " Verified cached vocals and local files remain usable. Original sound is available.";
   }
+  const cloudPrimary =
+    [
+      "SOURCE_BOT_CHALLENGE",
+      "ACQUISITION_COOLDOWN",
+      "ACQUISITION_RATE_LIMITED",
+    ].includes(code) &&
+    (!context?.retry_at || context.retry_at > now);
+  if (cloudPrimary)
+    message =
+      "Use MusicMute cloud to review and confirm cloud processing in the Mac app. " +
+      message;
   return {
     ...result,
     message,
+    cloudPrimary,
     openApp:
       code !== "SESSION_STOPPED" &&
       ![
@@ -331,7 +349,7 @@ export function failureGuidance(
         "OUTBOX_BUSY",
       ].includes(code),
     cloud:
-      /^(SOURCE_|ACQUISITION_|DENO_|PO_TOKEN_PROVIDER_|YT_DLP_|DOWNLOADER_|EJS_)/.test(
+      /^(SETUP_REQUIRED$|SOURCE_|ACQUISITION_|DENO_|PO_TOKEN_PROVIDER_|YT_DLP_|DOWNLOADER_|EJS_)/.test(
         code,
       ) &&
       ![

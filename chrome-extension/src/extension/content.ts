@@ -41,6 +41,7 @@ let mode: "idle" | "preparing" | "ready" = "idle";
 let userMuted = false;
 let observedMuted = false;
 let ownsMute = false;
+let tabMuteMode = false;
 let hasPlayedVocals = false;
 let vocalsPlaying = false;
 let saveState: JobSnapshot["save_state"];
@@ -57,6 +58,9 @@ type Preparation = {
 let preparation: Preparation | null = null;
 let preparationPausesPending = 0;
 let startAccepted = false;
+let sessionDuration = 0;
+let replacementTimer: ReturnType<typeof setTimeout> | null = null;
+let readyDuringReplacement = false;
 let buffering = false;
 let bufferingStartedAt: number | null = null;
 let button: HTMLButtonElement | null = null;
@@ -89,10 +93,18 @@ let lastFailure: {
   generation: number;
 } | null = null;
 let countdownTimer: ReturnType<typeof setTimeout> | null = null;
+function localRetryBlocked(): boolean {
+  return (
+    mode === "idle" &&
+    lastFailure?.generation === generation &&
+    (lastFailure.context?.retry_at ?? 0) > Date.now()
+  );
+}
 function clearFailure(): void {
   if (countdownTimer) clearTimeout(countdownTimer);
   countdownTimer = null;
   lastFailure = null;
+  if (cloudLink) cloudLink.dataset.primary = "false";
   if (errorDetails) errorDetails.hidden = true;
   if (copyError) copyError.hidden = true;
 }
@@ -104,6 +116,8 @@ function renderFailure(): void {
     mode !== "idle"
   )
     return;
+  if (countdownTimer) clearTimeout(countdownTimer);
+  countdownTimer = null;
   const { code, context } = lastFailure;
   const guidance = failureGuidance(code, context);
   text(
@@ -112,7 +126,10 @@ function renderFailure(): void {
     code === "SESSION_STOPPED" ? "ready" : "error",
   );
   if (setupLink) setupLink.hidden = !guidance.openApp;
-  if (cloudLink) cloudLink.hidden = !guidance.cloud || !videoId;
+  if (cloudLink) {
+    cloudLink.hidden = !guidance.cloud || !videoId;
+    cloudLink.dataset.primary = String(guidance.cloudPrimary);
+  }
   if (errorDetails) {
     errorDetails.hidden = code === "SESSION_STOPPED";
     errorDetails.textContent = `${code} · ${context?.stage ?? "operation"} · ${lastFailure.timestamp}`;
@@ -268,7 +285,8 @@ function updateAudioAction(): void {
       : mode === "ready"
         ? "Show original sound"
         : "Remove background music";
-  audioButton.disabled = invalidated || pendingStop !== null;
+  audioButton.disabled =
+    invalidated || pendingStop !== null || localRetryBlocked();
 }
 function text(
   message: string,
@@ -309,6 +327,7 @@ function progress(completed?: number, total?: number): string {
 }
 async function send(message: ExtensionMessage): Promise<{
   ok?: boolean;
+  source_muted?: boolean;
   error?: string;
   error_context?: ErrorContext;
   handoff_url?: string;
@@ -321,6 +340,7 @@ async function send(message: ExtensionMessage): Promise<{
     return reply && typeof reply === "object"
       ? (reply as {
           ok?: boolean;
+          source_muted?: boolean;
           error?: string;
           error_context?: ErrorContext;
           handoff_url?: string;
@@ -344,7 +364,7 @@ function releaseAdMute(owner: HTMLVideoElement, epoch: number): void {
   if (
     video !== owner ||
     mode !== "ready" ||
-    !ownsMute ||
+    (!ownsMute && !tabMuteMode) ||
     !adSuspended ||
     adMuteEpoch !== epoch ||
     !adActive()
@@ -375,10 +395,15 @@ function updateAdMute(ad: boolean): void {
   }
 }
 function teardown(pause = false, restoreOriginal = true): void {
+  if (replacementTimer) clearTimeout(replacementTimer);
+  replacementTimer = null;
+  readyDuringReplacement = false;
+  sessionDuration = 0;
   clearFailure();
   if (cloudLink) cloudLink.hidden = true;
   if (pause && video) video.pause();
   if (restoreOriginal) restoreMute();
+  tabMuteMode = false;
   hasPlayedVocals = false;
   vocalsPlaying = false;
   saveState = undefined;
@@ -504,7 +529,7 @@ function fail(code: string, context?: ErrorContext): void {
     generation,
   };
   renderFailure();
-  if (code !== "SESSION_STOPPED") emitDiagnostic("diagnostic_error", code);
+  emitDiagnostic("diagnostic_error", code, { stage: "content" });
   resumeOriginal(previous, clearedGeneration, resume);
 }
 function hasPlayableVideoBuffer(element: HTMLVideoElement): boolean {
@@ -535,7 +560,7 @@ function recoverBufferingFromProgress(): void {
     bufferingStartedAt = null;
   }
 }
-function clock(): void {
+function clock(): MediaClock | undefined {
   recoverBufferingFromProgress();
   updatePlaybackWaveform();
   if (invalidated || !video || !videoId || mode === "idle") return;
@@ -552,7 +577,7 @@ function clock(): void {
     current_time: video.currentTime,
     duration_seconds: video.duration,
     playback_rate: video.playbackRate,
-    paused: video.paused,
+    paused: video.paused || replacementTimer !== null,
     seeking: video.seeking,
     ended: video.ended,
     buffering,
@@ -574,11 +599,17 @@ function clock(): void {
       reply.ok === false &&
       (mode === "ready" || (mode === "preparing" && startAccepted))
     )
-      fail("SESSION_STOPPED");
+      fail("PLAYBACK_SESSION_LOST");
     // The existing clock acknowledgement arrives after offscreen handles the
     // ad pause. Until then, keep the original muted to avoid overlapping audio.
     else if (reply.ok === true && ad) releaseAdMute(owner, muteEpoch);
+    else if (reply.ok === true && reply.source_muted === true && !adActive()) {
+      tabMuteMode = true;
+      restoreMute();
+      observedMuted = owner.muted;
+    }
   });
+  return payload;
 }
 async function stopSession(dismiss = false): Promise<void> {
   if (invalidated) return;
@@ -595,6 +626,9 @@ async function stopSession(dismiss = false): Promise<void> {
     return;
   }
   stopDismissed = dismiss;
+  emitDiagnostic("playback_stopped", "PLAYBACK_USER_STOP", {
+    stage: "content",
+  });
   const previous = mode;
   const oldGeneration = generation;
   const owner = video;
@@ -638,6 +672,10 @@ async function stopSession(dismiss = false): Promise<void> {
 }
 async function start(intent: "manual" | "automatic" = "manual"): Promise<void> {
   if (invalidated || pendingStop || mode !== "idle") return;
+  if (localRetryBlocked()) {
+    renderFailure();
+    return;
+  }
   if (intent === "manual") eligibility.suppress();
   panelDismissed = false;
   if (!video || !videoId) {
@@ -672,6 +710,7 @@ async function start(intent: "manual" | "automatic" = "manual"): Promise<void> {
   userMuted = video.muted;
   desiredPlaying = !video.paused;
   mode = "preparing";
+  sessionDuration = video.duration;
   startClockTimer();
   preparation = { intent, video, id: videoId, source: video.currentSrc };
   if (!video.paused) {
@@ -965,7 +1004,7 @@ function installControls(player: HTMLElement, controls: Element): void {
   setupLink.textContent = "Open Mac app";
   setupLink.hidden = true;
   cloudLink = document.createElement("a");
-  cloudLink.className = "musicmute-setup-link musicmute-cloud-link";
+  cloudLink.className = "musicmute-cloud-link";
   cloudLink.textContent = "Use MusicMute cloud";
   cloudLink.title =
     "Open MusicMute to review monthly usage and confirm cloud processing. Processing still needs YouTube audio access.";
@@ -1064,7 +1103,7 @@ function installControls(player: HTMLElement, controls: Element): void {
   };
   controlPanel.addEventListener("click", onPanelClick);
   controlPanel.addEventListener("keydown", onPanelKey);
-  actions.append(setupLink, cloudLink, copyError, audioButton, stopButton);
+  actions.append(cloudLink, setupLink, copyError, audioButton, stopButton);
   controlPanel.append(
     header,
     status,
@@ -1109,6 +1148,9 @@ function stopForNavigation(pausePrevious = false): void {
   }
   const oldGeneration = generation;
   const oldMode = mode;
+  emitDiagnostic("playback_stopped", "PLAYBACK_NAVIGATION", {
+    stage: "content",
+  });
   // Retire old READY replies immediately. A reused player may already be
   // playing the incoming video, so preserve its playback intent here.
   teardown(pausePrevious, true);
@@ -1125,6 +1167,54 @@ function stopForNavigation(pausePrevious = false): void {
     });
   navigationStop = stopping;
 }
+function canRebindVideo(next: HTMLVideoElement): boolean {
+  const watch = next.closest("ytd-watch-flexy");
+  return (
+    !adActive() &&
+    watch?.getAttribute("video-id") === videoId &&
+    next.readyState >= 1 &&
+    !!next.currentSrc &&
+    Number.isFinite(next.duration) &&
+    Math.abs(next.duration - sessionDuration) <= 2
+  );
+}
+function rebindVideo(next: HTMLVideoElement, id: string): void {
+  const playing = vocalsPlaying;
+  const resume = readyDuringReplacement && desiredPlaying;
+  readyDuringReplacement = false;
+  if (replacementTimer) clearTimeout(replacementTimer);
+  replacementTimer = null;
+  cleanupVideo?.();
+  cleanupVideo = null;
+  video?.pause();
+  restoreMute();
+  attach(next, id);
+  vocalsPlaying = playing;
+  // The new element belongs to the same verified timeline. Keep the user's
+  // mute choice, preparation, generation and panel instead of cancelling work.
+  if (mode === "preparing") {
+    if (preparation)
+      preparation = { ...preparation, video: next, source: next.currentSrc };
+    preparationPausesPending = 0;
+    if (!next.paused) {
+      preparationPausesPending++;
+      next.pause();
+    }
+  } else if (hasPlayedVocals) {
+    ownsMute = !tabMuteMode;
+    next.muted = tabMuteMode ? userMuted : true;
+    observedMuted = next.muted;
+  }
+  emitDiagnostic("stage_completed", undefined, { stage: "player_rebound" });
+  if (resume && next.paused) {
+    const owner = generation;
+    void next.play().catch(() => {
+      if (video === next && generation === owner && mode === "ready")
+        text("Vocals ready. Press YouTube Play to start.");
+    });
+  }
+  clock();
+}
 function reconcile(): void {
   if (invalidated) return;
   const id = currentVideoId();
@@ -1132,14 +1222,40 @@ function reconcile(): void {
     ".html5-video-player video",
   );
   if (id !== videoId || next !== video) {
-    stopForNavigation(next !== video);
-    if (invalidated) return;
-    cleanupVideo?.();
-    cleanupVideo = null;
-    video = null;
-    videoId = null;
-    if (next && id) attach(next, id);
-    else eligibility.bind(null, id);
+    if (id && id === videoId && mode !== "idle") {
+      if (next && canRebindVideo(next)) rebindVideo(next, id);
+      else {
+        // YouTube may remove the old element before inserting/loading its
+        // replacement. Keep controls and pause the vocal clock for a bounded
+        // metadata handoff; never follow an unverified replacement or ad.
+        if (!replacementTimer) {
+          vocalsPlaying = false;
+          replacementTimer = setTimeout(() => {
+            replacementTimer = null;
+            emitDiagnostic("diagnostic_error", "PLAYBACK_SOURCE_CHANGED", {
+              stage: "content",
+            });
+            stopForNavigation(true);
+            scheduleReconcile();
+          }, 5000);
+          clock();
+        }
+        return;
+      }
+    } else {
+      stopForNavigation(next !== video);
+      if (invalidated) return;
+      cleanupVideo?.();
+      cleanupVideo = null;
+      video = null;
+      videoId = null;
+      if (next && id) attach(next, id);
+      else eligibility.bind(null, id);
+    }
+  } else if (replacementTimer) {
+    clearTimeout(replacementTimer);
+    replacementTimer = null;
+    clock();
   }
   const player = document.querySelector<HTMLElement>(".html5-video-player");
   const controls = player?.querySelector(".ytp-right-controls");
@@ -1201,6 +1317,7 @@ function renderPlaybackStatus(): void {
 function receiveMessage(
   value: unknown,
   sender: chrome.runtime.MessageSender,
+  sendResponse: (response: unknown) => void = () => {},
 ): void {
   if (!isExtensionMessage(value) || sender.tab) return;
   const message = value;
@@ -1211,6 +1328,10 @@ function receiveMessage(
     message.generation !== generation
   )
     return;
+  if (message.type === "MM_PAGE_PROBE") {
+    sendResponse({ clock: clock() });
+    return;
+  }
   if (message.type === "MM_JOB") {
     if (mode === "idle") return;
     saveState = message.payload.save_state;
@@ -1254,14 +1375,20 @@ function receiveMessage(
   }
   if (message.type === "MM_READY") {
     if (mode === "idle") return;
+    if (message.source_muted === true) {
+      tabMuteMode = true;
+      restoreMute();
+      if (video) observedMuted = video.muted;
+    }
     const firstReady = mode !== "ready";
+    if (firstReady && replacementTimer) readyDuringReplacement = true;
     mode = "ready";
     preparation = null;
     preparationPausesPending = 0;
     progress();
     text("Vocals ready. Play the video to listen.");
     clock();
-    if (firstReady && desiredPlaying && video?.paused) {
+    if (firstReady && desiredPlaying && video?.paused && !replacementTimer) {
       const owner = video;
       const ownerGeneration = generation;
       void owner.play().catch(() => {
@@ -1276,8 +1403,9 @@ function receiveMessage(
     if (message.playing) {
       hasPlayedVocals = true;
       if (!adSuspended) {
-        ownsMute = true;
-        video.muted = true;
+        ownsMute = !tabMuteMode;
+        video.muted = tabMuteMode ? userMuted : true;
+        observedMuted = video.muted;
         renderPlaybackStatus();
         emitDiagnostic("playback_started");
       }

@@ -9,10 +9,41 @@ Homebrew, npm, pip, Deno installation commands or Docker.
 
 `local_processing_ready` covers the processing runtime/model. `youtube_ready`
 also requires the downloader, Deno, challenge scripts, token provider and Chrome
-registration. Status performs bounded offline execution before reporting YouTube
-tools ready; a failed version or provider execution never becomes a green check
-merely because its files exist. Cached vocals and local files retain their own
+registration. Prepare and explicit Check perform bounded offline execution and save readiness
+for the current app/runtime identity. Ordinary status and fresh acquisition use
+that evidence plus cheap installed-path checks, without rerunning probes or
+hashing the runtime. Missing, stale or failed evidence requires Prepare or Check;
+file existence alone does not establish YouTube tools readiness. Cached vocals and local files retain their own
 readiness. These checks do not contact YouTube or establish guest access.
+
+## Guest acquisition and refusal handling
+
+Fresh local YouTube inspection/download checks the saved downloader, JavaScript
+and provider readiness before starting yt-dlp or entering the acquisition gate.
+Cached vocals, shared originals and local files bypass this guest-tool gate.
+Missing or stale evidence directs the user to Check/Prepare; repairing tools
+reuses an already installed compatible runtime rather than forcing a download.
+
+The pinned extractor uses `mweb` only. Its player response precedes GVS token
+acquisition during format extraction: GVS tokens authenticate media requests,
+not the player API. The registered pinned Deno provider must return a valid GVS
+token at that boundary, using the extractor's visitor/video binding. Missing,
+empty, invalid or timed-out token generation fails as `SOURCE_TOKEN_REQUIRED`
+instead of silently discarding formats or allowing tokenless media transfer.
+Provider error text/token values are not forwarded to the upstream logger.
+A temporary token-generation failure does not by itself prove a broken install.
+
+An explicit YouTube bot response remains `SOURCE_BOT_CHALLENGE`, even before
+GVS token generation. It and rate limiting still start the existing 15-minute
+hold. Token/setup errors do not start a refusal hold. During a hold, the Chrome
+panel leads with **Use MusicMute cloud**, keeps **Open Mac app** second, and
+blocks the local retry button and start handler until the supplied deadline.
+The countdown is local; it sends no requests and expiry never starts a retry.
+Cloud handoff still requires explicit review, sign-in and confirmation in the
+Mac app. Neither token generation nor cooldown expiry guarantees YouTube access.
+
+These rules are covered by offline fixtures against the pinned wheels and
+companion/panel tests. They do not establish current live YouTube acceptance.
 
 ## Acquisition and privacy
 
