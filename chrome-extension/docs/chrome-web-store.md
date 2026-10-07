@@ -8,9 +8,39 @@ The browser archive excludes the companion, model, native runtime, source maps,
 profiles, local reports and credentials. A usable public release also requires
 an independently distributed MusicMute Mac app.
 
+## Companion app-data extension update — October 7, 2026
+
+The recommended companion is now
+[MusicMute Local 0.1.1, build 1791393571](https://github.com/ahmed-dev-1/musicmute-downloads/releases/download/macos-store-companion-2026-10-07/MusicMuteLocal-0.1.1-arm64-development-build-1791393571.dmg).
+Prepare copies the 19 built extension files into
+`~/Library/Application Support/MusicMuteLocal/extension`; Setup's Reveal folder
+and Copy path actions use this stable location. Users enable Developer mode and
+select it through Chrome's Load unpacked action. App updates refresh the copy
+through Prepare; Chrome still needs manual Reload and a YouTube page refresh.
+
+The published DMG is **16,104,287 bytes**, SHA-256
+`c867a3bc55fcd84f41c20ae710aa559b1eeeac75478611e7e7a068f6dc2ab38a`.
+The release includes `SHA256SUMS-build-1791393571.txt`, retains the earlier assets,
+and recommends this build. Public metadata confirms the uploaded sizes and digests.
+Anonymous downloads of both the DMG and checksum file exactly match the local bytes.
+
+`npm run verify` passed 2,175 tests (four skipped), typechecking, lint, build and
+formatting. NativeTests and all 17 disposable packaged offline checks passed,
+including exact app-data payload bytes, registration, repair and GUI-closed HELLO.
+The DMG matched all 160 mounted inventory entries and passed strict signature
+verification. It includes the Library menu fix, preserves the Store identity and
+uses the existing runtime components and approved upstream-only model source.
+
+This remains an ad-hoc development pre-release without Apple notarization or a
+configured automatic updater. Chrome loading, fresh-Mac security acceptance,
+real account/cloud processing and new YouTube acquisition remain unproved.
+Evidence is under
+`output/macos/build-850a0a34-2d60-41c5-b839-67175953af99.noindex/distribution.noindex/`
+and `output/packaged-tools-proof/4b6dfde5-50c9-4288-9a7f-818cca10d2a5.noindex/result.json`.
+
 ## Companion Library controls update — October 7, 2026
 
-The recommended companion is
+The earlier Library-controls companion was
 [MusicMute Local 0.1.1, build 1791391546](https://github.com/ahmed-dev-1/musicmute-downloads/releases/download/macos-store-companion-2026-10-07/MusicMuteLocal-0.1.1-arm64-development-build-1791391546.dmg).
 Library Filter and Sort now use their visible fields as clickable menu labels.
 The existing release retains the previous DMG and adds a build-specific checksum

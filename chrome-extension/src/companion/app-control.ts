@@ -32,6 +32,10 @@ const actions: Record<string, string> = {
     "Chrome already has another MusicMute helper registration. Review it before replacing it.",
   LOCAL_DIRECTORY_NOT_PRIVATE:
     "MusicMute cannot use this data directory safely. Check its permissions.",
+  UNSAFE_EXTENSION_DIRECTORY:
+    "MusicMute cannot safely update its extension folder. Review the MusicMute Application Support folder, then retry Prepare.",
+  UNSAFE_EXTENSION_BUNDLE:
+    "The bundled Chrome extension is incomplete or unsafe. Reinstall or update MusicMute, then retry Prepare.",
   DISK_SPACE_LOW: "Free disk space on your Mac, then retry setup.",
   MEMORY_LOW: "Close other memory-heavy apps, then retry setup.",
   APP_RUNTIME_NOT_PREPARED:

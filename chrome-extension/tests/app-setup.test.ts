@@ -105,6 +105,7 @@ async function fixture(
   const state = join(root, "state");
   const runtime = join(state, "runtime/releases/macos-arm64-test-v1/runtime");
   await mkdir(join(resources, "extension"), { recursive: true });
+  await writeFile(join(resources, "../Info.plist"), "fixture app build 1");
   const source = JSON.parse(
     await readFile(bundledManifestPath, "utf8"),
   ) as Record<string, unknown>;
@@ -142,6 +143,136 @@ async function replaceBundledExtensionKey(
   await writeFile(path, JSON.stringify(manifest));
   return extensionOrigin(config.app_resources!);
 }
+
+describe("app-data unpacked extension", () => {
+  it("copies built files and locales with the same native-messaging identity", async () => {
+    const { config, userHome } = await fixture();
+    const bundled = join(config.app_resources!, "extension");
+    await mkdir(join(bundled, "_locales/ar"), { recursive: true });
+    await writeFile(join(bundled, "background.js"), "compiled extension");
+    await writeFile(
+      join(bundled, "background.js.map"),
+      "development source map",
+    );
+    await writeFile(
+      join(bundled, "_locales/ar/messages.json"),
+      '{"name":"عربي"}',
+    );
+    await registerNativeHost(config, userHome);
+    const installed = join(config.root, "extension");
+    expect(await readFile(join(installed, "background.js"), "utf8")).toBe(
+      "compiled extension",
+    );
+    expect(
+      await readFile(join(installed, "_locales/ar/messages.json"), "utf8"),
+    ).toContain("عربي");
+    await expect(
+      stat(join(installed, "background.js.map")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await stat(installed)).mode & 0o777).toBe(0o700);
+    expect((await stat(join(installed, "background.js"))).mode & 0o777).toBe(
+      0o600,
+    );
+    expect(await extensionOrigin(config.root)).toBe(
+      await extensionOrigin(config.app_resources!),
+    );
+    expect(await inspectAppStatus(config, userHome)).toMatchObject({
+      extension_path: installed,
+      extension_registered: true,
+    });
+  });
+  it("updates at the same path for a new app build and removes old payload files", async () => {
+    const { config, userHome } = await fixture();
+    const bundled = join(config.app_resources!, "extension");
+    await writeFile(join(bundled, "old.js"), "old payload");
+    await registerNativeHost(config, userHome);
+    const originalManifest = await readFile(join(bundled, "manifest.json"));
+    await unlink(join(bundled, "old.js"));
+    await writeFile(join(bundled, "background.js"), "new payload");
+    await writeFile(
+      join(config.app_resources!, "../Info.plist"),
+      "fixture app build 2",
+    );
+    expect(
+      (await inspectAppStatus(config, userHome)).extension_registered,
+    ).toBe(false);
+    await registerNativeHost(config, userHome);
+    await expect(
+      stat(join(config.root, "extension/old.js")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(
+      await readFile(join(config.root, "extension/background.js"), "utf8"),
+    ).toBe("new payload");
+    expect(
+      await readFile(join(config.root, "extension/manifest.json")),
+    ).toEqual(originalManifest);
+    expect(
+      (await inspectAppStatus(config, userHome)).extension_registered,
+    ).toBe(true);
+  });
+  it("repairs a missing payload without auditing script contents during ordinary status", async () => {
+    const { config, userHome } = await fixture();
+    await writeFile(
+      join(config.app_resources!, "extension/background.js"),
+      "payload",
+    );
+    await registerNativeHost(config, userHome);
+    await unlink(join(config.root, "extension/background.js"));
+    expect(
+      (await inspectAppStatus(config, userHome)).extension_registered,
+    ).toBe(false);
+    await registerNativeHost(config, userHome);
+    vi.mocked(fs.createReadStream).mockClear();
+    expect(
+      (await inspectAppStatus(config, userHome)).extension_registered,
+    ).toBe(true);
+    expect(fs.createReadStream).not.toHaveBeenCalled();
+  });
+  it("preserves the previous payload and registration if the bundled copy is unsafe", async () => {
+    const { config, userHome } = await fixture();
+    await registerNativeHost(config, userHome);
+    const path = join(config.root, "extension/manifest.json");
+    const prior = await readFile(path);
+    const registration = await readFile(
+      registrationPaths(config, userHome).manifest,
+    );
+    await symlink(path, join(config.app_resources!, "extension/background.js"));
+    await expect(registerNativeHost(config, userHome)).rejects.toMatchObject({
+      code: "UNSAFE_SETUP_FILE",
+    });
+    expect(await readFile(path)).toEqual(prior);
+    expect(
+      await readFile(registrationPaths(config, userHome).manifest),
+    ).toEqual(registration);
+  });
+  it.each(["unmarked", "symlink"])(
+    "refuses to replace a %s app-data directory",
+    async (kind) => {
+      const { config, userHome } = await fixture();
+      await privateDirectory(config.root);
+      const destination = join(config.root, "extension");
+      if (kind === "symlink")
+        await symlink(join(config.app_resources!, "extension"), destination);
+      else {
+        await mkdir(destination, { mode: 0o700 });
+        await writeFile(join(destination, "personal.txt"), "keep this");
+      }
+      await expect(registerNativeHost(config, userHome)).rejects.toMatchObject({
+        code: "UNSAFE_EXTENSION_DIRECTORY",
+      });
+      if (kind === "unmarked")
+        expect(await readFile(join(destination, "personal.txt"), "utf8")).toBe(
+          "keep this",
+        );
+      else
+        expect(await readFile(join(destination, "manifest.json"))).toEqual(
+          await readFile(
+            join(config.app_resources!, "extension/manifest.json"),
+          ),
+        );
+    },
+  );
+});
 
 async function metadataReadyFixture(): Promise<{
   config: LocalConfig;
@@ -767,7 +898,7 @@ describe("standalone app setup", () => {
     expect(repaired).toBe(launcherContents(moved, userHome));
     expect(repaired).not.toBe(launcherContents(config, userHome));
     expect((await inspectAppStatus(moved, userHome)).extension_path).toBe(
-      join(movedResources, "extension"),
+      join(config.root, "extension"),
     );
     const foreign = JSON.stringify({
       name: "com.musicmute.local",
@@ -1354,9 +1485,7 @@ describe("standalone app setup", () => {
   it("does not depend on the developer user's model or runtime directories", async () => {
     const { config, userHome } = await fixture();
     const status = await inspectAppStatus(config, userHome);
-    expect(status.extension_path).toBe(
-      join(config.app_resources!, "extension"),
-    );
+    expect(status.extension_path).toBe(join(config.root, "extension"));
     expect(config.models_root).not.toContain(
       join(homedir(), "Library/Application Support/MusicMuteWorker"),
     );

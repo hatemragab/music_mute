@@ -108,6 +108,8 @@ const appCodes = new Set([
   "ENGINE_NOT_READY",
   "FOREIGN_NATIVE_LAUNCHER_EXISTS",
   "FOREIGN_NATIVE_REGISTRATION_EXISTS",
+  "UNSAFE_EXTENSION_DIRECTORY",
+  "UNSAFE_EXTENSION_BUNDLE",
   "LOCAL_COMPANION_BUSY",
   "LOCAL_COMPANION_LOCK_UNSAFE",
   "LOCAL_COMPANION_START_FAILED",
@@ -457,6 +459,7 @@ function validateStatus(result) {
     token_provider_ready: true,
     youtube_tools_ready: true,
     extension_registered: true,
+    extension_path: status.extension_path,
     components: names,
   };
 }
@@ -671,6 +674,57 @@ finally:
   );
   report.status = validateStatus(status);
   report.checks.push("ACTUAL_PACKAGED_OFFLINE_STATUS_READY");
+  phase = "ISOLATED_UNPACKED_EXTENSION";
+  const installedExtension = join(state, "extension");
+  const extensionReceipt = JSON.parse(
+    await readFile(
+      join(installedExtension, ".musicmute-installation.json"),
+      "utf8",
+    ),
+  );
+  const bundledExtension = join(resources, "extension");
+  const bundledFiles = (
+    await readdir(bundledExtension, { recursive: true, withFileTypes: true })
+  )
+    .filter((entry) => entry.isFile())
+    .map((entry) =>
+      relative(bundledExtension, join(entry.parentPath, entry.name)),
+    )
+    .sort();
+  ensure(
+    extensionReceipt.owner === "MusicMuteLocal" &&
+      Array.isArray(extensionReceipt.files) &&
+      extensionReceipt.files.length > 0 &&
+      extensionReceipt.files.length <= 256 &&
+      JSON.stringify(extensionReceipt.files.map((file) => file.path).sort()) ===
+        JSON.stringify(bundledFiles) &&
+      report.status.extension_path === installedExtension,
+    "QUALIFICATION_APP_UNSAFE",
+  );
+  for (const file of extensionReceipt.files) {
+    ensure(
+      typeof file.path === "string" &&
+        file.path
+          .split("/")
+          .every((name) => /^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(name)),
+      "QUALIFICATION_APP_UNSAFE",
+    );
+    const installed = join(installedExtension, file.path);
+    const bundled = join(resources, "extension", file.path);
+    ensure(
+      (await readFile(installed)).equals(await readFile(bundled)),
+      "QUALIFICATION_APP_UNSAFE",
+    );
+    const info = await lstat(installed);
+    ensure(
+      info.isFile() &&
+        !info.isSymbolicLink() &&
+        info.uid === process.getuid() &&
+        (info.mode & 0o777) === 0o600,
+      "QUALIFICATION_APP_UNSAFE",
+    );
+  }
+  check("APP_DATA_EXTENSION_MATCHES_BUNDLE", true);
   phase = "ISOLATED_CHROME_REGISTRATION";
   const launcher = join(state, "native-launcher.sh");
   const registration = join(

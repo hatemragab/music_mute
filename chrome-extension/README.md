@@ -1030,17 +1030,26 @@ system directory without symlinks or world write permission; group write is allo
 only for macOS's admin group. It runs as the current user and requires ordinary
 write access. It does not use sudo, create/chmod `/Applications`, replace foreign
 apps or change Chrome registration. After relocating, open the new app and use
-**Repair Chrome connection**, then manually reload Chrome's unpacked extension from
-that app's `Contents/Resources/extension` folder.
+**Repair Chrome connection**. The unpacked extension stays at the same per-user
+Application Support path when the app moves or is replaced.
 
-Once the app reports that the Mac is ready, add its bundled Chrome extension:
+Prepare copies the built Chrome extension into
+`~/Library/Application Support/MusicMuteLocal/extension`. The folder includes the
+manifest, compiled scripts, icons and English/Arabic translations, with the public
+key preserved so Native Messaging uses the same extension ID. Prepare replaces
+only an app-owned copy; runtime, model, media and account state remain separate.
+After an app update, Prepare refreshes this copy even if the extension version
+number is unchanged. Ordinary status checks inspect metadata without hashing the
+scripts. Chrome still requires manual Reload followed by a YouTube page refresh.
+
+Once the app reports that the Mac is ready, add this unpacked extension:
 
 1. Open `chrome://extensions` in Google Chrome and enable **Developer mode**.
 2. On MusicMute's Setup page, choose **Reveal folder**, then click **Load unpacked**
-   and select that exact `Contents/Resources/extension` directory. It is below
-   either `~/Applications/MusicMute Local.app` or `/Applications/MusicMute Local.app`,
-   depending on the installation folder. **Copy path** provides the authoritative
-   current location.
+   and select `~/Library/Application Support/MusicMuteLocal/extension`.
+   **Copy path** provides the exact location for your user. If Chrome currently
+   loads the older folder inside the app bundle, remove that unpacked entry and
+   load this folder once; subsequent app moves preserve the new path.
 
 Refresh a standard YouTube watch page. Auto-start prepares eligible playing videos
 shorter than the saved limit (20 minutes by default); the MusicMute waveform beside
@@ -1064,8 +1073,8 @@ An existing ready connection reuses its handshake; this does not revalidate mode
 or runtime files. Use **Check readiness** in the Mac app for those checks. The Mac
 app verifies runtime, model and native registration; the popup requires the native
 helper handshake before reporting ready. After moving the app, repair the Chrome
-connection in Setup and reload the unpacked extension from its new folder because
-Chrome remembers the previous path.
+connection in Setup. The app-data extension folder does not move. After updating
+the extension files through Prepare, click Reload in Chrome and refresh YouTube.
 
 The earlier user-completed Chrome checks covered initial loading, `cb26daf3`
 Reload and `67960e3f` Reload. The canonical folder is unchanged; an update does not require

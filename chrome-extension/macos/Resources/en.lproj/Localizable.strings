@@ -102,7 +102,7 @@
 "Memory growth is an observation, not proof of a leak. Speaker-to-screen timing and audio quality still need listening checks." = "Memory growth is an observation, not proof of a leak. Speaker-to-screen timing and audio quality still need listening checks.";
 "More offline voices" = "More offline voices";
 "Move up" = "Move up";
-"Moved this app? Repair the Chrome connection if prompted, then use Load unpacked again with this app's current extension folder. Chrome keeps the previous folder path until you load the extension from its new location." = "Moved this app? Repair the Chrome connection if prompted, then use Load unpacked again with this app's current extension folder. Chrome keeps the previous folder path until you load the extension from its new location.";
+"After an app update, prepare your Mac if prompted, then click Reload for MusicMute in Chrome and refresh YouTube. The extension folder stays in the same location when you move or replace the app." = "After an app update, prepare your Mac if prompted, then click Reload for MusicMute in Chrome and refresh YouTube. The extension folder stays in the same location when you move or replace the app.";
 "MusicMute" = "MusicMute";
 "MusicMute cloud" = "MusicMute cloud";
 "MusicMute prepares the full vocals track locally, then plays it with the original YouTube video." = "MusicMute prepares the full vocals track locally, then plays it with the original YouTube video.";
@@ -125,7 +125,7 @@
 "Open the MusicMute listing and choose Add to Chrome when it is available." = "Open the MusicMute listing and choose Add to Chrome when it is available.";
 "If the listing is awaiting review, use the development steps below for testing." = "If the listing is awaiting review, use the development steps below for testing.";
 "Development installation" = "Development installation";
-"Use the bundled unpacked extension for development testing." = "Use the bundled unpacked extension for development testing.";
+"Prepare copies the extension into MusicMute's Application Support folder." = "Prepare copies the extension into MusicMute's Application Support folder.";
 "Open MusicMute website" = "Open MusicMute website";
 "Original audio" = "Original audio";
 "Password" = "Password";
@@ -1005,3 +1005,5 @@
 "Installed JavaScript runtime" = "Installed JavaScript runtime";
 "Installed Playback token provider" = "Installed Playback token provider";
 "Installed Voice processing engine" = "Installed Voice processing engine";
+"MusicMute cannot safely update its extension folder. Review the MusicMute Application Support folder, then retry Prepare." = "MusicMute cannot safely update its extension folder. Review the MusicMute Application Support folder, then retry Prepare.";
+"The bundled Chrome extension is incomplete or unsafe. Reinstall or update MusicMute, then retry Prepare." = "The bundled Chrome extension is incomplete or unsafe. Reinstall or update MusicMute, then retry Prepare.";

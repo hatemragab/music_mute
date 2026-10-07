@@ -4258,7 +4258,7 @@ final class ProcessBridge: @unchecked Sendable {
       version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         ?? "0.1.0",
       runtimeReady: false, modelReady: false, extensionRegistered: false,
-      extensionPath: resources.appendingPathComponent("extension", isDirectory: true).path,
+      extensionPath: LocalPaths.chromeExtension.path,
       modelBytes: 0, cacheBytes: 0, diagnosticMode: "LOCAL_ONLY",
       maxDurationSeconds: DesktopMediaLimits.maxDurationSeconds,
       downloaderReady: false, javascriptReady: false, tokenProviderReady: false,

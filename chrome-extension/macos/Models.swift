@@ -204,6 +204,16 @@ enum LocalPaths {
       "Library/Application Support/MusicMuteLocal", isDirectory: true)
   }
   static var logs: URL { support.appendingPathComponent("logs", isDirectory: true) }
+  static var chromeExtension: URL { support.appendingPathComponent("extension", isDirectory: true) }
+
+  static func installedExtension(_ path: String, support: URL = LocalPaths.support) -> URL? {
+    guard let candidate = descendant(path, of: support),
+      candidate.path
+        == support.standardizedFileURL.resolvingSymlinksInPath()
+        .appendingPathComponent("extension", isDirectory: true).path
+    else { return nil }
+    return candidate
+  }
 
   static func descendant(_ path: String, of root: URL) -> URL? {
     guard path.hasPrefix("/"), !path.contains("\0") else { return nil }

@@ -299,11 +299,8 @@ struct SetupPresentation {
     }
   }
   var extensionURL: URL? {
-    guard let resources, let path = status?.extensionPath,
-      let candidate = LocalPaths.descendant(path, of: resources),
-      candidate
-        == resources.appendingPathComponent("extension", isDirectory: true).standardizedFileURL
-        .resolvingSymlinksInPath(),
+    guard let path = status?.extensionPath,
+      let candidate = LocalPaths.installedExtension(path),
       FileManager.default.fileExists(atPath: candidate.path)
     else { return nil }
     return candidate
@@ -1516,10 +1513,10 @@ private struct CompanionView: View {
               Button("Copy path", systemImage: "doc.on.doc") { model.copyExtension() }
                 .buttonStyle(.bordered).controlSize(.large).disabled(model.extensionURL == nil)
             }
-            Text("Use the bundled unpacked extension for development testing.")
+            Text("Prepare copies the extension into MusicMute's Application Support folder.")
               .desktopFont(.caption).foregroundStyle(Brand.secondary)
             Label(
-              "Moved this app? Repair the Chrome connection if prompted, then use Load unpacked again with this app's current extension folder. Chrome keeps the previous folder path until you load the extension from its new location.",
+              "After an app update, prepare your Mac if prompted, then click Reload for MusicMute in Chrome and refresh YouTube. The extension folder stays in the same location when you move or replace the app.",
               systemImage: "folder.badge.gearshape"
             ).desktopFont(.caption).foregroundStyle(Brand.secondary).fixedSize(
               horizontal: false, vertical: true)

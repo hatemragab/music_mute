@@ -20,6 +20,7 @@ import {
   readdir,
   realpath,
   rename,
+  rm,
   unlink,
   type FileHandle,
 } from "node:fs/promises";
@@ -135,11 +136,10 @@ export async function verifyModel(config: LocalConfig): Promise<boolean> {
   }
 }
 export async function extensionOrigin(resources: string): Promise<string> {
-  const bytes = await safeFile(
-    join(resources, "extension/manifest.json"),
-    32 * 1024,
-    true,
-  );
+  return extensionManifestOrigin(join(resources, "extension/manifest.json"));
+}
+async function extensionManifestOrigin(path: string): Promise<string> {
+  const bytes = await safeFile(path, 32 * 1024, true);
   const manifest = JSON.parse(bytes.toString("utf8")) as Record<
     string,
     unknown
@@ -157,6 +157,213 @@ export async function extensionOrigin(resources: string): Promise<string> {
     .map((hex) => String.fromCharCode(97 + Number.parseInt(hex, 16)))
     .join("");
   return `chrome-extension://${id}/`;
+}
+
+const EXTENSION_RECEIPT = ".musicmute-installation.json";
+interface ExtensionReceipt {
+  schema_version: 1;
+  owner: "MusicMuteLocal";
+  bundle_identity: string;
+  files: { path: string; bytes: number }[];
+}
+export function installedExtensionPath(config: LocalConfig): string {
+  return join(config.root, "extension");
+}
+async function extensionBundleIdentity(resources: string): Promise<string> {
+  // The app build changes even when the extension's semantic version does not.
+  // Status reads these two small files, never hashes the installed scripts.
+  return createHash("sha256")
+    .update(await safeFile(join(resources, "../Info.plist"), 64 * 1024, true))
+    .update(
+      await safeFile(
+        join(resources, "extension/manifest.json"),
+        32 * 1024,
+        true,
+      ),
+    )
+    .digest("hex");
+}
+async function extensionReceipt(path: string): Promise<ExtensionReceipt> {
+  const directory = await lstat(path);
+  if (
+    !directory.isDirectory() ||
+    directory.isSymbolicLink() ||
+    directory.uid !== process.getuid?.() ||
+    directory.mode & 0o077
+  )
+    throw new LocalSetupError("UNSAFE_EXTENSION_DIRECTORY");
+  const receipt = JSON.parse(
+    (await safeFile(join(path, EXTENSION_RECEIPT), 64 * 1024)).toString("utf8"),
+  ) as ExtensionReceipt;
+  if (
+    receipt.schema_version !== 1 ||
+    receipt.owner !== "MusicMuteLocal" ||
+    !/^[a-f0-9]{64}$/.test(receipt.bundle_identity) ||
+    !Array.isArray(receipt.files) ||
+    receipt.files.length < 1 ||
+    receipt.files.length > 256 ||
+    new Set(receipt.files.map((file) => file.path)).size !==
+      receipt.files.length ||
+    !receipt.files.some((file) => file.path === "manifest.json") ||
+    receipt.files.some(
+      (file) =>
+        typeof file.path !== "string" ||
+        file.path.length > 512 ||
+        !file.path
+          .split("/")
+          .every((name) => /^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(name)) ||
+        !Number.isSafeInteger(file.bytes) ||
+        file.bytes < 0 ||
+        file.bytes > 32 * 1024 * 1024,
+    )
+  )
+    throw new LocalSetupError("UNSAFE_EXTENSION_DIRECTORY");
+  return receipt;
+}
+async function installedExtensionReady(config: LocalConfig): Promise<boolean> {
+  try {
+    const path = installedExtensionPath(config);
+    // Do not create app data from the read-only status path.
+    const directory = await lstat(path);
+    if (
+      !directory.isDirectory() ||
+      directory.isSymbolicLink() ||
+      directory.mode & 0o077
+    )
+      return false;
+    const receipt = await extensionReceipt(path);
+    if (
+      receipt.bundle_identity !==
+      (await extensionBundleIdentity(config.app_resources!))
+    )
+      return false;
+    const canonical = await realpath(path);
+    for (const file of receipt.files) {
+      const target = join(path, file.path);
+      if ((await realpath(target)) !== join(canonical, file.path)) return false;
+      const info = await lstat(target);
+      if (
+        !info.isFile() ||
+        info.isSymbolicLink() ||
+        info.nlink !== 1 ||
+        info.uid !== process.getuid?.() ||
+        info.mode & 0o077 ||
+        info.size !== file.bytes
+      )
+        return false;
+    }
+    return (
+      (await extensionOrigin(config.root)) ===
+      (await extensionOrigin(config.app_resources!))
+    );
+  } catch {
+    return false;
+  }
+}
+/** Called under the existing setup lease, only after registration ownership checks. */
+async function installUnpackedExtension(config: LocalConfig): Promise<void> {
+  const resources = config.app_resources!;
+  const destination = installedExtensionPath(config);
+  let previous = false;
+  try {
+    await lstat(destination);
+    // A receipt authorizes replacing only this app's own unpacked payload.
+    await extensionReceipt(destination);
+    previous = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+      throw new LocalSetupError("UNSAFE_EXTENSION_DIRECTORY");
+    // An existing unmarked directory must never be adopted or removed.
+    if (
+      await lstat(destination).then(
+        () => true,
+        () => false,
+      )
+    )
+      throw new LocalSetupError("UNSAFE_EXTENSION_DIRECTORY");
+  }
+  const staging = join(config.root, `.extension-${randomUUID()}.tmp`);
+  const backup = join(config.root, `.extension-${randomUUID()}.previous`);
+  let backedUp = false;
+  let activated = false;
+  try {
+    await privateDirectory(staging);
+    const files: ExtensionReceipt["files"] = [];
+    let bytes = 0;
+    let entries = 0;
+    const copy = async (relative = "", depth = 0): Promise<void> => {
+      const source = join(resources, "extension", relative);
+      const info = await lstat(source);
+      if (
+        !info.isDirectory() ||
+        info.isSymbolicLink() ||
+        info.mode & 0o022 ||
+        depth > 8
+      )
+        throw new LocalSetupError("UNSAFE_EXTENSION_BUNDLE");
+      const names = await readdir(source);
+      if (names.length > 256)
+        throw new LocalSetupError("UNSAFE_EXTENSION_BUNDLE");
+      for (const name of names.sort()) {
+        if (!/^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(name))
+          throw new LocalSetupError("UNSAFE_EXTENSION_BUNDLE");
+        const path = relative ? `${relative}/${name}` : name;
+        if (++entries > 512 || path.length > 512)
+          throw new LocalSetupError("UNSAFE_EXTENSION_BUNDLE");
+        const entry = await lstat(join(source, name));
+        if (entry.isDirectory() && !entry.isSymbolicLink()) {
+          await privateDirectory(join(staging, path));
+          await copy(path, depth + 1);
+        } else {
+          if (name.endsWith(".map")) continue;
+          const contents = await safeFile(
+            join(source, name),
+            32 * 1024 * 1024,
+            true,
+          );
+          bytes += contents.length;
+          files.push({ path, bytes: contents.length });
+          if (files.length > 256 || bytes > 32 * 1024 * 1024)
+            throw new LocalSetupError("UNSAFE_EXTENSION_BUNDLE");
+          const handle = await open(join(staging, path), "wx", 0o600);
+          try {
+            await handle.writeFile(contents);
+          } finally {
+            await handle.close();
+          }
+        }
+      }
+    };
+    const identity = await extensionBundleIdentity(resources);
+    await copy();
+    if (
+      (await extensionManifestOrigin(join(staging, "manifest.json"))) !==
+      (await extensionOrigin(resources))
+    )
+      throw new LocalSetupError("UNSAFE_EXTENSION_BUNDLE");
+    const receipt = JSON.stringify({
+      schema_version: 1,
+      owner: "MusicMuteLocal",
+      bundle_identity: identity,
+      files,
+    });
+    if (Buffer.byteLength(receipt) > 64 * 1024)
+      throw new LocalSetupError("UNSAFE_EXTENSION_BUNDLE");
+    await atomicOwnedWrite(join(staging, EXTENSION_RECEIPT), receipt, 0o600);
+    if (identity !== (await extensionBundleIdentity(resources)))
+      throw new LocalSetupError("UNSAFE_EXTENSION_BUNDLE");
+    if (previous) {
+      await rename(destination, backup);
+      backedUp = true;
+    }
+    await rename(staging, destination);
+    activated = true;
+  } finally {
+    if (backedUp && !activated) await rename(backup, destination);
+    await rm(staging, { recursive: true, force: true });
+    if (activated && backedUp)
+      await rm(backup, { recursive: true, force: true });
+  }
 }
 export function registrationPaths(
   config: LocalConfig,
@@ -305,6 +512,7 @@ export async function registerNativeHost(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
+  await installUnpackedExtension(config);
   await atomicOwnedWrite(
     paths.launcher,
     launcherContents(config, userHome),
@@ -655,7 +863,8 @@ export async function inspectAppStatus(
       manifest.type === "stdio" &&
       JSON.stringify(manifest.allowed_origins) ===
         JSON.stringify([await extensionOrigin(config.app_resources)]) &&
-      launcher === launcherContents(config, userHome);
+      launcher === launcherContents(config, userHome) &&
+      (await installedExtensionReady(config));
   } catch {
     /* Setup gives a specific error; quick status remains actionable. */
   }
@@ -717,7 +926,7 @@ export async function inspectAppStatus(
     })),
     model_ready: modelReady,
     extension_registered: registered,
-    extension_path: join(config.app_resources, "extension"),
+    extension_path: installedExtensionPath(config),
     model_bytes: modelReady ? MODEL.bytes : 0,
     cache_bytes: cacheBytes,
     diagnostic_mode: "LOCAL_ONLY",

@@ -1567,6 +1567,17 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
     try check(
       LocalPaths.descendant("https://example.invalid/report.json", of: parent) == nil,
       "Remote path must not match")
+    try check(
+      LocalPaths.installedExtension("/tmp/musicmute-root/extension", support: parent) != nil,
+      "Setup must reveal the stable app-data extension folder")
+    for path in [
+      "/tmp/musicmute-root/other", "/tmp/musicmute-root/extension/nested",
+      "/tmp/musicmute-root-other/extension", "/tmp/musicmute-root/../extension",
+    ] {
+      try check(
+        LocalPaths.installedExtension(path, support: parent) == nil,
+        "Setup must not reveal an unrelated extension path")
+    }
     try check(LocalPaths.isSetupURL(URL(string: "musicmute-local://setup")!), "Setup URL must work")
     for value in [
       "musicmute-local://setup?command=run", "musicmute-local://setup/other",

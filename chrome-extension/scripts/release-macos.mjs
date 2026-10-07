@@ -1433,7 +1433,8 @@ export async function releaseMacos(args, dependencies = {}) {
         "   Runtime tools and model weights are not included in this installer.\n" +
         "4. For YouTube controls, load the separate Chrome extension in Developer mode:\n" +
         "   open chrome://extensions, choose Load unpacked, and select\n" +
-        "   /Applications/MusicMute Local.app/Contents/Resources/extension.\n\n" +
+        "   ~/Library/Application Support/MusicMuteLocal/extension.\n" +
+        "   Setup's Reveal folder and Copy path buttons show this folder.\n\n" +
         "The Chrome Web Store release is separate and is not included in this installer.\n" +
         "You do not need Homebrew, Node.js, Python, or a worker service.\n" +
         "Local audio processing stays on your Mac. Account saving requires sign-in.\n" +

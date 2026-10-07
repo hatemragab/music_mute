@@ -6,6 +6,38 @@ app-closed extension processing, add explicit account cloud handoff and Sparkle
 updates. Apple account/certificate/notarization work and Chrome Web Store
 packaging/publication/deployment are deferred by the owner.
 
+## Unpacked Chrome extension in app data — 2026-10-07
+
+Prepare installs the packaged extension at
+`~/Library/Application Support/MusicMuteLocal/extension`. Setup's **Reveal folder**
+and **Copy path** buttons use that stable location. Users enable Developer mode in
+`chrome://extensions`, choose **Load unpacked**, and select this folder. Chrome
+loading remains a user action; the app does not edit browser profiles or install
+an extension automatically.
+
+The existing public manifest key preserves the extension/native-helper identity.
+A new app build makes the copy require Prepare again, even when its extension
+version is unchanged. Prepare validates the bounded bundled tree, stages a private
+copy without source maps, then replaces only a directory carrying the app's own
+receipt. Failed staging preserves the previous payload. Ordinary status reads the
+small build identity and installed file metadata rather than hashing scripts.
+Moving the app requires helper repair but does not change the extension folder.
+Click **Reload** in Chrome and refresh YouTube after an extension update. Existing
+bundle-path installations need to be removed and loaded from app data once.
+
+Local validation for development build `1791393571`: `npm run verify` passed
+2,175 tests (four skipped), TypeScript, lint, build and formatting. NativeTests
+passed, and isolated packaged offline qualification passed all 17 checks,
+including an exact 19-file app-data extension copy, native registration, repair
+and GUI-closed HELLO. The DMG passed checksum, mounted 160-leaf inventory and
+strict signature verification. A separate verified copy was placed in this
+Mac's real app-data extension folder; its ID matches the current native-helper
+registration. This did not load Chrome or replace the installed app. The build
+remains ad hoc signed, not notarized. After the owner requested publication,
+this exact build was added to the existing development release with checksums and
+app-data installation instructions. Swift lint still reports five pre-existing wire-field naming findings
+in ProcessBridge; the other changed Swift files pass strict lint.
+
 ## Staged GitHub downloads — 2026-10-06
 
 The owner authorized hosting runtime downloads in
@@ -319,6 +351,7 @@ layout is:
 | Runtime verification receipt | `~/Library/Application Support/MusicMuteLocal/runtime/verification-receipt-v1.json`            |
 | Voice model                  | `~/Library/Application Support/MusicMuteLocal/models/<verified-model-sha256>/Kim_Vocal_2.onnx` |
 | Cache, logs and app state    | Separate folders under `~/Library/Application Support/MusicMuteLocal/`                         |
+| Unpacked Chrome extension    | `~/Library/Application Support/MusicMuteLocal/extension/`                                      |
 | Chrome launcher              | `~/Library/Application Support/MusicMuteLocal/native-launcher.sh`                              |
 | Chrome registration          | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.musicmute.local.json`    |
 

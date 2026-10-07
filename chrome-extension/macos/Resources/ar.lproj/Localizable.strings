@@ -102,7 +102,7 @@
 "Memory growth is an observation, not proof of a leak. Speaker-to-screen timing and audio quality still need listening checks." = "زيادة الذاكرة ملاحظة وليست دليلاً على تسرب. ما زال تزامن الصوت مع الصورة وجودة الصوت يحتاجان إلى اختبار استماع.";
 "More offline voices" = "المزيد من الأصوات المحفوظة";
 "Move up" = "نقل إلى الأعلى";
-"Moved this app? Repair the Chrome connection if prompted, then use Load unpacked again with this app's current extension folder. Chrome keeps the previous folder path until you load the extension from its new location." = "هل نقلت التطبيق؟ أصلح اتصال Chrome عند الطلب ثم استخدم تحميل امتداد غير مضغوط من مجلد الامتداد الحالي. يحتفظ Chrome بالمسار القديم حتى تحمل الامتداد من موقعه الجديد.";
+"After an app update, prepare your Mac if prompted, then click Reload for MusicMute in Chrome and refresh YouTube. The extension folder stays in the same location when you move or replace the app." = "بعد تحديث التطبيق، أعد إعداد جهاز Mac إذا طُلب منك ذلك، ثم اضغط إعادة تحميل لإضافة MusicMute في Chrome وحدّث صفحة YouTube. يبقى مجلد الإضافة في الموقع نفسه عند نقل التطبيق أو استبداله.";
 "MusicMute" = "MusicMute";
 "MusicMute cloud" = "سحابة MusicMute";
 "MusicMute prepares the full vocals track locally, then plays it with the original YouTube video." = "يجهّز MusicMute الصوت الكامل محلياً ثم يشغّله مع فيديو YouTube الأصلي.";
@@ -125,7 +125,7 @@
 "Open the MusicMute listing and choose Add to Chrome when it is available." = "افتح صفحة MusicMute واختر «إضافة إلى Chrome» عندما تكون متاحة.";
 "If the listing is awaiting review, use the development steps below for testing." = "إذا كانت صفحة الإضافة تنتظر المراجعة، فاستخدم خطوات التثبيت التجريبي أدناه للاختبار.";
 "Development installation" = "التثبيت التجريبي";
-"Use the bundled unpacked extension for development testing." = "استخدم الإضافة غير المضغوطة المرفقة للاختبارات أثناء التطوير.";
+"Prepare copies the extension into MusicMute's Application Support folder." = "ينسخ الإعداد الإضافة إلى مجلد دعم التطبيق الخاص بـ MusicMute.";
 "Open MusicMute website" = "فتح موقع MusicMute";
 "Original audio" = "الصوت الأصلي";
 "Password" = "كلمة المرور";
@@ -1005,3 +1005,5 @@
 "Installed JavaScript runtime" = "تم تثبيت بيئة JavaScript";
 "Installed Playback token provider" = "تم تثبيت موفر رموز التشغيل";
 "Installed Voice processing engine" = "تم تثبيت محرك معالجة الصوت";
+"MusicMute cannot safely update its extension folder. Review the MusicMute Application Support folder, then retry Prepare." = "لا يستطيع MusicMute تحديث مجلد الإضافة بأمان. راجع مجلد دعم التطبيق الخاص بـ MusicMute، ثم أعد محاولة الإعداد.";
+"The bundled Chrome extension is incomplete or unsafe. Reinstall or update MusicMute, then retry Prepare." = "إضافة Chrome المرفقة غير مكتملة أو غير آمنة. أعد تثبيت MusicMute أو حدّثه، ثم أعد محاولة الإعداد.";
