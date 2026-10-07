@@ -144,6 +144,17 @@ private downloads and settings are not migrated automatically.
 
 ## Administrator dashboard
 
+Mac worker registration uses an administrator-approved account permission.
+After Google sign-in makes the account visible in Users, an administrator can
+allow new worker registrations. An open, connected MusicMute Local app then
+registers and starts that Mac without a visible pairing code. A closed/offline app
+checks when next opened and connected. Once activated, each machine runs with its
+own worker credential: signing out or removing account registration permission
+does not stop it. Administrators manage existing machines from Workers. See the
+[registration contract](docs/api/client-contract.md#mac-worker-registration).
+This requires matching backend/dashboard/Mac releases; local source and fixture
+checks do not establish deployed or installed-machine behavior.
+
 The [dashboard](dashboard/README.md) uses React Router, TanStack Query,
 Tailwind CSS, shadcn/ui, and Firebase Web Authentication against the NestJS
 administration API. It is an operations console, not a public demo.

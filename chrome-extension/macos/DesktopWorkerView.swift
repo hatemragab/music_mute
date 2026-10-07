@@ -17,11 +17,8 @@ private enum WorkerSection: String, CaseIterable {
 struct DesktopWorkerView: View {
   @ObservedObject var worker: DesktopWorkerModel
   let prepare: () -> Void
+  let openAccount: () -> Void
   @State private var section = WorkerSection.overview
-  @State private var label = ""
-  @State private var groupID = ""
-  @State private var enrollmentCode = ""
-  @State private var newCode = false
   @State private var force = false
   @State private var purge = false
   @State private var jobID = ""
@@ -46,9 +43,13 @@ struct DesktopWorkerView: View {
   @State private var requestedExportPath: String?
   @State private var pending: WorkerAction?
 
-  init(worker: DesktopWorkerModel, prepare: @escaping () -> Void, initialSection: String? = nil) {
+  init(
+    worker: DesktopWorkerModel, prepare: @escaping () -> Void,
+    initialSection: String? = nil, openAccount: @escaping () -> Void = {}
+  ) {
     self.worker = worker
     self.prepare = prepare
+    self.openAccount = openAccount
     _section = State(
       initialValue: initialSection.flatMap(WorkerSection.init(rawValue:)) ?? .overview)
   }
@@ -63,11 +64,13 @@ struct DesktopWorkerView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 20) {
       statusCard
+      if worker.registrationState != .registered, section != .setup { registrationCard }
       if let failure = worker.failure {
         VStack(alignment: .leading, spacing: 8) {
-          Label("Worker needs attention", systemImage: "exclamationmark.triangle").font(.headline)
+          Label("Worker needs attention", systemImage: "exclamationmark.triangle").desktopFont(
+            .headline)
           Text(LocalizedStringKey(failure.guidance)).fixedSize(horizontal: false, vertical: true)
-          Text(failure.code).font(.caption.monospaced()).textSelection(.enabled)
+          Text(failure.code).desktopFont(.caption, design: .monospaced).textSelection(.enabled)
           HStack {
             Button("Reconnect worker status") { worker.reconnect() }.disabled(worker.busy)
             Button("Open Setup", action: prepare)
@@ -78,20 +81,21 @@ struct DesktopWorkerView: View {
         VStack(alignment: .leading, spacing: 8) {
           HStack {
             ProgressView().controlSize(.small)
-            Text("Worker operation in progress").font(.headline)
+            Text("Worker operation in progress").desktopFont(.headline)
           }
           if let stage = worker.progress["stage"].string,
             DesktopWorkerSnapshot.safeIdentifier(stage)
           {
-            Text(LocalizedStringKey(DesktopWorkerReport.label(stage))).foregroundStyle(.secondary)
+            Text(LocalizedStringKey(DesktopWorkerReport.label(stage))).foregroundStyle(
+              Brand.secondary)
           }
           if let index = worker.progress["index"].number, index >= 0, index < 100 {
-            Text("Run \(Int(index))").font(.caption)
+            Text("Run \(Int(index))").desktopFont(.caption)
           }
           Text(
             "Keep the app open until this operation finishes. Backend jobs continue independently."
           )
-          .font(.caption).foregroundStyle(.secondary)
+          .desktopFont(.caption).foregroundStyle(Brand.secondary)
         }.workerCard().accessibilityIdentifier("worker_operation")
       }
       Picker("Worker section", selection: $section) {
@@ -137,28 +141,30 @@ struct DesktopWorkerView: View {
   private var statusCard: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack {
-        Label("Background worker", systemImage: "server.rack").font(.headline)
+        Label("Background worker", systemImage: "server.rack").desktopFont(.headline)
         Spacer()
         Label(
           worker.connected ? "Live local status" : "Local status disconnected",
           systemImage: worker.connected
             ? "dot.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash"
         )
-        .font(.caption).foregroundStyle(worker.connected ? Brand.mint : Brand.secondary)
+        .desktopFont(.caption).foregroundStyle(worker.connected ? Brand.mint : Brand.secondary)
       }
       Text(
         "An enabled worker starts at login and processes backend jobs when this window and app are closed. Your Mac must be awake and your macOS user logged in."
       )
-      .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      .desktopFont(.callout).foregroundStyle(Brand.secondary).fixedSize(
+        horizontal: false, vertical: true)
       Text(
         "macOS controls background permissions and may show a notice or ask you to enable MusicMute in Login Items & Extensions. Audio jobs do not require individual approval."
       )
-      .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      .desktopFont(.caption).foregroundStyle(Brand.secondary).fixedSize(
+        horizontal: false, vertical: true)
       Button("Open macOS background settings") { SMAppService.openSystemSettingsLoginItems() }
         .accessibilityIdentifier("worker_background_settings")
       if let snapshot = worker.snapshot, worker.connected {
         Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 10) {
-          summaryRow("Installation", snapshot.installed ? "Paired installation" : "Not installed")
+          summaryRow("Installation", snapshot.installed ? "Installed worker" : "Not installed")
           summaryRow("Service", snapshot.running ? "Running" : "Stopped")
           summaryRow("Phase", DesktopWorkerReport.label(snapshot.phase))
           summaryRow(
@@ -175,10 +181,10 @@ struct DesktopWorkerView: View {
               ?? "Not checked")
         }.accessibilityIdentifier("worker_status_summary")
         if !snapshot.blockers.isEmpty {
-          Text("Readiness blockers").font(.subheadline.weight(.semibold))
+          Text("Readiness blockers").desktopFont(.subheadline, weight: .semibold)
           ForEach(snapshot.blockers, id: \.self) {
             Label(LocalizedStringKey(DesktopWorkerReport.label($0)), systemImage: "info.circle")
-              .font(.caption).foregroundStyle(Brand.amber)
+              .desktopFont(.caption).foregroundStyle(Brand.amber)
           }
         }
         if snapshot.raw["runtime"]["cachedPolicy"] != .null {
@@ -187,27 +193,31 @@ struct DesktopWorkerView: View {
           Text(
             "Cached policy is the last observed state, not proof of a current backend connection."
           )
-          .font(.caption).foregroundStyle(.secondary)
+          .desktopFont(.caption).foregroundStyle(Brand.secondary)
         }
       } else {
         Text(
-          "Open Worker to connect to the existing local installation. Signing into the app does not pair a worker."
+          "Worker status is read from this Mac. Registration and local service controls stay separate from your voice library."
         )
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Brand.secondary)
       }
     }.workerCard()
   }
   private func summaryRow(_ title: String, _ value: String) -> some View {
     GridRow {
-      Text(LocalizedStringKey(title)).foregroundStyle(.secondary)
+      Text(LocalizedStringKey(title)).foregroundStyle(Brand.secondary)
       Text(LocalizedStringKey(value)).textSelection(.enabled)
     }
   }
   private var overview: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Worker controls").font(.headline)
+      Text("Worker controls").desktopFont(.headline)
       HStack {
-        action("Start worker", .start, .object(["wait_ready": .bool(true)]))
+        Button("Start worker") { Task { await worker.startRegisteredWorker() } }
+          .disabled(
+            worker.registrationState != .registered && worker.registrationState != .preserved
+          )
+          .accessibilityIdentifier("worker_start_app_action")
         action("Pause new jobs", .pause)
         action("Drain accepted jobs", .drain)
         action("Resume worker", .resume)
@@ -221,23 +231,28 @@ struct DesktopWorkerView: View {
       Text(
         "Pause and drain preserve accepted jobs. Stop Worker is separate from quitting the app. Resume changes local intent; backend pause and capacity rules remain authoritative."
       )
-      .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      .desktopFont(.caption).foregroundStyle(Brand.secondary).fixedSize(
+        horizontal: false, vertical: true)
       Text(
         "Stop ends the service now. Its login item remains installed and can start again at your next macOS login. Pause prevents new jobs and remains in effect across logins."
       )
-      .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      .desktopFont(.caption).foregroundStyle(Brand.secondary).fixedSize(
+        horizontal: false, vertical: true)
       if let snapshot = worker.snapshot, worker.connected {
         ForEach(Array(snapshot.jobs.enumerated()), id: \.offset) { _, job in
           VStack(alignment: .leading, spacing: 8) {
-            Label("Processing job", systemImage: "waveform").font(.subheadline.weight(.semibold))
-            Text(job["jobId"].string ?? "Not available").font(.caption.monospaced()).textSelection(
-              .enabled)
+            Label("Processing job", systemImage: "waveform").desktopFont(
+              .subheadline, weight: .semibold)
+            Text(job["jobId"].string ?? "Not available").desktopFont(.caption, design: .monospaced)
+              .textSelection(
+                .enabled)
             Text(LocalizedStringKey(DesktopWorkerReport.label(job["stage"].string ?? "unknown")))
             if let completed = job["work"]["completed"].number,
               let total = job["work"]["total"].number, completed >= 0, total > 0, completed <= total
             {
               ProgressView(value: completed, total: total)
-              Text("\(Int(completed)) / \(Int(total))").font(.caption.monospacedDigit())
+              Text("\(Int(completed)) / \(Int(total))").desktopFont(
+                .caption, monospacedDigits: true)
             }
             WorkerReportView(value: job, title: "Job progress")
           }.workerCard()
@@ -246,53 +261,98 @@ struct DesktopWorkerView: View {
     }.workerCard()
   }
   private var setup: some View {
+    registrationCard
+  }
+  private var registrationCard: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Adopt or pair this Mac").font(.headline)
+      Text("Machine registration").desktopFont(.headline)
       Text(
-        "An existing paired worker is detected without creating a new machine. Recovery preserves its identity and credentials. App sign-in and worker enrollment are separate."
+        "This worker keeps running after you sign out or close MusicMute Local. You can stop it on this Mac, or an administrator can disable it from Workers."
       )
-      .foregroundStyle(.secondary)
-      Text(
-        "The Worker screen uses the current bundled controller. For Terminal support after migration, use ~/Library/Application Support/MusicMuteWorker/bin/mw; an older globally installed CLI may not understand app-managed runtimes."
-      )
-      .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-      HStack {
-        action("Inspect existing worker", .adopt)
-        action("Move paired worker into app", .adopt, .object(["apply": .bool(true)]))
-        action("Recover paired installation", .recover)
+      .desktopFont(.callout).foregroundStyle(Brand.secondary).fixedSize(
+        horizontal: false, vertical: true)
+      if worker.deletedRegistrationObserved, worker.registrationState != .deletingRegistration {
+        Text(
+          "The previous worker was deleted in the dashboard. Models and history are preserved. This Mac will register again after fresh administrator approval."
+        )
+        .desktopFont(.callout).foregroundStyle(Brand.secondary).fixedSize(
+          horizontal: false, vertical: true)
       }
-      Divider()
-      TextField("Worker label", text: $label).textFieldStyle(.roundedBorder)
-        .accessibilityIdentifier("worker_label")
-      TextField("Optional group ID", text: $groupID).textFieldStyle(.roundedBorder)
-      SecureField("Worker enrollment code", text: $enrollmentCode).textFieldStyle(.roundedBorder)
-        .accessibilityIdentifier("worker_enrollment_code")
-      Text(
-        "The code is sent through a private local pipe. It is not saved in app preferences or reports."
-      )
-      .font(.caption).foregroundStyle(.secondary)
-      Toggle("Replace a pending enrollment code", isOn: $newCode)
-      Button("Pair and install worker") {
-        var fields: [String: DesktopJSON] = [
-          "label": .string(label.trimmingCharacters(in: .whitespacesAndNewlines))
-        ]
-        if !groupID.isEmpty {
-          fields["group_id"] = .string(groupID.trimmingCharacters(in: .whitespacesAndNewlines))
+      switch worker.registrationState {
+      case .checking:
+        ProgressView("Checking this Mac’s worker installation…")
+      case .signedOut:
+        Text("Sign in with Google. An administrator must approve first registration of this Mac.")
+        Button {
+          Task { await worker.account?.signInGoogle() }
+        } label: {
+          GoogleSignInLabel("Continue with Google")
         }
-        if !enrollmentCode.isEmpty { fields["enrollment_code"] = .string(enrollmentCode) }
-        if newCode { fields["new_code"] = .bool(true) }
-        request(.install, .object(fields))
-        enrollmentCode = ""
-      }.disabled(
-        label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || label.utf16.count > 120
-          || (groupID.utf16.count > 100) || enrollmentCode.utf16.count > 4096
-      )
-      .accessibilityIdentifier("worker_install")
-    }.workerCard()
+        .buttonStyle(.bordered).disabled(worker.account?.googleConfigured != true)
+        .accessibilityIdentifier("worker_google_sign_in")
+      case .googleRequired:
+        Text("Sign in with Google to register this Mac.")
+        Button("Open Account", action: openAccount)
+      case .waiting:
+        Label("Waiting for administrator approval.", systemImage: "clock")
+        Text("Keep MusicMute Local open and connected. Approval automatically registers this Mac.")
+          .desktopFont(.caption).foregroundStyle(Brand.secondary)
+      case .unavailable:
+        Label("Could not check worker registration permission", systemImage: "wifi.exclamationmark")
+        Button("Retry") { Task { await worker.retryRegistration() } }
+          .disabled(worker.busy).accessibilityIdentifier("worker_registration_retry")
+      case .preparing:
+        ProgressView("Registering this Mac and preparing its worker…")
+      case .registered:
+        Label(
+          "This Mac has an installed worker. Account changes do not replace its registration.",
+          systemImage: "checkmark.circle")
+      case .authenticationRejected:
+        Label(
+          "The backend rejected this worker’s credentials.", systemImage: "exclamationmark.shield")
+        Text(
+          "Review this machine in the dashboard. Account approval does not replace an existing worker."
+        )
+        .desktopFont(.caption).foregroundStyle(Brand.secondary)
+        action("Check backend connection", .status)
+      case .deletingRegistration:
+        ProgressView("Retiring the deleted worker registration…")
+        Text(
+          "Models and worker history will be kept. New registration waits for current administrator approval."
+        )
+        .desktopFont(.caption).foregroundStyle(Brand.secondary)
+      case .preserved:
+        Text(
+          "Registration is preserved. The worker service is uninstalled. Choose Start worker to restore it."
+        )
+      case .interrupted:
+        Text("Worker setup was interrupted. Retry uses its existing recovery state.")
+        Button("Retry worker setup") { Task { await worker.retryRegistration() } }
+          .disabled(worker.busy).accessibilityIdentifier("worker_setup_retry")
+        if worker.canReplacePendingRegistration {
+          Button("Retry worker registration") {
+            Task { await worker.replacePendingRegistration() }
+          }.disabled(worker.busy)
+        }
+      case .unpaired:
+        Text(
+          "This Mac’s worker registration was revoked locally. Review Worker health before setting up another worker."
+        )
+      case .removed:
+        Text(
+          "The worker was removed on this Mac. Automatic registration remains off until you choose to register again."
+        )
+        Button("Register this Mac again") { Task { await worker.registerThisMacAgain() } }
+          .accessibilityIdentifier("worker_register_again")
+      case .setupRequired:
+        Text("Prepare this Mac before registering its worker.")
+        Button("Open Setup", action: prepare)
+      }
+    }.workerCard().accessibilityIdentifier("worker_registration")
   }
   private var jobs: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Investigate worker jobs").font(.headline)
+      Text("Investigate worker jobs").desktopFont(.headline)
       HStack {
         TextField("Job ID", text: $jobID).textFieldStyle(.roundedBorder)
         action("Inspect job", .job, .object(["job_id": .string(jobID)]), disabled: !validJobID)
@@ -316,7 +376,7 @@ struct DesktopWorkerView: View {
       }
       Picker("Recipe", selection: $recipe) { recipeOptions }
       Divider()
-      Text("Live local logs").font(.headline)
+      Text("Live local logs").desktopFont(.headline)
       Stepper("Log lines: \(logLines)", value: $logLines, in: 1...1000)
       HStack {
         Picker("Log kind", selection: $logKind) {
@@ -332,8 +392,8 @@ struct DesktopWorkerView: View {
         }
       }
       TextField("Optional attempt ID", text: $attemptID).textFieldStyle(.roundedBorder)
-      Text("Time, attempt and level filters require Events or Errors.").font(.caption)
-        .foregroundStyle(.secondary)
+      Text("Time, attempt and level filters require Events or Errors.").desktopFont(.caption)
+        .foregroundStyle(Brand.secondary)
       HStack {
         action("Read retained logs", .logs, logParameters, disabled: !validLogs)
         Button("Follow filtered logs") { worker.subscribeLogs(parameters: logParameters) }.disabled(
@@ -347,13 +407,13 @@ struct DesktopWorkerView: View {
   }
   private var health: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Worker health and safe support export").font(.headline)
+      Text("Worker health and safe support export").desktopFont(.headline)
       Toggle("Run full integrity checks", isOn: $fullDoctor)
       action("Run Worker Doctor", .doctor, .object(["full": .bool(fullDoctor)]))
       Text(
         "Quick checks inspect readiness. Full checks also verify the managed worker installation. Support bundles exclude credentials, configuration secrets and media."
       )
-      .font(.caption).foregroundStyle(.secondary)
+      .desktopFont(.caption).foregroundStyle(Brand.secondary)
       TextField("Optional diagnostic job ID", text: $jobID).textFieldStyle(.roundedBorder)
       filterControls
       Button("Export worker diagnostics…") {
@@ -369,11 +429,11 @@ struct DesktopWorkerView: View {
   }
   private var storage: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Managed worker storage").font(.headline)
+      Text("Managed worker storage").desktopFont(.headline)
       Text(
         "Preview identifies removable scratch, logs and unused releases. Safe cleanup drains and stops the worker, preserves active attempts and verified recovery releases, and restores its previous operating intent."
       )
-      .foregroundStyle(.secondary)
+      .foregroundStyle(Brand.secondary)
       HStack {
         action("Preview worker cleanup", .cleanup)
         action("Apply safe worker cleanup", .cleanup, .object(["apply": .bool(true)]))
@@ -382,7 +442,7 @@ struct DesktopWorkerView: View {
   }
   private var performance: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Qualified worker capacity").font(.headline)
+      Text("Qualified worker capacity").desktopFont(.headline)
       Picker("Parallel workers", selection: $workers) {
         Text("One worker").tag(1)
         Text("Two workers").tag(2)
@@ -391,7 +451,7 @@ struct DesktopWorkerView: View {
       Text(
         "Two workers require a successful capacity qualification for this Mac and release. These operations safely pause fleet claims and restore previous intent after completion."
       )
-      .font(.caption).foregroundStyle(.secondary)
+      .desktopFont(.caption).foregroundStyle(Brand.secondary)
       HStack {
         action(
           "Benchmark and qualify capacity", .benchmark,
@@ -400,7 +460,7 @@ struct DesktopWorkerView: View {
           "Apply qualified capacity", .capacity, .object(["workers": .number(Double(workers))]))
       }
       Divider()
-      Text("File benchmark").font(.headline)
+      Text("File benchmark").desktopFont(.headline)
       pathRow("Input audio", $inputPath, directory: false)
       Picker("Recipe", selection: $recipe) { recipeOptions }
       Stepper("Warm-up runs: \(warmupRuns)", value: $warmupRuns, in: 0...2)
@@ -414,9 +474,11 @@ struct DesktopWorkerView: View {
       pathRow("Optional baseline report", $baselinePath, directory: false)
       pathRow("Optional audio output folder", $audioDirectory, directory: true)
       HStack {
-        Text("Benchmark report").foregroundStyle(.secondary)
-        Text(reportPath.isEmpty ? String(localized: "Not selected") : reportPath).font(.caption)
-          .textSelection(.enabled)
+        Text("Benchmark report").foregroundStyle(Brand.secondary)
+        Text(reportPath.isEmpty ? String(localized: "Not selected") : reportPath).desktopFont(
+          .caption
+        )
+        .textSelection(.enabled)
         Spacer()
         Button("Choose report…") {
           reportPath =
@@ -435,16 +497,17 @@ struct DesktopWorkerView: View {
           ("save_audio_dir", audioDirectory), ("report", reportPath),
         ] where !path.isEmpty { fields[key] = .string(path) }
         request(.benchmarkFile, .object(fields))
-      }.disabled(inputPath.isEmpty).accessibilityIdentifier("worker_benchmark_file")
+      }.disabled(inputPath.isEmpty || worker.registrationState != .registered)
+        .accessibilityIdentifier("worker_benchmark_file")
     }.workerCard()
   }
   private var updates: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Signed worker updates and recovery").font(.headline)
+      Text("Signed worker updates and recovery").desktopFont(.headline)
       Text(
         "The app and worker service have separate release lifecycles. Worker updates finish accepted work, verify the signed release and qualification, retain recovery state, then restore previous intent. An app update must not interrupt the worker's accepted jobs."
       )
-      .foregroundStyle(.secondary)
+      .foregroundStyle(Brand.secondary)
       HStack {
         action(
           "Check app-managed worker update", .update,
@@ -459,7 +522,7 @@ struct DesktopWorkerView: View {
   }
   private var advanced: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Advanced worker actions").font(.headline)
+      Text("Advanced worker actions").desktopFont(.headline)
       Text(
         "Force operations may interrupt accepted jobs. Use them only after reviewing the worker's state and health checks."
       )
@@ -472,11 +535,11 @@ struct DesktopWorkerView: View {
           "Force worker update", .update, .object(["source": .string("app"), "force": .bool(true)]))
       }
       Divider()
-      Text("Signed catalog worker releases").font(.headline)
+      Text("Signed catalog worker releases").desktopFont(.headline)
       Text(
         "Catalog updates use the worker's signed release channel and may download additional processing tools. Choose this when you need a standalone worker release."
       )
-      .font(.caption).foregroundStyle(.secondary)
+      .desktopFont(.caption).foregroundStyle(Brand.secondary)
       HStack {
         action(
           "Check signed catalog update", .update,
@@ -486,12 +549,12 @@ struct DesktopWorkerView: View {
           .object(["source": .string("catalog"), "force": .bool(force)]))
       }
       Divider()
-      Text("Disconnect this worker").font(.headline)
+      Text("Disconnect this worker").desktopFont(.headline)
       Text(
-        "Unpair confirms revocation with the backend. Uninstall removes the worker service and preserves worker data unless purge is separately selected. Personal app and Chrome data are separate."
+        "Revocation disconnects this machine from the backend. Uninstall removes the worker service and preserves worker data unless purge is separately selected. Personal app and Chrome data are separate."
       )
-      .foregroundStyle(.secondary)
-      action("Unpair this Mac", .unpair, .object(["force": .bool(force)]))
+      .foregroundStyle(Brand.secondary)
+      action("Revoke this Mac’s worker registration", .unpair, .object(["force": .bool(force)]))
       Toggle("Permanently purge worker data during uninstall", isOn: $purge)
       action(
         purge ? "Uninstall and purge worker data" : "Uninstall worker service", .uninstall,
@@ -533,9 +596,21 @@ struct DesktopWorkerView: View {
     _ parameters: DesktopJSON = .object([:]), disabled: Bool = false
   ) -> some View {
     Button(LocalizedStringKey(title)) { request(command, parameters) }
-      .disabled(disabled).accessibilityIdentifier(
+      .disabled(disabled || !allows(command)).accessibilityIdentifier(
         "worker_\(command.rawValue)_\(parameters["source"].string ?? "app")_\(parameters["apply"].bool == true ? "apply" : parameters["check"].bool == true ? "check" : "action")"
       )
+  }
+  private func allows(_ command: DesktopWorkerCommand) -> Bool {
+    switch command {
+    case .stop, .restart, .pause, .drain, .resume, .update, .capacity, .benchmark, .benchmarkFile,
+      .unpair, .cleanup:
+      return worker.registrationState == .registered
+    case .uninstall:
+      return [.registered, .preserved, .unpaired].contains(worker.registrationState)
+    case .recover:
+      return [.interrupted, .preserved].contains(worker.registrationState)
+    default: return true
+    }
   }
   private func request(_ command: DesktopWorkerCommand, _ parameters: DesktopJSON) {
     if command.requiresConfirmation(parameters) {
@@ -558,7 +633,7 @@ struct DesktopWorkerView: View {
     if command == .uninstall && parameters["purge"].bool == true {
       return "Permanently delete worker data?"
     }
-    if command == .unpair { return "Revoke this worker's pairing?" }
+    if command == .unpair { return "Revoke this machine’s worker registration?" }
     if command == .update && parameters["source"].string == "catalog" {
       return "Install signed catalog worker release?"
     }
@@ -574,10 +649,6 @@ struct DesktopWorkerView: View {
         : "This removes the worker's login service. Worker data and recovery material remain available for reinstalling."
     case .unpair:
       "This revokes the worker's backend registration. Confirm only if you want this Mac to stop participating in the fleet."
-    case .install:
-      "This pairs the Mac with the backend and enables its independent login service. It can process backend jobs while the app is closed."
-    case .adopt:
-      "Accepted jobs finish before this paired worker moves to the app-managed service. Machine identity, credentials, slot IDs and operating intent are preserved; a failed qualification restores the existing service."
     case .recover:
       "This restores a preserved worker installation using its existing machine identity and credentials."
     case .benchmark, .benchmarkFile, .capacity, .cleanup:
@@ -598,9 +669,9 @@ struct DesktopWorkerView: View {
   }
   private func pathRow(_ title: String, _ path: Binding<String>, directory: Bool) -> some View {
     HStack {
-      Text(LocalizedStringKey(title)).foregroundStyle(.secondary)
+      Text(LocalizedStringKey(title)).foregroundStyle(Brand.secondary)
       Text(path.wrappedValue.isEmpty ? String(localized: "Not selected") : path.wrappedValue)
-        .font(.caption).lineLimit(2).textSelection(.enabled)
+        .desktopFont(.caption).lineLimit(2).textSelection(.enabled)
       Spacer()
       Button("Choose…") {
         let panel = NSOpenPanel()
@@ -767,28 +838,32 @@ private struct WorkerReportView: View {
   let title: String
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text(LocalizedStringKey(title)).font(.headline)
+      Text(LocalizedStringKey(title)).desktopFont(.headline)
       let projection = DesktopWorkerReport.projection(value)
       if projection.truncated {
         Label(
           "Report display is limited. Narrow the filters or export diagnostics for more detail.",
           systemImage: "ellipsis.circle"
         )
-        .font(.caption).foregroundStyle(Brand.amber).accessibilityIdentifier(
+        .desktopFont(.caption).foregroundStyle(Brand.amber).accessibilityIdentifier(
           "worker_report_truncated")
       }
       if projection.rows.isEmpty {
-        Text("No retained records match these filters.").foregroundStyle(.secondary)
+        Text("No retained records match these filters.").foregroundStyle(Brand.secondary)
       } else {
         LazyVStack(alignment: .leading, spacing: 10) {
           ForEach(projection.rows) { row in
             HStack(alignment: .top, spacing: 20) {
-              Text(DesktopWorkerReport.localizedLabel(row.label, locale: locale)).font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 150, maxWidth: 280, alignment: .leading)
-              Text(LocalizedStringKey(DesktopWorkerReport.valueLabel(row.value))).font(.caption)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+              Text(DesktopWorkerReport.localizedLabel(row.label, locale: locale)).desktopFont(
+                .caption
+              )
+              .foregroundStyle(Brand.secondary)
+              .frame(minWidth: 150, maxWidth: 280, alignment: .leading)
+              Text(LocalizedStringKey(DesktopWorkerReport.valueLabel(row.value))).desktopFont(
+                .caption
+              )
+              .textSelection(.enabled)
+              .frame(maxWidth: .infinity, alignment: .leading)
             }.accessibilityElement(children: .combine)
             Divider()
           }

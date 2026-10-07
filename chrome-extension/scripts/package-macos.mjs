@@ -51,6 +51,7 @@ import {
 import { verifyYoutubeRuntime } from "../dist/companion/youtube-runtime.js";
 import { refreshYoutubeRuntimeIdentity } from "./youtube-runtime-artifacts.mjs";
 import { createCompressedWorkerService } from "./worker-service-artifact.mjs";
+import { importRuntimeComponents } from "./macos-runtime-components.mjs";
 
 const executeTool = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
@@ -137,8 +138,14 @@ async function packageMacos() {
     );
   const runtimeReusePackageResult =
     process.env.MUSICMUTE_RUNTIME_REUSE_PACKAGE_RESULT;
+  const runtimeComponentsDirectory =
+    process.env.MUSICMUTE_RUNTIME_COMPONENTS_DIRECTORY;
+  if (runtimeReusePackageResult && runtimeComponentsDirectory)
+    throw new Error("RUNTIME_COMPONENT_OPTIONS_CONFLICT");
+  const externalRuntime =
+    runtimeReusePackageResult || runtimeComponentsDirectory;
   const identity = signing.identity;
-  const runtimeDownload = runtimeReusePackageResult
+  const runtimeDownload = externalRuntime
     ? process.env.MUSICMUTE_RUNTIME_DOWNLOAD_BASE_URL == null &&
       process.env.MUSICMUTE_RUNTIME_REDIRECT_HOSTS == null
       ? undefined
@@ -245,7 +252,7 @@ async function packageMacos() {
     for await (const chunk of createReadStream(path)) hash.update(chunk);
     return hash.digest("hex");
   };
-  if (!runtimeReusePackageResult) {
+  if (!externalRuntime) {
     stage("COPY_DOWNLOADER");
     await verifyDownloaderBundle(sourceDownloader, false);
   }
@@ -280,7 +287,7 @@ async function packageMacos() {
       destination,
     );
   }
-  if (!runtimeReusePackageResult) {
+  if (!externalRuntime) {
     console.log("Copying allowlisted runtime and minimal local engine.");
     for (const path of runtimeAllowlist) {
       const from = join(sourceRuntime, path),
@@ -365,7 +372,7 @@ async function packageMacos() {
     await cp(join(root, name), destination);
   }
   let youtubeRuntime;
-  if (!runtimeReusePackageResult) {
+  if (!externalRuntime) {
     await mkdir(join(runtime, "tools/downloader"), { recursive: true });
     stage("COPY_DOWNLOADER");
     for (const name of [
@@ -731,7 +738,15 @@ async function packageMacos() {
   );
   stage("PACKAGE_RUNTIME");
   let runtimeArtifact;
-  if (runtimeReusePackageResult) {
+  if (runtimeComponentsDirectory) {
+    stage("PACKAGE_RUNTIME");
+    runtimeArtifact = await importRuntimeComponents({
+      directory: runtimeComponentsDirectory,
+      outputDirectory: join(buildRoot, "runtime-release.noindex"),
+      sourceVersion: runtimeSourceVersion,
+      signing,
+    });
+  } else if (runtimeReusePackageResult) {
     stage("REUSE_RUNTIME");
     runtimeArtifact = await reuseMacRuntimeArtifact({
       packageResultPath: runtimeReusePackageResult,
@@ -886,6 +901,9 @@ async function packageMacos() {
         ? { reuse_source: runtimeArtifact.reuse_source }
         : {}),
       archive: runtimeArtifact.archive,
+      ...(runtimeArtifact.components
+        ? { components: runtimeArtifact.components }
+        : {}),
       archive_bytes: runtimeArtifact.archive_bytes,
       archive_sha256: runtimeArtifact.archive_sha256,
       installed_bytes: runtimeArtifact.installed_bytes,

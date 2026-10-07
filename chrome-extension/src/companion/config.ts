@@ -169,6 +169,87 @@ function positiveSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
+function validPackagedComponents(
+  runtime: Record<string, unknown>,
+  hosts: string[],
+): boolean {
+  if (runtime.archive_format === "zip") return runtime.components == null;
+  if (
+    runtime.archive_format !== "zip-components" ||
+    !Array.isArray(runtime.components) ||
+    runtime.components.length < 2 ||
+    runtime.components.length > 16 ||
+    !Array.isArray(runtime.files)
+  )
+    return false;
+  const allowed = new Set([
+    "python-ml",
+    "node",
+    "audio-tools",
+    "downloader",
+    "javascript",
+    "token-provider",
+    "engine",
+  ]);
+  const paths = new Set(runtime.files.map((file) => jsonRecord(file)?.path));
+  if (
+    paths.size !== runtime.files.length ||
+    [...paths].some((path) => typeof path !== "string")
+  )
+    return false;
+  const assigned = new Set<string>();
+  const ids = new Set<string>();
+  const urls = new Set<string>();
+  const hashes: string[] = [];
+  let bytes = 0;
+  for (const value of runtime.components) {
+    const part = jsonRecord(value);
+    if (
+      !part ||
+      typeof part.id !== "string" ||
+      !allowed.has(part.id) ||
+      ids.has(part.id) ||
+      typeof part.url !== "string" ||
+      urls.has(part.url) ||
+      typeof part.archive_sha256 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(part.archive_sha256) ||
+      !positiveSafeInteger(part.archive_bytes) ||
+      part.archive_bytes > 2_000_000_000 ||
+      !Array.isArray(part.file_paths) ||
+      !part.file_paths.length ||
+      part.file_paths.length > paths.size
+    )
+      return false;
+    const url = new URL(part.url);
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.port && url.port !== "443") ||
+      !hosts.includes(url.hostname)
+    )
+      return false;
+    ids.add(part.id);
+    urls.add(part.url);
+    bytes += part.archive_bytes;
+    hashes.push(part.archive_sha256);
+    for (const path of part.file_paths) {
+      if (typeof path !== "string" || !paths.has(path) || assigned.has(path))
+        return false;
+      assigned.add(path);
+    }
+  }
+  return (
+    assigned.size === paths.size &&
+    bytes === runtime.archive_bytes &&
+    createHash("sha256")
+      .update(hashes.join("\n") + "\n")
+      .digest("hex") === runtime.archive_sha256
+  );
+}
+
 async function packagedRuntimeBootstrap(
   appResources: string,
 ): Promise<PackagedRuntimeIdentity> {
@@ -209,7 +290,7 @@ async function packagedRuntimeBootstrap(
       runtime.api_version !== PACKAGED_RUNTIME_API_VERSION ||
       runtime.platform !== "darwin" ||
       runtime.arch !== "arm64" ||
-      runtime.archive_format !== "zip" ||
+      !["zip", "zip-components"].includes(String(runtime.archive_format)) ||
       typeof runtime.archive_sha256 !== "string" ||
       !/^[a-f0-9]{64}$/.test(runtime.archive_sha256) ||
       !positiveSafeInteger(runtime.archive_bytes) ||
@@ -238,6 +319,8 @@ async function packagedRuntimeBootstrap(
       runtime.files.length > 50_000 ||
       !validSigning
     )
+      throw new Error();
+    if (!validPackagedComponents(runtime, normalizedDownloadHosts))
       throw new Error();
     return {
       id: runtime.id,

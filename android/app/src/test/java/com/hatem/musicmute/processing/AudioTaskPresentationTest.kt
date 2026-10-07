@@ -43,8 +43,11 @@ class AudioTaskPresentationTest {
             listOf(submitted.copy(jobObserved = true))).isEmpty())
         assertTrue(audioTaskPresentations(emptyList(), emptyList(), 300,
             listOf(submitted.copy(createdAtMillis = 0))).isEmpty())
-        assertEquals(AudioTaskStage.QUEUED, audioTaskPresentations(emptyList(), emptyList(), 300,
-            listOf(submitted)).single().stage)
+        assertTrue(audioTaskPresentations(emptyList(), emptyList(), 300, listOf(submitted)).isEmpty())
+        val processing = audioTaskPresentations(emptyList(), listOf(ready.copy(status = "processing")), 300,
+            listOf(submitted)).single()
+        assertEquals(AudioTaskStage.PROCESSING, processing.stage)
+        assertTrue(processing.visibleOnHome)
     }
 
     @Test fun importFailuresCanBeRemovedWithoutCloudJobActions() {
@@ -274,6 +277,30 @@ class AudioTaskPresentationTest {
             audioTaskPresentations(listOf(operation.copy(serverStatus = "queued")), emptyList(), 0)
                 .single().stage,
         )
+    }
+
+    @Test fun confirmedCloudJobStaysOffHomeUntilALiveSnapshotIncludesIt() {
+        val operation = ProcessingOperation(
+            operationId = "c21a2eaa-7e73-4f08-89da-6ac35baa83e1",
+            ownerUid = "owner",
+            requestId = "c21a2eaa-7e73-4f08-89da-6ac35baa83e1",
+            jobId = job("queued").id,
+            phase = ProcessingPhase.COMPLETE,
+            serverStatus = "queued",
+        )
+        val hidden = audioTaskPresentations(listOf(operation), emptyList(), 0).single()
+        assertEquals(AudioTaskStage.QUEUED, hidden.stage)
+        assertFalse(hidden.visibleOnHome)
+        val uploading = audioTaskPresentations(
+            listOf(operation.copy(phase = ProcessingPhase.UPLOADING, serverStatus = "awaiting_upload")),
+            emptyList(),
+            0,
+        ).single()
+        assertTrue(uploading.visibleOnHome)
+        val live = audioTaskPresentations(listOf(operation), listOf(job("processing")), 0).single()
+        assertEquals(AudioTaskStage.PROCESSING, live.stage)
+        assertTrue(live.visibleOnHome)
+        assertFalse(audioTaskPresentations(listOf(operation), listOf(job("ready")), 0).single().visibleOnHome)
     }
 
     @Test fun confirmedUploadNeverReturnsToWaitingWhileHistoryStillAwaitsUpload() {

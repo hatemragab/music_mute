@@ -14,6 +14,7 @@ const dependencies: Record<RealtimeResource, readonly string[]> = {
   job: JOBS,
   import: ['media_imports'],
   local_media_sync: ['local_media_syncs', 'audio_jobs'],
+  worker_registration: ['users'],
   usage: [
     ...JOBS,
     'account_usage_periods',

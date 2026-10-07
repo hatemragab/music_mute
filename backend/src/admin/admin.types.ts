@@ -10,6 +10,7 @@ export type AdminPermission =
   | 'users.processing.manage'
   | 'users.restrictions.manage'
   | 'users.account-recovery.manage'
+  | 'users.worker-registration.manage'
   | 'abuse.read'
   | 'media.read'
   | 'releases.read'

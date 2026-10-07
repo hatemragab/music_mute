@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import Foundation
 import SwiftUI
 
@@ -354,9 +355,52 @@ private struct UnusedSettingsHTTPTransport: DesktopHTTPTransport {
     print("Rendered \(images.count) isolated Settings previews to \(destination.path)")
   }
 
+  @MainActor private static func checkTypography() throws {
+    let resources = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+      .deletingLastPathComponent().appendingPathComponent("Resources")
+    let repository = resources.deletingLastPathComponent().deletingLastPathComponent()
+      .deletingLastPathComponent()
+    let android = repository.appendingPathComponent("android/app/src/main")
+    guard
+      try Data(contentsOf: resources.appendingPathComponent("Fonts/NotoSansArabic.ttf"))
+        == Data(contentsOf: android.appendingPathComponent("res/font/noto_sans_arabic.ttf")),
+      try Data(contentsOf: resources.appendingPathComponent("licenses/noto_sans_arabic_ofl.txt"))
+        == Data(
+          contentsOf: android.appendingPathComponent("assets/licenses/noto_sans_arabic_ofl.txt"))
+    else { throw SettingsTestFailure.failed("Mac font or license differs from Android") }
+    for weight: Font.Weight in [.regular, .medium, .semibold, .bold] {
+      let font = DesktopTypography.nativeFont(.body, weight: weight)
+      guard font.familyName == DesktopTypography.family else {
+        throw SettingsTestFailure.failed("Font weight fell back to a different family")
+      }
+      let characters = Array("MusicMute صوت واضح".utf16)
+      var glyphs = [CGGlyph](repeating: 0, count: characters.count)
+      guard CTFontGetGlyphsForCharacters(font as CTFont, characters, &glyphs, characters.count),
+        glyphs.allSatisfy({ $0 != 0 })
+      else { throw SettingsTestFailure.failed("Noto font is missing English or Arabic glyphs") }
+    }
+    guard DesktopTypography.nativeFont(.body).pointSize >= 17,
+      DesktopTypography.nativeFont(.caption).pointSize >= 14,
+      DesktopTypography.nativeFont(.caption2, scale: 0.85).pointSize >= 13,
+      DesktopTypography.nativeFont(.body, scale: 1.55).pointSize
+        > DesktopTypography.nativeFont(.body).pointSize,
+      DesktopTypography.nativeFont(.caption, design: .monospaced).isFixedPitch
+    else {
+      throw SettingsTestFailure.failed("Readable type scale or technical monospace regressed")
+    }
+    print(
+      "Typography checks passed: exact Android font and license, native weights, bilingual glyphs, readable sizes"
+    )
+  }
+
   @MainActor static func main() async throws {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.prohibited)
+    let resources = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+      .deletingLastPathComponent().appendingPathComponent("Resources")
+    guard DesktopTypography.registerFont(resources: resources) else {
+      throw SettingsTestFailure.failed("Android's bundled Noto Sans Arabic font did not register")
+    }
     if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--render-settings-ui" {
       guard CommandLine.arguments[2].hasPrefix("/") else {
         throw SettingsTestFailure.failed("Use an absolute Settings output path")
@@ -367,6 +411,7 @@ private struct UnusedSettingsHTTPTransport: DesktopHTTPTransport {
     guard CommandLine.arguments.count == 1 else {
       throw SettingsTestFailure.failed("Unsupported Settings test arguments")
     }
+    try checkTypography()
     try await checkTextSizeIdentity()
     try await checkStorageLoadLifecycle()
   }

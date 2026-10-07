@@ -1,3 +1,4 @@
+import { t, createLocalizer } from "./i18n";
 interface PlaybackWaveformSnapshot {
   visible: boolean;
   vocals: boolean;
@@ -14,6 +15,7 @@ function timeLabel(seconds: number): string {
 
 /** Decorative bars show playback activity; the video's clock owns the timeline. */
 export function createPlaybackWaveform() {
+  const localizer = createLocalizer();
   const element = document.createElement("div");
   element.className = "musicmute-playback-waveform";
   element.hidden = true;
@@ -28,7 +30,7 @@ export function createPlaybackWaveform() {
   const track = document.createElement("div");
   track.className = "musicmute-wave-track";
   track.setAttribute("role", "progressbar");
-  track.setAttribute("aria-label", "Video position");
+  localizer.attribute(track, "aria-label", () => t("Video position"));
   track.setAttribute("aria-valuemin", "0");
   const heights = [30, 52, 38, 76, 60, 96, 48, 70, 40, 84];
   for (const layer of ["base", "played"]) {
@@ -50,6 +52,7 @@ export function createPlaybackWaveform() {
 
   return {
     element,
+    dispose: () => localizer.dispose(),
     update(snapshot: PlaybackWaveformSnapshot): void {
       element.hidden = !snapshot.visible;
       element.dataset.playing = String(
@@ -65,12 +68,13 @@ export function createPlaybackWaveform() {
         duration > 0 && Number.isFinite(snapshot.currentTime)
           ? Math.min(duration, Math.max(0, snapshot.currentTime))
           : 0;
-      const label = snapshot.vocals ? "Voice-only" : "Original sound";
-      if (source.textContent !== label) source.textContent = label;
+      const label = () =>
+        snapshot.vocals ? t("Voice-only") : t("Original sound");
+      if (source.textContent !== label()) localizer.text(source, label);
       const elapsed = timeLabel(currentTime);
       const total = duration > 0 ? timeLabel(duration) : "--:--";
       const timeText = `${elapsed} / ${total}`;
-      if (time.textContent !== timeText) time.textContent = timeText;
+      if (time.textContent !== timeText) localizer.text(time, () => timeText);
       if (duration > 0) {
         track.setAttribute("aria-valuemax", String(duration));
         track.setAttribute("aria-valuenow", String(currentTime));
@@ -78,11 +82,10 @@ export function createPlaybackWaveform() {
         track.removeAttribute("aria-valuemax");
         track.removeAttribute("aria-valuenow");
       }
-      track.setAttribute(
-        "aria-valuetext",
+      localizer.attribute(track, "aria-valuetext", () =>
         duration > 0
-          ? `${label}: ${elapsed} of ${total}`
-          : `${label}: duration unavailable`,
+          ? t("{0}: {1} of {2}", [label(), elapsed, total])
+          : t("{0}: duration unavailable", [label()]),
       );
       const progress = `${duration > 0 ? (currentTime / duration) * 100 : 0}%`;
       if (progress !== previousProgress) {

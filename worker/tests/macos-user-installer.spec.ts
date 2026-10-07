@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { fork } from "node:child_process";
 import { once } from "node:events";
 import {
@@ -31,6 +31,16 @@ import {
 import { loadRuntimeConfig } from "../src/runtime/runtime-config.js";
 import { MAC_RECIPE_IDS } from "../src/platform/macos/runtime-recipes.js";
 import { runMacUserCommand } from "../src/platform/macos/user-cli.js";
+import {
+  resetDeletedMacRegistration,
+  finishDeletedMacRegistration,
+  writeMachineDeletionNotice,
+  loadMachineDeletionNotice,
+} from "../src/platform/macos/deleted-registration.js";
+import { writeConfirmedUnpairReceipt } from "../src/platform/shared/unpair-receipt.js";
+import { writeLocalRuntimeStatus } from "../src/runtime/local-runtime-status.js";
+import { DiagnosticSpool } from "../src/runtime/diagnostic-spool.js";
+import { DiagnosticForwarder } from "../src/runtime/diagnostic-forwarder.js";
 import {
   setLocalLifecycleIntent,
   loadLocalLifecycle,
@@ -512,6 +522,357 @@ describe.skipIf(process.platform !== "darwin")(
     });
   },
 );
+
+describe.skipIf(process.platform !== "darwin")(
+  "deleted machine registration cleanup",
+  () => {
+    it("archives only confirmed deleted identity state and preserves runtime, model and history", async () => {
+      const f = await deletedFixture();
+      await f.write("models/model.onnx", "model");
+      await f.write("runtime/releases/retained/binding.json", "binding");
+      await symlink("releases/retained", f.layout.currentLink);
+      await f.write("logs/worker.stderr.log", "historical service log");
+      await f.write("jobs/attempts/history.mp3", "historical output");
+      await f.write("cache/retained", "cache");
+      await f.write("state/qualified-rollback.json", "rollback");
+      await f.write(
+        "state/transactions/install/.enrollment-state.json",
+        "old protected enrollment",
+      );
+      await f.write("config/restart-budget.json", "old permanent failure");
+      await writeMachineDeletionNotice(f.layout, f.machineId);
+      await expect(f.reset()).resolves.toEqual({
+        deleted: true,
+        registrationReset: true,
+      });
+      for (const [path, contents] of [
+        ["models/model.onnx", "model"],
+        ["runtime/releases/retained/binding.json", "binding"],
+        ["logs/worker.stderr.log", "historical service log"],
+        ["jobs/attempts/history.mp3", "historical output"],
+        ["cache/retained", "cache"],
+        ["state/qualified-rollback.json", "rollback"],
+      ])
+        expect(await readFile(join(f.layout.installRoot, path!), "utf8")).toBe(
+          contents,
+        );
+      expect(await lstat(f.layout.currentLink)).toBeDefined();
+      for (const path of [
+        f.layout.installationStatePath,
+        f.layout.runtimeStatusPath,
+        f.layout.lifecyclePath,
+        f.layout.unpairReceiptPath,
+        join(f.layout.configRoot, "restart-budget.json"),
+        join(f.layout.transactionRoot, "install"),
+      ])
+        await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+      const journal = JSON.parse(
+        await readFile(
+          join(f.layout.stateRoot, "deleted-registration.json"),
+          "utf8",
+        ),
+      );
+      const archive = join(
+        f.layout.stateRoot,
+        "deleted-registrations",
+        journal.archiveId,
+      );
+      expect((await lstat(archive)).mode & 0o777).toBe(0o700);
+      expect(
+        await readFile(join(archive, "config__restart-budget.json"), "utf8"),
+      ).toBe("old permanent failure");
+      expect(journal.phase).toBe("complete");
+      expect(f.service.bootout).toHaveBeenCalledOnce();
+      await expect(f.reset()).resolves.toEqual({
+        deleted: true,
+        registrationReset: true,
+      });
+      await expect(
+        finishDeletedMacRegistration(f.layout, f.machineId),
+      ).rejects.toThrow("conflicts");
+      await finishDeletedMacRegistration(f.layout, randomUUID());
+      await expect(
+        lstat(join(f.layout.stateRoot, "deleted-registration.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await lstat(archive)).toBeDefined();
+    });
+
+    it.each([
+      "state/installation.json",
+      "state/runtime-status.json",
+      "state/unpaired.json",
+    ])(
+      "resumes exact archive moves after interruption at %s",
+      async (boundary) => {
+        const f = await deletedFixture();
+        await expect(
+          resetDeletedMacRegistration({
+            layout: f.layout,
+            service: f.service,
+            afterArchive: async (path) => {
+              if (path === boundary) throw new Error("interrupted");
+            },
+          }),
+        ).rejects.toThrow("interrupted");
+        const prior = JSON.parse(
+          await readFile(
+            join(f.layout.stateRoot, "deleted-registration.json"),
+            "utf8",
+          ),
+        );
+        expect(prior.phase).toBe("archiving");
+        await expect(f.reset()).resolves.toMatchObject({
+          registrationReset: true,
+        });
+        const next = JSON.parse(
+          await readFile(
+            join(f.layout.stateRoot, "deleted-registration.json"),
+            "utf8",
+          ),
+        );
+        expect(next.archiveId).toBe(prior.archiveId);
+        expect(next.phase).toBe("complete");
+      },
+    );
+
+    it("preserves old diagnostic bytes while new identity delivers only a fresh stream", async () => {
+      const f = await deletedFixture();
+      const logs = join(f.layout.installRoot, "jobs", "logs");
+      const oldSpool = new DiagnosticSpool(logs);
+      await oldSpool.initialize();
+      oldSpool.record({ kind: "old-machine-private-event" });
+      await oldSpool.flush();
+      const oldForwarder = new DiagnosticForwarder(
+        join(logs, "delivery.json"),
+        oldSpool,
+        {
+          appendDiagnosticLogs: async () => {
+            throw new Error("lost ack");
+          },
+        },
+        { sessionId: randomUUID(), incarnation: randomUUID() },
+      );
+      await expect(oldForwarder.pump()).rejects.toThrow("lost ack");
+      oldForwarder.stop();
+      await f.reset();
+      const journal = JSON.parse(
+        await readFile(
+          join(f.layout.stateRoot, "deleted-registration.json"),
+          "utf8",
+        ),
+      );
+      const archived = join(
+        f.layout.stateRoot,
+        "deleted-registrations",
+        journal.archiveId,
+      );
+      expect(
+        await readFile(join(archived, "jobs__logs__events.jsonl"), "utf8"),
+      ).toContain("old-machine-private-event");
+      expect(
+        await readFile(join(archived, "jobs__logs__delivery.json"), "utf8"),
+      ).toContain("old-machine-private-event");
+      const newSpool = new DiagnosticSpool(logs);
+      await newSpool.initialize();
+      newSpool.record({ kind: "new-machine-event" });
+      await newSpool.flush();
+      const append = vi.fn(async (batch: { sequenceEnd: number }) => ({
+        acknowledgedSequence: batch.sequenceEnd,
+        replayed: false,
+      }));
+      const fresh = new DiagnosticForwarder(
+        join(logs, "delivery.json"),
+        newSpool,
+        { appendDiagnosticLogs: append },
+        { sessionId: randomUUID(), incarnation: randomUUID() },
+      );
+      await fresh.pump();
+      expect(JSON.stringify(append.mock.calls)).toContain("new-machine-event");
+      expect(JSON.stringify(append.mock.calls)).not.toContain(
+        "old-machine-private-event",
+      );
+      fresh.stop();
+    });
+
+    it.each([
+      "ordinary-revocation",
+      "old-credential",
+      "active-attempt",
+      "unknown-runtime",
+      "personal-reservation",
+      "receipt-mismatch",
+      "receipt-symlink",
+      "archive-symlink",
+    ])("refuses %s before archiving", async (guard) => {
+      const f = await deletedFixture();
+      if (guard === "ordinary-revocation")
+        await writeConfirmedUnpairReceipt(
+          f.layout.unpairReceiptPath,
+          f.machineId,
+        );
+      if (guard === "old-credential")
+        await f.write("credentials/machine.credential", "synthetic");
+      if (guard === "active-attempt")
+        await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [
+          randomUUID(),
+        ]);
+      if (guard === "unknown-runtime") await rm(f.layout.runtimeStatusPath);
+      if (guard === "personal-reservation")
+        await f.write("state/personal-admission.json", "unknown ownership");
+      if (guard === "receipt-mismatch")
+        await writeConfirmedUnpairReceipt(
+          f.layout.unpairReceiptPath,
+          randomUUID(),
+          new Date(),
+          true,
+        );
+      if (guard === "receipt-symlink") {
+        const receipt = f.layout.unpairReceiptPath;
+        await renameForTest(receipt, `${receipt}.retained`);
+        await symlink(`${receipt}.retained`, receipt);
+      }
+      if (guard === "archive-symlink") {
+        const outside = join(f.layout.homeRoot, "outside");
+        await mkdir(outside, { mode: 0o700 });
+        await symlink(
+          outside,
+          join(f.layout.stateRoot, "deleted-registrations"),
+        );
+      }
+      await expect(f.reset()).rejects.toThrow();
+      expect(await lstat(f.layout.installationStatePath)).toBeDefined();
+      await expect(
+        lstat(join(f.layout.stateRoot, "deleted-registration.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    it("exposes only a validated token-free local deletion notice", async () => {
+      const f = await deletedFixture();
+      await writeMachineDeletionNotice(f.layout, f.machineId);
+      await expect(loadMachineDeletionNotice(f.layout)).resolves.toMatchObject({
+        code: "WORKER_MACHINE_DELETED",
+        httpStatus: 410,
+      });
+      await f.write(
+        "state/machine-deleted.json",
+        JSON.stringify({
+          schemaVersion: 1,
+          code: "WORKER_UNAUTHENTICATED",
+          httpStatus: 410,
+          detectedAt: new Date().toISOString(),
+        }),
+      );
+      await expect(loadMachineDeletionNotice(f.layout)).rejects.toThrow(
+        "invalid",
+      );
+    });
+  },
+);
+
+describe.skipIf(process.platform !== "darwin")(
+  "deleted registration ownership fences",
+  () => {
+    it("does not archive while the service or recorded supervisor is still alive", async () => {
+      const f = await deletedFixture();
+      const service = {
+        status: async () => ({ loaded: true, running: true }),
+        bootout: vi.fn(async () => undefined),
+      };
+      await expect(
+        resetDeletedMacRegistration({ layout: f.layout, service }),
+      ).rejects.toThrow("did not stop");
+      await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [], {
+        processId: process.pid,
+        childState: "stopped",
+      });
+      await expect(f.reset()).rejects.toThrow("ENGINE_EXIT_UNCONFIRMED");
+      expect(await lstat(f.layout.installationStatePath)).toBeDefined();
+    });
+    it("rejects replaced archive files and preserves a newer pending enrollment", async () => {
+      const f = await deletedFixture();
+      await f.write(
+        "state/transactions/install/.enrollment-state.json",
+        "old enrollment",
+      );
+      await f.reset();
+      await f.write(
+        "state/transactions/install/.enrollment-state.json",
+        "new protected enrollment",
+      );
+      await expect(f.reset()).rejects.toThrow("archive identity changed");
+      expect(
+        await readFile(
+          join(f.layout.transactionRoot, "install", ".enrollment-state.json"),
+          "utf8",
+        ),
+      ).toBe("new protected enrollment");
+      await rm(join(f.layout.transactionRoot, "install"), { recursive: true });
+      const journal = JSON.parse(
+        await readFile(
+          join(f.layout.stateRoot, "deleted-registration.json"),
+          "utf8",
+        ),
+      );
+      const archived = join(
+        f.layout.stateRoot,
+        "deleted-registrations",
+        journal.archiveId,
+        "state__installation.json",
+      );
+      await renameForTest(archived, `${archived}.retained`);
+      await writeFile(archived, "{}", { mode: 0o600 });
+      await expect(f.reset()).rejects.toThrow("archive identity changed");
+    });
+  },
+);
+
+async function deletedFixture() {
+  const root = await temporaryRoot();
+  const home = join(root, "home");
+  await mkdir(home, { mode: 0o700 });
+  const layout = createMacUserLayout(home);
+  await createMacUserDirectories(layout);
+  const machineId = randomUUID();
+  const write = async (path: string, contents: string) => {
+    const target = join(layout.installRoot, path);
+    await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+    await writeFile(target, contents, { mode: 0o600 });
+  };
+  await write(
+    "state/installation.json",
+    JSON.stringify({ schemaVersion: 1, machineId }),
+  );
+  await writeLocalRuntimeStatus(layout.runtimeStatusPath, [], {
+    childState: "stopped",
+    currentAttempts: [],
+  });
+  await write("state/lifecycle.json", "old draining lifecycle");
+  await writeConfirmedUnpairReceipt(
+    layout.unpairReceiptPath,
+    machineId,
+    new Date(),
+    true,
+  );
+  let loaded = true;
+  const service = {
+    status: vi.fn(async () => ({ loaded, running: loaded })),
+    bootout: vi.fn(async () => {
+      loaded = false;
+    }),
+  };
+  return {
+    layout,
+    machineId,
+    write,
+    service,
+    reset: () => resetDeletedMacRegistration({ layout, service }),
+  };
+}
+
+async function renameForTest(from: string, to: string) {
+  const { rename } = await import("node:fs/promises");
+  await rename(from, to);
+}
 
 async function releaseFixture(root: string, version: string): Promise<void> {
   for (const path of [

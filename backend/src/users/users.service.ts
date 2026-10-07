@@ -76,6 +76,18 @@ export class UsersService {
     return this.users.findOne({ firebaseUid: uid }).exec();
   }
 
+  async workerRegistration(userId: string) {
+    const user = await this.users
+      .findOne({ _id: userId, status: 'active' })
+      .select({ workerRegistrationAllowed: 1 })
+      .maxTimeMS(2000)
+      .lean();
+    if (!user) throw authError('ACCOUNT_DISABLED');
+    return {
+      workerRegistrationAllowed: user.workerRegistrationAllowed === true,
+    };
+  }
+
   async syncProfile(
     userId: string,
     profile: UserRecord,

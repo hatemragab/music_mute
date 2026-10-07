@@ -54,6 +54,7 @@ import {
   WorkerReadinessPanel,
 } from "./worker-insight-panels";
 import type { WorkerMachineDetail } from "./worker-types";
+import { DeleteWorkerMachineControl } from "./delete-worker-machine-control";
 
 type MachineAction =
   | "pause"
@@ -125,6 +126,7 @@ export function WorkerMachinePage() {
   const { can, reauthenticate } = useAdminSession();
   const [uncertain, setUncertain] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [deletionBlocked, setDeletionBlocked] = useState(false);
   const [pendingAction, setPendingAction] = useState<MachineAction | null>(
     null,
   );
@@ -165,7 +167,7 @@ export function WorkerMachinePage() {
         expectedRevision: current.machine.revision,
         reason,
       };
-      if (uncertain)
+      if (uncertain || deletionBlocked)
         throw new Error(
           "Resolve the previous operation before issuing another command.",
         );
@@ -222,12 +224,32 @@ export function WorkerMachinePage() {
     },
   });
 
-  if (machine.isLoading) return <LoadingState />;
+  const deletionControl = (
+    <DeleteWorkerMachineControl
+      key={id}
+      machine={machine.data?.machine ?? null}
+      disabled={mutation.isPending || Boolean(uncertain)}
+      onBlockedChange={setDeletionBlocked}
+    />
+  );
+  if (machine.isLoading)
+    return (
+      <div className="space-y-6">
+        {deletionControl}
+        <LoadingState />
+      </div>
+    );
   if (machine.isError)
     return (
-      <ErrorState error={machine.error} retry={() => void machine.refetch()} />
+      <div className="space-y-6">
+        {deletionControl}
+        <ErrorState
+          error={machine.error}
+          retry={() => void machine.refetch()}
+        />
+      </div>
     );
-  if (!machine.data) return null;
+  if (!machine.data) return <div className="space-y-6">{deletionControl}</div>;
   const data = machine.data;
   const currentAttempt = data.attempts.find((attempt) =>
     ["claimed", "running", "uploading"].includes(attempt.state),
@@ -239,6 +261,7 @@ export function WorkerMachinePage() {
 
   return (
     <div className="space-y-6">
+      {deletionControl}
       <Link
         to="/workers"
         className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
@@ -252,7 +275,7 @@ export function WorkerMachinePage() {
       {can("workers.manage") && data.machine.status !== "revoked" ? (
         <MachineActions
           data={data}
-          disabled={mutation.isPending || Boolean(uncertain)}
+          disabled={mutation.isPending || Boolean(uncertain) || deletionBlocked}
           onAction={setPendingAction}
         />
       ) : null}
@@ -274,6 +297,28 @@ export function WorkerMachinePage() {
           <CardContent className="space-y-6 p-5">
             <PageSection title="Identity and runtime">
               <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <Datum label="Registered through account">
+                  {data.machine.registeredByUserId ? (
+                    can("users.read") ? (
+                      <Link
+                        className="break-all font-mono text-xs text-primary hover:underline"
+                        to={`/users/${encodeURIComponent(data.machine.registeredByUserId)}`}
+                      >
+                        {data.machine.registeredByUserId}
+                      </Link>
+                    ) : (
+                      <span className="break-all font-mono text-xs">
+                        {data.machine.registeredByUserId}
+                      </span>
+                    )
+                  ) : (
+                    "Legacy registration"
+                  )}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Registration history only. This machine runs independently
+                    of that account.
+                  </p>
+                </Datum>
                 <Datum label="Machine state">
                   <StatusBadge value={data.machine.status} />
                 </Datum>
@@ -328,7 +373,11 @@ export function WorkerMachinePage() {
                   No active supervisor session.
                 </p>
               )}
-              <Table>
+              <Table
+                tabIndex={0}
+                aria-label="Worker slots"
+                className="focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
+              >
                 <TableHeader>
                   <TableRow>
                     <TableHead>Slot</TableHead>
@@ -673,7 +722,11 @@ function AttemptCard({
 function AttemptHistory({ data }: { data: WorkerMachineDetail }) {
   return (
     <div className="overflow-x-auto">
-      <Table>
+      <Table
+        tabIndex={0}
+        aria-label="Worker attempt history"
+        className="focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
+      >
         <TableHeader>
           <TableRow>
             <TableHead>Attempt</TableHead>

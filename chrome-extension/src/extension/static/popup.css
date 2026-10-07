@@ -121,7 +121,7 @@ h2 {
   display: inline-block;
   width: 5px;
   height: 5px;
-  margin-right: 5px;
+  margin-inline-end: 5px;
   border-radius: 50%;
   background: currentColor;
   vertical-align: 1px;
@@ -143,7 +143,8 @@ h2 {
   color: var(--muted);
 }
 .text-button {
-  padding: 4px 0 4px 8px;
+  padding: 4px 0;
+  padding-inline-start: 8px;
   color: var(--accent);
   background: transparent;
   border: 0;
@@ -210,7 +211,8 @@ body[data-helper-state="error"] .watch-guide {
 }
 .track-note {
   font-size: 10px;
-  margin: 8px 0 0 34px;
+  margin: 8px 0 0;
+  margin-inline-start: 34px;
 }
 .provider-field {
   margin-top: 16px;
@@ -293,7 +295,7 @@ summary {
 }
 .setup-content ol {
   margin: 10px 0 0;
-  padding-left: 18px;
+  padding-inline-start: 18px;
   color: var(--muted);
 }
 .setup-content li + li {
@@ -324,7 +326,7 @@ code {
 .tools > summary > span:first-child::after {
   content: "⌄";
   color: var(--muted);
-  margin-left: 6px;
+  margin-inline-start: 6px;
 }
 .tools[open] > summary > span:first-child::after {
   content: "⌃";
@@ -371,7 +373,7 @@ code {
 .privacy-note span {
   color: var(--accent);
   font-size: 6px;
-  margin-right: 3px;
+  margin-inline-end: 3px;
   vertical-align: 1px;
 }
 .report-details {
@@ -417,4 +419,20 @@ pre {
   font: inherit;
   font-size: 12px;
   color: var(--muted);
+}
+
+.language-settings {
+  margin-bottom: 14px;
+}
+#language-status {
+  color: #ffb4ab;
+  font-size: 11px;
+}
+[dir="rtl"] .eyebrow {
+  letter-spacing: normal;
+}
+#details,
+#helper-meta {
+  direction: ltr;
+  unicode-bidi: isolate;
 }

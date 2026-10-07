@@ -18,12 +18,14 @@ export interface ConfirmedUnpairReceipt {
   schemaVersion: 1;
   machineId: string;
   confirmedAt: string;
+  deleted?: true;
 }
 
 export async function writeConfirmedUnpairReceipt(
   path: string,
   machineId: string,
   now = new Date(),
+  deleted = false,
 ): Promise<ConfirmedUnpairReceipt> {
   if (!UUID_V4.test(machineId) || !Number.isFinite(now.getTime()))
     throw new TypeError("Confirmed unpair receipt is invalid");
@@ -31,6 +33,7 @@ export async function writeConfirmedUnpairReceipt(
     schemaVersion: 1,
     machineId,
     confirmedAt: now.toISOString(),
+    ...(deleted ? { deleted: true as const } : {}),
   };
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
@@ -68,6 +71,8 @@ export async function loadConfirmedUnpairReceipt(
     if (
       !info.isFile() ||
       info.isSymbolicLink() ||
+      (process.platform !== "win32" &&
+        (info.uid !== process.getuid?.() || info.nlink !== 1)) ||
       info.size < 2 ||
       info.size > 4096 ||
       (process.platform !== "win32" && (info.mode & 0o077) !== 0)
@@ -81,7 +86,9 @@ export async function loadConfirmedUnpairReceipt(
     const record = value as Record<string, unknown>;
     if (
       Object.keys(record).sort().join(",") !==
-        "confirmedAt,machineId,schemaVersion" ||
+        (record.deleted === true
+          ? "confirmedAt,deleted,machineId,schemaVersion"
+          : "confirmedAt,machineId,schemaVersion") ||
       record.schemaVersion !== 1 ||
       typeof record.machineId !== "string" ||
       !UUID_V4.test(record.machineId) ||
@@ -93,6 +100,7 @@ export async function loadConfirmedUnpairReceipt(
       schemaVersion: 1,
       machineId: record.machineId,
       confirmedAt: record.confirmedAt,
+      ...(record.deleted === true ? { deleted: true as const } : {}),
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;

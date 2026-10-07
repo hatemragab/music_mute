@@ -308,6 +308,17 @@ test("every dashboard mutation payload passes compiled backend strict validation
     });
     const results: Record<string, { status: number; code: string | null }> = {};
 
+    results.workerRegistration = await request(
+      "PUT",
+      `/admin/users/${missingId}/worker-registration`,
+      { ...revision(), workerRegistrationAllowed: true },
+    );
+    results.workerDeletion = await request(
+      "POST",
+      "/admin/workers/machines/5acc2df8-bf20-40ec-ab6f-b64a68cd4aec/deletions",
+      { ...revision(), registrationUserId: missingId, expectedUserRevision: 0 },
+    );
+
     results.accountRestrictionPut = await request(
       "PUT",
       "/admin/users/missing-user/restriction",

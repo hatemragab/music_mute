@@ -1,6 +1,7 @@
 package com.hatem.musicmute.processing
 
 import java.io.File
+import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
@@ -56,6 +57,28 @@ class ProcessingStoreTest {
         assertTrue(runCatching { store.operations("a").first() }.isFailure)
         assertEquals("{broken",file.readText())
     }
+    @Test fun terminalSnapshotRemovesOnlyTheConfirmedCloudOperation() = runTest {
+        val store = ProcessingStore(kotlin.io.path.createTempDirectory("processing-retire-").toFile(), backgroundScope)
+        val done = ProcessingOperation("done", "owner", "done-request", jobId = "ready-job",
+            phase = ProcessingPhase.COMPLETE, serverStatus = "queued")
+        val failed = ProcessingOperation("failed", "owner", "failed-request", jobId = "failed-job",
+            phase = ProcessingPhase.COMPLETE, serverStatus = "processing")
+        val uploading = ProcessingOperation("uploading", "owner", "upload-request", jobId = "queued-job",
+            phase = ProcessingPhase.UPLOADING, serverStatus = "awaiting_upload")
+        val unseen = ProcessingOperation("unseen", "owner", "unseen-request", jobId = "old-job",
+            phase = ProcessingPhase.COMPLETE, serverStatus = "queued")
+        listOf(done, failed, uploading, unseen).forEach { store.put("owner", it) }
+        store.retireConfirmedTerminalOperations("owner", listOf(
+            storedJob("ready-job", "ready"),
+            storedJob("failed-job", "failed"),
+            storedJob("queued-job", "queued"),
+            storedJob("cancelled-job", "cancelled"),
+        ))
+        assertEquals(setOf("uploading", "unseen"), store.operations("owner").first().map { it.operationId }.toSet())
+        store.retireConfirmedTerminalOperations("owner", emptyList())
+        assertEquals(setOf("uploading", "unseen"), store.operations("owner").first().map { it.operationId }.toSet())
+    }
+
     @Test fun reopeningRetainsTheExactReservationAndStagedPath() = runTest {
         val root=kotlin.io.path.createTempDirectory("processing-reopen-").toFile()
         val firstJob=SupervisorJob()
@@ -66,5 +89,9 @@ class ProcessingStoreTest {
         val reopened=ProcessingStore(root,backgroundScope)
         assertEquals(operation,reopened.get("a",operation.operationId))
     }
+
+    private fun storedJob(id: String, status: String) = Job(
+        id, status, Instant.EPOCH, Instant.EPOCH, JobInput("mp3", 32, 12.0), false, status == "ready",
+    )
 
 }

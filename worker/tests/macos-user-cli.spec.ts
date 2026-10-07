@@ -28,6 +28,9 @@ import {
 } from "../src/platform/macos/user-cli.js";
 import { createMacUserLayout } from "../src/platform/macos/user-paths.js";
 import type { LaunchAgentStatus } from "../src/platform/macos/launch-agent.js";
+import { writeConfirmedUnpairReceipt } from "../src/platform/shared/unpair-receipt.js";
+import { ControlPlaneError } from "../src/runtime/control-plane-client.js";
+import { writeMachineDeletionNotice } from "../src/platform/macos/deleted-registration.js";
 
 const roots: string[] = [];
 const stopObservers: Array<() => Promise<void>> = [];
@@ -445,6 +448,325 @@ describe.skipIf(process.platform !== "darwin")(
         activeReleaseVersion: null,
         lifecycle: "unknown",
         healthy: false,
+      });
+    });
+    it("exposes typed deletion status and local notice without credential output", async () => {
+      const f = await fixture(true);
+      await writeMachineDeletionNotice(f.layout, f.machineId);
+      await runMacUserCommand("status", ["--json"], {
+        layout: f.layout,
+        host: {
+          platform: "darwin",
+          arch: "arm64",
+          uid: process.getuid!(),
+          home: f.layout.homeRoot,
+        },
+        launchAgent: f.launchAgent,
+        stdout: (value) => f.output.push(value),
+        remoteStatus: async () => {
+          throw new ControlPlaneError("WORKER_MACHINE_DELETED", 410, false);
+        },
+      });
+      const value = JSON.parse(f.output.pop()!);
+      expect(value.remote).toMatchObject({
+        available: false,
+        errorCode: "WORKER_MACHINE_DELETED",
+        httpStatus: 410,
+      });
+      expect(value.deletionNotice).toMatchObject({
+        code: "WORKER_MACHINE_DELETED",
+        httpStatus: 410,
+      });
+      expect(value.registrationDeleted).toBe(true);
+      expect(JSON.stringify(value)).not.toContain("x".repeat(43));
+    });
+    it("uses recover only for confirmed deletion and leaves ordinary revoked state untouched", async () => {
+      const f = await fixture(false);
+      const machineId = randomUUID();
+      await writeFile(
+        f.layout.installationStatePath,
+        JSON.stringify({ machineId }),
+        { mode: 0o600 },
+      );
+      await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [], {
+        childState: "stopped",
+      });
+      await writeConfirmedUnpairReceipt(f.layout.unpairReceiptPath, machineId);
+      await expect(f.run("recover", ["--json"])).rejects.toThrow(
+        "Only backend-confirmed deleted",
+      );
+      expect(await lstat(f.layout.installationStatePath)).toBeDefined();
+      await writeConfirmedUnpairReceipt(
+        f.layout.unpairReceiptPath,
+        machineId,
+        new Date(),
+        true,
+      );
+      await expect(f.run("recover", ["--json"])).resolves.toBe(0);
+      expect(JSON.parse(f.output.pop()!)).toMatchObject({
+        action: "recover",
+        deleted: true,
+        registrationReset: true,
+      });
+      await expect(lstat(f.layout.installationStatePath)).rejects.toMatchObject(
+        { code: "ENOENT" },
+      );
+      await expect(f.run("recover", ["--json"])).resolves.toBe(0);
+    });
+    it.each([false, true])(
+      "does not mark replacement identity deleted from stale records (local=%s)",
+      async (local) => {
+        const f = await fixture(true);
+        const retiredMachine = randomUUID();
+        await writeMachineDeletionNotice(f.layout, retiredMachine);
+        await writeConfirmedUnpairReceipt(
+          f.layout.unpairReceiptPath,
+          retiredMachine,
+          new Date(),
+          true,
+        );
+        await runMacUserCommand(
+          "status",
+          [...(local ? ["--local"] : []), "--json"],
+          {
+            host: {
+              platform: "darwin",
+              arch: "arm64",
+              uid: process.getuid!(),
+              home: f.layout.homeRoot,
+            },
+            layout: f.layout,
+            launchAgent: f.launchAgent,
+            stdout: (value) => f.output.push(value),
+            remoteStatus: async () => ({
+              machineId: f.machineId,
+              status: "active",
+              groupId: null,
+              policyRevision: 1,
+              revision: 1,
+              lastSeenAt: null,
+              activeAttempts: 0,
+              claimsAllowed: true,
+            }),
+          },
+        );
+        const status = JSON.parse(f.output.pop()!);
+        expect(status.machineId).toBe(f.machineId);
+        expect(status.registrationDeleted).toBe(false);
+        expect(status.deletionNotice).toBeNull();
+        expect(status.confirmedDeletedReceipt).toBe(false);
+        expect(status.deletedMachineId).toBeNull();
+        if (!local)
+          expect(status.remote).toMatchObject({
+            available: true,
+            httpStatus: 200,
+          });
+      },
+    );
+    it.each(["replacement", "partial", "unsafe"])(
+      "refuses stale deleted unpair replay for %s state before bootout or removal",
+      async (condition) => {
+        const f = await fixture(true);
+        await writeConfirmedUnpairReceipt(
+          f.layout.unpairReceiptPath,
+          randomUUID(),
+          new Date(),
+          true,
+        );
+        f.launchAgent.status.mockResolvedValue({ loaded: true, running: true });
+        if (condition === "partial") await rm(f.layout.credentialPath);
+        if (condition === "unsafe") await chmod(f.layout.configPath, 0o666);
+        await expect(f.run("unpair", ["--json"])).rejects.toThrow();
+        expect(f.launchAgent.bootout).not.toHaveBeenCalled();
+        expect(await lstat(f.layout.configPath)).toBeDefined();
+        if (condition !== "partial")
+          expect(await lstat(f.layout.credentialPath)).toBeDefined();
+      },
+    );
+    it("refuses old unpaired installation journals before any resume hook", async () => {
+      const f = await fixture(false);
+      await writeConfirmedUnpairReceipt(
+        f.layout.unpairReceiptPath,
+        randomUUID(),
+      );
+      const resumeInstallation = vi.fn(async () => installationResult());
+      await expect(
+        runMacUserCommand("install", ["--label", "Studio Mac"], {
+          layout: f.layout,
+          host: {
+            platform: "darwin",
+            arch: "arm64",
+            uid: process.getuid!(),
+            home: f.layout.homeRoot,
+          },
+          launchAgent: f.launchAgent,
+          resumeInstallation,
+        }),
+      ).rejects.toThrow("confirmed deletion cleanup");
+      expect(resumeInstallation).not.toHaveBeenCalled();
+    });
+    it("replays a matching confirmed deletion after credential removal without touching a replacement", async () => {
+      const f = await fixture(true);
+      await writeConfirmedUnpairReceipt(
+        f.layout.unpairReceiptPath,
+        f.machineId,
+        new Date(),
+        true,
+      );
+      await rm(f.layout.credentialPath);
+      await f.run("status", ["--local", "--json"]);
+      const snapshot = JSON.parse(f.output.pop()!);
+      expect(snapshot).toMatchObject({
+        machineId: f.machineId,
+        confirmedDeletedReceipt: true,
+        deletedMachineId: f.machineId,
+        registrationDeleted: true,
+      });
+      f.launchAgent.status.mockResolvedValue({ loaded: true, running: true });
+      await expect(
+        f.run("unpair", [
+          "--json",
+          "--expected-machine-id",
+          f.machineId,
+          "--deleted-only",
+        ]),
+      ).resolves.toBe(0);
+      expect(f.launchAgent.bootout).toHaveBeenCalledOnce();
+      await expect(lstat(f.layout.configPath)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      expect(JSON.parse(f.output.pop()!)).toMatchObject({
+        confirmed: true,
+        deleted: true,
+        replayed: true,
+      });
+    });
+    it("refuses credential-only partial state even with a confirmed deleted receipt", async () => {
+      const f = await fixture(true);
+      await writeConfirmedUnpairReceipt(
+        f.layout.unpairReceiptPath,
+        f.machineId,
+        new Date(),
+        true,
+      );
+      await rm(f.layout.configPath);
+      await f.run("status", ["--local", "--json"]);
+      expect(JSON.parse(f.output.pop()!)).toMatchObject({
+        machineId: null,
+        confirmedDeletedReceipt: false,
+        deletedMachineId: null,
+        registrationDeleted: false,
+      });
+      await expect(f.run("unpair", ["--json"])).rejects.toThrow(
+        "partial worker registration",
+      );
+      expect(f.launchAgent.bootout).not.toHaveBeenCalled();
+      expect(await lstat(f.layout.credentialPath)).toBeDefined();
+    });
+    it.each([
+      "replacement",
+      "active",
+      "revoked",
+      "wrong-status",
+      "active-attempt",
+    ])(
+      "rejects targeted deletion cleanup of %s before every mutation",
+      async (state) => {
+        const f = await fixture(true);
+        const target = state === "replacement" ? randomUUID() : f.machineId;
+        if (state === "active-attempt")
+          await writeLocalRuntimeStatus(f.layout.runtimeStatusPath, [
+            randomUUID(),
+          ]);
+        const before = await loadLocalLifecycle(f.layout.lifecyclePath);
+        const unpair = vi.fn(async () => ({
+          confirmed: true as const,
+          machineId: f.machineId,
+          deleted: true as const,
+        }));
+        const remoteStatus = vi.fn(async () => {
+          if (state === "active")
+            return {
+              machineId: f.machineId,
+              status: "active" as const,
+              groupId: null,
+              policyRevision: 1,
+              revision: 1,
+              lastSeenAt: null,
+              activeAttempts: 0,
+              claimsAllowed: true,
+            };
+          throw new ControlPlaneError(
+            state === "revoked"
+              ? "WORKER_UNAUTHENTICATED"
+              : "WORKER_MACHINE_DELETED",
+            state === "wrong-status" || state === "revoked" ? 401 : 410,
+            false,
+          );
+        });
+        await expect(
+          runMacUserCommand(
+            "unpair",
+            ["--expected-machine-id", target, "--deleted-only", "--json"],
+            {
+              layout: f.layout,
+              host: {
+                platform: "darwin",
+                arch: "arm64",
+                uid: process.getuid!(),
+                home: f.layout.homeRoot,
+              },
+              launchAgent: f.launchAgent,
+              remoteStatus,
+              unpair,
+            },
+          ),
+        ).rejects.toThrow();
+        expect(unpair).not.toHaveBeenCalled();
+        expect(f.launchAgent.bootout).not.toHaveBeenCalled();
+        expect(await loadLocalLifecycle(f.layout.lifecyclePath)).toEqual(
+          before,
+        );
+        expect(await lstat(f.layout.configPath)).toBeDefined();
+        expect(await lstat(f.layout.credentialPath)).toBeDefined();
+        if (["replacement", "active-attempt"].includes(state))
+          expect(remoteStatus).not.toHaveBeenCalled();
+      },
+    );
+    it("rechecks exact target deletion inside the command lock before unpair", async () => {
+      const f = await fixture(true);
+      f.launchAgent.status.mockResolvedValue({ loaded: true, running: true });
+      const remoteStatus = vi.fn(async () => {
+        throw new ControlPlaneError("WORKER_MACHINE_DELETED", 410, false);
+      });
+      const unpair = vi.fn(async () => ({
+        confirmed: true as const,
+        machineId: f.machineId,
+        deleted: true as const,
+      }));
+      await expect(
+        runMacUserCommand(
+          "unpair",
+          ["--expected-machine-id", f.machineId, "--deleted-only", "--json"],
+          {
+            layout: f.layout,
+            host: {
+              platform: "darwin",
+              arch: "arm64",
+              uid: process.getuid!(),
+              home: f.layout.homeRoot,
+            },
+            launchAgent: f.launchAgent,
+            remoteStatus,
+            unpair,
+          },
+        ),
+      ).resolves.toBe(0);
+      expect(remoteStatus).toHaveBeenCalledOnce();
+      expect(unpair).toHaveBeenCalledWith(false);
+      expect(f.launchAgent.bootout).toHaveBeenCalledOnce();
+      await expect(lstat(f.layout.configPath)).rejects.toMatchObject({
+        code: "ENOENT",
       });
     });
 
@@ -1274,6 +1596,7 @@ async function fixture(installed: boolean) {
   const home = join(root, "home");
   await mkdir(home, { mode: 0o700 });
   const layout = createMacUserLayout(home);
+  const machineId = "32410a14-e85a-4a1d-bb99-61fa54b07eaa";
   await mkdir(layout.configRoot, { recursive: true, mode: 0o700 });
   await mkdir(layout.stateRoot, { recursive: true, mode: 0o700 });
   await mkdir(layout.logRoot, { recursive: true, mode: 0o700 });
@@ -1289,7 +1612,15 @@ async function fixture(installed: boolean) {
   };
   stopObservers.push(stopObserverAndWait);
   if (installed) {
-    await writeFile(layout.configPath, "{}\n", { mode: 0o600 });
+    await writeFile(
+      layout.configPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        machineId,
+        credentialFile: layout.credentialPath,
+      }),
+      { mode: 0o600 },
+    );
     await mkdir(layout.credentialRoot, { recursive: true, mode: 0o700 });
     await writeFile(layout.credentialPath, `${"x".repeat(43)}\n`, {
       mode: 0o600,
@@ -1321,7 +1652,7 @@ async function fixture(installed: boolean) {
       preflight: async () => true,
       stdout: (value) => output.push(value),
     });
-  return { layout, launchAgent, output, run };
+  return { layout, launchAgent, output, run, machineId };
 }
 
 function installationResult() {

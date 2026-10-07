@@ -1,16 +1,63 @@
-import { type ApiClient, submitWithReceiptReadBack } from "@/api/api-client";
-import type { RevisionCommand } from "@/api/contracts";
+import {
+  type ApiClient,
+  OperationOutcomeUnknownError,
+  submitWithReceiptReadBack,
+} from "@/api/api-client";
+import type { OperationReceipt, RevisionCommand } from "@/api/contracts";
 import { withQuery } from "@/api/query-string";
 import type {
   WorkerDiagnosticPage,
   WorkerFleetPolicy,
-  WorkerInvitationCredential,
-  WorkerInvitationPage,
   WorkerMachineDetail,
   WorkerMachinePage,
   WorkerMachineStatus,
   WorkerPlatform,
+  DeleteWorkerMachineCommand,
 } from "./worker-types";
+
+export const deleteWorkerMachine = (
+  client: ApiClient,
+  machineId: string,
+  input: DeleteWorkerMachineCommand,
+) => {
+  const confirmed = (receipt: OperationReceipt) => {
+    if (
+      receipt?.operationId !== input.operationId ||
+      receipt.status !== "succeeded" ||
+      receipt.resourceId !== machineId ||
+      !Number.isSafeInteger(receipt.revision) ||
+      (receipt.revision ?? -1) < 0
+    )
+      throw new OperationOutcomeUnknownError(
+        input.operationId,
+        "The deletion response is unresolved. Check its operation outcome before making another change.",
+      );
+    return receipt;
+  };
+  return submitWithReceiptReadBack<OperationReceipt>({
+    client,
+    operationId: input.operationId,
+    submit: async () => {
+      try {
+        return confirmed(
+          await client.post<OperationReceipt>(
+            `/admin/workers/machines/${encodeURIComponent(machineId)}/deletions`,
+            input,
+          ),
+        );
+      } catch (error) {
+        if (error instanceof SyntaxError)
+          throw new OperationOutcomeUnknownError(
+            input.operationId,
+            "The deletion response could not be decoded. Check its operation outcome before retrying.",
+            error,
+          );
+        throw error;
+      }
+    },
+    readResult: async (receipt) => confirmed(receipt),
+  });
+};
 
 export const listWorkerMachines = (
   client: ApiClient,
@@ -42,35 +89,6 @@ export const getWorkerDiagnostics = (
       `/admin/worker-fleet/machines/${encodeURIComponent(machineId)}/diagnostics`,
       options,
     ),
-  );
-
-export const listWorkerInvitations = (
-  client: ApiClient,
-  options: { cursor?: string | null; limit?: number } = {},
-) =>
-  client.get<WorkerInvitationPage>(
-    withQuery("/admin/worker-fleet/invitations", options),
-  );
-
-export const createWorkerInvitation = (
-  client: ApiClient,
-  input: {
-    operationId: string;
-    expiresInSeconds: number;
-    initialPolicyId?: string;
-    reason: string;
-  },
-) =>
-  client.post<WorkerInvitationCredential>("/admin/workers/invitations", input);
-
-export const revokeWorkerInvitation = (
-  client: ApiClient,
-  invitationId: string,
-  input: RevisionCommand,
-) =>
-  client.post<{ invitationId: string; revision: number; replayed: boolean }>(
-    `/admin/workers/invitations/${encodeURIComponent(invitationId)}/revocations`,
-    input,
   );
 
 export const changeWorkerMachineState = (

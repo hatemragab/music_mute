@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MusicMute Local</title>
+    <title data-i18n="MusicMute Local">MusicMute Local</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body data-helper-state="checking">
@@ -17,25 +17,48 @@
           alt=""
         />
         <div>
-          <h1>MusicMute <span>Local</span></h1>
-          <p>Keep the voice. Enjoy the video.</p>
+          <h1>MusicMute <span data-i18n="Local">Local</span></h1>
+          <p data-i18n="Keep the voice. Enjoy the video.">
+            Keep the voice. Enjoy the video.
+          </p>
         </div>
       </header>
 
+      <section id="language-settings" class="language-settings">
+        <p id="language-status" role="status"></p>
+      </section>
       <section class="helper-card" aria-labelledby="helper-title">
         <div class="card-topline">
-          <span class="eyebrow">On this Mac</span>
-          <span class="status-pill" id="helper-pill">Checking</span>
+          <span class="eyebrow" data-i18n="On this Mac">On this Mac</span>
+          <span class="status-pill" id="helper-pill" data-i18n="Checking"
+            >Checking</span
+          >
         </div>
-        <h2 id="helper-title">Connecting to MusicMute</h2>
-        <p id="status" role="status">Connecting to the local app…</p>
-        <p id="check-summary" role="status">
+        <h2 id="helper-title" data-i18n="Connecting to MusicMute">
+          Connecting to MusicMute
+        </h2>
+        <p id="status" role="status" data-i18n="Connecting to the local app…">
+          Connecting to the local app…
+        </p>
+        <p
+          id="check-summary"
+          role="status"
+          data-i18n="Full checks run only when you select Check again."
+        >
           Full checks run only when you select Check again.
         </p>
         <pre id="check-results" aria-live="polite" hidden></pre>
         <div class="helper-footer">
-          <span id="helper-meta">Apple Silicon · macOS</span>
-          <button id="check" class="text-button" type="button" disabled>
+          <span id="helper-meta" data-i18n="Apple Silicon · macOS"
+            >Apple Silicon · macOS</span
+          >
+          <button
+            id="check"
+            class="text-button"
+            type="button"
+            disabled
+            data-i18n="Check again"
+          >
             Check again
           </button>
         </div>
@@ -43,78 +66,138 @@
 
       <section class="watch-guide" aria-labelledby="watch-title">
         <div class="section-heading">
-          <h2 id="watch-title">Voice-only YouTube</h2>
-          <span class="small-label">Up to 20 min</span>
+          <h2 id="watch-title" data-i18n="Voice-only YouTube">
+            Voice-only YouTube
+          </h2>
+          <span class="small-label" data-i18n="Up to 20 min">Up to 20 min</span>
         </div>
         <ol class="steps">
           <li>
             <span>1</span>
             <div>
-              <strong>Open a video</strong>
-              <p>Choose a standard YouTube watch video.</p>
+              <strong data-i18n="Open a video">Open a video</strong>
+              <p data-i18n="Choose a standard YouTube watch video.">
+                Choose a standard YouTube watch video.
+              </p>
             </div>
           </li>
           <li>
             <span>2</span>
             <div>
-              <strong>Tap the MusicMute waveform</strong>
-              <p>We pause the video and prepare its vocals.</p>
+              <strong data-i18n="Tap the MusicMute waveform"
+                >Tap the MusicMute waveform</strong
+              >
+              <p data-i18n="We pause the video and prepare its vocals.">
+                We pause the video and prepare its vocals.
+              </p>
             </div>
           </li>
           <li>
             <span>3</span>
             <div>
-              <strong>Listen with the video</strong>
-              <p>Play, pause and seek as usual. Stop anytime.</p>
+              <strong data-i18n="Listen with the video"
+                >Listen with the video</strong
+              >
+              <p data-i18n="Play, pause and seek as usual. Stop anytime.">
+                Play, pause and seek as usual. Stop anytime.
+              </p>
             </div>
           </li>
         </ol>
-        <p class="track-note">
+        <p
+          class="track-note"
+          data-i18n="Videos with multiple language or described audio tracks are not supported yet. Player-selected audio matching is still being tested."
+        >
           Videos with multiple language or described audio tracks are not
           supported yet. Player-selected audio matching is still being tested.
+        </p>
+        <p
+          class="track-note"
+          data-i18n="Local YouTube playback can reuse shared results. New YouTube originals and vocals may be saved for reuse by other MusicMute users after playback starts, even while signed out. See Privacy and data use below."
+        >
+          Local YouTube playback can reuse shared results. New YouTube originals
+          and vocals may be saved for reuse by other MusicMute users after
+          playback starts, even while signed out. See Privacy and data use
+          below.
         </p>
       </section>
 
       <details id="setup" class="setup-card">
         <summary>
-          Set up the MusicMute app <span aria-hidden="true">⌄</span>
+          <span data-i18n="Set up the MusicMute app"
+            >Set up the MusicMute app</span
+          >
+          <span aria-hidden="true">⌄</span>
         </summary>
         <div class="setup-content">
-          <p>MusicMute runs locally on Apple Silicon.</p>
-          <a class="app-link" href="musicmute-local://setup"
-            >Open MusicMute app <span aria-hidden="true">↗</span></a
+          <p data-i18n="MusicMute runs locally on Apple Silicon.">
+            MusicMute runs locally on Apple Silicon.
+          </p>
+          <a
+            id="companion-download"
+            class="app-link"
+            target="_blank"
+            rel="noopener noreferrer"
+            ><span data-i18n="Download MusicMute for Mac (development release)"
+              >Download MusicMute for Mac (development release)</span
+            >
+            <span aria-hidden="true">↗</span></a
           >
-          <p>
+          <a class="app-link" href="musicmute-local://setup"
+            ><span data-i18n="Open MusicMute app">Open MusicMute app</span>
+            <span aria-hidden="true">↗</span></a
+          >
+          <p
+            data-i18n="If the app doesn&#x27;t open, install the local MusicMute Mac app first, then open it to complete setup. Return here and use Check again."
+          >
             If the app doesn't open, install the local MusicMute Mac app first,
-            then open it to complete setup. Return here and use
-            <strong>Check again</strong>.
+            then open it to complete setup. Return here and use Check again.
           </p>
         </div>
       </details>
 
       <details class="tools">
         <summary class="section-heading">
-          <span>Local tools</span>
-          <span id="diagnostic-count" class="small-label"
+          <span data-i18n="Local tools">Local tools</span>
+          <span
+            id="diagnostic-count"
+            class="small-label"
+            data-i18n="Private on your Mac"
             >Private on your Mac</span
           >
         </summary>
         <div class="provider-field">
-          <label for="provider">Processing mode</label>
+          <label for="provider" data-i18n="Processing mode"
+            >Processing mode</label
+          >
           <select id="provider" aria-describedby="provider-note" disabled>
-            <option value="LOCAL_MACOS">On this Mac — Apple Silicon</option>
-            <option value="ONLINE_MUSICMUTE">MusicMute cloud</option>
+            <option value="LOCAL_MACOS" data-i18n="On this Mac — Apple Silicon">
+              On this Mac — Apple Silicon
+            </option>
+            <option value="ONLINE_MUSICMUTE" data-i18n="MusicMute cloud">
+              MusicMute cloud
+            </option>
           </select>
-          <p id="provider-note">
+          <p
+            id="provider-note"
+            data-i18n="Uses the processing choice saved in the MusicMute app. Change it in Home or Preferences. Starting a video uses the saved choice; cloud processing sends its YouTube URL using the signed-in account&#x27;s monthly allowance."
+          >
             Uses the processing choice saved in the MusicMute app. Change it in
             Home or Preferences. Starting a video uses the saved choice; cloud
-            processing sends audio using the signed-in account's monthly
-            allowance.
+            processing sends its YouTube URL using the signed-in account's
+            monthly allowance.
           </p>
-          <button id="cloud" class="tool-button" type="button">
+          <button
+            id="cloud"
+            class="tool-button"
+            type="button"
+            data-i18n="Use MusicMute cloud for this video"
+          >
             Use MusicMute cloud for this video
           </button>
-          <p>
+          <p
+            data-i18n="MusicMute opens for account selection and confirmation. New cloud processing uses your monthly allowance; YouTube access is still subject to source availability."
+          >
             MusicMute opens for account selection and confirmation. New cloud
             processing uses your monthly allowance; YouTube access is still
             subject to source availability.
@@ -130,15 +213,23 @@
               stroke-linejoin="round"
             />
           </svg>
-          Export local diagnostics
+          <span data-i18n="Export local diagnostics"
+            >Export local diagnostics</span
+          >
         </button>
-        <button id="copy-errors" class="tool-button secondary" type="button">
+        <button
+          id="copy-errors"
+          class="tool-button secondary"
+          type="button"
+          data-i18n="Copy local errors"
+        >
           Copy local errors
         </button>
         <button
           id="download-errors"
           class="tool-button secondary"
           type="button"
+          data-i18n="Download local errors"
         >
           Download local errors
         </button>
@@ -152,16 +243,25 @@
               stroke-linejoin="round"
             />
           </svg>
-          Stop playback and clear local cache
+          <span data-i18n="Stop playback and clear local cache"
+            >Stop playback and clear local cache</span
+          >
         </button>
         <details id="report-details" class="report-details">
-          <summary>Connection details</summary>
+          <summary data-i18n="Connection details">Connection details</summary>
           <pre id="details" aria-live="polite"></pre>
         </details>
       </details>
       <p class="privacy-note">
-        <span aria-hidden="true">●</span> No diagnostics are sent online.
-        <a href="privacy.html" target="_blank" rel="noopener"
+        <span aria-hidden="true">●</span>
+        <span data-i18n="No diagnostics are sent online."
+          >No diagnostics are sent online.</span
+        >
+        <a
+          href="privacy.html"
+          target="_blank"
+          rel="noopener"
+          data-i18n="Privacy and data use"
           >Privacy and data use</a
         >
       </p>

@@ -1,3 +1,4 @@
+import { t, createLocalizer, createLanguageSelect } from "./i18n";
 import {
   DEFAULT_SETTINGS,
   MAX_DURATION_MINUTES,
@@ -17,11 +18,12 @@ export function createPanelSettings(
   close(): void;
   dispose(): void;
 } {
+  const localizer = createLocalizer();
   const button = document.createElement("button");
   button.type = "button";
   button.className = "musicmute-panel-settings-button";
-  button.title = "Extension settings";
-  button.setAttribute("aria-label", "Extension settings");
+  localizer.attribute(button, "title", () => t("Extension settings"));
+  localizer.attribute(button, "aria-label", () => t("Extension settings"));
   button.setAttribute("aria-expanded", "false");
   button.setAttribute("aria-controls", "musicmute-panel-settings");
   button.innerHTML =
@@ -29,6 +31,7 @@ export function createPanelSettings(
 
   const element = document.createElement("section");
   element.id = "musicmute-panel-settings";
+  localizer.direction(panel);
   element.className = "musicmute-panel-settings";
   element.hidden = true;
   element.setAttribute("aria-labelledby", "musicmute-settings-heading");
@@ -36,17 +39,19 @@ export function createPanelSettings(
   heading.className = "musicmute-settings-heading";
   const title = document.createElement("strong");
   title.id = "musicmute-settings-heading";
-  title.textContent = "Extension settings";
+  localizer.text(title, () => t("Extension settings"));
   const done = document.createElement("button");
   done.type = "button";
   done.className = "musicmute-settings-done";
-  done.textContent = "Done";
+  localizer.text(done, () => t("Done"));
   heading.append(title, done);
 
   const transparencyLabel = document.createElement("label");
   transparencyLabel.className = "musicmute-settings-label";
   transparencyLabel.htmlFor = "musicmute-setting-transparency";
-  transparencyLabel.textContent = "Dialog transparency";
+  const transparencyText = document.createElement("span");
+  localizer.text(transparencyText, () => t("Dialog transparency"));
+  transparencyLabel.append(transparencyText);
   const transparencyOutput = document.createElement("output");
   transparencyOutput.setAttribute("for", "musicmute-setting-transparency");
   transparencyLabel.append(transparencyOutput);
@@ -63,13 +68,13 @@ export function createPanelSettings(
   autoStart.type = "checkbox";
   autoStart.id = "musicmute-setting-autostart";
   const autoText = document.createElement("span");
-  autoText.textContent = "Auto-start videos";
+  localizer.text(autoText, () => t("Auto-start videos"));
   autoLabel.append(autoStart, autoText);
 
   const durationLabel = document.createElement("label");
   durationLabel.className = "musicmute-settings-label";
   durationLabel.htmlFor = "musicmute-setting-duration";
-  durationLabel.textContent = "Only videos shorter than";
+  localizer.text(durationLabel, () => t("Only videos shorter than"));
   const durationRow = document.createElement("div");
   durationRow.className = "musicmute-settings-duration";
   const duration = document.createElement("input");
@@ -80,23 +85,39 @@ export function createPanelSettings(
   duration.step = "1";
   duration.setAttribute("aria-describedby", "musicmute-settings-duration-hint");
   const minutes = document.createElement("span");
-  minutes.textContent = "minutes";
+  localizer.text(minutes, () => t("minutes"));
   durationRow.append(duration, minutes);
   const hint = document.createElement("small");
   hint.id = "musicmute-settings-duration-hint";
-  hint.textContent = `1–${MAX_DURATION_MINUTES} minutes. Eligible videos pause until vocals are ready.`;
+  localizer.text(hint, () =>
+    t("1–{0} minutes. Eligible videos pause until vocals are ready.", [
+      MAX_DURATION_MINUTES,
+    ]),
+  );
   const reset = document.createElement("button");
   reset.type = "button";
   reset.className = "musicmute-settings-reset";
-  reset.textContent = "Reset settings";
+  localizer.text(reset, () => t("Reset settings"));
   reset.hidden = true;
   const status = document.createElement("p");
   status.className = "musicmute-settings-status";
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
-  status.textContent = "Loading saved settings…";
+  localizer.text(status, () => t("Loading saved settings…"));
+  const languageControl = createLanguageSelect(
+    localizer,
+    "musicmute-setting-language",
+    () => {
+      localizer.text(status, () =>
+        t("Couldn’t save language. Your previous language is still active."),
+      );
+      status.dataset.error = "true";
+    },
+  );
   element.append(
     heading,
+    languageControl.label,
+    languageControl.select,
     transparencyLabel,
     transparency,
     autoLabel,
@@ -119,8 +140,10 @@ export function createPanelSettings(
 
   function applyTransparency(value: number): void {
     panel.style.setProperty("--musicmute-panel-alpha", String(1 - value / 100));
-    transparencyOutput.textContent = `${value}%`;
-    transparency.setAttribute("aria-valuetext", `${value}% transparent`);
+    localizer.text(transparencyOutput, () => `${value}%`);
+    localizer.attribute(transparency, "aria-valuetext", () =>
+      t("{0}% transparent", [value]),
+    );
   }
 
   function render(settings: ExtensionSettings): void {
@@ -158,14 +181,14 @@ export function createPanelSettings(
     if (disposed || !loaded) return;
     const revision = ++saveRevision;
     pending++;
-    status.textContent = "Saving…";
+    localizer.text(status, () => t("Saving…"));
     status.dataset.error = "false";
     try {
       const settings = await saveSettings(patch);
       if (disposed) return;
       accept(settings);
       if (revision === saveRevision) {
-        status.textContent = "Saved on this Chrome profile.";
+        localizer.text(status, () => t("Saved on this Chrome profile."));
         status.dataset.error = "false";
         reset.hidden = true;
       }
@@ -175,9 +198,13 @@ export function createPanelSettings(
         const needsReset =
           error instanceof Error && error.message === "SETTINGS_RESET_REQUIRED";
         reset.hidden = !needsReset;
-        status.textContent = needsReset
-          ? "Couldn’t save these settings. Choose Reset settings to restore defaults."
-          : "Couldn’t save. Your previous settings are still active.";
+        localizer.text(status, () =>
+          needsReset
+            ? t(
+                "Couldn’t save these settings. Choose Reset settings to restore defaults.",
+              )
+            : t("Couldn’t save. Your previous settings are still active."),
+        );
         status.dataset.error = "true";
       }
     } finally {
@@ -218,7 +245,11 @@ export function createPanelSettings(
       value < 1 ||
       value > MAX_DURATION_MINUTES
     ) {
-      status.textContent = `Choose a whole number from 1 to ${MAX_DURATION_MINUTES} minutes.`;
+      localizer.text(status, () =>
+        t("Choose a whole number from 1 to {0} minutes.", [
+          MAX_DURATION_MINUTES,
+        ]),
+      );
       status.dataset.error = "true";
       duration.value = String(committed.maxDurationMinutes);
       return;
@@ -265,12 +296,16 @@ export function createPanelSettings(
     .then((settings) => {
       if (disposed || observedRevision !== initialRevision) return;
       accept(settings);
-      status.textContent = "Changes are saved on this Chrome profile.";
+      localizer.text(status, () =>
+        t("Changes are saved on this Chrome profile."),
+      );
     })
     .catch(() => {
       if (disposed || observedRevision !== initialRevision) return;
       accept({ ...DEFAULT_SETTINGS, autoStartEnabled: false });
-      status.textContent = "Couldn’t load settings. Auto-start is off.";
+      localizer.text(status, () =>
+        t("Couldn’t load settings. Auto-start is off."),
+      );
       status.dataset.error = "true";
     });
   button.addEventListener("click", onButtonClick);
@@ -291,6 +326,8 @@ export function createPanelSettings(
     dispose() {
       if (disposed) return;
       disposed = true;
+      languageControl.dispose();
+      localizer.dispose();
       if (previewTimer !== undefined) {
         clearTimeout(previewTimer);
         previewTimer = undefined;

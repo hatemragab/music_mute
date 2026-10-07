@@ -255,6 +255,50 @@ describe('worker authorization boundary', () => {
     );
   });
 
+  it('distinguishes a known deleted credential only while keeping authority blocked', async () => {
+    const credential = Buffer.alloc(32, 6).toString('base64url');
+    const machines = {
+      findOne: vi.fn().mockReturnValue(
+        query({
+          _id: 'machine-1',
+          status: 'revoked',
+          deletedAt: new Date(),
+        }),
+      ),
+    };
+    const auth = guard(new Reflector(), {}, {}, machines);
+    class Controller {
+      @WorkerRoute('machine') ordinary() {}
+      @WorkerRoute('machine') @AllowRevokedMachine() unpair() {}
+    }
+    const context = (handler: () => void) => ({
+      getHandler: () => handler,
+      getClass: () => Controller,
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: { authorization: `Bearer ${credential}` },
+          rawHeaders: ['Authorization', `Bearer ${credential}`],
+        }),
+      }),
+    });
+    await expect(
+      auth.canActivate(context(Controller.prototype.ordinary) as never),
+    ).rejects.toMatchObject({
+      status: 410,
+      response: { code: 'WORKER_MACHINE_DELETED' },
+    });
+    await expect(
+      auth.canActivate(context(Controller.prototype.unpair) as never),
+    ).resolves.toBe(true);
+    machines.findOne.mockReturnValue(query(null));
+    await expect(
+      auth.canActivate(context(Controller.prototype.ordinary) as never),
+    ).rejects.toMatchObject({
+      status: 401,
+      response: { code: 'WORKER_UNAUTHENTICATED' },
+    });
+  });
+
   it('blocks credential lookup when the preauth service ceiling is exhausted', async () => {
     reserve.mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 11 });
     const model = { findOne: vi.fn() };

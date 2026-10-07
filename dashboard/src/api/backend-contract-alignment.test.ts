@@ -21,12 +21,14 @@ import {
   decideAccountRecoveryRequest,
   getAccountRecoverySummary,
 } from "@/features/account-recovery/account-recovery-api";
+import { setWorkerRegistration } from "@/features/users/users-api";
 
 const client = () =>
   ({
     get: vi.fn().mockResolvedValue({}),
     post: vi.fn().mockResolvedValue({}),
     patch: vi.fn().mockResolvedValue({}),
+    put: vi.fn().mockResolvedValue({}),
   }) as unknown as ApiClient;
 
 const policy = {
@@ -101,6 +103,35 @@ describe("dashboard/backend contract alignment", () => {
     expect(ROLE_DETAILS.support.permissions).not.toContain("workers.manage");
     expect(ROLE_DETAILS.viewer.permissions).toContain("workers.read");
     expect(ROLE_DETAILS.viewer.permissions).not.toContain("workers.logs.read");
+    expect(PERMISSIONS).toContain("users.worker-registration.manage");
+    expect(ROLE_DETAILS.owner.permissions).toContain(
+      "users.worker-registration.manage",
+    );
+    expect(ROLE_DETAILS.support.permissions).toContain(
+      "users.worker-registration.manage",
+    );
+    expect(ROLE_DETAILS.viewer.permissions).not.toContain(
+      "users.worker-registration.manage",
+    );
+    expect(ROLE_DETAILS.release_manager.permissions).not.toContain(
+      "users.worker-registration.manage",
+    );
+  });
+
+  it("saves registration approval with a revision then reads the user", async () => {
+    const api = client();
+    const input = {
+      workerRegistrationAllowed: true,
+      expectedRevision: 3,
+      operationId: "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+      reason: "Approve new Mac registrations",
+    };
+    await setWorkerRegistration(api, "user/unsafe", input);
+    expect(api.put).toHaveBeenCalledWith(
+      "/admin/users/user%2Funsafe/worker-registration",
+      input,
+    );
+    expect(api.get).toHaveBeenCalledWith("/admin/users/user%2Funsafe");
   });
 
   it("removes immutable fields from release edits", async () => {

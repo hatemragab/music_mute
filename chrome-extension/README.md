@@ -1,5 +1,11 @@
 # MusicMute Local — macOS app and Chrome extension
 
+GitHub download distribution now uses separate runtime component ZIPs from
+`ahmed-dev-1/musicmute-downloads`, with pinned release URLs and hashes. Each
+successful setup stage removes its downloaded ZIP. Kim Vocal 2 stays at its
+approved upstream source. See [staged downloads](docs/setup-updates.md#staged-github-downloads--2026-10-06)
+for the contract and development-release limits.
+
 The 2026-10-04 setup and update work adds bundled Deno, matching yt-dlp/EJS and
 the PO-token provider, offline component health checks, clear extension errors,
 safe diagnostic copy/export, and an explicit cloud handoff to the Mac app. Home
@@ -33,6 +39,16 @@ pages receive a bounded liveness check before their lease expires, and recovery
 reattaches only a still-valid local playback grant without submitting new work.
 See [playback interruption recovery](docs/playback-recovery.md) for the source,
 diagnostic and qualification boundaries.
+
+Chrome's popup, video controls, settings, error guidance and privacy page support
+**English and Arabic**, including Arabic right-to-left layout. The **Language**
+selector is available in the popup and the video's extension settings. Its default,
+**Automatic (Chrome language)**, follows Chrome's UI language: Arabic regional
+variants use Arabic and other languages fall back to English. Explicit English or
+Arabic choices are saved in this Chrome profile and update open extension views
+without restarting playback. Selecting Automatic restores Chrome detection.
+The Mac app keeps its own language preference. Diagnostic codes and exported
+technical reports retain their original identifiers.
 
 Chrome starts the native helper after setup even when the Mac window is closed.
 Idle Chrome connections release the helper so they do not block an app update;

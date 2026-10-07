@@ -6,6 +6,114 @@ app-closed extension processing, add explicit account cloud handoff and Sparkle
 updates. Apple account/certificate/notarization work and Chrome Web Store
 packaging/publication/deployment are deferred by the owner.
 
+## Staged GitHub downloads — 2026-10-06
+
+The owner authorized hosting runtime downloads in
+<https://github.com/ahmed-dev-1/musicmute-downloads> and explicitly requested
+Safari for release management. Runtime download assets are published under the
+versioned `macos-runtime-2026-10-06` release, not a mutable `latest` download URL.
+The seven ZIPs contain Python/ML dependencies, Node, FFmpeg/FFprobe and notices,
+the downloader, Deno and shared YouTube notices, the token provider, and the
+MusicMute engine. These assets contain no user media, credentials, account state
+or model weights. Kim Vocal 2 keeps its approved upstream download; the owner
+confirmed that its existing no-mirroring condition remains in force.
+
+`runtime-bootstrap.json` accepts the existing single `zip` representation and
+the new `zip-components` representation. The latter carries bounded `components`
+with `id`, `url`, `archive_bytes`, `archive_sha256` and disjoint `file_paths`.
+Component inventories must cover the full runtime inventory exactly once. The
+total archive byte count is the sum of component ZIP sizes; the aggregate digest
+is SHA-256 of the ordered lowercase component digest strings, each followed by
+one newline. Every component URL and GitHub CDN redirect is allowlisted.
+
+Prepare downloads, checks the ZIP digest/listing, extracts, verifies every file
+and marked code signature, and moves the verified component into private staging.
+It deletes that exact ZIP and its partial/resume files before the next stage.
+Only a complete second inventory/signature verification permits atomic runtime
+activation. A later-stage failure discards incomplete staging and preserves the
+previous active runtime; only the interrupted current ZIP is eligible for resume.
+The model downloads afterward and retains its existing exact-byte/hash checks and
+temporary-file cleanup. Successful setup leaves the runtime downloads directory
+empty. English and Arabic stage labels share the same progress sequence.
+
+Generate components from an independently verified prior package result:
+
+```sh
+node scripts/macos-runtime-components.mjs /absolute/build-UUID.noindex/package-result.json /absolute/new-components.noindex https://github.com/ahmed-dev-1/musicmute-downloads/releases/download/macos-runtime-2026-10-06/
+MUSICMUTE_RUNTIME_COMPONENTS_DIRECTORY=/absolute/new-components.noindex npm run package:macos
+```
+
+The current component import path is for explicitly labelled ad-hoc development
+packages. It does not bypass Developer ID, notarization or the public-release
+pipeline; the latter still requires its own segmented-artifact support and Apple
+acceptance. Hosting and local/fixture validation do not prove Gatekeeper acceptance
+on a fresh Mac. Required third-party licenses, media sources and the reproducible
+FFmpeg/LAME build script accompany the development release.
+
+The contract review used the current
+[Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/) on
+2026-10-06: compatible extensions (106/107), conservative validation (109),
+snake_case JSON (118), and safe error reporting (177). This file-based installer
+contract does not add REST routes or require HTTP method/OpenAPI changes.
+
+Published development checkpoint (2026-10-06 UTC):
+[release macos-runtime-2026-10-06](https://github.com/ahmed-dev-1/musicmute-downloads/releases/tag/macos-runtime-2026-10-06)
+contains 15 uploaded assets totaling 447,344,271 bytes, including seven runtime
+ZIPs (410,586,412 bytes), the development DMG (15,971,296 bytes), checksums,
+manifest, notices and matching media sources. Public unauthenticated readback
+matched every asset's exact size, digest and pinned URL. The actual downloaded
+DMG passed checksum, mounted inventory/link and strict signature checks.
+Installed build `1791319952` matched all 160 final inventory leaves and its
+strict deep signature; its explicit Prepare reused existing tools/model and
+showed all six Setup checks Ready.
+
+`npm run verify` passed 2,125 tests (four skipped), type checking, lint, formatting
+and the browser/companion build. Native `NativeTests` and `DesktopTests` passed,
+including real staged ZIP installation, monotonic progress, cleanup and failure
+atomicity. Packaged qualification passed all 16 offline/native/worker checks in
+disposable state without real account, Chrome profile or Keychain access. An
+initial 20-second token-provider probe timeout passed a focused rerun and the
+fresh full qualification. These checks do not establish live YouTube acquisition,
+cloud processing, a clean OS user, Developer ID signing or notarization.
+
+The isolated real-network Prepare check then passed from empty app data, with no
+preseeded archives or model and no access to existing user state/Keychain. It
+downloaded all seven ZIPs from the published GitHub release and Kim Vocal 2 from
+upstream, verified the model hash, reached Ready, confirmed each ZIP was removed
+before the next stage, and left `runtime/downloads` empty. Its evidence is saved
+locally in `output/github-network-proof.noindex/fresh-release-download-second.noindex/result.json`.
+The first harness run completed setup but could not save its atomic report inside
+the sandbox; the final rerun used a sandbox-compatible report writer. No product
+security protections were relaxed.
+
+## Readable Mac typography
+
+The Mac app bundles the exact Noto Sans Arabic variable font and SIL OFL license
+used by Android. Human-readable text uses its native regular, medium, semibold
+and bold instances; technical paths and identifiers retain a readable monospace
+font. One shared type scale covers Home, Library, Account, Worker, Setup,
+Diagnostics, Settings and the player: 17-point body, 14–15-point secondary text,
+21–34-point headings and a 13-point minimum even with Compact selected.
+
+The saved text-size preference applies throughout these screens. Navigation rows
+have more space, secondary labels use theme-aware contrast, controls have larger
+targets and the player source selector uses its natural text size. Ordinary app
+replacement preserves settings, prepared tools and the model. Font registration,
+Android file/license parity, English/Arabic glyph coverage and preference scaling
+are covered by `npm run test:native -- SettingsTests`.
+
+The local 2026-10-06 typography checkpoint is installed build `1791313330`: all
+157 installed inventory leaves and the strict deep signature match its package,
+including byte-identical Android font/license resources. `npm run verify` passed
+2,099 tests (four skipped); all six native suites passed, followed by a final
+Settings suite rerun. English/Arabic native previews and 14 isolated Settings
+renders checked both themes and accessibility sizing. Arabic content direction
+is scoped inside stable native navigation/scroll geometry to avoid clipping
+behind the sidebar. The Library sort selection and wrapping sidebar text were
+also verified visually. Installed startup accessibility readback confirmed the
+new controls; the native UI connection closed before a final installed screenshot.
+This remains an ad-hoc local build, without notarization or public-release proof.
+
 ## Installed-content trust and explicit checks (2026-10-06)
 
 After successful Prepare/update, ordinary native startup, cached playback and new
@@ -29,6 +137,23 @@ Completed checks also refresh the Mac app's saved component readiness for that
 installation. Passing components clear older setup failures; pending components,
 cancelled checks and installation changes preserve the previous evidence. Normal
 GUI status reads this record and installed metadata without rerunning probes.
+
+Replacing the app invalidates the old bundle's saved tool checks even when the
+same prepared runtime is reused. Installed downloader, Deno and token-provider
+files then show **Not checked**, with **Check YouTube tools** as the next action.
+Missing or unsafe files still show **Needs setup** with their specific component
+error. Run that explicit check to bind readiness to the current app; existing
+runtime/model files are verified and reused rather than downloaded again. Local
+files and cached vocals remain available while these tool checks are stale.
+
+The 2026-10-06 installed check reproduced the stale bundle receipt with all five
+previous component checks passing. **Check YouTube tools** restored all six Setup
+rows without reinstalling the tools. Build `1791311248` then verified the corrected
+update state (**Not checked**) followed by all six rows **Ready** after its explicit
+check. All 155 installed inventory leaves and strict deep signature verification
+match the package. `npm run verify` passed 2,099 tests (four skipped), and native
+`NativeTests`/`DesktopTests` passed. This is prepared-Mac tool-readiness evidence;
+it does not establish a fresh YouTube acquisition or public fresh-Mac release.
 
 An idle status connection stays available briefly for a following START or CHECK.
 After MusicMute closes its own idle helper, a fixed one-second window permits

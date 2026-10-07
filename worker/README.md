@@ -282,8 +282,10 @@ the accepted `0.1.0` runtime.
 The npm package contains the CLI. The authenticated installer separately obtains
 the platform runtime, verifies its Ed25519 signature and archive digest, downloads
 the model from its authorized owner, qualifies the GPU, and enrolls the machine.
-An administrator creates a one-use code in Workers → Enrollment. Installing the
-public CLI alone does not admit a machine to the fleet.
+The current Mac app uses account approval from Dashboard → Users. The legacy
+one-use enrollment API remains available to CLI operators; the dashboard no
+longer exposes code creation. Installing the public CLI alone does not admit a
+machine to the fleet.
 
 Runtime and model downloads allow up to one hour per artifact while bytes are
 arriving. A transfer with no progress for thirty seconds still fails; signatures,
@@ -349,6 +351,9 @@ Worker screen. The complete supervisor, operator and Python engine code is copie
 into versioned `MusicMuteWorker` releases outside the replaceable app. An explicit
 app-managed release binding reuses the prepared `MusicMuteLocal` runtime and fixed
 model; private runtime references retain the active and rollback releases.
+For a fresh app-managed Mac, sign in with Google and have an administrator enable
+worker registration on that account in Dashboard → Users. The app exchanges a
+private one-use credential and verifies readiness without a Terminal setup flow.
 The enabled per-user LaunchAgent starts at login and processes backend jobs while
 the GUI is closed, provided the user remains logged in, the Mac is awake and macOS
 allows background execution. App and Chrome personal audio share GPU admission
@@ -377,8 +382,9 @@ Mac, Node.js >=24.18.0 <25 and a user-writable npm prefix. pnpm is a development
 tool, not an end-user requirement; Python and FFmpeg come with the private runtime.
 Minimum supported macOS/RAM and clean-machine acceptance must be recorded for
 the final runtime; qualification does not imply support for untested hardware.
-An administrator creates the one-use code in Workers → Enrollment in the dashboard.
-Public availability of the CLI does not grant admission to the fleet.
+These standalone CLI commands require a one-use code from the legacy enrollment
+API. The current dashboard uses account approval for the Mac app instead. Public
+availability of the CLI does not grant admission to the fleet.
 
 `mw --version [--json]` reports the CLI and installed runtime versions separately
 without model loading or network access. Upgrade the CLI with
@@ -399,8 +405,8 @@ conservative `uninstall`, running `mw install` with no flags
 verifies and reactivates the preserved paired release without enrollment or a
 network download. A failed recovery removes the activation pointer again.
 
-If an old one-use code was already consumed by a different exchange, create a
-new code in the dashboard and run `mw install --label "Studio Mac"
+If an old one-use code was already consumed by a different exchange, obtain a
+new code through the legacy enrollment API and run `mw install --label "Studio Mac"
 --new-code`. The flag discards only a protected, pre-exchange local attempt and
 prompts for the new code; it refuses to replace an attempt that has already
 received an installation identity. A normal retry without this flag preserves
@@ -462,6 +468,15 @@ state, and a lock left by a dead process is recovered safely. `uninstall`
 preserves state by default; `uninstall --purge` requires a backend-confirmed
 `unpair` receipt first. Missing or manually deleted credential/config files are
 not accepted as proof of unpairing.
+
+Dashboard **Delete machine** also disables the registering account's approval.
+The Mac app retires only that backend-confirmed deleted identity. Under the
+command lock, the controller rechecks the target and deletion before unpairing;
+after all attempts and the old service stop, it privately archives only the old
+machine state and diagnostic stream. Models, runtime releases, job history and
+personal app data remain available. Interrupted cleanup resumes from a confirmed
+receipt and inode-bound journal. Ordinary revoke/authentication failure never
+triggers this reset. A fresh identity requires current account approval again.
 
 `status --local` reads the service and worker snapshot without contacting the
 backend. It reports observed loading, warm-up, processing, recovery, and pause

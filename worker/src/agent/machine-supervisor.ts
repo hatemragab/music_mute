@@ -1,5 +1,6 @@
 import {
   WorkerChildProcess,
+  childStopFailureSummary,
   type ChildProcessOptions,
 } from "./child-process.js";
 
@@ -92,8 +93,15 @@ export class MachineSupervisor {
     const stopped = await Promise.allSettled(
       [...this.children.values()].map((child) => child.stop()),
     );
-    if (stopped.some((result) => result.status === "rejected"))
-      throw new Error("Worker children could not be stopped safely");
+    const failures = stopped.flatMap((result) =>
+      result.status === "rejected"
+        ? [childStopFailureSummary(result.reason)]
+        : [],
+    );
+    if (failures.length > 0)
+      throw new Error(
+        `Worker children could not be stopped safely (${[...new Set(failures)].sort().join(", ")})`,
+      );
     this.children.clear();
   }
 }

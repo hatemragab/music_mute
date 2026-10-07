@@ -453,3 +453,34 @@
     margin-top: 10px;
   }
 }
+
+#musicmute-local-panel,
+#musicmute-local-panel .musicmute-panel-move {
+  text-align: start;
+}
+#musicmute-local-panel .musicmute-panel-settings select {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  color: #f2f0f5;
+  background: #25272e;
+  border: 1px solid #565866;
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-top: 6px;
+  color-scheme: dark;
+}
+#musicmute-local-panel select:focus-visible {
+  outline: 2px solid var(--musicmute-accent);
+  outline-offset: 3px;
+}
+#musicmute-local-panel .musicmute-wave-track,
+#musicmute-local-panel .musicmute-wave-time,
+#musicmute-local-panel .musicmute-error-details {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+#musicmute-local-panel[dir="rtl"] .musicmute-panel-brand {
+  letter-spacing: normal;
+}

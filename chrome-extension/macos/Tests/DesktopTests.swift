@@ -370,6 +370,9 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     }
     try posixRetryChecks()
     try await authChecks()
+    try await installationMetadataChecks()
+    try await installationConflictChecks()
+    try await installationConflictFenceChecks()
     try await cloudSubmissionFenceChecks()
     try await delayedRestoreChecks()
     try await staleSignInFence()
@@ -388,7 +391,9 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     try await googleReauthenticationFenceChecks()
     try await boundedTransportChecks()
     try visualPreferenceChecks()
+    try await processingSelectionChecks()
     try homeLibraryConnectionChecks()
+    try libraryCountPresentationChecks()
     try librarySnapshotReadinessChecks()
     try runtimePreparationFailureChecks()
     try playbackClockChecks()
@@ -401,6 +406,7 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     try await cachePlaybackLeaseChecks()
     try await playbackJournalChecks()
     try await playbackPreparationChecks()
+    try await libraryPlaybackQueueChecks()
     try accountStateChecks()
     try await outboxWatcherChecks()
     try silenceChecks()
@@ -477,6 +483,23 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
         && socketConnecting.detail.contains("connecting your library")
         && offline.detail.contains("Local playback stays available"),
       "Home Library connection copy must distinguish connected, connecting and offline states")
+  }
+  static func libraryCountPresentationChecks() throws {
+    let complete = DesktopLibraryCountPresentation(
+      visibleCount: 12, filtering: false, hasMorePages: false)
+    let paged = DesktopLibraryCountPresentation(
+      visibleCount: 50, filtering: false, hasMorePages: true)
+    let filtered = DesktopLibraryCountPresentation(
+      visibleCount: 3, filtering: true, hasMorePages: false)
+    let filteredPaged = DesktopLibraryCountPresentation(
+      visibleCount: 2, filtering: true, hasMorePages: true)
+    try require(
+      complete.title == "Songs" && complete.qualifier == nil
+        && paged.title == "Songs" && paged.qualifier == "Shown so far"
+        && filtered.title == "Matching songs" && filtered.qualifier == nil
+        && filteredPaged.title == "Matching songs"
+        && filteredPaged.qualifier == "Loaded pages only",
+      "Library song counts must distinguish complete, paginated and filtered results")
   }
   static func librarySnapshotReadinessChecks() throws {
     let firstScope = DesktopSessionScope(firebaseUid: "first-owner", generation: UUID())
@@ -689,6 +712,38 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     try require(
       visualPreferenceValues(defaults) == changedValues,
       "Repeated visual preference assignments must leave persisted storage unchanged")
+  }
+
+  @MainActor static func processingSelectionChecks() async throws {
+    try require(
+      DesktopProcessingAccess.resolved(.local, signedIn: false) == .local
+        && DesktopProcessingAccess.resolved(.cloud, signedIn: false) == .local
+        && DesktopProcessingAccess.resolved(.cloud, signedIn: true) == .cloud,
+      "Cloud processing must resolve to local until an account is authenticated")
+
+    let restoredDefaults = testPreferences()
+    restoredDefaults.set(
+      DesktopProcessingPreference.cloud.rawValue, forKey: DesktopPreferenceKey.processingMode)
+    let restoredAccount = DesktopAccountModel(
+      configuration: configuration(), vault: MemoryVault(), transport: FixtureTransport([]),
+      installationId: installation, preferences: restoredDefaults)
+    await restoredAccount.restore()
+    try require(
+      restoredDefaults.string(forKey: DesktopPreferenceKey.processingMode)
+        == DesktopProcessingPreference.local.rawValue,
+      "A completed signed-out restore must clear a stale cloud preference")
+
+    let logoutDefaults = testPreferences()
+    logoutDefaults.set(
+      DesktopProcessingPreference.cloud.rawValue, forKey: DesktopPreferenceKey.processingMode)
+    let logoutAccount = DesktopAccountModel(
+      configuration: configuration(), vault: MemoryVault(), transport: FixtureTransport([]),
+      installationId: installation, preferences: logoutDefaults)
+    await logoutAccount.logout()
+    try require(
+      logoutDefaults.string(forKey: DesktopPreferenceKey.processingMode)
+        == DesktopProcessingPreference.local.rawValue,
+      "Signing out must clear the persisted cloud processing preference")
   }
 
   @MainActor static func offlineStorageDefaultChecks() throws {
@@ -979,6 +1034,276 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     try require(
       !account.signedIn && account.generation != beforeLogout && vault.credential == nil,
       "Local logout must invalidate work before secure cleanup")
+  }
+  @MainActor static func installationMetadataChecks() async throws {
+    let defaults = testPreferences()
+    defaults.set(installation, forKey: "desktop.installationId")
+    let fixtures: [(DesktopInstallationMetadata, Double)] = [
+      (.init(appVersion: "0.1.0", buildNumber: 100, osVersion: "macOS 26", deviceModel: "Mac"), 1),
+      (.init(appVersion: "0.1.0", buildNumber: 100, osVersion: "macOS 26", deviceModel: "Mac"), 1),
+      (.init(appVersion: "0.1.0", buildNumber: 101, osVersion: "macOS 26", deviceModel: "Mac"), 2),
+      (.init(appVersion: "0.1.1", buildNumber: 101, osVersion: "macOS 26", deviceModel: "Mac"), 3),
+      (
+        .init(appVersion: "0.1.1", buildNumber: 101, osVersion: "macOS 26.1", deviceModel: "Mac"), 4
+      ),
+      (
+        .init(appVersion: "0.1.1", buildNumber: 101, osVersion: "macOS 26.1", deviceModel: "Mac 2"),
+        5
+      ),
+    ]
+    for (metadata, revision) in fixtures {
+      let transport = FixtureTransport([try credentials(), profile, profile])
+      let account = DesktopAccountModel(
+        configuration: configuration(), vault: MemoryVault(), transport: transport,
+        installationMetadata: metadata, preferences: defaults)
+      await account.signIn(email: "fixture@example.invalid", password: "fixture-password")
+      await account.reconnect()
+      let requests = await transport.recorded()
+      try require(account.online && requests.count == 3, "Metadata fixtures must bootstrap online")
+      let report = try JSONDecoder().decode(DesktopJSON.self, from: requests[1].httpBody!)
+      let repeated = try JSONDecoder().decode(DesktopJSON.self, from: requests[2].httpBody!)
+      try require(
+        report == repeated && report["metadata_revision"].number == revision
+          && report["build_number"].number == Double(metadata.buildNumber)
+          && report["platform"].string == "macos"
+          && report["installation_id"].string == installation
+          && account.installationId == installation
+          && defaults.string(forKey: "desktop.installationId") == installation,
+        "Legacy UUID must survive relaunch/build/OS/model changes; identical metadata must reuse its revision"
+      )
+      let saved = String(
+        decoding: defaults.data(forKey: "desktop.installationReport.\(installation)")!,
+        as: UTF8.self)
+      try require(
+        !saved.contains("firebase") && !saved.contains("Token")
+          && !saved.contains("fixture-password")
+          && !saved.contains("fixture-desktop-owner"),
+        "Installation metadata preferences must never contain account identity or credentials")
+      await account.logout()
+    }
+    let reconcile = FixtureTransport(replies: [
+      .init(value: try credentials(), status: 200, pause: false),
+      .init(
+        value: .object(["code": .string("DEVICE_REPORT_CONFLICT")]), status: 409, pause: false),
+      .init(
+        value: .object([
+          "items": .array([
+            .object([
+              "installation_id": .string(installation), "platform": .string("macos"),
+              "metadata_revision": .number(3),
+            ])
+          ]), "next_cursor": .null,
+        ]), status: 200, pause: false),
+      .init(value: profile, status: 200, pause: false),
+    ])
+    let reconciled = DesktopAccountModel(
+      configuration: configuration(), vault: MemoryVault(), transport: reconcile,
+      installationMetadata: fixtures.last!.0, preferences: defaults)
+    await reconciled.signIn(email: "fixture@example.invalid", password: "fixture-password")
+    let reconciledRequests = await reconcile.recorded()
+    try require(
+      reconciled.online && reconciledRequests.count == 4,
+      "An owned server revision behind local metadata must still allow safe reconciliation")
+    let retry = try JSONDecoder().decode(DesktopJSON.self, from: reconciledRequests[3].httpBody!)
+    try require(
+      retry["metadata_revision"].number == 6 && retry["installation_id"].string == installation,
+      "Reconciliation must advance the greater local revision instead of decreasing to server + one"
+    )
+    defaults.set(Data("{corrupt".utf8), forKey: "desktop.installationReport.\(installation)")
+    let transport = FixtureTransport([try credentials()])
+    let account = DesktopAccountModel(
+      configuration: configuration(), vault: MemoryVault(), transport: transport,
+      preferences: defaults)
+    await account.signIn(email: "fixture@example.invalid", password: "fixture-password")
+    let requests = await transport.recorded()
+    try require(
+      account.failure == .configuration && requests.count == 1
+        && account.installationId == installation,
+      "Corrupt revision state must fail safely without rotating the UUID or resetting revision to one"
+    )
+  }
+  @MainActor static func installationConflictChecks() async throws {
+    let conflict = DesktopJSON.object([
+      "code": .string("DEVICE_REPORT_CONFLICT"), "detail": .string("private-fixture-secret"),
+    ])
+    let owned = DesktopJSON.object([
+      "installation_id": .string(installation), "platform": .string("macos"),
+      "metadata_revision": .number(8),
+    ])
+    let other = DesktopJSON.object([
+      "installation_id": .string("00000000-0000-4000-8000-000000000043"),
+      "platform": .string("macos"), "metadata_revision": .number(99),
+    ])
+    func page(_ items: [DesktopJSON], next: DesktopJSON = .null) -> DesktopJSON {
+      .object(["items": .array(items), "next_cursor": next])
+    }
+    let initial: [FixtureTransport.Reply] = [
+      .init(
+        value: .object(["google_id_token": .string(String(repeating: "g", count: 40))]),
+        status: 200, pause: false),
+      .init(value: try credentials(), status: 200, pause: false),
+    ]
+    let defaults = testPreferences()
+    defaults.set(installation, forKey: "desktop.installationId")
+    let cursor = "000000000000000000000043"
+    let transport = FixtureTransport(
+      replies: initial + [
+        .init(value: conflict, status: 409, pause: false),
+        .init(value: page([other], next: .string(cursor)), status: 200, pause: false),
+        .init(value: page([owned]), status: 200, pause: false),
+        .init(value: profile, status: 200, pause: false),
+        .init(value: profile, status: 200, pause: false),
+      ])
+    let vault = MemoryVault()
+    let account = DesktopAccountModel(
+      configuration: configuration(), vault: vault, transport: transport, preferences: defaults,
+      googleBrowserDeadline: .seconds(2), openGoogleBrowser: googleCallback)
+    await account.signInGoogle()
+    await account.reconnect()
+    let requests = await transport.recorded()
+    try require(
+      account.signedIn && account.online && account.failure == nil && requests.count == 7,
+      "Legacy revision conflicts must recover the prospective owner's matching paginated installation"
+    )
+    let first = try JSONDecoder().decode(DesktopJSON.self, from: requests[2].httpBody!)
+    let retry = try JSONDecoder().decode(DesktopJSON.self, from: requests[5].httpBody!)
+    let repeatReport = try JSONDecoder().decode(DesktopJSON.self, from: requests[6].httpBody!)
+    try require(
+      first["metadata_revision"].number == 1 && retry["metadata_revision"].number == 9
+        && retry == repeatReport && retry["installation_id"].string == installation,
+      "Owned reconciliation must persist max(local, server)+1 and keep subsequent bootstraps idempotent"
+    )
+    let bearer = "Bearer \(initial[1].value["idToken"].string!)"
+    try require(
+      requests[3].url?.absoluteString == "https://api.example.invalid/users/me/devices?limit=50"
+        && requests[4].url?.absoluteString
+          == "https://api.example.invalid/users/me/devices?limit=50&before=\(cursor)"
+        && requests[2...6].allSatisfy {
+          $0.value(forHTTPHeaderField: "Authorization") == bearer
+            && $0.value(forHTTPHeaderField: "X-Installation-Id") == installation
+        },
+      "Recovery must use existing bounded devices pagination and the exact prospective bearer/installation"
+    )
+
+    let wrongPlatform = DesktopJSON.object([
+      "installation_id": .string(installation), "platform": .string("ios"),
+      "metadata_revision": .number(8),
+    ])
+    let invalidRevisions: [Double] = [0, 1.5, 9_007_199_254_740_991]
+    let invalidPages = invalidRevisions.map { revision in
+      page([
+        .object([
+          "installation_id": .string(installation), "platform": .string("macos"),
+          "metadata_revision": .number(revision),
+        ])
+      ])
+    }
+    var failures: [[FixtureTransport.Reply]] = [
+      [.init(value: conflict, status: 400, pause: false)],
+      [
+        .init(value: conflict, status: 409, pause: false),
+        .init(value: page([other]), status: 200, pause: false),
+      ],
+      [
+        .init(value: conflict, status: 409, pause: false),
+        .init(value: page([wrongPlatform]), status: 200, pause: false),
+      ],
+      [
+        .init(value: conflict, status: 409, pause: false),
+        .init(value: page([owned]), status: 200, pause: false),
+        .init(value: conflict, status: 409, pause: false),
+      ],
+      [
+        .init(value: conflict, status: 409, pause: false),
+        .init(value: page([], next: .string(cursor)), status: 200, pause: false),
+        .init(value: page([], next: .string(cursor)), status: 200, pause: false),
+      ],
+      [.init(value: conflict, status: 409, pause: false)]
+        + (1...5).map { index in
+          .init(
+            value: page([], next: .string(String(format: "%024x", index))), status: 200,
+            pause: false)
+        },
+    ]
+    failures += invalidPages.map {
+      [
+        .init(value: conflict, status: 409, pause: false),
+        .init(value: $0, status: 200, pause: false),
+      ]
+    }
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "musicmute-conflict-tests-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: root) }
+    for (index, replies) in failures.enumerated() {
+      let journalRoot = root.appendingPathComponent(String(index))
+      let journal = UIJournal(logsRoot: journalRoot)
+      let vault = MemoryVault()
+      let transport = FixtureTransport(replies: initial + replies)
+      let account = DesktopAccountModel(
+        configuration: configuration(), vault: vault, transport: transport,
+        installationId: installation, preferences: testPreferences(), journal: journal,
+        googleBrowserDeadline: .seconds(2), openGoogleBrowser: googleCallback)
+      await account.signInGoogle()
+      let requests = await transport.recorded()
+      try require(
+        account.failure == .service("DEVICE_REPORT_CONFLICT") && !account.signedIn
+          && !account.online && vault.saves == 0 && requests.count == initial.count + replies.count,
+        "Ownership/platform/revision conflicts must fail without UUID rotation, credential acceptance or further retries"
+      )
+      journal.flushForTesting()
+      let text = String(
+        decoding: try Data(contentsOf: journalRoot.appendingPathComponent("ui-events.jsonl")),
+        as: UTF8.self)
+      let fixtureToken = initial[1].value["idToken"].string!
+      try require(
+        !text.contains("private-fixture-secret") && !text.contains(fixtureToken)
+          && !text.contains("refreshToken") && !text.contains(installation),
+        "Device conflict diagnostics must retain only the existing safe authentication failure code"
+      )
+    }
+  }
+  @MainActor static func installationConflictFenceChecks() async throws {
+    for cancel in [false, true] {
+      let defaults = testPreferences()
+      let vault = MemoryVault()
+      let transport = FixtureTransport(replies: [
+        .init(
+          value: .object(["google_id_token": .string(String(repeating: "g", count: 40))]),
+          status: 200, pause: false),
+        .init(value: try credentials(), status: 200, pause: false),
+        .init(
+          value: .object(["code": .string("DEVICE_REPORT_CONFLICT")]), status: 409, pause: false),
+        .init(
+          value: .object([
+            "items": .array([
+              .object([
+                "installation_id": .string(installation), "platform": .string("macos"),
+                "metadata_revision": .number(8),
+              ])
+            ]), "next_cursor": .null,
+          ]), status: 200, pause: true, cancellable: cancel),
+      ])
+      let account = DesktopAccountModel(
+        configuration: configuration(), vault: vault, transport: transport,
+        installationId: installation, preferences: defaults,
+        googleBrowserDeadline: .seconds(2), openGoogleBrowser: googleCallback)
+      let signIn = Task { await account.signInGoogle() }
+      await transport.waitUntilBlocked()
+      try require(
+        !account.signedIn && vault.saves == 0,
+        "Prospective credentials must remain staged during owner reconciliation")
+      let saved = defaults.data(forKey: "desktop.installationReport.\(installation)")
+      if cancel { account.cancelSignIn() } else { await account.logout() }
+      await transport.release()
+      await signIn.value
+      let requests = await transport.recorded()
+      try require(
+        requests.count == 4 && !account.signedIn && !account.online && vault.saves == 0
+          && account.failure == (cancel ? .cancelled : .sessionChanged)
+          && defaults.data(forKey: "desktop.installationReport.\(installation)") == saved,
+        "Late owner reconciliation must not persist a new revision, retry bootstrap or resurrect cancelled/logout sessions"
+      )
+    }
   }
   @MainActor static func cloudSubmissionFenceChecks() async throws {
     let vault = MemoryVault()
@@ -2484,6 +2809,74 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
         && retryWorkspace.failure == nil,
       "Retry must prepare and automatically play the retained selected voice")
     retryWorkspace.shutdown()
+  }
+  @MainActor static func libraryPlaybackQueueChecks() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "musicmute-library-playback-queue-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    let audioURL = root.appendingPathComponent("fixture.wav")
+    let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
+    let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 960_000)!
+    buffer.frameLength = 960_000
+    do {
+      let audio = try AVAudioFile(forWriting: audioURL, settings: format.settings)
+      try audio.write(from: buffer)
+    }
+
+    func track(_ suffix: String, title: String) -> DesktopTrack {
+      DesktopTrack(
+        id: "0000000000000000000000\(suffix)", title: title, duration: 60, path: nil,
+        jobId: "0000000000000000000000\(suffix)", bytes: 0, sourceVideoId: nil)
+    }
+    let first = track("41", title: "First fixture")
+    let second = track("42", title: "Second fixture")
+    let third = track("43", title: "Third fixture")
+    let grant = DesktopJSON.object([
+      "url": .string("https://media.example.invalid/synthetic-output")
+    ])
+    let transport = FixtureTransport([try credentials(), profile, grant, grant, grant])
+    let account = DesktopAccountModel(
+      configuration: configuration(), vault: MemoryVault(), transport: transport,
+      installationId: installation, preferences: testPreferences())
+    await account.signIn(email: "fixture@example.invalid", password: "fixture-password")
+    try require(account.signedIn, "Playback queue fixtures must use an authenticated owner")
+    let workspace = DesktopWorkspace(
+      account: account, resources: nil, playbackSupport: root, preferences: testPreferences(),
+      playbackAssetLoader: { _ in AVURLAsset(url: audioURL) })
+    defer { workspace.shutdown() }
+    workspace.setVolume(0)
+    func waitUntilControllable(_ label: String) async throws {
+      for _ in 0..<200 where !workspace.canControlPlayback {
+        try await Task.sleep(for: .milliseconds(10))
+      }
+      try require(workspace.canControlPlayback, label)
+    }
+
+    let started = await workspace.playFromLibrary(
+      first, orderedTracks: [first, second, third])
+    try require(
+      started && workspace.currentTrack == first && workspace.queue == [second, third]
+        && workspace.playing,
+      "Playing a Library row must start it and snapshot the later visible tracks as Up Next")
+    try await waitUntilControllable("The first Library track must become controllable")
+
+    await workspace.next()
+    try require(
+      workspace.currentTrack == second && workspace.queue == [third] && workspace.playing,
+      "Next must start the first queued Library track and retain the remaining order")
+    try await waitUntilControllable("The second Library track must become controllable")
+
+    await workspace.next()
+    try require(
+      workspace.currentTrack == third && workspace.queue.isEmpty && workspace.playing,
+      "Next must advance through the final queued Library track exactly once")
+    try await waitUntilControllable("The final Library track must become controllable")
+
+    await workspace.next()
+    try require(
+      workspace.currentTrack == third && workspace.queue.isEmpty && !workspace.playing,
+      "Next after the Library queue is exhausted must pause without changing the current track")
   }
   @MainActor static func comparisonChecks() throws {
     let untrimmed = DesktopJSON.object(["trim_enabled": .bool(false)])

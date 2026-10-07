@@ -1,3 +1,4 @@
+import { t, createLocalizer, localizedStage } from "./i18n";
 import {
   MVP_MAX_DURATION_SECONDS,
   parseYouTubeVideoId,
@@ -28,6 +29,7 @@ import { failureGuidance } from "./error-guidance";
 import { cloudHandoffUrl } from "../shared/app-handoff";
 import { isErrorContext, type ErrorContext } from "../shared/error-context";
 
+const localizer = createLocalizer();
 const removeErrorCapture = installErrorCapture("content");
 let invalidated = false;
 let clockTimer: ReturnType<typeof setInterval> | null = null;
@@ -67,8 +69,8 @@ let button: HTMLButtonElement | null = null;
 let panel: HTMLDivElement | null = null;
 let panelDismissed = false;
 let panelPresentation: {
-  message: string;
-  title: string;
+  message: () => string;
+  title: () => string;
   tone: "preparing" | "ready" | "waiting" | "error";
 } | null = null;
 let panelMovement: ReturnType<typeof installPanelMovement> | null = null;
@@ -121,8 +123,8 @@ function renderFailure(): void {
   const { code, context } = lastFailure;
   const guidance = failureGuidance(code, context);
   text(
-    guidance.message,
-    guidance.title,
+    () => failureGuidance(code, context).message,
+    () => failureGuidance(code, context).title,
     code === "SESSION_STOPPED" ? "ready" : "error",
   );
   if (setupLink) setupLink.hidden = !guidance.openApp;
@@ -132,7 +134,11 @@ function renderFailure(): void {
   }
   if (errorDetails) {
     errorDetails.hidden = code === "SESSION_STOPPED";
-    errorDetails.textContent = `${code} · ${context?.stage ?? "operation"} · ${lastFailure.timestamp}`;
+    localizer.text(
+      errorDetails,
+      () =>
+        `${code} · ${context?.stage ?? "operation"} · ${lastFailure?.timestamp ?? ""}`,
+    );
   }
   if (copyError) copyError.hidden = code === "SESSION_STOPPED";
   if (context?.retry_at && context.retry_at > Date.now())
@@ -231,7 +237,8 @@ function updatePlaybackWaveform(): void {
     };
   }
   playbackWaveform?.update({
-    visible: mode === "ready" || panelPresentation?.title === "Original sound",
+    visible:
+      mode === "ready" || panelPresentation?.title() === t("Original sound"),
     vocals: mode === "ready",
     playing:
       !invalidated &&
@@ -256,10 +263,12 @@ function updatePanelVisibility(): void {
   updatePlaybackWaveform();
   button?.setAttribute("aria-expanded", String(!!panel && !panel.hidden));
   if (button && mode !== "idle" && !invalidated) {
-    button.title = panel?.hidden
-      ? "MusicMute: show controls"
-      : "MusicMute: hide controls";
-    button.setAttribute("aria-label", button.title);
+    localizer.attribute(button, "title", () =>
+      panel?.hidden
+        ? t("MusicMute: show controls")
+        : t("MusicMute: hide controls"),
+    );
+    localizer.attribute(button, "aria-label", () => button?.title ?? "");
   }
   panelMovement?.refresh();
 }
@@ -279,25 +288,29 @@ function updateAudioAction(): void {
     cloudLink.hidden = invalidated || !videoId || mode !== "idle";
   if (stopButton) stopButton.disabled = invalidated;
   if (!audioButton) return;
-  audioButton.textContent =
+  localizer.text(audioButton, () =>
     mode === "preparing"
-      ? "Cancel"
+      ? t("Cancel")
       : mode === "ready"
-        ? "Show original sound"
-        : "Remove background music";
+        ? t("Show original sound")
+        : t("Remove background music"),
+  );
   audioButton.disabled =
     invalidated || pendingStop !== null || localRetryBlocked();
 }
 function text(
-  message: string,
-  title = mode === "preparing" ? "Preparing vocals" : "Vocals ready",
+  message: () => string,
+  title?: () => string,
   tone: "preparing" | "ready" | "waiting" | "error" = mode === "preparing"
     ? "preparing"
     : "ready",
 ): void {
-  panelPresentation = { message, title, tone };
-  if (status) status.textContent = message;
-  if (panelTitle) panelTitle.textContent = title;
+  const renderTitle =
+    title ??
+    (() => (tone === "preparing" ? t("Preparing vocals") : t("Vocals ready")));
+  panelPresentation = { message, title: renderTitle, tone };
+  if (status) localizer.text(status, message);
+  if (panelTitle) localizer.text(panelTitle, renderTitle);
   if (panel) {
     panel.dataset.state = tone;
   }
@@ -321,7 +334,9 @@ function progress(completed?: number, total?: number): string {
   }
   if (progressLabel) {
     progressLabel.hidden = percent === null || mode !== "preparing";
-    progressLabel.textContent = percent === null ? "" : `${percent}%`;
+    localizer.text(progressLabel, () =>
+      percent === null ? "" : `${percent}%`,
+    );
   }
   return percent === null ? "" : ` ${percent}%`;
 }
@@ -357,7 +372,12 @@ async function send(message: ExtensionMessage): Promise<{
   }
 }
 function restoreMute(): void {
-  if (video && ownsMute) video.muted = userMuted;
+  if (video && ownsMute) {
+    video.muted = userMuted;
+    // Only consume our own writes. A repeated tab-mask acknowledgement may
+    // arrive before a native mute change's queued volumechange event.
+    observedMuted = video.muted;
+  }
   ownsMute = false;
 }
 function releaseAdMute(owner: HTMLVideoElement, epoch: number): void {
@@ -372,8 +392,11 @@ function releaseAdMute(owner: HTMLVideoElement, epoch: number): void {
     return;
   restoreMute();
   text(
-    "The ad plays with its original audio. MusicMute resumes when your video returns.",
-    "Waiting for the video",
+    () =>
+      t(
+        "The ad plays with its original audio. MusicMute resumes when your video returns.",
+      ),
+    () => t("Waiting for the video"),
     "waiting",
   );
 }
@@ -386,10 +409,11 @@ function updateAdMute(ad: boolean): void {
     ownsMute = true;
     video.muted = true;
     text(
-      video.paused
-        ? "Vocals ready. Play the video to listen."
-        : "Your video has returned. MusicMute is resuming vocals.",
-      video.paused ? "Vocals ready" : "Resuming vocals",
+      () =>
+        video?.paused
+          ? t("Vocals ready. Play the video to listen.")
+          : t("Your video has returned. MusicMute is resuming vocals."),
+      () => (video?.paused ? t("Vocals ready") : t("Resuming vocals")),
       video.paused ? "ready" : "waiting",
     );
   }
@@ -424,8 +448,10 @@ function teardown(pause = false, restoreOriginal = true): void {
   bufferingStartedAt = null;
   button?.setAttribute("aria-pressed", "false");
   if (button) {
-    button.title = "MusicMute: remove background music";
-    button.setAttribute("aria-label", button.title);
+    localizer.attribute(button, "title", () =>
+      t("MusicMute: remove background music"),
+    );
+    localizer.attribute(button, "aria-label", () => button?.title ?? "");
   }
   updatePanelVisibility();
 }
@@ -442,13 +468,16 @@ function retireContext(): void {
   cleanupLifecycle?.();
   cleanupLifecycle = null;
   removeErrorCapture();
+  localizer.dispose();
   teardown(wasActive);
   video = null;
   videoId = null;
   if (button) {
     button.disabled = true;
-    button.title = "MusicMute updated. Refresh this YouTube page.";
-    button.setAttribute("aria-label", button.title);
+    localizer.attribute(button, "title", () =>
+      t("MusicMute updated. Refresh this YouTube page."),
+    );
+    localizer.attribute(button, "aria-label", () => button?.title ?? "");
     button.setAttribute("aria-disabled", "true");
   }
   if (audioButton) audioButton.hidden = true;
@@ -467,8 +496,11 @@ function retireContext(): void {
   if (retiredSettings) retiredSettings.disabled = true;
   panelDismissed = false;
   text(
-    "MusicMute was updated or reloaded. Refresh this YouTube page to reconnect. Original audio restored.",
-    "Refresh YouTube",
+    () =>
+      t(
+        "MusicMute was updated or reloaded. Refresh this YouTube page to reconnect. Original audio restored.",
+      ),
+    () => t("Refresh YouTube"),
     "waiting",
   );
 }
@@ -606,7 +638,6 @@ function clock(): MediaClock | undefined {
     else if (reply.ok === true && reply.source_muted === true && !adActive()) {
       tabMuteMode = true;
       restoreMute();
-      observedMuted = owner.muted;
     }
   });
   return payload;
@@ -655,7 +686,10 @@ async function stopSession(dismiss = false): Promise<void> {
         panelPresentation = null;
         updatePanelVisibility();
       } else
-        text("Use YouTube to pause, seek and adjust volume.", "Original sound");
+        text(
+          () => t("Use YouTube to pause, seek and adjust volume."),
+          () => t("Original sound"),
+        );
     })
     .finally(() => {
       if (pendingStop === stopping) {
@@ -667,7 +701,11 @@ async function stopSession(dismiss = false): Promise<void> {
     });
   pendingStop = stopping;
   if (dismiss) updateAudioAction();
-  else text("Switching back to the video's original sound…", "Switching audio");
+  else
+    text(
+      () => t("Switching back to the video's original sound…"),
+      () => t("Switching audio"),
+    );
   await stopping;
 }
 async function start(intent: "manual" | "automatic" = "manual"): Promise<void> {
@@ -680,8 +718,8 @@ async function start(intent: "manual" | "automatic" = "manual"): Promise<void> {
   panelDismissed = false;
   if (!video || !videoId) {
     text(
-      "Open a standard YouTube watch video to use MusicMute.",
-      "Choose a video",
+      () => t("Open a standard YouTube watch video to use MusicMute."),
+      () => t("Choose a video"),
       "waiting",
     );
     return;
@@ -689,16 +727,23 @@ async function start(intent: "manual" | "automatic" = "manual"): Promise<void> {
   const snapshot = eligibilitySnapshot();
   if (!snapshot || !eligibility.ready(snapshot)) {
     text(
-      "Wait until the video has loaded and ads finish. Live streams and Shorts are not supported.",
-      "Waiting for a supported video",
+      () =>
+        t(
+          "Wait until the video has loaded and ads finish. Live streams and Shorts are not supported.",
+        ),
+      () => t("Waiting for a supported video"),
       "waiting",
     );
     return;
   }
   if (video.duration > MVP_MAX_DURATION_SECONDS) {
     text(
-      `MusicMute supports videos up to ${MVP_MAX_DURATION_SECONDS / 60} minutes. Choose a shorter video.`,
-      "Choose a shorter video",
+      () =>
+        t(
+          "MusicMute supports videos up to {0} minutes. Choose a shorter video.",
+          [MVP_MAX_DURATION_SECONDS / 60],
+        ),
+      () => t("Choose a shorter video"),
       "waiting",
     );
     return;
@@ -720,8 +765,10 @@ async function start(intent: "manual" | "automatic" = "manual"): Promise<void> {
   startAccepted = false;
   button?.setAttribute("aria-pressed", "true");
   if (setupLink) setupLink.hidden = true;
-  text(
-    "The video is paused while MusicMute starts on this Mac. You can cancel anytime.",
+  text(() =>
+    t(
+      "The video is paused while MusicMute starts on this Mac. You can cancel anytime.",
+    ),
   );
   progress();
   const owner = generation;
@@ -748,8 +795,10 @@ async function start(intent: "manual" | "automatic" = "manual"): Promise<void> {
     const confirmationScope = reply.cloud_confirmation_scope;
     // A manual Start uses the app's saved choice. Keep the account-scope
     // handshake so a changed account or provider cannot redirect this request.
-    text(
-      "MusicMute cloud is preparing the complete vocals track using your signed-in account and monthly allowance. You can cancel anytime.",
+    text(() =>
+      t(
+        "MusicMute cloud is preparing the complete vocals track using your signed-in account and monthly allowance. You can cancel anytime.",
+      ),
     );
     reply = await send({
       ...request,
@@ -863,11 +912,15 @@ function installControls(player: HTMLElement, controls: Element): void {
   button.id = "musicmute-local-button";
   button.className = "ytp-button musicmute-local-button";
   button.type = "button";
-  button.setAttribute("aria-label", "MusicMute: remove background music");
+  localizer.attribute(button, "aria-label", () =>
+    t("MusicMute: remove background music"),
+  );
   button.setAttribute("aria-pressed", mode === "idle" ? "false" : "true");
   button.setAttribute("aria-controls", "musicmute-local-panel");
   button.setAttribute("aria-expanded", "false");
-  button.title = "MusicMute: remove background music";
+  localizer.attribute(button, "title", () =>
+    t("MusicMute: remove background music"),
+  );
   const mark =
     '<svg viewBox="0 0 108 108" fill="none" aria-hidden="true"><path d="M24 49v10M84 49v10" stroke="currentColor" stroke-opacity=".24" stroke-width="6" stroke-linecap="round"/><path d="M34 43v22M74 43v22" stroke="currentColor" stroke-opacity=".38" stroke-width="7" stroke-linecap="round"/><path d="M44 36v36M64 36v36" stroke="currentColor" stroke-opacity=".56" stroke-width="8" stroke-linecap="round"/><path d="M54 25v58" stroke="currentColor" stroke-width="12" stroke-linecap="round"/></svg>';
   button.innerHTML = mark;
@@ -885,19 +938,21 @@ function installControls(player: HTMLElement, controls: Element): void {
   panel?.remove();
   panel = document.createElement("div");
   panel.id = "musicmute-local-panel";
+  localizer.direction(panel);
   panel.hidden = true;
   panel.setAttribute("role", "region");
-  panel.setAttribute("aria-label", "MusicMute audio");
+  localizer.attribute(panel, "aria-label", () => t("MusicMute audio"));
   const header = document.createElement("div");
   header.className = "musicmute-panel-header";
   const moveHandle = document.createElement("button");
   moveHandle.type = "button";
   moveHandle.className = "musicmute-panel-move";
-  moveHandle.setAttribute(
-    "aria-label",
-    "Move MusicMute controls. Use arrow keys to move and Home to reset.",
+  localizer.attribute(moveHandle, "aria-label", () =>
+    t("Move MusicMute controls. Use arrow keys to move and Home to reset."),
   );
-  moveHandle.title = "Drag to move. Arrow keys move; Home resets.";
+  localizer.attribute(moveHandle, "title", () =>
+    t("Drag to move. Arrow keys move; Home resets."),
+  );
   const logo = document.createElement("span");
   logo.className = "musicmute-panel-logo";
   logo.innerHTML = mark;
@@ -905,7 +960,7 @@ function installControls(player: HTMLElement, controls: Element): void {
   heading.className = "musicmute-panel-heading";
   const brand = document.createElement("span");
   brand.className = "musicmute-panel-brand";
-  brand.textContent = "MusicMute · On this Mac";
+  localizer.text(brand, () => t("MusicMute · On this Mac"));
   panelTitle = document.createElement("span");
   panelTitle.className = "musicmute-panel-title";
   heading.append(brand, panelTitle);
@@ -913,9 +968,11 @@ function installControls(player: HTMLElement, controls: Element): void {
   const closeButton = document.createElement("button");
   closeButton.type = "button";
   closeButton.className = "musicmute-panel-close";
-  closeButton.setAttribute("aria-label", "Hide MusicMute controls");
-  closeButton.title = "Hide MusicMute controls";
-  closeButton.textContent = "×";
+  localizer.attribute(closeButton, "aria-label", () =>
+    t("Hide MusicMute controls"),
+  );
+  localizer.attribute(closeButton, "title", () => t("Hide MusicMute controls"));
+  localizer.text(closeButton, () => "×");
   const onClose = () => hidePanel();
   closeButton.addEventListener("click", onClose);
   const localSettings = createPanelSettings(panel, acceptSettings);
@@ -928,7 +985,9 @@ function installControls(player: HTMLElement, controls: Element): void {
   progressBar = document.createElement("progress");
   progressBar.max = 100;
   progressBar.hidden = true;
-  progressBar.setAttribute("aria-label", "Current preparation stage");
+  localizer.attribute(progressBar, "aria-label", () =>
+    t("Current preparation stage"),
+  );
   progressLabel = document.createElement("span");
   progressLabel.className = "musicmute-progress-label";
   progressLabel.hidden = true;
@@ -952,9 +1011,11 @@ function installControls(player: HTMLElement, controls: Element): void {
   stopButton = document.createElement("button");
   stopButton.type = "button";
   stopButton.className = "musicmute-panel-stop";
-  stopButton.textContent = "Stop";
-  stopButton.setAttribute("aria-label", "Stop MusicMute");
-  stopButton.title = "Stop MusicMute and close controls";
+  localizer.text(stopButton, () => t("Stop"));
+  localizer.attribute(stopButton, "aria-label", () => t("Stop MusicMute"));
+  localizer.attribute(stopButton, "title", () =>
+    t("Stop MusicMute and close controls"),
+  );
   const localStopButton = stopButton;
   const onStop = () => {
     if (!localStopButton.disabled) void stopSession(true);
@@ -1001,13 +1062,16 @@ function installControls(player: HTMLElement, controls: Element): void {
   setupLink = document.createElement("a");
   setupLink.href = "musicmute-local://setup";
   setupLink.className = "musicmute-setup-link";
-  setupLink.textContent = "Open Mac app";
+  localizer.text(setupLink, () => t("Open Mac app"));
   setupLink.hidden = true;
   cloudLink = document.createElement("a");
   cloudLink.className = "musicmute-cloud-link";
-  cloudLink.textContent = "Use MusicMute cloud";
-  cloudLink.title =
-    "Open MusicMute to review monthly usage and confirm cloud processing. Processing still needs YouTube audio access.";
+  localizer.text(cloudLink, () => t("Use MusicMute cloud"));
+  localizer.attribute(cloudLink, "title", () =>
+    t(
+      "Open MusicMute to review monthly usage and confirm cloud processing. Processing still needs YouTube audio access.",
+    ),
+  );
   cloudLink.href = videoId
     ? cloudHandoffUrl(videoId, video?.duration)
     : "musicmute-local://setup";
@@ -1049,8 +1113,11 @@ function installControls(player: HTMLElement, controls: Element): void {
         }
         teardown(false, true);
         text(
-          "Continue in MusicMute to review monthly usage and confirm cloud processing. No cloud request has been submitted.",
-          "Continue in MusicMute",
+          () =>
+            t(
+              "Continue in MusicMute to review monthly usage and confirm cloud processing. No cloud request has been submitted.",
+            ),
+          () => t("Continue in MusicMute"),
           "waiting",
         );
         if (setupLink) setupLink.hidden = false;
@@ -1069,7 +1136,7 @@ function installControls(player: HTMLElement, controls: Element): void {
   copyError = document.createElement("button");
   copyError.className = "musicmute-copy-error";
   copyError.type = "button";
-  copyError.textContent = "Copy error";
+  localizer.text(copyError, () => t("Copy error"));
   copyError.hidden = true;
   const localCopyError = copyError;
   const onCopyError = () => {
@@ -1085,10 +1152,10 @@ function installControls(player: HTMLElement, controls: Element): void {
     ].join("\n");
     void navigator.clipboard.writeText(summary).then(
       () => {
-        localCopyError.textContent = "Copied";
+        localizer.text(localCopyError, () => t("Copied"));
       },
       () => {
-        localCopyError.textContent = "Copy unavailable";
+        localizer.text(localCopyError, () => t("Copy unavailable"));
       },
     );
   };
@@ -1120,6 +1187,8 @@ function installControls(player: HTMLElement, controls: Element): void {
     localCloudLink.removeEventListener("click", onCloud);
     localCopyError.removeEventListener("click", onCopyError);
     localSettings.dispose();
+    playbackWaveform?.dispose();
+    localizer.clear();
     if (panelSettings === localSettings) panelSettings = null;
     controlButton.removeEventListener("click", onStart);
     localAudioButton.removeEventListener("click", onAudioToggle);
@@ -1133,8 +1202,8 @@ function installControls(player: HTMLElement, controls: Element): void {
     if (panelMovement === movement) panelMovement = null;
   };
   if (panelPresentation) {
-    status.textContent = panelPresentation.message;
-    panelTitle.textContent = panelPresentation.title;
+    localizer.text(status, panelPresentation.message);
+    localizer.text(panelTitle, panelPresentation.title);
     controlPanel.dataset.state = panelPresentation.tone;
   }
   updateAudioAction();
@@ -1210,7 +1279,7 @@ function rebindVideo(next: HTMLVideoElement, id: string): void {
     const owner = generation;
     void next.play().catch(() => {
       if (video === next && generation === owner && mode === "ready")
-        text("Vocals ready. Press YouTube Play to start.");
+        text(() => t("Vocals ready. Press YouTube Play to start."));
     });
   }
   clock();
@@ -1300,18 +1369,20 @@ function renderPlaybackStatus(): void {
   const saving = saveState === "pending" || saveState === "saving";
   if (!vocalsPlaying) {
     text(
-      saving && hasPlayedVocals
-        ? "Vocals ready · Saving in background"
-        : "Vocals ready. Play the video to listen.",
-      "Vocals ready",
+      () =>
+        saving && hasPlayedVocals
+          ? t("Vocals ready · Saving in background")
+          : t("Vocals ready. Play the video to listen."),
+      () => t("Vocals ready"),
     );
     return;
   }
   text(
-    saving
-      ? "Playing vocals · Saving in background"
-      : "Use YouTube to pause, seek and adjust volume.",
-    "Voice-only playback",
+    () =>
+      saving
+        ? t("Playing vocals · Saving in background")
+        : t("Use YouTube to pause, seek and adjust volume."),
+    () => t("Voice-only playback"),
   );
 }
 function receiveMessage(
@@ -1353,21 +1424,30 @@ function receiveMessage(
       );
       if (message.payload.stage === "account-restore") {
         text(
-          `Checking your MusicMute library for saved vocals${percent}. The video stays paused; you can cancel anytime.`,
-          "Checking saved vocals",
+          () =>
+            t(
+              "Checking your MusicMute library for saved vocals{0}. The video stays paused; you can cancel anytime.",
+              [percent],
+            ),
+          () => t("Checking saved vocals"),
         );
         return;
       }
-      const stage = message.payload.stage
-        .replaceAll("_", " ")
-        .replaceAll("-", " ");
       text(
-        `${stage}${percent} — ${message.payload.provider === "ONLINE_MUSICMUTE" ? "processing with MusicMute cloud" : "processing on this Mac"}. The video stays paused until vocals are ready.`,
-        message.payload.state === "DOWNLOADING"
-          ? "Getting the audio"
-          : message.payload.state === "VALIDATING"
-            ? "Checking the vocals"
-            : "Separating vocals",
+        () =>
+          t("{0}{1} — {2}. The video stays paused until vocals are ready.", [
+            localizedStage(message.payload.stage),
+            percent,
+            message.payload.provider === "ONLINE_MUSICMUTE"
+              ? t("processing with MusicMute cloud")
+              : t("processing on this Mac"),
+          ]),
+        () =>
+          message.payload.state === "DOWNLOADING"
+            ? t("Getting the audio")
+            : message.payload.state === "VALIDATING"
+              ? t("Checking the vocals")
+              : t("Separating vocals"),
       );
     } else if (mode === "ready" && !adSuspended) {
       renderPlaybackStatus();
@@ -1378,7 +1458,6 @@ function receiveMessage(
     if (message.source_muted === true) {
       tabMuteMode = true;
       restoreMute();
-      if (video) observedMuted = video.muted;
     }
     const firstReady = mode !== "ready";
     if (firstReady && replacementTimer) readyDuringReplacement = true;
@@ -1386,14 +1465,14 @@ function receiveMessage(
     preparation = null;
     preparationPausesPending = 0;
     progress();
-    text("Vocals ready. Play the video to listen.");
+    text(() => t("Vocals ready. Play the video to listen."));
     clock();
     if (firstReady && desiredPlaying && video?.paused && !replacementTimer) {
       const owner = video;
       const ownerGeneration = generation;
       void owner.play().catch(() => {
         if (!invalidated && video === owner && generation === ownerGeneration)
-          text("Vocals ready. Press YouTube Play to start.");
+          text(() => t("Vocals ready. Press YouTube Play to start."));
       });
     }
   }

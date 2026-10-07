@@ -4087,6 +4087,61 @@ paths:
           $ref: '#/components/responses/Problem503'
       x-audience:
         - administrator
+  /admin/users/{id}/worker-registration:
+    put:
+      tags: [admin]
+      operationId: AdminUsersController.workerRegistration
+      summary: Allow or prevent new worker registrations for this account
+      description: Audited registration permission only. Existing machines and their claims remain independent. Requires an active account, revision fence, operation ID, reason, and recent admin authentication.
+      security:
+        - FirebaseBearer: []
+      x-source: src/admin-users/admin-users.controller.ts
+      x-auth-policy: A(`users.worker-registration.manage`) F
+      x-rate-policy: G + Ax sensitive
+      x-required-permissions: [users.worker-registration.manage]
+      x-recent-auth-max-age-seconds: 300
+      x-audience: [administrator]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutWorkerRegistrationDto'
+      responses:
+        '200':
+          description: Durable admin operation receipt. Read user detail to obtain the saved permission and current revision.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response_AdminOperationsController_read'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '415':
+          $ref: '#/components/responses/Problem415'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '500':
+          $ref: '#/components/responses/Problem500'
+        '503':
+          $ref: '#/components/responses/Problem503'
   /admin/users/{id}/account-usage-resets:
     post:
       tags:
@@ -5544,6 +5599,72 @@ paths:
           $ref: '#/components/responses/Problem503'
       x-audience:
         - administrator
+  /admin/workers/machines/{id}/deletions:
+    post:
+      tags: [admin]
+      operationId: AdminWorkerEnrollmentController.deleteMachine
+      summary: Delete a worker machine and disable account registration
+      description: >-
+        DELETE with body. Audited, idempotent deletion with machine and account
+        revision fences. Stops machine access and removes it from fleet reads.
+        Retains an internal deletion record for audit and authenticated local
+        cleanup. Existing account-owned media and other machines are preserved.
+        A legacy machine requires an explicitly selected registration_user_id;
+        a machine with provenance can only disable that registering account.
+      security:
+        - FirebaseBearer: []
+      x-source: src/worker-fleet/enrollment/admin-worker-enrollment.controller.ts
+      x-auth-policy: A(`workers.manage`, `users.read`, `users.worker-registration.manage`) F
+      x-rate-policy: G + Ax sensitive
+      x-required-permissions:
+        - workers.manage
+        - users.read
+        - users.worker-registration.manage
+      x-recent-auth-max-age-seconds: 300
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkerMachineDeletionDto'
+      responses:
+        '200':
+          description: Committed deletion or replay of the same operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerMachineDeletionReceipt'
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '415':
+          $ref: '#/components/responses/Problem415'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '500':
+          $ref: '#/components/responses/Problem500'
+        '503':
+          $ref: '#/components/responses/Problem503'
+      x-audience: [administrator]
   /app-policy:
     get:
       tags:
@@ -7390,6 +7511,51 @@ paths:
       x-audience:
         - native-app
       x-owner-scope: Resources are selected using the authenticated account; caller-supplied owner IDs are not accepted.
+  /users/me/worker-installation:
+    post:
+      tags: [accounts]
+      operationId: UserWorkerInstallationController.workerInstallation
+      summary: Issue a private one-use worker installation credential
+      description: Only an active user with saved registration approval and a current Google sign-in session may issue a credential. Google Workspace accounts qualify. The credential is returned once; only its digest is stored. Approval is rechecked before new enrollment activation. Registered machines remain independent of subsequent account changes. Call only for fresh setup, not status or existing registrations.
+      security:
+        - FirebaseBearer: []
+      x-source: src/worker-fleet/enrollment/user-worker-installation.controller.ts
+      x-auth-policy: U; Google sign-in provider and worker_registration_allowed
+      x-rate-policy: G + Ux worker-installation
+      x-audience: [native-app]
+      x-owner-scope: Authenticated user only; no caller-supplied owner ID.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyBody'
+      responses:
+        '201':
+          description: One-use credential. Do not log, cache, display, or persist it in client preferences.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response_UserWorkerInstallationController_workerInstallation'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '413':
+          $ref: '#/components/responses/Problem413'
+        '415':
+          $ref: '#/components/responses/Problem415'
+        '429':
+          $ref: '#/components/responses/Problem429'
+        '500':
+          $ref: '#/components/responses/Problem500'
+        '503':
+          $ref: '#/components/responses/Problem503'
   /users/me/account-recovery:
     get:
       tags:
@@ -8830,7 +8996,10 @@ paths:
         - worker
       operationId: WorkerMachineLifecycleController.status
       summary: GET /worker/status
-      description: none; current machine status
+      description: >-
+        Current machine status. A known deleted machine credential returns
+        410 WORKER_MACHINE_DELETED so the client can retire its local registration;
+        unknown or merely revoked credentials remain 401 WORKER_UNAUTHENTICATED.
       security:
         - WorkerCredential: []
       x-source: src/worker-fleet/machines/worker-machine-lifecycle.controller.ts
@@ -8866,7 +9035,10 @@ paths:
         - worker
       operationId: WorkerMachineLifecycleController.unpair
       summary: POST /worker/unpairings
-      description: optional force boolean; own machine
+      description: >-
+        Optional force boolean; own machine. A deleted machine may replay cleanup
+        confirmation using its old credential; this grants no processing authority.
+        Its response additionally contains deleted=true.
       security:
         - WorkerCredential: []
       x-source: src/worker-fleet/machines/worker-machine-lifecycle.controller.ts
@@ -11017,6 +11189,40 @@ components:
         - operation_id
         - expected_revision
         - reason
+    WorkerMachineDeletionDto:
+      type: object
+      additionalProperties: false
+      properties:
+        operation_id:
+          type: string
+          format: uuid
+        expected_revision:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740990
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        registration_user_id:
+          type: string
+          pattern: ^[a-f0-9]{24}$
+          description: Required for legacy machines; must match provenance when present.
+        expected_user_revision:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740990
+          description: Required when the selected registering account still exists.
+      required: [operation_id, expected_revision, reason]
+    WorkerMachineDeletionReceipt:
+      type: object
+      additionalProperties: false
+      properties:
+        operation_id: { type: string, format: uuid }
+        status: { type: string, const: succeeded }
+        resource_id: { type: string, format: uuid }
+        revision: { type: integer, minimum: 1 }
+      required: [operation_id, status, resource_id, revision]
     WorkerOutputGrantDto:
       type: object
       additionalProperties: false
@@ -11493,6 +11699,26 @@ components:
               format: date-time
             - type: 'null'
       additionalProperties: true
+    PutWorkerRegistrationDto:
+      type: object
+      additionalProperties: false
+      properties:
+        worker_registration_allowed: { type: boolean }
+        expected_revision:
+          { type: integer, minimum: 0, maximum: 9007199254740991 }
+        operation_id: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+      required:
+        [worker_registration_allowed, expected_revision, operation_id, reason]
+    Response_UserWorkerInstallationController_workerInstallation:
+      type: object
+      additionalProperties: true
+      properties:
+        credential:
+          type: string
+          description: Opaque one-use enrollment secret, consumed by the existing worker exchange. Never appears in realtime snapshots.
+        expires_at: { type: string, format: date-time }
+      required: [credential, expires_at]
     UserView:
       type: object
       additionalProperties: true
@@ -11507,6 +11733,10 @@ components:
             - type: 'null'
         email_verified:
           type: boolean
+        worker_registration_allowed:
+          type: boolean
+          default: false
+          description: Permission to register new machines only; no authority over registered workers. Missing legacy user values are false.
         providers:
           type: array
           items:
@@ -11521,6 +11751,7 @@ components:
         - email
         - email_verified
         - providers
+        - worker_registration_allowed
     DeviceView:
       type: object
       additionalProperties: true
@@ -12369,6 +12600,10 @@ components:
           type: boolean
           const: true
         revision: *a6
+        deleted:
+          type: boolean
+          const: true
+          description: Present only for backend-confirmed machine deletion.
       required:
         - machine_id
         - status
@@ -15262,6 +15497,7 @@ components:
               - users.read
               - users.processing.manage
               - users.restrictions.manage
+              - users.worker-registration.manage
               - users.account-recovery.manage
               - abuse.read
               - media.read
@@ -15739,6 +15975,13 @@ components:
       type: object
       additionalProperties: true
       properties:
+        worker_registration_allowed:
+          type: boolean
+          default: false
+          description: New registration permission only. Turning it off does not pause or revoke existing machines.
+        providers:
+          type: array
+          items: { type: string }
         processing_counts:
           type: object
           additionalProperties:
@@ -15833,6 +16076,8 @@ components:
           minimum: 0
           maximum: 9007199254740990
       required:
+        - worker_registration_allowed
+        - providers
         - processing_counts
         - recent_job_ids
         - deletion
@@ -17531,6 +17776,12 @@ components:
                       - code
                       - summary
                       - at
+              registered_by_user_id:
+                description: Account that registered this machine, for audit only. Null for legacy code enrollment; never an ongoing authorization dependency.
+                anyOf:
+                  - type: 'null'
+                  - type: string
+                    pattern: '^[a-f0-9]{24}$'
               machine_id:
                 type: string
               status:
@@ -17721,6 +17972,7 @@ components:
             required:
               - current_attempt
               - recent_error
+              - registered_by_user_id
               - machine_id
               - status
               - label
@@ -17761,6 +18013,12 @@ components:
           type: object
           additionalProperties: true
           properties:
+            registered_by_user_id:
+              description: Account that registered this machine, for audit only. Null for legacy code enrollment; never an ongoing authorization dependency.
+              anyOf:
+                - type: 'null'
+                - type: string
+                  pattern: '^[a-f0-9]{24}$'
             machine_id:
               type: string
             status:
@@ -17949,6 +18207,7 @@ components:
               format: date-time
               description: UTC RFC 3339 timestamp.
           required:
+            - registered_by_user_id
             - machine_id
             - status
             - label
@@ -20435,7 +20694,7 @@ components:
             type: string
             const: no-store
     Problem4101:
-      description: Worker credential or resource expired
+      description: Worker credential/resource expired, or known machine deleted (WORKER_MACHINE_DELETED)
       content:
         application/problem+json:
           schema:

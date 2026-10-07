@@ -25,6 +25,8 @@ import {
   verifyRuntimeCodeSignature,
 } from "./macos-runtime-artifact.mjs";
 
+import { validateRuntimeComponents } from "./macos-runtime-components.mjs";
+
 const run = promisify(execFile);
 const SHA256 = /^[a-f0-9]{64}$/;
 const RUNTIME_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -94,7 +96,7 @@ function validateManifest(document, packaged) {
       runtime.api_version === 1 &&
       runtime.platform === "darwin" &&
       runtime.arch === "arm64" &&
-      runtime.archive_format === "zip" &&
+      ["zip", "zip-components"].includes(runtime.archive_format) &&
       SHA256.test(runtime.archive_sha256 ?? "") &&
       Number.isSafeInteger(runtime.archive_bytes) &&
       runtime.archive_bytes > 0 &&
@@ -146,6 +148,13 @@ function validateManifest(document, packaged) {
       JSON.stringify(runtime.signing) === JSON.stringify(packaged.signing),
     "QUALIFICATION_RUNTIME_MANIFEST_INVALID",
   );
+  if (runtime.archive_format === "zip-components")
+    validateRuntimeComponents(runtime);
+  else
+    ensure(
+      runtime.components == null,
+      "QUALIFICATION_RUNTIME_MANIFEST_INVALID",
+    );
   return runtime;
 }
 
@@ -395,24 +404,18 @@ export async function stageExternalRuntimeForQualification({
             runtimePackage.native_binaries)),
     "QUALIFICATION_PACKAGE_RESULT_INVALID",
   );
-  let archive;
   let sidecar;
   try {
     ensure(
-      isAbsolute(runtimePackage.archive) && isAbsolute(runtimePackage.manifest),
+      isAbsolute(runtimePackage.manifest),
       "QUALIFICATION_RUNTIME_PATH_INVALID",
     );
-    archive = await realpath(runtimePackage.archive);
     sidecar = await realpath(runtimePackage.manifest);
-  } catch (error) {
-    if (error.message === "QUALIFICATION_RUNTIME_PATH_INVALID") throw error;
+  } catch {
     throw new Error("QUALIFICATION_RUNTIME_PATH_INVALID");
   }
   ensure(
-    runtimePackage.archive === archive &&
-      runtimePackage.manifest === sidecar &&
-      contained(buildRoot, archive) &&
-      contained(buildRoot, sidecar),
+    runtimePackage.manifest === sidecar && contained(buildRoot, sidecar),
     "QUALIFICATION_RUNTIME_PATH_INVALID",
   );
   const resources = join(resolvedApp, "Contents/Resources");
@@ -450,21 +453,62 @@ export async function stageExternalRuntimeForQualification({
     throw new Error("QUALIFICATION_RUNTIME_MANIFEST_INVALID");
   }
   const runtime = validateManifest(manifestDocument, runtimePackage);
-  const archiveInfo = await boundedRegularFile(
-    archive,
-    2_000_000_000,
-    "QUALIFICATION_RUNTIME_ARCHIVE_INVALID",
-  );
+  const archives = runtime.components
+    ? runtime.components.map((component, index) => {
+        const packaged = runtimePackage.components?.[index];
+        ensure(
+          packaged &&
+            packaged.id === component.id &&
+            packaged.url === component.url &&
+            packaged.archive_bytes === component.archive_bytes &&
+            packaged.archive_sha256 === component.archive_sha256,
+          "QUALIFICATION_RUNTIME_ARCHIVE_INVALID",
+        );
+        const paths = new Set(component.file_paths);
+        return {
+          path: packaged.archive,
+          bytes: component.archive_bytes,
+          sha256: component.archive_sha256,
+          files: runtime.files.filter((file) => paths.has(file.path)),
+        };
+      })
+    : [
+        {
+          path: runtimePackage.archive,
+          bytes: runtime.archive_bytes,
+          sha256: runtime.archive_sha256,
+          files: runtime.files,
+        },
+      ];
   ensure(
-    archiveInfo.size === runtime.archive_bytes &&
-      (await digest(archive)) === runtime.archive_sha256,
+    !runtime.components ||
+      runtimePackage.components?.length === runtime.components.length,
     "QUALIFICATION_RUNTIME_ARCHIVE_INVALID",
   );
-  const { stdout } = await exec("/usr/bin/unzip", ["-Z1", archive], {
-    timeout: 10 * 60_000,
-    maxBuffer: MAX_MANIFEST_BYTES,
-  });
-  assertRuntimeArchiveListing(String(stdout), runtime.files);
+  for (const archive of archives) {
+    ensure(
+      typeof archive.path === "string" &&
+        isAbsolute(archive.path) &&
+        contained(buildRoot, archive.path) &&
+        (await realpath(archive.path)) === archive.path,
+      "QUALIFICATION_RUNTIME_PATH_INVALID",
+    );
+    const archiveInfo = await boundedRegularFile(
+      archive.path,
+      2_000_000_000,
+      "QUALIFICATION_RUNTIME_ARCHIVE_INVALID",
+    );
+    ensure(
+      archiveInfo.size === archive.bytes &&
+        (await digest(archive.path)) === archive.sha256,
+      "QUALIFICATION_RUNTIME_ARCHIVE_INVALID",
+    );
+    const { stdout } = await exec("/usr/bin/unzip", ["-Z1", archive.path], {
+      timeout: 10 * 60_000,
+      maxBuffer: MAX_MANIFEST_BYTES,
+    });
+    assertRuntimeArchiveListing(String(stdout), archive.files);
+  }
 
   const runtimeDirectory = join(stateRoot, "runtime");
   const releases = join(runtimeDirectory, "releases");
@@ -476,11 +520,21 @@ export async function stageExternalRuntimeForQualification({
   });
   const releaseRoot = join(releases, runtime.id);
   await privateDirectory(releaseRoot, { create: true });
-  await exec(
-    "/usr/bin/ditto",
-    ["-x", "-k", "--noextattr", "--noqtn", "--noacl", archive, releaseRoot],
-    { timeout: 20 * 60_000, maxBuffer: 256 * 1024 },
-  );
+  for (const archive of archives) {
+    await exec(
+      "/usr/bin/ditto",
+      [
+        "-x",
+        "-k",
+        "--noextattr",
+        "--noqtn",
+        "--noacl",
+        archive.path,
+        releaseRoot,
+      ],
+      { timeout: 20 * 60_000, maxBuffer: 256 * 1024 },
+    );
+  }
   const extracted = await collectRuntimeInventory(releaseRoot);
   ensure(
     extracted.installedBytes === runtime.installed_bytes &&

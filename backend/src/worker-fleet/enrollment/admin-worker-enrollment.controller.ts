@@ -1,4 +1,12 @@
-import { Body, Controller, Param, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Header,
+  HttpCode,
+  Param,
+  Post,
+  Req,
+} from '@nestjs/common';
 import type { AuthRequest } from '../../auth/auth-request.js';
 import {
   LimitAdmin,
@@ -8,6 +16,7 @@ import {
 import {
   CreateWorkerInvitationDto,
   WorkerLifecycleDto,
+  WorkerMachineDeletionDto,
 } from './worker-enrollment.dto.js';
 import { WorkerEnrollmentService } from './worker-enrollment.service.js';
 
@@ -84,5 +93,23 @@ export class AdminWorkerEnrollmentController {
     @Body() dto: WorkerLifecycleDto,
   ) {
     return this.enrollment.revoke(request.adminActor!, id, dto);
+  }
+
+  @Post('machines/:id/deletions')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @RequireAdminPermission(
+    'workers.manage',
+    'users.read',
+    'users.worker-registration.manage',
+  )
+  @RequireFreshAdminAuth()
+  @LimitAdmin('sensitive')
+  deleteMachine(
+    @Req() request: AuthRequest,
+    @Param('id') id: string,
+    @Body() dto: WorkerMachineDeletionDto,
+  ) {
+    return this.enrollment.deleteMachine(request.adminActor!, id, dto);
   }
 }

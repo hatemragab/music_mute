@@ -3,6 +3,24 @@
   "roles": ["owner", "release_manager", "support", "viewer"],
   "routes": [
     {
+      "controller": "AdminUsersController",
+      "method": "PUT",
+      "path": "/admin/users/:id/worker-registration",
+      "permissions": ["users.worker-registration.manage"],
+      "roles": ["owner", "support"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "worker_registration_allowed": true,
+        "expected_revision": 0,
+        "operation_id": "7f107510-108d-4c25-a091-ecf28e43bd7b",
+        "reason": "Approve worker registration for fixture account"
+      },
+      "responseCategory": "operation_receipt",
+      "validationOwner": "dto",
+      "successStatus": 200
+    },
+    {
       "controller": "AdminMacosUpdatesController",
       "method": "GET",
       "path": "/admin/macos-updates/configuration",
@@ -1028,6 +1046,29 @@
       "requestBody": null,
       "responseCategory": "page",
       "validationOwner": "controller-query",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminWorkerEnrollmentController",
+      "method": "POST",
+      "path": "/admin/workers/machines/:id/deletions",
+      "permissions": [
+        "workers.manage",
+        "users.read",
+        "users.worker-registration.manage"
+      ],
+      "roles": ["owner"],
+      "freshAuth": true,
+      "rateClass": "sensitive",
+      "requestBody": {
+        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expected_revision": 0,
+        "reason": "Delete synthetic machine registration",
+        "registration_user_id": "64b000000000000000000001",
+        "expected_user_revision": 0
+      },
+      "responseCategory": "operation_receipt",
+      "validationOwner": "dto",
       "successStatus": 200
     },
     {

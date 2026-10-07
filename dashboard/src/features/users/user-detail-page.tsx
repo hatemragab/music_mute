@@ -27,6 +27,7 @@ import { formatDateTime } from "@/lib/format";
 import { AccountRestrictionExpiryField } from "./account-restriction-expiry-field";
 import { restrictionExpiry } from "./processing-access-validation";
 import { ProcessingUsageSection } from "./processing-usage-panel";
+import { WorkerRegistrationSection } from "./worker-registration-section";
 import {
   getAccountRestriction,
   getUser,
@@ -146,6 +147,12 @@ export function UserDetailPage() {
                   <dt className="text-muted-foreground">Created</dt>
                   <dd>{formatDateTime(data.createdAt)}</dd>
                 </div>
+                {data.providers?.length ? (
+                  <div>
+                    <dt className="text-muted-foreground">Sign-in providers</dt>
+                    <dd>{data.providers.join(", ")}</dd>
+                  </div>
+                ) : null}
                 {data.deletion ? (
                   <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
                     <dt className="font-medium text-red-700 dark:text-red-300">
@@ -216,6 +223,17 @@ export function UserDetailPage() {
           </CardContent>
         </Card>
       </div>
+      <WorkerRegistrationSection
+        key={`worker-registration-${id}`}
+        data={data}
+        onUpdated={async (saved) => {
+          queryClient.setQueryData(["user", id], saved);
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["users"] }),
+            queryClient.invalidateQueries({ queryKey: ["audit"] }),
+          ]);
+        }}
+      />
       <Card>
         <CardContent className="p-5">
           <PageSection title="Processing summary">

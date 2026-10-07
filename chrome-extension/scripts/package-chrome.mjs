@@ -14,9 +14,11 @@ export const staticFiles = [
   "musicmute-mark.svg",
   "privacy.html",
   "privacy.css",
+  "_locales/en/messages.json",
+  "_locales/ar/messages.json",
   ...[16, 32, 48, 128].map((size) => `icons/icon-${size}.png`),
 ];
-const scripts = ["background", "content", "offscreen", "popup"];
+const scripts = ["background", "content", "offscreen", "popup", "privacy"];
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 export function validateManifest(manifest, version) {
@@ -66,6 +68,15 @@ export function validateManifest(manifest, version) {
   }
 }
 
+export function createStoreManifest(manifest, version) {
+  validateManifest(manifest, version);
+  // The Store assigns its signing identity. Keep the public key in local/native
+  // builds, but the upload validator rejects it in the submission manifest.
+  const storeManifest = { ...manifest };
+  delete storeManifest.key;
+  return storeManifest;
+}
+
 function crc32(bytes) {
   let crc = 0xffffffff;
   for (const byte of bytes) {
@@ -86,7 +97,7 @@ export function zipFiles(files) {
     a.name.localeCompare(b.name, "en"),
   )) {
     if (
-      !/^[a-z0-9/.-]+$/.test(name) ||
+      !/^[a-z0-9_/.-]+$/.test(name) ||
       name.startsWith("/") ||
       name.split("/").includes("..") ||
       bytes.length > 0xffffffff
@@ -132,7 +143,7 @@ export async function packageChrome() {
     await readFile(join(source, "manifest.json"), "utf8"),
   );
   const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-  validateManifest(manifest, pkg.version);
+  const storeManifest = createStoreManifest(manifest, pkg.version);
   const parent = join(root, "output/chrome-store");
   await mkdir(parent, { recursive: true });
   const output = await mkdtemp(join(parent, `v${pkg.version}-`));
@@ -150,7 +161,15 @@ export async function packageChrome() {
   });
   for (const name of staticFiles) {
     await mkdir(resolve(unpacked, name, ".."), { recursive: true });
-    await cp(join(source, name), join(unpacked, name));
+    if (name === "manifest.json") {
+      await writeFile(
+        join(unpacked, name),
+        JSON.stringify(storeManifest, null, 2) + "\n",
+        { flag: "wx" },
+      );
+    } else {
+      await cp(join(source, name), join(unpacked, name));
+    }
   }
   const files = [];
   for (const name of [
@@ -189,6 +208,8 @@ export async function packageChrome() {
     ]
       .map((byte) => String.fromCharCode(97 + (byte >> 4), 97 + (byte & 15)))
       .join(""),
+    identity_scope: "LOCAL_BUNDLED_PUBLIC_KEY",
+    store_manifest_key_included: false,
     public_ready: false,
     remaining_release_gates: [
       "Chrome publisher identity and store extension ID alignment",

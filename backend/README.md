@@ -226,6 +226,19 @@ server. Production Compose also runs only the API.
   `GET /support`, and `GET /public-policy`. They use repository-owned defaults,
   require no authentication, contain no account lookup, and remain available when
   optional publication overrides are absent.
+- The unified `/privacy` notice covers Android, iOS, web, Mac, and Chrome. It
+  distinguishes local playback and diagnostics from account/cloud use, signed-out
+  YouTube shared lookup and background saving, native runtime/model downloads,
+  retention controls, and Chrome Web Store Limited Use. Its publication metadata
+  is version `2026-10-07`; deployment and the live notice must be verified
+  separately from source tests.
+
+October 7, 2026 deployment checkpoint: API `123` serves the unified notice and
+matching `/public-policy` metadata over HTTPS. The guarded overlay changed only
+the six compiled policy/configuration files; 31,541 other runtime/dependency
+entries, inherited image configuration, and service environment stayed identical
+to API `121`. Public policy, support, deletion, and both health endpoints returned
+HTTP 200. This establishes policy publication, not Chrome Web Store approval.
 
 ## Environments
 

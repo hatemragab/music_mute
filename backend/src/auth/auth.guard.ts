@@ -126,6 +126,19 @@ export class AuthGuard implements CanActivate {
         limit: this.config.get<number>('LOGOUT_UID_PER_HOUR', 3),
         windowMs: 3600000,
       });
+    if (operation === 'worker-installation')
+      buckets.push(
+        {
+          key: this.keys.bucket('worker-installation-uid', signed.uid),
+          limit: 5,
+          windowMs: 60_000,
+        },
+        {
+          key: this.keys.bucket('worker-installation-ip', req.ip ?? 'unknown'),
+          limit: 20,
+          windowMs: 60_000,
+        },
+      );
     const processingBudget = {
       'processing-read': {
         scope: 'read',

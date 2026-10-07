@@ -96,6 +96,24 @@ describe('worker machine lifecycle', () => {
     });
   });
 
+  it('confirms cleanup of a deleted machine without restoring any authority', async () => {
+    const f = fixture(null, null, {
+      _id: machineId,
+      status: 'revoked',
+      revision: 9,
+      deletedAt: new Date(),
+    });
+    await expect(f.service.unpair(revokedPrincipal)).resolves.toEqual({
+      machineId,
+      status: 'revoked',
+      confirmed: true,
+      revision: 9,
+      deleted: true,
+    });
+    expect(f.machines.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(f.attempts.exists).not.toHaveBeenCalled();
+  });
+
   it('replays confirmation after revocation when the first response was lost', async () => {
     const f = fixture(null, null, {
       _id: machineId,

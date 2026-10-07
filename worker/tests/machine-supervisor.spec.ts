@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import type { WorkerChildProcess } from "../src/agent/child-process.js";
+import {
+  ChildStopError,
+  type WorkerChildProcess,
+} from "../src/agent/child-process.js";
 import { MachineSupervisor } from "../src/agent/machine-supervisor.js";
 
 const child = { command: "unused", args: [], cwd: "." };
@@ -10,6 +13,60 @@ const workerRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const hangingFixture = resolve(workerRoot, "tests/fixtures/hanging-child.mjs");
 
 describe("machine supervisor capacity", () => {
+  function failedSupervisor(errors: unknown[]) {
+    const slots = errors.map(() => ({
+      workerId: randomUUID(),
+      gpuId: randomUUID(),
+      child,
+    }));
+    const supervisor = new MachineSupervisor(slots);
+    const children = errors.map((error) => ({
+      stop: vi.fn().mockRejectedValue(error),
+    }));
+    Object.assign(supervisor, {
+      children: new Map(
+        slots.map((slot, index) => [slot.workerId, children[index]]),
+      ),
+    });
+    return { supervisor, slots, children };
+  }
+
+  it("retains safe child-stop failure stages while keeping all failed children fenced", async () => {
+    const { supervisor, slots, children } = failedSupervisor([
+      new ChildStopError("PROCESS_GROUP_EXIT_UNCONFIRMED", "EPERM"),
+      new ChildStopError("CHILD_EXIT_UNCONFIRMED"),
+      new ChildStopError("CHILD_EXIT_UNCONFIRMED"),
+    ]);
+    await expect(supervisor.stop()).rejects.toThrow(
+      "Worker children could not be stopped safely (CHILD_EXIT_UNCONFIRMED, PROCESS_GROUP_EXIT_UNCONFIRMED:EPERM)",
+    );
+    for (let index = 0; index < children.length; index++) {
+      expect(children[index]!.stop).toHaveBeenCalledOnce();
+      expect(supervisor.child(slots[index]!.workerId)).toBe(children[index]);
+    }
+  });
+
+  it("never copies arbitrary error fields, raw output or causes into the stop summary", async () => {
+    const raw =
+      "fixture-sensitive https://user:password@example.invalid/private.wav";
+    const typed = new ChildStopError("PROCESS_GROUP_EXIT_UNCONFIRMED", raw);
+    typed.message = raw;
+    const forged = new ChildStopError("CHILD_EXIT_UNCONFIRMED");
+    Object.defineProperty(forged, "code", { value: raw });
+    const { supervisor } = failedSupervisor([
+      Object.assign(new Error(raw), { code: "EPERM", cause: new Error(raw) }),
+      typed,
+      forged,
+    ]);
+    const error = await supervisor.stop().catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Worker children could not be stopped safely (CHILD_STOP_UNCONFIRMED, PROCESS_GROUP_EXIT_UNCONFIRMED)",
+    );
+    expect((error as Error).message).not.toContain(raw);
+    expect(error).not.toHaveProperty("cause");
+  });
+
   it("starts with one logical child per unique GPU", () => {
     expect(
       () =>

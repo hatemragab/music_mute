@@ -5,18 +5,20 @@ import {
   chmod,
   readFile,
   writeFile,
-  realpath,
   unlink,
   readdir,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { resolve, join } from "node:path";
 import { promisify } from "node:util";
+import { build } from "esbuild";
 import assert from "node:assert/strict";
 import { startFixtureServer } from "./fixture-server.mjs";
 import { packageChrome } from "./package-chrome.mjs";
 import { createStoreAssets } from "./store-assets.mjs";
+import { resolveE2ERuntime } from "./e2e-runtime.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const storePackage = process.argv.includes("--store");
@@ -146,19 +148,33 @@ try {
     throw new Error("MVP_E2E_REQUIRES_MAC_ARM64");
   await mkdir(output, { recursive: true, mode: 0o700 });
   await mkdir(localRoot, { recursive: true, mode: 0o700 });
-  const runtime = await realpath(
-    process.env.MUSICMUTE_LOCAL_RUNTIME ??
-      join(
-        homedir(),
-        "Library/Application Support/MusicMuteWorker/runtime/current",
-      ),
+  // Reuse the app's validated, token-free active descriptor. A fleet service
+  // artifact need not contain the local Python/Node tools used by this fixture.
+  const resolverModule = join(output, "runtime-resolver.mjs");
+  await build({
+    stdin: {
+      contents:
+        'export { resolvePackagedRuntime } from "./src/companion/config.ts";',
+      resolveDir: root,
+    },
+    outfile: resolverModule,
+    bundle: true,
+    platform: "node",
+    format: "esm",
+  });
+  const { resolvePackagedRuntime } = await import(
+    pathToFileURL(resolverModule).href
   );
+  const { runtime, node, python } = await resolveE2ERuntime({
+    resolvePackagedRuntime,
+  });
+  results.runtime_selection = process.env.MUSICMUTE_LOCAL_RUNTIME
+    ? "EXPLICIT_EXECUTABLE_RUNTIME"
+    : "VALIDATED_INSTALLED_APP_RUNTIME";
   // Worker FFmpeg is intentionally audio-only. Fixture video needs a developer
   // FFmpeg with H.264 encoding; it is never used by the shipped companion.
   const ffmpeg =
     process.env.MUSICMUTE_TEST_FFMPEG ?? "/opt/homebrew/bin/ffmpeg";
-  const node = join(runtime, "runtime/node/bin/node");
-  const python = join(runtime, "runtime/python/bin/python3");
   const video = join(output, "fixture.mp4");
   const vocals = join(output, "fixture.mp3");
   await execute(
@@ -231,36 +247,11 @@ try {
   const manifest = JSON.parse(
     await readFile(join(extensionPath, "manifest.json"), "utf8"),
   );
-  const hash = createHash("sha256")
-    .update(Buffer.from(manifest.key, "base64"))
-    .digest("hex")
-    .slice(0, 32);
-  const extensionId = [...hash]
-    .map((c) => String.fromCharCode(97 + parseInt(c, 16)))
-    .join("");
-  await mkdir(nativeDirectory, { recursive: true, mode: 0o700 });
-  const launcher = join(output, "fixture-native-launcher.sh");
-  await writeFile(
-    launcher,
-    `#!/bin/sh\n# MusicMute Local MVP isolated browser fixture\nexec /usr/bin/env -i HOME=${quote(homedir())} PATH='/usr/bin:/bin' LANG='en_US.UTF-8' MUSICMUTE_LOCAL_ROOT=${quote(localRoot)} MUSICMUTE_LOCAL_RUNTIME=${quote(runtime)} MUSICMUTE_LOCAL_TEST_MODE=1 MUSICMUTE_LOCAL_FIXTURE_AUDIO=${quote(vocals)} ${quote(python)} ${quote(join(root, "scripts/native-lock.py"))} ${quote(node)} ${quote(join(root, "dist/companion/host.js"))} "$@"\n`,
-    { mode: 0o700 },
-  );
-  await writeFile(
-    nativePath,
-    JSON.stringify(
-      {
-        name: "com.musicmute.local",
-        description: "MusicMute Local MVP isolated browser fixture",
-        path: launcher,
-        type: "stdio",
-        allowed_origins: [`chrome-extension://${extensionId}/`],
-      },
-      null,
-      2,
-    ),
-    { mode: 0o600 },
-  );
-  nativeRegistered = true;
+  if (storePackage)
+    check(
+      "Store archive omits local identity key",
+      !Object.hasOwn(manifest, "key"),
+    );
   server = await startFixtureServer(video);
   // No flags that bypass autoplay, CORS, Local Network Access, or media security.
   chrome = spawn(
@@ -291,6 +282,47 @@ try {
   const loaded = await raw.send("Extensions.loadUnpacked", {
     path: extensionPath,
   });
+  const extensionId = loaded.id;
+  check("loaded extension id is valid", /^[a-p]{32}$/.test(extensionId));
+  if (!storePackage) {
+    const hash = createHash("sha256")
+      .update(Buffer.from(manifest.key, "base64"))
+      .digest("hex")
+      .slice(0, 32);
+    const keyedId = [...hash]
+      .map((c) => String.fromCharCode(97 + parseInt(c, 16)))
+      .join("");
+    check("stable local extension id", extensionId === keyedId);
+  }
+  // The Store ZIP must stay byte-for-byte unchanged. Its unpacked test ID is
+  // path-derived, whereas Google signs the published CRX with the Store identity.
+  // Bind only this isolated profile's fixture host to Chrome's actual loaded ID.
+  results.extension_id = extensionId;
+  results.extension_identity = storePackage ? "UNPACKED_PATH" : "MANIFEST_KEY";
+  results.signed_store_identity_verified = false;
+  await mkdir(nativeDirectory, { recursive: true, mode: 0o700 });
+  const launcher = join(output, "fixture-native-launcher.sh");
+  await writeFile(
+    launcher,
+    `#!/bin/sh\n# MusicMute Local MVP isolated browser fixture\nexec /usr/bin/env -i HOME=${quote(homedir())} PATH='/usr/bin:/bin' LANG='en_US.UTF-8' MUSICMUTE_LOCAL_ROOT=${quote(localRoot)} MUSICMUTE_LOCAL_RUNTIME=${quote(runtime)} MUSICMUTE_LOCAL_TEST_MODE=1 MUSICMUTE_LOCAL_FIXTURE_AUDIO=${quote(vocals)} ${quote(python)} -I -B -S ${quote(join(root, "scripts/native-lock.py"))} ${quote(node)} ${quote(join(root, "dist/companion/host.js"))} "$@"\n`,
+    { mode: 0o700 },
+  );
+  await writeFile(
+    nativePath,
+    JSON.stringify(
+      {
+        name: "com.musicmute.local",
+        description: "MusicMute Local MVP isolated browser fixture",
+        path: launcher,
+        type: "stdio",
+        allowed_origins: [`chrome-extension://${extensionId}/`],
+      },
+      null,
+      2,
+    ),
+    { mode: 0o600 },
+  );
+  nativeRegistered = true;
   raw.listeners.push((message) => {
     if (message.method === "Target.attachedToTarget")
       void raw
@@ -319,7 +351,6 @@ try {
     waitForDebuggerOnStart: true,
     flatten: true,
   });
-  check("stable extension id", loaded.id === extensionId);
   const context = browser.contexts()[0];
   if (storePackage) {
     // Fulfill every YouTube request with owned fixture bytes. The production
@@ -604,7 +635,29 @@ try {
     "SEEK_RATE_VOLUME_FAILED",
   );
   check("seek rate and volume follow video", true);
+  results.player_mute_before = {
+    video: await page.locator("video").evaluate((v) => ({
+      muted: v.muted,
+      volume: v.volume,
+      paused: v.paused,
+      time: v.currentTime,
+    })),
+    audio: await audio.evaluate((a) => ({
+      muted: a.muted,
+      volume: a.volume,
+      paused: a.paused,
+      time: a.currentTime,
+    })),
+  };
   await page.locator(".ytp-mute-button").click();
+  results.player_mute_after_click = await page
+    .locator("video")
+    .evaluate((v) => ({
+      muted: v.muted,
+      volume: v.volume,
+      paused: v.paused,
+      time: v.currentTime,
+    }));
   await poll(
     () => audio.evaluate((a) => a.volume === 0),
     Boolean,
@@ -849,6 +902,16 @@ try {
   results.success = false;
   results.failure = error instanceof Error ? error.message : "E2E_FAILED";
   if (page) {
+    results.video_state = await page
+      .locator("video")
+      .evaluate((v) => ({
+        muted: v.muted,
+        volume: v.volume,
+        paused: v.paused,
+        time: v.currentTime,
+        rate: v.playbackRate,
+      }))
+      .catch(() => "unavailable");
     results.page_status = await page
       .locator("#musicmute-local-panel")
       .textContent()
@@ -868,7 +931,7 @@ try {
     )) {
       const evaluate = await targetEvaluator(target.targetId);
       results.audio_state = await evaluate(
-        '(()=>{const a=document.querySelector("audio");return a?{error:a.error?.code,paused:a.paused,ready:a.readyState,network:a.networkState,duration:Number.isFinite(a.duration)?a.duration:null}:null})()',
+        '(()=>{const a=document.querySelector("audio");return a?{error:a.error?.code,paused:a.paused,muted:a.muted,volume:a.volume,time:a.currentTime,ready:a.readyState,network:a.networkState,duration:Number.isFinite(a.duration)?a.duration:null}:null})()',
       ).catch(() => "unavailable");
     }
     for (const worker of browser.contexts()[0]?.serviceWorkers() ?? []) {

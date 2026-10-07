@@ -116,6 +116,7 @@ await build({
     "src/extension/content.ts",
     "src/extension/offscreen.ts",
     "src/extension/popup.ts",
+    "src/extension/privacy.ts",
   ],
   outdir: "dist/extension",
   platform: "browser",

@@ -23,9 +23,7 @@ import { createDashboardHandlers } from "@/test/handlers";
 import { dashboardServer } from "@/test/server";
 import {
   changeWorkerMachineState,
-  createWorkerInvitation,
   getWorkerDiagnostics,
-  listWorkerInvitations,
   listWorkerMachines,
   requestWorkerBenchmark,
   updateWorkerFleetPolicy,
@@ -58,25 +56,18 @@ describe("worker dashboard API contracts", () => {
     );
   });
 
-  it("passes opaque cursors and page limits for invitations and machine diagnostics", async () => {
+  it("passes opaque cursors and page limits for machine diagnostics", async () => {
     const api = client();
-    await listWorkerInvitations(api, { cursor: "next-invitation", limit: 25 });
     await getWorkerDiagnostics(api, "machine/unsafe", {
       cursor: "next-diagnostic",
       limit: 10,
     });
-
-    expect(api.get).toHaveBeenNthCalledWith(
-      1,
-      "/admin/worker-fleet/invitations?cursor=next-invitation&limit=25",
-    );
-    expect(api.get).toHaveBeenNthCalledWith(
-      2,
+    expect(api.get).toHaveBeenCalledWith(
       "/admin/worker-fleet/machines/machine%2Funsafe/diagnostics?cursor=next-diagnostic&limit=10",
     );
   });
 
-  it("uses the accepted enrollment, lifecycle and diagnostics routes", async () => {
+  it("uses the accepted lifecycle and diagnostics routes", async () => {
     const api = client();
     const command = {
       operationId: "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
@@ -84,11 +75,6 @@ describe("worker dashboard API contracts", () => {
       reason: "Synthetic contract fixture",
     };
 
-    await createWorkerInvitation(api, {
-      operationId: command.operationId,
-      expiresInSeconds: 900,
-      reason: command.reason,
-    });
     await changeWorkerMachineState(api, "machine/unsafe", "drain", command);
     await getWorkerDiagnostics(api, "machine/unsafe");
     await requestWorkerBenchmark(api, "machine/unsafe", {
@@ -99,11 +85,6 @@ describe("worker dashboard API contracts", () => {
 
     expect(api.post).toHaveBeenNthCalledWith(
       1,
-      "/admin/workers/invitations",
-      expect.objectContaining({ expiresInSeconds: 900 }),
-    );
-    expect(api.post).toHaveBeenNthCalledWith(
-      2,
       "/admin/workers/machines/machine%2Funsafe/drains",
       command,
     );
@@ -111,7 +92,7 @@ describe("worker dashboard API contracts", () => {
       "/admin/worker-fleet/machines/machine%2Funsafe/diagnostics",
     );
     expect(api.post).toHaveBeenNthCalledWith(
-      3,
+      2,
       "/admin/worker-fleet/machines/machine%2Funsafe/benchmark-runs",
       expect.objectContaining({ recipeId: "kim-vocals-v2" }),
     );
@@ -186,37 +167,62 @@ function renderPage(page: ReactNode, initialEntry: string) {
 }
 
 describe("worker dashboard pagination", () => {
-  it("opens the next invitation page and resets to the first on tab selection", async () => {
+  it("keeps machine controls independent of the registering account", async () => {
     const fixture = createDashboardFixture();
-    const first = fixture.workerInvitations[0]!;
-    const second = { ...first, invitationId: "next-invitation-id" };
-    const cursors: Array<string | null> = [];
+    fixture.user.status = "deleting";
+    fixture.user.workerRegistrationAllowed = false;
+    fixture.workerMachine.registeredByUserId = fixture.user.id;
     dashboardServer.use(...createDashboardHandlers(fixture));
-    dashboardServer.use(
-      http.get("*/admin/worker-fleet/invitations", ({ request }) => {
-        const cursor = new URL(request.url).searchParams.get("cursor");
-        cursors.push(cursor);
-        return HttpResponse.json(
-          toWireCase({
-            items: cursor ? [second] : [first],
-            nextCursor: cursor ? null : "next-invitation",
-            asOf: "2026-09-21T00:00:00.000Z",
-          }) as Record<string, unknown>,
-        );
-      }),
+    renderPage(
+      createElement(
+        Routes,
+        null,
+        createElement(Route, {
+          path: "/workers/:id",
+          element: createElement(WorkerMachinePage),
+        }),
+      ),
+      `/workers/${FIXTURE_IDS.workerMachine}`,
     );
+    expect(
+      await screen.findByText("Registered through account"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: fixture.user.id })).toHaveAttribute(
+      "href",
+      `/users/${fixture.user.id}`,
+    );
+    expect(screen.getByRole("button", { name: "Pause" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeEnabled();
+    expect(
+      fixture.requests.some(({ url }) => url.includes("worker-registration")),
+    ).toBe(false);
+  });
+
+  it("manages registered machines without invitation UI or reads", async () => {
+    const fixture = createDashboardFixture();
+    dashboardServer.use(...createDashboardHandlers(fixture));
     const user = userEvent.setup();
     renderPage(createElement(WorkerFleetPage), "/workers");
 
-    await user.click(await screen.findByRole("tab", { name: "Enrollment" }));
-    expect(await screen.findByText(first.invitationId)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Next page" }));
-    expect(await screen.findByText(second.invitationId)).toBeInTheDocument();
-    expect(cursors).toContain("next-invitation");
-
-    await user.click(screen.getByRole("tab", { name: "Machines" }));
-    await user.click(screen.getByRole("tab", { name: "Enrollment" }));
-    expect(await screen.findByText(first.invitationId)).toBeInTheDocument();
+    expect(
+      await screen.findByRole("tab", { name: "Machines" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("link", { name: /Windows Z440/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "Enrollment" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: /Create invitation|Create replacement/,
+      }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Policy" }));
+    expect(await screen.findByText("Claim policy")).toBeInTheDocument();
+    expect(
+      fixture.requests.some(({ url }) => url.includes("invitations")),
+    ).toBe(false);
   });
 
   it("opens the next page of machine diagnostics", async () => {

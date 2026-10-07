@@ -45,6 +45,38 @@ const frame = (
 });
 
 describe("macOS app command facade", () => {
+  it("preserves an automatic deletion target through the closed command facade", async () => {
+    const runCommand = vi.fn(
+      async (
+        _command: string,
+        _arguments: readonly string[],
+        context: MacUserCommandContext = {},
+      ) => {
+        context.stdout?.(
+          JSON.stringify({ status: "ok", confirmed: true, deleted: true }),
+        );
+        return 0;
+      },
+    );
+    const output: AppControlResponse[] = [];
+    await executeAppControlCommand(
+      frame("unpair", {
+        expected_machine_id: requestId,
+        deleted_only: true,
+        force: false,
+      }),
+      (value) => output.push(value),
+      { runCommand },
+    );
+    expect(runCommand.mock.calls[0]?.slice(0, 2)).toEqual([
+      "unpair",
+      ["--json", "--expected-machine-id", requestId, "--deleted-only"],
+    ]);
+    expect(output.at(-1)).toMatchObject({
+      type: "RESULT",
+      payload: { confirmed: true, deleted: true },
+    });
+  });
   it("dispatches every guarded operator capability without arbitrary CLI arguments", async () => {
     const runCommand = vi.fn(
       async (

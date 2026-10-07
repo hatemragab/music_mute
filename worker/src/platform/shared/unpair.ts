@@ -2,14 +2,14 @@ import { ControlPlaneError } from "../../runtime/control-plane-client.js";
 export async function awaitUnpair(
   operation: (
     force: boolean,
-  ) => Promise<{ confirmed: true; machineId: string }>,
+  ) => Promise<{ confirmed: true; machineId: string; deleted?: true }>,
   force: boolean,
   options: {
     wait?: (milliseconds: number) => Promise<void>;
     timeoutMs?: number;
     monotonicNow?: () => number;
   },
-): Promise<{ confirmed: true; machineId: string }> {
+): Promise<{ confirmed: true; machineId: string; deleted?: true }> {
   const wait =
     options.wait ??
     (async (milliseconds: number) =>

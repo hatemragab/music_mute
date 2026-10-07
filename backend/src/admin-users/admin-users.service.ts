@@ -5,6 +5,7 @@ import {
 import { AdminOperationsService } from '../admin/admin-operations.service.js';
 import { ProcessingAdmissionFence } from '../admin-settings/processing-settings.schema.js';
 import type { ResetAccountUsageDto } from './reset-account-usage.dto.js';
+import type { PutWorkerRegistrationDto } from './worker-registration.dto.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -139,6 +140,61 @@ export class AdminUsersService implements OnModuleInit {
       ...(await this.usage.readUsage(owner)),
       policyOverride: await this.policies.currentOverride(owner),
     };
+  }
+
+  async putWorkerRegistration(
+    actor: AdminActor,
+    id: string,
+    dto: PutWorkerRegistrationDto,
+  ) {
+    const owner = this.objectId(id);
+    const result = await this.operations.run(
+      actor,
+      {
+        operationId: dto.operationId,
+        route: 'PUT /admin/users/:id/worker-registration',
+        request: {
+          id,
+          expectedRevision: dto.expectedRevision,
+          workerRegistrationAllowed: dto.workerRegistrationAllowed,
+        },
+        action: 'users.worker_registration.update',
+        resourceType: 'user',
+        reason: dto.reason,
+      },
+      async (session) => {
+        const user = await this.users
+          .findOne({ _id: owner })
+          .session(session)
+          .lean();
+        if (!user) throw adminError('RESOURCE_NOT_FOUND');
+        if (user.status !== 'active') throw adminError('INVALID_REQUEST');
+        if ((user.adminRevision ?? 0) !== dto.expectedRevision)
+          throw adminError('REVISION_CONFLICT');
+        const updated = await this.users.updateOne(
+          {
+            _id: owner,
+            status: 'active',
+            ...(user.adminRevision === undefined
+              ? { adminRevision: trusted({ $exists: false }) }
+              : { adminRevision: dto.expectedRevision }),
+          },
+          {
+            $set: { workerRegistrationAllowed: dto.workerRegistrationAllowed },
+            $inc: { adminRevision: 1 },
+          },
+          { session, runValidators: true },
+        );
+        if (updated.modifiedCount !== 1) throw adminError('REVISION_CONFLICT');
+        return {
+          resourceId: id,
+          previousRevision: dto.expectedRevision,
+          revision: dto.expectedRevision + 1,
+          value: null,
+        };
+      },
+    );
+    return result.receipt;
   }
 
   async resetUsage(actor: AdminActor, id: string, dto: ResetAccountUsageDto) {

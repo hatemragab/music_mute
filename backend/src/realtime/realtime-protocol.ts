@@ -3,6 +3,7 @@ export const REALTIME_RESOURCES = [
   'job',
   'import',
   'local_media_sync',
+  'worker_registration',
   'usage',
   'policy',
   'admin.jobs',

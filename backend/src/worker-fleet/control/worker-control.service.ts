@@ -194,6 +194,7 @@ export class WorkerControlService {
   async listMachines(_actor: AdminActor, query: AdminWorkerListQueryDto) {
     const scope = workerListScope(query);
     const filter: Record<string, unknown> = {
+      deletedAt: null,
       ...(query.status ? { status: query.status } : {}),
       ...(query.groupId ? { groupId: query.groupId } : {}),
       ...(query.platform
@@ -263,7 +264,7 @@ export class WorkerControlService {
 
   async machineDetail(_actor: AdminActor, id: string) {
     const machine = await this.machines.findById(id).maxTimeMS(2000).lean();
-    if (!machine) throw adminError('RESOURCE_NOT_FOUND');
+    if (!machine || machine.deletedAt) throw adminError('RESOURCE_NOT_FOUND');
     const [slots, attempts, diagnostics, installation, commands] =
       await Promise.all([
         this.slots
@@ -332,7 +333,7 @@ export class WorkerControlService {
     id: string,
     query: AdminWorkerPageQueryDto = { limit: 50 },
   ) {
-    if (!(await this.machines.exists({ _id: id })))
+    if (!(await this.machines.exists({ _id: id, deletedAt: null })))
       throw adminError('RESOURCE_NOT_FOUND');
     const scope = JSON.stringify(['machine-diagnostics', id, query.limit]);
     const after = query.cursor
@@ -755,6 +756,7 @@ function presentMachine(machine: WorkerMachine) {
     machineId: machine._id,
     status: machine.status,
     label: machine.label,
+    registeredByUserId: machine.registeredByUserId ?? null,
     groupId: machine.groupId,
     policyRevision: machine.policyRevision,
     appliedRevision: machine.appliedRevision,

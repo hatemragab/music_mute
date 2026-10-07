@@ -19,6 +19,7 @@ import {
   RequireFreshAdminAuth,
 } from '../admin/admin.decorators.js';
 import { AdminUsersService } from './admin-users.service.js';
+import { PutWorkerRegistrationDto } from './worker-registration.dto.js';
 import {
   DeleteAccountPolicyOverrideDto,
   PutAccountPolicyOverrideDto,
@@ -37,6 +38,19 @@ export class AdminUsersController {
   @Get(':id')
   detail(@Param('id') id: string) {
     return this.users.detail(id);
+  }
+
+  @Put(':id/worker-registration')
+  @Header('Cache-Control', 'no-store')
+  @RequireAdminPermission('users.worker-registration.manage')
+  @RequireFreshAdminAuth()
+  @LimitAdmin('sensitive')
+  workerRegistration(
+    @Req() request: AuthRequest,
+    @Param('id') id: string,
+    @Body() body: PutWorkerRegistrationDto,
+  ) {
+    return this.users.putWorkerRegistration(request.adminActor!, id, body);
   }
 
   @Get(':id/account-usage')

@@ -66,6 +66,54 @@ export class ChildCommandError extends Error {
   }
 }
 
+const CHILD_STOP_MESSAGES = {
+  CHILD_TERMINATION_SIGNAL_FAILED: "Worker child termination signal failed",
+  CHILD_EXIT_UNCONFIRMED: "Worker child exit could not be confirmed",
+  PROCESS_GROUP_EXIT_UNCONFIRMED:
+    "Worker process group exit could not be confirmed",
+} as const;
+const CHILD_STOP_ERRNOS = new Set([
+  "EACCES",
+  "EINTR",
+  "EINVAL",
+  "EIO",
+  "EPERM",
+  "ESRCH",
+]);
+type ChildStopCode = keyof typeof CHILD_STOP_MESSAGES;
+
+/** Internal diagnostics only. Never retain arbitrary child/OS messages or causes. */
+export class ChildStopError extends Error {
+  readonly code: ChildStopCode;
+  readonly errno: string | undefined;
+
+  constructor(code: ChildStopCode, errno?: unknown) {
+    const safeCode = Object.hasOwn(CHILD_STOP_MESSAGES, code)
+      ? code
+      : "CHILD_EXIT_UNCONFIRMED";
+    super(CHILD_STOP_MESSAGES[safeCode]);
+    this.name = "ChildStopError";
+    this.code = safeCode;
+    this.errno =
+      typeof errno === "string" && CHILD_STOP_ERRNOS.has(errno)
+        ? errno
+        : undefined;
+  }
+}
+
+/** Only fixed stop stages and allowlisted errno can enter a supervisor summary. */
+export function childStopFailureSummary(error: unknown): string {
+  if (
+    !(error instanceof ChildStopError) ||
+    !Object.hasOwn(CHILD_STOP_MESSAGES, error.code)
+  )
+    return "CHILD_STOP_UNCONFIRMED";
+  const errno = CHILD_STOP_ERRNOS.has(error.errno ?? "")
+    ? error.errno
+    : undefined;
+  return error.code + (errno === undefined ? "" : `:${errno}`);
+}
+
 export class WorkerChildProcess {
   private currentIncarnation = randomUUID();
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -231,7 +279,14 @@ export class WorkerChildProcess {
           ),
         ]);
     } catch {
-      killProcessingTree(child);
+      try {
+        killProcessingTree(child);
+      } catch (error) {
+        throw new ChildStopError(
+          "CHILD_TERMINATION_SIGNAL_FAILED",
+          (error as NodeJS.ErrnoException).code,
+        );
+      }
       if (child.exitCode === null && child.signalCode === null) {
         await Promise.race([
           once(child, "exit"),
@@ -240,7 +295,7 @@ export class WorkerChildProcess {
       }
     }
     if (child.exitCode === null && child.signalCode === null)
-      throw new Error("Worker child exit could not be confirmed");
+      throw new ChildStopError("CHILD_EXIT_UNCONFIRMED");
     await this.confirmProcessGroupExit();
   }
 
@@ -258,12 +313,15 @@ export class WorkerChildProcess {
           if (this.processGroupPid === pid) this.processGroupPid = undefined;
           return;
         }
-        throw new Error("Worker process group exit could not be confirmed");
+        throw new ChildStopError(
+          "PROCESS_GROUP_EXIT_UNCONFIRMED",
+          (error as NodeJS.ErrnoException).code,
+        );
       }
       // Guardian exit alone cannot prove native inference/decoder descendants
       // have exited after a forced kill. Keep the GPU fence until the OS agrees.
       if (performance.now() >= deadline)
-        throw new Error("Worker process group exit could not be confirmed");
+        throw new ChildStopError("PROCESS_GROUP_EXIT_UNCONFIRMED");
       await delay(10);
     }
   }

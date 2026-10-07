@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -178,6 +179,59 @@ process.stdout.write(output);
 }
 
 describe("isolated local configuration", () => {
+  it.each([false, true])(
+    "validates segmented bootstrap compatibility (corrupt host: %s)",
+    async (corrupt) => {
+      platform();
+      const resources = await temporaryRoot();
+      const root = await temporaryRoot();
+      const payload = await packagedRuntimeFixture(resources, root);
+      const bootstrap = join(resources, PACKAGED_RUNTIME_BOOTSTRAP);
+      const document = JSON.parse(await readFile(bootstrap, "utf8"));
+      const files = document.runtime.files as { path: string }[];
+      const groups = [
+        ["node", "runtime/runtime/node/"],
+        ["python-ml", "runtime/runtime/python/"],
+        ["audio-tools", "runtime/runtime/bin/"],
+        ["javascript", "runtime/tools/youtube/"],
+      ] as const;
+      const components = groups.map(([id, prefix]) => ({
+        id,
+        url: "https://downloads.example.test/" + id + ".zip",
+        archive_bytes: 10,
+        archive_sha256: createHash("sha256").update(id).digest("hex"),
+        file_paths: files
+          .filter((file) => file.path.startsWith(prefix))
+          .map((file) => file.path),
+      }));
+      const checksum = createHash("sha256")
+        .update(components.map((part) => part.archive_sha256).join("\n") + "\n")
+        .digest("hex");
+      if (corrupt)
+        components[0]!.url = "https://unapproved.example.net/node.zip";
+      Object.assign(document.runtime, {
+        components,
+        archive_format: "zip-components",
+        archive_bytes: 40,
+        archive_sha256: checksum,
+      });
+      await writeFile(bootstrap, JSON.stringify(document), { mode: 0o600 });
+      const descriptorPath = join(root, PACKAGED_RUNTIME_ACTIVE_DESCRIPTOR);
+      const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+      descriptor.archive_sha256 = checksum;
+      await writeFile(descriptorPath, JSON.stringify(descriptor), {
+        mode: 0o600,
+      });
+      if (corrupt)
+        await expect(
+          resolvePackagedRuntime(resources, root),
+        ).rejects.toMatchObject({ code: "APP_RUNTIME_BOOTSTRAP_INVALID" });
+      else
+        await expect(
+          resolvePackagedRuntime(resources, root),
+        ).resolves.toMatchObject({ runtime_root: payload });
+    },
+  );
   it("packaged app uses the compatible active external runtime and persistent model root", async () => {
     platform();
     const resources = await temporaryRoot();

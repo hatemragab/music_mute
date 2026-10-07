@@ -16,6 +16,7 @@ import { WorkerCommandController } from './control/worker-command.controller.js'
 import { WorkerAuthGuard } from './auth/worker-auth.guard.js';
 import { AdminWorkerEnrollmentController } from './enrollment/admin-worker-enrollment.controller.js';
 import { WorkerEnrollmentController } from './enrollment/worker-enrollment.controller.js';
+import { UserWorkerInstallationController } from './enrollment/user-worker-installation.controller.js';
 import { WorkerEnrollmentService } from './enrollment/worker-enrollment.service.js';
 import { WorkerInstallationArtifactsService } from './enrollment/worker-installation-artifacts.service.js';
 import { WorkerInstallationQualificationService } from './enrollment/worker-installation-qualification.service.js';
@@ -46,6 +47,7 @@ import { WorkerHintController } from './control/worker-hint.controller.js';
   ],
   controllers: [
     WorkerEnrollmentController,
+    UserWorkerInstallationController,
     WorkerClaimController,
     WorkerLeaseController,
     WorkerAttemptController,

@@ -120,6 +120,8 @@ export class WorkerAuthGuard implements CanActivate {
       .findOne({ credentialDigest: digest })
       .maxTimeMS(2000)
       .lean();
+    if (machine?.deletedAt && !allowRevokedMachine)
+      throw workerError('WORKER_MACHINE_DELETED');
     if (!machine || (machine.status === 'revoked' && !allowRevokedMachine))
       throw workerError('WORKER_UNAUTHENTICATED');
     request.workerPrincipal = {

@@ -46,6 +46,7 @@ import {
   resolveMacAppExecutionLayout,
 } from "./app-installation-binding.js";
 import { MAC_RECIPE_IDS } from "./runtime-recipes.js";
+import { finishDeletedMacRegistration } from "./deleted-registration.js";
 
 export const PRODUCTION_BACKEND_BASE_URL = "https://api.music-mute.com";
 
@@ -523,6 +524,7 @@ export async function resumeMacUserInstallation(options: {
   }
   if (!(await service.status()).loaded)
     throw new Error("MusicMute worker LaunchAgent did not load");
+  await finishDeletedMacRegistration(layout, String(identity.machineId));
   await rm(join(transactionRoot, "enrollment.credential"), { force: true });
   await rm(journalPath);
   await syncDirectory(transactionRoot);

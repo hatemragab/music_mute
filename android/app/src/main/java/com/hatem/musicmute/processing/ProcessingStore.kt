@@ -98,6 +98,12 @@ internal val ProcessingOperation.hasUploadedInput: Boolean
 internal val ProcessingOperation.progressPhase: ProcessingPhase
     get() = if (phase == ProcessingPhase.CONFIRMING && !hasUploadedInput) ProcessingPhase.UPLOADING else phase
 
+private val terminalCloudStatuses = setOf(
+    JobStatus.READY.wireValue,
+    JobStatus.FAILED.wireValue,
+    JobStatus.CANCELLED.wireValue,
+)
+
 private fun retainProcessingHistory(previous: ProcessingOperation?, next: ProcessingOperation): ProcessingOperation =
     next.copy(lastReachedPhase = listOfNotNull(previous?.lastReachedPhase, previous?.progressPhase, next.lastReachedPhase)
         .filter { it in processingMilestones }
@@ -263,6 +269,24 @@ class ProcessingStore(
                 library = mergeLibrary(current, jobs),
                 schemaVersion = 3,
             )
+        }
+    }
+
+    /** Remove a confirmed upload only when this snapshot says its cloud job is finished.
+     * A missing page is not completion, and an upload still in progress stays recoverable.
+     */
+    suspend fun retireConfirmedTerminalOperations(uid: String, jobs: List<Job>) {
+        val terminalIds = jobs.asSequence()
+            .filter { it.status in terminalCloudStatuses }
+            .map { it.id }
+            .toSet()
+        if (terminalIds.isEmpty()) return
+        store(uid).updateData { current ->
+            validateOwner(uid, current)
+            val retained = current.operations.filterNot { operation ->
+                operation.phase == ProcessingPhase.COMPLETE && operation.jobId in terminalIds
+            }
+            if (retained.size == current.operations.size) current else current.copy(operations = retained)
         }
     }
 

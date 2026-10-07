@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { delimiter, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ChildCommandError,
+  ChildStopError,
   WorkerChildProcess,
 } from "../src/agent/child-process.js";
 import { WORKER_RECIPE_IDS } from "../protocol/v1/protocol.js";
@@ -27,6 +30,135 @@ afterEach(async () => {
 });
 
 describe("worker child lifecycle", () => {
+  it("identifies an unconfirmed child exit without retaining the shutdown error", async () => {
+    const fixture = new WorkerChildProcess({
+      command: "unused",
+      args: [],
+      cwd: ".",
+      stopTimeoutMs: 100,
+    });
+    const fake = Object.assign(new EventEmitter(), {
+      exitCode: null,
+      signalCode: null,
+      stdin: { writable: true },
+      kill: vi.fn().mockReturnValue(false),
+    });
+    Object.assign(fixture, {
+      child: fake as unknown as ChildProcessWithoutNullStreams,
+      send: () => ({
+        response: Promise.reject(new Error("sensitive child output")),
+      }),
+    });
+    const error = await fixture.stop().catch((failure: unknown) => failure);
+    expect(error).toMatchObject({
+      code: "CHILD_EXIT_UNCONFIRMED",
+      errno: undefined,
+    });
+    expect((error as Error).message).toBe(
+      "Worker child exit could not be confirmed",
+    );
+    expect(error).not.toHaveProperty("cause");
+    expect(fake.kill).toHaveBeenCalledWith("SIGKILL");
+  });
+
+  it("identifies a failed termination signal using only allowlisted errno", async () => {
+    const fixture = new WorkerChildProcess({
+      command: "unused",
+      args: [],
+      cwd: ".",
+      stopTimeoutMs: 100,
+    });
+    const fake = Object.assign(new EventEmitter(), {
+      exitCode: null,
+      signalCode: null,
+      stdin: { writable: true },
+      kill: () => {
+        throw Object.assign(new Error("sensitive OS message"), {
+          code: "EPERM",
+        });
+      },
+    });
+    Object.assign(fixture, {
+      child: fake as unknown as ChildProcessWithoutNullStreams,
+      send: () => ({
+        response: Promise.reject(new Error("sensitive child output")),
+      }),
+    });
+    const error = await fixture.stop().catch((failure: unknown) => failure);
+    expect(error).toMatchObject({
+      code: "CHILD_TERMINATION_SIGNAL_FAILED",
+      errno: "EPERM",
+    });
+    expect(error).not.toHaveProperty("cause");
+  });
+
+  it
+    .skipIf(process.platform === "win32")
+    .each(["EPERM", "sensitive-error-value"])(
+    "retains the process-group fence and sanitizes probe errno %s",
+    async (code) => {
+      const fixture = new WorkerChildProcess({
+        command: "unused",
+        args: [],
+        cwd: ".",
+      });
+      const pid = 2_147_483_647;
+      Object.assign(fixture, { processGroupPid: pid });
+      const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+        throw Object.assign(new Error("sensitive OS message"), { code });
+      });
+      try {
+        const error = await fixture.stop().catch((failure: unknown) => failure);
+        expect(error).toBeInstanceOf(ChildStopError);
+        expect(error).toMatchObject({
+          code: "PROCESS_GROUP_EXIT_UNCONFIRMED",
+          errno: code === "EPERM" ? "EPERM" : undefined,
+        });
+        expect(error).not.toHaveProperty("cause");
+        expect(kill).toHaveBeenCalledWith(-pid, 0);
+        expect(error).not.toHaveProperty("path");
+        kill.mockImplementation(() => {
+          throw Object.assign(new Error("group exited"), { code: "ESRCH" });
+        });
+        await fixture.stop();
+        expect(kill).toHaveBeenCalledTimes(2);
+        // A successful ESRCH probe clears only the positively absent group.
+        await fixture.stop();
+        expect(kill).toHaveBeenCalledTimes(2);
+      } finally {
+        kill.mockRestore();
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "classifies a live process-group deadline without relaxing its fence",
+    async () => {
+      const fixture = new WorkerChildProcess({
+        command: "unused",
+        args: [],
+        cwd: ".",
+        stopTimeoutMs: 100,
+      });
+      const pid = 2_147_483_647;
+      Object.assign(fixture, { processGroupPid: pid });
+      const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+      try {
+        await expect(fixture.stop()).rejects.toMatchObject({
+          code: "PROCESS_GROUP_EXIT_UNCONFIRMED",
+          errno: undefined,
+        });
+        expect(kill).toHaveBeenCalledWith(-pid, 0);
+        kill.mockImplementation(() => {
+          throw Object.assign(new Error("group exited"), { code: "ESRCH" });
+        });
+        await fixture.stop();
+      } finally {
+        kill.mockRestore();
+      }
+    },
+  );
+
   it.skipIf(process.platform === "win32")(
     "does not resolve stop until the actual descendant process group is gone",
     async () => {

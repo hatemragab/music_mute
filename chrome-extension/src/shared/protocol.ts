@@ -10,7 +10,7 @@ export const PROTOCOL_VERSION = 1 as const;
 export const NATIVE_HOST = "com.musicmute.local";
 /** Match Android's inclusive 20-minute processing ceiling. */
 export const MVP_MAX_DURATION_SECONDS = 1_200;
-export const VERSION = "0.1.0";
+export const VERSION = "0.1.1";
 
 export type ProviderId = "LOCAL_MACOS" | "LOCAL_WINDOWS" | "ONLINE_MUSICMUTE";
 export type JobState =

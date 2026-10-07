@@ -13,6 +13,7 @@ import { RealtimeSocketService } from '../dist/realtime/realtime-socket.service.
 import { RealtimeAuthService } from '../dist/realtime/realtime-auth.service.js';
 import { RealtimeResourcesService } from '../dist/realtime/realtime-resources.service.js';
 import { QueueProjectionService } from '../dist/realtime/queue-projection.service.js';
+import { UsersService } from '../dist/users/users.service.js';
 import { WebSocket } from 'ws';
 
 // Owned loopback infrastructure only. Real Mongo transactions/change streams, Redis,
@@ -134,13 +135,13 @@ test(
         uid: String(owner),
         authTimeSec: Math.floor(Date.now() / 1000),
       };
-      const mint = () =>
+      const mint = (userId = owner) =>
         auth.mint(
           {
             headers: {},
-            identity,
-            bearer: String(owner),
-            user: { _id: owner },
+            identity: { ...identity, uid: String(userId) },
+            bearer: String(userId),
+            user: { _id: userId },
           },
           'owner',
         );
@@ -192,6 +193,9 @@ test(
           {},
           {},
           queues,
+          {},
+          {},
+          new UsersService(users, {}),
         );
         const transport = new RealtimeSocketService(
           auth,
@@ -235,6 +239,89 @@ test(
         );
         clients.push({ socket, frames, feed, url, grant });
       }
+      // Approval rides the existing owner socket, on both API feed instances.
+      // No account ID or secret is carried by this read-only subscription.
+      const subscribeRegistration = (socket) =>
+        socket.send(
+          JSON.stringify({
+            type: 'subscribe',
+            subscription_id: 'registration',
+            resource: 'worker_registration',
+            params: {},
+          }),
+        );
+      const registration = (frames) =>
+        frames
+          .filter(
+            (f) =>
+              f.type === 'snapshot' && f.subscription_id === 'registration',
+          )
+          .at(-1)?.data;
+      for (const c of clients) subscribeRegistration(c.socket);
+      await until(
+        () =>
+          clients.every(
+            (c) =>
+              registration(c.frames)?.worker_registration_allowed === false,
+          ),
+        'missing legacy approval defaults false on both feeds',
+      );
+      const otherGrant = await mint(other);
+      const otherSocket = new WebSocket(clients[1].url, [
+        otherGrant.protocol,
+        `ticket.${otherGrant.ticket}`,
+      ]);
+      const otherFrames = [];
+      otherSocket.on('message', (data) =>
+        otherFrames.push(JSON.parse(String(data))),
+      );
+      await until(
+        () => otherFrames.some((f) => f.type === 'ready'),
+        'other owner ready',
+      );
+      subscribeRegistration(otherSocket);
+      await until(
+        () => registration(otherFrames)?.worker_registration_allowed === false,
+        'other account has its own permission',
+      );
+      await users.collection.updateOne(
+        { _id: owner },
+        { $set: { workerRegistrationAllowed: true } },
+      );
+      await until(
+        () =>
+          clients.every(
+            (c) => registration(c.frames)?.worker_registration_allowed === true,
+          ),
+        'committed approval reaches both feeds without HTTP reads',
+      );
+      await delay(300);
+      assert.deepEqual(registration(otherFrames), {
+        worker_registration_allowed: false,
+      });
+      for (const c of clients)
+        assert.deepEqual(registration(c.frames), {
+          worker_registration_allowed: true,
+        });
+      otherSocket.send(
+        JSON.stringify({
+          type: 'subscribe',
+          subscription_id: 'foreign-registration',
+          resource: 'worker_registration',
+          params: { user_id: String(owner) },
+        }),
+      );
+      await until(
+        () =>
+          otherFrames.some(
+            (f) =>
+              f.subscription_id === 'foreign-registration' && f.status === 400,
+          ),
+        'caller-supplied account is rejected',
+      );
+      const otherClosed = once(otherSocket, 'close');
+      otherSocket.close();
+      await otherClosed;
       // Bounded local baseline: six connections (the distributed account limit),
       // two feed/transport instances and 202 eligible queued jobs. No production SLA.
       const extraJobs = Array.from({ length: 200 }, () => ({
@@ -337,8 +424,11 @@ test(
       await delay(1200);
       for (const c of clients)
         assert.equal(
-          c.frames.filter((f) => f.type === 'snapshot').at(-1).data.queue
-            .position,
+          c.frames
+            .filter(
+              (f) => f.type === 'snapshot' && f.subscription_id === 'mine',
+            )
+            .at(-1).data.queue.position,
           2,
         );
       await jobs.collection.updateOne(
@@ -420,6 +510,28 @@ test(
       await until(
         () => recoveredFrames.some((f) => f.data?.queue?.position === 1),
         'fresh snapshot after feed loss',
+      );
+      subscribeRegistration(recovered);
+      await until(
+        () =>
+          registration(recoveredFrames)?.worker_registration_allowed === true,
+        'approval is recovered in the new stream',
+      );
+      await users.collection.updateOne(
+        { _id: owner },
+        { $set: { workerRegistrationAllowed: false } },
+      );
+      await until(
+        () =>
+          registration(recoveredFrames)?.worker_registration_allowed ===
+            false &&
+          registration(clients[1].frames)?.worker_registration_allowed ===
+            false,
+        'registration permission removal reaches both feeds',
+      );
+      assert.equal(
+        (await machines.findById('machine').lean()).status,
+        'active',
       );
       c.socket = recovered;
       const closed = clients.map((c) => once(c.socket, 'close'));

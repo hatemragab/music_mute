@@ -52,14 +52,20 @@ await exec(
   ],
   { timeout: 60_000, maxBuffer: 128 * 1024 },
 );
-for (const name of [
+const suites = [
   "NativeTests",
   "DesktopTests",
   "UpdaterTests",
   "BrowserProcessingBridgeTests",
   "WorkerTests",
   "SettingsTests",
-]) {
+];
+const requested = process.argv.slice(2);
+assert.ok(
+  requested.every((name) => suites.includes(name)),
+  "UNKNOWN_NATIVE_SUITE",
+);
+for (const name of requested.length ? [...new Set(requested)] : suites) {
   const binary = join(output, name);
   await exec(
     "/usr/bin/xcrun",

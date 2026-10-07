@@ -15,6 +15,7 @@ export const PERMISSIONS = [
   "jobs.manage",
   "users.read",
   "users.processing.manage",
+  "users.worker-registration.manage",
   "users.restrictions.manage",
   "users.account-recovery.manage",
   "abuse.read",
@@ -133,6 +134,8 @@ export interface UserSummary {
 }
 
 export interface UserDetail extends UserSummary {
+  workerRegistrationAllowed: boolean;
+  providers?: string[];
   processingCounts: Record<string, number>;
   recentJobIds: string[];
   deletion: {

@@ -35,10 +35,13 @@ data class AudioTaskPresentation(
     val importOnly: Boolean = false,
     val serverStageTimings: ServerStageTimings? = null,
     val createdAtMillis: Long = 0,
+    // Confirmed cloud work keeps its last server status for recovery, but that
+    // status is not a current Home job until a live snapshot includes it.
+    val awaitingLiveJob: Boolean = false,
 ) {
     // Keep unfinished local reviews/recovery accessible without restoring terminal cloud history.
     val visibleOnHome: Boolean
-        get() = active || stage == AudioTaskStage.REVIEW || (jobId == null && (canRetry || canDelete))
+        get() = !awaitingLiveJob && (active || stage == AudioTaskStage.REVIEW || (jobId == null && (canRetry || canDelete)))
 }
 
 fun audioTaskPresentations(
@@ -57,11 +60,15 @@ fun audioTaskPresentations(
     }.toMutableList()
     val represented = merged.mapNotNull { it.operationId }.toSet()
     operations.filterNot { it.operationId in represented || it.pendingDelete }
-        .forEach { merged += presentation(it, null) }
-    imports.filter { record -> jobs.none { it.id == record.jobId } &&
-        !(record.status == "submitted" && (record.jobObserved || record.createdAtMillis == 0L)) }.forEach { record ->
-        merged += importPresentation(record)
-    }
+        .forEach { operation ->
+            val task = presentation(operation, null)
+            merged += if (operation.phase == ProcessingPhase.COMPLETE && operation.jobId != null)
+                task.copy(awaitingLiveJob = true) else task
+        }
+    // A submitted import belongs to its server job. Showing the saved record
+    // before that job arrives paints a finished job as still queued.
+    imports.filter { record -> jobs.none { it.id == record.jobId } && record.status != "submitted" }
+        .forEach { record -> merged += importPresentation(record) }
     return merged.sortedByDescending(AudioTaskPresentation::createdAtMillis)
 }
 

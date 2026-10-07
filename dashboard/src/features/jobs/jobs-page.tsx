@@ -8,6 +8,7 @@ import { useAdminSession } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
 import { validateDateRange } from "@/components/date-range";
 import { ExportCsvButton } from "@/components/export-csv-button";
+import { RefreshButton } from "@/components/refresh-button";
 import {
   EmptyState,
   ErrorState,
@@ -75,6 +76,12 @@ export function JobsPage() {
         description="Inspect job status, owner, source, timing and finalized results."
         actions={
           <>
+            <RefreshButton
+              label="Refresh jobs"
+              refreshing={jobs.isFetching}
+              disabled={Boolean(dateError)}
+              onRefresh={() => void jobs.refetch()}
+            />
             {can("exports.read") ? (
               <ExportCsvButton
                 path={withQuery("/admin/exports/jobs.csv", filters)}

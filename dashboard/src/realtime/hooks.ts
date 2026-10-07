@@ -15,7 +15,6 @@ import type {
 import type { ReleaseUploadStatus } from "@/features/releases/releases-api";
 import type {
   WorkerDiagnosticPage,
-  WorkerInvitationPage,
   WorkerMachineDetail,
   WorkerMachinePage,
 } from "@/features/workers/worker-types";
@@ -30,7 +29,6 @@ interface Resources {
   "admin.workers": WorkerMachinePage;
   "admin.worker": WorkerMachineDetail;
   "admin.diagnostics": WorkerDiagnosticPage;
-  "admin.invitations": WorkerInvitationPage;
   "admin.recoveries": Page<AccountRecoveryRequest>;
   "admin.recovery_summary": AccountRecoveryQueueSummary;
   "admin.release_upload": ReleaseUploadStatus;
@@ -76,7 +74,7 @@ export function useLiveQuery<R extends keyof Resources>({
     queryKey: stableKey,
     enabled,
     queryFn: ({ signal }) =>
-      client.read<Resources[R]>(resource, stableParams, signal),
+      client.read<Resources[R]>(resource, stableParams, signal, true),
     staleTime: Infinity,
     retry: false,
     refetchOnMount: false,

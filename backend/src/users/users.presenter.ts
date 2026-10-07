@@ -7,5 +7,6 @@ export function presentUser(user: UserDocument) {
     email: user.email,
     emailVerified: user.emailVerified,
     providers: [...user.providerIds],
+    workerRegistrationAllowed: user.workerRegistrationAllowed === true,
   };
 }

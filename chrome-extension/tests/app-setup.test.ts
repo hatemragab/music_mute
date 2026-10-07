@@ -1,5 +1,6 @@
 import {
   chmod,
+  link,
   mkdtemp,
   mkdir,
   open,
@@ -39,6 +40,7 @@ import * as tools from "../src/companion/local-provider.js";
 import * as diagnosticIdentity from "../src/companion/diagnostic-identity.js";
 import { checkInstallation } from "../src/companion/installation-check.js";
 import { type LocalConfig } from "../src/companion/config.js";
+import { VERSION } from "../src/shared/protocol.js";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -54,6 +56,29 @@ vi.mock("node:os", async (importOriginal) => {
 });
 
 const roots: string[] = [];
+// Preserve the original unpacked identity independently of the current Store key.
+const DEVELOPMENT_EXTENSION_KEY =
+  "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA9UG0PJix+Qbfilg2uOsSwxDVinNT6YhJrna0TQ2FyIc9MsuPzJexzXDF/+KPQfW+2S7BqsrxNxDYPhZ2OsNU2OHVLJZWoXa2CkbbXJFZP5JQH2KQHexiWXsCNpMCq852zg3WbdlZsrhQTGvHPw9PXjuzbJQCXGMGkVKC8jzji9wyp5gT9JTMIuJF6M2sd400vCC/ZxvCIys9KGhQPrU46ThcXg1S0nNaiszlRhCoq46OsSkPzKffo90fcU4A4cwry8uAHoi5aax6moGhRMGS4AczVAUlWWuxV5PqqJ9hNvOC0iK2BwIehDfwMemVT+oRb/U07Ek4HhaJQefUKMcUmQIDAQAB";
+const DEVELOPMENT_EXTENSION_ORIGIN =
+  "chrome-extension://dclpfemnpknfdlpcbfcjkmdbnociippd/";
+const bundledManifestPath = join(
+  import.meta.dirname,
+  "../src/extension/static/manifest.json",
+);
+
+async function expectedBundledExtensionOrigin(): Promise<string> {
+  const manifest = JSON.parse(await readFile(bundledManifestPath, "utf8"));
+  const { createHash: hash } =
+    await vi.importActual<typeof import("node:crypto")>("node:crypto");
+  const prefix = hash("sha256")
+    .update(Buffer.from(manifest.key, "base64"))
+    .digest()
+    .subarray(0, 16);
+  const id = [...prefix]
+    .map((byte) => String.fromCharCode(97 + (byte >> 4), 97 + (byte & 15)))
+    .join("");
+  return `chrome-extension://${id}/`;
+}
 const adequateResources: RuntimeResourceProbe = {
   availableDiskBytes: async () => 100_000_000_000n,
   availableMemoryBytes: async () => 100_000_000_000n,
@@ -71,7 +96,9 @@ afterEach(async () => {
     roots.splice(0).map((path) => rm(path, { recursive: true, force: true })),
   );
 });
-async function fixture(): Promise<{ config: LocalConfig; userHome: string }> {
+async function fixture(
+  extensionKey?: string,
+): Promise<{ config: LocalConfig; userHome: string }> {
   const root = await mkdtemp(join(tmpdir(), "musicmute-app-test-"));
   roots.push(root);
   const resources = join(root, "Test App's.app", "Contents", "Resources");
@@ -79,11 +106,9 @@ async function fixture(): Promise<{ config: LocalConfig; userHome: string }> {
   const runtime = join(state, "runtime/releases/macos-arm64-test-v1/runtime");
   await mkdir(join(resources, "extension"), { recursive: true });
   const source = JSON.parse(
-    await readFile(
-      join(import.meta.dirname, "../src/extension/static/manifest.json"),
-      "utf8",
-    ),
-  ) as object;
+    await readFile(bundledManifestPath, "utf8"),
+  ) as Record<string, unknown>;
+  if (extensionKey !== undefined) source.key = extensionKey;
   await writeFile(
     join(resources, "extension/manifest.json"),
     JSON.stringify(source),
@@ -106,6 +131,16 @@ async function fixture(): Promise<{ config: LocalConfig; userHome: string }> {
     runner_path: join(resources, "engine/local_pipeline.py"),
   };
   return { config, userHome: join(root, "user's home") };
+}
+
+async function replaceBundledExtensionKey(
+  config: LocalConfig,
+): Promise<string> {
+  const path = join(config.app_resources!, "extension/manifest.json");
+  const manifest = JSON.parse(await readFile(path, "utf8"));
+  manifest.key = Buffer.alloc(128, 1).toString("base64");
+  await writeFile(path, JSON.stringify(manifest));
+  return extensionOrigin(config.app_resources!);
 }
 
 async function metadataReadyFixture(): Promise<{
@@ -188,7 +223,7 @@ async function setupReadinessRecord(
         app.ctimeMs,
         config.runtime_id ?? null,
         config.runtime_root ?? null,
-        "0.1.0",
+        VERSION,
       ]),
       engine: true,
       model: true,
@@ -206,7 +241,7 @@ describe("standalone app setup", () => {
     const { config } = await fixture();
     vi.spyOn(process, "getuid").mockReturnValue(process.getuid!() + 1);
     expect(await extensionOrigin(config.app_resources!)).toBe(
-      "chrome-extension://dclpfemnpknfdlpcbfcjkmdbnociippd/",
+      await expectedBundledExtensionOrigin(),
     );
     await expect(privateDirectory(config.root)).rejects.toMatchObject({
       code: "LOCAL_DIRECTORY_NOT_PRIVATE",
@@ -220,7 +255,7 @@ describe("standalone app setup", () => {
   it("registers the exact origin and invokes only the quoted native app entrypoint", async () => {
     const { config, userHome } = await fixture();
     expect(await extensionOrigin(config.app_resources!)).toBe(
-      "chrome-extension://dclpfemnpknfdlpcbfcjkmdbnociippd/",
+      await expectedBundledExtensionOrigin(),
     );
     await registerNativeHost(config, userHome);
     const paths = registrationPaths(config, userHome);
@@ -511,6 +546,200 @@ describe("standalone app setup", () => {
     expect(
       (await inspectAppStatus(config, userHome)).extension_registered,
     ).toBe(true);
+  });
+  it.each(["current", "mvp"])(
+    "migrates the known development origin from an owned %s launcher to only the packaged origin",
+    async (launcher) => {
+      const { config, userHome } = await fixture(DEVELOPMENT_EXTENSION_KEY);
+      await registerNativeHost(config, userHome);
+      const paths = registrationPaths(config, userHome);
+      const manifest = JSON.parse(await readFile(paths.manifest, "utf8"));
+      expect(manifest.allowed_origins).toEqual([DEVELOPMENT_EXTENSION_ORIGIN]);
+      if (launcher === "mvp") {
+        manifest.path = join(
+          userHome,
+          "Library/Application Support/MusicMuteLocalMvp/native-launcher.sh",
+        );
+        await mkdir(dirname(manifest.path), { recursive: true, mode: 0o700 });
+        await writeFile(
+          manifest.path,
+          "#!/bin/sh\n# MusicMute Local MVP development launcher\nexit 0\n",
+          { mode: 0o700 },
+        );
+        await writeFile(paths.manifest, JSON.stringify(manifest));
+      }
+      const newOrigin = await replaceBundledExtensionKey(config);
+      expect(newOrigin).not.toBe(manifest.allowed_origins[0]);
+      expect(
+        (await inspectAppStatus(config, userHome)).extension_registered,
+      ).toBe(false);
+
+      await registerNativeHost(config, userHome);
+      await registerNativeHost(config, userHome);
+
+      const migrated = JSON.parse(await readFile(paths.manifest, "utf8"));
+      expect(migrated.allowed_origins).toEqual([newOrigin]);
+      expect(migrated.path).toBe(paths.launcher);
+      expect(await readFile(paths.launcher, "utf8")).toBe(
+        launcherContents(config, userHome),
+      );
+      expect(
+        (await inspectAppStatus(config, userHome)).extension_registered,
+      ).toBe(true);
+    },
+  );
+  it.each([
+    { origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"] },
+    { origins: ["chrome-extension://*/"] },
+    {
+      origins: [
+        "chrome-extension://dclpfemnpknfdlpcbfcjkmdbnociippd/",
+        "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/",
+      ],
+    },
+    { origins: "chrome-extension://dclpfemnpknfdlpcbfcjkmdbnociippd/" },
+  ])(
+    "preserves foreign or malformed prior origins during a key change: %j",
+    async ({ origins }) => {
+      const { config, userHome } = await fixture(DEVELOPMENT_EXTENSION_KEY);
+      await registerNativeHost(config, userHome);
+      const paths = registrationPaths(config, userHome);
+      const manifest = JSON.parse(await readFile(paths.manifest, "utf8"));
+      manifest.allowed_origins = origins;
+      const prior = JSON.stringify(manifest);
+      await writeFile(paths.manifest, prior);
+      const launcher = await readFile(paths.launcher, "utf8");
+      await replaceBundledExtensionKey(config);
+
+      await expect(registerNativeHost(config, userHome)).rejects.toMatchObject({
+        code: "FOREIGN_NATIVE_REGISTRATION_EXISTS",
+      });
+      expect(await readFile(paths.manifest, "utf8")).toBe(prior);
+      expect(await readFile(paths.launcher, "utf8")).toBe(launcher);
+    },
+  );
+  it("preserves an owned registration for an unrecognized prior extension key", async () => {
+    const { config, userHome } = await fixture(
+      Buffer.alloc(128, 2).toString("base64"),
+    );
+    await registerNativeHost(config, userHome);
+    const paths = registrationPaths(config, userHome);
+    const prior = await readFile(paths.manifest, "utf8");
+    const priorOrigin = JSON.parse(prior).allowed_origins[0];
+    const launcher = await readFile(paths.launcher, "utf8");
+    expect(priorOrigin).not.toBe(DEVELOPMENT_EXTENSION_ORIGIN);
+    expect(await replaceBundledExtensionKey(config)).not.toBe(priorOrigin);
+
+    await expect(registerNativeHost(config, userHome)).rejects.toMatchObject({
+      code: "FOREIGN_NATIVE_REGISTRATION_EXISTS",
+    });
+    expect(await readFile(paths.manifest, "utf8")).toBe(prior);
+    expect(await readFile(paths.launcher, "utf8")).toBe(launcher);
+  });
+  it.each(["name", "type", "path"])(
+    "does not migrate a known development origin with a foreign %s",
+    async (field) => {
+      const { config, userHome } = await fixture(DEVELOPMENT_EXTENSION_KEY);
+      await registerNativeHost(config, userHome);
+      const paths = registrationPaths(config, userHome);
+      const manifest = JSON.parse(await readFile(paths.manifest, "utf8"));
+      manifest[field] = "foreign";
+      const prior = JSON.stringify(manifest);
+      await writeFile(paths.manifest, prior);
+      const launcher = await readFile(paths.launcher, "utf8");
+      await replaceBundledExtensionKey(config);
+
+      await expect(registerNativeHost(config, userHome)).rejects.toMatchObject({
+        code: "FOREIGN_NATIVE_REGISTRATION_EXISTS",
+      });
+      expect(await readFile(paths.manifest, "utf8")).toBe(prior);
+      expect(await readFile(paths.launcher, "utf8")).toBe(launcher);
+    },
+  );
+  it.each(["null", "[]", '"registration"', "{"])(
+    "preserves a malformed native manifest during a key change: %s",
+    async (prior) => {
+      const { config, userHome } = await fixture(DEVELOPMENT_EXTENSION_KEY);
+      await registerNativeHost(config, userHome);
+      const paths = registrationPaths(config, userHome);
+      await writeFile(paths.manifest, prior);
+      await replaceBundledExtensionKey(config);
+
+      await expect(registerNativeHost(config, userHome)).rejects.toMatchObject({
+        code: "FOREIGN_NATIVE_REGISTRATION_EXISTS",
+      });
+      expect(await readFile(paths.manifest, "utf8")).toBe(prior);
+    },
+  );
+  it("requires an existing owned launcher when replacing the development origin", async () => {
+    const { config, userHome } = await fixture(DEVELOPMENT_EXTENSION_KEY);
+    await registerNativeHost(config, userHome);
+    const paths = registrationPaths(config, userHome);
+    const manifest = await readFile(paths.manifest, "utf8");
+    await unlink(paths.launcher);
+    await replaceBundledExtensionKey(config);
+
+    await expect(registerNativeHost(config, userHome)).rejects.toMatchObject({
+      code: "FOREIGN_NATIVE_LAUNCHER_EXISTS",
+    });
+    expect(await readFile(paths.manifest, "utf8")).toBe(manifest);
+    await expect(stat(paths.launcher)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+  it.each([
+    "#!/bin/sh\n# another application's launcher\n",
+    "#!/bin/sh\n# unowned prefix\n# MusicMute Local companion launcher v1\n",
+    "#!/bin/sh\n# MusicMute Local companion launcher v1-extra\n",
+  ])("does not migrate a foreign launcher containing %j", async (foreign) => {
+    const { config, userHome } = await fixture(DEVELOPMENT_EXTENSION_KEY);
+    await registerNativeHost(config, userHome);
+    const paths = registrationPaths(config, userHome);
+    const manifest = await readFile(paths.manifest, "utf8");
+    await writeFile(paths.launcher, foreign);
+    await replaceBundledExtensionKey(config);
+
+    await expect(registerNativeHost(config, userHome)).rejects.toMatchObject({
+      code: "FOREIGN_NATIVE_LAUNCHER_EXISTS",
+    });
+    expect(await readFile(paths.manifest, "utf8")).toBe(manifest);
+    expect(await readFile(paths.launcher, "utf8")).toBe(foreign);
+  });
+  it.each([
+    "symlink",
+    "hardlink",
+    "writable-launcher",
+    "writable-manifest",
+    "foreign-launcher-owner",
+  ])("does not migrate unsafe registration files: %s", async (unsafe) => {
+    const { config, userHome } = await fixture(DEVELOPMENT_EXTENSION_KEY);
+    await registerNativeHost(config, userHome);
+    const paths = registrationPaths(config, userHome);
+    const manifest = await readFile(paths.manifest, "utf8");
+    if (unsafe === "symlink") {
+      const target = join(config.root, "launcher-target");
+      await rename(paths.launcher, target);
+      await symlink(target, paths.launcher);
+    } else if (unsafe === "hardlink") {
+      await link(paths.launcher, join(config.root, "launcher-copy"));
+    } else if (unsafe === "foreign-launcher-owner") {
+      const uid = process.getuid!();
+      vi.spyOn(process, "getuid")
+        .mockReturnValueOnce(uid)
+        .mockReturnValueOnce(uid)
+        .mockReturnValue(uid + 1);
+    } else {
+      await chmod(
+        unsafe === "writable-launcher" ? paths.launcher : paths.manifest,
+        0o722,
+      );
+    }
+    await replaceBundledExtensionKey(config);
+
+    await expect(registerNativeHost(config, userHome)).rejects.toMatchObject({
+      code: "UNSAFE_SETUP_FILE",
+    });
+    expect(await readFile(paths.manifest, "utf8")).toBe(manifest);
   });
   it("repairs app relocation but preserves a foreign native registration", async () => {
     const { config, userHome } = await fixture();
@@ -1078,10 +1307,48 @@ describe("standalone app setup", () => {
       const status = await inspectAppStatus(config, userHome);
       expect(status.youtube_ready).toBe(false);
       expect(status.local_processing_ready).toBe(true);
+      for (const component of ["downloader", "javascript", "token_provider"]) {
+        expect(status.components).toContainEqual({
+          component,
+          state: "invalid",
+          error_code: "SETUP_REQUIRED",
+        });
+      }
       await expect(assertYouTubeSetupReady(config)).rejects.toMatchObject({
         code: "SETUP_REQUIRED",
       });
       expect(check).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    ["downloader", "YT_DLP_IDENTITY_INVALID"],
+    ["javascript", "DENO_MISSING"],
+    ["token_provider", "PO_TOKEN_PROVIDER_INVALID"],
+  ] as const)(
+    "keeps missing %s actionable when readiness evidence is stale",
+    async (component, code) => {
+      const { config, userHome } = await metadataReadyFixture();
+      await setupReadinessRecord(config);
+      await writeFile(join(config.app_resources!, "new-build"), "fixture");
+      const path = {
+        downloader: config.yt_dlp_path,
+        javascript: config.js_runtime_path,
+        token_provider: join(
+          config.youtube_runtime_root!,
+          "provider/src/generate_once.ts",
+        ),
+      }[component];
+      await unlink(path);
+      const probe = vi.spyOn(configModule, "inspectYouTubeReadiness");
+      const status = await inspectAppStatus(config, userHome);
+      expect(status.components).toContainEqual({
+        component,
+        state: "invalid",
+        error_code: code,
+      });
+      expect(status.youtube_ready).toBe(false);
+      expect(status.local_processing_ready).toBe(true);
+      expect(probe).not.toHaveBeenCalled();
     },
   );
   it("does not depend on the developer user's model or runtime directories", async () => {

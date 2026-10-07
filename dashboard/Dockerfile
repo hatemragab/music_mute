@@ -4,17 +4,21 @@ FROM node:24-alpine AS build
 WORKDIR /app
 
 COPY dashboard/package.json dashboard/package-lock.json ./
-RUN npm ci
-
 COPY dashboard/index.html dashboard/tsconfig*.json dashboard/vite.config.ts dashboard/vite-environment.ts ./
 COPY dashboard/public ./public
 COPY dashboard/src ./src
 ARG SENTRY_RELEASE
-RUN --mount=type=secret,id=sentry_auth_token,env=SENTRY_AUTH_TOKEN \
-    if [ -n "${SENTRY_AUTH_TOKEN:-}" ]; then \
-      test -n "$SENTRY_RELEASE"; \
+# Resolve the optional secret before the long install, then expose it only to
+# the build. This avoids needing a new BuildKit session lookup after npm ci.
+RUN --mount=type=secret,id=sentry_auth_token \
+    set -eu; \
+    npm ci --ignore-scripts; \
+    if [ -s /run/secrets/sentry_auth_token ]; then \
+      test -n "${SENTRY_RELEASE:-}"; \
+      IFS= read -r SENTRY_AUTH_TOKEN < /run/secrets/sentry_auth_token || test -n "${SENTRY_AUTH_TOKEN:-}"; \
+      export SENTRY_AUTH_TOKEN; \
     fi; \
-    SENTRY_RELEASE="$SENTRY_RELEASE" npm run build
+    SENTRY_RELEASE="${SENTRY_RELEASE:-}" npm run build
 
 FROM node:24-alpine AS production
 

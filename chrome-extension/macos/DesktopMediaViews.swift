@@ -73,168 +73,16 @@ struct DesktopHomeView: View {
   @State private var confirmCloud = false
   @State private var cloudConfirmation: DesktopCloudConfirmation?
   @State private var handoffCloudSelected = false
+  @State private var cloudSignInRequired = false
   @State private var estimatedCloudSeconds: Int?
   @State private var estimatedCloudSource: String?
   @Environment(\.locale) private var locale
   @FocusState private var linkFocused: Bool
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
+      studioConsole
       accountAndProductsCard
-      HStack(alignment: .firstTextBaseline) {
-        Label("New voice", systemImage: "waveform.badge.plus").font(.title2.weight(.semibold))
-        Spacer()
-        Label("Audio only · up to 20 minutes", systemImage: "timer")
-          .font(.caption).foregroundStyle(Brand.secondary)
-      }
-      if account.updateRequired {
-        Label("Update MusicMute before starting new processing.", systemImage: "arrow.down.app")
-          .foregroundStyle(Brand.amber)
-        if let build = account.requiredBuild {
-          Text("Required app build: \(build)").font(.caption).foregroundStyle(Brand.secondary)
-        }
-        Button("Open MusicMute website") {
-          MusicMuteProductLinks.open(.downloads)
-        }.buttonStyle(.bordered)
-      }
-      Text(
-        "Paste a supported video link or choose an audio file. MusicMute keeps the full timeline and prepares voice-only audio."
-      )
-      .font(.body).foregroundStyle(Brand.secondary)
-      Picker("Source", selection: $source) {
-        ForEach(DesktopImportSourcePreference.allCases, id: \.self) { option in
-          Label(
-            LocalizedStringKey(option.title),
-            systemImage: option == .youtube ? "link" : "waveform"
-          )
-          .tag(option.rawValue)
-        }
-      }.pickerStyle(.segmented).accessibilityIdentifier("import_source")
-      if selectedSource == .youtube {
-        HStack(spacing: 10) {
-          TextField("Paste a supported video URL", text: $link)
-            .textFieldStyle(.roundedBorder)
-            .controlSize(.large)
-            .focused($linkFocused)
-            .onSubmit { startProcessing() }
-            .accessibilityIdentifier("import_youtube_url")
-          Button("Paste", systemImage: "doc.on.clipboard") { pasteLink() }
-            .buttonStyle(.bordered).controlSize(.large)
-            .help("Paste a video URL from the Clipboard")
-        }
-        .environment(\.layoutDirection, .leftToRight)
-      } else {
-        HStack(spacing: 12) {
-          Button("Choose Audio…", systemImage: "folder") { chooseAudio() }
-            .buttonStyle(.bordered).controlSize(.large)
-            .accessibilityIdentifier("import_choose_file")
-          VStack(alignment: .leading, spacing: 3) {
-            Text(file?.lastPathComponent ?? "No audio selected").lineLimit(1)
-            Text("You can also drop an audio file anywhere on this card.")
-              .font(.caption).foregroundStyle(Brand.secondary)
-          }
-        }
-      }
-      Picker("Process using", selection: processingSelection) {
-        ForEach(DesktopProcessingPreference.allCases, id: \.self) { option in
-          Label(
-            LocalizedStringKey(option.title),
-            systemImage: option == .local ? "desktopcomputer" : "cloud"
-          )
-          .tag(option.rawValue)
-        }
-      }.pickerStyle(.segmented).accessibilityIdentifier("processing_mode")
-      Text("This choice is saved and also used by the Chrome extension.")
-        .font(.caption).foregroundStyle(Brand.secondary)
-      Label(
-        LocalizedStringKey(
-          selectedProcessing == .local
-            ? "Uses your Mac. No cloud processing minutes."
-            : "Uses the same account processing allowance as Android."),
-        systemImage: selectedProcessing == .local ? "desktopcomputer" : "cloud"
-      )
-      .font(.callout).foregroundStyle(Brand.secondary)
-      if selectedSource == .youtube {
-        Text(
-          LocalizedStringKey(
-            account.signedIn
-              ? "Video-link originals and voice results may be added to MusicMute’s reusable shared cache. Your result is also linked to your account library."
-              : "Video-link originals and voice results may be added to MusicMute’s reusable shared cache. Sign in to link the result to your account library."
-          )
-        )
-        .font(.caption).foregroundStyle(Brand.secondary)
-      } else if account.signedIn {
-        Text(
-          "Audio files stay private. After local processing, your original and voice result are saved to your account; storage and transfer allowances apply."
-        )
-        .font(.caption).foregroundStyle(Brand.secondary)
-      } else {
-        Text("Audio files stay on this Mac unless you sign in to save them to your account.")
-          .font(.caption).foregroundStyle(Brand.secondary)
-      }
-      if selectedProcessing == .cloud {
-        Button(account.signedIn ? "Review or switch account" : "Sign in to use MusicMute cloud") {
-          openAccount()
-        }.buttonStyle(.bordered).accessibilityIdentifier("cloud_open_account")
-        if let usage = DesktopUsagePresentation.parse(workspace.usage) {
-          Text(
-            "Remaining this month: \(DesktopUsagePresentation.durationLabel(seconds: usage.processing.remaining, locale: locale))"
-          )
-          .font(.callout).foregroundStyle(Brand.secondary)
-          Text(
-            "Allowance resets \(DesktopUsagePresentation.resetLabel(usage.resetAt, locale: locale))"
-          )
-          .font(.caption).foregroundStyle(Brand.secondary)
-        } else {
-          Text(
-            "Your current allowance appears after account connection. Cloud processing requires an available allowance."
-          )
-          .font(.caption).foregroundStyle(Brand.secondary)
-        }
-        if let seconds = estimatedCloudSeconds {
-          Text(
-            "Estimated processing usage: \(DesktopUsagePresentation.durationLabel(seconds: Int64(seconds), locale: locale))"
-          )
-          .font(.callout).foregroundStyle(Brand.secondary)
-        }
-        Text(
-          "New cloud processing uses the full audio duration, rounded up to seconds. Compatible saved results may be reused without new processing usage. The server confirms admission and usage."
-        )
-        .font(.caption).foregroundStyle(Brand.secondary)
-      }
-      Toggle("I have permission to process this audio", isOn: $rights).accessibilityIdentifier(
-        "import_rights")
-      HStack {
-        Button(
-          LocalizedStringKey(workspace.processing ? "Preparing voice…" : "Remove background music")
-        ) { startProcessing() }
-        .buttonStyle(.borderedProminent).controlSize(.large)
-        .keyboardShortcut(.defaultAction)
-        .disabled(!canStart)
-        .accessibilityIdentifier("import_start")
-        if workspace.processing {
-          ProgressView().controlSize(.small)
-          Text(workspace.progress).font(.callout).foregroundStyle(Brand.secondary)
-          Button("Cancel") { workspace.cancelProcessing() }.buttonStyle(.bordered)
-            .accessibilityIdentifier("import_cancel")
-        }
-      }
-      if let failure = workspace.failure {
-        Label(LocalizedStringKey(failure), systemImage: "exclamationmark.circle").foregroundStyle(
-          Brand.amber
-        )
-        .accessibilityIdentifier("media_error")
-      }
-      if let notice = workspace.notice {
-        Text(LocalizedStringKey(notice)).foregroundStyle(Brand.secondary)
-      }
-      Text(
-        "Offline voices use up to \(bytesLabel(workspace.budgetBytes)). Change the limit in Settings. Saved voices are reused before processing again; older unused files can be removed to make room."
-      )
-      .font(.caption).foregroundStyle(Brand.secondary)
     }
-    .padding(24)
-    .background(Brand.surface, in: RoundedRectangle(cornerRadius: 20))
-    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Brand.border))
     .dropDestination(for: URL.self) { urls, _ in
       guard let audio = urls.first(where: isAudioFile) else { return false }
       file = audio
@@ -255,6 +103,16 @@ struct DesktopHomeView: View {
     .onChange(of: account.scope) { _, _ in
       confirmCloud = false
       cloudConfirmation = nil
+    }
+    .onChange(of: account.signedIn) { _, signedIn in
+      if signedIn {
+        cloudSignInRequired = false
+      } else {
+        handoffCloudSelected = false
+        mode = DesktopProcessingPreference.local.rawValue
+        confirmCloud = false
+        cloudConfirmation = nil
+      }
     }
     .onChange(of: source) { _, value in
       confirmCloud = false
@@ -295,6 +153,382 @@ struct DesktopHomeView: View {
     }
   }
 
+  private var studioConsole: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      consoleHeader
+      Divider().overlay(Brand.border)
+
+      VStack(alignment: .leading, spacing: 20) {
+        if account.updateRequired { updateNotice }
+
+        Text(
+          "Paste a supported video link or choose an audio file. MusicMute keeps the full timeline and prepares voice-only audio."
+        )
+        .desktopFont(.body)
+        .foregroundStyle(Brand.secondary)
+
+        ViewThatFits(in: .horizontal) {
+          HStack(alignment: .top, spacing: 18) {
+            sourcePanel.frame(width: 390)
+            Divider().overlay(Brand.border)
+            processingPanel.frame(width: 390)
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          VStack(alignment: .leading, spacing: 20) {
+            sourcePanel
+            Divider().overlay(Brand.border)
+            processingPanel
+          }
+        }
+
+        Divider().overlay(Brand.border)
+        permissionActionRail
+
+        if let failure = workspace.failure {
+          Label(LocalizedStringKey(failure), systemImage: "exclamationmark.circle")
+            .foregroundStyle(Brand.amber)
+            .accessibilityIdentifier("media_error")
+        }
+        if let notice = workspace.notice {
+          Text(LocalizedStringKey(notice)).foregroundStyle(Brand.secondary)
+        }
+
+        Label(
+          "Offline voices use up to \(bytesLabel(workspace.budgetBytes)). Change the limit in Settings. Saved voices are reused before processing again; older unused files can be removed to make room.",
+          systemImage: "internaldrive"
+        )
+        .desktopFont(.caption)
+        .foregroundStyle(Brand.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+      }
+      .padding(24)
+    }
+    .background {
+      ZStack {
+        RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Brand.surface)
+        RadialGradient(
+          colors: [Brand.accent.opacity(0.08), .clear], center: .topLeading,
+          startRadius: 20, endRadius: 520
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+      }
+    }
+    .overlay {
+      RoundedRectangle(cornerRadius: 22, style: .continuous)
+        .stroke(
+          LinearGradient(
+            colors: [Brand.accent.opacity(0.38), Brand.border, Brand.border],
+            startPoint: .topLeading, endPoint: .bottomTrailing),
+          lineWidth: 1)
+    }
+    .shadow(color: .black.opacity(0.08), radius: 18, y: 8)
+  }
+
+  private var consoleHeader: some View {
+    HStack(alignment: .center, spacing: 14) {
+      Image(systemName: "waveform.badge.plus")
+        .desktopFont(.title2, weight: .semibold)
+        .foregroundStyle(Brand.accent)
+        .frame(width: 42, height: 42)
+        .background(Brand.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityHidden(true)
+      Text("New voice").desktopFont(.title2, weight: .semibold)
+      Spacer(minLength: 20)
+      Label("Audio only · up to 20 minutes", systemImage: "timer")
+        .desktopFont(.caption, weight: .medium)
+        .foregroundStyle(Brand.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Brand.raised, in: Capsule())
+    }
+    .padding(24)
+    .accessibilityElement(children: .combine)
+  }
+
+  @ViewBuilder private var updateNotice: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Label("Update MusicMute before starting new processing.", systemImage: "arrow.down.app")
+        .foregroundStyle(Brand.amber)
+      if let build = account.requiredBuild {
+        Text("Required app build: \(build)")
+          .desktopFont(.caption)
+          .foregroundStyle(Brand.secondary)
+      }
+      Button("Open MusicMute website") { MusicMuteProductLinks.open(.downloads) }
+        .buttonStyle(.bordered)
+    }
+    .padding(16)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Brand.amber.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Brand.amber.opacity(0.22)))
+  }
+
+  private var sourcePanel: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      Label("Source", systemImage: "link")
+        .desktopFont(.headline)
+        .foregroundStyle(Brand.text)
+
+      Picker("Source", selection: $source) {
+        ForEach(DesktopImportSourcePreference.allCases, id: \.self) { option in
+          Label(
+            LocalizedStringKey(option.title),
+            systemImage: option == .youtube ? "play.rectangle.fill" : "waveform"
+          )
+          .tag(option.rawValue)
+        }
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .accessibilityLabel("Source")
+      .accessibilityIdentifier("import_source")
+
+      if selectedSource == .youtube {
+        HStack(spacing: 10) {
+          TextField("Paste a supported video URL", text: $link)
+            .textFieldStyle(.roundedBorder)
+            .controlSize(.large)
+            .focused($linkFocused)
+            .onSubmit { startProcessing() }
+            .accessibilityIdentifier("import_youtube_url")
+          Button("Paste", systemImage: "doc.on.clipboard") { pasteLink() }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .help("Paste a video URL from the Clipboard")
+        }
+        .environment(\.layoutDirection, .leftToRight)
+      } else {
+        HStack(spacing: 12) {
+          Button("Choose Audio…", systemImage: "folder") { chooseAudio() }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .accessibilityIdentifier("import_choose_file")
+          VStack(alignment: .leading, spacing: 3) {
+            Text(file?.lastPathComponent ?? "No audio selected").lineLimit(1)
+            Text("You can also drop an audio file anywhere on this card.")
+              .desktopFont(.caption)
+              .foregroundStyle(Brand.secondary)
+          }
+        }
+      }
+
+      sourcePrivacyNote
+    }
+    .padding(18)
+    .frame(minWidth: 330, idealWidth: 430, maxWidth: .infinity, alignment: .topLeading)
+    .background(Brand.raised.opacity(0.58), in: RoundedRectangle(cornerRadius: 16))
+    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Brand.border))
+  }
+
+  @ViewBuilder private var sourcePrivacyNote: some View {
+    if selectedSource == .youtube {
+      Label {
+        Text(
+          LocalizedStringKey(
+            account.signedIn
+              ? "Video-link originals and voice results may be added to MusicMute’s reusable shared cache. Your result is also linked to your account library."
+              : "Video-link originals and voice results may be added to MusicMute’s reusable shared cache. Sign in to link the result to your account library."
+          )
+        )
+      } icon: {
+        Image(systemName: "arrow.triangle.2.circlepath")
+      }
+      .desktopFont(.caption)
+      .foregroundStyle(Brand.secondary)
+      .fixedSize(horizontal: false, vertical: true)
+    } else if account.signedIn {
+      Label(
+        "Audio files stay private. After local processing, your original and voice result are saved to your account; storage and transfer allowances apply.",
+        systemImage: "lock.shield"
+      )
+      .desktopFont(.caption)
+      .foregroundStyle(Brand.secondary)
+      .fixedSize(horizontal: false, vertical: true)
+    } else {
+      Label(
+        "Audio files stay on this Mac unless you sign in to save them to your account.",
+        systemImage: "lock.shield"
+      )
+      .desktopFont(.caption)
+      .foregroundStyle(Brand.secondary)
+      .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
+  private var processingPanel: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      Label("Process using", systemImage: "cpu")
+        .desktopFont(.headline)
+        .foregroundStyle(Brand.text)
+
+      HStack(spacing: 12) {
+        ForEach(DesktopProcessingPreference.allCases, id: \.self) { option in
+          processingChoice(option)
+        }
+      }
+      .accessibilityElement(children: .contain)
+      .accessibilityLabel("Process using")
+      .accessibilityIdentifier("processing_mode")
+
+      if cloudSignInRequired {
+        VStack(alignment: .leading, spacing: 8) {
+          Label(
+            "Sign in to use MusicMute cloud. On this Mac remains selected.",
+            systemImage: "exclamationmark.circle"
+          )
+          .desktopFont(.callout, weight: .medium)
+          .foregroundStyle(Brand.amber)
+          .fixedSize(horizontal: false, vertical: true)
+
+          Button("Sign in") { openAccount() }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("processing_cloud_sign_in")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("processing_cloud_sign_in_required")
+      }
+
+      Label("Saved for the Chrome extension", systemImage: "checkmark.circle.fill")
+        .desktopFont(.caption, weight: .medium)
+        .foregroundStyle(Brand.mint)
+
+      Label(
+        LocalizedStringKey(
+          selectedProcessing == .local
+            ? "Uses your Mac. No cloud processing minutes."
+            : "Uses the same account processing allowance as Android."),
+        systemImage: selectedProcessing == .local ? "desktopcomputer" : "cloud"
+      )
+      .desktopFont(.callout)
+      .foregroundStyle(Brand.secondary)
+
+      if selectedProcessing == .cloud { cloudDetails }
+    }
+    .padding(18)
+    .frame(minWidth: 330, idealWidth: 430, maxWidth: .infinity, alignment: .topLeading)
+    .background(Brand.raised.opacity(0.58), in: RoundedRectangle(cornerRadius: 16))
+    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Brand.border))
+  }
+
+  private func processingChoice(_ option: DesktopProcessingPreference) -> some View {
+    let selected = selectedProcessing == option
+    return Button {
+      processingSelection.wrappedValue = option.rawValue
+    } label: {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack {
+          Image(systemName: option == .local ? "desktopcomputer" : "cloud")
+            .desktopFont(.title3)
+          Spacer()
+          Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+            .foregroundStyle(selected ? Brand.accent : Brand.secondary)
+        }
+        Text(LocalizedStringKey(option.title))
+          .desktopFont(.callout, weight: .semibold)
+          .lineLimit(1)
+      }
+      .padding(16)
+      .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
+      .foregroundStyle(selected ? Brand.text : Brand.secondary)
+      .background(
+        selected ? Brand.accent.opacity(0.1) : Brand.surface.opacity(0.72),
+        in: RoundedRectangle(cornerRadius: 14)
+      )
+      .overlay {
+        RoundedRectangle(cornerRadius: 14)
+          .stroke(selected ? Brand.accent : Brand.border, lineWidth: selected ? 1.5 : 1)
+      }
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(Text(LocalizedStringKey(option.title)))
+    .accessibilityValue(selected ? "Selected" : "Not selected")
+    .accessibilityAddTraits(selected ? .isSelected : [])
+    .accessibilityIdentifier("processing_mode_\(option.rawValue)")
+  }
+
+  @ViewBuilder private var cloudDetails: some View {
+    Divider().overlay(Brand.border)
+    Button(account.signedIn ? "Review or switch account" : "Sign in to use MusicMute cloud") {
+      openAccount()
+    }
+    .buttonStyle(.bordered)
+    .accessibilityIdentifier("cloud_open_account")
+
+    if let usage = DesktopUsagePresentation.parse(workspace.usage) {
+      Text(
+        "Remaining this month: \(DesktopUsagePresentation.durationLabel(seconds: usage.processing.remaining, locale: locale))"
+      )
+      .desktopFont(.callout)
+      .foregroundStyle(Brand.secondary)
+      Text(
+        "Allowance resets \(DesktopUsagePresentation.resetLabel(usage.resetAt, locale: locale))"
+      )
+      .desktopFont(.caption)
+      .foregroundStyle(Brand.secondary)
+    } else {
+      Text(
+        "Your current allowance appears after account connection. Cloud processing requires an available allowance."
+      )
+      .desktopFont(.caption)
+      .foregroundStyle(Brand.secondary)
+    }
+    if let seconds = estimatedCloudSeconds {
+      Text(
+        "Estimated processing usage: \(DesktopUsagePresentation.durationLabel(seconds: Int64(seconds), locale: locale))"
+      )
+      .desktopFont(.callout)
+      .foregroundStyle(Brand.secondary)
+    }
+    Text(
+      "New cloud processing uses the full audio duration, rounded up to seconds. Compatible saved results may be reused without new processing usage. The server confirms admission and usage."
+    )
+    .desktopFont(.caption)
+    .foregroundStyle(Brand.secondary)
+  }
+
+  private var permissionActionRail: some View {
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 20) {
+        Toggle("I have permission to process this audio", isOn: $rights)
+          .accessibilityIdentifier("import_rights")
+        Spacer(minLength: 16)
+        processingAction
+      }
+      VStack(alignment: .leading, spacing: 14) {
+        Toggle("I have permission to process this audio", isOn: $rights)
+          .accessibilityIdentifier("import_rights")
+        processingAction
+      }
+    }
+    .padding(18)
+    .background(Brand.raised.opacity(0.5), in: RoundedRectangle(cornerRadius: 16))
+    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Brand.border))
+  }
+
+  @ViewBuilder private var processingAction: some View {
+    HStack(spacing: 10) {
+      Button(
+        LocalizedStringKey(workspace.processing ? "Preparing voice…" : "Remove background music")
+      ) { startProcessing() }
+      .buttonStyle(.borderedProminent)
+      .controlSize(.large)
+      .keyboardShortcut(.defaultAction)
+      .disabled(!canStart)
+      .accessibilityIdentifier("import_start")
+
+      if workspace.processing {
+        ProgressView().controlSize(.small)
+        Text(workspace.progress)
+          .desktopFont(.callout)
+          .foregroundStyle(Brand.secondary)
+        Button("Cancel") { workspace.cancelProcessing() }
+          .buttonStyle(.bordered)
+          .accessibilityIdentifier("import_cancel")
+      }
+    }
+  }
+
   private var accountAndProductsCard: some View {
     let connection = DesktopHomeLibraryConnection.resolve(
       signedIn: account.signedIn, accountOnline: account.online,
@@ -303,7 +537,7 @@ struct DesktopHomeView: View {
     return VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .top, spacing: 12) {
         Image(systemName: connection.systemImage)
-          .font(.title2)
+          .desktopFont(.title2)
           .foregroundStyle(
             connection == .connected
               ? Brand.mint : connection == .signedOut ? Brand.accent : Brand.amber
@@ -311,9 +545,9 @@ struct DesktopHomeView: View {
           .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 5) {
           Text(LocalizedStringKey(connection.title))
-            .font(.headline)
+            .desktopFont(.headline)
           Text(LocalizedStringKey(connection.detail))
-            .font(.callout)
+            .desktopFont(.callout)
             .foregroundStyle(Brand.secondary)
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -329,7 +563,7 @@ struct DesktopHomeView: View {
 
       Divider().overlay(Brand.border)
       Text("Also available from MusicMute")
-        .font(.caption.weight(.semibold))
+        .desktopFont(.caption, weight: .semibold)
         .foregroundStyle(Brand.secondary)
       ViewThatFits(in: .horizontal) {
         HStack(spacing: 10) { productActions }
@@ -383,15 +617,20 @@ struct DesktopHomeView: View {
   }
 
   private var selectedProcessing: DesktopProcessingPreference {
-    handoffCloudSelected ? .cloud : DesktopProcessingPreference(rawValue: mode) ?? .local
+    let requested =
+      handoffCloudSelected ? .cloud : DesktopProcessingPreference(rawValue: mode) ?? .local
+    return DesktopProcessingAccess.resolved(requested, signedIn: account.signedIn)
   }
 
   private var processingSelection: Binding<String> {
     Binding(
       get: { selectedProcessing.rawValue },
       set: { value in
+        let requested = DesktopProcessingPreference(rawValue: value) ?? .local
+        let resolved = DesktopProcessingAccess.resolved(requested, signedIn: account.signedIn)
         handoffCloudSelected = false
-        mode = value
+        mode = resolved.rawValue
+        cloudSignInRequired = requested == .cloud && resolved == .local
         workspace.consumeCloudHandoff()
         confirmCloud = false
         cloudConfirmation = nil
@@ -445,7 +684,12 @@ struct DesktopHomeView: View {
     source = DesktopImportSourcePreference.youtube.rawValue
     file = nil
     rights = false
-    handoffCloudSelected = true
+    handoffCloudSelected = account.signedIn
+    if !account.signedIn {
+      mode = DesktopProcessingPreference.local.rawValue
+      cloudSignInRequired = true
+      workspace.consumeCloudHandoff()
+    }
     link = handoff.sourceURL
     estimatedCloudSource = handoff.sourceURL
     estimatedCloudSeconds = handoff.estimatedDurationSeconds
@@ -511,6 +755,7 @@ enum MusicMuteProductLinks: CaseIterable, Sendable {
   case webApp
   case googlePlay
   case downloads
+  case chromeWebStore
 
   var url: URL {
     switch self {
@@ -520,6 +765,8 @@ enum MusicMuteProductLinks: CaseIterable, Sendable {
       URL(string: "https://play.google.com/store/apps/details?id=com.hatem.musicmute")!
     case .downloads:
       URL(string: "https://music-mute.com/#downloads")!
+    case .chromeWebStore:
+      URL(string: "https://chromewebstore.google.com/detail/acmgefmmndomcpdlgnafkjbgobinllep")!
     }
   }
 
@@ -535,6 +782,9 @@ enum MusicMuteProductLinks: CaseIterable, Sendable {
         == [URLQueryItem(name: "id", value: "com.hatem.musicmute")]
     case ("music-mute.com", "/", "downloads") where url.query == nil:
       return true
+    case ("chromewebstore.google.com", "/detail/acmgefmmndomcpdlgnafkjbgobinllep", nil)
+    where url.query == nil:
+      return true
     default:
       return false
     }
@@ -544,6 +794,18 @@ enum MusicMuteProductLinks: CaseIterable, Sendable {
     let url = destination.url
     guard isAllowed(url) else { return }
     NSWorkspace.shared.open(url)
+  }
+}
+
+struct DesktopLibraryCountPresentation: Equatable {
+  let visibleCount: Int
+  let filtering: Bool
+  let hasMorePages: Bool
+
+  var title: String { filtering ? "Matching songs" : "Songs" }
+  var qualifier: String? {
+    guard hasMorePages else { return nil }
+    return filtering ? "Loaded pages only" : "Shown so far"
   }
 }
 
@@ -570,38 +832,25 @@ struct DesktopLibraryView: View {
         && (filter != "Online" || track.path == nil)
     }
     return sort == "Title"
-      ? values.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+      ? values.sorted { left, right in
+        let order = left.title.localizedStandardCompare(right.title)
+        return order == .orderedSame ? left.id < right.id : order == .orderedAscending
+      }
       : DesktopWorkspace.newestTracks(values)
+  }
+  private var cacheUsage: Double {
+    guard workspace.budgetBytes > 0 else { return 0 }
+    return min(max(Double(workspace.cacheBytes) / Double(workspace.budgetBytes), 0), 1)
+  }
+  private var songCountPresentation: DesktopLibraryCountPresentation {
+    DesktopLibraryCountPresentation(
+      visibleCount: visible.count,
+      filtering: !search.isEmpty || filter != "All",
+      hasMorePages: workspace.localHasMore || workspace.cloudHasMore)
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
-      HStack {
-        Spacer()
-        Picker("Filter", selection: $filter) {
-          ForEach(["All", "Starred", "Offline", "Online", "Removed"], id: \.self) {
-            Text(LocalizedStringKey($0))
-          }
-        }.frame(width: 140)
-        Picker("Sort", selection: $sort) {
-          Text("Newest")
-          Text("Title")
-        }.frame(width: 140)
-      }
-      HStack {
-        Label(
-          "\(bytesLabel(workspace.cacheBytes)) of \(bytesLabel(workspace.budgetBytes)) offline voices",
-          systemImage: "internaldrive"
-        )
-        Spacer()
-        if workspace.account.signedIn {
-          Label(
-            LocalizedStringKey(
-              accountLibraryConnected
-                ? "Account library connected" : "Connecting account library…"
-            ),
-            systemImage: accountLibraryConnected ? "checkmark.icloud" : "icloud")
-        }
-      }.font(.caption).foregroundStyle(Brand.secondary)
+      libraryHeader
       if let failure = workspace.failure {
         Text(LocalizedStringKey(failure)).foregroundStyle(Brand.amber)
       }
@@ -618,7 +867,7 @@ struct DesktopLibraryView: View {
         ForEach(visible) { track in
           HStack(spacing: 14) {
             Button {
-              Task { await workspace.play(track) }
+              Task { await workspace.playFromLibrary(track, orderedTracks: visible) }
             } label: {
               Group {
                 if workspace.currentTrack?.id == track.id && workspace.preparingPlayback {
@@ -633,10 +882,10 @@ struct DesktopLibraryView: View {
               .help("Play \(track.title)")
               .disabled(workspace.currentTrack?.id == track.id && workspace.preparingPlayback)
             VStack(alignment: .leading, spacing: 4) {
-              Text(track.title).font(.headline).lineLimit(2)
+              Text(track.title).desktopFont(.headline).lineLimit(2)
               Text(
                 "\(durationLabel(track.duration * 1000)) · \(track.path == nil ? "Account voice" : "Saved offline")"
-              ).font(.caption).foregroundStyle(Brand.secondary)
+              ).desktopFont(.caption).foregroundStyle(Brand.secondary)
             }
             Spacer()
             Button {
@@ -667,7 +916,12 @@ struct DesktopLibraryView: View {
                   Button("Keep offline") { Task { await workspace.download(track) } }
                 }
                 if track.originalAvailable {
-                  Button("Play original") { Task { await workspace.play(track, original: true) } }
+                  Button("Play original") {
+                    Task {
+                      await workspace.playFromLibrary(
+                        track, orderedTracks: visible, original: true)
+                    }
+                  }
                 }
                 Button("Delete from account", role: .destructive) { deleteTrack = track }
               }
@@ -720,7 +974,7 @@ struct DesktopLibraryView: View {
       isPresented: Binding(get: { renameTrack != nil }, set: { if !$0 { renameTrack = nil } })
     ) {
       VStack(spacing: 16) {
-        Text("Rename voice").font(.title2)
+        Text("Rename voice").desktopFont(.title2)
         TextField("Title", text: $renameTitle).textFieldStyle(.roundedBorder)
         HStack {
           Button("Cancel") { renameTrack = nil }
@@ -749,6 +1003,248 @@ struct DesktopLibraryView: View {
         "This removes account access to both the original and voice result. The server applies its storage cleanup policy."
       )
     }
+  }
+
+  private var libraryHeader: some View {
+    ViewThatFits(in: .horizontal) {
+      HStack(alignment: .top, spacing: 28) {
+        libraryIdentity
+        libraryControlPanel
+      }
+      VStack(alignment: .leading, spacing: 22) {
+        libraryIdentity
+        libraryControlPanel
+      }
+    }
+    .padding(24)
+    .background {
+      ZStack {
+        RoundedRectangle(cornerRadius: 24, style: .continuous)
+          .fill(Brand.surface)
+        RadialGradient(
+          colors: [Brand.accent.opacity(0.13), .clear], center: .topLeading,
+          startRadius: 12, endRadius: 440
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+      }
+    }
+    .overlay {
+      RoundedRectangle(cornerRadius: 24, style: .continuous)
+        .stroke(
+          LinearGradient(
+            colors: [Brand.accent.opacity(0.48), Brand.border, Brand.border],
+            startPoint: .topLeading, endPoint: .bottomTrailing),
+          lineWidth: 1)
+    }
+    .accessibilityIdentifier("library_header")
+  }
+
+  private var libraryIdentity: some View {
+    VStack(alignment: .leading, spacing: 15) {
+      VStack(alignment: .leading, spacing: 7) {
+        Text("YOUR VOICE LIBRARY")
+          .desktopFont(.caption2, weight: .semibold)
+          .tracking(1.4)
+          .foregroundStyle(Brand.mint)
+        Text("Library").desktopFont(.largeTitle, weight: .bold)
+        Text("Your account results and saved voice-only audio.")
+          .desktopFont(.body)
+          .foregroundStyle(Brand.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .accessibilityElement(children: .combine)
+      librarySongCount
+      DesktopLibraryWaveform()
+        .frame(height: 68)
+      VStack(alignment: .leading, spacing: 8) {
+        Label(
+          "\(bytesLabel(workspace.cacheBytes)) of \(bytesLabel(workspace.budgetBytes)) offline voices",
+          systemImage: "internaldrive"
+        )
+        .desktopFont(.caption, weight: .medium)
+        .foregroundStyle(Brand.secondary)
+        ProgressView(value: cacheUsage)
+          .progressViewStyle(.linear)
+          .tint(Brand.accent)
+          .accessibilityHidden(true)
+      }
+      .accessibilityElement(children: .combine)
+      .accessibilityLabel("Offline voices")
+      .accessibilityValue(
+        "\(bytesLabel(workspace.cacheBytes)) of \(bytesLabel(workspace.budgetBytes))")
+    }
+    .frame(minWidth: 300, maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var librarySongCount: some View {
+    let presentation = songCountPresentation
+    return HStack(spacing: 8) {
+      Image(systemName: "music.note.list")
+        .foregroundStyle(Brand.accent)
+        .accessibilityHidden(true)
+      Text(LocalizedStringKey(presentation.title))
+      Text(presentation.visibleCount, format: .number)
+        .foregroundStyle(Brand.text)
+        .monospacedDigit()
+      if let qualifier = presentation.qualifier {
+        Divider().frame(height: 14).overlay(Brand.border)
+        Text(LocalizedStringKey(qualifier))
+          .foregroundStyle(Brand.secondary)
+      }
+    }
+    .desktopFont(.caption, weight: .semibold)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 7)
+    .background(Brand.raised.opacity(0.82), in: Capsule())
+    .overlay(Capsule().stroke(Brand.border))
+    .fixedSize(horizontal: true, vertical: false)
+    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("library_song_count")
+  }
+
+  private var libraryControlPanel: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      if workspace.account.signedIn {
+        Label(
+          LocalizedStringKey(
+            accountLibraryConnected
+              ? "Account library connected" : "Connecting account library…"
+          ),
+          systemImage: accountLibraryConnected ? "checkmark.icloud" : "icloud"
+        )
+        .desktopFont(.callout, weight: .medium)
+        .foregroundStyle(accountLibraryConnected ? Brand.mint : Brand.amber)
+        .accessibilityIdentifier("library_connection_status")
+        Divider().overlay(Brand.border)
+      }
+      libraryControls
+    }
+    .padding(20)
+    .frame(minWidth: 320, idealWidth: 390, maxWidth: 430, alignment: .leading)
+    .background(Brand.raised.opacity(0.88), in: RoundedRectangle(cornerRadius: 20))
+    .overlay {
+      RoundedRectangle(cornerRadius: 20, style: .continuous)
+        .stroke(
+          LinearGradient(
+            colors: [Brand.accent.opacity(0.58), Brand.border, Brand.border],
+            startPoint: .topLeading, endPoint: .bottomTrailing),
+          lineWidth: 1)
+    }
+    .shadow(color: .black.opacity(0.1), radius: 14, y: 6)
+  }
+
+  @ViewBuilder private var libraryControls: some View {
+    libraryMenu(
+      title: "Filter", selection: $filter,
+      options: ["All", "Starred", "Offline", "Online", "Removed"],
+      accessibilityIdentifier: "library_filter")
+    libraryMenu(
+      title: "Sort", selection: $sort, options: ["Newest", "Title"],
+      accessibilityIdentifier: "library_sort")
+  }
+
+  private func libraryMenu(
+    title: LocalizedStringKey, selection: Binding<String>, options: [String],
+    accessibilityIdentifier: String
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 7) {
+      Text(title).desktopFont(.caption, weight: .medium).foregroundStyle(Brand.secondary)
+      Menu {
+        ForEach(options, id: \.self) { option in
+          Button {
+            selection.wrappedValue = option
+          } label: {
+            if selection.wrappedValue == option {
+              Label(LocalizedStringKey(option), systemImage: "checkmark")
+            } else {
+              Text(LocalizedStringKey(option))
+            }
+          }
+        }
+      } label: {
+        HStack(spacing: 12) {
+          Text(LocalizedStringKey(selection.wrappedValue))
+            .desktopFont(.callout, weight: .medium)
+          Spacer(minLength: 12)
+          Image(systemName: "chevron.up.chevron.down")
+            .desktopFont(.caption, weight: .semibold)
+            .foregroundStyle(Brand.secondary)
+        }
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+        .background(Brand.surface.opacity(0.76), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(Brand.border.opacity(0.8))
+        }
+        .contentShape(Rectangle())
+      }
+      .menuStyle(.button)
+      .buttonStyle(.plain)
+      .menuIndicator(.hidden)
+      .frame(maxWidth: .infinity, minHeight: 42)
+      .accessibilityLabel(Text(title))
+      .accessibilityValue(Text(LocalizedStringKey(selection.wrappedValue)))
+      .accessibilityIdentifier(accessibilityIdentifier)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+}
+
+private struct DesktopLibraryWaveform: View {
+  var body: some View {
+    Canvas { context, size in
+      let baselineY = size.height * 0.56
+      var baseline = Path()
+      baseline.move(to: CGPoint(x: 0, y: baselineY))
+      baseline.addLine(to: CGPoint(x: size.width, y: baselineY))
+      context.stroke(
+        baseline, with: .color(Brand.border.opacity(0.72)),
+        style: StrokeStyle(lineWidth: 1))
+
+      var wave = Path()
+      wave.move(to: CGPoint(x: 0, y: baselineY))
+      wave.addCurve(
+        to: CGPoint(x: size.width * 0.25, y: baselineY - size.height * 0.34),
+        control1: CGPoint(x: size.width * 0.08, y: baselineY + size.height * 0.18),
+        control2: CGPoint(x: size.width * 0.15, y: baselineY - size.height * 0.38))
+      wave.addCurve(
+        to: CGPoint(x: size.width * 0.5, y: baselineY + size.height * 0.2),
+        control1: CGPoint(x: size.width * 0.34, y: baselineY - size.height * 0.3),
+        control2: CGPoint(x: size.width * 0.4, y: baselineY + size.height * 0.3))
+      wave.addCurve(
+        to: CGPoint(x: size.width * 0.75, y: baselineY - size.height * 0.18),
+        control1: CGPoint(x: size.width * 0.59, y: baselineY + size.height * 0.22),
+        control2: CGPoint(x: size.width * 0.65, y: baselineY - size.height * 0.28))
+      wave.addCurve(
+        to: CGPoint(x: size.width, y: baselineY),
+        control1: CGPoint(x: size.width * 0.84, y: baselineY - size.height * 0.12),
+        control2: CGPoint(x: size.width * 0.92, y: baselineY + size.height * 0.08))
+
+      var fill = wave
+      fill.addLine(to: CGPoint(x: size.width, y: baselineY))
+      fill.addLine(to: CGPoint(x: 0, y: baselineY))
+      fill.closeSubpath()
+      context.fill(fill, with: .color(Brand.accent.opacity(0.1)))
+      context.stroke(
+        wave, with: .color(Brand.accent.opacity(0.9)),
+        style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+
+      var echo = Path()
+      echo.move(to: CGPoint(x: 0, y: baselineY + size.height * 0.03))
+      echo.addCurve(
+        to: CGPoint(x: size.width * 0.44, y: baselineY - size.height * 0.08),
+        control1: CGPoint(x: size.width * 0.16, y: baselineY - size.height * 0.08),
+        control2: CGPoint(x: size.width * 0.28, y: baselineY + size.height * 0.19))
+      echo.addCurve(
+        to: CGPoint(x: size.width, y: baselineY + size.height * 0.02),
+        control1: CGPoint(x: size.width * 0.62, y: baselineY - size.height * 0.3),
+        control2: CGPoint(x: size.width * 0.82, y: baselineY + size.height * 0.16))
+      context.stroke(
+        echo, with: .color(Brand.accent.opacity(0.28)),
+        style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+    }
+    .accessibilityHidden(true)
   }
 }
 
@@ -829,7 +1325,7 @@ struct DesktopMiniPlayer: View {
             .accessibilityHidden(true)
         }
         Text(LocalizedStringKey(preparation.message))
-          .font(.caption.weight(.medium))
+          .desktopFont(.caption, weight: .medium)
           .foregroundStyle(Brand.secondary)
           .fixedSize(horizontal: false, vertical: true)
           .accessibilityIdentifier("player_preparation_status")
@@ -865,7 +1361,7 @@ struct DesktopMiniPlayer: View {
               colors: [Brand.accent.opacity(0.38), Brand.accent.opacity(0.12)],
               startPoint: .topLeading, endPoint: .bottomTrailing))
         Image(systemName: workspace.originalPlaying ? "music.note" : "waveform")
-          .font(.system(size: 19, weight: .semibold))
+          .desktopFont(.headline, weight: .semibold)
           .foregroundStyle(Brand.accent)
       }
       .frame(width: 42, height: 42)
@@ -875,12 +1371,13 @@ struct DesktopMiniPlayer: View {
       )
       .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 3) {
-        Text(track.title).font(.callout.weight(.semibold)).lineLimit(1).truncationMode(.tail)
+        Text(track.title).desktopFont(.callout, weight: .semibold).lineLimit(1).truncationMode(
+          .tail)
         Label(
           LocalizedStringKey(workspace.originalPlaying ? "Original audio" : "Voice only"),
           systemImage: workspace.originalPlaying ? "music.note" : "waveform"
         )
-        .font(.caption)
+        .desktopFont(.caption)
         .foregroundStyle(Brand.secondary)
       }
     }
@@ -890,10 +1387,10 @@ struct DesktopMiniPlayer: View {
     if workspace.preparingOriginal {
       HStack(spacing: 8) {
         ProgressView().controlSize(.small)
-        Text("Preparing original…").font(.caption.weight(.medium))
+        Text("Preparing original…").desktopFont(.caption, weight: .medium)
       }
       .foregroundStyle(Brand.secondary)
-      .frame(width: 230, height: 32)
+      .frame(minWidth: 240, minHeight: 40)
       .accessibilityElement(children: .combine)
     } else if workspace.canCompareOriginal {
       Picker(
@@ -910,17 +1407,19 @@ struct DesktopMiniPlayer: View {
       }
       .pickerStyle(.segmented)
       .labelsHidden()
-      .controlSize(.small)
-      .frame(width: 190)
+      .controlSize(.large)
+      .desktopFont(.caption, weight: .medium)
+      .fixedSize(horizontal: true, vertical: true)
+      .frame(minWidth: 240)
       .accessibilityLabel("Playback")
       .help(workspace.originalPlaying ? "Play voice" : "Play original")
       .disabled(!workspace.canControlPlayback)
     } else {
       Label("Voice only", systemImage: "waveform")
-        .font(.caption.weight(.medium))
+        .desktopFont(.caption, weight: .medium)
         .foregroundStyle(Brand.secondary)
         .padding(.horizontal, 12)
-        .frame(height: 32)
+        .frame(minHeight: 40)
         .background(Brand.raised, in: Capsule())
     }
   }
@@ -1065,11 +1564,11 @@ struct DesktopMiniPlayer: View {
             ProgressView().controlSize(.small)
             Text("Preparing silence skipping…")
           }
-          .font(.caption)
+          .desktopFont(.caption)
           .foregroundStyle(Brand.secondary)
         } else if track.path == nil {
           Text("Keep this voice offline to skip silence.")
-            .font(.caption)
+            .desktopFont(.caption)
             .foregroundStyle(Brand.secondary)
         }
         if track.path != nil {
@@ -1082,7 +1581,7 @@ struct DesktopMiniPlayer: View {
       controlCard(title: "Queue", symbol: "music.note.list") {
         if workspace.queue.isEmpty {
           Text("Add voices from Library to keep listening.")
-            .font(.caption)
+            .desktopFont(.caption)
             .foregroundStyle(Brand.secondary)
         } else {
           ForEach(Array(workspace.queue.prefix(4).enumerated()), id: \.offset) { index, item in
@@ -1100,7 +1599,7 @@ struct DesktopMiniPlayer: View {
           }
           if workspace.queue.count > 4 {
             Text("\(workspace.queue.count - 4) more")
-              .font(.caption)
+              .desktopFont(.caption)
               .foregroundStyle(Brand.secondary)
           }
           HStack {
@@ -1118,7 +1617,7 @@ struct DesktopMiniPlayer: View {
   ) -> some View {
     VStack(alignment: .leading, spacing: 10) {
       Label(title, systemImage: symbol)
-        .font(.subheadline.weight(.semibold))
+        .desktopFont(.subheadline, weight: .semibold)
         .foregroundStyle(Brand.secondary)
       Divider()
       content()
@@ -1178,7 +1677,7 @@ private struct DesktopPlaybackScrubber: View {
       Text(desktopClock(clock.duration))
         .frame(minWidth: 36, alignment: .leading)
     }
-    .font(.caption2.monospacedDigit())
+    .desktopFont(.caption2, monospacedDigits: true)
     .foregroundStyle(Brand.secondary)
   }
 }
@@ -1229,7 +1728,7 @@ private struct DesktopVolumeControl: View {
         Text(
           state.value.muted ? 0 : state.value.level, format: .percent.precision(.fractionLength(0))
         )
-        .font(.caption.monospacedDigit())
+        .desktopFont(.caption, monospacedDigits: true)
         .foregroundStyle(Brand.secondary)
         .accessibilityHidden(true)
       }
@@ -1291,7 +1790,7 @@ private struct DesktopLoopControls: View {
         "\(desktopClock(start)) – \(workspace.loopEnd.map(desktopClock) ?? "…")",
         systemImage: "repeat"
       )
-      .font(.caption.monospacedDigit())
+      .desktopFont(.caption, monospacedDigits: true)
       .foregroundStyle(Brand.secondary)
     }
     HStack {
@@ -1331,7 +1830,7 @@ private struct DesktopPlayerIconButton: View {
   private var configuredButton: some View {
     Button(action: action) {
       Image(systemName: systemImage)
-        .font(.system(size: prominent ? 16 : 14, weight: .semibold))
+        .desktopFont(prominent ? .callout : .caption, weight: .semibold)
         .frame(width: prominent ? 40 : 34, height: prominent ? 40 : 34)
         .foregroundStyle(prominent ? prominentForeground : selected ? Brand.accent : Brand.text)
         .background(

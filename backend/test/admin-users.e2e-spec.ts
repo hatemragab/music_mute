@@ -19,6 +19,12 @@ describe('admin users HTTP boundary', () => {
         asOf: new Date().toISOString(),
       }),
       detail: vi.fn().mockResolvedValue({ id: '64b000000000000000000001' }),
+      putWorkerRegistration: vi.fn().mockResolvedValue({
+        operationId: '7f107510-108d-4c25-a091-ecf28e43bd7b',
+        status: 'succeeded',
+        resourceId: '64b000000000000000000001',
+        revision: 1,
+      }),
       accountUsage: vi.fn().mockResolvedValue({
         schemaVersion: 2,
         plan: 'standard',
@@ -56,6 +62,46 @@ describe('admin users HTTP boundary', () => {
       .request('get', '/admin/users', undefined, harness.signInAs('viewer'))
       .expect(403);
     expect(users.list).toHaveBeenCalledOnce();
+  });
+
+  it('protects worker registration changes with dedicated permissions, fresh auth, strict input and an operation receipt', async () => {
+    const { harness, users } = await setup();
+    const path = '/admin/users/64b000000000000000000001/worker-registration';
+    const body = {
+      workerRegistrationAllowed: true,
+      expectedRevision: 0,
+      operationId: '7f107510-108d-4c25-a091-ecf28e43bd7b',
+      reason: 'Approve registration',
+    };
+    for (const role of ['viewer', 'release_manager'] as const)
+      await harness
+        .request('put', path, wireJson(body), harness.signInAs(role))
+        .expect(403);
+    const stale = harness.signInAs('support');
+    harness.identities.get(stale)!.authTimeSec =
+      Math.floor(Date.now() / 1000) - 301;
+    await harness.request('put', path, wireJson(body), stale).expect(403);
+    harness.identities.get(stale)!.authTimeSec = Math.floor(Date.now() / 1000);
+    for (const invalid of [
+      { workerRegistrationAllowed: 'true' },
+      { reason: ' ' },
+      { expectedRevision: -1 },
+      { operationId: 'bad' },
+      { userId: 'other' },
+    ])
+      await harness
+        .request('put', path, wireJson({ ...body, ...invalid }), stale)
+        .expect(400);
+    const result = await harness
+      .request('put', path, wireJson(body), stale)
+      .expect(200);
+    expect(result.headers['cache-control']).toBe('no-store');
+    expect(result.body).toMatchObject({
+      status: 'succeeded',
+      operation_id: body.operationId,
+      revision: 1,
+    });
+    expect(users.putWorkerRegistration).toHaveBeenCalledOnce();
   });
 
   it('protects account override writes with permission, fresh auth, and strict DTOs', async () => {

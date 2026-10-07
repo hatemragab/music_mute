@@ -171,6 +171,10 @@ export function registrationPaths(
   };
 }
 const LAUNCHER_MARKER = "# MusicMute Local companion launcher v1";
+// The sole prior identity supported when a packaged Web Store key replaces the
+// development key. Never retain this origin in the rewritten registration.
+const DEVELOPMENT_EXTENSION_ORIGIN =
+  "chrome-extension://dclpfemnpknfdlpcbfcjkmdbnociippd/";
 export function launcherContents(
   config: LocalConfig,
   userHome = homedir(),
@@ -228,15 +232,24 @@ export async function registerNativeHost(
   const origin = await extensionOrigin(resources);
   let previous: Record<string, unknown> | undefined;
   try {
-    previous = JSON.parse(
+    const parsed: unknown = JSON.parse(
       (await safeFile(paths.manifest, 16 * 1024)).toString("utf8"),
-    ) as Record<string, unknown>;
+    );
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      throw new LocalSetupError("FOREIGN_NATIVE_REGISTRATION_EXISTS");
+    previous = parsed as Record<string, unknown>;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT")
       throw new LocalSetupError("FOREIGN_NATIVE_REGISTRATION_EXISTS");
   }
+  let originMigration = false;
   if (previous) {
     const origins = previous.allowed_origins;
+    originMigration =
+      Array.isArray(origins) &&
+      origins.length === 1 &&
+      origins[0] === DEVELOPMENT_EXTENSION_ORIGIN &&
+      origin !== DEVELOPMENT_EXTENSION_ORIGIN;
     const ownDevelopment = join(
       userHome,
       "Library/Application Support/MusicMuteLocalMvp/native-launcher.sh",
@@ -246,11 +259,15 @@ export async function registerNativeHost(
       previous.type !== "stdio" ||
       !Array.isArray(origins) ||
       origins.length !== 1 ||
-      origins[0] !== origin ||
+      (origins[0] !== origin && !originMigration) ||
       (previous.path !== paths.launcher && previous.path !== ownDevelopment)
     )
       throw new LocalSetupError("FOREIGN_NATIVE_REGISTRATION_EXISTS");
+    if (originMigration && (await lstat(paths.manifest)).mode & 0o022)
+      throw new LocalSetupError("UNSAFE_SETUP_FILE");
     try {
+      if (originMigration && (await lstat(String(previous.path))).mode & 0o022)
+        throw new LocalSetupError("UNSAFE_SETUP_FILE");
       const priorLauncher = (
         await safeFile(String(previous.path), 16 * 1024)
       ).toString("utf8");
@@ -258,19 +275,32 @@ export async function registerNativeHost(
         previous.path === ownDevelopment
           ? "# MusicMute Local MVP development launcher"
           : LAUNCHER_MARKER;
-      if (!priorLauncher.includes(expectedMarker))
+      if (
+        originMigration
+          ? !priorLauncher.startsWith(`#!/bin/sh\n${expectedMarker}\n`)
+          : !priorLauncher.includes(expectedMarker)
+      )
         throw new LocalSetupError("FOREIGN_NATIVE_LAUNCHER_EXISTS");
     } catch (error) {
       // Removing the app/helper can leave Chrome's exact owned manifest behind.
-      // Recreate an absent launcher; existing unsafe or foreign files still fail.
+      // Same-origin reinstall repair may recreate it. An origin migration needs
+      // an existing owned launcher so a stale manifest cannot authorize a swap.
+      if (originMigration && (error as NodeJS.ErrnoException).code === "ENOENT")
+        throw new LocalSetupError("FOREIGN_NATIVE_LAUNCHER_EXISTS");
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
   try {
+    if (originMigration && (await lstat(paths.launcher)).mode & 0o022)
+      throw new LocalSetupError("UNSAFE_SETUP_FILE");
     const existing = (await safeFile(paths.launcher, 16 * 1024)).toString(
       "utf8",
     );
-    if (!existing.includes(LAUNCHER_MARKER))
+    if (
+      originMigration
+        ? !existing.startsWith(`#!/bin/sh\n${LAUNCHER_MARKER}\n`)
+        : !existing.includes(LAUNCHER_MARKER)
+    )
       throw new LocalSetupError("FOREIGN_NATIVE_LAUNCHER_EXISTS");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -532,10 +562,15 @@ async function installedYouTubeReadiness(
     ]);
     tokenProviderReady = entries.every(Boolean);
   }
+  const installed = {
+    downloader: downloaderReady,
+    javascript: javascriptReady,
+    token_provider: tokenProviderReady,
+  };
   downloaderReady &&= saved?.downloader ?? false;
   javascriptReady &&= saved?.javascript ?? false;
   tokenProviderReady &&= saved?.token_provider ?? false;
-  return { downloaderReady, javascriptReady, tokenProviderReady };
+  return { downloaderReady, javascriptReady, tokenProviderReady, installed };
 }
 
 /** Only fresh guest acquisition needs these tools; cache and local files bypass this. */
@@ -590,7 +625,7 @@ export async function inspectAppStatus(
   ]);
   const saved = await savedSetupReadiness(config);
   const runtimeReady = runtimeEntries.every(Boolean) && (saved?.engine ?? true);
-  const { downloaderReady, javascriptReady, tokenProviderReady } =
+  const { downloaderReady, javascriptReady, tokenProviderReady, installed } =
     await installedYouTubeReadiness(config, saved);
   const componentErrors = new Map<string, string>(
     Object.entries(saved?.errors ?? {}),
@@ -600,7 +635,7 @@ export async function inspectAppStatus(
     "javascript",
     "token_provider",
   ] as const) {
-    if (saved?.[component] === undefined)
+    if (saved?.[component] === undefined && installed[component])
       componentErrors.set(component, "SETUP_REQUIRED");
   }
   const modelReady =

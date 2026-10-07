@@ -5,6 +5,9 @@ import type { RealtimePrincipal } from './realtime-auth.service.js';
 
 function fixture() {
   const detail = vi.fn(async () => ({ id: 'fixture', status: 'ready' }));
+  const workerRegistration = vi.fn(async () => ({
+    workerRegistrationAllowed: false,
+  }));
   const service = new RealtimeResourcesService(
     { detail } as never,
     {} as never,
@@ -20,14 +23,38 @@ function fixture() {
     { enrich: async (items: unknown) => items } as never,
     {} as never,
     {} as never,
+    { workerRegistration } as never,
   );
   const owner = {
     audience: 'owner',
     userId: 'owner',
     admin: null,
   } as RealtimePrincipal;
-  return { service, detail, owner };
+  return { service, detail, owner, workerRegistration };
 }
+
+it('reads only the authenticated owner registration permission without arbitrary target params', async () => {
+  const f = fixture();
+  const subscription = {
+    type: 'subscribe' as const,
+    subscription_id: 'registration',
+    resource: 'worker_registration' as const,
+    params: {},
+  };
+  await expect(f.service.read(f.owner, subscription)).resolves.toEqual({
+    workerRegistrationAllowed: false,
+  });
+  expect(f.workerRegistration).toHaveBeenCalledWith('owner');
+  await expect(
+    f.service.read(f.owner, {
+      ...subscription,
+      params: { id: 'another-user' },
+    }),
+  ).rejects.toMatchObject({ response: { code: 'INVALID_INPUT' } });
+  await expect(
+    f.service.read({ ...f.owner, audience: 'admin' }, subscription),
+  ).rejects.toMatchObject({ response: { code: 'UNAUTHENTICATED' } });
+});
 
 it.each(REALTIME_RESOURCES.filter((r) => r.startsWith('admin.')))(
   'rejects an owner or unprivileged administrator subscribing to %s',

@@ -33,7 +33,7 @@ struct DesktopAccountView: View {
         ProgressView("Restoring your saved account…")
           .accessibilityIdentifier("account_restoring")
         Text("If macOS asks, allow MusicMute to access your saved sign-in.")
-          .font(.caption).foregroundStyle(Brand.secondary)
+          .desktopFont(.caption).foregroundStyle(Brand.secondary)
       } else {
         if account.signedIn { signedIn } else { signIn }
       }
@@ -67,11 +67,11 @@ struct DesktopAccountView: View {
   }
   private var signIn: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Label("ONE ACCOUNT, YOUR VOICE LIBRARY", systemImage: "person.crop.circle").font(
-        .caption.weight(.semibold)
+      Label("ONE ACCOUNT, YOUR VOICE LIBRARY", systemImage: "person.crop.circle").desktopFont(
+        .caption, weight: .semibold
       )
       .foregroundStyle(Brand.accent)
-      Text("Listen on your Mac and mobile").font(.title2.weight(.semibold))
+      Text("Listen on your Mac and mobile").desktopFont(.title2, weight: .semibold)
       Text(
         "Processing runs on this Mac by default. Signing in lets MusicMute save your original and voice-only audio to your account in the background."
       )
@@ -145,12 +145,16 @@ struct DesktopAccountView: View {
         }.buttonStyle(.bordered).disabled(!account.googleConfigured).accessibilityIdentifier(
           "auth_google")
         if !account.googleConfigured {
-          Text("Google sign-in needs this build's registered desktop OAuth client.").font(.caption)
-            .foregroundStyle(Brand.secondary)
+          Text("Google sign-in needs this build's registered desktop OAuth client.").desktopFont(
+            .caption
+          )
+          .foregroundStyle(Brand.secondary)
         }
       }
-      Text("Credentials stay in macOS Keychain. Diagnostics stay on this Mac.").font(.caption)
-        .foregroundStyle(Brand.secondary)
+      Text("Credentials stay in macOS Keychain. Diagnostics stay on this Mac.").desktopFont(
+        .caption
+      )
+      .foregroundStyle(Brand.secondary)
     }.padding(24).background(Brand.surface, in: RoundedRectangle(cornerRadius: 20)).frame(
       maxWidth: 620, alignment: .leading)
   }
@@ -183,7 +187,7 @@ struct DesktopAccountView: View {
               "Cloud access: \(reason.replacingOccurrences(of: "_", with: " ").lowercased())",
               systemImage: "exclamationmark.cloud"
             )
-            .font(.callout).foregroundStyle(Brand.amber)
+            .desktopFont(.callout).foregroundStyle(Brand.amber)
           }
         }
         .padding(18)
@@ -208,8 +212,10 @@ struct DesktopAccountView: View {
           SecureField("Current password for security changes", text: $securityPassword)
             .textContentType(.password)
           if account.user?.providers.contains("google.com") == true {
-            Text("Leave the password empty to confirm security changes with Google.").font(.caption)
-              .foregroundStyle(Brand.secondary)
+            Text("Leave the password empty to confirm security changes with Google.").desktopFont(
+              .caption
+            )
+            .foregroundStyle(Brand.secondary)
           }
           if account.user?.providers.contains("google.com") == false {
             Button {
@@ -255,14 +261,14 @@ struct DesktopAccountView: View {
             HStack {
               VStack(alignment: .leading) {
                 Text(device["device_model"].string ?? device["platform"].string ?? "Device")
-                Text(device["last_seen_at"].string ?? "").font(.caption).foregroundStyle(
+                Text(device["last_seen_at"].string ?? "").desktopFont(.caption).foregroundStyle(
                   Brand.secondary)
               }
               Spacer()
               if let id = device["installation_id"].string, id != account.installationId {
                 Button("Hide from history") { Task { await account.hideDevice(id) } }
               } else {
-                Text("This Mac").font(.caption).foregroundStyle(Brand.accent)
+                Text("This Mac").desktopFont(.caption).foregroundStyle(Brand.accent)
               }
             }
           }
@@ -286,7 +292,7 @@ struct DesktopAccountView: View {
             !canReauthenticate || account.deletionPending)
           Text(
             "Security changes require recent sign-in. The server controls deletion and recovery eligibility."
-          ).font(.caption).foregroundStyle(Brand.secondary)
+          ).desktopFont(.caption).foregroundStyle(Brand.secondary)
         }.padding(12)
       }
     }.frame(maxWidth: 900, alignment: .leading)
@@ -332,7 +338,7 @@ struct DesktopAccountView: View {
         email: account.user?.email
       )
     )
-    .font(.title2.weight(.semibold))
+    .desktopFont(.title2, weight: .semibold)
     .foregroundStyle(Brand.accent)
     .frame(width: 58, height: 58)
     .background(Brand.accent.opacity(0.13), in: Circle())
@@ -342,10 +348,10 @@ struct DesktopAccountView: View {
   private var accountIdentity: some View {
     VStack(alignment: .leading, spacing: 5) {
       accountDisplayName
-        .font(.title2.weight(.semibold))
+        .desktopFont(.title2, weight: .semibold)
         .fixedSize(horizontal: false, vertical: true)
       accountEmail
-        .font(.callout)
+        .desktopFont(.callout)
         .foregroundStyle(Brand.secondary)
         .textSelection(.enabled)
         .fixedSize(horizontal: false, vertical: true)
@@ -367,12 +373,12 @@ struct DesktopAccountView: View {
         LocalizedStringKey(account.online ? "Account connected" : "Account reconnecting"),
         systemImage: account.online ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath"
       )
-      .font(.callout.weight(.semibold))
+      .desktopFont(.callout, weight: .semibold)
       .foregroundStyle(account.online ? Brand.mint : Brand.amber)
       .accessibilityIdentifier("account_connection_status")
       if !account.online {
         Text("Local playback stays available while MusicMute reconnects.")
-          .font(.caption)
+          .desktopFont(.caption)
           .foregroundStyle(Brand.secondary)
           .fixedSize(horizontal: false, vertical: true)
         Button("Reconnect account") { Task { await account.reconnect() } }
@@ -465,12 +471,13 @@ struct DesktopAccountPresentation {
 }
 
 struct DesktopUsageAmount: Equatable, Sendable {
+  let used: Int64
   let remaining: Int64
   let limit: Int64
 
-  var remainingFraction: Double? {
-    guard limit > 0, remaining >= 0, remaining <= limit else { return nil }
-    return Double(remaining) / Double(limit)
+  var progressFraction: Double {
+    guard limit > 0 else { return used > 0 ? 1 : 0 }
+    return min(1, Double(used) / Double(limit))
   }
 }
 
@@ -478,31 +485,14 @@ struct DesktopUsagePresentation: Equatable, Sendable {
   static let maximumSafeInteger: Double = 9_007_199_254_740_991
 
   let processing: DesktopUsageAmount
-  let storage: DesktopUsageAmount
-  let uploads: DesktopUsageAmount
-  let downloads: DesktopUsageAmount
   let resetAt: Date
 
   static func parse(_ value: DesktopJSON) -> Self? {
     guard
-      let processing = amount(
-        value["processing"], remainingKey: "remaining_seconds", limitKey: "limit_seconds"),
-      let storage = amount(
-        value["storage"], remainingKey: "remaining_bytes", limitKey: "limit_bytes"),
-      let uploads = amount(
-        value["uploads"], remainingKey: "monthly_remaining_grants",
-        limitKey: "monthly_grant_limit"),
-      let downloads = amount(
-        value["downloads"], remainingKey: "monthly_remaining_grants",
-        limitKey: "monthly_grant_limit"),
+      let processing = processingAmount(value["processing"]),
       let reset = value["period"]["next_reset_at"].string.flatMap(rfc3339Date)
     else { return nil }
-    return Self(
-      processing: processing,
-      storage: storage,
-      uploads: uploads,
-      downloads: downloads,
-      resetAt: reset)
+    return Self(processing: processing, resetAt: reset)
   }
 
   static func nonnegativeSafeInteger(_ value: DesktopJSON) -> Int64? {
@@ -542,6 +532,7 @@ struct DesktopUsagePresentation: Equatable, Sendable {
     formatter.locale = locale
     formatter.numberStyle = .decimal
     formatter.maximumFractionDigits = 0
+    formatter.usesGroupingSeparator = true
     return formatter.string(from: NSNumber(value: value)) ?? String(value)
   }
 
@@ -581,139 +572,61 @@ struct DesktopUsagePresentation: Equatable, Sendable {
     return formatter.string(from: TimeInterval(seconds)) ?? countLabel(seconds, locale: locale)
   }
 
-  static func resetLabel(_ date: Date, locale: Locale) -> String {
-    date.formatted(Date.FormatStyle(date: .long, time: .shortened).locale(locale))
+  static func resetLabel(
+    _ date: Date, locale: Locale, timeZone: TimeZone = .autoupdatingCurrent
+  ) -> String {
+    date.formatted(
+      Date.FormatStyle(
+        date: .abbreviated, time: .shortened, locale: locale, timeZone: timeZone))
   }
 
-  private static func amount(
-    _ object: DesktopJSON, remainingKey: String, limitKey: String
-  ) -> DesktopUsageAmount? {
-    guard let remaining = nonnegativeSafeInteger(object[remainingKey]),
-      let limit = nonnegativeSafeInteger(object[limitKey]), remaining <= limit
+  private static func processingAmount(_ object: DesktopJSON) -> DesktopUsageAmount? {
+    guard let used = nonnegativeSafeInteger(object["used_seconds"]),
+      let reserved = nonnegativeSafeInteger(object["reserved_seconds"]),
+      nonnegativeSafeInteger(object["released_seconds"]) != nil,
+      let remaining = nonnegativeSafeInteger(object["remaining_seconds"]),
+      let limit = nonnegativeSafeInteger(object["limit_seconds"]),
+      remaining == max(0, limit - used - reserved)
     else { return nil }
-    return DesktopUsageAmount(remaining: remaining, limit: limit)
+    return DesktopUsageAmount(used: used, remaining: remaining, limit: limit)
   }
 }
 
 private struct DesktopUsageView: View {
   @ObservedObject var workspace: DesktopWorkspace
-  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-  @Environment(\.locale) private var locale
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      ViewThatFits(in: .horizontal) {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-          allowanceHeading
-          Spacer(minLength: 20)
-          liveStatus
-        }
-        VStack(alignment: .leading, spacing: 8) {
-          allowanceHeading
-          liveStatus
-        }
-      }
+    VStack(alignment: .leading, spacing: 22) {
+      Text("Usage").desktopFont(.title2, weight: .semibold)
       if workspace.usage == .null {
         emptyState
       } else if let presentation = DesktopUsagePresentation.parse(workspace.usage) {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-          DesktopUsageMetricCard(
-            title: "Cloud processing", symbol: "cloud.fill",
-            amount: presentation.processing,
-            remainingLabel: DesktopUsagePresentation.durationLabel(
-              seconds: presentation.processing.remaining, locale: locale),
-            limitLabel: DesktopUsagePresentation.durationLabel(
-              seconds: presentation.processing.limit, locale: locale),
-            accessibilityID: "allowance_processing")
-          DesktopUsageMetricCard(
-            title: "Account storage", symbol: "externaldrive.fill",
-            amount: presentation.storage,
-            remainingLabel: DesktopUsagePresentation.byteLabel(
-              presentation.storage.remaining, locale: locale),
-            limitLabel: DesktopUsagePresentation.byteLabel(
-              presentation.storage.limit, locale: locale),
-            accessibilityID: "allowance_storage")
-          DesktopUsageMetricCard(
-            title: "Monthly uploads", symbol: "arrow.up.circle.fill",
-            amount: presentation.uploads,
-            remainingLabel: DesktopUsagePresentation.countLabel(
-              presentation.uploads.remaining, locale: locale),
-            limitLabel: DesktopUsagePresentation.countLabel(
-              presentation.uploads.limit, locale: locale),
-            accessibilityID: "allowance_uploads")
-          DesktopUsageMetricCard(
-            title: "Monthly downloads", symbol: "arrow.down.circle.fill",
-            amount: presentation.downloads,
-            remainingLabel: DesktopUsagePresentation.countLabel(
-              presentation.downloads.remaining, locale: locale),
-            limitLabel: DesktopUsagePresentation.countLabel(
-              presentation.downloads.limit, locale: locale),
-            accessibilityID: "allowance_downloads")
-        }
-        Label(
-          "Allowance resets \(DesktopUsagePresentation.resetLabel(presentation.resetAt, locale: locale))",
-          systemImage: "calendar.badge.clock"
+        DesktopProcessingUsageView(
+          amount: presentation.processing,
+          resetAt: presentation.resetAt
         )
-        .font(.callout)
-        .foregroundStyle(Brand.secondary)
-        .accessibilityIdentifier("allowance_reset")
+        if !workspace.cloudConnected {
+          Label("Reconnecting to your live allowance…", systemImage: "arrow.clockwise")
+            .desktopFont(.caption)
+            .foregroundStyle(Brand.amber)
+            .accessibilityIdentifier("allowance_reconnecting")
+        }
       } else {
         Label(
           "Allowance details are temporarily unavailable.", systemImage: "exclamationmark.shield"
         )
-        .font(.callout)
+        .desktopFont(.callout)
         .foregroundStyle(Brand.amber)
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Brand.amber.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
         .accessibilityIdentifier("allowance_invalid")
       }
-      Label(
-        "Processing on this Mac does not use cloud minutes. Account storage and transfers still use their normal allowances.",
-        systemImage: "desktopcomputer"
-      )
-      .font(.callout)
-      .foregroundStyle(Brand.mint)
-      .fixedSize(horizontal: false, vertical: true)
-      .padding(14)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Brand.mintDark.opacity(0.72), in: RoundedRectangle(cornerRadius: 14))
-      .accessibilityIdentifier("allowance_local_processing")
     }
-    .padding(20)
+    .padding(24)
     .background(Brand.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Brand.border))
     .accessibilityIdentifier("account_allowance")
-  }
-
-  private var columns: [GridItem] {
-    if dynamicTypeSize.isAccessibilitySize { return [GridItem(.flexible())] }
-    return [GridItem(.adaptive(minimum: 240, maximum: 420), spacing: 12)]
-  }
-
-  private var allowanceHeading: some View {
-    VStack(alignment: .leading, spacing: 3) {
-      Text("Account allowance").font(.title3.weight(.semibold))
-      Text("Your current cloud and account limits")
-        .font(.callout)
-        .foregroundStyle(Brand.secondary)
-    }
-  }
-
-  private var liveStatus: some View {
-    Label(
-      LocalizedStringKey(workspace.cloudConnected ? "Live" : "Reconnecting"),
-      systemImage: workspace.cloudConnected ? "dot.radiowaves.left.and.right" : "arrow.clockwise"
-    )
-    .font(.caption.weight(.semibold))
-    .foregroundStyle(workspace.cloudConnected ? Brand.mint : Brand.amber)
-    .padding(.horizontal, 10)
-    .padding(.vertical, 6)
-    .background(
-      (workspace.cloudConnected ? Brand.mint : Brand.amber).opacity(0.1),
-      in: Capsule()
-    )
-    .accessibilityIdentifier("allowance_live_status")
   }
 
   private var emptyState: some View {
@@ -739,43 +652,52 @@ private struct DesktopUsageView: View {
   }
 }
 
-private struct DesktopUsageMetricCard: View {
-  let title: String
-  let symbol: String
+private struct DesktopProcessingUsageView: View {
+  @Environment(\.locale) private var locale
+
   let amount: DesktopUsageAmount
-  let remainingLabel: String
-  let limitLabel: String
-  let accessibilityID: String
+  let resetAt: Date
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 11) {
-      HStack(spacing: 8) {
-        Image(systemName: symbol)
-          .foregroundStyle(Brand.accent)
-          .frame(width: 22)
-          .accessibilityHidden(true)
-        Text(LocalizedStringKey(title)).font(.callout.weight(.semibold))
-      }
-      Text("Remaining").font(.caption).foregroundStyle(Brand.secondary)
-      Text(verbatim: remainingLabel)
-        .font(.title2.weight(.semibold))
-        .minimumScaleFactor(0.8)
-        .lineLimit(2)
-      Text("of \(limitLabel) total")
-        .font(.caption)
-        .foregroundStyle(Brand.secondary)
+    let used = DesktopUsagePresentation.countLabel(amount.used, locale: locale)
+    let limit = DesktopUsagePresentation.countLabel(amount.limit, locale: locale)
+    let remaining = DesktopUsagePresentation.countLabel(amount.remaining, locale: locale)
+    let reset = DesktopUsagePresentation.resetLabel(resetAt, locale: locale)
+
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Processing: \(used) / \(limit) seconds")
+        .desktopFont(.body, weight: .semibold)
         .fixedSize(horizontal: false, vertical: true)
-      if let progress = amount.remainingFraction {
-        ProgressView(value: progress)
-          .tint(progress > 0.1 ? Brand.accent : Brand.amber)
-          .accessibilityHidden(true)
+      DesktopUsageProgressBar(value: amount.progressFraction)
+      Text("\(remaining) seconds · \(reset)")
+        .desktopFont(.body)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(Text("Cloud processing"))
+    .accessibilityValue(
+      Text(
+        "\(used) of \(limit) seconds used. \(remaining) seconds remaining. Resets \(reset)."
+      )
+    )
+    .accessibilityIdentifier("allowance_processing")
+  }
+}
+
+private struct DesktopUsageProgressBar: View {
+  let value: Double
+
+  var body: some View {
+    GeometryReader { geometry in
+      ZStack(alignment: .leading) {
+        Capsule().fill(Brand.secondary.opacity(0.28))
+        Capsule()
+          .fill(Brand.accent)
+          .frame(width: geometry.size.width * min(1, max(0, value)))
       }
     }
-    .padding(16)
-    .frame(maxWidth: .infinity, minHeight: 142, alignment: .topLeading)
-    .background(Brand.raised, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-    .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(Brand.border))
-    .accessibilityElement(children: .combine)
-    .accessibilityIdentifier(accessibilityID)
+    .frame(height: 8)
+    .accessibilityHidden(true)
   }
 }

@@ -1,6 +1,14 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 
 const authErrors = {
+  WORKER_REGISTRATION_NOT_ALLOWED: {
+    statusCode: HttpStatus.FORBIDDEN,
+    message: 'Worker registration is not allowed for this account',
+  },
+  GOOGLE_SIGN_IN_REQUIRED: {
+    statusCode: HttpStatus.FORBIDDEN,
+    message: 'Sign in with Google to register this Mac as a worker',
+  },
   GOOGLE_TOKEN_INVALID_GRANT: {
     statusCode: HttpStatus.BAD_REQUEST,
     message: 'Google sign-in expired or was rejected; start sign-in again',

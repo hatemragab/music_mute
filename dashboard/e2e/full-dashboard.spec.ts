@@ -47,13 +47,17 @@ test("owner can open every dashboard area without runtime errors", async ({
   expect(runtimeErrors).toEqual([]);
 });
 
-test("owner inspects worker detail and one-use enrollment is cleared", async ({
+test("owner manages registered machines without enrollment UI", async ({
   page,
 }) => {
   await setDashboardRole(page, "owner");
   const fixture = await installDashboardFixture(page);
 
   await page.goto("/workers");
+  await expect(page.getByRole("tab", { name: "Enrollment" })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /Create invitation|Create replacement/ }),
+  ).toHaveCount(0);
   await expect(page.getByRole("link", { name: /Windows Z440/ })).toBeVisible();
   await page.getByRole("link", { name: /Windows Z440/ }).click();
   await expect(
@@ -63,33 +67,19 @@ test("owner inspects worker detail and one-use enrollment is cleared", async ({
   await expect(page.getByText(/\[redacted-url\]/)).toBeVisible();
   await expect(page.getByText(/fixture-secret/)).toHaveCount(0);
 
-  await page.goto("/workers");
-  const trigger = page.getByRole("button", { name: "Create invitation" });
-  await trigger.click();
-  const dialog = page.getByRole("dialog", { name: "Enroll a worker machine" });
-  await dialog.getByLabel("Reason").fill("Enroll the Windows fixture");
-  await dialog.getByRole("button", { name: "Verify identity" }).click();
-  await dialog.getByRole("button", { name: "Create one-use code" }).click();
-  const credentialDialog = page.getByRole("dialog", {
-    name: "Save the one-use code",
-  });
-  await expect(
-    credentialDialog.getByText("fixture-one-use-enrollment-secret"),
-  ).toBeVisible();
-  await credentialDialog
-    .getByRole("button", { name: "I saved the code" })
+  await page.getByRole("button", { name: "Revoke", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Revoke worker machine" });
+  await dialog.getByLabel("Reason").fill("Retire the fixture machine");
+  await dialog
+    .getByRole("button", { name: "Reauthenticate with Google" })
     .click();
-  await expect(credentialDialog).toHaveCount(0);
-  await expect(trigger).toBeFocused();
-  await trigger.click();
-  await expect(
-    page.getByRole("dialog", { name: "Enroll a worker machine" }),
-  ).not.toContainText("fixture-one-use-enrollment-secret");
-  expect(
-    fixture.requests.some(({ url }) =>
-      url.includes("/admin/workers/invitations"),
-    ),
-  ).toBe(true);
+  await dialog.getByRole("button", { name: "Revoke machine" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(fixture.workerMachine.status).toBe("revoked");
+  expect(fixture.user.workerRegistrationAllowed).toBe(false);
+  expect(fixture.requests.some(({ url }) => url.includes("invitations"))).toBe(
+    false,
+  );
 });
 
 test("support reviews a high-priority account recovery request", async ({

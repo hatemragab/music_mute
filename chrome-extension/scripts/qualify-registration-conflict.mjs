@@ -28,7 +28,6 @@ const modelDigest =
   "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b";
 const modelBytes = 66_759_214;
 const modelFilename = "Kim_Vocal_2.onnx";
-const origin = "chrome-extension://dclpfemnpknfdlpcbfcjkmdbnociippd/";
 const started = Date.now();
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const delay = (milliseconds) =>
@@ -48,6 +47,7 @@ const report = {
 };
 let app;
 let resources;
+let origin;
 let node;
 let env;
 let stopActive;
@@ -495,6 +495,24 @@ try {
       audit.includes_worker_state === false,
   );
   await signature("INSTALLED_SIGNATURE_BEFORE");
+  const extensionManifest = JSON.parse(
+    await boundedRead(join(resources, "extension/manifest.json"), 32 * 1024),
+  );
+  const extensionKey = extensionManifest.key;
+  check(
+    "INSTALLED_EXTENSION_KEY_VALID",
+    typeof extensionKey === "string" && /^[A-Za-z0-9+/=]+$/.test(extensionKey),
+  );
+  const keyBytes = Buffer.from(extensionKey, "base64");
+  check(
+    "INSTALLED_EXTENSION_KEY_BOUNDED",
+    keyBytes.length >= 128 && keyBytes.length <= 4096,
+  );
+  const extensionId = Array.from(digest(keyBytes).slice(0, 32), (hex) =>
+    String.fromCharCode(97 + Number.parseInt(hex, 16)),
+  ).join("");
+  origin = `chrome-extension://${extensionId}/`;
+  report.extension_origin = origin;
   env = {
     HOME: testHome,
     PATH: "/usr/bin:/bin",

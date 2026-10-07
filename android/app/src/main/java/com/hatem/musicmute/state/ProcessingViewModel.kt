@@ -48,7 +48,10 @@ class ProcessingViewModel(
     private val errorOutbox: ClientErrorOutbox,
 ) : ViewModel() {
     val history = JobHistoryController(api, viewModelScope,
-        onJobsChanged = { uid, jobs -> repository.store.updateLibraryJobs(uid, jobs) },
+        onJobsChanged = { uid, jobs ->
+            repository.store.updateLibraryJobs(uid, jobs)
+            repository.store.retireConfirmedTerminalOperations(uid, jobs)
+        },
         onMissing = { jobId ->
             session()?.let { current ->
                 playback.removeTrack(com.hatem.musicmute.library.LibraryKey(current.uid, jobId))

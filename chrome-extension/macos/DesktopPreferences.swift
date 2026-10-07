@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import SwiftUI
 
 enum DesktopAppearancePreference: String, CaseIterable, Identifiable {
@@ -139,18 +140,95 @@ extension EnvironmentValues {
 private struct DesktopTextSizeModifier: ViewModifier {
   let preference: DesktopTextSizePreference
   @Environment(\.dynamicTypeSize) private var inheritedSize
-  @Environment(\.font) private var inheritedFont
 
   func body(content: Content) -> some View {
-    let bodyFont = NSFont.preferredFont(forTextStyle: .body)
-    let font =
-      preference == .system
-      ? (inheritedFont ?? Font(bodyFont))
-      : Font.system(size: bodyFont.pointSize * preference.fontScale)
     content
       .dynamicTypeSize(preference.dynamicTypeSize ?? inheritedSize)
       .environment(\.desktopTextScale, preference.fontScale)
-      .font(font)
+      .font(DesktopTypography.font(.body, scale: preference.fontScale))
+      .controlSize(.large)
+  }
+}
+
+/// One readable type scale for every Mac screen, using Android's bundled font.
+enum DesktopTypography {
+  static let family = "Noto Sans Arabic"
+  static let postScriptName = "NotoSansArabic-Regular"
+
+  @discardableResult static func registerFont(resources: URL?) -> Bool {
+    guard let resources else { return false }
+    let file = resources.appendingPathComponent("Fonts/NotoSansArabic.ttf")
+    guard FileManager.default.fileExists(atPath: file.path) else { return false }
+    _ = CTFontManagerRegisterFontsForURL(file as CFURL, .process, nil)
+    return NSFont(name: postScriptName, size: 17)?.familyName == family
+  }
+
+  static func baseSize(_ style: Font.TextStyle) -> CGFloat {
+    switch style {
+    case .largeTitle: 34
+    case .title: 28
+    case .title2: 24
+    case .title3: 21
+    case .headline: 18
+    case .body: 17
+    case .callout: 16
+    case .subheadline: 16
+    case .footnote: 15
+    case .caption: 14
+    case .caption2: 13
+    default: 17
+    }
+  }
+
+  static func pointSize(_ style: Font.TextStyle, scale: CGFloat) -> CGFloat {
+    let systemScale = NSFont.preferredFont(forTextStyle: .body).pointSize / NSFont.systemFontSize
+    return max(13, baseSize(style) * scale * systemScale)
+  }
+
+  static func nativeFont(
+    _ style: Font.TextStyle, scale: CGFloat = 1, weight: Font.Weight? = nil,
+    design: Font.Design = .default
+  ) -> NSFont {
+    let size = pointSize(style, scale: scale)
+    let selected = weight ?? (style == .headline ? .semibold : .regular)
+    if design == .monospaced {
+      return NSFont.monospacedSystemFont(ofSize: size, weight: nativeWeight(selected))
+    }
+    let suffix: String
+    switch selected {
+    case .ultraLight: suffix = "_Thin"
+    case .thin: suffix = "_ExtraLight"
+    case .light: suffix = "_Light"
+    case .medium: suffix = "_Medium"
+    case .semibold: suffix = "_SemiBold"
+    case .bold: suffix = "_Bold"
+    case .heavy: suffix = "_ExtraBold"
+    case .black: suffix = "_Black"
+    default: suffix = ""
+    }
+    return NSFont(name: postScriptName + suffix, size: size)
+      ?? NSFont.systemFont(ofSize: size, weight: nativeWeight(selected))
+  }
+
+  private static func nativeWeight(_ weight: Font.Weight) -> NSFont.Weight {
+    switch weight {
+    case .ultraLight: .ultraLight
+    case .thin: .thin
+    case .light: .light
+    case .medium: .medium
+    case .semibold: .semibold
+    case .bold: .bold
+    case .heavy: .heavy
+    case .black: .black
+    default: .regular
+    }
+  }
+
+  static func font(
+    _ style: Font.TextStyle, scale: CGFloat, weight: Font.Weight? = nil,
+    design: Font.Design = .default
+  ) -> Font {
+    Font(nativeFont(style, scale: scale, weight: weight, design: design))
   }
 }
 
@@ -158,30 +236,12 @@ private struct DesktopSemanticFontModifier: ViewModifier {
   let style: Font.TextStyle
   let weight: Font.Weight?
   let design: Font.Design
+  let monospacedDigits: Bool
   @Environment(\.desktopTextScale) private var scale
 
-  private var nativeStyle: NSFont.TextStyle {
-    switch style {
-    case .largeTitle: .largeTitle
-    case .title: .title1
-    case .title2: .title2
-    case .title3: .title3
-    case .headline: .headline
-    case .subheadline: .subheadline
-    case .callout: .callout
-    case .footnote: .footnote
-    case .caption: .caption1
-    case .caption2: .caption2
-    default: .body
-    }
-  }
-
   func body(content: Content) -> some View {
-    let pointSize = NSFont.preferredFont(forTextStyle: nativeStyle).pointSize * scale
-    content.font(
-      .system(
-        size: pointSize, weight: weight ?? (style == .headline ? .semibold : .regular),
-        design: design))
+    let font = DesktopTypography.font(style, scale: scale, weight: weight, design: design)
+    content.font(monospacedDigits ? font.monospacedDigit() : font)
   }
 }
 
@@ -191,9 +251,12 @@ extension View {
   }
 
   func desktopFont(
-    _ style: Font.TextStyle, weight: Font.Weight? = nil, design: Font.Design = .default
+    _ style: Font.TextStyle, weight: Font.Weight? = nil, design: Font.Design = .default,
+    monospacedDigits: Bool = false
   ) -> some View {
-    modifier(DesktopSemanticFontModifier(style: style, weight: weight, design: design))
+    modifier(
+      DesktopSemanticFontModifier(
+        style: style, weight: weight, design: design, monospacedDigits: monospacedDigits))
   }
 }
 
@@ -330,6 +393,14 @@ enum DesktopProcessingPreference: String, CaseIterable, Identifiable {
   }
 }
 
+enum DesktopProcessingAccess {
+  static func resolved(
+    _ requested: DesktopProcessingPreference, signedIn: Bool
+  ) -> DesktopProcessingPreference {
+    requested == .cloud && !signedIn ? .local : requested
+  }
+}
+
 enum DesktopPreferenceKey {
   static let appearance = "desktop.appearance"
   static let accent = "desktop.accent"
@@ -447,9 +518,12 @@ struct DesktopPreferencesView: View {
   let workspace: DesktopWorkspace
   @ObservedObject var visualPreferences: DesktopVisualPreferences
   @ObservedObject var updater: DesktopUpdater
+  @ObservedObject private var account: DesktopAccountModel
   let isPreview: Bool
+  let openAccount: () -> Void
   @State private var section: DesktopSettingsSection
   @StateObject private var storageState: DesktopStoragePreferencesState
+  @State private var cloudSignInRequired = false
   @Environment(\.colorScheme) private var colorScheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @AppStorage(DesktopPreferenceKey.importSource) private var importSourceRaw =
@@ -462,12 +536,14 @@ struct DesktopPreferencesView: View {
   init(
     workspace: DesktopWorkspace, visualPreferences: DesktopVisualPreferences,
     updater: DesktopUpdater, isPreview: Bool = false,
-    initialSection: DesktopSettingsSection = .appearance
+    initialSection: DesktopSettingsSection = .appearance, openAccount: @escaping () -> Void = {}
   ) {
     self.workspace = workspace
     self.visualPreferences = visualPreferences
     self.updater = updater
     self.isPreview = isPreview
+    self.openAccount = openAccount
+    _account = ObservedObject(wrappedValue: workspace.account)
     _section = State(initialValue: initialSection)
     _storageState = StateObject(
       wrappedValue: DesktopStoragePreferencesState(workspace: workspace, isPreview: isPreview))
@@ -500,9 +576,15 @@ struct DesktopPreferencesView: View {
   private var processingMode: Binding<DesktopProcessingPreference> {
     Binding(
       get: {
-        DesktopPreferenceNormalizer.normalize(processingModeRaw, fallback: .local)
+        DesktopProcessingAccess.resolved(
+          DesktopPreferenceNormalizer.normalize(processingModeRaw, fallback: .local),
+          signedIn: account.signedIn)
       },
-      set: { processingModeRaw = $0.rawValue })
+      set: { requested in
+        let resolved = DesktopProcessingAccess.resolved(requested, signedIn: account.signedIn)
+        processingModeRaw = resolved.rawValue
+        cloudSignInRequired = requested == .cloud && resolved == .local
+      })
   }
 
   var body: some View {
@@ -522,6 +604,13 @@ struct DesktopPreferencesView: View {
     .frame(minWidth: 600, idealWidth: 700, minHeight: 580, idealHeight: 660)
     .accessibilityIdentifier("desktopPreferences.form")
     .onAppear(perform: repairMalformedOperationalPreferences)
+    .onChange(of: account.signedIn) { _, signedIn in
+      if signedIn {
+        cloudSignInRequired = false
+      } else {
+        processingModeRaw = DesktopProcessingPreference.local.rawValue
+      }
+    }
   }
 
   private func settingsPane<Content: View>(
@@ -529,7 +618,7 @@ struct DesktopPreferencesView: View {
   ) -> some View {
     Form { content() }
       .formStyle(.grouped)
-      .controlSize(.regular)
+      .controlSize(.large)
       .tabItem { Label(LocalizedStringKey(section.title), systemImage: section.symbol) }
       .tag(section)
       .accessibilityIdentifier("desktopPreferences.pane.\(section.rawValue)")
@@ -574,7 +663,7 @@ struct DesktopPreferencesView: View {
             .desktopFont(.callout, weight: .semibold)
           Spacer()
           Text(LocalizedStringKey(textSize.wrappedValue.title))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Brand.secondary)
         }
         ViewThatFits(in: .horizontal) {
           HStack(spacing: 8) {
@@ -594,7 +683,7 @@ struct DesktopPreferencesView: View {
 
       Text("System follows your Mac appearance. Adjust text size for easier reading.")
         .desktopFont(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Brand.secondary)
         .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -612,7 +701,7 @@ struct DesktopPreferencesView: View {
 
         Text("System follows your Mac language setting.")
           .desktopFont(.footnote)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(Brand.secondary)
       }
 
       Section("New imports") {
@@ -632,11 +721,28 @@ struct DesktopPreferencesView: View {
         .pickerStyle(.segmented)
         .accessibilityIdentifier("desktopPreferences.processingMode")
 
+        if cloudSignInRequired {
+          VStack(alignment: .leading, spacing: 8) {
+            Label(
+              "Sign in to use MusicMute cloud. On this Mac remains selected.",
+              systemImage: "exclamationmark.circle"
+            )
+            .desktopFont(.footnote, weight: .medium)
+            .foregroundStyle(Brand.amber)
+            .fixedSize(horizontal: false, vertical: true)
+
+            Button("Open Account", action: openAccount)
+              .buttonStyle(.bordered)
+          }
+          .accessibilityElement(children: .contain)
+          .accessibilityIdentifier("desktopPreferences.cloudSignInRequired")
+        }
+
         Text(
           "On this Mac keeps processing local. MusicMute cloud is used only after you start an import."
         )
         .desktopFont(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Brand.secondary)
         .fixedSize(horizontal: false, vertical: true)
       }
 
@@ -653,7 +759,7 @@ struct DesktopPreferencesView: View {
           "These preferences stay on this Mac. Changing a default does not upload media or start processing."
         )
         .desktopFont(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Brand.secondary)
         .fixedSize(horizontal: false, vertical: true)
       }
     }
@@ -663,7 +769,7 @@ struct DesktopPreferencesView: View {
     Section("Keyboard Shortcuts") {
       Text("Use these shortcuts anywhere in MusicMute. They avoid standard typing commands.")
         .desktopFont(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Brand.secondary)
         .fixedSize(horizontal: false, vertical: true)
 
       LazyVGrid(
@@ -713,7 +819,7 @@ struct DesktopPreferencesView: View {
           .desktopFont(.headline)
         Text("Voice ready")
           .desktopFont(.subheadline)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(Brand.secondary)
       }
 
       Spacer()
@@ -861,7 +967,7 @@ private struct DesktopUpdatesPreferencesSection: View {
         systemImage: updater.configured ? "info.circle" : "info.circle.fill"
       )
       .desktopFont(.callout)
-      .foregroundStyle(.secondary)
+      .foregroundStyle(Brand.secondary)
       .fixedSize(horizontal: false, vertical: true)
       Button("Check for Updates…") { updater.checkForUpdates() }
         .disabled(!updater.canCheck || isPreview)
@@ -958,10 +1064,10 @@ private struct DesktopStoragePreferencesSection: View {
         LabeledContent("Offline voices") {
           if state.hasLoadedStorage {
             Text("\(storageSize(workspace.cacheBytes)) of \(storageSize(workspace.budgetBytes))")
-              .foregroundStyle(.secondary)
+              .foregroundStyle(Brand.secondary)
           } else {
             Text(LocalizedStringKey(state.loadingStorage ? "Loading storage…" : "Unavailable"))
-              .foregroundStyle(.secondary)
+              .foregroundStyle(Brand.secondary)
           }
         }
         if state.loadingStorage {
@@ -990,7 +1096,7 @@ private struct DesktopStoragePreferencesSection: View {
               .onSubmit { saveLimit() }
               .accessibilityLabel("Offline voice storage limit in GB")
               .accessibilityIdentifier("desktopPreferences.offlineStorageLimit")
-            Text("GB").foregroundStyle(.secondary)
+            Text("GB").foregroundStyle(Brand.secondary)
           }
         }
 
@@ -1002,7 +1108,7 @@ private struct DesktopStoragePreferencesSection: View {
           "Choose a whole number of GB, starting at 1. The default is 2 GB, shared with the Chrome extension. Lowering the limit removes older unused voices only when space is next needed; active playback and pending account saves stay protected."
         )
         .desktopFont(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Brand.secondary)
         .fixedSize(horizontal: false, vertical: true)
 
         if state.hasLoadedStorage
@@ -1020,7 +1126,7 @@ private struct DesktopStoragePreferencesSection: View {
             systemImage: workspace.savingCacheBudget ? "hourglass" : "info.circle"
           )
           .desktopFont(.footnote)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(Brand.secondary)
           .accessibilityIdentifier("desktopPreferences.offlineStorageStatus")
         }
       }
@@ -1029,7 +1135,7 @@ private struct DesktopStoragePreferencesSection: View {
           "Clearing stops current MusicMute playback, then removes eligible voice copies from this Mac. Other voices pinned by extension playback or pending account saves stay protected."
         )
         .desktopFont(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Brand.secondary)
         .fixedSize(horizontal: false, vertical: true)
         HStack {
           Button("Clear Offline Voices…", role: .destructive) { confirmClearOfflineVoices = true }
@@ -1040,14 +1146,14 @@ private struct DesktopStoragePreferencesSection: View {
         if let count = workspace.cacheClearedEntries, count > 0 {
           Text("Removed \(count) eligible offline voices from this Mac.")
             .desktopFont(.footnote)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Brand.secondary)
         } else if let status = workspace.cacheClearStatus {
           Label(
             LocalizedStringKey(status),
             systemImage: workspace.clearingCache ? "hourglass" : "info.circle"
           )
           .desktopFont(.footnote)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(Brand.secondary)
           .fixedSize(horizontal: false, vertical: true)
         }
       }

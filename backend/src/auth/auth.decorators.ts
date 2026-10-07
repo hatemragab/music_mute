@@ -14,6 +14,7 @@ export type AuthOperation =
   | 'logout'
   | 'account-deletion'
   | 'account-recovery'
+  | 'worker-installation'
   | 'processing-read'
   | 'processing-create'
   | 'processing-upload-grant'

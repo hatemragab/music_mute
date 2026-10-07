@@ -1,0 +1,2487 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23ff7754'/%3E%3Cpath d='M14 32v7m7-19v24m7-34v44m8-30v16m7-24v32m7-22v12' stroke='%231c0904' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+    <title>MusicMute Local — Four Home-Only Concepts</title>
+    <style>
+      :root {
+        color: #f7f7fa;
+        background: #06070a;
+        font-family:
+          Inter,
+          ui-sans-serif,
+          -apple-system,
+          BlinkMacSystemFont,
+          "SF Pro Display",
+          "Segoe UI",
+          sans-serif;
+        font-synthesis: none;
+        --switcher-height: 84px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        min-height: 100vh;
+        background:
+          radial-gradient(
+            circle at 0 0,
+            rgba(255, 119, 84, 0.09),
+            transparent 31rem
+          ),
+          #06070a;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        color: inherit;
+      }
+
+      button:focus-visible,
+      input:focus-visible {
+        outline: 3px solid #fff;
+        outline-offset: 3px;
+      }
+
+      .icon {
+        width: 20px;
+        height: 20px;
+        flex: 0 0 auto;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .switcher {
+        position: sticky;
+        z-index: 100;
+        top: 0;
+        min-height: var(--switcher-height);
+        padding: 12px clamp(16px, 2.4vw, 34px);
+        display: grid;
+        grid-template-columns: minmax(300px, 0.8fr) minmax(520px, 1.4fr) auto;
+        align-items: center;
+        gap: 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+        background: rgba(8, 9, 13, 0.92);
+        -webkit-backdrop-filter: blur(22px);
+        backdrop-filter: blur(22px);
+      }
+
+      .switcher-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .switcher-mark {
+        width: 42px;
+        height: 42px;
+        display: grid;
+        place-items: center;
+        border-radius: 13px;
+        color: #1a0904;
+        background: linear-gradient(145deg, #ff8d5d, #ff5d6f);
+        box-shadow: 0 10px 30px rgba(255, 93, 91, 0.24);
+      }
+
+      .switcher-copy strong,
+      .switcher-copy span {
+        display: block;
+      }
+
+      .switcher-copy strong {
+        font-size: 14px;
+      }
+
+      .switcher-copy span {
+        margin-top: 4px;
+        color: #90939d;
+        font-size: 11px;
+      }
+
+      .scope-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 6px;
+        color: #86ddbc;
+        font-size: 9px;
+        font-weight: 750;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      .scope-chip i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 10px currentColor;
+      }
+
+      .design-tabs {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+        padding: 5px;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .design-tab {
+        min-height: 48px;
+        padding: 7px 11px;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: #858895;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          color 180ms ease,
+          background 180ms ease;
+      }
+
+      .design-tab:hover {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .design-tab[aria-selected="true"] {
+        color: #fff;
+        background: #24252c;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+      }
+
+      .design-tab b,
+      .design-tab small {
+        display: block;
+      }
+
+      .design-tab b {
+        font-size: 12px;
+      }
+
+      .design-tab small {
+        margin-top: 2px;
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .switcher-arrows {
+        display: flex;
+        gap: 6px;
+      }
+
+      .switcher-arrows button,
+      .icon-button {
+        width: 44px;
+        height: 44px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        cursor: pointer;
+      }
+
+      .stage {
+        min-height: calc(100vh - var(--switcher-height));
+      }
+
+      .design {
+        display: none;
+        min-height: calc(100vh - var(--switcher-height));
+        padding: clamp(14px, 2.2vw, 34px);
+      }
+
+      .design.active {
+        display: grid;
+        place-items: center;
+        animation: enter 280ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      @keyframes enter {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .home-frame {
+        position: relative;
+        width: min(1510px, 100%);
+        min-height: min(920px, calc(100vh - var(--switcher-height) - 34px));
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.11);
+        border-radius: 24px;
+        box-shadow: 0 35px 110px rgba(0, 0, 0, 0.5);
+      }
+
+      .design-label {
+        position: absolute;
+        z-index: 10;
+        top: 18px;
+        right: 20px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        color: rgba(255, 255, 255, 0.58);
+        font-size: 9px;
+        font-weight: 750;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+      }
+
+      .design-label b {
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 50%;
+        color: #fff;
+        font-size: 12px;
+        letter-spacing: 0;
+      }
+
+      .eyebrow {
+        margin: 0;
+        color: var(--accent-2, #8de1c1);
+        font-size: 11px;
+        font-weight: 780;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+      }
+
+      .home-title {
+        margin: 10px 0 0;
+        font-size: clamp(40px, 4vw, 64px);
+        line-height: 0.98;
+        letter-spacing: -0.06em;
+      }
+
+      .home-subtitle {
+        margin: 12px 0 0;
+        color: var(--muted, #a0a3ad);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      .pill {
+        display: inline-flex;
+        min-height: 32px;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 11px;
+        border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        font-size: 11px;
+        font-weight: 680;
+        white-space: nowrap;
+      }
+
+      .pill .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 12px currentColor;
+      }
+
+      .status-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted, #a0a3ad);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .status-line .icon {
+        color: var(--accent-2, #8de1c1);
+      }
+
+      .segmented {
+        display: inline-flex;
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid var(--line, rgba(255, 255, 255, 0.11));
+        border-radius: 12px;
+        background: rgba(0, 0, 0, 0.28);
+      }
+
+      .segmented button {
+        min-height: 38px;
+        padding: 8px 15px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--muted, #90949f);
+        font-size: 12px;
+        font-weight: 680;
+        cursor: pointer;
+        transition:
+          color 180ms ease,
+          background 180ms ease,
+          box-shadow 180ms ease;
+      }
+
+      .segmented button.active {
+        color: var(--active-text, #fff);
+        background: var(--accent, #ff7754);
+        box-shadow: 0 7px 22px
+          color-mix(in srgb, var(--accent, #ff7754) 26%, transparent);
+      }
+
+      .field-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 8px;
+        color: var(--muted, #90949f);
+        font-size: 10px;
+        font-weight: 760;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .url-input {
+        min-height: 56px;
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 6px 7px 6px 16px;
+        border: 1px solid var(--line, rgba(255, 255, 255, 0.11));
+        border-radius: 14px;
+        background: rgba(0, 0, 0, 0.3);
+      }
+
+      .url-input > .icon {
+        color: var(--muted, #858995);
+      }
+
+      .url-input input {
+        width: 100%;
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: #fff;
+        font-size: 13px;
+      }
+
+      .url-input input::placeholder {
+        color: color-mix(in srgb, var(--muted, #8e919c) 78%, transparent);
+      }
+
+      .primary,
+      .secondary,
+      .mode-card {
+        display: inline-flex;
+        min-height: 46px;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border-radius: 12px;
+        font-weight: 720;
+        cursor: pointer;
+        transition:
+          transform 170ms ease,
+          opacity 170ms ease,
+          background 170ms ease;
+      }
+
+      .primary:active,
+      .secondary:active,
+      .mode-card:active {
+        transform: scale(0.985);
+      }
+
+      .primary {
+        padding: 12px 20px;
+        border: 0;
+        background: var(--accent, #ff7754);
+        color: var(--active-text, #fff);
+        box-shadow: 0 14px 35px
+          color-mix(in srgb, var(--accent, #ff7754) 23%, transparent);
+      }
+
+      .primary:disabled {
+        cursor: not-allowed;
+        opacity: 0.4;
+        box-shadow: none;
+      }
+
+      .secondary {
+        padding: 10px 15px;
+        border: 1px solid var(--line, rgba(255, 255, 255, 0.11));
+        background: rgba(255, 255, 255, 0.05);
+        color: #f6f6f8;
+        font-size: 12px;
+      }
+
+      .check-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        color: var(--muted, #9699a4);
+        font-size: 12px;
+        line-height: 1.45;
+        cursor: pointer;
+      }
+
+      .check-row input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .fake-check {
+        width: 19px;
+        height: 19px;
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--line, rgba(255, 255, 255, 0.2));
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.26);
+      }
+
+      .fake-check .icon {
+        width: 13px;
+        height: 13px;
+        opacity: 0;
+      }
+
+      .check-row input:checked + .fake-check {
+        border-color: var(--accent, #ff7754);
+        background: var(--accent, #ff7754);
+        color: var(--active-text, #fff);
+      }
+
+      .check-row input:checked + .fake-check .icon {
+        opacity: 1;
+      }
+
+      .check-row input:focus-visible + .fake-check {
+        outline: 3px solid #fff;
+        outline-offset: 3px;
+      }
+
+      .waveform {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        color: var(--accent, #ff7754);
+      }
+
+      .waveform i {
+        width: 3px;
+        height: var(--h, 40%);
+        border-radius: 99px;
+        background: currentColor;
+        box-shadow: 0 0 12px color-mix(in srgb, currentColor 35%, transparent);
+      }
+
+      .library-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .library-links button {
+        min-height: 36px;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 11px;
+        border: 0;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--accent, #ff7754) 10%, transparent);
+        color: color-mix(in srgb, var(--accent, #ff7754) 85%, #fff);
+        font-size: 10px;
+        font-weight: 720;
+        cursor: pointer;
+      }
+
+      .library-links .icon {
+        width: 15px;
+      }
+
+      /* Design 01 — Layered Canvas */
+      #design-1 {
+        background:
+          radial-gradient(
+            circle at 85% 12%,
+            rgba(255, 105, 76, 0.12),
+            transparent 28rem
+          ),
+          #08090c;
+      }
+
+      .layered {
+        --accent: #ff7652;
+        --active-text: #1d0903;
+        --accent-2: #8ee2c1;
+        --muted: #a0a4ae;
+        --line: rgba(255, 255, 255, 0.1);
+        padding: clamp(42px, 5vw, 74px);
+        background:
+          radial-gradient(
+            circle at 87% 13%,
+            rgba(255, 102, 72, 0.11),
+            transparent 23rem
+          ),
+          #0d0f13;
+      }
+
+      .layered-header {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        gap: 28px;
+      }
+
+      .layered-header .home-title span {
+        color: #656a74;
+      }
+
+      .layered-header .pill {
+        color: #8ee2c1;
+        border-color: rgba(142, 226, 193, 0.16);
+        background: rgba(142, 226, 193, 0.055);
+      }
+
+      .layered-status {
+        margin-top: 26px;
+        padding: 13px 16px;
+        border: 1px solid rgba(142, 226, 193, 0.12);
+        border-radius: 13px;
+        background: linear-gradient(
+          90deg,
+          rgba(142, 226, 193, 0.055),
+          transparent 72%
+        );
+      }
+
+      .layered-layout {
+        margin-top: 20px;
+        display: grid;
+        grid-template-columns: minmax(500px, 1.45fr) minmax(330px, 0.72fr);
+        gap: 18px;
+      }
+
+      .layered-create,
+      .layered-card {
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: #14171c;
+      }
+
+      .layered-create {
+        padding: clamp(26px, 3vw, 40px);
+        display: flex;
+        flex-direction: column;
+        min-height: 540px;
+      }
+
+      .layered-create-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+
+      .layered-create-head h2 {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 22px;
+        letter-spacing: -0.035em;
+      }
+
+      .layered-create-head h2 .icon {
+        color: var(--accent);
+      }
+
+      .layered-create-head span {
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .layered-intro {
+        max-width: 680px;
+        margin: 14px 0 24px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .layered-form {
+        display: grid;
+        gap: 20px;
+      }
+
+      .layered-source {
+        display: flex;
+        align-items: end;
+        gap: 12px;
+      }
+
+      .layered-source > div:first-child {
+        flex: 1;
+      }
+
+      .layered-mode-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .layered-mode-grid .mode-card {
+        min-height: 80px;
+        justify-content: flex-start;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.2);
+        color: #858a95;
+        text-align: left;
+      }
+
+      .layered-mode-grid .mode-card.active {
+        border-color: rgba(255, 118, 82, 0.5);
+        background: rgba(255, 118, 82, 0.075);
+        color: #fff;
+      }
+
+      .mode-copy b,
+      .mode-copy small {
+        display: block;
+      }
+
+      .mode-copy b {
+        font-size: 12px;
+      }
+
+      .mode-copy small {
+        margin-top: 4px;
+        color: #7d828d;
+        font-size: 9px;
+      }
+
+      .layered-mode-grid .active > .icon {
+        color: var(--accent);
+      }
+
+      .layered-actions {
+        margin-top: auto;
+        padding-top: 28px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 18px;
+      }
+
+      .layered-actions .primary {
+        min-width: 230px;
+      }
+
+      .layered-aside {
+        display: grid;
+        grid-template-rows: 0.8fr 1.2fr;
+        gap: 18px;
+      }
+
+      .layered-library {
+        padding: 24px;
+      }
+
+      .layered-library header {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .layered-library header > .icon {
+        color: var(--accent-2);
+      }
+
+      .layered-library h3,
+      .layered-library p {
+        margin: 0;
+      }
+
+      .layered-library h3 {
+        font-size: 14px;
+      }
+
+      .layered-library p {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.5;
+      }
+
+      .layered-library .library-links {
+        margin-top: 18px;
+      }
+
+      .layered-visual {
+        position: relative;
+        overflow: hidden;
+        padding: 22px;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle, rgba(255, 118, 82, 0.18), transparent 42%),
+          #14171c;
+      }
+
+      .layered-visual::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        opacity: 0.18;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+        background-size: 25px 25px;
+        mask-image: radial-gradient(circle, black, transparent 75%);
+      }
+
+      .layered-ring {
+        position: relative;
+        width: min(245px, 76%);
+        aspect-ratio: 1;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(255, 118, 82, 0.3);
+        border-radius: 50%;
+        color: var(--accent);
+        box-shadow:
+          0 0 0 26px rgba(255, 118, 82, 0.04),
+          0 0 0 52px rgba(255, 118, 82, 0.02),
+          inset 0 0 58px rgba(255, 118, 82, 0.1);
+      }
+
+      .layered-ring .waveform {
+        width: 78%;
+        height: 84px;
+      }
+
+      .layered-visual footer {
+        position: absolute;
+        right: 20px;
+        bottom: 18px;
+        left: 20px;
+        display: flex;
+        justify-content: space-between;
+        color: #838894;
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      /* Design 02 — Bento Home */
+      #design-2 {
+        background:
+          radial-gradient(
+            circle at 20% 20%,
+            rgba(86, 230, 215, 0.1),
+            transparent 28rem
+          ),
+          radial-gradient(
+            circle at 90% 75%,
+            rgba(142, 99, 255, 0.12),
+            transparent 28rem
+          ),
+          #07080d;
+      }
+
+      .bento {
+        --accent: #6ce5d7;
+        --active-text: #051513;
+        --accent-2: #aa87ff;
+        --muted: #a5a8b8;
+        --line: rgba(255, 255, 255, 0.11);
+        padding: clamp(42px, 4.8vw, 70px);
+        background:
+          radial-gradient(
+            circle at 88% 18%,
+            rgba(158, 108, 255, 0.13),
+            transparent 24rem
+          ),
+          radial-gradient(
+            circle at 17% 79%,
+            rgba(75, 224, 210, 0.1),
+            transparent 25rem
+          ),
+          #0b0c14;
+      }
+
+      .bento-header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 28px;
+      }
+
+      .bento-header .eyebrow {
+        color: #75e7da;
+      }
+
+      .bento-header .home-title {
+        font-size: clamp(42px, 5vw, 70px);
+      }
+
+      .bento-header .home-title span {
+        background: linear-gradient(90deg, #6de4d7, #a17cff, #f379ae);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .bento-header-right {
+        display: grid;
+        justify-items: end;
+        gap: 10px;
+      }
+
+      .bento-header-right .pill {
+        color: #79e5d8;
+        border-color: rgba(108, 229, 215, 0.16);
+      }
+
+      .bento-header-right .status-line {
+        max-width: 470px;
+        text-align: right;
+      }
+
+      .bento-grid {
+        margin-top: 28px;
+        display: grid;
+        grid-template-columns: 1.15fr 0.85fr 0.72fr;
+        grid-template-rows: 210px 330px;
+        gap: 14px;
+      }
+
+      .bento-card {
+        position: relative;
+        overflow: hidden;
+        padding: 22px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 22px;
+        background: linear-gradient(
+          145deg,
+          rgba(255, 255, 255, 0.07),
+          rgba(255, 255, 255, 0.028)
+        );
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.06);
+        -webkit-backdrop-filter: blur(16px);
+        backdrop-filter: blur(16px);
+      }
+
+      .bento-card h3,
+      .bento-card p {
+        margin: 0;
+      }
+
+      .bento-card h3 {
+        font-size: 14px;
+        letter-spacing: -0.02em;
+      }
+
+      .bento-card p {
+        margin-top: 7px;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.5;
+      }
+
+      .bento-new {
+        grid-row: 1 / 3;
+        padding: clamp(26px, 3vw, 38px);
+        display: flex;
+        flex-direction: column;
+      }
+
+      .bento-new header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .bento-new h2 {
+        margin: 0;
+        font-size: 25px;
+        letter-spacing: -0.04em;
+      }
+
+      .bento-new > p {
+        max-width: 600px;
+        margin: 10px 0 24px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .bento-form {
+        display: grid;
+        gap: 18px;
+      }
+
+      .bento-input-line {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        gap: 10px;
+      }
+
+      .bento-modes {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .bento-modes .mode-card {
+        min-height: 88px;
+        justify-content: flex-start;
+        padding: 15px;
+        border: 1px solid var(--line);
+        background: rgba(2, 4, 9, 0.28);
+        color: #8f93a3;
+        text-align: left;
+      }
+
+      .bento-modes .mode-card.active {
+        border-color: rgba(108, 229, 215, 0.42);
+        background: linear-gradient(
+          100deg,
+          rgba(108, 229, 215, 0.1),
+          rgba(161, 124, 255, 0.07)
+        );
+        color: #fff;
+      }
+
+      .bento-modes .mode-icon {
+        width: 42px;
+        height: 42px;
+        display: grid;
+        place-items: center;
+        border-radius: 13px;
+        background: rgba(255, 255, 255, 0.055);
+      }
+
+      .bento-modes .active .mode-icon {
+        color: #72e7d9;
+        background: rgba(108, 229, 215, 0.1);
+      }
+
+      .bento-actions {
+        margin-top: auto;
+        padding-top: 26px;
+        display: grid;
+        gap: 15px;
+      }
+
+      .bento-actions .primary {
+        width: 100%;
+        min-height: 54px;
+      }
+
+      .bento-library {
+        grid-column: 2 / 4;
+        padding: 25px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 20px;
+        background:
+          linear-gradient(
+            120deg,
+            rgba(108, 229, 215, 0.08),
+            rgba(161, 124, 255, 0.065)
+          ),
+          rgba(255, 255, 255, 0.035);
+      }
+
+      .bento-library h3 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 17px;
+      }
+
+      .bento-library h3 .icon {
+        color: #78e5d8;
+      }
+
+      .bento-orbit {
+        width: 120px;
+        height: 120px;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(108, 229, 215, 0.25);
+        border-radius: 50%;
+        color: #77e7d9;
+        box-shadow:
+          0 0 0 18px rgba(108, 229, 215, 0.03),
+          0 0 50px rgba(108, 229, 215, 0.08);
+      }
+
+      .bento-orbit .waveform {
+        width: 76%;
+        height: 54px;
+      }
+
+      .bento-route,
+      .bento-products {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+
+      .bento-route .route-metric {
+        margin-top: auto;
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .bento-route .route-metric strong {
+        font-size: 30px;
+        letter-spacing: -0.055em;
+      }
+
+      .bento-route .route-metric span {
+        color: #7f8393;
+        font-size: 9px;
+        text-align: right;
+      }
+
+      .bento-products .library-links {
+        margin-top: auto;
+      }
+
+      .bento-products::after {
+        content: "";
+        position: absolute;
+        right: -38px;
+        bottom: -42px;
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle,
+          rgba(169, 125, 255, 0.23),
+          transparent 70%
+        );
+      }
+
+      /* Design 03 — Guided Steps */
+      #design-3 {
+        background: #060906;
+      }
+
+      .guided {
+        --accent: #b4f466;
+        --active-text: #122000;
+        --accent-2: #82e3b4;
+        --muted: #99a19a;
+        --line: rgba(196, 255, 126, 0.13);
+        padding: clamp(42px, 4.8vw, 72px);
+        background:
+          linear-gradient(rgba(180, 244, 102, 0.018) 1px, transparent 1px),
+          linear-gradient(
+            90deg,
+            rgba(180, 244, 102, 0.018) 1px,
+            transparent 1px
+          ),
+          #0a100c;
+        background-size: 30px 30px;
+      }
+
+      .guided-header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 30px;
+      }
+
+      .guided-header .eyebrow {
+        color: #b4f466;
+      }
+
+      .guided-header .home-title {
+        font-size: clamp(42px, 4.5vw, 66px);
+      }
+
+      .guided-header .home-title span {
+        color: #5f685f;
+      }
+
+      .guided-readiness {
+        max-width: 500px;
+        display: grid;
+        justify-items: end;
+        gap: 10px;
+      }
+
+      .guided-readiness .pill {
+        color: #b4f466;
+        border-color: rgba(180, 244, 102, 0.18);
+        background: rgba(180, 244, 102, 0.055);
+      }
+
+      .guided-readiness .status-line {
+        text-align: right;
+      }
+
+      .guided-library {
+        margin-top: 25px;
+        padding: 15px 18px;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 15px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(8, 15, 10, 0.82);
+      }
+
+      .guided-library .library-icon {
+        width: 40px;
+        height: 40px;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(180, 244, 102, 0.16);
+        border-radius: 11px;
+        color: #b4f466;
+        background: rgba(180, 244, 102, 0.055);
+      }
+
+      .guided-library h3,
+      .guided-library p {
+        margin: 0;
+      }
+
+      .guided-library h3 {
+        font-size: 12px;
+      }
+
+      .guided-library p {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 9px;
+      }
+
+      .guided-flow {
+        margin-top: 16px;
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+        background: rgba(8, 15, 10, 0.9);
+      }
+
+      .guided-step {
+        min-height: 415px;
+        padding: 26px;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--line);
+      }
+
+      .guided-step:last-child {
+        border-right: 0;
+      }
+
+      .step-number {
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(180, 244, 102, 0.2);
+        border-radius: 50%;
+        color: #b4f466;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+      }
+
+      .guided-step h2 {
+        margin: 20px 0 8px;
+        font-size: 18px;
+        letter-spacing: -0.03em;
+      }
+
+      .guided-step > p {
+        margin: 0 0 22px;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.55;
+      }
+
+      .guided-source-form {
+        display: grid;
+        gap: 14px;
+      }
+
+      .guided-source-form .url-input {
+        border-radius: 10px;
+        background: #050a06;
+      }
+
+      .guided-source-form .secondary {
+        width: 100%;
+        border-radius: 10px;
+      }
+
+      .guided-route-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .guided-route-list .mode-card {
+        min-height: 82px;
+        justify-content: flex-start;
+        padding: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 11px;
+        background: rgba(0, 0, 0, 0.18);
+        color: #818982;
+        text-align: left;
+      }
+
+      .guided-route-list .mode-card.active {
+        border-color: rgba(180, 244, 102, 0.34);
+        background: rgba(180, 244, 102, 0.055);
+        color: #fff;
+      }
+
+      .guided-route-list .mode-card > .icon {
+        color: #b4f466;
+      }
+
+      .guided-confirm-visual {
+        height: 125px;
+        display: grid;
+        place-items: center;
+        margin-bottom: 18px;
+        border: 1px solid rgba(180, 244, 102, 0.08);
+        border-radius: 12px;
+        color: #b4f466;
+        background:
+          linear-gradient(rgba(180, 244, 102, 0.05) 1px, transparent 1px),
+          linear-gradient(
+            90deg,
+            rgba(180, 244, 102, 0.05) 1px,
+            transparent 1px
+          ),
+          #050a06;
+        background-size: 20px 20px;
+      }
+
+      .guided-confirm-visual .waveform {
+        width: 80%;
+        height: 80px;
+      }
+
+      .guided-step .check-row {
+        margin-bottom: 16px;
+      }
+
+      .guided-step .primary {
+        width: 100%;
+        margin-top: auto;
+        border-radius: 10px;
+      }
+
+      .step-complete {
+        margin-top: auto;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: #778078;
+        font-size: 9px;
+      }
+
+      .step-complete .icon {
+        width: 15px;
+        color: #b4f466;
+      }
+
+      /* Design 04 — Spotlight Home */
+      #design-4 {
+        background:
+          radial-gradient(
+            circle at 50% 28%,
+            rgba(255, 134, 71, 0.1),
+            transparent 30rem
+          ),
+          #070707;
+      }
+
+      .spotlight {
+        --accent: #ff8648;
+        --active-text: #1c0e03;
+        --accent-2: #9ce2bf;
+        --muted: #9d9d9d;
+        --line: rgba(255, 255, 255, 0.1);
+        padding: clamp(42px, 5vw, 76px);
+        background:
+          radial-gradient(
+            circle at 50% 20%,
+            rgba(255, 124, 66, 0.12),
+            transparent 26rem
+          ),
+          #0c0c0c;
+      }
+
+      .spotlight-header {
+        text-align: center;
+      }
+
+      .spotlight-header .eyebrow {
+        color: #ff8b51;
+      }
+
+      .spotlight-header .home-title {
+        margin-top: 13px;
+        font-size: clamp(54px, 7vw, 104px);
+        font-weight: 620;
+        line-height: 0.87;
+        letter-spacing: -0.085em;
+      }
+
+      .spotlight-header .home-title span {
+        color: #444;
+      }
+
+      .spotlight-header .home-subtitle {
+        max-width: 620px;
+        margin-inline: auto;
+      }
+
+      .spotlight-status {
+        width: min(920px, 100%);
+        margin: 24px auto 0;
+        padding: 11px 15px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        color: #8c8c8c;
+        font-size: 10px;
+      }
+
+      .spotlight-status .icon {
+        color: #91dfbb;
+      }
+
+      .spotlight-command {
+        width: min(1080px, 100%);
+        margin: 30px auto 0;
+        padding: 12px;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 20px;
+        background: #151515;
+        box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
+      }
+
+      .spotlight-source {
+        min-height: 50px;
+        padding: 0 14px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        border: 0;
+        border-right: 1px solid rgba(255, 255, 255, 0.09);
+        background: transparent;
+        color: #f6f6f6;
+        font-size: 11px;
+        font-weight: 720;
+        cursor: pointer;
+      }
+
+      .spotlight-source .icon {
+        color: #ff8648;
+      }
+
+      .spotlight-command input {
+        width: 100%;
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: #fff;
+        font-size: 13px;
+      }
+
+      .spotlight-command input::placeholder {
+        color: #6f6f6f;
+      }
+
+      .spotlight-command .primary {
+        min-width: 190px;
+      }
+
+      .spotlight-options {
+        width: min(1020px, 94%);
+        margin: 14px auto 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .spotlight-route {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        color: #777;
+        font-size: 10px;
+      }
+
+      .spotlight-route button {
+        min-height: 36px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: #777;
+        font-size: 10px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .spotlight-route button.active {
+        color: #fff;
+        background: #1f1f1f;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+      }
+
+      .spotlight-library {
+        width: min(1080px, 100%);
+        margin: 42px auto 0;
+        display: grid;
+        grid-template-columns: 1.3fr 0.7fr 0.7fr;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.07);
+      }
+
+      .spotlight-panel {
+        min-height: 135px;
+        padding: 21px;
+        border-right: 1px solid rgba(255, 255, 255, 0.09);
+        background: #111;
+      }
+
+      .spotlight-panel:last-child {
+        border-right: 0;
+      }
+
+      .spotlight-panel .panel-icon {
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        margin-bottom: 14px;
+        border-radius: 50%;
+        color: #ff8a51;
+        background: rgba(255, 134, 72, 0.09);
+      }
+
+      .spotlight-panel h3,
+      .spotlight-panel p {
+        margin: 0;
+      }
+
+      .spotlight-panel h3 {
+        font-size: 12px;
+      }
+
+      .spotlight-panel p {
+        margin-top: 6px;
+        color: #777;
+        font-size: 10px;
+        line-height: 1.5;
+      }
+
+      .spotlight-panel .library-links {
+        margin-top: 10px;
+      }
+
+      @media (max-width: 1120px) {
+        .switcher {
+          grid-template-columns: auto 1fr auto;
+        }
+
+        .switcher-copy {
+          display: none;
+        }
+
+        .layered-layout {
+          grid-template-columns: 1fr;
+        }
+
+        .layered-aside {
+          grid-template-columns: 0.8fr 1.2fr;
+          grid-template-rows: auto;
+        }
+
+        .bento-grid {
+          grid-template-columns: 1fr 1fr;
+          grid-template-rows: auto;
+        }
+
+        .bento-new {
+          grid-column: 1 / 3;
+          grid-row: auto;
+        }
+
+        .bento-library {
+          grid-column: 1 / 3;
+        }
+
+        .home-frame {
+          min-height: 1050px;
+        }
+      }
+
+      @media (max-width: 800px) {
+        :root {
+          --switcher-height: 132px;
+        }
+
+        .switcher {
+          grid-template-columns: 1fr auto;
+          align-items: start;
+        }
+
+        .design-tabs {
+          grid-column: 1 / -1;
+          grid-row: 2;
+          width: 100%;
+        }
+
+        .design-tab {
+          text-align: center;
+        }
+
+        .design-tab small {
+          display: none;
+        }
+
+        .home-frame {
+          min-height: 1220px;
+          border-radius: 16px;
+        }
+
+        .layered,
+        .bento,
+        .guided,
+        .spotlight {
+          padding: 54px 20px 28px;
+        }
+
+        .layered-header,
+        .bento-header,
+        .guided-header {
+          align-items: flex-start;
+          flex-direction: column;
+          display: flex;
+        }
+
+        .bento-header-right,
+        .guided-readiness {
+          justify-items: start;
+        }
+
+        .bento-header-right .status-line,
+        .guided-readiness .status-line {
+          text-align: left;
+        }
+
+        .layered-source,
+        .layered-actions,
+        .spotlight-options {
+          display: grid;
+          grid-template-columns: 1fr;
+        }
+
+        .layered-mode-grid,
+        .bento-modes,
+        .bento-grid,
+        .guided-flow,
+        .spotlight-library {
+          grid-template-columns: 1fr;
+        }
+
+        .layered-aside {
+          grid-template-columns: 1fr;
+        }
+
+        .bento-new,
+        .bento-library {
+          grid-column: 1;
+        }
+
+        .bento-library {
+          grid-template-columns: 1fr;
+        }
+
+        .guided-step {
+          min-height: auto;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .guided-step:last-child {
+          border-bottom: 0;
+        }
+
+        .spotlight-command {
+          grid-template-columns: 1fr;
+        }
+
+        .spotlight-source {
+          border-right: 0;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+        }
+
+        .spotlight-panel {
+          border-right: 0;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+        }
+      }
+
+      @media (max-width: 540px) {
+        .switcher-brand {
+          display: none;
+        }
+
+        .switcher {
+          grid-template-columns: 1fr auto;
+        }
+
+        .design-tabs {
+          grid-column: 1;
+          grid-row: 1;
+        }
+
+        .switcher-arrows {
+          grid-column: 2;
+          grid-row: 1;
+        }
+
+        .design-tab {
+          padding-inline: 4px;
+        }
+
+        .design-tab b span {
+          display: none;
+        }
+
+        .home-title {
+          font-size: 40px;
+        }
+
+        .spotlight-header .home-title {
+          font-size: 52px;
+        }
+
+        .bento-input-line {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <svg aria-hidden="true" width="0" height="0" style="position: absolute">
+      <defs>
+        <symbol id="i-wave" viewBox="0 0 24 24">
+          <path d="M3 12v3m3-7v8m3-12v16m3-11v7m3-10v12m3-8v4m3-2v1" />
+        </symbol>
+        <symbol id="i-link" viewBox="0 0 24 24">
+          <path
+            d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.2 1.2M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.2-1.2"
+          />
+        </symbol>
+        <symbol id="i-file" viewBox="0 0 24 24">
+          <path d="M6 2h8l4 4v16H6zM14 2v5h5M9 12h6M9 16h6" />
+        </symbol>
+        <symbol id="i-clipboard" viewBox="0 0 24 24">
+          <rect x="5" y="4" width="14" height="18" rx="2" />
+          <path d="M9 5V2h6v3M8 10h8M8 14h6" />
+        </symbol>
+        <symbol id="i-monitor" viewBox="0 0 24 24">
+          <rect x="2" y="3" width="20" height="14" rx="2" />
+          <path d="M8 21h8m-4-4v4" />
+        </symbol>
+        <symbol id="i-cloud" viewBox="0 0 24 24">
+          <path
+            d="M6.5 19a4.5 4.5 0 0 1-.7-8.9A6.5 6.5 0 0 1 18.4 9a5 5 0 0 1 .6 10z"
+          />
+        </symbol>
+        <symbol id="i-check" viewBox="0 0 24 24">
+          <path d="m5 12 4 4L19 6" />
+        </symbol>
+        <symbol id="i-info" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 11v6M12 7h.01" />
+        </symbol>
+        <symbol id="i-timer" viewBox="0 0 24 24">
+          <circle cx="12" cy="13" r="8" />
+          <path d="M9 2h6M12 13l3-3" />
+        </symbol>
+        <symbol id="i-globe" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18M12 3c3 3.3 3 14.7 0 18M12 3c-3 3.3-3 14.7 0 18" />
+        </symbol>
+        <symbol id="i-play" viewBox="0 0 24 24">
+          <path d="m8 5 11 7-11 7z" />
+        </symbol>
+        <symbol id="i-arrow" viewBox="0 0 24 24">
+          <path d="M5 12h14m-5-5 5 5-5 5" />
+        </symbol>
+        <symbol id="i-left" viewBox="0 0 24 24">
+          <path d="m15 18-6-6 6-6" />
+        </symbol>
+        <symbol id="i-right" viewBox="0 0 24 24">
+          <path d="m9 18 6-6-6-6" />
+        </symbol>
+        <symbol id="i-shield" viewBox="0 0 24 24">
+          <path d="M12 2 4 5v6c0 5.3 3.2 9 8 11 4.8-2 8-5.7 8-11V5z" />
+          <path d="m8.5 12 2.2 2.2 4.8-5" />
+        </symbol>
+        <symbol id="i-spark" viewBox="0 0 24 24">
+          <path
+            d="m12 2 1.4 5.6L19 9l-5.6 1.4L12 16l-1.4-5.6L5 9l5.6-1.4zM19 16l.6 2.4L22 19l-2.4.6L19 22l-.6-2.4L16 19l2.4-.6z"
+          />
+        </symbol>
+      </defs>
+    </svg>
+
+    <header class="switcher">
+      <div class="switcher-brand">
+        <span class="switcher-mark"
+          ><svg class="icon"><use href="#i-wave" /></svg
+        ></span>
+        <div class="switcher-copy">
+          <strong>MusicMute Home-only explorations</strong>
+          <span>Four new directions for the detail page</span>
+          <span class="scope-chip"
+            ><i></i> Existing macOS sidebar stays unchanged</span
+          >
+        </div>
+      </div>
+      <nav
+        class="design-tabs"
+        role="tablist"
+        aria-label="Home-only design concepts"
+      >
+        <button
+          class="design-tab"
+          id="tab-1"
+          role="tab"
+          aria-controls="design-1"
+          aria-selected="true"
+          data-design="1"
+        >
+          <b>01 <span>Layered</span></b
+          ><small>Canvas</small>
+        </button>
+        <button
+          class="design-tab"
+          id="tab-2"
+          role="tab"
+          aria-controls="design-2"
+          aria-selected="false"
+          data-design="2"
+        >
+          <b>02 <span>Bento</span></b
+          ><small>Home</small>
+        </button>
+        <button
+          class="design-tab"
+          id="tab-3"
+          role="tab"
+          aria-controls="design-3"
+          aria-selected="false"
+          data-design="3"
+        >
+          <b>03 <span>Guided</span></b
+          ><small>Steps</small>
+        </button>
+        <button
+          class="design-tab"
+          id="tab-4"
+          role="tab"
+          aria-controls="design-4"
+          aria-selected="false"
+          data-design="4"
+        >
+          <b>04 <span>Spotlight</span></b
+          ><small>Home</small>
+        </button>
+      </nav>
+      <div class="switcher-arrows">
+        <button type="button" data-prev aria-label="Previous design">
+          <svg class="icon"><use href="#i-left" /></svg>
+        </button>
+        <button type="button" data-next aria-label="Next design">
+          <svg class="icon"><use href="#i-right" /></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="stage">
+      <!-- 01 — Layered Canvas -->
+      <section
+        class="design active"
+        id="design-1"
+        role="tabpanel"
+        aria-labelledby="tab-1"
+      >
+        <article class="home-frame layered">
+          <div class="design-label">
+            <span>Home content only · Layered Canvas</span><b>01</b>
+          </div>
+          <header class="layered-header">
+            <div>
+              <p class="eyebrow">Create voice-only audio</p>
+              <h1 class="home-title">Home<span>.</span></h1>
+              <p class="home-subtitle">
+                Keep the voice. Enjoy the original video.
+              </p>
+            </div>
+            <span class="pill"><i class="dot"></i> Local engine ready</span>
+          </header>
+          <div class="layered-status status-line">
+            <svg class="icon"><use href="#i-info" /></svg
+            ><span
+              >Local tools are prepared. Add the Chrome extension to finish.
+              YouTube access is checked when you use a video.</span
+            >
+          </div>
+          <div class="layered-layout">
+            <section class="layered-create">
+              <header class="layered-create-head">
+                <h2>
+                  <svg class="icon"><use href="#i-wave" /></svg> New voice
+                </h2>
+                <span>Audio only · up to 20 minutes</span>
+              </header>
+              <p class="layered-intro">
+                Paste a supported video link or choose an audio file. MusicMute
+                keeps the full timeline and prepares voice-only audio.
+              </p>
+              <div class="layered-form">
+                <div class="segmented" data-toggle>
+                  <button class="active" type="button">YouTube</button
+                  ><button type="button">Audio file</button>
+                </div>
+                <div class="layered-source">
+                  <div>
+                    <div class="field-label">
+                      <span>Source URL</span><span>Supported video</span>
+                    </div>
+                    <div class="url-input">
+                      <svg class="icon"><use href="#i-link" /></svg
+                      ><input
+                        aria-label="Layered Canvas video URL"
+                        placeholder="Paste a supported video URL"
+                      /><button
+                        class="icon-button"
+                        type="button"
+                        data-paste
+                        aria-label="Paste example URL"
+                      >
+                        <svg class="icon"><use href="#i-clipboard" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <button class="secondary" type="button">
+                    <svg class="icon"><use href="#i-file" /></svg> Choose audio
+                  </button>
+                </div>
+                <div>
+                  <div class="field-label">
+                    <span>Process using</span><span>Saved for Chrome</span>
+                  </div>
+                  <div class="layered-mode-grid" data-toggle>
+                    <button class="mode-card active" type="button">
+                      <svg class="icon"><use href="#i-monitor" /></svg
+                      ><span class="mode-copy"
+                        ><b>On this Mac</b
+                        ><small>Private · no cloud minutes</small></span
+                      ></button
+                    ><button class="mode-card" type="button">
+                      <svg class="icon"><use href="#i-cloud" /></svg
+                      ><span class="mode-copy"
+                        ><b>MusicMute cloud</b
+                        ><small>Uses account allowance</small></span
+                      >
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <footer class="layered-actions">
+                <label class="check-row"
+                  ><input type="checkbox" data-rights /><span class="fake-check"
+                    ><svg class="icon"><use href="#i-check" /></svg></span
+                  ><span>I have permission to process this audio.</span></label
+                ><button class="primary" type="button" data-start disabled>
+                  <svg class="icon"><use href="#i-wave" /></svg> Remove
+                  background music
+                </button>
+              </footer>
+            </section>
+            <aside class="layered-aside">
+              <section class="layered-card layered-library">
+                <header>
+                  <svg class="icon"><use href="#i-cloud" /></svg>
+                  <div>
+                    <h3>Your library follows you</h3>
+                    <p>
+                      Your MusicMute library is connected across Mac, web, and
+                      mobile.
+                    </p>
+                  </div>
+                </header>
+                <div class="library-links">
+                  <button>
+                    <svg class="icon"><use href="#i-globe" /></svg> Open web app</button
+                  ><button>
+                    <svg class="icon"><use href="#i-play" /></svg> Android
+                  </button>
+                </div>
+              </section>
+              <section class="layered-card layered-visual">
+                <div class="layered-ring">
+                  <div class="waveform" aria-hidden="true">
+                    <i style="--h: 24%"></i><i style="--h: 48%"></i
+                    ><i style="--h: 82%"></i><i style="--h: 55%"></i
+                    ><i style="--h: 96%"></i><i style="--h: 68%"></i
+                    ><i style="--h: 36%"></i><i style="--h: 74%"></i
+                    ><i style="--h: 43%"></i><i style="--h: 88%"></i
+                    ><i style="--h: 52%"></i><i style="--h: 30%"></i>
+                  </div>
+                </div>
+                <footer>
+                  <span>Vocal engine · MPS</span><span>Standby</span>
+                </footer>
+              </section>
+            </aside>
+          </div>
+        </article>
+      </section>
+
+      <!-- 02 — Bento Home -->
+      <section
+        class="design"
+        id="design-2"
+        role="tabpanel"
+        aria-labelledby="tab-2"
+        hidden
+      >
+        <article class="home-frame bento">
+          <div class="design-label">
+            <span>Home content only · Bento Home</span><b>02</b>
+          </div>
+          <header class="bento-header">
+            <div>
+              <p class="eyebrow">Create voice-only audio</p>
+              <h1 class="home-title">Home, <span>recomposed.</span></h1>
+              <p class="home-subtitle">
+                Keep the voice. Enjoy the original video.
+              </p>
+            </div>
+            <div class="bento-header-right">
+              <span class="pill"><i class="dot"></i> Mac ready</span
+              ><span class="status-line"
+                ><svg class="icon"><use href="#i-info" /></svg> Local tools are
+                prepared. YouTube access is checked when used.</span
+              >
+            </div>
+          </header>
+          <div class="bento-grid">
+            <section class="bento-card bento-new">
+              <header>
+                <h2>New voice</h2>
+                <span class="pill"
+                  ><svg class="icon"><use href="#i-timer" /></svg> Up to 20
+                  min</span
+                >
+              </header>
+              <p>
+                Paste a supported video link or choose an audio file. MusicMute
+                keeps the full timeline and prepares voice-only audio.
+              </p>
+              <div class="bento-form">
+                <div class="segmented" data-toggle>
+                  <button class="active" type="button">YouTube</button
+                  ><button type="button">Audio file</button>
+                </div>
+                <div class="bento-input-line">
+                  <div>
+                    <div class="field-label">
+                      <span>Source</span><span>Video link</span>
+                    </div>
+                    <div class="url-input">
+                      <svg class="icon"><use href="#i-link" /></svg
+                      ><input
+                        aria-label="Bento Home video URL"
+                        placeholder="Paste a supported video URL"
+                      /><button
+                        class="icon-button"
+                        type="button"
+                        data-paste
+                        aria-label="Paste example URL"
+                      >
+                        <svg class="icon"><use href="#i-clipboard" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <button class="secondary" type="button">
+                    <svg class="icon"><use href="#i-file" /></svg> Browse
+                  </button>
+                </div>
+                <div>
+                  <div class="field-label">
+                    <span>Process using</span
+                    ><span>Chrome follows this choice</span>
+                  </div>
+                  <div class="bento-modes" data-toggle>
+                    <button class="mode-card active" type="button">
+                      <span class="mode-icon"
+                        ><svg class="icon"><use href="#i-monitor" /></svg></span
+                      ><span class="mode-copy"
+                        ><b>On this Mac</b
+                        ><small>Private and unlimited</small></span
+                      ></button
+                    ><button class="mode-card" type="button">
+                      <span class="mode-icon"
+                        ><svg class="icon"><use href="#i-cloud" /></svg></span
+                      ><span class="mode-copy"
+                        ><b>MusicMute cloud</b
+                        ><small>Uses account minutes</small></span
+                      >
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <footer class="bento-actions">
+                <label class="check-row"
+                  ><input type="checkbox" data-rights /><span class="fake-check"
+                    ><svg class="icon"><use href="#i-check" /></svg></span
+                  ><span>I have permission to process this audio.</span></label
+                ><button class="primary" type="button" data-start disabled>
+                  Create voice <svg class="icon"><use href="#i-arrow" /></svg>
+                </button>
+              </footer>
+            </section>
+            <section class="bento-card bento-library">
+              <div>
+                <h3>
+                  <svg class="icon"><use href="#i-cloud" /></svg> Your library
+                  follows you
+                </h3>
+                <p>
+                  Connected across Mac, web, and mobile. Your completed voice
+                  tracks stay within reach.
+                </p>
+                <div class="library-links" style="margin-top: 16px">
+                  <button>
+                    <svg class="icon"><use href="#i-globe" /></svg> Open web app</button
+                  ><button>
+                    <svg class="icon"><use href="#i-play" /></svg> Android
+                  </button>
+                </div>
+              </div>
+              <div class="bento-orbit">
+                <div class="waveform" aria-hidden="true">
+                  <i style="--h: 28%"></i><i style="--h: 62%"></i
+                  ><i style="--h: 91%"></i><i style="--h: 48%"></i
+                  ><i style="--h: 74%"></i><i style="--h: 38%"></i
+                  ><i style="--h: 80%"></i>
+                </div>
+              </div>
+            </section>
+            <section class="bento-card bento-route">
+              <div>
+                <h3>Local by default</h3>
+                <p>
+                  Processing stays on this Mac with no cloud processing minutes.
+                </p>
+              </div>
+              <div class="route-metric">
+                <strong>Local</strong><span>Saved route<br />for Chrome</span>
+              </div>
+            </section>
+            <section class="bento-card bento-products">
+              <div>
+                <h3>One account, every screen</h3>
+                <p>Move between MusicMute on Mac, web, and mobile.</p>
+              </div>
+              <div class="library-links">
+                <button>
+                  <svg class="icon"><use href="#i-globe" /></svg> Web</button
+                ><button>
+                  <svg class="icon"><use href="#i-play" /></svg> Android
+                </button>
+              </div>
+            </section>
+          </div>
+        </article>
+      </section>
+
+      <!-- 03 — Guided Steps -->
+      <section
+        class="design"
+        id="design-3"
+        role="tabpanel"
+        aria-labelledby="tab-3"
+        hidden
+      >
+        <article class="home-frame guided">
+          <div class="design-label">
+            <span>Home content only · Guided Steps</span><b>03</b>
+          </div>
+          <header class="guided-header">
+            <div>
+              <p class="eyebrow">Create voice-only audio</p>
+              <h1 class="home-title">
+                Three steps.<br /><span>One clear voice.</span>
+              </h1>
+              <p class="home-subtitle">
+                A guided Home for first-time confidence and repeat-use speed.
+              </p>
+            </div>
+            <div class="guided-readiness">
+              <span class="pill"><i class="dot"></i> Local engine ready</span
+              ><span class="status-line"
+                ><svg class="icon"><use href="#i-info" /></svg> Local tools are
+                prepared. Add Chrome when you want synchronized YouTube
+                playback.</span
+              >
+            </div>
+          </header>
+          <section class="guided-library">
+            <span class="library-icon"
+              ><svg class="icon"><use href="#i-cloud" /></svg
+            ></span>
+            <div>
+              <h3>Your library follows you</h3>
+              <p>Connected across Mac, web, and mobile.</p>
+            </div>
+            <div class="library-links">
+              <button>
+                <svg class="icon"><use href="#i-globe" /></svg> Web app</button
+              ><button>
+                <svg class="icon"><use href="#i-play" /></svg> Android
+              </button>
+            </div>
+          </section>
+          <div class="guided-flow">
+            <section class="guided-step">
+              <span class="step-number">01</span>
+              <h2>Choose a source</h2>
+              <p>Paste a supported YouTube link or switch to an audio file.</p>
+              <div class="guided-source-form">
+                <div class="segmented" data-toggle>
+                  <button class="active" type="button">YouTube</button
+                  ><button type="button">Audio file</button>
+                </div>
+                <div class="url-input">
+                  <svg class="icon"><use href="#i-link" /></svg
+                  ><input
+                    aria-label="Guided Steps video URL"
+                    placeholder="Paste a supported video URL"
+                  /><button
+                    class="icon-button"
+                    type="button"
+                    data-paste
+                    aria-label="Paste example URL"
+                  >
+                    <svg class="icon"><use href="#i-clipboard" /></svg>
+                  </button>
+                </div>
+                <button class="secondary" type="button">
+                  <svg class="icon"><use href="#i-file" /></svg> Choose audio
+                  file
+                </button>
+              </div>
+              <span class="step-complete"
+                ><svg class="icon"><use href="#i-timer" /></svg> Audio only · up
+                to 20 minutes</span
+              >
+            </section>
+            <section class="guided-step">
+              <span class="step-number">02</span>
+              <h2>Choose where it runs</h2>
+              <p>This saved choice is also used by the Chrome extension.</p>
+              <div class="guided-route-list" data-toggle>
+                <button class="mode-card active" type="button">
+                  <svg class="icon"><use href="#i-monitor" /></svg
+                  ><span class="mode-copy"
+                    ><b>On this Mac</b
+                    ><small>No cloud processing minutes</small></span
+                  ></button
+                ><button class="mode-card" type="button">
+                  <svg class="icon"><use href="#i-cloud" /></svg
+                  ><span class="mode-copy"
+                    ><b>MusicMute cloud</b
+                    ><small>Uses your account allowance</small></span
+                  >
+                </button>
+              </div>
+              <span class="step-complete"
+                ><svg class="icon"><use href="#i-check" /></svg> On this Mac is
+                selected</span
+              >
+            </section>
+            <section class="guided-step">
+              <span class="step-number">03</span>
+              <h2>Confirm and create</h2>
+              <p>
+                MusicMute keeps the full timeline and prepares voice-only audio.
+              </p>
+              <div class="guided-confirm-visual">
+                <div class="waveform" aria-hidden="true">
+                  <i style="--h: 22%"></i><i style="--h: 50%"></i
+                  ><i style="--h: 84%"></i><i style="--h: 42%"></i
+                  ><i style="--h: 95%"></i><i style="--h: 65%"></i
+                  ><i style="--h: 36%"></i><i style="--h: 78%"></i
+                  ><i style="--h: 46%"></i><i style="--h: 70%"></i>
+                </div>
+              </div>
+              <label class="check-row"
+                ><input type="checkbox" data-rights /><span class="fake-check"
+                  ><svg class="icon"><use href="#i-check" /></svg></span
+                ><span>I have permission to process this audio.</span></label
+              ><button class="primary" type="button" data-start disabled>
+                Remove background music
+                <svg class="icon"><use href="#i-arrow" /></svg>
+              </button>
+            </section>
+          </div>
+        </article>
+      </section>
+
+      <!-- 04 — Spotlight Home -->
+      <section
+        class="design"
+        id="design-4"
+        role="tabpanel"
+        aria-labelledby="tab-4"
+        hidden
+      >
+        <article class="home-frame spotlight">
+          <div class="design-label">
+            <span>Home content only · Spotlight Home</span><b>04</b>
+          </div>
+          <header class="spotlight-header">
+            <p class="eyebrow">Create voice-only audio</p>
+            <h1 class="home-title">
+              Keep the voice.<br /><span>Mute the rest.</span>
+            </h1>
+            <p class="home-subtitle">
+              The fastest path from a video or audio file to a clear,
+              full-timeline voice track.
+            </p>
+          </header>
+          <div class="spotlight-status">
+            <svg class="icon"><use href="#i-info" /></svg
+            ><span
+              >Local tools are prepared · YouTube access is checked when you use
+              a video · Audio only up to 20 minutes</span
+            >
+          </div>
+          <div class="spotlight-command">
+            <button class="spotlight-source" type="button">
+              <svg class="icon"><use href="#i-link" /></svg> YouTube
+              <svg class="icon" style="width: 14px">
+                <use href="#i-right" />
+              </svg></button
+            ><input
+              aria-label="Spotlight Home video URL"
+              placeholder="Paste a supported video URL"
+            /><button class="primary" type="button" data-start disabled>
+              Remove music <svg class="icon"><use href="#i-arrow" /></svg>
+            </button>
+          </div>
+          <div class="spotlight-options">
+            <div class="spotlight-route" data-toggle>
+              <span>Process using</span
+              ><button class="active" type="button">On this Mac</button
+              ><button type="button">MusicMute cloud</button>
+            </div>
+            <label class="check-row"
+              ><input type="checkbox" data-rights /><span class="fake-check"
+                ><svg class="icon"><use href="#i-check" /></svg></span
+              ><span>I have permission to process this audio.</span></label
+            >
+          </div>
+          <div class="spotlight-library">
+            <section class="spotlight-panel">
+              <span class="panel-icon"
+                ><svg class="icon"><use href="#i-cloud" /></svg
+              ></span>
+              <h3>Your library follows you</h3>
+              <p>
+                Your MusicMute library is connected across Mac, web, and mobile.
+              </p>
+            </section>
+            <section class="spotlight-panel">
+              <span class="panel-icon"
+                ><svg class="icon"><use href="#i-monitor" /></svg
+              ></span>
+              <h3>Private by default</h3>
+              <p>Uses your Mac with no cloud processing minutes.</p>
+            </section>
+            <section class="spotlight-panel">
+              <span class="panel-icon"
+                ><svg class="icon"><use href="#i-spark" /></svg
+              ></span>
+              <h3>Also on MusicMute</h3>
+              <div class="library-links">
+                <button>
+                  <svg class="icon"><use href="#i-globe" /></svg> Web</button
+                ><button>
+                  <svg class="icon"><use href="#i-play" /></svg> Android
+                </button>
+              </div>
+            </section>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const tabs = [...document.querySelectorAll("[data-design]")];
+        const panels = [...document.querySelectorAll(".design")];
+        let current = 1;
+
+        function show(number, focus = false) {
+          current = ((number - 1 + panels.length) % panels.length) + 1;
+          tabs.forEach((tab) => {
+            const selected = Number(tab.dataset.design) === current;
+            tab.setAttribute("aria-selected", String(selected));
+            tab.tabIndex = selected ? 0 : -1;
+            if (selected && focus) tab.focus();
+          });
+          panels.forEach((panel, index) => {
+            const selected = index + 1 === current;
+            panel.hidden = !selected;
+            panel.classList.toggle("active", selected);
+          });
+          history.replaceState(null, "", `#home-${current}`);
+        }
+
+        tabs.forEach((tab) => {
+          tab.addEventListener("click", () => show(Number(tab.dataset.design)));
+          tab.addEventListener("keydown", (event) => {
+            if (event.key === "ArrowRight") show(current + 1, true);
+            if (event.key === "ArrowLeft") show(current - 1, true);
+          });
+        });
+
+        document
+          .querySelector("[data-prev]")
+          .addEventListener("click", () => show(current - 1));
+        document
+          .querySelector("[data-next]")
+          .addEventListener("click", () => show(current + 1));
+
+        document.querySelectorAll("[data-toggle]").forEach((group) => {
+          group.querySelectorAll("button").forEach((button) => {
+            button.addEventListener("click", () => {
+              group
+                .querySelectorAll("button")
+                .forEach((item) => item.classList.remove("active"));
+              button.classList.add("active");
+            });
+          });
+        });
+
+        panels.forEach((panel) => {
+          const rights = panel.querySelector("[data-rights]");
+          const start = panel.querySelector("[data-start]");
+          if (rights && start) {
+            rights.addEventListener("change", () => {
+              start.disabled = !rights.checked;
+            });
+          }
+          panel.querySelectorAll("[data-paste]").forEach((button) => {
+            button.addEventListener("click", () => {
+              const input = panel.querySelector('input:not([type="checkbox"])');
+              if (input) {
+                input.value = "https://youtube.com/watch?v=voice-demo";
+                input.focus();
+              }
+            });
+          });
+        });
+
+        const requested = Number(location.hash.replace("#home-", ""));
+        show(requested >= 1 && requested <= 4 ? requested : 1);
+      })();
+    </script>
+  </body>
+</html>

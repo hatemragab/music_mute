@@ -1,4 +1,5 @@
 import { LocalMediaSyncsService } from '../local-media-syncs/local-media-syncs.service.js';
+import { UsersService } from '../users/users.service.js';
 import { AdminNotificationsService } from '../admin-notifications/admin-notifications.service.js';
 import { Injectable, ValidationPipe } from '@nestjs/common';
 import { QueueProjectionService } from './queue-projection.service.js';
@@ -68,6 +69,7 @@ export class RealtimeResourcesService {
     private readonly queues: QueueProjectionService,
     private readonly notifications: AdminNotificationsService,
     private readonly localMediaSyncs: LocalMediaSyncsService,
+    private readonly users: UsersService,
   ) {}
 
   async read(
@@ -103,6 +105,9 @@ export class RealtimeResourcesService {
         )[0];
       case 'local_media_sync':
         return this.localMediaSyncs.get(owner, this.id(params));
+      case 'worker_registration':
+        this.empty(params);
+        return this.users.workerRegistration(owner);
       case 'import':
         return this.imports.get(owner, this.id(params));
       case 'usage':

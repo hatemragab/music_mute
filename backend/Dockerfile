@@ -4,17 +4,21 @@ FROM node:24.21.0-bookworm-slim AS build
 WORKDIR /app
 
 COPY backend/package.json backend/pnpm-lock.yaml backend/.npmrc ./
-RUN corepack enable \
-    && corepack install --global pnpm@10.14.0 \
-    && pnpm install --frozen-lockfile
-
 COPY backend/nest-cli.json backend/tsconfig*.json ./
 COPY backend/src ./src
 ARG SENTRY_RELEASE
-RUN --mount=type=secret,id=sentry_auth_token,env=SENTRY_AUTH_TOKEN \
-    pnpm run build \
-    && if [ -n "${SENTRY_AUTH_TOKEN:-}" ]; then \
-      test -n "$SENTRY_RELEASE"; \
+# Resolve the optional secret before the long install and build. Keep its value
+# out of dependency scripts and expose it only to the source-map upload commands.
+RUN --mount=type=secret,id=sentry_auth_token \
+    set -eu; \
+    corepack enable; \
+    corepack install --global pnpm@10.14.0; \
+    pnpm install --frozen-lockfile; \
+    pnpm run build; \
+    if [ -s /run/secrets/sentry_auth_token ]; then \
+      test -n "${SENTRY_RELEASE:-}"; \
+      IFS= read -r SENTRY_AUTH_TOKEN < /run/secrets/sentry_auth_token || test -n "${SENTRY_AUTH_TOKEN:-}"; \
+      export SENTRY_AUTH_TOKEN; \
       pnpm exec sentry-cli sourcemaps inject dist; \
       pnpm exec sentry-cli sourcemaps upload \
         --org vchat-9f --project musicmute-backend \

@@ -306,7 +306,11 @@ describe("panel settings controls", () => {
 
   it("shows a load failure with safe defaults and contains late results after disposal", async () => {
     const context = fixture();
-    context.get.mockRejectedValueOnce(new Error("no storage"));
+    const get = context.get.getMockImplementation()!;
+    context.get.mockImplementation(async (keys) => {
+      if (Array.isArray(keys)) throw new Error("no storage");
+      return get(keys);
+    });
     const { createPanelSettings } =
       await import("../src/extension/panel-settings");
     const callback = vi.fn();

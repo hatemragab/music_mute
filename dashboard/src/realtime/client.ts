@@ -113,6 +113,7 @@ export class RealtimeClient {
     resource: string,
     params: Record<string, string>,
     signal?: AbortSignal,
+    fresh = false,
   ): Promise<T> {
     return new Promise((resolve, reject) => {
       let off = () => {};
@@ -136,10 +137,21 @@ export class RealtimeClient {
         abort();
         return;
       }
+      const entry = fresh
+        ? this.entries.get(
+            JSON.stringify([resource, Object.entries(params).sort()]),
+          )
+        : undefined;
+      // Keep the shared subscription, but wait for a new server snapshot.
+      if (entry) entry.last = undefined;
       off = this.watch(resource, params, (result) =>
         done(result.error, result.data),
       );
       if (settled) off();
+      else if (entry && this.stream) {
+        this.armSubscriptionTimeout(entry);
+        this.send({ type: "resync", subscription_id: entry.id });
+      }
     });
   }
 

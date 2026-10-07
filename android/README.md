@@ -401,9 +401,10 @@ HTTP remains responsible for authentication, commands and file transfers.
 ### Home job history storage
 
 Home job history is held in memory and loaded from WebSocket snapshots; it is
-not restored from disk. Existing persisted history is reduced to completed
-library tracks when the account store opens. Library media/metadata, preferences,
-and pending import/upload recovery records remain on device. Switching tabs
+not restored from disk. A confirmed upload stays off Home until a live snapshot
+includes that job. When the snapshot says the job is ready, failed, or cancelled,
+only that local operation record is removed. Completed library tracks, preferences,
+and unfinished import or upload recovery records remain on device. Switching tabs
 continues using the shared live session rather than restarting the connection.
 
 ## Current jobs and Library (2026-09-28)
@@ -434,9 +435,10 @@ verify every populated card state or a real processing flow.
 
 Home and the processing list hide terminal cloud jobs (`ready`, `failed`,
 `cancelled`); unfinished local reviews and recoverable local imports stay
-accessible. Creation date and time are shown on Home job cards. Filtering is
-presentation only: no deletion request, database mutation or media cleanup is
-performed, and the administrator dashboard retains job history.
+accessible. Confirmed uploads stay off Home until the live snapshot names them.
+A terminal snapshot removes the local operation record and does not delete the
+server job, library audio, or administrator history. Creation date and time are
+shown on Home job cards.
 
 Library has explicit cursor-based Load more with loading/error feedback. Native
 Library storage preserves previously discovered completed audio; browser Library

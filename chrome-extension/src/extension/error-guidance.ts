@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { ErrorContext } from "../shared/error-context";
 
 function acquisitionFailure(
@@ -6,27 +7,31 @@ function acquisitionFailure(
   switch (code) {
     case "WORKER_UPDATE_REQUIRED":
       return {
-        title: "Update the background worker",
-        message:
+        title: t("Update the background worker"),
+        message: t(
           "Open MusicMute and select Worker to update or move the paired worker into the app. Local separation can share this Mac's GPU once the worker supports coordination. Saved vocals remain available.",
+        ),
       };
     case "WORKER_MAINTENANCE_BUSY":
       return {
-        title: "Worker maintenance in progress",
-        message:
+        title: t("Worker maintenance in progress"),
+        message: t(
           "MusicMute is preparing, updating or benchmarking the background worker. Wait for that operation to finish, then try local separation again. Saved vocals remain available.",
+        ),
       };
     case "WORKER_PERSONAL_BUSY":
       return {
-        title: "Local separation is active",
-        message:
+        title: t("Local separation is active"),
+        message: t(
           "Another local preparation is using the GPU. Wait for it to finish before starting worker maintenance or another separation.",
+        ),
       };
     case "WORKER_WAIT_TIMEOUT":
       return {
-        title: "Waiting for the background worker",
-        message:
+        title: t("Waiting for the background worker"),
+        message: t(
           "An accepted background job has not released the GPU yet. Check its progress in MusicMute's Worker section and try again after it finishes.",
+        ),
       };
     case "WORKER_COORDINATION_UNSAFE":
     case "WORKER_COORDINATION_UNAVAILABLE":
@@ -35,154 +40,179 @@ function acquisitionFailure(
     case "PERSONAL_ENGINE_IDENTITY_UNAVAILABLE":
     case "ENGINE_EXIT_UNCONFIRMED":
       return {
-        title: "Processing coordination needs attention",
-        message:
+        title: t("Processing coordination needs attention"),
+        message: t(
           "MusicMute could not confirm that the GPU is available for local separation. Open Worker diagnostics in the Mac app and check the failed operation before trying again. Saved vocals remain available.",
+        ),
       };
     case "ENGINE_SERVICE_REQUIRED":
       return {
-        title: "Update MusicMute processing",
-        message:
+        title: t("Update MusicMute processing"),
+        message: t(
           "This installation cannot coordinate its local separation engine with the background worker. Open MusicMute and check for an app update before starting local separation or worker qualification.",
+        ),
       };
     case "OUTBOX_BUSY":
       return {
-        title: "Local save busy",
-        message:
+        title: t("Local save busy"),
+        message: t(
           "Another local save is still finishing. Try again in a moment.",
+        ),
       };
     case "ENOENT":
       return {
-        title: "Local file missing",
-        message:
+        title: t("Local file missing"),
+        message: t(
           "MusicMute could not find a required local file. Open the MusicMute extension and select Check again. The results will help you check or repair setup in the Mac app.",
+        ),
       };
     case "SOURCE_BOT_CHALLENGE":
       return {
-        title: "YouTube access paused",
-        message:
+        title: t("YouTube access paused"),
+        message: t(
           "YouTube refused this guest download with a bot check. MusicMute holds fresh downloads for 15 minutes. Signing into Chrome does not authenticate MusicMute's isolated guest downloader.",
+        ),
       };
     case "ACQUISITION_RATE_LIMITED":
       return {
-        title: "YouTube request limit",
-        message:
+        title: t("YouTube request limit"),
+        message: t(
           "YouTube limited guest download requests. MusicMute waits 15 minutes before another download. Try later; original sound is available.",
+        ),
       };
     case "ACQUISITION_COOLDOWN":
       return {
-        title: "YouTube access paused",
-        message:
+        title: t("YouTube access paused"),
+        message: t(
           "MusicMute is waiting after a YouTube bot check, request limit or interrupted download. Fresh downloads remain on hold during the 15-minute cooldown. Signing into Chrome does not authenticate MusicMute's isolated guest downloader. Original sound is available.",
+        ),
       };
     case "ACQUISITION_BUSY":
       return {
-        title: "Another download is active",
-        message:
+        title: t("Another download is active"),
+        message: t(
           "Another MusicMute download is in progress. Try again after it finishes. Original sound is available.",
+        ),
       };
     case "ACQUISITION_STATE_INVALID":
       return {
-        title: "Download safety check failed",
-        message:
+        title: t("Download safety check failed"),
+        message: t(
           "MusicMute could not verify its local download state. Open the MusicMute app and check diagnostics before trying again.",
+        ),
       };
     case "SOURCE_TOKEN_REQUIRED":
       return {
-        title: "YouTube playback token required",
-        message:
+        title: t("YouTube playback token required"),
+        message: t(
           "MusicMute's bundled PO-token provider could not obtain a required playback token for this guest download. Check your internet connection and the MusicMute app diagnostics. If this persists, check for an app update.",
+        ),
       };
     case "SOURCE_HTTP_UNAUTHORIZED":
     case "SOURCE_AUTH_REQUIRED":
       return {
-        title: "YouTube authentication required",
-        message:
+        title: t("YouTube authentication required"),
+        message: t(
           "YouTube requires authentication for this guest download. MusicMute does not use your Chrome cookies. Choose another public video or try later.",
+        ),
       };
     case "SOURCE_HTTP_FORBIDDEN":
       return {
-        title: "YouTube refused the audio",
-        message:
+        title: t("YouTube refused the audio"),
+        message: t(
           "YouTube refused the guest audio download (HTTP 403). This response does not explain why. Check the MusicMute app diagnostics or try later.",
+        ),
       };
     case "SOURCE_AGE_RESTRICTED":
       return {
-        title: "Age-restricted video",
-        message:
+        title: t("Age-restricted video"),
+        message: t(
           "This video requires age verification. MusicMute's guest downloader cannot access it. Choose a public video without age restrictions.",
+        ),
       };
     case "SOURCE_ACCESS_RESTRICTED":
       return {
-        title: "Restricted video",
-        message:
+        title: t("Restricted video"),
+        message: t(
           "This video is private, members-only or otherwise restricted. MusicMute's guest downloader cannot access it. Choose another public video.",
+        ),
       };
     case "ACQUISITION_NETWORK_FAILED":
       return {
-        title: "Audio connection failed",
-        message:
+        title: t("Audio connection failed"),
+        message: t(
           "MusicMute could not connect to download the audio. Check your connection, then use the MusicMute icon to try again.",
+        ),
       };
     case "SOURCE_TRANSFER_INCOMPLETE":
       return {
-        title: "Audio download incomplete",
-        message:
+        title: t("Audio download incomplete"),
+        message: t(
           "MusicMute received an incomplete audio download. No vocals result was created. Try later; original sound is available.",
+        ),
       };
     case "SOURCE_TRANSFER_EMPTY":
       return {
-        title: "No audio downloaded",
-        message:
+        title: t("No audio downloaded"),
+        message: t(
           "The audio download was empty. No vocals result was created. Try later; original sound is available.",
+        ),
       };
     case "SOURCE_TLS_FAILED":
       return {
-        title: "Secure audio connection failed",
-        message:
+        title: t("Secure audio connection failed"),
+        message: t(
           "MusicMute could not establish or verify the audio server's secure connection. Check your connection and the MusicMute app diagnostics before trying again.",
+        ),
       };
     case "ACQUISITION_STORAGE_FAILED":
       return {
-        title: "Audio storage failed",
-        message:
+        title: t("Audio storage failed"),
+        message: t(
           "MusicMute could not save the downloaded audio on this Mac. Check free disk space and the MusicMute app diagnostics before trying again.",
+        ),
       };
     case "SOURCE_POSTPROCESSING_FAILED":
       return {
-        title: "Audio preparation failed",
-        message:
+        title: t("Audio preparation failed"),
+        message: t(
           "MusicMute could not finish preparing the downloaded audio. Open the MusicMute app and check diagnostics before trying again.",
+        ),
       };
     case "DOWNLOADER_ARGUMENTS_INVALID":
       return {
-        title: "Downloader settings rejected",
-        message:
+        title: t("Downloader settings rejected"),
+        message: t(
           "MusicMute's downloader rejected its local settings. Open the MusicMute app and check diagnostics before trying again.",
+        ),
       };
     case "DOWNLOADER_ISOLATION_REQUIRED":
       return {
-        title: "Guest download safety check failed",
-        message:
+        title: t("Guest download safety check failed"),
+        message: t(
           "MusicMute stopped the download because guest isolation could not be verified. Open the MusicMute app and check diagnostics before trying again.",
+        ),
       };
     case "SOURCE_CHALLENGE_FAILED":
       return {
-        title: "YouTube challenge failed",
-        message:
+        title: t("YouTube challenge failed"),
+        message: t(
           "MusicMute could not complete YouTube's guest playback challenge. Check the MusicMute app diagnostics before trying again.",
+        ),
       };
     case "SOURCE_AUDIO_FORMAT_UNAVAILABLE":
       return {
-        title: "YouTube audio unavailable",
-        message:
+        title: t("YouTube audio unavailable"),
+        message: t(
           "MusicMute could not get a supported audio download from YouTube. Signing in to MusicMute does not change YouTube download access. Open the app and use Prepare my Mac to check or repair the YouTube tools, or check for an app update.",
+        ),
       };
     case "SOURCE_UNAVAILABLE":
       return {
-        title: "Video unavailable",
-        message:
+        title: t("Video unavailable"),
+        message: t(
           "YouTube reported that this video is unavailable to the guest downloader. Choose another public video.",
+        ),
       };
     default:
       return null;
@@ -205,9 +235,10 @@ export function failureGuidance(
   if (!result) {
     if (code === "INSTALLATION_CHECK_BUSY")
       result = {
-        title: "Installation check busy",
-        message:
+        title: t("Installation check busy"),
+        message: t(
           "Wait for the installation check to finish before starting a video. To run Check again, stop MusicMute playback or processing first.",
+        ),
       };
     else if (
       /^(ENGINE_|SEPARATOR_|TOOL_UNAVAILABLE|APP_RESOURCES_INCOMPLETE|INSTALLATION_CHECK_FAILED)/.test(
@@ -215,39 +246,45 @@ export function failureGuidance(
       )
     )
       result = {
-        title: "Check local processing tools",
-        message:
+        title: t("Check local processing tools"),
+        message: t(
           "MusicMute could not start local processing. Open the MusicMute extension and select Check again. If a check fails, open the Mac app to repair setup.",
+        ),
       };
     else if (code === "EXTENSION_CONNECTION_LOST")
       result = {
-        title: "MusicMute connection lost",
-        message:
+        title: t("MusicMute connection lost"),
+        message: t(
           "Chrome lost the MusicMute extension connection. Click the waveform to reconnect. If it repeats, refresh this YouTube page.",
+        ),
       };
     else if (code === "PROCESSING_SELECTION_CHANGED")
       result = {
-        title: "Processing choice changed",
-        message:
+        title: t("Processing choice changed"),
+        message: t(
           "The saved processing choice changed in MusicMute. Review Process using in the app, then click the waveform again. No cloud request was submitted.",
+        ),
       };
     else if (code === "PROCESSING_BRIDGE_UNAVAILABLE")
       result = {
-        title: "MusicMute cloud connection unavailable",
-        message:
+        title: t("MusicMute cloud connection unavailable"),
+        message: t(
           "Open MusicMute, check for an app update and confirm the saved processing choice. If this repeats, check MusicMute Diagnostics before trying again.",
+        ),
       };
     else if (code === "ACCOUNT_REQUIRED")
       result = {
-        title: "Sign in for MusicMute cloud",
-        message:
+        title: t("Sign in for MusicMute cloud"),
+        message: t(
           "Open the MusicMute app and sign in to the account you want to use for cloud processing, then click the waveform again. You can choose On this Mac in the app for local processing.",
+        ),
       };
     else if (code === "ACCOUNT_SESSION_UNAVAILABLE")
       result = {
-        title: "Reconnect your MusicMute account",
-        message:
+        title: t("Reconnect your MusicMute account"),
+        message: t(
           "Open the MusicMute app and sign in again to restore its cloud session. Then return to this video and click the waveform. Account credentials stay in the app.",
+        ),
       };
     else if (
       /^DENO_|^PO_TOKEN_PROVIDER_|^YT_DLP_|^DOWNLOADER_|^EJS_|^JAVASCRIPT_/.test(
@@ -255,115 +292,141 @@ export function failureGuidance(
       )
     )
       result = {
-        title: "YouTube tools need repair",
-        message:
+        title: t("YouTube tools need repair"),
+        message: t(
           "Open the MusicMute extension and select Check again. If the YouTube tools check fails, open the Mac app and use Prepare my Mac or install an app update.",
+        ),
       };
     else if (/MODEL|RUNTIME|SETUP|PLATFORM|ARCH/.test(code))
       result = {
-        title: "Finish Mac setup",
-        message:
+        title: t("Finish Mac setup"),
+        message: t(
           "Open the MusicMute extension and select Check again. If a check fails or setup is missing, open the Mac app and use Prepare my Mac. Local processing requires an Apple Silicon Mac.",
+        ),
       };
     else if (/COMPANION/.test(code))
       result = {
-        title: "Connect the MusicMute app",
-        message:
+        title: t("Connect the MusicMute app"),
+        message: t(
           "Open the MusicMute extension and select Check again. If the helper cannot connect, open the Mac app to complete setup or Repair Chrome connection. Install MusicMute first if it is missing.",
+        ),
       };
     else if (code === "APP_UPDATE_REQUIRED")
       result = {
-        title: "Update MusicMute",
-        message:
+        title: t("Update MusicMute"),
+        message: t(
           "This feature needs a newer MusicMute app. Open MusicMute, check for updates, then return to the extension. No cloud request was submitted.",
+        ),
       };
     else if (/QUOTA|ALLOWANCE|STORAGE_LIMIT|TRANSFER_LIMIT/.test(code))
       result = {
-        title: "Account allowance reached",
-        message:
+        title: t("Account allowance reached"),
+        message: t(
           "Open MusicMute to review this account's remaining processing, storage and transfer allowance and reset date, or choose another account. No automatic paid retry is performed.",
+        ),
       };
     else if (/ACCOUNT|AUTH|SESSION_EXPIRED|EMAIL_VERIFICATION/.test(code))
       result = {
-        title: "Account action needed",
-        message:
+        title: t("Account action needed"),
+        message: t(
           "Open MusicMute to sign in, verify your email or select the correct account. Local files and verified cached vocals remain available.",
+        ),
       };
     else if (/DISK|SPACE|MEMORY|ENOSPC|CACHE_FULL|OUTBOX_FULL/.test(code))
       result = {
-        title: "Not enough local resources",
-        message:
+        title: t("Not enough local resources"),
+        message: t(
           "Free disk space, close other heavy apps, and check MusicMute Diagnostics before retrying. Existing saved results are preserved.",
+        ),
       };
     else if (
       /EACCES|EPERM|CACHE_UNSAFE|OUTBOX_UNSAFE|WORKSPACE_UNSAFE/.test(code)
     )
       result = {
-        title: "Local storage access failed",
-        message:
+        title: t("Local storage access failed"),
+        message: t(
           "Open MusicMute Diagnostics to check local storage ownership and permissions. Repair setup before retrying; do not delete your saved files.",
+        ),
       };
     else if (/NETWORK|CONNECTION|TLS|TIMEOUT/.test(code))
       result = {
-        title: "Connection interrupted",
-        message:
+        title: t("Connection interrupted"),
+        message: t(
           "Check your internet connection and try again when it is stable. If this repeats, open MusicMute Diagnostics.",
+        ),
       };
     else if (
       code === "SOURCE_AUDIO_TRACK_UNSUPPORTED" ||
       code === "SOURCE_AUDIO_TRACK_UNVERIFIED"
     )
       result = {
-        title: "Audio track unavailable",
-        message:
+        title: t("Audio track unavailable"),
+        message: t(
           "MusicMute could not verify this video's audio track. Videos with multiple language or described tracks are not supported yet. Original audio restored.",
+        ),
       };
     else if (code === "SOURCE_AUDIO_TRACK_MISMATCH")
       result = {
-        title: "Audio track did not match",
-        message:
+        title: t("Audio track did not match"),
+        message: t(
           "The downloaded audio track did not match. Original audio restored. Choose another video or check MusicMute Diagnostics.",
+        ),
       };
     else if (code === "PLAYBACK_SESSION_LOST" || code === "PLAYBACK_PAGE_LOST")
       result = {
-        title: "Playback connection interrupted",
-        message:
+        title: t("Playback connection interrupted"),
+        message: t(
           "MusicMute could not recover this playback session. Original audio restored. Select Remove background music to reconnect.",
+        ),
       };
     else if (code === "SESSION_STOPPED")
       result = {
-        title: "Original audio restored",
-        message: "MusicMute stopped. Original audio restored.",
+        title: t("Original audio restored"),
+        message: t("MusicMute stopped. Original audio restored."),
       };
     else
       result = {
-        title: "Playback paused",
-        message:
+        title: t("Playback paused"),
+        message: t(
           "MusicMute could not finish this operation. Original audio restored. Open MusicMute Diagnostics for the failed stage and error code before retrying.",
+        ),
       };
   }
   let message = result.message;
   if (code === "SOURCE_CHALLENGE_FAILED")
-    message +=
-      " Check or update the bundled Deno runtime, EJS and YouTube extractor in MusicMute setup.";
+    message += t(
+      " Check or update the bundled Deno runtime, EJS and YouTube extractor in MusicMute setup.",
+    );
   if (code === "SOURCE_TOKEN_REQUIRED")
-    message += " A token cannot guarantee YouTube acceptance.";
+    message += t(" A token cannot guarantee YouTube acceptance.");
   if (context?.block_reason) {
     message =
       context.block_reason === "ACQUISITION_INTERRUPTED"
-        ? "A previous guest download was interrupted before its outcome was known. MusicMute is holding fresh downloads to avoid repeated uncertain requests."
+        ? t(
+            "A previous guest download was interrupted before its outcome was known. MusicMute is holding fresh downloads to avoid repeated uncertain requests.",
+          )
         : context.block_reason === "ACQUISITION_RATE_LIMITED"
-          ? "YouTube limited guest download requests. MusicMute is holding fresh downloads after that request limit."
-          : "YouTube refused this guest download with a bot check. MusicMute is holding fresh downloads. Signing into Chrome does not authenticate MusicMute's isolated guest downloader.";
+          ? t(
+              "YouTube limited guest download requests. MusicMute is holding fresh downloads after that request limit.",
+            )
+          : t(
+              "YouTube refused this guest download with a bot check. MusicMute is holding fresh downloads. Signing into Chrome does not authenticate MusicMute's isolated guest downloader.",
+            );
   }
   if (context?.retry_at) {
     const seconds = Math.max(0, Math.ceil((context.retry_at - now) / 1000));
     message +=
       seconds > 0
-        ? ` Retry available in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}.`
-        : " The download hold has ended. You may try once; YouTube can still refuse.";
-    message +=
-      " Verified cached vocals and local files remain usable. Original sound is available.";
+        ? t(" Retry available in {0}:{1}.", [
+            Math.floor(seconds / 60),
+            String(seconds % 60).padStart(2, "0"),
+          ])
+        : t(
+            " The download hold has ended. You may try once; YouTube can still refuse.",
+          );
+    message += t(
+      " Verified cached vocals and local files remain usable. Original sound is available.",
+    );
   }
   const cloudPrimary =
     [
@@ -374,8 +437,9 @@ export function failureGuidance(
     (!context?.retry_at || context.retry_at > now);
   if (cloudPrimary)
     message =
-      "Use MusicMute cloud to review and confirm cloud processing in the Mac app. " +
-      message;
+      t(
+        "Use MusicMute cloud to review and confirm cloud processing in the Mac app. ",
+      ) + message;
   return {
     ...result,
     message,

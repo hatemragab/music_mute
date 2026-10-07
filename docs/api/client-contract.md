@@ -25,6 +25,90 @@ cache-delivery command. Private file sync and account authorization are unchange
 Community contributions carry unverified source identity and never replace trusted
 adapter/worker artifacts. Release backend support before the matching companion.
 
+## Mac worker registration
+
+Google sign-in identifies the person allowed to register a Mac worker. Registration
+creates a separate machine identity and credential. After activation, account
+sign-out, account switching, registration permission removal, or account deletion
+does not stop, reassign, or revoke that machine. Existing fleet readiness, policy,
+capacity, and claim rules continue to apply. Administrators pause, drain, or revoke
+registered machines from Workers; local controls keep their existing meaning.
+
+`POST /admin/workers/machines/{id}/deletions` implements Delete machine with an
+audited body (`operation_id`, `expected_revision`, `reason`, optional
+`registration_user_id` and `expected_user_revision`). It requires `workers.manage`,
+`users.read`, `users.worker-registration.manage` and recent admin authentication.
+The transaction removes the machine from fleet reads, revokes its authority and
+expires its work leases, while disabling the registering account's permission.
+Legacy machines have no account provenance and require explicit account selection.
+The account revision must match if that account exists; a known registering
+account already deleted requires no flag change. Other registered machines and
+personal media remain independent. Successful requests return HTTP 200 and the
+normal operation receipt; replay the same operation ID after uncertain outcomes.
+
+A private deletion record retains audit/job references and the old credential
+digest for cleanup only. Known deleted machine credentials return HTTP 410
+`WORKER_MACHINE_DELETED`; unknown or merely revoked credentials remain HTTP 401.
+Only the existing unpairing route can confirm cleanup using a deleted credential,
+with `deleted: true` added to its confirmation. A compatible Mac app then retires
+its local registration while preserving models, runtime and history. It checks
+current Google approval again before creating a new machine identity. An offline
+Mac receives the deletion when it next connects; deletion is not a remote file purge.
+
+`GET /users/me` and `GET /admin/users/{id}` expose
+`worker_registration_allowed`, a Boolean defaulting to false. Missing values on
+legacy user documents are false. User detail also exposes the existing linked
+`providers` for context. One approved account can register multiple Macs.
+
+`PUT /admin/users/{id}/worker-registration` accepts
+`worker_registration_allowed`, nonnegative `expected_revision`, UUIDv4
+`operation_id`, and a trimmed `reason` of 1–500 characters. Owner/support require
+`users.worker-registration.manage` and recent authentication; viewer/release
+manager cannot change it. Disabled, deleting, or purging accounts reject the
+mutation. The response is the existing durable admin operation receipt; read user
+detail for saved state. Reasons and actors use the existing audit trail. Flag
+changes affect only new registrations, never registered machine status/claims.
+
+The user-scoped `worker_registration` realtime resource accepts no parameters and
+returns `{ "worker_registration_allowed": false }` (or true). It uses the existing
+authenticated session socket, user change invalidation, and reconnect snapshots.
+It carries no enrollment secret. An open connected Mac app can react to approval
+from any screen. A closed/offline app registers when next opened and connected;
+there is no HTTP polling or remote installation while the app is closed.
+
+`POST /users/me/worker-installation` accepts an empty JSON object. Only an active
+approved user whose **current verified sign-in provider** is `google.com` can
+request it; a linked Google provider alone is insufficient. Workspace addresses
+qualify without a Gmail suffix. Success is 201 with `Cache-Control: no-store`, a
+15-minute credential lifetime, and
+`{ "credential": "<one-use secret>", "expires_at": "<UTC RFC 3339>" }`. A
+non-Google session returns 403 `GOOGLE_SIGN_IN_REQUIRED`; missing/false approval
+returns 403 `WORKER_REGISTRATION_NOT_ALLOWED`. Existing account/auth errors and
+shared Redis limits apply (five requests per UID and twenty per IP per minute).
+
+The backend stores only the secret's digest and server-fixed
+`registeredByUserId` provenance on the invitation, installation, and new machine.
+Existing code-enrolled records retain null provenance. Approval/active status is
+checked again before new exchange/activation and fenced against concurrent account
+changes. Idempotent replies for already activated machines remain valid without
+an account dependency. Provenance is informational, not a machine ownership gate.
+
+The Mac requests a credential only for fresh setup, passes it over the existing
+private controller pipe, and never displays/logs it or saves it in preferences.
+The unchanged installer may retain its existing private recovery credential file
+until successful finalization. Existing installations do not receive another
+credential. Stop is respected; restoring an explicitly removed preserved service
+is a local action and retains the existing machine registration.
+
+API preflight used the current [Zalando RESTful API and Event Guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+on 2026-10-06: 100/101 (API-first/OpenAPI), 104/105 (security/permissions),
+118 (snake_case), 106 (compatibility), 148/151 (methods/responses),
+176 (Problem JSON), and 200 (private snapshot data). Existing Problem JSON and
+raw WebSocket framing remain authoritative;
+REST method/header rules do not replace socket framing. Backend support must ship
+before matching clients. Source and isolated fixtures are not live registration,
+installed-Mac login, or production deployment proof.
+
 ## Mac local media sync
 
 The Mac desktop reports platform `macos`, with its own optional `minimum_build`

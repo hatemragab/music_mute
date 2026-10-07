@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router";
 
 import { useApiClient } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
+import { RefreshButton } from "@/components/refresh-button";
 import {
   EmptyState,
   ErrorState,
@@ -76,6 +77,14 @@ export function UsersPage() {
       <PageHeader
         title="Users"
         description="Support directory for account state. Open an account to review quotas and manual abuse restrictions."
+        actions={
+          <RefreshButton
+            label="Refresh users"
+            refreshing={users.isFetching}
+            disabled={!validQuery}
+            onRefresh={() => void users.refetch()}
+          />
+        }
       />
       <div className="grid gap-2 rounded-xl border bg-card p-3 md:grid-cols-2">
         <div>

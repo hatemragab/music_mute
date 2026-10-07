@@ -23,7 +23,11 @@ export interface AppCommandParameters {
   drain: Record<string, never>;
   resume: Record<string, never>;
   update: { check?: boolean; force?: boolean; source?: "app" | "catalog" };
-  unpair: { force?: boolean };
+  unpair: {
+    force?: boolean;
+    expected_machine_id?: string;
+    deleted_only?: true;
+  };
   uninstall: { purge?: boolean };
   logs: {
     lines?: number;
@@ -205,7 +209,16 @@ const SCHEMAS: Record<
       source: member("app", "catalog"),
     },
   },
-  unpair: { fields: { force: boolean } },
+  unpair: {
+    fields: {
+      force: boolean,
+      expected_machine_id: string(
+        36,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+      ),
+      deleted_only: member(true),
+    },
+  },
   uninstall: { fields: { purge: boolean } },
   logs: {
     fields: {
@@ -281,6 +294,13 @@ export function parseAppControlRequest(value: unknown): AppControlRequest {
   )
     throw new AppControlError("INVALID_REQUEST");
   const p = value.parameters;
+  if (
+    command === "unpair" &&
+    (Object.hasOwn(p, "expected_machine_id") !==
+      Object.hasOwn(p, "deleted_only") ||
+      (p.deleted_only === true && p.force === true))
+  )
+    throw new AppControlError("INVALID_REQUEST");
   if (command === "update" && p.check === true && p.force === true)
     throw new AppControlError("INVALID_REQUEST");
   if (command === "logs") {
@@ -321,6 +341,8 @@ export function appCommandArguments(request: AppControlRequest): {
     candidate_engine: "candidate-engine",
     save_audio_dir: "save-audio-dir",
     baseline_report: "baseline-report",
+    expected_machine_id: "expected-machine-id",
+    deleted_only: "deleted-only",
   };
   for (const [key, value] of Object.entries(p)) {
     if (

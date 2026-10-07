@@ -159,6 +159,7 @@ struct RuntimeBootstrapManifest: Decodable, Sendable {
   let downloadHosts: [String]
   let signing: RuntimeSigningManifest
   let files: [RuntimeFileManifest]
+  let components: [RuntimeArchiveComponent]?
 
   enum CodingKeys: String, CodingKey {
     case id
@@ -169,14 +170,15 @@ struct RuntimeBootstrapManifest: Decodable, Sendable {
     case archiveBytes = "archive_bytes"
     case installedBytes = "installed_bytes"
     case downloadHosts = "download_hosts"
-    case signing, files
+    case signing, files, components
   }
 
   var archiveURL: URL? { URL(string: url) }
 
   func validate() throws {
     guard RuntimePath.safeIdentifier(id), apiVersion == 1, platform == "darwin", arch == "arm64",
-      archiveFormat == "zip", RuntimeDigest.valid(archiveSha256), archiveBytes > 0,
+      archiveFormat == (components == nil ? "zip" : "zip-components"),
+      RuntimeDigest.valid(archiveSha256), archiveBytes > 0,
       archiveBytes <= 2_000_000_000, installedBytes > 0, installedBytes <= 4_000_000_000,
       files.count >= 5, files.count <= 50_000,
       let archiveURL, RuntimePath.safeDownloadURL(archiveURL),
@@ -203,6 +205,81 @@ struct RuntimeBootstrapManifest: Decodable, Sendable {
     guard required.allSatisfy(paths.contains), files.contains(where: { $0.codeSigned == true })
     else {
       throw RuntimeBootstrapFailure.code("RUNTIME_MANIFEST_INVALID")
+    }
+    if let components {
+      guard components.count >= 2, components.count <= 16 else {
+        throw RuntimeBootstrapFailure.code("RUNTIME_MANIFEST_INVALID")
+      }
+      var ids = Set<String>()
+      var urls = Set<String>()
+      var assigned = Set<String>()
+      var total: Int64 = 0
+      for component in components {
+        guard RuntimeArchiveComponent.allowedIDs.contains(component.id),
+          ids.insert(component.id).inserted, urls.insert(component.url).inserted,
+          RuntimePath.safeIdentifier("\(id)-\(component.id)"),
+          let url = URL(string: component.url), RuntimePath.safeDownloadURL(url),
+          let host = url.host?.lowercased(), hosts.contains(host),
+          RuntimeDigest.valid(component.archiveSha256), component.archiveBytes > 0,
+          component.archiveBytes <= 2_000_000_000, !component.filePaths.isEmpty,
+          component.filePaths.count <= files.count
+        else { throw RuntimeBootstrapFailure.code("RUNTIME_MANIFEST_INVALID") }
+        total += component.archiveBytes
+        for path in component.filePaths {
+          guard paths.contains(path), assigned.insert(path).inserted else {
+            throw RuntimeBootstrapFailure.code("RUNTIME_MANIFEST_INVALID")
+          }
+        }
+      }
+      let checksum = RuntimeDigest.data(
+        Data((components.map(\.archiveSha256).joined(separator: "\n") + "\n").utf8))
+      guard assigned == paths, total == archiveBytes, checksum == archiveSha256 else {
+        throw RuntimeBootstrapFailure.code("RUNTIME_MANIFEST_INVALID")
+      }
+    }
+  }
+
+  var downloadManifests: [RuntimeBootstrapManifest] {
+    guard let components else { return [self] }
+    return components.map { component in
+      let paths = Set(component.filePaths)
+      let selected = files.filter { paths.contains($0.path) }
+      return RuntimeBootstrapManifest(
+        id: "\(id)-\(component.id)", apiVersion: apiVersion, platform: platform, arch: arch,
+        url: component.url, archiveFormat: "zip", archiveSha256: component.archiveSha256,
+        archiveBytes: component.archiveBytes,
+        installedBytes: selected.reduce(0) { $0 + ($1.bytes ?? 0) },
+        downloadHosts: downloadHosts, signing: signing, files: selected, components: nil)
+    }
+  }
+}
+
+struct RuntimeArchiveComponent: Decodable, Sendable {
+  static let allowedIDs: Set<String> = [
+    "python-ml", "node", "audio-tools", "downloader", "javascript", "token-provider", "engine",
+  ]
+  let id: String
+  let url: String
+  let archiveSha256: String
+  let archiveBytes: Int64
+  let filePaths: [String]
+
+  enum CodingKeys: String, CodingKey {
+    case id, url
+    case archiveSha256 = "archive_sha256"
+    case archiveBytes = "archive_bytes"
+    case filePaths = "file_paths"
+  }
+
+  var title: String {
+    switch id {
+    case "python-ml": "Processing runtime"
+    case "node": "App connection tools"
+    case "audio-tools": "Audio tools"
+    case "downloader": "YouTube downloader"
+    case "javascript": "JavaScript runtime"
+    case "token-provider": "Playback token provider"
+    default: "Voice processing engine"
     }
   }
 }
@@ -2244,7 +2321,8 @@ struct RuntimeInventoryVerifier {
   func verify(
     release: URL, resources: URL, manifest: RuntimeBootstrapManifest,
     progress: @escaping @Sendable (Double, String) -> Void = { _, _ in },
-    cancelled: @escaping @Sendable () -> Bool = { false }
+    cancelled: @escaping @Sendable () -> Bool = { false },
+    requireCompleteRuntime: Bool = true
   ) throws {
     guard safeReleaseRoot(release) else {
       throw RuntimeBootstrapFailure.code("RUNTIME_ARCHIVE_INVALID")
@@ -2328,8 +2406,10 @@ struct RuntimeInventoryVerifier {
           "Checking runtime signatures")
       }
     }
-    try validateCriticalSignatures(
-      release: release, manifest: manifest, resolvedSymlinks: resolvedSymlinks)
+    if requireCompleteRuntime {
+      try validateCriticalSignatures(
+        release: release, manifest: manifest, resolvedSymlinks: resolvedSymlinks)
+    }
   }
 
   private func safeReleaseRoot(_ release: URL) -> Bool {
@@ -2943,10 +3023,11 @@ enum RuntimeStorageMaintenance {
     if let manifest {
       guard RuntimePath.safeIdentifier(manifest.id), RuntimeDigest.valid(manifest.archiveSha256)
       else { throw RuntimeBootstrapFailure.code("RUNTIME_DOWNLOAD_UNSAFE") }
-      let archiveName = "\(manifest.id)-\(manifest.archiveSha256.prefix(12)).zip"
-      preservedNames = [
-        archiveName, "\(archiveName).partial", "\(archiveName).partial.resume.json",
-      ]
+      preservedNames = Set(
+        manifest.downloadManifests.flatMap { part in
+          let archiveName = "\(part.id)-\(part.archiveSha256.prefix(12)).zip"
+          return [archiveName, "\(archiveName).partial", "\(archiveName).partial.resume.json"]
+        })
     } else {
       preservedNames = []
     }
@@ -3364,6 +3445,57 @@ final class RuntimeBootstrapInstaller: @unchecked Sendable {
     verifier: RuntimeInventoryVerifier, progress: @escaping @Sendable (Double, String) -> Void
   ) throws -> RuntimeActivation {
     let release = releases.appendingPathComponent(manifest.id, isDirectory: true)
+    if let components = manifest.components {
+      return try prepareComponentRelease(
+        manifest: manifest, components: components, runtimeDirectory: runtimeDirectory,
+        releases: releases, downloads: downloads, staging: staging, activeFile: activeFile,
+        previous: previous, setupLock: setupLock, verifier: verifier, progress: progress)
+    }
+    let archive = try downloadedArchive(
+      manifest: manifest, runtimeDirectory: runtimeDirectory, downloads: downloads,
+      progress: progress)
+    let candidate = staging.appendingPathComponent(
+      "install-\(UUID().uuidString)", isDirectory: true)
+    try RuntimeFileSecurity.ensurePrivateDirectory(candidate)
+    defer {
+      if FileManager.default.fileExists(atPath: candidate.path) {
+        try? RuntimeFileSecurity.removeOwnedTree(candidate)
+      }
+    }
+    progress(44, "Installing processing tools")
+    let extraction = try runSubprocess(
+      executable: "/usr/bin/ditto",
+      arguments: ["-x", "-k", "--noextattr", "--noqtn", "--noacl", archive.path, candidate.path],
+      timeout: 20 * 60, maximumOutputBytes: 256 * 1024)
+    try checkCancellation()
+    guard extraction.status == 0 else {
+      throw RuntimeBootstrapFailure.code("RUNTIME_INSTALL_FAILED")
+    }
+    try verifier.verify(
+      release: candidate, resources: resources, manifest: manifest, progress: progress,
+      cancelled: { [weak self] in self?.isCancelled ?? true })
+    try freeze(release: candidate, manifest: manifest)
+    progress(94, "Activating processing tools")
+    guard chmod(candidate.path, 0o700) == 0 else {
+      throw RuntimeBootstrapFailure.code("RUNTIME_ACTIVATION_FAILED")
+    }
+    guard RuntimeFileSecurity.exclusiveRename(candidate, to: release) else {
+      _ = chmod(candidate.path, 0o500)
+      throw RuntimeBootstrapFailure.code("RUNTIME_ACTIVATION_FAILED")
+    }
+    guard chmod(release.path, 0o500) == 0 else {
+      throw RuntimeBootstrapFailure.code("RUNTIME_ACTIVATION_FAILED")
+    }
+    try RuntimeStorageMaintenance.cleanupDownloads(downloads, preserving: nil)
+    return try activate(
+      release: release, manifest: manifest, activeFile: activeFile, previous: previous,
+      setupLock: setupLock, releases: releases, staging: staging)
+  }
+
+  private func downloadedArchive(
+    manifest: RuntimeBootstrapManifest, runtimeDirectory: URL, downloads: URL,
+    progress: @escaping @Sendable (Double, String) -> Void
+  ) throws -> URL {
     let archive = downloads.appendingPathComponent(
       "\(manifest.id)-\(manifest.archiveSha256.prefix(12)).zip")
     let partial = archive.appendingPathExtension("partial")
@@ -3419,38 +3551,71 @@ final class RuntimeBootstrapInstaller: @unchecked Sendable {
     }
     try preflightArchive(archive, manifest: manifest)
     try checkCancellation()
+    return archive
+  }
+
+  private func prepareComponentRelease(
+    manifest: RuntimeBootstrapManifest, components: [RuntimeArchiveComponent],
+    runtimeDirectory: URL, releases: URL, downloads: URL, staging: URL, activeFile: URL,
+    previous: Data?, setupLock: RuntimeFileLock, verifier: RuntimeInventoryVerifier,
+    progress: @escaping @Sendable (Double, String) -> Void
+  ) throws -> RuntimeActivation {
     let candidate = staging.appendingPathComponent(
       "install-\(UUID().uuidString)", isDirectory: true)
     try RuntimeFileSecurity.ensurePrivateDirectory(candidate)
-    defer {
-      if FileManager.default.fileExists(atPath: candidate.path) {
-        try? RuntimeFileSecurity.removeOwnedTree(candidate)
+    defer { try? RuntimeFileSecurity.removeOwnedTree(candidate) }
+    let parts = manifest.downloadManifests
+    for (index, part) in parts.enumerated() {
+      try checkCancellation()
+      let title = components[index].title
+      let base = Double(index) / Double(parts.count) * 82
+      let stageProgress: @Sendable (Double, String) -> Void = { value, label in
+        let step = label == "Downloading processing tools" ? "Downloading" : "Installing"
+        progress(base + min(100, max(0, value)) / Double(parts.count) * 0.82, "\(step) \(title)")
       }
-    }
-    progress(44, "Installing processing tools")
-    let extraction = try runSubprocess(
-      executable: "/usr/bin/ditto",
-      arguments: ["-x", "-k", "--noextattr", "--noqtn", "--noacl", archive.path, candidate.path],
-      timeout: 20 * 60, maximumOutputBytes: 256 * 1024)
-    try checkCancellation()
-    guard extraction.status == 0 else {
-      throw RuntimeBootstrapFailure.code("RUNTIME_INSTALL_FAILED")
+      let archive = try downloadedArchive(
+        manifest: part, runtimeDirectory: runtimeDirectory, downloads: downloads,
+        progress: stageProgress)
+      let extracted = staging.appendingPathComponent(
+        "install-\(UUID().uuidString)", isDirectory: true)
+      try RuntimeFileSecurity.ensurePrivateDirectory(extracted)
+      defer { try? RuntimeFileSecurity.removeOwnedTree(extracted) }
+      stageProgress(44, "Installing")
+      let result = try runSubprocess(
+        executable: "/usr/bin/ditto",
+        arguments: ["-x", "-k", "--noextattr", "--noqtn", "--noacl", archive.path, extracted.path],
+        timeout: 20 * 60, maximumOutputBytes: 256 * 1024)
+      try checkCancellation()
+      guard result.status == 0 else { throw RuntimeBootstrapFailure.code("RUNTIME_INSTALL_FAILED") }
+      try verifier.verify(
+        release: extracted, resources: resources, manifest: part, progress: stageProgress,
+        cancelled: { [weak self] in self?.isCancelled ?? true }, requireCompleteRuntime: false)
+      for entry in part.files {
+        try checkCancellation()
+        let destination = candidate.appendingPathComponent(entry.path)
+        try RuntimeFileSecurity.ensurePrivateDirectory(destination.deletingLastPathComponent())
+        guard
+          RuntimeFileSecurity.exclusiveRename(
+            extracted.appendingPathComponent(entry.path), to: destination)
+        else { throw RuntimeBootstrapFailure.code("RUNTIME_INSTALL_FAILED") }
+      }
+      // Delete this exact verified ZIP as soon as its installation stage succeeds.
+      // A later stage failure never exposes a partially assembled active runtime.
+      try removeOwnedRegularFile(archive)
+      try RuntimeDownloadResumeState.discard(partial: archive.appendingPathExtension("partial"))
+      try RuntimeFileSecurity.removeOwnedTree(extracted)
+      progress(Double(index + 1) / Double(parts.count) * 82, "Installed \(title)")
     }
     try verifier.verify(
-      release: candidate, resources: resources, manifest: manifest, progress: progress,
+      release: candidate, resources: resources, manifest: manifest,
+      progress: { value, label in progress(82 + max(0, min(94, value) - 45) / 49 * 12, label) },
       cancelled: { [weak self] in self?.isCancelled ?? true })
     try freeze(release: candidate, manifest: manifest)
+    let release = releases.appendingPathComponent(manifest.id, isDirectory: true)
     progress(94, "Activating processing tools")
-    guard chmod(candidate.path, 0o700) == 0 else {
-      throw RuntimeBootstrapFailure.code("RUNTIME_ACTIVATION_FAILED")
-    }
-    guard RuntimeFileSecurity.exclusiveRename(candidate, to: release) else {
-      _ = chmod(candidate.path, 0o500)
-      throw RuntimeBootstrapFailure.code("RUNTIME_ACTIVATION_FAILED")
-    }
-    guard chmod(release.path, 0o500) == 0 else {
-      throw RuntimeBootstrapFailure.code("RUNTIME_ACTIVATION_FAILED")
-    }
+    guard chmod(candidate.path, 0o700) == 0,
+      RuntimeFileSecurity.exclusiveRename(candidate, to: release), chmod(release.path, 0o500) == 0
+    else { throw RuntimeBootstrapFailure.code("RUNTIME_ACTIVATION_FAILED") }
     try RuntimeStorageMaintenance.cleanupDownloads(downloads, preserving: nil)
     return try activate(
       release: release, manifest: manifest, activeFile: activeFile, previous: previous,

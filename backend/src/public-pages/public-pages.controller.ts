@@ -244,38 +244,59 @@ export class PublicPagesController {
     const configuration = this.configuration();
     return page(
       'MusicMute privacy policy',
-      'How MusicMute collects, uses, protects, retains, and deletes account, device, diagnostic, and audio information.',
+      'How MusicMute handles information across its Android, iOS, web, Mac, and Chrome products.',
       configuration,
       `
-<section class="card" aria-labelledby="operator"><h2 id="operator">Operator and contact</h2>
-<p>MusicMute is operated by ${escapeHtml(configuration.developer)}. For privacy, support, or account questions, email <a href="mailto:${escapeHtml(configuration.email)}">${escapeHtml(configuration.email)}</a>.</p></section>
-<section class="card" aria-labelledby="collection"><h2 id="collection">Information MusicMute handles</h2>
-<ul>
-<li><strong>Account information:</strong> Firebase user ID, profile name, email when available, verification state, and linked sign-in providers.</li>
-<li><strong>Audio and user content:</strong> audio selected for processing, prepared original audio, voice-only results, filenames, duration, size, processing history, source URLs, and source metadata.</li>
-<li><strong>Device and service information:</strong> MusicMute installation identifier, Firebase installation and messaging identifiers, push token, device model, operating system, app version and build, IP address, request metadata, and security/session records.</li>
-<li><strong>Diagnostics:</strong> bounded crash, error, performance, and processing diagnostics needed to operate, secure, and troubleshoot the service.</li>
-</ul>
-<p>When a video is selected locally, MusicMute prepares audio on the device and uploads the prepared audio; it does not upload the original video file. Selecting a file or link alone does not authorize a cloud submission.</p></section>
-<section class="card" aria-labelledby="uses"><h2 id="uses">Why the information is used</h2>
-<p>MusicMute uses this information to authenticate accounts, enforce account and usage policy, prepare and process audio, deliver private results, maintain history, send requested processing notifications, support playback and export, prevent abuse, diagnose failures, provide support, and complete account deletion.</p>
-<p>MusicMute does not sell personal information and does not use account or audio data for advertising.</p></section>
-<section class="card" aria-labelledby="links"><h2 id="links">Imports from public links</h2>
-<p>After the user confirms an import, MusicMute’s server retrieves an available audio-only stream from a supported public link and submits the prepared audio for processing, or reuses an existing verified original and matching result. The mobile app does not fetch provider media. Public-link originals and results are stored once in permanent shared storage across accounts. Each account has its own job, history, and authorized access. Local file uploads and their results remain private to the uploading account and are not shared.</p>
-<p>Users must import only material they own or are permitted to process. Rights confirmation is a statement by the user; MusicMute does not verify ownership or grant permission to download or process third-party material.</p></section>
-<section class="card" aria-labelledby="providers"><h2 id="providers">Service providers and disclosure</h2>
-<p>Firebase/Google processes authentication and messaging data. MongoDB stores account and job records. Private S3-compatible storage holds account media. Sentry receives privacy-filtered crash and diagnostic events when enabled. Hosting, network, and security providers may process IP addresses and request metadata to deliver and protect the service.</p>
-<p>These providers process data for MusicMute’s service purposes. MusicMute may also disclose limited information when required by law or to protect users, the service, or others. These public pages contain no analytics scripts, advertising trackers, or account lookup form.</p></section>
-<section class="card" aria-labelledby="security"><h2 id="security">Security and transfer</h2>
-<p>Release clients use HTTPS. Cloud media is private and transferred through authenticated, short-lived grants. Access is account-scoped, and credentials or signed transfer URLs must not be shared. No system can guarantee absolute security.</p></section>
-<section class="card" aria-labelledby="retention"><h2 id="retention">Retention, local copies, and deletion</h2>
-<p>Privately uploaded local media and history remain associated with the account until the user deletes the relevant item or account, subject to processing cleanup and the deletion lifecycle below. Public-link originals and processed results remain in permanent shared storage after deletion, while the deleted account’s records and access are removed. Signing out does not erase retained cloud or local data.</p>
-<p>An accepted account-deletion request blocks access immediately and starts an exact ${PUBLIC_POLICY_DEFAULTS.recoveryPeriodDays}-day recovery period. Permanent cleanup starts after that deadline.</p>
-<p class="policy">${escapeHtml(configuration.retention)}</p>
-<p class="policy">${escapeHtml(configuration.timeframe)}</p>
-<p>Use the <a href="${PUBLIC_POLICY_PATHS.accountDeletion}">account deletion page</a> to request deletion outside the app or review the in-app process. The page explains the data removed, the exact recovery period, and limited retention.</p></section>
-<section class="card" aria-labelledby="changes"><h2 id="changes">Policy changes</h2>
-<p>Material changes will be published at this same URL with a new last-updated date. Continued use after an effective change is subject to the updated notice and applicable law.</p></section>`,
+  <section class="card" aria-labelledby="operator"><h2 id="operator">Operator and contact</h2>
+  <p>MusicMute is operated by ${escapeHtml(configuration.developer)}. This policy covers the Android and iOS apps, the web app, MusicMute Local for Mac, its Chrome extension, and the MusicMute services they use. Features and data handling differ slightly by client. MusicMute is independent of YouTube and Google.</p>
+  <p>For privacy, support, access, correction, or deletion questions, email <a href="mailto:${escapeHtml(configuration.email)}">${escapeHtml(configuration.email)}</a> or use the <a href="${PUBLIC_POLICY_PATHS.support}">support page</a>. Do not send passwords, authentication tokens, browser cookies, private audio, or protected download URLs. Support may ask you to verify ownership before acting on an account request.</p></section>
+  <section class="card" aria-labelledby="collection"><h2 id="collection">Information MusicMute handles</h2>
+  <ul>
+  <li><strong>Account and authentication information:</strong> Firebase user ID, profile name, email when available, verification state, linked sign-in providers, and the credentials or session records needed for sign-in. The Mac app stores its sign-in credentials in macOS Keychain; they are not sent to the Chrome extension.</li>
+  <li><strong>Audio and user content:</strong> audio you select or upload, prepared audio, voice-only results, filenames, duration, size, processing history, source URLs and identifiers you submit, and source metadata.</li>
+  <li><strong>Device and service information:</strong> where supported, a MusicMute installation identifier, Firebase installation and messaging identifiers, push token, device model, operating system, app version and build, IP address, request metadata, and security/session records. These network requests do not give MusicMute GPS or precise-geolocation access.</li>
+  <li><strong>Chrome playback and preferences:</strong> on supported YouTube watch pages, the canonical URL and video identifier, duration, playback position and speed, volume, mute state, and player/advertisement state. The extension uses these only to add controls and synchronize vocals. Playback and language preferences and bounded diagnostics are stored in the current Chrome profile.</li>
+  <li><strong>Diagnostics:</strong> bounded crash, error, performance, and processing diagnostics needed to operate, secure, and troubleshoot the service. Chrome extension and Mac app diagnostic reports remain on your device unless you choose to share an exported report; other clients and the backend may send privacy-filtered diagnostics to Sentry when enabled.</li>
+  </ul>
+  <p>The Chrome extension does not read general browsing history, browser cookies, or your Google password, and does not access precise geolocation. It does not log typed text or general keyboard activity. Its access is limited to supported YouTube watch pages and is used only for the selected playback feature; it does not monitor unrelated browsing. MusicMute does not collect health, financial/payment, or personal-communication data for this feature.</p>
+  <p>When a client prepares a selected local video for processing, it uploads prepared audio rather than the original video file.</p></section>
+  <section class="card" aria-labelledby="uses"><h2 id="uses">Why the information is used</h2>
+  <p>MusicMute uses this information to authenticate your account, enforce account and usage policy, prepare and process audio, deliver your private results, maintain your history, send processing notifications you request, support playback and export, prevent abuse, diagnose failures, provide support, and complete account deletion.</p>
+  <p>MusicMute does not sell personal information, transfer it to data brokers, use it for advertising, or use it to determine creditworthiness or for lending. Your data is used only for the disclosed features and for necessary service, security, and legal purposes.</p></section>
+  <section class="card" aria-labelledby="links"><h2 id="links">Imports from links</h2>
+  <p>When you submit a public link in the mobile or web app, MusicMute retrieves the audio you selected and processes it. The mobile app does not fetch media from the link provider itself. Results are never made available to other users.</p>
+  <p>Import only material you own or are permitted to process. Confirming your rights is a statement by you; MusicMute does not verify ownership or grant permission to download or process third-party material.</p></section>
+  <section class="card" aria-labelledby="local"><h2 id="local">Mac and Chrome local playback</h2>
+  <p>The Chrome extension plays a voice-only track synchronized with a supported YouTube watch video through the required MusicMute Mac app, and follows the processing choice saved in that app. With local processing selected, the Mac app obtains the selected audio online when needed, runs separation on your Mac, and keeps originals, vocals, processing metadata, and preferences in its managed storage on your device. Playback uses native messaging and a temporary protected loopback connection on the same Mac. Automatic local preparation is enabled by default for eligible playing videos; you can turn it off or set a shorter duration limit.</p>
+  <p>To obtain audio locally, the Mac app contacts YouTube without using your Chrome account, profile, or browser cookies. YouTube and its media servers receive these requests, including your Mac's IP address, and may return anonymous session data for that request. YouTube may refuse access; MusicMute does not bypass login requirements.</p></section>
+  <section class="card" aria-labelledby="cloud"><h2 id="cloud">Mac account and cloud processing</h2>
+  <p>Signing in to the Mac app connects it to your MusicMute account and Library.</p>
+  <p>When MusicMute cloud processing is selected in the Mac app, manually starting a video sends its canonical YouTube watch URL to MusicMute using that saved choice, without a per-video confirmation in Chrome. MusicMute then retrieves the audio and processes it, and the vocals are downloaded to your Mac for playback. Cloud processing uses your account's processing allowance. Automatic preparation never submits new cloud processing.</p></section>
+  <section class="card" aria-labelledby="android"><h2 id="android">Android app: permissions, backup, and analytics</h2>
+  <ul>
+  <li>Android cloud backup is disabled for the app so local session data is not copied into Android backup.</li>
+  <li>The Android app uses Internet access, notifications, foreground media playback, and wake lock for its core video and background-playback features.</li>
+  <li>The app does not request camera, microphone, contacts, location, calendar, SMS, call log, photos, or broad device file access.</li>
+  <li>MusicMute does not use mobile analytics for advertising and does not include an ads SDK.</li>
+  </ul></section>
+  <section class="card" aria-labelledby="security"><h2 id="security">Security and transfer</h2>
+  <p>Service and media transfers use HTTPS or secure WebSockets, as applicable. Your media is stored privately and transferred through short-lived, access-controlled links. Access is authorized through account-scoped records, and storage is not public. Do not share credentials or signed transfer URLs. Native messaging and protected loopback playback stay on the same Mac. No system can guarantee absolute security.</p>
+  <p>Browser executable code is bundled with the Chrome extension. The Mac app separately downloads checksum-verified native runtime components and model data, installs them outside the extension, and runs them in the Mac app rather than in Chrome. Each downloaded component ZIP is removed after successful installation. Ordinary app replacement preserves the installed runtime, model, and app data.</p></section>
+  <section class="card" aria-labelledby="diagnostics"><h2 id="diagnostics">Local diagnostics and your controls</h2>
+  <p>The Chrome extension and Mac app keep diagnostic reports on your device, without automatic upload, telemetry, or analytics. Exporting diagnostics creates a local report, and you choose whether to share it. Reports omit audio, credentials, browser cookies, and private media URLs. Separately, MusicMute's online services retain operational and security records for the requests they receive.</p>
+  <p>You can turn automatic preparation on or off, set a duration limit, switch between vocals and original sound, or stop playback. Use "Stop playback and clear local cache" in the extension's local tools to clear its managed local results. The local cache is subject to a managed size budget. Items in your account Library are managed separately and can be deleted by you.</p>
+  <p>Removing the Chrome extension removes its Chrome settings; it does not uninstall the Mac app or delete its files or your cloud Library. Contact support for privacy questions or requests about data the available controls do not remove.</p></section>
+  <section class="card" aria-labelledby="retention"><h2 id="retention">Retention, local copies, and deletion</h2>
+  <p>Your uploaded media, results, and account history remain until you delete the relevant item or your account, subject to processing cleanup and the deletion lifecycle below. When you delete an item or your account, the associated media, results, and records are removed from MusicMute storage as described below. Signing out does not erase retained cloud or local data.</p>
+  <p>An accepted account-deletion request blocks access immediately and starts an exact ${PUBLIC_POLICY_DEFAULTS.recoveryPeriodDays}-day recovery period. Permanent cleanup starts after that deadline.</p>
+  <p class="policy">${escapeHtml(configuration.retention)}</p>
+  <p class="policy">${escapeHtml(configuration.timeframe)}</p>
+  <p>Use the <a href="${PUBLIC_POLICY_PATHS.accountDeletion}">account deletion page</a> to request deletion outside the app or review the in-app process. The page explains the data removed, the exact recovery period, and any limited retention.</p></section>
+  <section class="card" aria-labelledby="limited-use"><h2 id="limited-use">Chrome Web Store Limited Use</h2>
+  <p>MusicMute Local's use and transfer of user data complies with the <a href="https://developer.chrome.com/docs/webstore/program-policies/user-data-faq" rel="noreferrer noopener">Chrome Web Store User Data Policy</a>, including its Limited Use requirements. Data is used and transferred only for the disclosed voice playback, processing, and account Library features, and for the policy's permitted service purposes.</p>
+  <p>User data is not used or transferred for personalized, retargeted, or interest-based advertising; it is not sold or transferred to data brokers and is not used for creditworthiness or lending. Human access to user data is limited to the policy's permitted situations, such as your affirmative agreement to specific support access, security investigations, compliance with law, or permitted internal use of aggregated and anonymized data.</p></section>
+  <section class="card" aria-labelledby="changes"><h2 id="changes">Policy changes</h2>
+  <p>Material changes will be published at this same URL with a new last-updated date. This notice describes current data handling; it does not itself obtain consent for new or unrelated uses. Where a change requires additional notice or affirmative consent under applicable law or store policy, MusicMute must provide that notice and obtain that consent before the new use.</p></section>`,
     );
   }
 

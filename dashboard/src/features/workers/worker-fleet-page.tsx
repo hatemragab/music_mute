@@ -1,21 +1,17 @@
 import { useLiveQuery } from "@/realtime/hooks";
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, RotateCcw } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 
-import { createOperationId } from "@/api/api-client";
-import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
+import { RefreshButton } from "@/components/refresh-button";
 import {
   EmptyState,
   ErrorState,
   LoadingState,
   PageHeader,
 } from "@/components/page";
-import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -35,14 +31,11 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDateTime } from "@/lib/format";
-import { revokeWorkerInvitation } from "./worker-api";
-import { WorkerEnrollmentDialog } from "./worker-enrollment-dialog";
 import { WorkerPolicyPanel } from "./worker-policy-panel";
 import { WorkerFleetSummary } from "./worker-insight-panels";
 import { workerContactState } from "./worker-status";
 import {
   WORKER_MACHINE_STATUSES,
-  type WorkerInvitation,
   type WorkerMachine,
   type WorkerMachineStatus,
   type WorkerPlatform,
@@ -54,11 +47,7 @@ const platformLabel: Record<WorkerPlatform, string> = {
 };
 
 export function WorkerFleetPage() {
-  const client = useApiClient();
-  const queryClient = useQueryClient();
-  const { can, reauthenticate } = useAdminSession();
   const [activeTab, setActiveTab] = useState("machines");
-  const [invitationCursor, setInvitationCursor] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
   const status = params.get("status") ?? "all";
   const platform = params.get("platform") ?? "all";
@@ -79,35 +68,6 @@ export function WorkerFleetPage() {
     params: filters,
     enabled: activeTab === "machines",
   });
-  const invitations = useLiveQuery({
-    queryKey: ["worker-invitations", invitationCursor],
-    resource: "admin.invitations",
-    params: { cursor: invitationCursor, limit: 25 },
-    enabled: activeTab === "enrollment" && can("workers.enroll"),
-  });
-
-  const [revokeTarget, setRevokeTarget] = useState<WorkerInvitation | null>(
-    null,
-  );
-  const refreshInvitations = async () => {
-    setInvitationCursor(null);
-    await queryClient.invalidateQueries({ queryKey: ["worker-invitations"] });
-  };
-  const revoke = useMutation({
-    mutationFn: ({
-      target,
-      reason,
-    }: {
-      target: WorkerInvitation;
-      reason: string;
-    }) =>
-      revokeWorkerInvitation(client, target.invitationId, {
-        operationId: createOperationId(),
-        expectedRevision: target.revision,
-        reason,
-      }),
-    onSuccess: refreshInvitations,
-  });
   const change = (name: string, value: string) => {
     const next = new URLSearchParams(params);
     if (value && value !== "all") next.set(name, value);
@@ -120,27 +80,20 @@ export function WorkerFleetPage() {
     <div className="space-y-6">
       <PageHeader
         title="Worker fleet"
-        description="Enroll qualified machines, watch current work and control bounded fleet capacity without exposing worker credentials."
+        description="Manage registered machines, watch current work and control bounded fleet capacity. Approve new Mac registrations from user detail."
         actions={
-          <>
-            {can("workers.enroll") ? (
-              <WorkerEnrollmentDialog onCreated={refreshInvitations} />
-            ) : null}
-          </>
+          activeTab === "machines" ? (
+            <RefreshButton
+              label="Refresh worker fleet"
+              refreshing={machines.isFetching}
+              onRefresh={() => void machines.refetch()}
+            />
+          ) : null
         }
       />
-      <Tabs
-        value={activeTab}
-        onValueChange={(value) => {
-          setActiveTab(value);
-          if (value === "enrollment") setInvitationCursor(null);
-        }}
-      >
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList aria-label="Worker fleet sections">
           <TabsTrigger value="machines">Machines</TabsTrigger>
-          {can("workers.enroll") ? (
-            <TabsTrigger value="enrollment">Enrollment</TabsTrigger>
-          ) : null}
           <TabsTrigger value="policy">Policy</TabsTrigger>
         </TabsList>
         <TabsContent value="machines" className="space-y-4">
@@ -209,76 +162,14 @@ export function WorkerFleetPage() {
           ) : (
             <EmptyState
               title="No machines match"
-              description="Adjust the filters or create a one-use enrollment invitation for a new machine."
+              description="Adjust the filters. To register a new Mac, allow worker registration on its user detail page and have MusicMute Local open and connected."
             />
           )}
         </TabsContent>
-        {can("workers.enroll") ? (
-          <TabsContent value="enrollment" className="space-y-4">
-            {invitations.isLoading ? (
-              <LoadingState />
-            ) : invitations.isError ? (
-              <ErrorState
-                error={invitations.error}
-                retry={() => void invitations.refetch()}
-              />
-            ) : invitations.data?.items.length ? (
-              <InvitationTable
-                items={invitations.data.items}
-                onRevoke={setRevokeTarget}
-                replacementAction={
-                  invitations.data.items.some(
-                    (item) =>
-                      item.installation?.phase === "failed" ||
-                      item.installation?.phase === "expired",
-                  ) ? (
-                    <WorkerEnrollmentDialog
-                      label="Create replacement"
-                      onCreated={refreshInvitations}
-                    />
-                  ) : null
-                }
-              />
-            ) : (
-              <EmptyState
-                title="No invitations yet"
-                description="Create a short-lived invitation when a native machine is ready to install."
-              />
-            )}
-            <CursorPagination
-              cursor={invitationCursor}
-              nextCursor={invitations.data?.nextCursor ?? null}
-              pending={invitations.isFetching}
-              onCursorChange={setInvitationCursor}
-            />
-          </TabsContent>
-        ) : null}
         <TabsContent value="policy">
           <WorkerPolicyPanel />
         </TabsContent>
       </Tabs>
-      <ReasonDialog
-        open={Boolean(revokeTarget)}
-        onOpenChange={(open) => !open && setRevokeTarget(null)}
-        title="Revoke enrollment invitation"
-        description="The installer will no longer be able to exchange this invitation. Already-consumed machine credentials are unaffected."
-        confirmLabel="Revoke invitation"
-        destructive
-        freshAuth
-        onReauthenticate={reauthenticate}
-        summary={
-          revokeTarget ? (
-            <p className="font-mono break-all">{revokeTarget.invitationId}</p>
-          ) : null
-        }
-        onConfirm={(reason) =>
-          revokeTarget
-            ? revoke
-                .mutateAsync({ target: revokeTarget, reason })
-                .then(() => setRevokeTarget(null))
-            : Promise.resolve()
-        }
-      />
     </div>
   );
 }
@@ -414,106 +305,6 @@ function MachineTable({
           pending={pending}
           onCursorChange={onCursorChange}
         />
-      </CardContent>
-    </Card>
-  );
-}
-
-function InvitationTable({
-  items,
-  onRevoke,
-  replacementAction,
-}: {
-  items: WorkerInvitation[];
-  onRevoke(item: WorkerInvitation): void;
-  replacementAction: React.ReactNode;
-}) {
-  return (
-    <Card>
-      <CardContent className="overflow-x-auto p-0">
-        <div className="flex items-center justify-between gap-3 border-b p-4">
-          <div>
-            <h2 className="font-semibold">
-              Invitation and installation history
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Secrets are never recoverable here; only lifecycle diagnostics
-              remain.
-            </p>
-          </div>
-          {replacementAction}
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Invitation</TableHead>
-              <TableHead>State / expiry</TableHead>
-              <TableHead>Installation</TableHead>
-              <TableHead>Diagnostic</TableHead>
-              <TableHead className="text-right">Action</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((item) => (
-              <TableRow key={item.invitationId}>
-                <TableCell>
-                  <p className="max-w-56 truncate font-mono text-xs">
-                    {item.invitationId}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    By {item.createdByUid}
-                  </p>
-                </TableCell>
-                <TableCell>
-                  <StatusBadge value={item.state} />
-                  <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
-                    Expires {formatDateTime(item.expiresAt)}
-                  </p>
-                </TableCell>
-                <TableCell>
-                  {item.installation ? (
-                    <>
-                      <StatusBadge value={item.installation.phase} />
-                      <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
-                        Seen {formatDateTime(item.installation.lastSeenAt)}
-                      </p>
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">Not started</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <div className="max-w-80 text-xs">
-                    {item.installation?.outcomeCode ? (
-                      <p className="font-medium text-destructive">
-                        {item.installation.outcomeCode}
-                      </p>
-                    ) : null}
-                    <p className="line-clamp-2 text-muted-foreground">
-                      {item.installation?.reportSummary ?? "No report yet"}
-                    </p>
-                  </div>
-                </TableCell>
-                <TableCell className="text-right">
-                  {item.state === "active" ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onRevoke(item)}
-                    >
-                      Revoke
-                    </Button>
-                  ) : item.installation?.phase === "failed" ? (
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                      <RotateCcw aria-hidden="true" className="size-3" /> Use
-                      replacement
-                    </span>
-                  ) : null}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
       </CardContent>
     </Card>
   );

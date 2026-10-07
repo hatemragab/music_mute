@@ -63,6 +63,13 @@ describe('Public account, privacy, and support resources', () => {
       expect(response.headers['cache-control']).toBe('no-store, no-transform');
       expect(response.text).toContain(PUBLIC_POLICY_DEFAULTS.developerName);
       expect(response.text).toContain(PUBLIC_POLICY_DEFAULTS.supportEmail);
+      if (path !== '/support') {
+        expect(response.text).toContain(
+          'authorized account records or scoped guest capabilities',
+        );
+        expect(response.text).toContain('15-day recovery period');
+        expect(response.text).toContain('replay fence remains for 24 hours');
+      }
     }
     const metadata = await request(app.getHttpServer())
       .get('/public-policy')
@@ -128,7 +135,7 @@ describe('Public account, privacy, and support resources', () => {
     for (const value of [
       'Firebase',
       'MongoDB',
-      'S3-compatible storage',
+      'Cloudflare R2',
       'Sentry',
       'IP address',
       'audio-only stream',
@@ -143,10 +150,133 @@ describe('Public account, privacy, and support resources', () => {
     expect(response.text).toContain('href="/delete-account"');
     expect(response.text).not.toContain('temporarily unavailable');
     expect(response.text).not.toContain('three-calendar-month');
-    expect(response.text).not.toMatch(/https?:\/\/[^\s"<]+/);
+    expect(response.text.match(/https?:\/\/[^\s"<]+/g)).toEqual([
+      'https://developer.chrome.com/docs/webstore/program-policies/user-data-faq',
+    ]);
     expect(response.headers['content-security-policy']).toContain(
       "script-src 'none'",
     );
+  });
+
+  it('distinguishes Chrome and Mac data handling from other client features', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/privacy')
+      .expect(200);
+    for (const disclosure of [
+      'Android and iOS apps, the web app, MusicMute Local for Mac, its Chrome extension',
+      'selected canonical URL and video identifier',
+      'playback position and speed, volume, mute state',
+      'player/advertisement state',
+      'Playback and language preferences and bounded diagnostics',
+      'does not read general browsing history, browser cookies, your Google password, or precise geolocation',
+      'does not log typed text or general keyboard activity',
+      'Account credentials and guest capabilities are handled by the Mac app',
+      'are not sent to the Chrome extension',
+      'logged-out YouTube guest',
+      'does not import your Chrome account, profile, or browser cookies',
+      'without a per-video confirmation in Chrome',
+      'Automatic preparation never submits new cloud processing',
+      'Personal audio or video files processed in the Mac app use the account-private saving path',
+      'Chrome extension and Mac companion diagnostic reports remain local',
+      'other clients and the backend may send privacy-filtered diagnostics to Sentry when enabled',
+    ]) {
+      expect(response.text).toContain(disclosure);
+    }
+  });
+
+  it('discloses signed-out shared saving, persistence, and the limits of local controls', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/privacy')
+      .expect(200);
+    for (const disclosure of [
+      'no MusicMute account is required',
+      'video metadata may be sent before playback to reserve shared saving',
+      'After vocals start playing',
+      'upload original audio, vocals, and associated video metadata in the background, even while signed out',
+      'Pending saves can resume when the app or helper starts again',
+      'There is no separate per-video opt-in control for shared saving',
+      'Signing out does not disable it',
+      'no automatic expiry',
+      'local cache clearing, job deletion, or account/guest deletion',
+      'does not delete a shared result or cancel an already released background save',
+      'Removing the Chrome extension removes its Chrome settings',
+      'does not uninstall the Mac app or delete its files, cloud Library, or accepted shared YouTube results',
+      'account-scoped records or scoped guest capabilities',
+    ]) {
+      expect(response.text).toContain(disclosure);
+    }
+    expect(response.text).not.toContain(
+      'requires an authorized account job for access',
+    );
+    expect(response.text).not.toContain('Access is account-scoped');
+  });
+
+  it('identifies native downloads and providers without loading browser code or trackers', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/privacy')
+      .expect(200);
+    for (const disclosure of [
+      'Firebase/Google',
+      'MongoDB and Cloudflare R2',
+      'private audio-acquisition providers',
+      'YouTube and its media servers',
+      'GitHub and its download infrastructure',
+      'approved upstream GitHub release',
+      'not destinations for user audio or diagnostic reports',
+      'Browser executable code is bundled with the Chrome extension',
+      'checksum-verified native runtime components and model data',
+      'runs the native tools in the companion rather than in Chrome',
+      'component ZIP is removed after its successful installation stage',
+      'temporary protected loopback connection on the same Mac',
+    ]) {
+      expect(response.text).toContain(disclosure);
+    }
+    expect(response.text).not.toContain('<script');
+    expect(response.text).not.toContain('<form');
+    expect(response.text).not.toContain('<iframe');
+    expect(response.text).not.toContain('<img');
+    expect(response.text).not.toContain('<link');
+    expect(response.headers['cache-control']).toBe('no-store, no-transform');
+    expect(response.headers['content-security-policy']).toBe(
+      "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    );
+  });
+
+  it('publishes the Limited Use commitment without treating the notice as new consent', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/privacy')
+      .expect(200);
+    for (const disclosure of [
+      'Last updated 2026-10-07',
+      'Chrome Web Store Limited Use',
+      'use and transfer of user data complies with',
+      'including its Limited Use requirements',
+      'not used or transferred for personalized, retargeted, or interest-based advertising',
+      'not sold or transferred to data brokers',
+      'not used for creditworthiness or lending',
+      'Human access to user data is limited',
+      'affirmative agreement to specific support access',
+      'does not itself obtain consent for new or unrelated uses',
+      'obtain that consent before the new use',
+    ]) {
+      expect(response.text).toContain(disclosure);
+    }
+    expect(response.text).not.toContain('Continued use after');
+    expect(PUBLIC_POLICY_DEFAULTS.policyVersion).toBe('2026-10-07');
+    expect(PUBLIC_POLICY_DEFAULTS.policyUpdatedAt).toBe('2026-10-07T00:00:00Z');
+  });
+
+  it('escapes configured operator and retention text on the unified privacy page', async () => {
+    values.PUBLIC_DEVELOPER_NAME = '<script>operator()</script>';
+    values.PUBLIC_RETENTION_NOTICE = '<img src=x onerror="retention()">';
+    const response = await request(app.getHttpServer())
+      .get('/privacy')
+      .expect(200);
+    expect(response.text).toContain('&lt;script&gt;operator()&lt;/script&gt;');
+    expect(response.text).toContain('&lt;img');
+    expect(response.text).toContain('&quot;retention()&quot;');
+    expect(response.text).not.toContain('<script');
+    expect(response.text).not.toContain('<img');
   });
 
   it('serves a privacy-safe support destination', async () => {

@@ -33,6 +33,7 @@ const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 const WORKER_ERROR_CODES = new Set([
   "WORKER_INVALID_REQUEST",
   "WORKER_UNAUTHENTICATED",
+  "WORKER_MACHINE_DELETED",
   "WORKER_FORBIDDEN",
   "WORKER_NOT_FOUND",
   "WORKER_CONFLICT",
@@ -391,6 +392,7 @@ export class WorkerControlPlaneClient {
     status: "revoked";
     confirmed: true;
     revision: number;
+    deleted?: true;
   }> {
     const response = asRecord(
       await this.request("worker/unpairings", "POST", { force }, signal),
@@ -400,6 +402,7 @@ export class WorkerControlPlaneClient {
       !UUID_V4.test(response.machineId) ||
       response.status !== "revoked" ||
       response.confirmed !== true ||
+      (response.deleted !== undefined && response.deleted !== true) ||
       !Number.isSafeInteger(response.revision) ||
       (response.revision as number) < 1
     )
@@ -409,6 +412,7 @@ export class WorkerControlPlaneClient {
       status: "revoked",
       confirmed: true,
       revision: response.revision as number,
+      ...(response.deleted === true ? { deleted: true as const } : {}),
     };
   }
 

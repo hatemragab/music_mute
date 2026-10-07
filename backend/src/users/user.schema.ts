@@ -48,6 +48,9 @@ export class User {
   })
   status!: 'active' | 'disabled' | 'deleting' | 'purging';
 
+  @Prop({ type: Boolean, required: true, default: false })
+  workerRegistrationAllowed!: boolean;
+
   @Prop({ type: String, default: null })
   deletionRequestId!: string | null;
 

@@ -3,13 +3,18 @@ import { readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { MVP_MAX_DURATION_SECONDS } from "../src/shared/protocol.js";
+import { MVP_MAX_DURATION_SECONDS, VERSION } from "../src/shared/protocol.js";
 const url = new URL("../scripts/package-chrome.mjs", import.meta.url).href;
-const { validateManifest, zipFiles, staticFiles } = (await import(url)) as {
-  validateManifest: (manifest: unknown, version: string) => void;
-  zipFiles: (files: { name: string; bytes: Buffer }[]) => Buffer;
-  staticFiles: string[];
-};
+const { validateManifest, createStoreManifest, zipFiles, staticFiles } =
+  (await import(url)) as {
+    validateManifest: (manifest: unknown, version: string) => void;
+    createStoreManifest: (
+      manifest: Record<string, unknown>,
+      version: string,
+    ) => Record<string, unknown>;
+    zipFiles: (files: { name: string; bytes: Buffer }[]) => Buffer;
+    staticFiles: string[];
+  };
 const manifest = JSON.parse(
   await readFile(
     new URL("../src/extension/static/manifest.json", import.meta.url),
@@ -18,6 +23,9 @@ const manifest = JSON.parse(
 );
 
 describe("Chrome Web Store packaging", () => {
+  it("reports the same software version in browser and companion messages", () => {
+    expect(manifest.version).toBe(VERSION);
+  });
   it("keeps the popup duration claim aligned with the shared limit", async () => {
     const popup = await readFile(
       new URL("../src/extension/static/popup.html", import.meta.url),
@@ -35,6 +43,15 @@ describe("Chrome Web Store packaging", () => {
         /\.map$|\.env|fixture|companion|account/.test(name),
       ),
     ).toBe(false);
+  });
+  it("omits the Store-forbidden key while preserving the local native identity", () => {
+    const before = structuredClone(manifest);
+    const storeManifest = createStoreManifest(manifest, manifest.version);
+    expect(storeManifest).not.toHaveProperty("key");
+    expect(manifest).toEqual(before);
+    expect(manifest.key).toBeTruthy();
+    const { key: _key, ...expected } = before;
+    expect(storeManifest).toEqual(expected);
   });
   it.each([
     "fixture",
@@ -62,7 +79,12 @@ describe("Chrome Web Store packaging", () => {
   });
   it("creates a deterministic standard ZIP with correct CRC and root manifest", async () => {
     const files = [
-      { name: "manifest.json", bytes: Buffer.from(JSON.stringify(manifest)) },
+      {
+        name: "manifest.json",
+        bytes: Buffer.from(
+          JSON.stringify(createStoreManifest(manifest, manifest.version)),
+        ),
+      },
       { name: "icons/icon-16.png", bytes: Buffer.from([0, 1, 2, 255]) },
     ];
     const bytes = zipFiles(files);
@@ -75,7 +97,7 @@ describe("Chrome Web Store packaging", () => {
         "python3",
         [
           "-c",
-          "import zipfile,sys,json; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; assert z.read('icons/icon-16.png') == bytes([0,1,2,255]); print(json.dumps(z.namelist()))",
+          "import zipfile,sys,json; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; assert 'key' not in json.loads(z.read('manifest.json')); assert z.read('icons/icon-16.png') == bytes([0,1,2,255]); print(json.dumps(z.namelist()))",
           path,
         ],
         { encoding: "utf8" },

@@ -541,6 +541,15 @@ enum DesktopPlaybackAdvance: Equatable {
   }
 }
 
+enum DesktopPlaybackQueue {
+  static func following(after track: DesktopTrack, in orderedTracks: [DesktopTrack])
+    -> [DesktopTrack]
+  {
+    guard let index = orderedTracks.firstIndex(where: { $0.id == track.id }) else { return [] }
+    return Array(orderedTracks.dropFirst(index + 1))
+  }
+}
+
 enum DesktopLibrarySnapshotReadiness: Equatable {
   case disconnected
   case awaitingInitialSnapshot(scope: DesktopSessionScope, streamID: String)
@@ -748,6 +757,7 @@ struct DesktopCloudJobsPage: Equatable {
     cloudConnected = false
     librarySnapshotReadiness.reset()
     activeSession = scope
+    if let scope { account.receiveWorkerRegistration(nil, scope: scope) }
     localTracks = []
     favorites = []
     hidden = []
@@ -1386,6 +1396,12 @@ struct DesktopCloudJobsPage: Equatable {
     }
     return started
   }
+  @discardableResult func playFromLibrary(
+    _ track: DesktopTrack, orderedTracks: [DesktopTrack], original: Bool = false
+  ) async -> Bool {
+    queue = DesktopPlaybackQueue.following(after: track, in: orderedTracks)
+    return await play(track, original: original)
+  }
   private func preparePlayback(
     _ track: DesktopTrack, original: Bool, request: DesktopPlaybackRequest
   ) async -> Bool {
@@ -1740,6 +1756,7 @@ struct DesktopCloudJobsPage: Equatable {
     currentTrack = nil
   }
   func next() async {
+    guard !preparingPlayback else { return }
     let selectedQueueIndex = shuffle && !queue.isEmpty ? Int.random(in: 0..<queue.count) : 0
     let advance = DesktopPlaybackAdvance.next(
       repeatMode: repeatMode, hasCurrent: currentTrack != nil,
@@ -1895,6 +1912,7 @@ struct DesktopCloudJobsPage: Equatable {
           if self.account.scope == fence {
             self.cloudConnected = false
             self.librarySnapshotReadiness.reset()
+            self.account.receiveWorkerRegistration(nil, scope: fence)
           }
           if self.account.scope == fence, let failure = error as? DesktopAuthFailure,
             [
@@ -1943,6 +1961,7 @@ struct DesktopCloudJobsPage: Equatable {
         socket = nil
         cloudConnected = false
         librarySnapshotReadiness.reset()
+        account.receiveWorkerRegistration(nil, scope: fence)
       }
     }
     streamId = nil
@@ -2006,6 +2025,12 @@ struct DesktopCloudJobsPage: Equatable {
             "type": .string("subscribe"), "subscription_id": .string("desktop-policy"),
             "resource": .string("policy"), "params": .object([:]),
           ]))
+        try await sendSocket(
+          .object([
+            "type": .string("subscribe"),
+            "subscription_id": .string("desktop-worker-registration"),
+            "resource": .string("worker_registration"), "params": .object([:]),
+          ]))
       } else if type == "ping" {
         try await sendSocket(.object(["type": .string("pong")]))
       } else if type == "snapshot" {
@@ -2015,12 +2040,18 @@ struct DesktopCloudJobsPage: Equatable {
           let sequence = event["sequence"].number, sequence > 0
         else { throw DesktopAuthFailure.malformedResponse }
         let previous = sequences[id] ?? 0
-        guard id == jobsSubscriptionID || id == "desktop-usage" || id == "desktop-policy" else {
+        guard
+          id == jobsSubscriptionID || id == "desktop-usage" || id == "desktop-policy"
+            || id == "desktop-worker-registration"
+        else {
           continue
         }
         if sequence <= previous { continue }
         if previous > 0 && sequence != previous + 1 {
           sequences[id] = nil
+          if id == "desktop-worker-registration" {
+            account.receiveWorkerRegistration(nil, scope: fence)
+          }
           try await sendSocket(
             .object(["type": .string("resync"), "subscription_id": .string(id)]))
           continue
@@ -2038,6 +2069,11 @@ struct DesktopCloudJobsPage: Equatable {
           usage = event["data"]
         } else if id == "desktop-policy" {
           account.receivePolicy(event["data"])
+        } else if id == "desktop-worker-registration" {
+          guard let allowed = event["data"]["worker_registration_allowed"].bool else {
+            throw DesktopAuthFailure.malformedResponse
+          }
+          account.receiveWorkerRegistration(allowed, scope: fence)
         }
       } else if type == "subscription_error" {
         throw DesktopAuthFailure.service(event["code"].string ?? "REALTIME_UNAVAILABLE")

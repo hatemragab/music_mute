@@ -68,7 +68,7 @@ export class WorkerMachineLifecycleService {
           credentialDigest,
           status: 'revoked',
         })
-        .select({ _id: 1, revision: 1 })
+        .select({ _id: 1, revision: 1, deletedAt: 1 })
         .maxTimeMS(2000)
         .lean();
       if (!revoked) throw workerError('WORKER_UNAUTHENTICATED');
@@ -77,6 +77,7 @@ export class WorkerMachineLifecycleService {
         status: 'revoked' as const,
         confirmed: true as const,
         revision: revoked.revision,
+        ...(revoked.deletedAt ? { deleted: true as const } : {}),
       };
     }
     const activeAttempt = await this.attempts

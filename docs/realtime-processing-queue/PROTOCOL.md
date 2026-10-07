@@ -43,6 +43,7 @@ Mongo expressions or write commands are accepted.
 | Owner    | `jobs`                                       | Existing owner job list filters and cursor; authenticated owner only |
 | Owner    | `job`, `import`, `local_media_sync`          | `id`; ownership checked by existing service                          |
 | Owner    | `usage`                                      | No parameters                                                        |
+| Owner    | `worker_registration`                        | No parameters; current user's registration permission only           |
 | Owner    | `policy`                                     | Optional `schema_version`                                            |
 | Admin    | `admin.jobs`, `admin.job`                    | Existing list filters / `id`; `jobs.read`                            |
 | Admin    | `admin.overview`                             | Existing range; `overview.read` and existing field-level permissions |
@@ -56,6 +57,18 @@ Mongo expressions or write commands are accepted.
 Owner subscriptions cannot use administrator resources and vice versa. Job/import
 not-found behavior does not reveal another account's data. Administrative writes
 still use existing HTTP authorization, reasons, revisions and operation receipts.
+
+`worker_registration` returns a complete
+`{ "worker_registration_allowed": true }` or false snapshot. Missing saved user
+values mean false. User-document changes invalidate this resource. No caller
+supplies a user ID and administrators cannot subscribe through the owner socket.
+The snapshot contains no credential, email, or machine authority. Permission
+changes authorize new Mac registration only; they never control an activated
+worker. The Mac keeps this subscription in app-session coordination so approval
+can trigger first setup while another screen is visible. Reconnect obtains current
+state through the normal snapshot sequence/session fences; HTTP polling is not
+used. The private enrollment credential is issued separately by the authenticated
+HTTP command described in the client contract.
 
 ## Queue meaning
 

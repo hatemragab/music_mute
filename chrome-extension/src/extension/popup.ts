@@ -1,13 +1,22 @@
+import { t, createLocalizer, createLanguageSelect, localizePage } from "./i18n";
 import type { ExtensionStatus } from "./messages";
 import { installErrorCapture } from "./diagnostics";
 import { failureGuidance } from "./error-guidance";
 import { localErrorReport } from "./local-error-report";
 import { isVideoId } from "../shared/protocol";
 import { cloudHandoffUrl } from "../shared/app-handoff";
+import { configureProductLink } from "../shared/product-links";
 import {
   isInstallationCheck,
   type InstallationCheck,
 } from "../shared/installation-check";
+const localizer = createLocalizer();
+localizePage(document, localizer);
+const companionDownload = document.querySelector<HTMLAnchorElement>(
+  "#companion-download",
+);
+if (companionDownload)
+  configureProductLink(companionDownload, "companionRelease");
 let latestState: ExtensionStatus = { hello: null, job: null, diagnostics: [] };
 const cloud = document.querySelector<HTMLButtonElement>("#cloud");
 const copy = document.querySelector<HTMLButtonElement>("#copy-errors");
@@ -22,32 +31,61 @@ const check = document.querySelector<HTMLButtonElement>("#check")!;
 const checkSummary =
   document.querySelector<HTMLParagraphElement>("#check-summary")!;
 const checkResults = document.querySelector<HTMLPreElement>("#check-results")!;
+const languageControl = createLanguageSelect(localizer, "language", () => {
+  localizer.text(document.querySelector("#language-status")!, () =>
+    t("Couldn’t save language. Your previous language is still active."),
+  );
+});
+document
+  .querySelector("#language-settings")!
+  .append(languageControl.label, languageControl.select);
+window.addEventListener(
+  "pagehide",
+  () => {
+    languageControl.dispose();
+    localizer.dispose();
+  },
+  { once: true },
+);
 let manualCheckRunning = false;
 function renderCheck(result?: InstallationCheck): void {
   manualCheckRunning = result?.state === "running";
   check.disabled = manualCheckRunning;
-  check.textContent = manualCheckRunning ? "Checking…" : "Check again";
+  localizer.text(check, () =>
+    manualCheckRunning ? t("Checking…") : t("Check again"),
+  );
   checkResults.hidden = !result;
   if (!result) {
-    checkSummary.textContent =
-      "Full checks run only when you select Check again.";
+    localizer.text(checkSummary, () =>
+      t("Full checks run only when you select Check again."),
+    );
     return;
   }
-  const labels = {
-    runtime: "Installed tools",
-    model: "Voice model and engine",
-    youtube_tools: "YouTube tools",
-  };
-  checkSummary.textContent =
+  const labels = () => ({
+    runtime: t("Installed tools"),
+    model: t("Voice model and engine"),
+    youtube_tools: t("YouTube tools"),
+  });
+  localizer.text(checkSummary, () =>
     result.state === "running"
-      ? "Checking your installation. This may take a minute. Playback does not repeat these checks."
-      : `Last check ${result.state === "passed" ? "passed" : "found a problem"} · ${new Date(result.completed_at!).toLocaleString()}`;
-  checkResults.textContent = result.checks
-    .map(
-      (item) =>
-        `${labels[item.component]}: ${item.state === "pending" ? (result.state === "running" ? "Waiting" : "Not checked") : item.state}${item.duration_ms === undefined ? "" : ` (${(item.duration_ms / 1000).toFixed(1)}s)`}${item.error_code ? `\n${item.error_code}: ${setupHint(item.error_code)}` : ""}`,
-    )
-    .join("\n\n");
+      ? t(
+          "Checking your installation. This may take a minute. Playback does not repeat these checks.",
+        )
+      : t("Last check {0} · {1}", [
+          result.state === "passed" ? t("passed") : t("found a problem"),
+          new Date(result.completed_at!).toLocaleString(
+            document.documentElement.lang,
+          ),
+        ]),
+  );
+  localizer.text(checkResults, () =>
+    result.checks
+      .map(
+        (item) =>
+          `${labels()[item.component]}: ${item.state === "pending" ? (result.state === "running" ? t("Waiting") : t("Not checked")) : item.state === "passed" ? t("passed") : item.state === "failed" ? t("failed") : t("running")}${item.duration_ms === undefined ? "" : t(" ({0}s)", [(item.duration_ms / 1000).toFixed(1)])}${item.error_code ? `\n${item.error_code}: ${setupHint(item.error_code)}` : ""}`,
+      )
+      .join("\n\n"),
+  );
   if (result.state === "failed") setup.open = true;
 }
 const helperTitle =
@@ -60,34 +98,49 @@ const reportDetails =
 const diagnosticCount =
   document.querySelector<HTMLSpanElement>("#diagnostic-count")!;
 
-function showDetails(message: string): void {
-  details.textContent = message;
+function showDetails(message: () => string): void {
+  localizer.text(details, message);
   reportDetails.open = true;
 }
 function setupHint(code?: string): string {
   if (code === "LOCAL_COMPANION_BUSY")
-    return "Another MusicMute Chrome session is using the local companion. Close that session, then check again.";
+    return t(
+      "Another MusicMute Chrome session is using the local companion. Close that session, then check again.",
+    );
   if (code === "LOCAL_COMPANION_LOCK_UNSAFE")
-    return "MusicMute could not safely open its local lock. Open the MusicMute app to inspect local diagnostics and repair setup.";
+    return t(
+      "MusicMute could not safely open its local lock. Open the MusicMute app to inspect local diagnostics and repair setup.",
+    );
   if (code === "LOCAL_COMPANION_START_FAILED")
-    return "The local companion could not start. Open the MusicMute app to check readiness and export local diagnostics, then check again.";
+    return t(
+      "The local companion could not start. Open the MusicMute app to check readiness and export local diagnostics, then check again.",
+    );
   if (code?.includes("MODEL"))
-    return "Open the MusicMute app to finish or repair the voice model setup.";
+    return t(
+      "Open the MusicMute app to finish or repair the voice model setup.",
+    );
   if (code?.includes("DOWNLOADER"))
-    return "Open the MusicMute app to repair its audio downloader, then check again.";
+    return t(
+      "Open the MusicMute app to repair its audio downloader, then check again.",
+    );
   if (code?.includes("PLATFORM") || code?.includes("ARCH"))
-    return "Local processing currently requires an Apple Silicon Mac.";
+    return t("Local processing currently requires an Apple Silicon Mac.");
   return code
     ? failureGuidance(code).message
-    : "Install MusicMute if it is missing, then open it once and use Prepare my Mac. After setup, Chrome starts the helper even when the app window is closed.";
+    : t(
+        "Install MusicMute if it is missing, then open it once and use Prepare my Mac. After setup, Chrome starts the helper even when the app window is closed.",
+      );
 }
 async function refresh(): Promise<void> {
   check.disabled = true;
   document.body.dataset.helperState = "checking";
-  helperPill.textContent = "Checking";
-  helperTitle.textContent = "Connecting to MusicMute";
-  status.textContent =
-    "Connecting to the local app. Installation checks run only when requested.";
+  localizer.text(helperPill, () => t("Checking"));
+  localizer.text(helperTitle, () => t("Connecting to MusicMute"));
+  localizer.text(status, () =>
+    t(
+      "Connecting to the local app. Installation checks run only when requested.",
+    ),
+  );
   try {
     const state = (await chrome.runtime.sendMessage({
       type: "MM_STATUS",
@@ -102,50 +155,80 @@ async function refresh(): Promise<void> {
       provider.value = selectedCloud ? "ONLINE_MUSICMUTE" : "LOCAL_MACOS";
     latestState = state;
     document.body.dataset.helperState = ready ? "ready" : "setup";
-    helperPill.textContent = ready ? "Connected" : "Setup needed";
-    helperTitle.textContent = ready
-      ? selectedCloud
-        ? "MusicMute cloud is selected"
-        : "MusicMute is connected"
-      : "Connect the MusicMute app";
-    status.textContent = ready
-      ? state.job && !["FAILED", "CANCELLED"].includes(state.job.state)
-        ? state.job.state === "READY"
-          ? "Vocals are ready. Use the controls on your YouTube video to listen."
-          : state.job.provider === "ONLINE_MUSICMUTE"
-            ? "Preparing vocals with MusicMute cloud. You can cancel from the video controls."
-            : "Preparing vocals on this Mac. You can cancel from the video controls."
-        : state.error
-          ? failureGuidance(state.error, state.error_context).message
-          : selectedCloud
-            ? "Ready — starting a video uses MusicMute cloud with your signed-in account and monthly allowance."
-            : "Processing stays on this Mac using your installed tools. The app window can be closed."
-      : setupHint(state.hello?.error_code ?? state.error);
-    helperMeta.textContent = state.hello
-      ? `${state.hello.platform === "darwin" ? "macOS" : state.hello.platform} · ${state.hello.arch === "arm64" ? "Apple Silicon" : state.hello.arch} · v${state.hello.version}`
-      : "Apple Silicon · macOS";
+    localizer.text(helperPill, () =>
+      ready ? t("Connected") : t("Setup needed"),
+    );
+    localizer.text(helperTitle, () =>
+      ready
+        ? selectedCloud
+          ? t("MusicMute cloud is selected")
+          : t("MusicMute is connected")
+        : t("Connect the MusicMute app"),
+    );
+    localizer.text(status, () =>
+      ready
+        ? state.job && !["FAILED", "CANCELLED"].includes(state.job.state)
+          ? state.job.state === "READY"
+            ? t(
+                "Vocals are ready. Use the controls on your YouTube video to listen.",
+              )
+            : state.job.provider === "ONLINE_MUSICMUTE"
+              ? t(
+                  "Preparing vocals with MusicMute cloud. You can cancel from the video controls.",
+                )
+              : t(
+                  "Preparing vocals on this Mac. You can cancel from the video controls.",
+                )
+          : state.error
+            ? failureGuidance(state.error, state.error_context).message
+            : selectedCloud
+              ? t(
+                  "Ready — starting a video uses MusicMute cloud with your signed-in account and monthly allowance.",
+                )
+              : t(
+                  "Processing stays on this Mac using your installed tools. The app window can be closed.",
+                )
+        : setupHint(state.hello?.error_code ?? state.error),
+    );
+    localizer.text(helperMeta, () =>
+      state.hello
+        ? `${state.hello.platform === "darwin" ? "macOS" : state.hello.platform} · ${state.hello.arch === "arm64" ? "Apple Silicon" : state.hello.arch} · v${state.hello.version}`
+        : t("Apple Silicon · macOS"),
+    );
     setup.open = !ready;
     renderCheck(state.installation_check);
-    diagnosticCount.textContent = state.diagnostics.length
-      ? `${state.diagnostics.length} saved local ${state.diagnostics.length === 1 ? "error" : "errors"}`
-      : "Private on your Mac";
-    details.textContent = [
-      state.hello
-        ? `${state.hello.platform} ${state.hello.arch} · v${state.hello.version}`
-        : "Companion unavailable",
-      state.job ? `Job: ${state.job.stage}` : "No active job",
-      state.error ? `Last error: ${state.error}` : "",
+    localizer.text(diagnosticCount, () =>
       state.diagnostics.length
-        ? `Saved local errors: ${state.diagnostics.length}\n\n${localErrorReport(state)}`
-        : "No saved errors",
-    ]
-      .filter(Boolean)
-      .join("\n");
+        ? t("{0} saved local {1}", [
+            state.diagnostics.length,
+            state.diagnostics.length === 1 ? t("error") : t("errors"),
+          ])
+        : t("Private on your Mac"),
+    );
+    localizer.text(details, () =>
+      [
+        state.hello
+          ? `${state.hello.platform} ${state.hello.arch} · v${state.hello.version}`
+          : t("Companion unavailable"),
+        state.job ? t("Job: {0}", [state.job.stage]) : t("No active job"),
+        state.error ? t("Last error: {0}", [state.error]) : "",
+        state.diagnostics.length
+          ? t("Saved local errors: {0}\n\n{1}", [
+              state.diagnostics.length,
+              localErrorReport(state),
+            ])
+          : t("No saved errors"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
   } catch {
     document.body.dataset.helperState = "error";
-    helperPill.textContent = "Unavailable";
-    helperTitle.textContent = "Connection unavailable";
-    status.textContent = "Unable to connect. Reopen this popup to retry.";
+    localizer.text(helperPill, () => t("Unavailable"));
+    localizer.text(helperTitle, () => t("Connection unavailable"));
+    localizer.text(status, () =>
+      t("Unable to connect. Reopen this popup to retry."),
+    );
     setup.open = true;
   } finally {
     check.disabled = manualCheckRunning;
@@ -155,8 +238,8 @@ check.addEventListener("click", () => {
   if (manualCheckRunning) return;
   manualCheckRunning = true;
   check.disabled = true;
-  check.textContent = "Checking…";
-  checkSummary.textContent = "Starting installation checks…";
+  localizer.text(check, () => t("Checking…"));
+  localizer.text(checkSummary, () => t("Starting installation checks…"));
   void chrome.runtime
     .sendMessage({ type: "MM_CHECK" })
     .then(
@@ -168,21 +251,27 @@ check.addEventListener("click", () => {
         if (isInstallationCheck(reply.installation_check))
           renderCheck(reply.installation_check);
         else
-          checkSummary.textContent =
+          localizer.text(checkSummary, () =>
             reply.error === "INSTALLATION_CHECK_BUSY"
-              ? "Stop MusicMute playback or processing, then select Check again."
-              : setupHint(reply.error ?? "INSTALLATION_CHECK_FAILED");
+              ? t(
+                  "Stop MusicMute playback or processing, then select Check again.",
+                )
+              : setupHint(reply.error ?? "INSTALLATION_CHECK_FAILED"),
+          );
       },
     )
     .catch(() => {
-      checkSummary.textContent =
-        "Checks could not finish. Open the MusicMute app to check or repair setup, then try again.";
+      localizer.text(checkSummary, () =>
+        t(
+          "Checks could not finish. Open the MusicMute app to check or repair setup, then try again.",
+        ),
+      );
       setup.open = true;
     })
     .finally(() => {
       manualCheckRunning = false;
       check.disabled = false;
-      check.textContent = "Check again";
+      localizer.text(check, () => t("Check again"));
     });
 });
 chrome.runtime.onMessage.addListener((message: unknown, sender) => {
@@ -203,7 +292,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
 });
 report.addEventListener("click", () => {
   report.disabled = true;
-  showDetails("Exporting your local diagnostic report…");
+  showDetails(() => t("Exporting your local diagnostic report…"));
   void chrome.runtime
     .sendMessage({ type: "MM_DIAGNOSTICS" })
     .then(
@@ -212,16 +301,25 @@ report.addEventListener("click", () => {
         payload?: { path?: string; report?: unknown; error_code?: string };
         error?: string;
       }) => {
-        showDetails(
+        showDetails(() =>
           reply.type === "REPORT"
-            ? `Native report saved locally. Open MusicMute Diagnostics to reveal it.\n\n${localErrorReport(latestState)}`
-            : `The native report is unavailable. You can copy or download the extension's local errors below, or open MusicMute Diagnostics.\n\n${localErrorReport(latestState)}`,
+            ? t(
+                "Native report saved locally. Open MusicMute Diagnostics to reveal it.\n\n{0}",
+                [localErrorReport(latestState)],
+              )
+            : t(
+                "The native report is unavailable. You can copy or download the extension's local errors below, or open MusicMute Diagnostics.\n\n{0}",
+                [localErrorReport(latestState)],
+              ),
         );
       },
     )
     .catch(() => {
-      showDetails(
-        `Could not export native diagnostics. Copy or download the extension's errors, or open MusicMute.\n\n${localErrorReport(latestState)}`,
+      showDetails(() =>
+        t(
+          "Could not export native diagnostics. Copy or download the extension's errors, or open MusicMute.\n\n{0}",
+          [localErrorReport(latestState)],
+        ),
       );
     })
     .finally(() => {
@@ -230,7 +328,9 @@ report.addEventListener("click", () => {
 });
 clear.addEventListener("click", () => {
   clear.disabled = true;
-  showDetails("Stopping playback and clearing the local vocals cache…");
+  showDetails(() =>
+    t("Stopping playback and clearing the local vocals cache…"),
+  );
   void chrome.runtime
     .sendMessage({ type: "MM_CLEAR_CACHE" })
     .then(
@@ -239,16 +339,22 @@ clear.addEventListener("click", () => {
         payload?: { error_code?: string };
         error?: string;
       }) => {
-        showDetails(
+        showDetails(() =>
           reply.type === "JOB"
-            ? "Local vocals cache cleared. Playback stopped and original audio restored."
-            : `Could not clear cache: ${reply.error ?? reply.payload?.error_code ?? "companion unavailable"}`,
+            ? t(
+                "Local vocals cache cleared. Playback stopped and original audio restored.",
+              )
+            : t("Could not clear cache: {0}", [
+                reply.error ??
+                  reply.payload?.error_code ??
+                  t("companion unavailable"),
+              ]),
         );
       },
     )
     .catch(() => {
-      showDetails(
-        "Could not clear cache. Open the MusicMute app to check setup.",
+      showDetails(() =>
+        t("Could not clear cache. Open the MusicMute app to check setup."),
       );
     })
     .finally(() => {
@@ -258,11 +364,13 @@ clear.addEventListener("click", () => {
 copy?.addEventListener("click", () => {
   void navigator.clipboard.writeText(localErrorReport(latestState)).then(
     () => {
-      copy.textContent = "Copied local errors";
+      localizer.text(copy, () => t("Copied local errors"));
     },
     () => {
-      showDetails(
-        `Copy unavailable. Select the report below.\n\n${localErrorReport(latestState)}`,
+      showDetails(() =>
+        t("Copy unavailable. Select the report below.\n\n{0}", [
+          localErrorReport(latestState),
+        ]),
       );
     },
   );
@@ -288,22 +396,28 @@ cloud?.addEventListener("click", () => {
         const url = new URL(reply.handoff_url);
         const id = url.searchParams.get("video_id");
         if (isVideoId(id) && reply.handoff_url === cloudHandoffUrl(id)) {
-          showDetails(
-            "Continue in MusicMute to review monthly allowance and confirm cloud processing. No cloud request was submitted by Chrome.",
+          showDetails(() =>
+            t(
+              "Continue in MusicMute to review monthly allowance and confirm cloud processing. No cloud request was submitted by Chrome.",
+            ),
           );
           location.href = reply.handoff_url;
           return;
         }
       }
-      showDetails(
+      showDetails(() =>
         reply.error === "UNSUPPORTED_VIDEO"
-          ? "Open a standard YouTube watch video in this window, then choose cloud processing again."
+          ? t(
+              "Open a standard YouTube watch video in this window, then choose cloud processing again.",
+            )
           : failureGuidance(reply.error ?? "CLOUD_HANDOFF_FAILED").message,
       );
     })
     .catch(() =>
-      showDetails(
-        "Open MusicMute to review monthly allowance and confirm cloud processing. No cloud request was submitted.",
+      showDetails(() =>
+        t(
+          "Open MusicMute to review monthly allowance and confirm cloud processing. No cloud request was submitted.",
+        ),
       ),
     )
     .finally(() => {

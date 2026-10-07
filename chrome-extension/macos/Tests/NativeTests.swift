@@ -22,6 +22,30 @@ private final class Capture: @unchecked Sendable {
   }
 }
 
+private final class RuntimeComponentProgressCapture: @unchecked Sendable {
+  private let lock = NSLock()
+  private var percentages = [Double]()
+  private var cleanedStages = [Bool]()
+
+  func record(_ percent: Double, label: String, downloads: URL) {
+    lock.lock()
+    defer { lock.unlock() }
+    percentages.append(percent)
+    if label.hasPrefix("Installed ") {
+      cleanedStages.append(
+        (try? FileManager.default.contentsOfDirectory(atPath: downloads.path).isEmpty) == true)
+    }
+  }
+
+  func valid(stages: Int) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return cleanedStages.count == stages && cleanedStages.allSatisfy { $0 }
+      && zip(percentages, percentages.dropFirst()).allSatisfy { $0 <= $1 }
+      && percentages.allSatisfy { $0 >= 0 && $0 <= 100 }
+  }
+}
+
 private final class RecordingRuntimeSignatureChecker: RuntimeSignatureChecking, @unchecked Sendable
 {
   private let lock = NSLock()
@@ -401,6 +425,7 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
     try preferenceChecks()
     try accountUsagePresentationChecks()
     try playbackAdvanceChecks()
+    try playbackQueueChecks()
     try offlineStoragePolicyChecks()
     try cacheBudgetOutcomeChecks()
     try cacheClearOutcomeChecks()
@@ -408,7 +433,7 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
     try bridgeChecks()
     try journalChecks()
     print(
-      "Native macOS checks passed: parser, readiness presentation, retained setup alerts, diagnostic identity and bounded safe inventory, paths, preference defaults and normalization, account allowance parsing and presentation, playback advance and repeat decisions, pinned external runtime schema/inventory/activation, subprocess completion, environment filtering, malformed output, missing resources, cancellation and private bounded UI journal."
+      "Native macOS checks passed: parser, readiness presentation, retained setup alerts, diagnostic identity and bounded safe inventory, paths, preference defaults and normalization, account allowance parsing and presentation, playback queue order, advance and repeat decisions, pinned external runtime schema/inventory/activation, subprocess completion, environment filtering, malformed output, missing resources, cancellation and private bounded UI journal."
     )
   }
 
@@ -509,18 +534,32 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
       throw TestFailure.failed("A complete valid allowance snapshot must be presentable")
     }
     try check(
-      presentation.processing == DesktopUsageAmount(remaining: 27_000, limit: 54_000)
-        && presentation.storage
-          == DesktopUsageAmount(remaining: 3_520_000_000, limit: 5_000_000_000)
-        && presentation.uploads == DesktopUsageAmount(remaining: 937, limit: 1_000)
-        && presentation.downloads == DesktopUsageAmount(remaining: 979, limit: 1_000),
-      "Allowance parsing must preserve all remaining and limit values")
+      presentation.processing
+        == DesktopUsageAmount(used: 13_112, remaining: 22_888, limit: 36_000),
+      "Allowance parsing must preserve explicit used, remaining, and limit seconds")
     try check(
-      presentation.processing.remainingFraction == 0.5,
-      "Allowance progress must represent the remaining share")
+      presentation.processing.progressFraction == Double(13_112) / Double(36_000),
+      "Allowance progress must represent the server's explicit used seconds")
     try check(
-      DesktopUsageAmount(remaining: 0, limit: 0).remainingFraction == nil,
-      "A zero limit must not render misleading progress")
+      DesktopUsagePresentation.parse(
+        usageFixture(
+          processingUsed: 10, processingReserved: 5, processingRemaining: 85,
+          processingLimit: 100))?.processing
+        == DesktopUsageAmount(used: 10, remaining: 85, limit: 100),
+      "Reserved work must not be presented as completed processing usage")
+    try check(
+      DesktopUsagePresentation.parse(
+        usageFixture(processingUsed: 3, processingRemaining: 0, processingLimit: 0))?
+        .processing.progressFraction == 1
+        && DesktopUsagePresentation.parse(
+          usageFixture(processingUsed: 0, processingRemaining: 0, processingLimit: 0))?
+          .processing.progressFraction == 0,
+      "Valid zero limits must render numeric usage with bounded progress")
+    try check(
+      DesktopUsagePresentation.parse(
+        usageFixture(processingUsed: 40_000, processingRemaining: 0, processingLimit: 36_000))?
+        .processing.progressFraction == 1,
+      "Usage above a reduced limit must remain visible while progress clamps to full")
     try check(
       DesktopUsagePresentation.nonnegativeSafeInteger(
         .number(DesktopUsagePresentation.maximumSafeInteger))
@@ -537,13 +576,31 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
         && DesktopUsagePresentation.rfc3339Date("2026-11-01") == nil,
       "Reset dates must be bounded and use the complete RFC3339 form")
 
-    let locale = Locale(identifier: "en_US_POSIX")
+    let locale = Locale(identifier: "en_US")
+    try check(
+      DesktopUsagePresentation.countLabel(presentation.processing.used, locale: locale)
+        == "13,112"
+        && DesktopUsagePresentation.countLabel(presentation.processing.limit, locale: locale)
+          == "36,000"
+        && DesktopUsagePresentation.countLabel(presentation.processing.remaining, locale: locale)
+          == "22,888",
+      "Processing usage values must use localized decimal grouping")
+    let arabicUsed = DesktopUsagePresentation.countLabel(
+      presentation.processing.used, locale: Locale(identifier: "ar_EG"))
+    try check(
+      arabicUsed == "١٣٬١١٢",
+      "Arabic processing usage must use localized digits and grouping")
+    guard let cairo = TimeZone(identifier: "Africa/Cairo") else {
+      throw TestFailure.failed("Cairo time zone is unavailable")
+    }
+    let resetLabel = DesktopUsagePresentation.resetLabel(
+      presentation.resetAt, locale: locale, timeZone: cairo)
     try check(
       !DesktopUsagePresentation.durationLabel(seconds: 4_500, locale: locale).isEmpty
         && !DesktopUsagePresentation.byteLabel(3_520_000_000, locale: locale).isEmpty
         && !DesktopUsagePresentation.countLabel(12_345, locale: locale).isEmpty
-        && !DesktopUsagePresentation.resetLabel(presentation.resetAt, locale: locale).contains("T"),
-      "Allowance values and reset dates must use localized human-readable labels")
+        && resetLabel.contains("Nov 1, 2026") && resetLabel.contains("2:00"),
+      "Allowance values and reset dates must match localized medium-date presentation")
     try check(
       DesktopAccountPresentation.initials(name: "Hatem Ragap", email: nil) == "HR"
         && DesktopAccountPresentation.initials(name: "Hatem", email: nil) == "HA"
@@ -552,20 +609,26 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
       "Account avatars must provide predictable, private initials")
 
     let invalidSnapshots = [
+      usageFixture(processingUsed: -1),
+      usageFixture(processingUsed: 0.5),
+      usageFixture(processingUsed: DesktopUsagePresentation.maximumSafeInteger + 1),
+      usageFixture(processingReserved: -1),
+      usageFixture(processingReserved: 0.5),
+      usageFixture(processingReserved: DesktopUsagePresentation.maximumSafeInteger + 1),
+      usageFixture(processingReleased: -1),
       usageFixture(processingRemaining: -1),
       usageFixture(processingRemaining: 0.5),
-      usageFixture(processingRemaining: 54_001),
+      usageFixture(processingRemaining: 36_001),
       usageFixture(processingRemaining: DesktopUsagePresentation.maximumSafeInteger + 1),
-      usageFixture(storageLimit: .infinity),
+      usageFixture(
+        processingUsed: 10, processingReserved: 5, processingRemaining: 86,
+        processingLimit: 100),
+      usageFixture(processingLimit: .infinity),
       usageFixture(resetAt: "2026-11-01"),
       DesktopJSON.object([
-        "processing": .object(["remaining_seconds": .number(1)]),
-        "storage": .object(["remaining_bytes": .number(1), "limit_bytes": .number(1)]),
-        "uploads": .object([
-          "monthly_remaining_grants": .number(1), "monthly_grant_limit": .number(1),
-        ]),
-        "downloads": .object([
-          "monthly_remaining_grants": .number(1), "monthly_grant_limit": .number(1),
+        "processing": .object([
+          "used_seconds": .number(0), "released_seconds": .number(0),
+          "remaining_seconds": .number(1), "limit_seconds": .number(1),
         ]),
         "period": .object(["next_reset_at": .string("2026-11-01T00:00:00Z")]),
       ]),
@@ -576,28 +639,20 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
   }
 
   static func usageFixture(
-    processingRemaining: Double = 27_000,
-    processingLimit: Double = 54_000,
-    storageRemaining: Double = 3_520_000_000,
-    storageLimit: Double = 5_000_000_000,
+    processingUsed: Double = 13_112,
+    processingReserved: Double = 0,
+    processingReleased: Double = 0,
+    processingRemaining: Double = 22_888,
+    processingLimit: Double = 36_000,
     resetAt: String = "2026-11-01T00:00:00.000Z"
   ) -> DesktopJSON {
     .object([
       "processing": .object([
+        "used_seconds": .number(processingUsed),
+        "reserved_seconds": .number(processingReserved),
+        "released_seconds": .number(processingReleased),
         "remaining_seconds": .number(processingRemaining),
         "limit_seconds": .number(processingLimit),
-      ]),
-      "storage": .object([
-        "remaining_bytes": .number(storageRemaining),
-        "limit_bytes": .number(storageLimit),
-      ]),
-      "uploads": .object([
-        "monthly_remaining_grants": .number(937),
-        "monthly_grant_limit": .number(1_000),
-      ]),
-      "downloads": .object([
-        "monthly_remaining_grants": .number(979),
-        "monthly_grant_limit": .number(1_000),
       ]),
       "period": .object(["next_reset_at": .string(resetAt)]),
     ])
@@ -642,6 +697,30 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
         repeatMode: "Queue", hasCurrent: false, currentVariant: .voice, queueCount: 0,
         selectedQueueIndex: 0) == .pause,
       "Repeat Queue without a current or queued track must pause playback")
+  }
+  static func playbackQueueChecks() throws {
+    func track(_ id: String) -> DesktopTrack {
+      DesktopTrack(
+        id: id, title: "Track \(id)", duration: 30, path: nil, jobId: nil, bytes: 0,
+        sourceVideoId: nil)
+    }
+    let first = track("first")
+    let middle = track("middle")
+    let last = track("last")
+    let ordered = [first, middle, last]
+
+    try check(
+      DesktopPlaybackQueue.following(after: first, in: ordered) == [middle, last],
+      "Starting the first visible Library track must queue every later track in visible order")
+    try check(
+      DesktopPlaybackQueue.following(after: middle, in: ordered) == [last],
+      "Starting a middle Library track must queue only the tracks that follow it")
+    try check(
+      DesktopPlaybackQueue.following(after: last, in: ordered).isEmpty,
+      "Starting the final visible Library track must produce an empty queue")
+    try check(
+      DesktopPlaybackQueue.following(after: track("missing"), in: ordered).isEmpty,
+      "A track outside the visible Library snapshot must never synthesize an unrelated queue")
   }
   static func offlineStoragePolicyChecks() throws {
     try check(
@@ -1541,20 +1620,26 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
   static func productLinkChecks() throws {
     let destinations = MusicMuteProductLinks.allCases.map(\.url)
     try check(
-      destinations.count == 3 && destinations.allSatisfy(MusicMuteProductLinks.isAllowed),
+      destinations.count == 4 && destinations.allSatisfy(MusicMuteProductLinks.isAllowed),
       "Product discovery links must remain exact, HTTPS, credential-free destinations")
     try check(
       MusicMuteProductLinks.webApp.url.absoluteString == "https://app.music-mute.com"
         && MusicMuteProductLinks.googlePlay.url.absoluteString
           == "https://play.google.com/store/apps/details?id=com.hatem.musicmute"
         && MusicMuteProductLinks.downloads.url.absoluteString
-          == "https://music-mute.com/#downloads",
+          == "https://music-mute.com/#downloads"
+        && MusicMuteProductLinks.chromeWebStore.url.absoluteString
+          == "https://chromewebstore.google.com/detail/acmgefmmndomcpdlgnafkjbgobinllep",
       "Product discovery links must retain their reviewed public destinations")
     for value in [
       "http://app.music-mute.com", "https://user@app.music-mute.com",
       "https://app.music-mute.com/private", "https://app.music-mute.com?token=secret",
       "https://play.google.com/store/apps/details?id=com.example.other",
       "https://music-mute.com/#other",
+      "https://chromewebstore.google.com/detail/dclpfemnpknfdlpcbfcjkmdbnociippd",
+      "https://chromewebstore.google.com/detail/acmgefmmndomcpdlgnafkjbgobinllep?tracking=1",
+      "https://chromewebstore.google.com/detail/acmgefmmndomcpdlgnafkjbgobinllep#other",
+      "https://chromewebstore.google.com.example.com/detail/acmgefmmndomcpdlgnafkjbgobinllep",
     ] {
       try check(
         !MusicMuteProductLinks.isAllowed(URL(string: value)!),
@@ -1613,6 +1698,32 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
       "Rights must still be confirmed at submission")
   }
   static func youtubeSetupChecks() throws {
+    let uncheckedJSON = status.replacingOccurrences(
+      of: "\"max_duration_seconds\":900",
+      with:
+        "\"max_duration_seconds\":900,\"downloader_ready\":false,\"javascript_ready\":false,\"token_provider_ready\":false,\"youtube_ready\":false,\"components\":[{\"component\":\"downloader\",\"state\":\"invalid\",\"error_code\":\"SETUP_REQUIRED\"},{\"component\":\"javascript\",\"state\":\"invalid\",\"error_code\":\"SETUP_REQUIRED\"},{\"component\":\"token_provider\",\"state\":\"invalid\",\"error_code\":\"SETUP_REQUIRED\"}]"
+    )
+    let uncheckedStatus = try ControlEvent.decode(Data(uncheckedJSON.utf8), command: .status).status
+    let unchecked = SetupPresentation(
+      status: uncheckedStatus, activeCommand: nil, hasFailure: false)
+    try check(
+      unchecked.downloader == .notChecked && unchecked.javascript == .notChecked
+        && unchecked.tokenProvider == .notChecked && unchecked.runtime == .ready
+        && unchecked.model == .ready && unchecked.ready,
+      "An app update invalidates tool checks without implying missing tools or blocking local audio"
+    )
+    try check(
+      unchecked.actionLabel == "Check YouTube tools" && unchecked.needsYouTubeRepair,
+      "Installed unchecked tools must offer the explicit tool check")
+    for command in [AppCommand.status, .setup] {
+      let running = SetupPresentation(
+        status: uncheckedStatus, activeCommand: command, hasFailure: false)
+      let expected: ReadinessState = command == .status ? .checking : .preparing
+      try check(
+        running.downloader == expected && running.javascript == expected
+          && running.tokenProvider == expected,
+        "In-flight work takes precedence over stale tool-check evidence")
+    }
     let partialJSON = status.replacingOccurrences(
       of: "\"max_duration_seconds\":900",
       with:
@@ -2393,6 +2504,127 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
             "runtime/releases/\(installerDocument.runtime.id)", isDirectory: true
           ).path),
       "Installer activation rollback must clear selection without destroying the verified release")
+
+    var componentDocuments = [[String: Any]]()
+    var componentBytes = [Data]()
+    let groups = [
+      ("python-ml", "runtime/runtime/python/"), ("node", "runtime/runtime/node/"),
+      ("audio-tools", "runtime/runtime/bin/"), ("javascript", "runtime/tools/youtube/"),
+    ]
+    for (id, prefix) in groups {
+      let paths = files.compactMap { $0["path"] as? String }.filter { $0.hasPrefix(prefix) }
+      let archive = root.appendingPathComponent("component-\(id).zip")
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+      process.arguments = ["-X", "-D", "-y", "-q", archive.path] + paths
+      process.currentDirectoryURL = release
+      process.environment = ["PATH": "/usr/bin:/bin", "LANG": "en_US.UTF-8"]
+      process.standardInput = FileHandle.nullDevice
+      process.standardOutput = FileHandle.nullDevice
+      process.standardError = FileHandle.nullDevice
+      try process.run()
+      process.waitUntilExit()
+      try check(process.terminationStatus == 0, "Each isolated component fixture ZIP must build")
+      let bytes = try Data(contentsOf: archive)
+      componentBytes.append(bytes)
+      componentDocuments.append([
+        "id": id, "url": "https://downloads.example.com/\(id).zip",
+        "archive_bytes": bytes.count, "archive_sha256": RuntimeDigest.data(bytes),
+        "file_paths": paths,
+      ])
+    }
+    var componentEnvelope =
+      try JSONSerialization.jsonObject(with: installerManifestData) as! [String: Any]
+    var componentRuntime = componentEnvelope["runtime"] as! [String: Any]
+    componentRuntime["id"] = "macos-arm64-components"
+    componentRuntime["archive_format"] = "zip-components"
+    componentRuntime["archive_bytes"] = componentBytes.reduce(0) { $0 + $1.count }
+    componentRuntime["archive_sha256"] = RuntimeDigest.data(
+      Data((componentBytes.map(RuntimeDigest.data).joined(separator: "\n") + "\n").utf8))
+    componentRuntime["components"] = componentDocuments
+    componentEnvelope["runtime"] = componentRuntime
+    let componentManifestBytes = try JSONSerialization.data(withJSONObject: componentEnvelope)
+    let componentDocument = try RuntimeBootstrapDocument.decodeValidated(componentManifestBytes)
+    try check(
+      componentDocument.runtime.downloadManifests.count == groups.count,
+      "Segmented manifests must derive one bounded independent download per component")
+    for invalidKind in 0..<5 {
+      var broken = componentRuntime
+      var parts = componentDocuments
+      switch invalidKind {
+      case 0: parts[1]["file_paths"] = parts[0]["file_paths"]
+      case 1: parts[1]["id"] = parts[0]["id"]
+      case 2: parts[1]["url"] = "https://unapproved.example.net/component.zip"
+      case 3: parts[0]["file_paths"] = ["../escape"]
+      default: broken["archive_bytes"] = 1
+      }
+      broken["components"] = parts
+      do {
+        _ = try RuntimeBootstrapDocument.decodeValidated(
+          JSONSerialization.data(withJSONObject: ["schema_version": 1, "runtime": broken]))
+        throw TestFailure.failed("Inconsistent or unsafe runtime components were accepted")
+      } catch RuntimeBootstrapFailure.code("RUNTIME_MANIFEST_INVALID") {}
+    }
+    let componentResources = root.appendingPathComponent("ComponentResources", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: componentResources, withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700])
+    try componentManifestBytes.write(
+      to: componentResources.appendingPathComponent("runtime-bootstrap.json"))
+    let componentSupport = root.appendingPathComponent("ComponentSupport", isDirectory: true)
+    let componentDownloads = componentSupport.appendingPathComponent(
+      "runtime/downloads", isDirectory: true)
+    let componentProgress = RuntimeComponentProgressCapture()
+    RuntimeDownloadFixtureProtocol.store.configure(
+      componentBytes.enumerated().map { index, bytes in
+        .init(
+          headers: responseHeaders(bytes: bytes.count, etag: "\"part-\(index)\""), chunks: [bytes])
+      })
+    let componentActivation = try RuntimeBootstrapInstaller(
+      resources: componentResources, support: componentSupport,
+      signatureChecker: RecordingRuntimeSignatureChecker(),
+      downloadConfiguration: downloadConfiguration
+    ).prepare { percent, label in
+      componentProgress.record(percent, label: label, downloads: componentDownloads)
+    }
+    try check(
+      componentProgress.valid(stages: groups.count)
+        && RuntimeDownloadFixtureProtocol.store.snapshot().count == groups.count
+        && RuntimeInstallationResolver.activeDocument(support: componentSupport)
+          == RuntimeActiveDocument(runtime: componentDocument.runtime),
+      "Each stage must verify, install and remove its ZIP before the next download, with monotonic progress"
+    )
+    try check(componentActivation.commit(), "The complete segmented runtime must commit atomically")
+    let failedComponentSupport = root.appendingPathComponent(
+      "FailedComponentSupport", isDirectory: true)
+    let failedComponentProgress = RuntimeComponentProgressCapture()
+    RuntimeDownloadFixtureProtocol.store.configure([
+      .init(
+        headers: responseHeaders(bytes: componentBytes[0].count, etag: "\"part-first\""),
+        chunks: [componentBytes[0]]),
+      .init(status: 503, headers: responseHeaders(bytes: 0), chunks: []),
+    ])
+    do {
+      _ = try RuntimeBootstrapInstaller(
+        resources: componentResources, support: failedComponentSupport,
+        signatureChecker: RecordingRuntimeSignatureChecker(),
+        downloadConfiguration: downloadConfiguration
+      ).prepare { percent, label in
+        failedComponentProgress.record(
+          percent, label: label,
+          downloads: failedComponentSupport.appendingPathComponent("runtime/downloads"))
+      }
+      throw TestFailure.failed("A failed component download activated a partial runtime")
+    } catch RuntimeBootstrapFailure.code("RUNTIME_DOWNLOAD_FAILED") {}
+    let failedStageEntries = try FileManager.default.contentsOfDirectory(
+      atPath:
+        failedComponentSupport.appendingPathComponent("runtime/staging").path)
+    try check(
+      failedComponentProgress.valid(stages: 1)
+        && RuntimeInstallationResolver.activeDocument(support: failedComponentSupport) == nil
+        && failedStageEntries.isEmpty && RuntimeDownloadFixtureProtocol.store.snapshot().count == 2,
+      "A later-stage failure must preserve prior ZIP cleanup and discard the incomplete staging tree"
+    )
 
     let corruptSupport = root.appendingPathComponent("CorruptSupport", isDirectory: true)
     RuntimeDownloadFixtureProtocol.store.configure([

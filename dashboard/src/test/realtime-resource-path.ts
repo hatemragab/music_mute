@@ -18,7 +18,6 @@ export function realtimeResourcePath(
     "admin.workers": "/admin/worker-fleet/machines",
     "admin.worker": `/admin/worker-fleet/machines/${encodeURIComponent(id ?? "")}`,
     "admin.diagnostics": `/admin/worker-fleet/machines/${encodeURIComponent(id ?? "")}/diagnostics`,
-    "admin.invitations": "/admin/worker-fleet/invitations",
     "admin.recoveries": "/admin/account-recovery-requests",
     "admin.recovery_summary": "/admin/account-recovery-requests/summary",
     "admin.release_upload": `/admin/releases/${encodeURIComponent(releaseId ?? "")}/uploads/${encodeURIComponent(uploadId ?? "")}`,

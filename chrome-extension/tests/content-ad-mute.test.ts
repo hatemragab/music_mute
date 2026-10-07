@@ -136,6 +136,7 @@ class ElementFixture extends EventTarget {
 
 class VideoFixture extends ElementFixture {
   private mutedValue = false;
+  deferVolumeChanges = false;
   muteWrites = 0;
   currentTime = 2;
   duration = 19;
@@ -162,7 +163,8 @@ class VideoFixture extends ElementFixture {
     this.muteWrites++;
     if (value === this.mutedValue) return;
     this.mutedValue = value;
-    queueMicrotask(() => this.dispatchEvent(new Event("volumechange")));
+    if (!this.deferVolumeChanges)
+      queueMicrotask(() => this.dispatchEvent(new Event("volumechange")));
   }
   pause(): void {
     this.paused = true;
@@ -2852,6 +2854,64 @@ describe("retired playback sessions through the actual content handler", () => {
     expect(video.muted).toBe(false);
     expect(latestClock().payload.user_muted).toBe(false);
   });
+
+  it.each(
+    [false, true].flatMap((muted) =>
+      ["clock", "READY"].map((delivery) => ({ muted, delivery })),
+    ),
+  )(
+    "preserves a native mute change from $muted when $delivery arrives before volumechange",
+    async ({ muted, delivery }) => {
+      await begin(muted);
+      clockReply = { ok: true, source_muted: true };
+      messageHandler(
+        { type: "MM_READY", generation: generation(), source_muted: true },
+        { id: extensionId },
+      );
+      await flush();
+      expect(video.muted).toBe(muted);
+
+      let acknowledge: (() => void) | undefined;
+      runtimeSend.mockImplementationOnce((message) => {
+        expect(message.type).toBe("MM_CLOCK");
+        sent.push(message);
+        return new Promise((resolve) => {
+          acknowledge = () => resolve(clockReply);
+        });
+      });
+      video.currentTime = 5;
+      video.volume = 0.4;
+      video.dispatchEvent(new Event("seeked"));
+      expect(latestClock().payload.user_muted).toBe(muted);
+
+      // Browser media events are queued tasks. A pending message response can
+      // arrive after YouTube changes the flag but before volumechange runs.
+      video.deferVolumeChanges = true;
+      video.muted = !muted;
+      expect(acknowledge).toBeDefined();
+      if (delivery === "clock") acknowledge!();
+      else
+        messageHandler(
+          { type: "MM_READY", generation: generation(), source_muted: true },
+          { id: extensionId },
+        );
+      await flush();
+      video.dispatchEvent(new Event("volumechange"));
+      await flush();
+
+      expect(latestClock().payload.user_muted).toBe(!muted);
+      expect(latestClock().payload.volume).toBe(0.4);
+      expect(video.muted).toBe(!muted);
+      if (delivery === "READY") {
+        acknowledge!();
+        await flush();
+        expect(latestClock().payload.user_muted).toBe(!muted);
+      }
+      stopMusicMute();
+      await flush();
+      expect(video.muted).toBe(!muted);
+    },
+  );
 
   it("waits for replacement metadata without hiding controls or following the old playing clock", async () => {
     await begin();

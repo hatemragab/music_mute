@@ -126,6 +126,8 @@ async function renderPopup(state: unknown) {
       "diagnostic-count",
       "provider",
       "cloud",
+      "language-settings",
+      "language-status",
     ].map((id) => [
       `#${id}`,
       {
@@ -134,11 +136,24 @@ async function renderPopup(state: unknown) {
         open: false,
         value: "",
         addEventListener: vi.fn(),
+        append: vi.fn(),
+        setAttribute: vi.fn(),
       },
     ]),
   );
   const body = { dataset: {} as Record<string, string> };
+  const element = () => ({
+    textContent: "",
+    setAttribute: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    append: vi.fn(),
+  });
+  vi.stubGlobal("window", { addEventListener: vi.fn() });
   vi.stubGlobal("document", {
+    documentElement: element(),
+    createElement: element,
+    querySelectorAll: () => [],
     body,
     querySelector: (selector: string) => nodes[selector],
   });

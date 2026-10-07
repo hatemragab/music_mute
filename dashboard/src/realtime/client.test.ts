@@ -243,3 +243,55 @@ test("logout during ticket issuance never opens a socket", async () => {
   await Promise.resolve();
   expect(f.factory).not.toHaveBeenCalled();
 });
+
+test("fresh reads resync the filtered subscription and wait beyond cached data", async () => {
+  const f = await fixture();
+  const params = { status: "queued", cursor: "page-two" };
+  const updates = vi.fn();
+  f.client.watch("admin.jobs", params, updates);
+  const socket = f.sockets[0];
+  socket.ready();
+  socket.snapshot(1, { items: [{ status: "queued" }] });
+
+  const resolved = vi.fn();
+  const read = f.client
+    .read("admin.jobs", params, undefined, true)
+    .then(resolved);
+  await Promise.resolve();
+  expect(resolved).not.toHaveBeenCalled();
+  expect(socket.sent.at(-1)).toEqual({ type: "resync", subscription_id: "s1" });
+  socket.snapshot(1, { items: [{ status: "stale" }] });
+  await Promise.resolve();
+  expect(resolved).not.toHaveBeenCalled();
+
+  socket.snapshot(2, { items: [{ status: "processing" }] });
+  await read;
+  expect(resolved).toHaveBeenCalledWith({ items: [{ status: "processing" }] });
+  expect(updates).toHaveBeenLastCalledWith({
+    data: { items: [{ status: "processing" }] },
+  });
+  expect(
+    socket.sent.filter((frame) => frame.type === "subscribe"),
+  ).toHaveLength(1);
+  expect(socket.sent.some((frame) => frame.type === "unsubscribe")).toBe(false);
+  expect(f.factory).toHaveBeenCalledOnce();
+  expect(f.grant).toHaveBeenCalledOnce();
+});
+
+test("fresh read errors reject without returning a previous snapshot", async () => {
+  const f = await fixture();
+  f.client.watch("admin.workers", {}, vi.fn());
+  const socket = f.sockets[0];
+  socket.ready();
+  socket.snapshot(1, { items: [] });
+  const read = f.client.read("admin.workers", {}, undefined, true);
+  const rejected = expect(read).rejects.toMatchObject({ status: 403 });
+  socket.frame({
+    type: "subscription_error",
+    stream_id: "one",
+    subscription_id: "s1",
+    status: 403,
+    code: "FORBIDDEN",
+  });
+  await rejected;
+});

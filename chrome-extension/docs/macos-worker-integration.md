@@ -1,14 +1,78 @@
 # macOS worker application integration
 
-Implementation branch: `hatem/macos-worker-app`, based on remote `main`
+Initial integration branch: `hatem/macos-worker-app`, based on remote `main`
 `bf8eddba12199f0fe8a4c37c3c1575d899936e0b`. Work is local until separately
 authorized installation/publication. Existing app accounts, Chrome profiles,
 installed workers and machine credentials must not be modified by tests.
 
+## Account-approved machine registration, current source — 2026-10-06
+
+Google sign-in identifies who registers a Mac. An administrator enables **Allow
+this account to register worker machines** in Users. The open Mac app receives
+approval through the account Library's existing authenticated raw WebSocket,
+including when another screen is visible. Once its personal runtime is prepared,
+it requests a one-use credential from `POST /users/me/worker-installation`, sends
+it privately to the bundled controller, then starts the worker with readiness
+confirmation. The Worker UI has no invitation, pairing-code, label/group, adoption
+or Terminal setup fields. English and Arabic expose the same registration states.
+
+Local installation state is inspected before account permission. A registered Mac
+keeps its existing machine identity and operates independently of later sign-out,
+account switching, permission removal, account deletion and app closure. Account
+events never start a stopped worker or restore an explicitly uninstalled service.
+Start can restore preserved registration using only the normal machine label.
+Explicit removal persists a local suppression flag; after purge, registration
+requires the deliberate **Register this Mac again** action and current approval.
+Stop retains the login item and remains distinct from removal.
+
+Interrupted setup reuses the controller's recovery state. A non-secret pending
+registering Firebase UID allows the same Google user to replace a failed pending
+credential after relaunch. Another account and unknown legacy pending state cannot
+replace that registration. Swift never persists the credential; the unchanged
+installer's private recovery file remains permitted. Session-generation fences and
+one local command owner protect asynchronous inspection and credential replies.
+Existing legacy machines are never automatically adopted or reassigned.
+
+The operator/code-enrollment evidence below records the original integration.
+Those historical UI descriptions are not the current registration default. This
+registration follow-up did not change the Node worker/controller. The later
+dashboard-delete follow-up below adds bounded controller cleanup; personal
+processing, Prepare, Chrome panel and runtime distribution stay independent.
+
+## Dashboard deletion and fresh registration — 2026-10-06
+
+Dashboard **Delete machine** turns off the registering account's worker approval
+and removes the machine from fleet views in one audited transaction. A legacy
+machine without registration provenance requires the owner to select the account
+explicitly. The internal tombstone retains audit/job references and permits only
+authenticated cleanup with the old credential; ordinary worker routes return
+`410 WORKER_MACHINE_DELETED`. Revocation remains a separate operation.
+
+The Mac retires a registration only after that exact deletion response or a
+matching controller-confirmed deletion receipt. Ordinary authentication errors,
+network failures and account permission removal never authorize retirement. The
+GUI binds unpair to the observed machine UUID; the controller checks the target
+and fresh deletion response under its command lock before mutating state. A
+replacement machine cannot be removed by a stale GUI response or receipt.
+
+After the old service and processing attempts are confirmed stopped, the
+controller archives fixed machine-specific records and diagnostic streams under
+private `state/deleted-registrations/<archive-id>`. It preserves model/runtime
+releases, personal app data, job history and known-good rollback. Inode-bound
+journaling resumes interrupted archival without accepting manually missing
+credentials as evidence. Local subscriptions stay fenced during cleanup.
+
+The resulting Worker screen behaves as an unregistered Mac. It rereads the
+current Google account's approval before requesting any fresh credential; the
+dashboard deletion leaves that approval off. A later administrator approval can
+register a new machine identity using the prepared runtime. Signed-out cleanup
+stays signed out. No recovery button, periodic remote status polling or automatic
+registration after a normal revoke is introduced.
+
 ## Required outcome
 
 The thin MusicMute app exposes every macOS worker operator capability. An enabled,
-paired worker remains a per-user LaunchAgent, starts at login and processes jobs
+registered worker remains a per-user LaunchAgent, starts at login and processes jobs
 independently of the GUI. Existing installations retain their machine/slot IDs,
 credentials, configuration, lifecycle intent, signed releases and recovery journals.
 The CLI remains compatible as a support interface; no npm installation is required
@@ -51,8 +115,10 @@ existing guarded worker functions, never an arbitrary command string. Enrollment
 material is accepted only for install and only inside the private request payload.
 It is never reflected in replies, diagnostics, errors or operation history.
 
-`adopt` is inspection by default; `apply: true` is the explicit, confirmed move of
-an existing paired worker. App update commands accept `source: "app" | "catalog"`.
+For controller/CLI compatibility, `adopt` remains inspection by default;
+`apply: true` is the explicit, confirmed move of an existing paired worker. The
+normal GUI uses the current registration flow above. App update commands accept
+`source: "app" | "catalog"`.
 The GUI defaults to the app-owned service; signed catalog updates remain an
 explicit advanced choice. The standalone CLI preserves its catalog default.
 
@@ -77,7 +143,7 @@ below. They do not establish installed migration, live enrollment, actual login 
 reboot, genuine MPS performance, public distribution or VoiceOver acceptance.
 
 - [x] Status, versions, backend/local readiness and live progress.
-- [x] Existing installation adoption; GUI enrollment, label/group and recovery.
+- [x] Existing installation detection/recovery; historical adoption/code-enrollment fixtures.
 - [x] Start/stop/restart/pause/drain/resume with exact prior-intent preservation.
 - [x] Job history, errors/explanation, performance and filtered live logs.
 - [x] Quick/full Doctor and safe diagnostic export.
@@ -393,3 +459,289 @@ protocol, formatting, lint, type checking and build passed. Post-rebase
 type checking, lint, build and formatting. These checks validate source and owned
 fixtures; the frozen package checkpoint and pending installed/GPU acceptance
 retain their separate scope.
+
+### Account-approved registration source validation, 2026-10-06
+
+`npm run verify` passed type checking, zero-warning lint over 192 files, all 70
+JavaScript suites (2,096 tests passed and four skipped), the companion/controller
+build and formatting. Final Swift follow-ups then passed the focused
+`npm run test:native -- WorkerTests` and all six `npm run test:native` suites.
+The final native suite binary is
+`output/native-tests/build-29a33c2c-86a3-4b77-b9ec-c2b22412d257.noindex/WorkerTests`.
+`npm run build` was rerun successfully after the final Swift changes, including
+the native browser bridge and unchanged worker/controller artifacts.
+
+Registration fixtures cover approval with the Worker screen unopened, duplicate
+events, linked Google with a password session, unknown permission, late credential
+replies after sign-out, same-session reconnect after a discarded reply, controller
+setup surviving GUI sign-out, installed/stopped/preserved machines, label-only
+restoration and interrupted recovery. Additional regression cases cover pending
+replacement after relaunch for the same Firebase UID, another-account/legacy
+refusal, explicit purge suppression through relaunch, command ownership during
+asynchronous inspection, and waiting for Prepare before credential issuance.
+Fixture accounts use memory vaults, injected HTTP/controller transports and unique
+preference domains removed after the run. Filesystem presence checks use temporary
+directories and reject redirected worker metadata.
+
+Final `npm run lint`, `npm run format:check`, translation `plutil -lint`, strict
+`xcrun swift-format lint --strict` for the six touched Swift files, and
+`git diff --check -- chrome-extension` passed. The actual app entrypoint also
+compiled with the following compiler arguments from this component directory:
+
+```sh
+xcrun swiftc -swift-version 6 -warnings-as-errors \
+  -target arm64-apple-macos14.0 -parse-as-library \
+  -framework SwiftUI -framework AppKit \
+  macos/Models.swift macos/DesktopWorker.swift macos/DesktopWorkerView.swift \
+  macos/DesktopCloudHandoff.swift macos/ProcessBridge.swift macos/UIJournal.swift \
+  macos/DesktopAuth.swift macos/DesktopAccountState.swift \
+  macos/BrowserProcessingBridge.swift macos/DesktopOutboxWatcher.swift \
+  macos/DesktopListening.swift macos/DesktopWorkspace.swift \
+  macos/DesktopAccountView.swift macos/DesktopMediaViews.swift \
+  macos/DesktopPreferences.swift macos/DesktopUpdater.swift macos/MusicMuteLocal.swift \
+  -o output/native-app-build/6f815cdb-2850-4e0c-b313-68d9aec3baac.noindex/MusicMuteLocal
+```
+
+The directory was created privately before compilation; the binary was not
+launched or installed. This direct build does not establish Sparkle delivery,
+package signing or runtime download availability.
+
+The final native Worker binary rendered 34 offscreen previews with:
+
+```sh
+output/worker-registration-ui/480e42ff-39e5-4a88-9ccb-b592d3e0c495.noindex/WorkerFixture.app/Contents/MacOS/WorkerTests \
+  --render-worker-ui \
+  output/worker-registration-ui/480e42ff-39e5-4a88-9ccb-b592d3e0c495.noindex/images
+```
+
+The fixture wrapper contains the final test executable, English/Arabic resources
+and the existing multicolor Google G. It prohibits application activation. The
+previews cover the existing operator sections plus signed-out, Google-required,
+waiting, unknown permission, registering, preserved, interrupted, removed and
+Prepare-required states in both languages. They provide layout/translation
+fixtures, not visible-window, VoiceOver, real-account or installed-service proof.
+
+No DMG, installed LaunchAgent, machine credential, developer account, user Chrome
+profile, model/runtime installation, real backend/R2 enrollment or macOS login
+behavior was changed or verified by this follow-up. Deployment and installed-Mac
+registration remain separate acceptance work.
+
+### Current registration candidate, pre-install qualification — 2026-10-06
+
+The later owner-authorized build produced candidate
+`1f36f3e8-d5f2-4a9e-a60b-33f7cbd44470`, build `1791292918`, at
+`output/macos/build-1f36f3e8-d5f2-4a9e-a60b-33f7cbd44470.noindex/MusicMute Local.app`.
+The ARM64, ad-hoc signed thin app is exactly 31,079,463 bytes. Its complete
+155-leaf external inventory SHA-256 is
+`b8c191826664c31a1cc6752138ca53db0f3d29193d6fb8b92d57d6e833463d48`, and the final
+native app executable SHA-256 is
+`8de335fb215251bc4cdd300e5206f7dca48af3f34a03d34dcdcfa1aaea23552e`.
+Independent leaf/hash/link readback and deep strict signature verification passed;
+the private `preinstall-verification.json` sits beside the package result.
+
+The actual packaging command was:
+
+```sh
+MUSICMUTE_MAC_SIGN_IDENTITY=- \
+MUSICMUTE_RUNTIME_REUSE_PACKAGE_RESULT="/Users/hatemragap/work_spaces/music_remover/chrome-extension/output/macos/build-7f1386bd-53ed-4f07-85c1-692cb1f77bb3.noindex/package-result.json" \
+MUSICMUTE_DESKTOP_PUBLIC_CONFIG="/Applications/MusicMute Local.app/Contents/Resources/desktop-public-config.json" \
+  npm run package:macos
+```
+
+The signed installed app's allowlisted public client configuration was reused;
+its credentials and account data were not read. The prior runtime artifact was
+verified and reused exactly: `macos-arm64-v1-c923b1be1f135d8c48ef81c9`, archive
+SHA-256 `e2ab2504dec4de6dd4bde8b7156bfb7e071bf22b4446a002d30e791ce603a064`,
+410,586,280 bytes and 18,031 runtime leaves. Its existing sealed URL still uses
+the reserved `downloads.example.invalid` host. This is an ordinary compatible
+update for a prepared Mac, without new runtime hosting or fresh-network Prepare
+proof. The verified model remains the same 66,759,214-byte Kim Vocal 2 file.
+
+Current packaged offline qualification passed all 16 checks with:
+
+```sh
+node scripts/qualify-packaged-tools.mjs \
+  --app "/Users/hatemragap/work_spaces/music_remover/chrome-extension/output/macos/build-1f36f3e8-d5f2-4a9e-a60b-33f7cbd44470.noindex/MusicMute Local.app" \
+  --model "/Users/hatemragap/Library/Application Support/MusicMuteLocal/models/ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b/Kim_Vocal_2.onnx"
+```
+
+The report is
+`output/packaged-tools-proof/2c548b4d-3f6f-49e9-b2d8-cdeebcd4fab0.noindex/result.json`.
+Actual packaged Prepare/status, native HELLO, code/runtime/model binding, support
+CLI and status/log subscriptions passed inside disposable state. The complete
+runtime and bundle remained unchanged afterward. The copied worker service has
+3,749 entries and payload SHA-256
+`fc5a423c4a4d318f393728047bb1917beccfd735f78026809b4137be11a785f1`.
+No real account, Keychain, Chrome profile, outbound network or launchctl was used.
+
+An additional direct-process qualification of that exact copied service passed
+both controller EOF and controller-kill scenarios. Each accepted attempt survived
+controller exit and removal of its disposable GUI directory, with one processing
+invocation, download, conditional upload and completion. Owned process groups
+were confirmed gone after supervisor shutdown. The evidence is the candidate's
+`worker-direct-qualification.json`. This uses production Node/controller code,
+loopback fixtures and a fake Python engine; it proves no physical inference or
+installed login behavior.
+
+These are pre-install package/fixture checks only. The build remains unnotarized,
+updater-unconfigured and `public_ready=false`. This packaging run did not install
+an app, create a real LaunchAgent, alter existing worker/runtime/account state,
+deploy services or publish a DMG. Later installed/live-cycle evidence must name
+its own artifact and scope.
+
+### Installed update and real acceptance — 2026-10-06
+
+The owner-authorized install first replaced `/Applications/MusicMute Local.app`
+with build `1791292918`, preserving the previous app and all managed account,
+runtime/model and worker data. The existing worker was repaired by quarantining
+only undeclared generated Python caches; all 20,216 manifest entries were
+unchanged. Its ordinary readiness checks passed before a non-forced app-managed
+worker update.
+
+That update committed release `0.1.3-app.8a36e3c1102c33b603674d36`, retained
+`0.1.3` as qualified rollback and restored active intent. Independent private
+comparisons confirmed the same machine identity and credential bytes. Model
+loading progressed through ONNX initialization to actual MPS readiness. The
+worker remained healthy, ready and eligible after the GUI quit, with no accepted
+attempts. An observer's 30-second initial timeout during activation did not mean
+the two-hour-budget update operation failed; activation journals and service
+read-back confirmed the committed state.
+
+Actual Google sign-in then exposed `DEVICE_REPORT_CONFLICT`: the Mac always
+reported metadata revision 1 even after its build metadata changed. The client
+now follows the existing iOS installation-report behavior: persist non-secret
+metadata/revision, increment only when metadata changes, and reconcile one owned
+matching device using the prospective bearer before a single bounded retry.
+UUID/platform, account generation and worker identity remain fenced.
+
+The corrected candidate `41f04b1e-efd3-48fd-bf07-02af4e9d7872`, build
+`1791295340`, is installed. All 155 inventory leaves match and strict deep
+signature verification passes. Inventory SHA-256 is
+`518b44b00ae732df0f5302b817c7d276cdda75b808e4ba4498f5e5a8949ee248`;
+native executable SHA-256 is
+`063423bc6ca7df88c23851b89a155b906e6d1cb6f2635f118d76587380755388`.
+The normal Google flow completed live bootstrap, published a fresh connected
+account scope and persisted metadata revision 2 for this build. This was
+confirmed from non-secret state; credentials were not extracted. All six native
+suites and 2,096 companion tests pass. A concurrent build staging collision was
+resolved by a coordinated sequential build rerun.
+
+The owned three-second WAV test still failed before personal inference:
+`WORKER_COORDINATION_UNAVAILABLE` followed worker child retirement failure.
+No GPU admission was granted. The worker later restarted healthy/ready. Six
+isolated Darwin process-retirement cases using the installed controller passed,
+so no timeout increase or weakened process-group guard was justified.
+
+Safe stop-stage diagnostics were added to the worker supervisor/child controller
+without altering deadlines, signals, GPU fences or wire fields. Twenty-one
+focused and 726 full worker tests pass. New candidate
+`f31a2a7e-c54d-4161-adb3-b37481c66150`, build `1791296418`, contains that change:
+155 inventory leaves match, strict deep signature verification passes, inventory
+SHA-256 is `cea9182732bb7bd8077c6c9a8a3126971dfc6a6a2ab4e3994a2e98dd3e280360`
+and native executable SHA-256 is
+`26e407b4a3188b0772b79ea01562c2d25dbf96f01d7bb5bf79115e16b2d6f995`.
+Desktop controls initially disconnected while the previous app was running.
+After the owner closed it, this candidate was installed; all 155 installed
+inventory leaves match. All 16 packaged offline checks pass, without cloud,
+Keychain, launchctl or physical inference. Its app-managed update then committed
+worker `0.1.3-app.e748a9b48b8ede830625a6cb`; original machine and credential bytes
+remain unchanged. The later owned three-second local-file retest reached Voice
+ready and played to completion. An independent process observer confirmed that
+the old fleet group exited, the supervisor stayed alive and no new stop-stage
+error occurred. After this short personal attempt, fleet preload resumed and
+full status returned healthy, ready and claim-eligible with zero active attempts.
+The original YouTube/cloud mode and unchecked rights selection were restored.
+
+Independent validation of the exact new fixture output confirms one stereo MP3
+audio stream, 44,100 Hz, 3.000 seconds and 61,170 bytes; the selected WAV remains
+byte-identical. Output SHA-256 is
+`43bdaa75c5cb6e40d0c517ecedef9f519b18312090779a57e4d69bad2807ea60`.
+Owned job timestamps place model load at 14:49:08.921 UTC after the old fleet
+group exited, job completion at 14:49:16.167 UTC and fleet recreation at
+14:49:17.618 UTC. Processing took 7.589 seconds plus 2.326 seconds waiting for
+the worker. The later fleet-ready/no-reservation snapshot was taken after this
+short job completed, so it does not establish a simultaneous-ownership defect.
+This is real local processing/playback proof, without cloud/R2 or listening
+quality acceptance.
+
+Latest-build account restoration remains inside `SecItemCopyMatching` waiting
+for the macOS Security server, before any backend HTTP request. Process sampling
+and safe journal events establish this stage without reading credentials.
+Worker status and update controls stay available throughout account restoration.
+Computer Use safety review prohibits accessing SecurityAgent; the owner must
+handle any macOS access prompt directly. No credential or installation-ID reset
+was performed to bypass this boundary.
+
+The API and dashboard registration feature are deployed (versions 117 and 31).
+The intended administrator account remains required: the account tried in the
+dashboard was denied admission. Fresh approval/registration, cloud job
+completion, approval-removal independence and macOS login acceptance are
+not established by these checks. No existing machine was unpaired or reassigned,
+and no real permission/account deletion was performed to force a fresh test.
+These remain ad-hoc prepared-Mac updates using the unchanged external runtime;
+the reserved runtime download URL still prevents fresh-network release proof.
+
+### Dashboard deletion candidate and installed checks — 2026-10-06
+
+The later owner request adds dashboard deletion and bounded fresh-registration
+cleanup described above. Current controller protocol/status fields identify the
+deleted machine, preserve backward compatibility with ordinary unpair receipts
+and bind deletion-only unpair to the observed UUID under the command lock. The
+worker source freeze passed 768 tests (21 skipped), 178 focused tests, protocol,
+formatting, lint, types and build. Companion checks passed typecheck/lint/build,
+2,096 tests (four skipped), formatting and all six native suites before the
+installed pipe-reader follow-up below. Fixtures cover positive typed deletion,
+ordinary revocation/network refusal, signed-out cleanup, interrupted archival,
+replacement-machine fencing and fresh current-account approval.
+
+The first deletion candidate, build `1791307813`, was installed with all 155
+inventory leaves matching and strict deep signature verification. It passed all
+16 packaged offline checks in disposable state. Installed startup exposed an
+additional native transport defect: a long-lived `FileHandle.bytes` subscription
+prevented a separate command reader from delivering its already completed
+response. The independent exact packaged controller returned the real
+`401 WORKER_UNAUTHENTICATED` status and exited in under one second. Normal
+navigation away from Worker closed its subscription and immediately released the
+waiting GUI result, confirming the stage without changing worker identity,
+credentials, service or backend data.
+
+The worker pipe reader now uses one bounded POSIX read per readiness callback
+and a bounded asynchronous chunk stream. Parsing remains on the main actor, and
+generation/frame/output limits, terminal EOF and zero-exit validation remain in
+place. Exact-source Worker, Settings and Desktop native suites passed after this
+repair, with Swift 6 warnings-as-errors and strict Swift formatting. Regression
+coverage keeps two live subscriptions open while a full status command finishes;
+oversize frames, trailing/duplicate output, nonzero exit and cancellation remain
+rejected.
+
+Final candidate `b71b6201-e777-4a26-ba44-bd6867a13c8a`, build `1791308880`, is
+installed at `/Applications/MusicMute Local.app`. All 155 inventory leaves match;
+inventory SHA-256 is
+`3bfef1909bc704b221f8e10062a63ebe432c350830f3ff7861aa766fc2239207` and native
+executable SHA-256 is
+`43ebeb418ea772b3dde6b6fe191399b3f96ff1399732147b975f8ee7ab2e25ad`.
+Strict deep signature verification and all 16 exact-candidate packaged offline
+checks pass. The report is
+`output/packaged-tools-proof/23602f0a-1cde-4f64-9a7f-7b8a55de6873.noindex/result.json`.
+The package is 31,273,831 bytes; the prepared external runtime/model are unchanged.
+Copied worker payload SHA-256 is
+`59e5a8fe31fe5c5a4e608b75958859a60a951cef4d17499b5e3c85ac713bb8bc`, app-managed
+release `0.1.3-app.d067d81ffe4fdffa65d1c71b`. Previous installed apps are preserved
+in the installer's private backup directory.
+
+The final installed Worker screen completes both its startup backend check and
+an explicit check while its local status subscription stays open. It shows the
+existing revoked worker's authentication failure and does not replace it. This
+is visible installed/native plus live read-only backend proof. API 121 and
+dashboard 32 are deployed and healthy; the signed-in dashboard owner can review
+the new delete dialog, explicit legacy account selection and fresh Google
+reauthentication. No actual machine deletion or registration-approval mutation
+has been performed at this checkpoint. The real delete/reapproval/fresh-machine/
+completed-job cycle awaits action-time confirmation and the account's macOS
+Keychain access response. Computer Use cannot operate SecurityAgent; the owner
+must handle any system credential prompt directly.
+
+These remain compatible ad-hoc updates for this prepared Mac, with the unchanged
+reserved external-runtime URL. No notarization, fresh-network Prepare, clean OS
+user, public release, login/logout, reboot or real cloud-job completion is proved
+by the package checks. No commit, push or public artifact publication occurred.

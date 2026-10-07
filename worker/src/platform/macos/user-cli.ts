@@ -1,5 +1,13 @@
 import { awaitUnpair } from "../shared/unpair.js";
 import {
+  hasDeletedMacRegistration,
+  resetDeletedMacRegistration,
+  loadMachineDeletionNotice,
+  readMacMachineIdentity,
+  assertMacUnpairReceiptReplay,
+  assertMacFreshEnrollmentAllowed,
+} from "./deleted-registration.js";
+import {
   reconcileMacAppRuntimeReferences,
   assertMacPreparedRuntimeUnused,
   resolveMacAppExecutionLayout,
@@ -170,7 +178,9 @@ export interface MacUserCommandContext {
   layout?: MacUserLayout;
   launchAgent?: LaunchAgentActions;
   stdout?: (value: string) => void;
-  unpair?: (force: boolean) => Promise<{ confirmed: true; machineId: string }>;
+  unpair?: (
+    force: boolean,
+  ) => Promise<{ confirmed: true; machineId: string; deleted?: true }>;
   wait?: (milliseconds: number) => Promise<void>;
   unpairTimeoutMs?: number;
   drainTimeoutMs?: number;
@@ -259,7 +269,33 @@ export async function runMacUserCommand(
     async () => {
       const ownedService =
         context.launchAgent ?? new MacLaunchAgentController(host.uid);
+      if (command === "unpair") {
+        const flags = parseUnpairArguments(arguments_);
+        if (flags.expectedMachineId !== undefined) {
+          await verifyDeletedUnpairTarget(
+            layout,
+            flags.expectedMachineId,
+            context.remoteStatus,
+          );
+          await recoverMacAppPreparationFence(layout);
+          return await withMacAppPreparationFence(layout, "recover", () =>
+            runUnlocked(command, arguments_, context, host, layout),
+          );
+        }
+      }
       await recoverMacAppPreparationFence(layout);
+      if (command === "install") await assertMacFreshEnrollmentAllowed(layout);
+      const unpairReceipt = ["recover", "unpair"].includes(command)
+        ? await loadConfirmedUnpairReceipt(layout.unpairReceiptPath)
+        : null;
+      if (command === "unpair" && unpairReceipt)
+        await assertMacUnpairReceiptReplay(layout, unpairReceipt.machineId);
+      if (command === "recover" && unpairReceipt && !unpairReceipt.deleted)
+        throw new Error("Only backend-confirmed deleted machines can be reset");
+      if (command === "recover" && (await hasDeletedMacRegistration(layout)))
+        return await withMacAppPreparationFence(layout, "recover", () =>
+          runUnlocked(command, arguments_, context, host, layout),
+        );
       if (await pathExists(join(layout.stateRoot, "app-activation.json")))
         await withMacAppPreparationFence(layout, "recover", () =>
           recoverMacAppActivation(
@@ -374,6 +410,19 @@ async function runUnlocked(
     }
     case "recover": {
       exactArguments(arguments_, new Set(["--json"]));
+      const reset = await resetDeletedMacRegistration({
+        layout,
+        service: launchAgent,
+      });
+      if (reset) {
+        stdout(
+          formatActionResult(
+            { status: "ok", action: "recover", ...reset },
+            arguments_.includes("--json"),
+          ),
+        );
+        return 0;
+      }
       await recoverSignedUpdate(layout, launchAgent, context.beforeWorkerLoad);
       const resumed = await (
         context.resumeInstallation ??
@@ -767,9 +816,10 @@ async function runUnlocked(
       return 0;
     }
     case "unpair": {
-      exactArguments(arguments_, new Set(["--force", "--json"]));
+      const flags = parseUnpairArguments(arguments_);
       const replay = await loadConfirmedUnpairReceipt(layout.unpairReceiptPath);
       if (replay !== null) {
+        await assertMacUnpairReceiptReplay(layout, replay.machineId);
         if ((await launchAgent.status()).loaded) await launchAgent.bootout();
         await rm(layout.credentialPath, { force: true });
         await rm(layout.configPath, { force: true });
@@ -781,6 +831,7 @@ async function runUnlocked(
               machineId: replay.machineId,
               confirmed: true,
               replayed: true,
+              ...(replay.deleted ? { deleted: true } : {}),
             },
             arguments_.includes("--json"),
           ),
@@ -788,7 +839,7 @@ async function runUnlocked(
         return 0;
       }
       await requireInstalled(layout);
-      const force = arguments_.includes("--force");
+      const force = flags.force;
       await setLocalLifecycleIntent(layout.lifecyclePath, "draining");
       if (force && (await launchAgent.status()).loaded)
         await launchAgent.bootout();
@@ -810,10 +861,20 @@ async function runUnlocked(
       });
       if (!confirmation.confirmed)
         throw new Error("Backend did not confirm worker unpair");
+      if (
+        flags.expectedMachineId !== undefined &&
+        (confirmation.machineId !== flags.expectedMachineId ||
+          confirmation.deleted !== true)
+      )
+        throw new Error(
+          "Backend did not confirm deletion of the expected machine",
+        );
       if ((await launchAgent.status()).loaded) await launchAgent.bootout();
       await writeConfirmedUnpairReceipt(
         layout.unpairReceiptPath,
         confirmation.machineId,
+        new Date(),
+        confirmation.deleted === true,
       );
       await rm(layout.credentialPath, { force: true });
       await rm(layout.configPath, { force: true });
@@ -824,6 +885,7 @@ async function runUnlocked(
             action: "unpair",
             machineId: confirmation.machineId,
             confirmed: true,
+            ...(confirmation.deleted ? { deleted: true } : {}),
           },
           arguments_.includes("--json"),
         ),
@@ -1277,6 +1339,7 @@ async function readStatus(
           state: null,
           checkedAt: null,
           errorCode: null,
+          httpStatus: null,
         };
   const logs = installed
     ? await inspectOperationalLogUsage(layout).catch(() => null)
@@ -1373,9 +1436,27 @@ async function readStatus(
       : localReady &&
         remote.state.status === "active" &&
         remote.state.claimsAllowed;
+  const identity = await readMacMachineIdentity(layout);
+  const receipt = await loadConfirmedUnpairReceipt(layout.unpairReceiptPath);
+  const notice = await loadMachineDeletionNotice(layout);
+  const confirmedDeletedReceipt =
+    receipt?.deleted === true &&
+    (receipt.machineId === identity.machineId ||
+      (!identity.present && !(await pathExists(layout.credentialPath))));
+  const deletionNotice =
+    notice &&
+    (notice.machineId === identity.machineId ||
+      (!identity.present &&
+        confirmedDeletedReceipt &&
+        notice.machineId === receipt.machineId))
+      ? notice
+      : null;
+  const registrationDeleted =
+    deletionNotice !== null || confirmedDeletedReceipt;
   return {
     schemaVersion: 2,
     installed,
+    machineId: identity.machineId,
     activeReleaseVersion,
     lifecycle: lifecycle?.intent ?? "unknown",
     service,
@@ -1407,6 +1488,12 @@ async function readStatus(
     logs,
     telemetry: { gpuMemoryBytes: null, note: "not-sampled" },
     update,
+    deletionNotice,
+    registrationDeleted,
+    confirmedDeletedReceipt,
+    deletedMachineId: confirmedDeletedReceipt
+      ? receipt.machineId
+      : (deletionNotice?.machineId ?? null),
     remote,
     readiness: {
       phase,
@@ -1450,6 +1537,60 @@ async function readActiveReleaseVersion(
   }
 }
 
+function parseUnpairArguments(arguments_: readonly string[]) {
+  const force = extractBooleanFlag(arguments_, "--force");
+  const json = extractBooleanFlag(force.remaining, "--json");
+  const deleted = extractBooleanFlag(json.remaining, "--deleted-only");
+  const values = parseValueFlags(
+    deleted.remaining,
+    new Set(["expected-machine-id"]),
+  );
+  const expectedMachineId = values.get("expected-machine-id");
+  if (
+    deleted.present !== (expectedMachineId !== undefined) ||
+    (deleted.present && force.present) ||
+    (expectedMachineId !== undefined &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+        expectedMachineId,
+      ))
+  )
+    throw new TypeError(
+      "Deleted unpair requires an exact machine target and --deleted-only",
+    );
+  return { force: force.present, expectedMachineId };
+}
+async function verifyDeletedUnpairTarget(
+  layout: MacUserLayout,
+  expectedMachineId: string,
+  remoteStatus?: () => Promise<WorkerMachineStatus>,
+): Promise<void> {
+  const receipt = await loadConfirmedUnpairReceipt(layout.unpairReceiptPath);
+  if (receipt) {
+    if (receipt.deleted !== true || receipt.machineId !== expectedMachineId)
+      throw new Error(
+        "Deleted unpair target does not match its confirmed receipt",
+      );
+    await assertMacUnpairReceiptReplay(layout, expectedMachineId);
+    return;
+  }
+  const identity = await readMacMachineIdentity(layout);
+  if (identity.machineId !== expectedMachineId)
+    throw new Error("Deleted unpair target does not match the current machine");
+  const runtime = await loadLocalRuntimeStatus(layout.runtimeStatusPath);
+  if (
+    runtime.activeAttemptIds.length !== 0 ||
+    (runtime.currentAttempts?.length ?? 0) !== 0
+  )
+    throw new Error("Deleted unpair requires zero active attempts");
+  const authority = await readRemoteStatus(layout, remoteStatus);
+  if (
+    authority.available ||
+    authority.errorCode !== "WORKER_MACHINE_DELETED" ||
+    authority.httpStatus !== 410
+  )
+    throw new Error("Backend did not confirm deletion of the current machine");
+}
+
 async function readRemoteStatus(
   layout: MacUserLayout,
   remoteStatus?: () => Promise<WorkerMachineStatus>,
@@ -1459,12 +1600,14 @@ async function readRemoteStatus(
       state: WorkerMachineStatus;
       checkedAt: string;
       errorCode: null;
+      httpStatus: 200;
     }
   | {
       available: false;
       state: null;
       checkedAt: string;
       errorCode: string;
+      httpStatus: number | null;
     }
 > {
   const controller = new AbortController();
@@ -1493,6 +1636,7 @@ async function readRemoteStatus(
       state,
       checkedAt: new Date().toISOString(),
       errorCode: null,
+      httpStatus: 200,
     };
   } catch (error) {
     return {
@@ -1501,6 +1645,7 @@ async function readRemoteStatus(
       checkedAt: new Date().toISOString(),
       errorCode:
         error instanceof ControlPlaneError ? error.code : "BACKEND_UNAVAILABLE",
+      httpStatus: error instanceof ControlPlaneError ? error.status : null,
     };
   } finally {
     if (timer) clearTimeout(timer);

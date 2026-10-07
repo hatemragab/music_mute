@@ -14,7 +14,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -91,7 +91,7 @@ async function digest(path: string): Promise<string> {
     .digest("hex");
 }
 
-async function fixture(): Promise<{
+async function fixture(segmented = false): Promise<{
   app: string;
   state: string;
   manifest: string;
@@ -125,9 +125,14 @@ async function fixture(): Promise<{
       mode: 0o755,
     });
   }
-  await writeFile(join(release, "runtime/NOTICE.txt"), "notice\n", {
-    mode: 0o644,
-  });
+  await mkdir(join(release, "runtime/runtime/licenses"), { mode: 0o755 });
+  await writeFile(
+    join(release, "runtime/runtime/licenses/NOTICE.txt"),
+    "notice\n",
+    {
+      mode: 0o644,
+    },
+  );
   await symlink("node", join(release, "runtime/runtime/node/bin/node-link"));
   await symlink("bin", join(release, "runtime/runtime/node/bin-current"));
   await symlink(
@@ -147,6 +152,78 @@ async function fixture(): Promise<{
   const nativeBinaries = manifestDocument.runtime.files.filter(
     (entry: { code_signed?: boolean }) => entry.code_signed === true,
   ).length;
+  let components:
+    | {
+        id: string;
+        url: string;
+        archive: string;
+        archive_bytes: number;
+        archive_sha256: string;
+        file_paths: string[];
+      }[]
+    | undefined;
+  if (segmented) {
+    const componentModule = (await import(
+      new URL("../scripts/macos-runtime-components.mjs", import.meta.url).href
+    )) as {
+      runtimeComponentForPath(path: string): string;
+      validateRuntimeComponents(value: unknown): void;
+    };
+    const entries = manifestDocument.runtime.files as { path: string }[];
+    const ids = [
+      ...new Set(
+        entries.map((entry) =>
+          componentModule.runtimeComponentForPath(entry.path),
+        ),
+      ),
+    ];
+    components = [];
+    for (const id of ids) {
+      const file_paths = entries
+        .filter(
+          (entry) => componentModule.runtimeComponentForPath(entry.path) === id,
+        )
+        .map((entry) => entry.path);
+      const archive = join(dirname(runtime.manifest), id + ".zip");
+      await run(
+        "/usr/bin/zip",
+        ["-q", "-X", "-D", "-y", archive, ...file_paths],
+        { cwd: release },
+      );
+      await chmod(archive, 0o600);
+      components.push({
+        id,
+        url: "https://downloads.example.test/musicmute/runtime/" + id + ".zip",
+        archive,
+        archive_bytes: (await lstat(archive)).size,
+        archive_sha256: await digest(archive),
+        file_paths,
+      });
+    }
+    const declared = components.map(
+      ({ archive: _archive, ...component }) => component,
+    );
+    manifestDocument.runtime.components = declared;
+    manifestDocument.runtime.archive_format = "zip-components";
+    runtime.archive_bytes = components.reduce(
+      (sum, component) => sum + component.archive_bytes,
+      0,
+    );
+    runtime.archive_sha256 = createHash("sha256")
+      .update(
+        components.map((component) => component.archive_sha256).join("\n") +
+          "\n",
+      )
+      .digest("hex");
+    manifestDocument.runtime.archive_bytes = runtime.archive_bytes;
+    manifestDocument.runtime.archive_sha256 = runtime.archive_sha256;
+    componentModule.validateRuntimeComponents(manifestDocument.runtime);
+    await writeFile(runtime.manifest, JSON.stringify(manifestDocument), {
+      mode: 0o600,
+    });
+    await copyFile(runtime.manifest, join(resources, "runtime-bootstrap.json"));
+    runtime.manifest_sha256 = await digest(runtime.manifest);
+  }
   const result = {
     schema_version: 1,
     build_id: buildId,
@@ -158,6 +235,7 @@ async function fixture(): Promise<{
     runtime: {
       delivery: "EXTERNAL_PREPARE",
       ...runtime,
+      ...(components ? { components } : {}),
       native_binaries: nativeBinaries,
       notarized: false,
       public_ready: false,
@@ -189,6 +267,30 @@ const verifiedExec = (async (
 }) as typeof run;
 
 describe("external runtime qualification staging", () => {
+  it("assembles and verifies separate component archives using the sealed inventory", async () => {
+    const { app, state, runtime, nativeBinaries } = await fixture(true);
+    const staged = await qualification.stageExternalRuntimeForQualification({
+      app,
+      stateRoot: state,
+      exec: verifiedExec,
+    });
+    expect(staged.runtime).toMatchObject({
+      id: runtime.id,
+      archive_format: "zip-components",
+    });
+    const verified = (await qualification.verifyExternalRuntimeForQualification(
+      {
+        releaseRoot: staged.releaseRoot,
+        activePath: staged.activePath,
+        runtime: staged.runtime,
+        packageResult: staged.packageResult,
+        exec: verifiedExec,
+      },
+    )) as { files: { code_signed?: boolean }[] };
+    expect(
+      verified.files.filter((file) => file.code_signed === true),
+    ).toHaveLength(nativeBinaries);
+  });
   it("verifies and stages the exact thin-package runtime in disposable state", async () => {
     const { app, state, runtime, nativeBinaries } = await fixture();
     const staged = await qualification.stageExternalRuntimeForQualification({

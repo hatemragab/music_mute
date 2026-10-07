@@ -15,6 +15,7 @@ import {
   Min,
   MinLength,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 import {
   WORKER_PLATFORMS,
@@ -158,4 +159,16 @@ export class WorkerLifecycleDto {
   @Max(Number.MAX_SAFE_INTEGER - 1)
   expectedRevision!: number;
   @Transform(trim) @IsString() @Length(1, 500) reason!: string;
+}
+
+export class WorkerMachineDeletionDto extends WorkerLifecycleDto {
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @Matches(/^[a-f0-9]{24}$/)
+  registrationUserId?: string;
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsInt()
+  @Min(0)
+  @Max(Number.MAX_SAFE_INTEGER - 1)
+  expectedUserRevision?: number;
 }

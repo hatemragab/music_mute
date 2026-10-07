@@ -204,10 +204,33 @@ struct DesktopUser: Codable, Sendable, Equatable {
   let email: String?
   let emailVerified: Bool
   let providers: [String]
+  var workerRegistrationAllowed = false
   enum CodingKeys: String, CodingKey {
     case id, email, providers
     case displayName = "display_name"
     case emailVerified = "email_verified"
+    case workerRegistrationAllowed = "worker_registration_allowed"
+  }
+  init(
+    id: String, displayName: String, email: String?, emailVerified: Bool, providers: [String],
+    workerRegistrationAllowed: Bool = false
+  ) {
+    self.id = id
+    self.displayName = displayName
+    self.email = email
+    self.emailVerified = emailVerified
+    self.providers = providers
+    self.workerRegistrationAllowed = workerRegistrationAllowed
+  }
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    id = try values.decode(String.self, forKey: .id)
+    displayName = try values.decode(String.self, forKey: .displayName)
+    email = try values.decodeIfPresent(String.self, forKey: .email)
+    emailVerified = try values.decode(Bool.self, forKey: .emailVerified)
+    providers = try values.decode([String].self, forKey: .providers)
+    workerRegistrationAllowed =
+      try values.decodeIfPresent(Bool.self, forKey: .workerRegistrationAllowed) ?? false
   }
 }
 struct DesktopCredential: Codable, Sendable {
@@ -407,6 +430,52 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
   }
 }
 
+struct DesktopInstallationMetadata: Codable, Equatable, Sendable {
+  let appVersion: String
+  let buildNumber: Int
+  let osVersion: String
+  let deviceModel: String
+
+  static var current: Self {
+    Self(
+      appVersion:
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        ?? "0.1.0",
+      buildNumber: Int(
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1")
+        ?? 1,
+      osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+      deviceModel: "Apple Silicon Mac")
+  }
+
+  var isValid: Bool {
+    func text(_ value: String, limit: Int) -> Bool {
+      (1...limit).contains(value.count)
+        && value.rangeOfCharacter(from: .controlCharacters) == nil
+    }
+    return text(appVersion, limit: 32) && (1...Int(Int32.max)).contains(buildNumber)
+      && text(osVersion, limit: 64) && text(deviceModel, limit: 100)
+  }
+}
+
+private struct DesktopInstallationReport: Codable {
+  static let maximumRevision: Int64 = 9_007_199_254_740_991
+  let installationId: String
+  let metadata: DesktopInstallationMetadata
+  var revision: Int64
+  var body: DesktopJSON {
+    .object([
+      "installation_id": .string(installationId), "platform": .string("macos"),
+      "app_version": .string(metadata.appVersion),
+      "build_number": .number(Double(metadata.buildNumber)),
+      "metadata_revision": .number(Double(revision)), "os_version": .string(metadata.osVersion),
+      "device_model": .string(metadata.deviceModel),
+    ])
+  }
+}
+
+private enum DesktopBootstrapFailure: Error { case deviceReportConflict }
+
 @MainActor final class DesktopAccountModel: ObservableObject {
   @Published private(set) var user: DesktopUser?
   @Published private(set) var firebaseUid: String?
@@ -422,11 +491,15 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
   @Published private(set) var recovery = DesktopJSON.null
   @Published private(set) var verificationRetryAt: Date?
   @Published private(set) var resetRetryAt: Date?
+  // A saved profile is not current registration authorization. Only fresh backend replies set this.
+  @Published private(set) var workerRegistrationPermission: Bool?
   let configuration: DesktopPublicConfiguration?
   let installationId: String
   private let vault: any DesktopCredentialVault
   private let transport: any DesktopHTTPTransport
   private let preferences: UserDefaults
+  private let installationMetadata: DesktopInstallationMetadata?
+  private var installationReportKey: String { "desktop.installationReport.\(installationId)" }
   private let stateStore: DesktopAccountStateStore?
   private let googleBrowserDeadline: Duration
   private let openGoogleBrowser: @MainActor (URL) -> Bool
@@ -455,6 +528,13 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
   var signedIn: Bool { credential != nil }
   var googleConfigured: Bool { configuration?.googleDesktopClientID != nil }
   var googleSignInActive: Bool { googleAttempt != nil }
+  var currentSignInProvider: String? {
+    credential.flatMap { Self.tokenClaims($0.idToken)?["firebase"]["sign_in_provider"].string }
+  }
+  func receiveWorkerRegistration(_ value: Bool?, scope: DesktopSessionScope) {
+    guard self.scope == scope else { return }
+    workerRegistrationPermission = value
+  }
   var authenticating: Bool {
     busy || restoring || googleAttempt != nil || refreshTask != nil
   }
@@ -481,7 +561,8 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
     configuration: DesktopPublicConfiguration? = nil,
     vault: (any DesktopCredentialVault)? = nil,
     transport: any DesktopHTTPTransport = DesktopURLSessionTransport(),
-    installationId: String? = nil, preferences: UserDefaults = .standard,
+    installationId: String? = nil, installationMetadata: DesktopInstallationMetadata? = nil,
+    preferences: UserDefaults = .standard,
     stateStore: DesktopAccountStateStore? = nil, journal: UIJournal? = nil,
     googleBrowserDeadline: Duration = DesktopGoogleOAuth.browserWaitLimit,
     openGoogleBrowser: @escaping @MainActor (URL) -> Bool = { NSWorkspace.shared.open($0) }
@@ -497,6 +578,7 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
           "com.hatem.musicmute.local.auth.\(configuration?.firebaseProjectID ?? "unconfigured")")
     self.transport = transport
     self.preferences = preferences
+    self.installationMetadata = installationMetadata
     self.stateStore = stateStore ?? (vault == nil ? DesktopAccountStateStore() : nil)
     let stored = preferences.string(forKey: "desktop.installationId")
     let selected = installationId ?? stored ?? UUID().uuidString.lowercased()
@@ -504,6 +586,11 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
       UUID(uuidString: selected)?.uuidString.lowercased() ?? UUID().uuidString.lowercased()
     if installationId == nil {
       preferences.set(self.installationId, forKey: "desktop.installationId")
+    }
+    if preferences.bool(forKey: signedOutKey) {
+      preferences.set(
+        DesktopProcessingPreference.local.rawValue,
+        forKey: DesktopPreferenceKey.processingMode)
     }
   }
   func restore() async {
@@ -518,7 +605,13 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
       failure = authFailure(error)
       return
     }
-    guard restoreIsCurrent(epoch), let stored = loaded else { return }
+    guard restoreIsCurrent(epoch) else { return }
+    guard let stored = loaded else {
+      preferences.set(
+        DesktopProcessingPreference.local.rawValue,
+        forKey: DesktopPreferenceKey.processingMode)
+      return
+    }
     do {
       guard let config = configuration,
         Self.belongsToProject(
@@ -635,12 +728,15 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
       var token = try self.parseCredential(value)
       if link && token.firebaseUid != self.firebaseUid { throw DesktopAuthFailure.sessionChanged }
       let session = try await self.googleAttemptResult(attempt) {
-        try await self.bootstrapRequest(bearer: token.idToken)
+        try await self.bootstrapRequest(bearer: token.idToken) {
+          try self.checkGoogleAttempt(attempt)
+        }
       }
       token.user = try self.parseUser(session["user"])
       try self.checkGoogleAttempt(attempt)
       try self.accept(token, rotate: !link)
       self.user = token.user
+      self.workerRegistrationPermission = token.user?.workerRegistrationAllowed
       self.applyBootstrap(session)
     }
   }
@@ -800,6 +896,9 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
     // Fence before any asynchronous or fallible credential cleanup.
     generation = UUID()
     preferences.set(true, forKey: signedOutKey)
+    preferences.set(
+      DesktopProcessingPreference.local.rawValue,
+      forKey: DesktopPreferenceKey.processingMode)
     refreshTask?.cancel()
     refreshTask = nil
     google?.cancel()
@@ -810,6 +909,7 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
     credential = nil
     firebaseUid = nil
     user = nil
+    workerRegistrationPermission = nil
     online = false
     deletionPending = false
     devices = []
@@ -862,27 +962,116 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
   func reconnect() async { await perform { try await self.bootstrap() } }
   private func bootstrap() async throws {
     let fence = scope
-    let value = try await bootstrapRequest(bearer: authorization())
+    let bearer = try await authorization()
+    let value = try await bootstrapRequest(bearer: bearer) {
+      guard self.scope == fence else { throw DesktopAuthFailure.sessionChanged }
+      guard !Task.isCancelled else { throw DesktopAuthFailure.cancelled }
+    }
     guard scope == fence else { throw DesktopAuthFailure.sessionChanged }
     try setUser(value["user"])
     applyBootstrap(value)
   }
-  private func bootstrapRequest(bearer: String) async throws -> DesktopJSON {
-    let version =
-      Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
-    let build =
-      Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1") ?? 1
+  private func installationReport() throws -> DesktopInstallationReport {
+    let metadata = installationMetadata ?? .current
+    guard metadata.isValid else { throw DesktopAuthFailure.configuration }
+    var previous: DesktopInstallationReport?
+    if let data = preferences.data(forKey: installationReportKey) {
+      guard data.count <= 16_384,
+        let stored = try? JSONDecoder().decode(DesktopInstallationReport.self, from: data),
+        stored.installationId == installationId, stored.metadata.isValid,
+        (1...DesktopInstallationReport.maximumRevision).contains(stored.revision)
+      else { throw DesktopAuthFailure.configuration }
+      previous = stored
+    }
+    if let previous, previous.metadata == metadata { return previous }
+    guard previous?.revision != DesktopInstallationReport.maximumRevision else {
+      throw DesktopAuthFailure.configuration
+    }
+    let report = DesktopInstallationReport(
+      installationId: installationId, metadata: metadata, revision: (previous?.revision ?? 0) + 1)
+    try persistInstallationReport(report)
+    return report
+  }
+  private func persistInstallationReport(_ report: DesktopInstallationReport) throws {
+    // This global installation snapshot contains metadata only, never account or worker credentials.
+    preferences.set(try JSONEncoder().encode(report), forKey: installationReportKey)
+  }
+  private func bootstrapRequest(bearer: String, checkSession: @MainActor () throws -> Void)
+    async throws -> DesktopJSON
+  {
+    try checkSession()
+    var report = try installationReport()
+    do {
+      return try await prospectiveAPI(
+        "POST", "/auth/sessions", body: report.body, bearer: bearer,
+        recognizeDeviceConflict: true, checkSession: checkSession)
+    } catch DesktopBootstrapFailure.deviceReportConflict {
+      // The owner-scoped read must use the same prospective bearer, before Google credentials are saved.
+      guard
+        let serverRevision = try await ownedInstallationRevision(
+          bearer: bearer, checkSession: checkSession)
+      else { throw DesktopAuthFailure.service("DEVICE_REPORT_CONFLICT") }
+      try checkSession()
+      let revision = max(report.revision, serverRevision)
+      guard revision < DesktopInstallationReport.maximumRevision else {
+        throw DesktopAuthFailure.service("DEVICE_REPORT_CONFLICT")
+      }
+      report.revision = revision + 1
+      try persistInstallationReport(report)
+      // One retry only. A second conflict retains the backend's ownership/platform protection.
+      return try await prospectiveAPI(
+        "POST", "/auth/sessions", body: report.body, bearer: bearer, checkSession: checkSession)
+    }
+  }
+  private func ownedInstallationRevision(
+    bearer: String, checkSession: @MainActor () throws -> Void
+  ) async throws -> Int64? {
+    var cursor: String?
+    var seen = Set<String>()
+    for _ in 0..<5 {
+      var query = URLComponents()
+      query.queryItems = [URLQueryItem(name: "limit", value: "50")]
+      if let cursor { query.queryItems?.append(URLQueryItem(name: "before", value: cursor)) }
+      let page = try await prospectiveAPI(
+        "GET", "/users/me/devices?\(query.percentEncodedQuery ?? "")", bearer: bearer,
+        checkSession: checkSession)
+      guard case .array(let items) = page["items"], items.count <= 50 else {
+        throw DesktopAuthFailure.malformedResponse
+      }
+      if let device = items.first(where: { $0["installation_id"].string == installationId }) {
+        guard device["platform"].string == "macos",
+          let revision = device["metadata_revision"].number,
+          revision.isFinite, revision.rounded() == revision, revision >= 1,
+          revision <= Double(DesktopInstallationReport.maximumRevision)
+        else { throw DesktopAuthFailure.service("DEVICE_REPORT_CONFLICT") }
+        return Int64(revision)
+      }
+      if page["next_cursor"] == .null { return nil }
+      guard let next = page["next_cursor"].string,
+        next.range(of: "^[a-f0-9]{24}$", options: .regularExpression) != nil,
+        seen.insert(next).inserted
+      else { throw DesktopAuthFailure.service("DEVICE_REPORT_CONFLICT") }
+      cursor = next
+    }
+    return nil
+  }
+  private func prospectiveAPI(
+    _ method: String, _ path: String, body: DesktopJSON? = nil, bearer: String,
+    recognizeDeviceConflict: Bool = false, checkSession: @MainActor () throws -> Void
+  ) async throws -> DesktopJSON {
+    try checkSession()
     var request = try await backendRequest(
-      "POST", "/auth/sessions",
-      body: .object([
-        "installation_id": .string(installationId), "platform": .string("macos"),
-        "app_version": .string(version),
-        "build_number": .number(Double(build)), "metadata_revision": .number(1),
-        "os_version": .string(ProcessInfo.processInfo.operatingSystemVersionString),
-        "device_model": .string("Apple Silicon Mac"),
-      ]), authenticated: false)
+      method, path, body: body, authenticated: false)
+    try checkSession()
     request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-    return try await send(request)
+    do {
+      let value = try await send(request, recognizeDeviceConflict: recognizeDeviceConflict)
+      try checkSession()
+      return value
+    } catch {
+      try checkSession()
+      throw error
+    }
   }
   private func applyBootstrap(_ value: DesktopJSON) {
     access = value["access"]
@@ -893,6 +1082,7 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
   private func setUser(_ value: DesktopJSON) throws {
     let decoded = try parseUser(value)
     user = decoded
+    workerRegistrationPermission = decoded.workerRegistrationAllowed
     if var credential {
       credential.user = decoded
       try vault.save(credential)
@@ -917,6 +1107,7 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
     if rotate {
       generation = UUID()
       user = nil
+      workerRegistrationPermission = nil
       try stateStore?.publish(scope)
       onSessionChanged?(scope)
     }
@@ -1095,7 +1286,9 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
     request.httpBody = try JSONEncoder().encode(body)
     return try await send(request)
   }
-  private func send(_ request: URLRequest) async throws -> DesktopJSON {
+  private func send(_ request: URLRequest, recognizeDeviceConflict: Bool = false) async throws
+    -> DesktopJSON
+  {
     let (data, status) = try await transport.send(request)
     let value =
       data.isEmpty ? DesktopJSON.null : try JSONDecoder().decode(DesktopJSON.self, from: data)
@@ -1103,6 +1296,9 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
       let code =
         value["code"].string ?? value["error"]["message"].string?.components(separatedBy: " : ")
         .first ?? "ACCOUNT_REQUEST_FAILED"
+      if recognizeDeviceConflict, status == 409, code == "DEVICE_REPORT_CONFLICT" {
+        throw DesktopBootstrapFailure.deviceReportConflict
+      }
       throw DesktopAuthFailure.service(safeIdentifier(code) ? code : "ACCOUNT_REQUEST_FAILED")
     }
     return value
@@ -1154,17 +1350,21 @@ final class DesktopURLSessionTransport: DesktopHTTPTransport, @unchecked Sendabl
   }
   // This is a project/identity mix-up fence, not signature verification. The API verifies Firebase signatures.
   static func belongsToProject(_ token: String, project: String, uid: String) -> Bool {
+    guard let claims = tokenClaims(token) else { return false }
+    return claims["aud"].string == project
+      && claims["iss"].string == "https://securetoken.google.com/\(project)"
+      && claims["sub"].string == uid
+  }
+  private static func tokenClaims(_ token: String) -> DesktopJSON? {
     let parts = token.split(separator: ".", omittingEmptySubsequences: false)
-    guard parts.count == 3, parts[1].count <= 16_384 else { return false }
+    guard parts.count == 3, parts[1].count <= 16_384 else { return nil }
     var payload = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(
       of: "_", with: "/")
     payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
     guard let data = Data(base64Encoded: payload),
       let claims = try? JSONDecoder().decode(DesktopJSON.self, from: data)
-    else { return false }
-    return claims["aud"].string == project
-      && claims["iss"].string == "https://securetoken.google.com/\(project)"
-      && claims["sub"].string == uid
+    else { return nil }
+    return claims
   }
 }
 

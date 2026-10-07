@@ -113,6 +113,19 @@ describe("macOS app control closed contract", () => {
       ).arguments,
     ).toEqual(["--json"]);
   });
+  it("maps the paired deletion target without extending the REST unpair body", () => {
+    expect(
+      appCommandArguments(
+        parseAppControlRequest(
+          frame("unpair", {
+            force: false,
+            expected_machine_id: requestId,
+            deleted_only: true,
+          }),
+        ),
+      ).arguments,
+    ).toEqual(["--json", "--expected-machine-id", requestId, "--deleted-only"]);
+  });
 
   it.each([
     frame("run", {}),
@@ -126,6 +139,15 @@ describe("macOS app control closed contract", () => {
     frame("logs", { clear: true, lines: 1 }),
     frame("logs", { since: "1d" }),
     frame("update", { check: true, force: true }),
+    frame("unpair", { expected_machine_id: requestId }),
+    frame("unpair", { deleted_only: true }),
+    frame("unpair", { expected_machine_id: requestId, deleted_only: false }),
+    frame("unpair", {
+      expected_machine_id: requestId,
+      deleted_only: true,
+      force: true,
+    }),
+    frame("unpair", { expected_machine_id: "--force", deleted_only: true }),
     frame("benchmark-file", { input: "../audio.wav" }),
     frame("benchmark-file", { input: "/tmp/audio.wav", runs: 2 }),
     frame("benchmark-file", { input: "/tmp/audio.wav", group_size: 3 }),

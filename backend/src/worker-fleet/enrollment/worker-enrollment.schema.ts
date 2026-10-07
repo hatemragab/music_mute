@@ -84,6 +84,14 @@ export class WorkerEnrollmentInvitation {
   codeDigest!: string;
   @Prop({ required: true, immutable: true, maxlength: 128 })
   createdByUid!: string;
+  /** Registration provenance only; never a machine authorization dependency. */
+  @Prop({
+    type: String,
+    immutable: true,
+    default: null,
+    match: /^[a-f0-9]{24}$/,
+  })
+  registeredByUserId!: string | null;
   @Prop({ type: String, default: null, maxlength: 100 })
   initialPolicyId!: string | null;
   @Prop({ type: String, required: true, enum: WORKER_INVITATION_STATES })
@@ -133,6 +141,13 @@ export class WorkerInstallationSession {
   _id!: string;
   @Prop({ required: true, immutable: true, match: UUID_V4_PATTERN })
   invitationId!: string;
+  @Prop({
+    type: String,
+    immutable: true,
+    default: null,
+    match: /^[a-f0-9]{24}$/,
+  })
+  registeredByUserId!: string | null;
   @Prop({ required: true, immutable: true, match: SHA256_HEX_PATTERN })
   credentialDigest!: string;
   @Prop({ required: true, immutable: true, match: UUID_V4_PATTERN })

@@ -3,6 +3,7 @@ import { HttpException } from '@nestjs/common';
 export type WorkerErrorCode =
   | 'WORKER_INVALID_REQUEST'
   | 'WORKER_UNAUTHENTICATED'
+  | 'WORKER_MACHINE_DELETED'
   | 'WORKER_FORBIDDEN'
   | 'WORKER_NOT_FOUND'
   | 'WORKER_CONFLICT'
@@ -13,6 +14,7 @@ export type WorkerErrorCode =
 const status: Record<WorkerErrorCode, number> = {
   WORKER_INVALID_REQUEST: 400,
   WORKER_UNAUTHENTICATED: 401,
+  WORKER_MACHINE_DELETED: 410,
   WORKER_FORBIDDEN: 403,
   WORKER_NOT_FOUND: 404,
   WORKER_CONFLICT: 409,
@@ -24,6 +26,7 @@ const status: Record<WorkerErrorCode, number> = {
 const message: Record<WorkerErrorCode, string> = {
   WORKER_INVALID_REQUEST: 'Invalid worker request',
   WORKER_UNAUTHENTICATED: 'Worker authentication is required',
+  WORKER_MACHINE_DELETED: 'This worker machine was deleted by an administrator',
   WORKER_FORBIDDEN: 'Worker operation is not allowed',
   WORKER_NOT_FOUND: 'Worker resource was not found',
   WORKER_CONFLICT: 'Worker resource changed',

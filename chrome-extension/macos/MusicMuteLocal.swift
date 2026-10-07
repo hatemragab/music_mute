@@ -8,7 +8,7 @@ enum Brand {
   static let raised = Color.adaptive(light: 0xF2F3F6, dark: 0x202229)
   static let border = Color(nsColor: .separatorColor)
   static let text = Color.primary
-  static let secondary = Color.secondary
+  static let secondary = Color.adaptive(light: 0x505A6A, dark: 0xBDC5D2)
   static let mint = Color.adaptive(light: 0x087C65, dark: 0x96E6C7)
   static let mintDark = Color.adaptive(light: 0xE1F4EE, dark: 0x123C37)
   static let amber = Color.adaptive(light: 0x8A4A00, dark: 0xFFD18B)
@@ -146,9 +146,18 @@ struct SetupPresentation {
   var runtime: ReadinessState { state(status?.runtimeReady) }
   var model: ReadinessState { state(status?.modelReady) }
   var chrome: ReadinessState { state(status?.extensionRegistered) }
-  var downloader: ReadinessState { state(status?.downloaderReady) }
-  var javascript: ReadinessState { state(status?.javascriptReady) }
-  var tokenProvider: ReadinessState { state(status?.tokenProviderReady) }
+  private func toolState(_ component: String, verified: Bool?) -> ReadinessState {
+    let result = state(verified)
+    guard result == .needsSetup,
+      status?.components?.first(where: { $0.component == component })?.errorCode == "SETUP_REQUIRED"
+    else { return result }
+    return .notChecked
+  }
+  var downloader: ReadinessState { toolState("downloader", verified: status?.downloaderReady) }
+  var javascript: ReadinessState { toolState("javascript", verified: status?.javascriptReady) }
+  var tokenProvider: ReadinessState {
+    toolState("token_provider", verified: status?.tokenProviderReady)
+  }
   var ready: Bool {
     activeCommand != .status && activeCommand != .setup && status?.complete == true
   }
@@ -233,6 +242,8 @@ struct SetupPresentation {
       return !self.busy && !self.updater.installationReserved
         && !self.updater.installationPreparing
     }
+    worker.canRegister = { [weak self] in self?.ready == true }
+    worker.coordinateRegistration(account: desktopAccount)
     updater.prepareInstallation = { [weak self] in
       guard let self else { throw DesktopWorkerFailure("APP_OPERATION_BUSY") }
       await self.worker.suspendSubscriptions()
@@ -381,6 +392,7 @@ struct SetupPresentation {
         && status?.modelReady == true
       {
         Task { [weak self] in await self?.workspace.runtimeBecameReady() }
+        worker.registrationRuntimeBecameReady()
       }
     case .cancelled:
       progress = nil
@@ -426,8 +438,17 @@ struct SetupPresentation {
     }
     bridge.cancel()
   }
+  func openChromeStore() {
+    let url = MusicMuteProductLinks.chromeWebStore.url
+    guard MusicMuteProductLinks.isAllowed(url) else { return }
+    openChrome(url, failureAction: "Open the MusicMute listing in Google Chrome.")
+  }
   func openChromeExtensions() {
-    guard let url = URL(string: "chrome://extensions"),
+    guard let url = URL(string: "chrome://extensions") else { return }
+    openChrome(url, failureAction: "Open chrome://extensions in Google Chrome.")
+  }
+  private func openChrome(_ url: URL, failureAction: String) {
+    guard
       let chrome = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome")
     else {
       failure = VisibleFailure(
@@ -440,7 +461,7 @@ struct SetupPresentation {
       if error != nil {
         Task { @MainActor in
           self.failure = VisibleFailure(
-            code: "CHROME_OPEN_FAILED", action: "Open chrome://extensions in Google Chrome.")
+            code: "CHROME_OPEN_FAILED", action: failureAction)
         }
       }
     }
@@ -842,6 +863,9 @@ struct SetupPresentation {
     @NSApplicationDelegateAdaptor(CompanionDelegate.self) private var delegate
     @StateObject private var model = CompanionModel()
     @StateObject private var visualPreferences = DesktopVisualPreferences()
+    init() {
+      DesktopTypography.registerFont(resources: Bundle.main.resourceURL)
+    }
     var body: some Scene {
       WindowGroup("MusicMute Local", id: "main") {
         CompanionView(model: model)
@@ -851,7 +875,7 @@ struct SetupPresentation {
           .desktopTextSize(visualPreferences.textSize)
           .environment(\.locale, Locale(identifier: resolvedLanguage))
           .environment(\.layoutDirection, resolvedLanguage == "ar" ? .rightToLeft : .leftToRight)
-          .frame(minWidth: 780, minHeight: 620)
+          .frame(minWidth: 840, minHeight: 660)
           .onOpenURL { model.openSetupLink($0) }
           .task {
             delegate.model = model
@@ -864,7 +888,7 @@ struct SetupPresentation {
             }
           }
       }
-      .defaultSize(width: 1180, height: 800)
+      .defaultSize(width: 1240, height: 860)
       .windowToolbarStyle(.unified)
       .commands {
         CommandGroup(after: .appInfo) {
@@ -912,7 +936,7 @@ struct SetupPresentation {
               DesktopAppShortcut.nextVoice.key,
               modifiers: DesktopAppShortcut.nextVoice.modifiers
             )
-            .disabled(model.workspace.currentTrack == nil)
+            .disabled(!model.workspace.canControlPlayback)
           Divider()
           Button("Back 10 Seconds") {
             model.workspace.seek(model.workspace.position - 10)
@@ -1019,7 +1043,14 @@ struct SetupPresentation {
       Settings {
         DesktopPreferencesView(
           workspace: model.workspace, visualPreferences: visualPreferences,
-          updater: model.updater, isPreview: model.fixture
+          updater: model.updater, isPreview: model.fixture,
+          openAccount: {
+            model.page = .account
+            NSApp.activate(ignoringOtherApps: true)
+            let settingsWindow = NSApp.keyWindow
+            NSApp.windows.first(where: { $0.canBecomeMain && $0 !== settingsWindow })?
+              .makeKeyAndOrderFront(nil)
+          }
         )
         .preferredColorScheme(visualPreferences.appearance.colorScheme)
         .tint(visualPreferences.accent.color)
@@ -1048,11 +1079,13 @@ private struct CompanionView: View {
   @FocusState private var navigationFocused: Bool
   var body: some View {
     NavigationSplitView {
-      sidebar
+      sidebar.environment(\.layoutDirection, layoutDirection)
     } detail: {
       detail
     }
     .navigationSplitViewStyle(.balanced)
+    // Keep the native column geometry stable; each column still lays out Arabic right to left.
+    .environment(\.layoutDirection, .leftToRight)
     .background(Brand.background)
     .disabled(model.updater.installationReserved || model.updater.installationPreparing)
     .foregroundStyle(Brand.text)
@@ -1085,8 +1118,8 @@ private struct CompanionView: View {
           HStack(spacing: 12) {
             VocalMark().frame(width: 42, height: 42).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-              Text("MusicMute").font(.headline)
-              Text("ON THIS MAC").font(.caption2.weight(.semibold))
+              Text("MusicMute").desktopFont(.headline)
+              Text("ON THIS MAC").desktopFont(.caption2, weight: .semibold)
                 .tracking(layoutDirection == .rightToLeft ? 0 : 1.4)
                 .foregroundStyle(Brand.mint)
             }
@@ -1099,12 +1132,16 @@ private struct CompanionView: View {
         Section("MusicMute") {
           ForEach([CompanionPage.overview, .library, .account, .worker], id: \.self) { page in
             Label(LocalizedStringKey(page.rawValue), systemImage: page.symbol)
+              .desktopFont(.body, weight: .medium)
+              .padding(.vertical, 5)
               .tag(page)
               .id(page)
               .accessibilityIdentifier("nav_\(page.rawValue.lowercased())")
           }
           SettingsLink {
             Label("Settings", systemImage: "gearshape")
+              .desktopFont(.body, weight: .medium)
+              .padding(.vertical, 5)
               .frame(maxWidth: .infinity, alignment: .leading)
               .contentShape(Rectangle())
           }
@@ -1114,6 +1151,8 @@ private struct CompanionView: View {
         Section("Support") {
           ForEach([CompanionPage.setup, .diagnostics], id: \.self) { page in
             Label(LocalizedStringKey(page.rawValue), systemImage: page.symbol)
+              .desktopFont(.body, weight: .medium)
+              .padding(.vertical, 5)
               .tag(page)
               .id(page)
               .accessibilityIdentifier("nav_\(page.rawValue.lowercased())")
@@ -1121,16 +1160,18 @@ private struct CompanionView: View {
         }
         Section {
           VStack(alignment: .leading, spacing: 10) {
-            Label("Private by design", systemImage: "lock.shield").font(
-              .caption.weight(.semibold)
+            Label("Private by design", systemImage: "lock.shield").desktopFont(
+              .caption, weight: .semibold
             )
             .foregroundStyle(Brand.mint)
             Text(
               "Local processing by default. Account media syncs online. Diagnostics stay on your Mac."
-            ).font(.caption).foregroundStyle(Brand.secondary).fixedSize(
-              horizontal: false, vertical: true)
+            ).desktopFont(.caption).foregroundStyle(Brand.secondary)
+              .lineLimit(nil)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .fixedSize(horizontal: false, vertical: true)
             Text("macOS · Apple Silicon · v\(model.status?.version ?? "0.1.0")")
-              .font(.caption2).foregroundStyle(Brand.secondary).padding(.top, 4)
+              .desktopFont(.caption2).foregroundStyle(Brand.secondary).padding(.top, 4)
           }
           .padding(.vertical, 8)
         }
@@ -1144,16 +1185,16 @@ private struct CompanionView: View {
       }
     }
     .background(.regularMaterial)
-    .navigationSplitViewColumnWidth(min: 190, ideal: 230, max: 280)
+    .navigationSplitViewColumnWidth(min: 230, ideal: 270, max: 330)
   }
   private var detail: some View {
     VStack(spacing: 0) {
       if model.busy {
         HStack(spacing: 12) {
           ProgressView().controlSize(.small)
-          Text(LocalizedStringKey(model.operationLabel)).font(.callout.weight(.medium))
+          Text(LocalizedStringKey(model.operationLabel)).desktopFont(.callout, weight: .medium)
           if let progress = model.progress {
-            Text(LocalizedStringKey(progress.label)).font(.caption).foregroundStyle(
+            Text(LocalizedStringKey(progress.label)).desktopFont(.caption).foregroundStyle(
               Brand.secondary
             ).lineLimit(2)
           }
@@ -1162,6 +1203,7 @@ private struct CompanionView: View {
             .keyboardShortcut(.cancelAction)
             .accessibilityIdentifier("operation_cancel")
         }
+        .environment(\.layoutDirection, layoutDirection)
         .padding(.horizontal, 24).padding(.vertical, 10)
         .background(.bar)
       }
@@ -1169,20 +1211,22 @@ private struct CompanionView: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 24) {
             Color.clear.frame(height: 1).id(detailTopID).accessibilityHidden(true)
-            header
+            if model.page != .library {
+              header
+            }
             if model.fixture {
               Label("SYNTHETIC UI PREVIEW • No setup commands run", systemImage: "testtube.2")
-                .font(.caption.weight(.semibold)).foregroundStyle(Brand.amber)
+                .desktopFont(.caption, weight: .semibold).foregroundStyle(Brand.amber)
             }
             if !model.journalAvailable {
               Label(
                 "App diagnostics are unavailable. Setup can continue, but this app session cannot write its local journal.",
                 systemImage: "exclamationmark.shield"
-              ).font(.caption).foregroundStyle(Brand.amber)
+              ).desktopFont(.caption).foregroundStyle(Brand.amber)
             }
             if let error = model.failure { failureCard(error) }
             if let notice = model.notice {
-              Label(LocalizedStringKey(notice), systemImage: "info.circle").font(.callout)
+              Label(LocalizedStringKey(notice), systemImage: "info.circle").desktopFont(.callout)
                 .foregroundStyle(
                   Brand.secondary
                 ).textSelection(.enabled)
@@ -1195,11 +1239,15 @@ private struct CompanionView: View {
               overview
             case .library: DesktopLibraryView(workspace: model.workspace)
             case .account: DesktopAccountView(account: model.account, workspace: model.workspace)
-            case .worker: DesktopWorkerView(worker: model.worker) { model.page = .setup }
+            case .worker:
+              DesktopWorkerView(
+                worker: model.worker, prepare: { model.page = .setup },
+                openAccount: { model.page = .account })
             case .setup: setup
             case .diagnostics: diagnostics
             }
           }
+          .environment(\.layoutDirection, layoutDirection)
           .padding(.horizontal, 30).padding(.bottom, 24).padding(.top, 12)
           .frame(maxWidth: 1040, alignment: .leading)
           .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -1212,6 +1260,7 @@ private struct CompanionView: View {
         }
       }
       DesktopMiniPlayer(workspace: model.workspace)
+        .environment(\.layoutDirection, layoutDirection)
     }
     .toolbar {
       ToolbarItem(placement: .primaryAction) {
@@ -1242,10 +1291,10 @@ private struct CompanionView: View {
   }
   private var header: some View {
     VStack(alignment: .leading, spacing: 7) {
-      Text(LocalizedStringKey(eyebrow)).font(.caption2.weight(.semibold))
+      Text(LocalizedStringKey(eyebrow)).desktopFont(.caption2, weight: .semibold)
         .foregroundStyle(Brand.mint)
-      Text(LocalizedStringKey(model.page.rawValue)).font(.largeTitle.weight(.semibold))
-      Text(LocalizedStringKey(subtitle)).font(.body).foregroundStyle(Brand.secondary)
+      Text(LocalizedStringKey(model.page.rawValue)).desktopFont(.largeTitle, weight: .semibold)
+      Text(LocalizedStringKey(subtitle)).desktopFont(.body).foregroundStyle(Brand.secondary)
     }
     .padding(.top, 4)
     .accessibilityElement(children: .combine)
@@ -1265,7 +1314,7 @@ private struct CompanionView: View {
     case .overview: "Keep the voice. Enjoy the original video."
     case .library: "Your account results and saved voice-only audio."
     case .account: "Your account, sign-in methods and connected devices."
-    case .worker: "Manage this Mac’s paired worker without Terminal."
+    case .worker: "Manage this Mac’s independent background worker."
     case .setup: "Prepare once, then control MusicMute inside YouTube."
     case .diagnostics: "Understand a run with safe evidence stored locally."
     }
@@ -1279,16 +1328,16 @@ private struct CompanionView: View {
             model.displayedReady ? "LOCAL ENGINE READY" : "LOCAL ENGINE SETUP",
             systemImage: model.displayedReady ? "checkmark.circle.fill" : "gearshape.2"
           )
-          .font(.caption.weight(.semibold)).foregroundStyle(
+          .desktopFont(.caption, weight: .semibold).foregroundStyle(
             model.displayedReady ? Brand.mint : Brand.amber)
           Text(
             model.displayedReady
               ? "Your Mac is ready for voice-only audio."
               : "Prepare MusicMute once to process privately on this Mac."
-          ).font(.title2.weight(.semibold))
+          ).desktopFont(.title2, weight: .semibold)
           Text(
             "Use the importer above for links and audio files, or add the Chrome extension for synchronized YouTube playback."
-          ).font(.body).foregroundStyle(Brand.secondary).fixedSize(
+          ).desktopFont(.body).foregroundStyle(Brand.secondary).fixedSize(
             horizontal: false, vertical: true)
           Button {
             model.page = .setup
@@ -1314,7 +1363,7 @@ private struct CompanionView: View {
           "Account", value: "Not needed", symbol: "person.crop.circle.badge.checkmark")
       }
       VStack(alignment: .leading, spacing: 18) {
-        Text("Chrome playback in three steps").font(.headline)
+        Text("Chrome playback in three steps").desktopFont(.headline)
         numberedStep(1, "Choose a video", "Click MusicMute beside the YouTube player controls.")
         numberedStep(
           2, "Prepare the voice track", "The video pauses while your Mac removes background music.")
@@ -1325,38 +1374,30 @@ private struct CompanionView: View {
       Label(
         "Internet is needed to acquire the audio. Voice processing and diagnostics stay local.",
         systemImage: "lock.circle"
-      ).font(.caption).foregroundStyle(Brand.secondary)
+      ).desktopFont(.caption).foregroundStyle(Brand.secondary)
     }
   }
   private var setup: some View {
     VStack(alignment: .leading, spacing: 22) {
       VStack(alignment: .leading, spacing: 20) {
         HStack {
-          Text("1. Prepare your Mac").font(.title3.weight(.semibold))
+          Text("1. Prepare your Mac").desktopFont(.title3, weight: .semibold)
           Spacer()
           if model.displayedReady {
-            Label("Ready", systemImage: "checkmark.circle.fill").foregroundStyle(Brand.mint).font(
-              .caption.weight(.semibold))
+            Label("Ready", systemImage: "checkmark.circle.fill").foregroundStyle(Brand.mint)
+              .desktopFont(.caption, weight: .semibold)
           }
         }
         Text(
           "Install the verified voice model and connect the local companion to Chrome. No account or administrator password is needed."
-        ).font(.callout).foregroundStyle(Brand.secondary)
+        ).desktopFont(.callout).foregroundStyle(Brand.secondary)
         VStack(spacing: 14) {
+          // Tool subcomponents still participate in setup and explicit checks; the checklist only
+          // presents the three user-facing readiness outcomes.
           readinessRow(
             "Processing runtime",
             detail: "Kept on this Mac · verified during Prepare or Check again",
             state: model.setupPresentation.runtime)
-          readinessRow(
-            "YouTube downloader", detail: "Installed yt-dlp and matching challenge solver",
-            state: model.setupPresentation.downloader)
-          readinessRow(
-            "JavaScript runtime", detail: "Bundled Deno · no Terminal installation",
-            state: model.setupPresentation.javascript)
-          readinessRow(
-            "Playback token provider",
-            detail: "Installed locally · checked during Prepare or Check again",
-            state: model.setupPresentation.tokenProvider)
           readinessRow(
             "Kim Vocal 2 model",
             detail: model.setupPresentation.model == .ready
@@ -1371,38 +1412,38 @@ private struct CompanionView: View {
         }
         Text(
           "These checks prepare local tools. YouTube may still refuse a request or limit access. Cached voices and local files remain usable."
-        ).font(.caption).foregroundStyle(Brand.secondary)
+        ).desktopFont(.caption).foregroundStyle(Brand.secondary)
         Text(
           "After setup, Chrome starts the companion automatically. The MusicMute window can be closed while the extension processes."
-        ).font(.caption).foregroundStyle(Brand.secondary)
+        ).desktopFont(.caption).foregroundStyle(Brand.secondary)
         VStack(alignment: .leading, spacing: 8) {
           Label("Where MusicMute keeps its files", systemImage: "internaldrive")
-            .font(.caption.weight(.semibold))
+            .desktopFont(.caption, weight: .semibold)
           Text(
             "The app stays where you installed it. This running copy is at:"
-          ).font(.caption).foregroundStyle(Brand.secondary).fixedSize(
+          ).desktopFont(.caption).foregroundStyle(Brand.secondary).fixedSize(
             horizontal: false, vertical: true)
           Text(Bundle.main.bundleURL.path)
-            .font(.caption.monospaced()).textSelection(.enabled)
+            .desktopFont(.caption, design: .monospaced).textSelection(.enabled)
             .environment(\.layoutDirection, .leftToRight)
           Text("Managed processing data is stored per user at:")
-            .font(.caption).foregroundStyle(Brand.secondary)
+            .desktopFont(.caption).foregroundStyle(Brand.secondary)
           Text(LocalPaths.support.path)
-            .font(.caption.monospaced()).textSelection(.enabled)
+            .desktopFont(.caption, design: .monospaced).textSelection(.enabled)
             .environment(\.layoutDirection, .leftToRight)
           Text(
             "Processing tools are kept in runtime/releases and the voice model is kept in models. They stay outside the app so compatible app updates can reuse them."
-          ).font(.caption).foregroundStyle(Brand.secondary).fixedSize(
+          ).desktopFont(.caption).foregroundStyle(Brand.secondary).fixedSize(
             horizontal: false, vertical: true)
-          Text(storageEstimate).font(.caption).foregroundStyle(Brand.secondary).fixedSize(
+          Text(storageEstimate).desktopFont(.caption).foregroundStyle(Brand.secondary).fixedSize(
             horizontal: false, vertical: true)
           Text(
             "Each app build requests one pinned runtime. An already prepared match is reused; otherwise Prepare downloads and verifies it before an atomic switch. Runtime files are never mixed. Running different app versions side by side is unsupported, and the last prepared copy controls Chrome."
-          ).font(.caption).foregroundStyle(Brand.secondary).fixedSize(
+          ).desktopFont(.caption).foregroundStyle(Brand.secondary).fixedSize(
             horizontal: false, vertical: true)
           Text(
             "Other Python, Node, FFmpeg, Deno or downloader versions installed elsewhere are left unchanged and ignored. MusicMute runs only its pinned, verified copies; if managed files are changed, setup stops and guides you through repair."
-          ).font(.caption).foregroundStyle(Brand.secondary).fixedSize(
+          ).desktopFont(.caption).foregroundStyle(Brand.secondary).fixedSize(
             horizontal: false, vertical: true)
         }
         .padding(14)
@@ -1413,9 +1454,9 @@ private struct CompanionView: View {
         if let progress = model.progress {
           VStack(alignment: .leading, spacing: 12) {
             HStack {
-              Text(LocalizedStringKey(progress.label)).font(.callout.weight(.medium))
+              Text(LocalizedStringKey(progress.label)).desktopFont(.callout, weight: .medium)
               Spacer()
-              Text("\(Int(progress.percent))%").font(.caption.monospacedDigit())
+              Text("\(Int(progress.percent))%").desktopFont(.caption, monospacedDigits: true)
                 .foregroundStyle(Brand.mint)
             }
             ProgressView(value: progress.percent, total: 100).tint(Brand.mint)
@@ -1423,7 +1464,7 @@ private struct CompanionView: View {
               .accessibilityValue(
                 "\(progress.phase.replacingOccurrences(of: "_", with: " ")), \(Int(progress.percent)) percent"
               )
-            Text("Keep this app open while setup completes.").font(.caption).foregroundStyle(
+            Text("Keep this app open while setup completes.").desktopFont(.caption).foregroundStyle(
               Brand.secondary)
           }.padding(18).background(Brand.raised, in: RoundedRectangle(cornerRadius: 14))
             .accessibilityIdentifier("setup_progress")
@@ -1439,33 +1480,51 @@ private struct CompanionView: View {
         }
       }.card()
       VStack(alignment: .leading, spacing: 20) {
-        Text("2. Add the Chrome extension").font(.title3.weight(.semibold))
+        Text("2. Add the Chrome extension").desktopFont(.title3, weight: .semibold)
         numberedStep(
-          1, "Open Chrome extensions", "Enable Developer mode in the upper-right corner.")
+          1, "Open Chrome Web Store",
+          "Open the MusicMute listing and choose Add to Chrome when it is available.")
         numberedStep(
-          2, "Choose Load unpacked", "Select the MusicMute extension folder shown by this app.")
-        numberedStep(
-          3, "Refresh your YouTube video",
+          2, "Refresh your YouTube video",
           "The mint MusicMute icon appears beside the player controls.")
-        HStack(spacing: 10) {
-          Button("Open Chrome extensions", systemImage: "arrow.up.right.square") {
-            model.openChromeExtensions()
-          }.buttonStyle(.borderedProminent).controlSize(.large)
-            .disabled(!model.displayedReady || model.busy)
-            .accessibilityIdentifier("open_chrome")
-          Button("Reveal folder", systemImage: "folder") { model.revealExtension() }
-            .buttonStyle(.bordered).controlSize(.large).disabled(model.extensionURL == nil)
-          Button("Copy path", systemImage: "doc.on.doc") { model.copyExtension() }
-            .buttonStyle(.bordered).controlSize(.large).disabled(model.extensionURL == nil)
-        }
+        Button("Open Chrome Web Store", systemImage: "arrow.up.right.square") {
+          model.openChromeStore()
+        }.buttonStyle(.borderedProminent).controlSize(.large)
+          .disabled(!model.displayedReady || model.busy)
+          .accessibilityIdentifier("open_chrome_store")
         Text(
-          "This development MVP uses an unpacked extension. Chrome installation is a separate step from preparing your Mac."
-        ).font(.caption).foregroundStyle(Brand.secondary)
-        Label(
-          "Moved this app? Repair the Chrome connection if prompted, then use Load unpacked again with this app's current extension folder. Chrome keeps the previous folder path until you load the extension from its new location.",
-          systemImage: "folder.badge.gearshape"
-        ).font(.caption).foregroundStyle(Brand.secondary).fixedSize(
+          "If the listing is awaiting review, use the development steps below for testing."
+        ).desktopFont(.caption).foregroundStyle(Brand.secondary).fixedSize(
           horizontal: false, vertical: true)
+        DisclosureGroup("Development installation") {
+          VStack(alignment: .leading, spacing: 16) {
+            numberedStep(
+              1, "Open Chrome extensions", "Enable Developer mode in the upper-right corner.")
+            numberedStep(
+              2, "Choose Load unpacked", "Select the MusicMute extension folder shown by this app.")
+            numberedStep(
+              3, "Refresh your YouTube video",
+              "The mint MusicMute icon appears beside the player controls.")
+            HStack(spacing: 10) {
+              Button("Open Chrome extensions", systemImage: "arrow.up.right.square") {
+                model.openChromeExtensions()
+              }.buttonStyle(.bordered).controlSize(.large)
+                .disabled(!model.displayedReady || model.busy)
+                .accessibilityIdentifier("open_chrome")
+              Button("Reveal folder", systemImage: "folder") { model.revealExtension() }
+                .buttonStyle(.bordered).controlSize(.large).disabled(model.extensionURL == nil)
+              Button("Copy path", systemImage: "doc.on.doc") { model.copyExtension() }
+                .buttonStyle(.bordered).controlSize(.large).disabled(model.extensionURL == nil)
+            }
+            Text("Use the bundled unpacked extension for development testing.")
+              .desktopFont(.caption).foregroundStyle(Brand.secondary)
+            Label(
+              "Moved this app? Repair the Chrome connection if prompted, then use Load unpacked again with this app's current extension folder. Chrome keeps the previous folder path until you load the extension from its new location.",
+              systemImage: "folder.badge.gearshape"
+            ).desktopFont(.caption).foregroundStyle(Brand.secondary).fixedSize(
+              horizontal: false, vertical: true)
+          }.padding(.top, 12)
+        }.desktopFont(.callout).accessibilityIdentifier("chrome_development_installation")
       }.card()
     }
   }
@@ -1519,21 +1578,22 @@ private struct CompanionView: View {
                 ? "checkmark.shield" : "exclamationmark.shield"
             ).foregroundStyle(report.availability == "available" ? Brand.mint : Brand.amber)
             Spacer()
-            Text(bytesLabel(report.coverage?.retainedBytes ?? 0)).font(.caption).foregroundStyle(
-              Brand.secondary)
+            Text(bytesLabel(report.coverage?.retainedBytes ?? 0)).desktopFont(.caption)
+              .foregroundStyle(
+                Brand.secondary)
           }
           Text(
             report.availability != "available" || report.coverage?.incompleteHistory == true
               ? "This is a bounded summary. Some older events or measurements are unavailable; export the retained detail to investigate."
               : "No gaps are reported in the retained evidence. This does not prove all behavior or audio quality."
-          ).font(.caption).foregroundStyle(Brand.secondary)
+          ).desktopFont(.caption).foregroundStyle(Brand.secondary)
           if report.availability == "diagnostics_unavailable" {
             Text("Recording unavailable · \(displayCode(report.failureCode))")
-              .font(.caption2.monospaced()).foregroundStyle(Brand.amber)
+              .desktopFont(.caption2, design: .monospaced).foregroundStyle(Brand.amber)
           }
           Text(
             "Memory growth is an observation, not proof of a leak. Speaker-to-screen timing and audio quality still need listening checks."
-          ).font(.caption).foregroundStyle(Brand.secondary)
+          ).desktopFont(.caption).foregroundStyle(Brand.secondary)
           if let identity = report.identity {
             VStack(alignment: .leading, spacing: 5) {
               Text(identity.recorderLabel)
@@ -1543,26 +1603,26 @@ private struct CompanionView: View {
               Text(
                 "Retained events keep their own identifiers in the exported report. Expected model is not verification of a run."
               )
-            }.font(.caption).foregroundStyle(Brand.secondary)
+            }.desktopFont(.caption).foregroundStyle(Brand.secondary)
               .textSelection(.enabled).accessibilityIdentifier("diagnostics_identity")
           }
         }.card()
         if !report.errors.isEmpty || !report.warnings.isEmpty {
           VStack(alignment: .leading, spacing: 16) {
-            Text("Retained processing alerts").font(.headline)
+            Text("Retained processing alerts").desktopFont(.headline)
             Text(
               "Recent errors and warnings remain visible after newer activity. Export for retained detail."
             )
-            .font(.caption).foregroundStyle(Brand.secondary)
+            .desktopFont(.caption).foregroundStyle(Brand.secondary)
             if !report.errors.isEmpty {
-              Text("Errors").font(.caption.weight(.semibold)).foregroundStyle(Brand.amber)
+              Text("Errors").desktopFont(.caption, weight: .semibold).foregroundStyle(Brand.amber)
               ForEach(Array(report.errors.suffix(8).reversed().enumerated()), id: \.offset) {
                 _, event in
                 eventRow(event)
               }
             }
             if !report.warnings.isEmpty {
-              Text("Warnings").font(.caption.weight(.semibold)).foregroundStyle(Brand.amber)
+              Text("Warnings").desktopFont(.caption, weight: .semibold).foregroundStyle(Brand.amber)
               ForEach(Array(report.warnings.suffix(8).reversed().enumerated()), id: \.offset) {
                 _, event in
                 eventRow(event)
@@ -1573,12 +1633,12 @@ private struct CompanionView: View {
         if let appEvents = report.appUiEvents {
           VStack(alignment: .leading, spacing: 16) {
             HStack {
-              Text("Companion app journal").font(.headline)
+              Text("Companion app journal").desktopFont(.headline)
               Spacer()
               Text(
                 report.appUiCoverage?.available == false || !model.journalAvailable
                   ? "Unavailable" : "Local only"
-              ).font(.caption).foregroundStyle(
+              ).desktopFont(.caption).foregroundStyle(
                 report.appUiCoverage?.available == false || !model.journalAvailable
                   ? Brand.amber : Brand.mint)
             }
@@ -1587,10 +1647,10 @@ private struct CompanionView: View {
             {
               Text(
                 "Older or incomplete app events are not shown. The export includes the safe retained evidence."
-              ).font(.caption).foregroundStyle(Brand.secondary)
+              ).desktopFont(.caption).foregroundStyle(Brand.secondary)
             }
             if appEvents.isEmpty {
-              Text("No retained app events are available.").font(.callout).foregroundStyle(
+              Text("No retained app events are available.").desktopFont(.callout).foregroundStyle(
                 Brand.secondary)
             }
             ForEach(Array(appEvents.suffix(8).reversed().enumerated()), id: \.offset) { _, event in
@@ -1602,15 +1662,15 @@ private struct CompanionView: View {
                 VStack(alignment: .leading, spacing: 5) {
                   Text(
                     displayCode(event.event).replacingOccurrences(of: "_", with: " ").capitalized
-                  ).font(.callout.weight(.medium))
-                  Text("\(displayCode(event.command)) · \(displayCode(event.code))").font(
-                    .system(size: 11, design: .monospaced)
+                  ).desktopFont(.callout, weight: .medium)
+                  Text("\(displayCode(event.command)) · \(displayCode(event.code))").desktopFont(
+                    .caption2, design: .monospaced
                   ).foregroundStyle(Brand.secondary)
                 }
                 Spacer()
                 if event.at.count >= 19 {
-                  Text(String(event.at.dropFirst(11).prefix(8))).font(
-                    .system(size: 11, design: .monospaced)
+                  Text(String(event.at.dropFirst(11).prefix(8))).desktopFont(
+                    .caption2, design: .monospaced
                   ).foregroundStyle(Brand.secondary)
                 }
               }
@@ -1623,37 +1683,40 @@ private struct CompanionView: View {
         if let setupEvidence = report.appSetupDiagnostics {
           VStack(alignment: .leading, spacing: 16) {
             HStack {
-              Text("App setup evidence").font(.headline)
+              Text("App setup evidence").desktopFont(.headline)
               Spacer()
-              Text(setupEvidence.availability == "available" ? "Available" : "Incomplete").font(
-                .caption
-              ).foregroundStyle(
-                setupEvidence.availability == "available" ? Brand.mint : Brand.amber)
+              Text(setupEvidence.availability == "available" ? "Available" : "Incomplete")
+                .desktopFont(.caption).foregroundStyle(
+                  setupEvidence.availability == "available" ? Brand.mint : Brand.amber)
             }
             if setupEvidence.coverage?.incompleteHistory == true {
-              Text("Some setup history is outside the retained evidence.").font(.caption)
+              Text("Some setup history is outside the retained evidence.").desktopFont(.caption)
                 .foregroundStyle(Brand.secondary)
             }
             if !setupEvidence.errors.isEmpty || !setupEvidence.warnings.isEmpty {
               Text("Retained setup alerts remain visible after a successful retry.")
-                .font(.caption).foregroundStyle(Brand.secondary)
+                .desktopFont(.caption).foregroundStyle(Brand.secondary)
               if !setupEvidence.errors.isEmpty {
-                Text("Errors (\(setupEvidence.errors.count))").font(.caption.weight(.semibold))
-                  .foregroundStyle(Brand.amber)
+                Text("Errors (\(setupEvidence.errors.count))").desktopFont(
+                  .caption, weight: .semibold
+                )
+                .foregroundStyle(Brand.amber)
                 ForEach(Array(setupEvidence.errors.enumerated()), id: \.offset) { _, event in
                   eventRow(event)
                 }
               }
               if !setupEvidence.warnings.isEmpty {
-                Text("Warnings (\(setupEvidence.warnings.count))").font(.caption.weight(.semibold))
-                  .foregroundStyle(Brand.amber)
+                Text("Warnings (\(setupEvidence.warnings.count))").desktopFont(
+                  .caption, weight: .semibold
+                )
+                .foregroundStyle(Brand.amber)
                 ForEach(Array(setupEvidence.warnings.enumerated()), id: \.offset) { _, event in
                   eventRow(event)
                 }
               }
             }
             if !setupEvidence.events.isEmpty {
-              Text("Recent setup activity").font(.caption.weight(.semibold))
+              Text("Recent setup activity").desktopFont(.caption, weight: .semibold)
                 .foregroundStyle(Brand.secondary)
               ForEach(Array(setupEvidence.events.enumerated()), id: \.offset) { _, event in
                 eventRow(event)
@@ -1664,9 +1727,9 @@ private struct CompanionView: View {
         if let job = report.jobs?.last {
           VStack(alignment: .leading, spacing: 16) {
             HStack {
-              Text("Latest preparation").font(.headline)
+              Text("Latest preparation").desktopFont(.headline)
               Spacer()
-              Text(displayCode(job.state).capitalized).font(.caption.weight(.medium))
+              Text(displayCode(job.state).capitalized).desktopFont(.caption, weight: .medium)
                 .foregroundStyle(job.state == "ready" ? Brand.mint : Brand.amber)
             }
             HStack {
@@ -1684,13 +1747,13 @@ private struct CompanionView: View {
                 Text(durationLabel(job.stagesMs?[key])).monospacedDigit()
               }
             }
-          }.font(.callout).card()
+          }.desktopFont(.callout).card()
         }
         VStack(alignment: .leading, spacing: 18) {
-          Text("Recent events").font(.headline)
+          Text("Recent events").desktopFont(.headline)
           if report.events.isEmpty {
             Text("No retained events yet. Use MusicMute on a short video, then inspect again.")
-              .font(.callout).foregroundStyle(Brand.secondary)
+              .desktopFont(.callout).foregroundStyle(Brand.secondary)
           }
           ForEach(Array(report.events.prefix(20).enumerated()), id: \.offset) { _, event in
             eventRow(event)
@@ -1698,26 +1761,29 @@ private struct CompanionView: View {
         }.card()
       } else {
         VStack(alignment: .leading, spacing: 16) {
-          Image(systemName: "waveform.path.ecg").font(.largeTitle).foregroundStyle(Brand.mint)
-          Text("A clear view of each run").font(.title3.weight(.semibold))
+          Image(systemName: "waveform.path.ecg").desktopFont(.largeTitle).foregroundStyle(
+            Brand.mint)
+          Text("A clear view of each run").desktopFont(.title3, weight: .semibold)
           Text(
             "Inspect errors, stage timings and sampled resource use. Export a safe local report when a problem needs a closer look."
-          ).font(.callout).foregroundStyle(Brand.secondary)
+          ).desktopFont(.callout).foregroundStyle(Brand.secondary)
         }.frame(maxWidth: .infinity, alignment: .leading).card()
       }
       Label(
         "Local only. No audio, source URLs, cookies or credentials are included in reports.",
         systemImage: "lock.shield"
-      ).font(.caption).foregroundStyle(Brand.secondary)
+      ).desktopFont(.caption).foregroundStyle(Brand.secondary)
     }
   }
   private func failureCard(_ error: VisibleFailure) -> some View {
     HStack(alignment: .top, spacing: 14) {
-      Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Brand.amber).font(.title3)
+      Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Brand.amber).desktopFont(
+        .title3)
       VStack(alignment: .leading, spacing: 8) {
-        Text("A step needs attention").font(.headline)
-        Text(LocalizedStringKey(error.action)).font(.callout).foregroundStyle(Brand.secondary)
-        Text(displayCode(error.code)).font(.caption.monospaced()).foregroundStyle(
+        Text("A step needs attention").desktopFont(.headline)
+        Text(LocalizedStringKey(error.action)).desktopFont(.callout).foregroundStyle(
+          Brand.secondary)
+        Text(displayCode(error.code)).desktopFont(.caption, design: .monospaced).foregroundStyle(
           Brand.amber
         ).textSelection(.enabled)
         if error.code == "MODEL_CACHE_INVALID" {
@@ -1737,11 +1803,11 @@ private struct CompanionView: View {
       Image(systemName: state.symbol).foregroundStyle(
         state == .ready ? Brand.mint : Brand.secondary.opacity(0.6))
       VStack(alignment: .leading, spacing: 4) {
-        Text(title).font(.callout.weight(.medium))
-        Text(detail).font(.caption).foregroundStyle(Brand.secondary)
+        Text(title).desktopFont(.callout, weight: .medium)
+        Text(detail).desktopFont(.caption).foregroundStyle(Brand.secondary)
       }
       Spacer()
-      Text(LocalizedStringKey(state.label)).font(.caption.weight(.medium)).foregroundStyle(
+      Text(LocalizedStringKey(state.label)).desktopFont(.caption, weight: .medium).foregroundStyle(
         state == .ready ? Brand.mint : Brand.secondary)
     }.accessibilityElement(children: .combine)
       .accessibilityValue(Text(LocalizedStringKey(state.label)))
@@ -1750,12 +1816,12 @@ private struct CompanionView: View {
     _ number: Int, _ title: LocalizedStringKey, _ detail: LocalizedStringKey
   ) -> some View {
     HStack(alignment: .top, spacing: 14) {
-      Text("\(number)").font(.caption.weight(.semibold).monospacedDigit())
+      Text("\(number)").desktopFont(.caption, weight: .semibold, monospacedDigits: true)
         .foregroundStyle(Brand.mint).frame(width: 28, height: 28).background(
           Brand.mint.opacity(0.08), in: Circle())
       VStack(alignment: .leading, spacing: 5) {
-        Text(title).font(.callout.weight(.medium))
-        Text(detail).font(.caption).foregroundStyle(Brand.secondary).fixedSize(
+        Text(title).desktopFont(.callout, weight: .medium)
+        Text(detail).desktopFont(.caption).foregroundStyle(Brand.secondary).fixedSize(
           horizontal: false, vertical: true)
       }
     }
@@ -1766,8 +1832,8 @@ private struct CompanionView: View {
         Image(systemName: symbol).foregroundStyle(Brand.mint)
         Spacer()
       }
-      Text(value).font(.title2.weight(.semibold))
-      Text(title).font(.caption).foregroundStyle(Brand.secondary)
+      Text(value).desktopFont(.title2, weight: .semibold)
+      Text(title).desktopFont(.caption).foregroundStyle(Brand.secondary)
     }.frame(maxWidth: .infinity, alignment: .leading).card(padding: 18)
   }
   private func localizedMetric(
@@ -1778,8 +1844,8 @@ private struct CompanionView: View {
         Image(systemName: symbol).foregroundStyle(Brand.mint)
         Spacer()
       }
-      Text(value).font(.title2.weight(.semibold))
-      Text(title).font(.caption).foregroundStyle(Brand.secondary)
+      Text(value).desktopFont(.title2, weight: .semibold)
+      Text(title).desktopFont(.caption).foregroundStyle(Brand.secondary)
     }.frame(maxWidth: .infinity, alignment: .leading).card(padding: 18)
   }
   private func localizedBytesLabel(_ value: Int64) -> String {
@@ -1788,13 +1854,13 @@ private struct CompanionView: View {
   private func desktopEvidenceView(_ report: AppSetupReport) -> some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack {
-        Text("Desktop processing and playback").font(.headline)
+        Text("Desktop processing and playback").desktopFont(.headline)
         Spacer()
-        Text(report.availability == "available" ? "Available" : "Incomplete").font(.caption)
+        Text(report.availability == "available" ? "Available" : "Incomplete").desktopFont(.caption)
           .foregroundStyle(report.availability == "available" ? Brand.mint : Brand.amber)
       }
       if report.coverage?.incompleteHistory == true {
-        Text("Some desktop history is outside the retained evidence.").font(.caption)
+        Text("Some desktop history is outside the retained evidence.").desktopFont(.caption)
           .foregroundStyle(Brand.secondary)
       }
       ForEach(Array((report.counts ?? [:]).keys.sorted().prefix(8)), id: \.self) { key in
@@ -1803,7 +1869,7 @@ private struct CompanionView: View {
             .foregroundStyle(Brand.secondary)
           Spacer()
           Text("\(report.counts?[key] ?? 0)").monospacedDigit()
-        }.font(.caption)
+        }.desktopFont(.caption)
       }
       ForEach(Array((report.peaks ?? [:]).keys.sorted().prefix(8)), id: \.self) { key in
         HStack {
@@ -1811,24 +1877,24 @@ private struct CompanionView: View {
             .foregroundStyle(Brand.secondary)
           Spacer()
           Text(diagnosticPeakLabel(key, value: report.peaks?[key])).monospacedDigit()
-        }.font(.caption)
+        }.desktopFont(.caption)
       }
       if !report.errors.isEmpty || !report.warnings.isEmpty {
         Text("Retained desktop alerts remain visible after a successful retry.")
-          .font(.caption).foregroundStyle(Brand.secondary)
+          .desktopFont(.caption).foregroundStyle(Brand.secondary)
       }
       if !report.errors.isEmpty {
-        Text("Errors").font(.caption.weight(.semibold)).foregroundStyle(Brand.amber)
+        Text("Errors").desktopFont(.caption, weight: .semibold).foregroundStyle(Brand.amber)
         ForEach(Array(report.errors.enumerated()), id: \.offset) { _, event in eventRow(event) }
       }
       if !report.warnings.isEmpty {
-        Text("Warnings").font(.caption.weight(.semibold)).foregroundStyle(Brand.amber)
+        Text("Warnings").desktopFont(.caption, weight: .semibold).foregroundStyle(Brand.amber)
         ForEach(Array(report.warnings.enumerated()), id: \.offset) { _, event in eventRow(event) }
       }
-      Text("Recent desktop activity").font(.caption.weight(.semibold))
+      Text("Recent desktop activity").desktopFont(.caption, weight: .semibold)
         .foregroundStyle(Brand.secondary)
       if report.events.isEmpty {
-        Text("No retained desktop activity is available.").font(.callout)
+        Text("No retained desktop activity is available.").desktopFont(.callout)
           .foregroundStyle(Brand.secondary)
       }
       ForEach(Array(report.events.enumerated()), id: \.offset) { _, event in eventRow(event) }
@@ -1851,15 +1917,15 @@ private struct CompanionView: View {
         .accessibilityLabel(
           event.severity == "error" ? "Error" : event.severity == "warning" ? "Warning" : "Event")
       VStack(alignment: .leading, spacing: 5) {
-        Text(event.displayName).font(.callout.weight(.medium))
+        Text(event.displayName).desktopFont(.callout, weight: .medium)
         HStack {
           Text(event.displayComponent).foregroundStyle(Brand.secondary)
           if let code = event.displayErrorCode { Text(code).foregroundStyle(Brand.amber) }
-        }.font(.caption2.monospaced())
+        }.desktopFont(.caption2, design: .monospaced)
       }
       Spacer()
       if let time = event.displayTime {
-        Text(time).font(.caption2.monospacedDigit())
+        Text(time).desktopFont(.caption2, monospacedDigits: true)
           .foregroundStyle(Brand.secondary)
       }
     }

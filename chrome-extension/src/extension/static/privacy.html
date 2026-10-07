@@ -3,82 +3,149 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MusicMute Local — Privacy and data use</title>
+    <title data-i18n="MusicMute Local — Privacy and data use">
+      MusicMute Local — Privacy and data use
+    </title>
     <link rel="stylesheet" href="privacy.css" />
   </head>
   <body>
     <main>
-      <h1>Privacy and data use</h1>
-      <p>MusicMute Local · Updated October 4, 2026</p>
-      <h2>What the extension reads</h2>
-      <p>
+      <h1 data-i18n="Privacy and data use">Privacy and data use</h1>
+      <p data-i18n="MusicMute Local · Updated October 7, 2026">
+        MusicMute Local · Updated October 7, 2026
+      </p>
+      <h2 data-i18n="What the extension reads">What the extension reads</h2>
+      <p
+        data-i18n="On supported YouTube watch pages, MusicMute reads the video identifier, duration, playback position, volume, mute state and player/ad state to prepare and synchronize vocals. It does not read your general browsing history, Google password or browser cookies."
+      >
         On supported YouTube watch pages, MusicMute reads the video identifier,
         duration, playback position, volume, mute state and player/ad state to
         prepare and synchronize vocals. It does not read your general browsing
         history, Google password or browser cookies.
       </p>
-      <h2>What stays on your Mac</h2>
-      <p>
+      <h2 data-i18n="What is stored locally">What is stored locally</h2>
+      <p
+        data-i18n="The extension stores playback preferences and a bounded local diagnostic history in Chrome. The required MusicMute Mac app acquires audio online and stores reusable results in a local cache. The extension follows the processing choice saved in the app: local separation or MusicMute cloud. Playback uses a temporary, protected connection to the app on this Mac."
+      >
         The extension stores playback preferences and a bounded local diagnostic
         history in Chrome. The required MusicMute Mac app acquires audio online
         and stores reusable results in a local cache. The extension follows the
         processing choice saved in the app: local separation or MusicMute cloud.
         Playback uses a temporary, protected connection to the app on this Mac.
       </p>
-      <h2>Cloud processing</h2>
-      <p>
+      <h2 data-i18n="Cloud processing">Cloud processing</h2>
+      <p
+        data-i18n="When MusicMute cloud is selected in the app, manually starting a video sends its canonical YouTube watch URL to MusicMute using the saved choice, without a per-video Chrome confirmation. MusicMute services acquire the audio or reuse a shared result; the Mac does not acquire and upload original audio for this cloud request. Cloud processing requires the app&#x27;s signed-in account and uses its processing allowance. Vocals are downloaded to the Mac for synchronized playback. Automatic preparation never submits new cloud processing. Account credentials remain in the Mac app and are not sent to Chrome."
+      >
         When MusicMute cloud is selected in the app, manually starting a video
-        sends the acquired audio to MusicMute using the saved choice, without a
-        per-video Chrome confirmation. Cloud processing requires the app's
-        signed-in account and uses its processing allowance. Vocals are
-        downloaded to the Mac for synchronized playback. Automatic preparation
-        never submits new cloud processing. Account credentials remain in the
-        Mac app and are not sent to Chrome.
+        sends its canonical YouTube watch URL to MusicMute using the saved
+        choice, without a per-video Chrome confirmation. MusicMute services
+        acquire the audio or reuse a shared result; the Mac does not acquire and
+        upload original audio for this cloud request. Cloud processing requires
+        the app's signed-in account and uses its processing allowance. Vocals
+        are downloaded to the Mac for synchronized playback. Automatic
+        preparation never submits new cloud processing. Account credentials
+        remain in the Mac app and are not sent to Chrome.
       </p>
-      <p>
+      <h2 data-i18n="Shared YouTube results">Shared YouTube results</h2>
+      <p
+        data-i18n="Local YouTube requests may send the canonical video URL to MusicMute to look up reusable originals and vocals, even while signed out. The Mac app uses a guest capability stored in macOS Keychain for this service; no MusicMute account is required. A shared hit can download existing vocals instead of acquiring YouTube audio or running separation."
+      >
+        Local YouTube requests may send the canonical video URL to MusicMute to
+        look up reusable originals and vocals, even while signed out. The Mac
+        app uses a guest capability stored in macOS Keychain for this service;
+        no MusicMute account is required. A shared hit can download existing
+        vocals instead of acquiring YouTube audio or running separation.
+      </p>
+      <p
+        data-i18n="When local preparation creates a new YouTube result, video metadata may be sent before playback to reserve shared saving. After vocals start playing, the Mac app may upload the original audio, vocals and associated video metadata in the background, even while signed out. Pending uploads can resume when the app or helper starts again. Accepted results can be reused by other MusicMute users. Transfers use temporary access grants to private R2 storage; the bucket is not public."
+      >
+        When local preparation creates a new YouTube result, video metadata may
+        be sent before playback to reserve shared saving. After vocals start
+        playing, the Mac app may upload the original audio, vocals and
+        associated video metadata in the background, even while signed out.
+        Pending uploads can resume when the app or helper starts again. Accepted
+        results can be reused by other MusicMute users. Transfers use temporary
+        access grants to private R2 storage; the bucket is not public.
+      </p>
+      <p
+        data-i18n="Accepted shared YouTube originals, vocals and metadata have no automatic expiry and remain available after local cache clearing, job deletion or account/guest deletion. Stopping playback does not delete a shared result or cancel an already released background save."
+      >
+        Accepted shared YouTube originals, vocals and metadata have no automatic
+        expiry and remain available after local cache clearing, job deletion or
+        account/guest deletion. Stopping playback does not delete a shared
+        result or cancel an already released background save.
+      </p>
+      <p
+        data-i18n="The downloader runs as a logged-out guest without importing your Chrome account or cookies. YouTube and its media servers receive the network requests needed to acquire the selected audio, including your IP address. Guest access may be refused; MusicMute does not bypass login requirements."
+      >
         The downloader runs as a logged-out guest without importing your Chrome
         account or cookies. YouTube and its media servers receive the network
         requests needed to acquire the selected audio, including your IP
         address. Guest access may be refused; MusicMute does not bypass login
         requirements.
       </p>
-      <h2>Signing into the Mac app</h2>
-      <p>
-        A MusicMute account is optional for local playback. When you sign into
-        the companion app, new local results can be staged for saving to your
-        account, including original audio, vocals and associated video metadata.
-        Account saving uses MusicMute services and private cloud storage,
-        subject to your account's access and storage limits. Local processing
-        does not mean that signed-in results always remain only on your device.
+      <h2 data-i18n="Signing into the Mac app">Signing into the Mac app</h2>
+      <p
+        data-i18n="A MusicMute account is optional for local playback and shared YouTube reuse. Signing into the Mac app can add YouTube shared references to your Library. Personal audio/video files processed in the Mac app use the account-private saving path; they are not contributed to the shared YouTube catalog. Account saving uses MusicMute services and private cloud storage, subject to your account&#x27;s access and storage limits."
+      >
+        A MusicMute account is optional for local playback and shared YouTube
+        reuse. Signing into the Mac app can add YouTube shared references to
+        your Library. Personal audio/video files processed in the Mac app use
+        the account-private saving path; they are not contributed to the shared
+        YouTube catalog. Account saving uses MusicMute services and private
+        cloud storage, subject to your account's access and storage limits.
       </p>
-      <h2>Your controls</h2>
-      <p>
+      <h2 data-i18n="Your controls">Your controls</h2>
+      <p
+        data-i18n="You can turn automatic preparation on or off in the video controls, set a duration limit, and stop playback at any time. Stop ends playback; it does not delete previously saved results."
+      >
         You can turn automatic preparation on or off in the video controls, set
         a duration limit, and stop playback at any time. Stop ends playback; it
         does not delete previously saved results.
       </p>
-      <p>
+      <p
+        data-i18n="Use “Stop playback and clear local cache” in the extension&#x27;s local tools to clear its managed reusable results. Pending background saves and account Library items are managed separately by the Mac app. Removing the extension removes its Chrome settings, but does not uninstall the Mac app or delete its files, cloud Library or accepted shared YouTube results."
+      >
         Use “Stop playback and clear local cache” in the extension's local tools
-        to clear its managed reusable results. Pending account saves and account
-        Library items are managed separately in the Mac app. Removing the
-        extension removes its Chrome settings, but does not uninstall the Mac
-        app or delete its files or cloud Library.
+        to clear its managed reusable results. Pending background saves and
+        account Library items are managed separately by the Mac app. Removing
+        the extension removes its Chrome settings, but does not uninstall the
+        Mac app or delete its files, cloud Library or accepted shared YouTube
+        results.
       </p>
-      <h2>Diagnostics</h2>
-      <p>
+      <h2 data-i18n="Diagnostics">Diagnostics</h2>
+      <p
+        data-i18n="Diagnostics are saved locally. MusicMute does not automatically send diagnostic reports, telemetry or analytics from this extension. Exporting diagnostics creates a local report; you choose whether to share it. Reports omit audio, credentials, browser cookies and private media URLs."
+      >
         Diagnostics are saved locally. MusicMute does not automatically send
         diagnostic reports, telemetry or analytics from this extension.
         Exporting diagnostics creates a local report; you choose whether to
         share it. Reports omit audio, credentials, browser cookies and private
         media URLs.
       </p>
-      <h2>Purpose and sharing</h2>
-      <p>
-        Data is used to provide voice playback, selected processing and account
-        saving when signed in. This extension does not sell data, use it for
-        advertising, or send it to analytics services. It is an independent
-        MusicMute product and is not affiliated with YouTube or Google.
+      <h2 data-i18n="Purpose and sharing">Purpose and sharing</h2>
+      <p
+        data-i18n="Data is used to provide voice playback, selected processing, shared YouTube reuse and account Library features. This extension does not sell data, use it for advertising, or send it to analytics services. It is an independent MusicMute product and is not affiliated with YouTube or Google."
+      >
+        Data is used to provide voice playback, selected processing, shared
+        YouTube reuse and account Library features. This extension does not sell
+        data, use it for advertising, or send it to analytics services. It is an
+        independent MusicMute product and is not affiliated with YouTube or
+        Google.
+      </p>
+      <h2 data-i18n="Chrome Web Store Limited Use">
+        Chrome Web Store Limited Use
+      </h2>
+      <p
+        data-i18n="MusicMute Local uses and transfers user data only for the disclosed voice playback, processing, shared YouTube reuse and account Library features, in accordance with the Chrome Web Store User Data Policy, including its Limited Use requirements."
+      >
+        MusicMute Local uses and transfers user data only for the disclosed
+        voice playback, processing, shared YouTube reuse and account Library
+        features, in accordance with the Chrome Web Store User Data Policy,
+        including its Limited Use requirements.
       </p>
     </main>
+    <script src="privacy.js"></script>
   </body>
 </html>

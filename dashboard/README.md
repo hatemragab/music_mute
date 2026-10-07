@@ -153,6 +153,12 @@ See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.
 and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
 HTTP remains responsible for authentication, commands and file transfers.
 
+Worker fleet (Machines), Users and Jobs include a small header refresh icon that
+keeps the current filters and page. Jobs and worker machines request a fresh
+snapshot over the shared WebSocket; Users repeats its directory HTTP read.
+The icon is disabled and spins while the request is pending. Live pages continue
+receiving automatic socket updates without status polling.
+
 ## Account usage reset
 
 The user detail page's **Reset usage** action calls
@@ -187,6 +193,22 @@ in the foreground. iOS display depends on APNs setup and notification permission
 Web users without a native push registration are not reachable by this feature.
 
 ## Worker insights and commands
+
+On user detail, owners and support administrators can enable **Allow this account
+to register worker machines**, with a reason and fresh authentication. The saved
+permission defaults off. An active Google session in an open, connected MusicMute
+Local app can then register each new Mac automatically. Disabled or deleting
+accounts cannot change this permission. Lost mutation responses are reconciled
+through the operation receipt and an authoritative user read; an unresolved
+receipt blocks further changes until **Check operation outcome** resolves it.
+
+Registration approval controls new registrations only. Registered machines keep
+their own identity and credentials after sign-out, app quit, account switching,
+permission removal or account deletion. Manage them from **Worker fleet** using
+the existing pause, drain, resume and revoke actions. Machine detail shows the
+registering account as informational history, or **Legacy registration** when no
+account provenance exists. Enrollment invitations and codes are no longer shown
+in the dashboard.
 
 The fleet page summarizes only the currently loaded, filtered page. Worker detail
 explains contact, policy-sync and slot blockers against the server observation

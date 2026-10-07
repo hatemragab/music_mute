@@ -56,6 +56,19 @@ describe.skipIf(process.platform !== "darwin")(
       await chmod(path, 0o666);
       await expect(loadConfirmedUnpairReceipt(path)).rejects.toThrow("unsafe");
     });
+    it("persists deletion only from an explicit confirmed response", async () => {
+      const root = await privateRoot();
+      const path = join(root, "unpaired.json");
+      await writeConfirmedUnpairReceipt(path, machineId, new Date(), true);
+      await expect(loadConfirmedUnpairReceipt(path)).resolves.toMatchObject({
+        deleted: true,
+      });
+      const receipt = await loadConfirmedUnpairReceipt(path);
+      await writeFile(path, JSON.stringify({ ...receipt, deleted: false }), {
+        mode: 0o600,
+      });
+      await expect(loadConfirmedUnpairReceipt(path)).rejects.toThrow("invalid");
+    });
   },
 );
 

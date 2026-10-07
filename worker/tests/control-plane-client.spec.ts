@@ -343,6 +343,54 @@ describe("worker control-plane client", () => {
     });
   });
 
+  it("preserves an explicit deleted confirmation and rejects ambiguous deletion values", async () => {
+    const fetchMock = vi.fn(async () =>
+      json({
+        machineId,
+        status: "revoked",
+        confirmed: true,
+        revision: 4,
+        deleted: true,
+      }),
+    );
+    const client = new WorkerControlPlaneClient({
+      baseUrl: "http://localhost",
+      credential: "x".repeat(43),
+      allowInsecureLoopback: true,
+      fetch: fetchMock as typeof fetch,
+    });
+    await expect(client.unpair()).resolves.toMatchObject({
+      confirmed: true,
+      deleted: true,
+    });
+    fetchMock.mockImplementation(async () =>
+      json({
+        machineId,
+        status: "revoked",
+        confirmed: true,
+        revision: 4,
+        deleted: "true",
+      }),
+    );
+    await expect(client.unpair()).rejects.toThrow("Unpair response is invalid");
+  });
+
+  it("reports machine deletion as a permanent410 and never retries or substitutes authentication", async () => {
+    const fetchMock = vi.fn(async () => problem("WORKER_MACHINE_DELETED", 410));
+    const client = new WorkerControlPlaneClient({
+      baseUrl: "http://localhost",
+      credential: "x".repeat(43),
+      allowInsecureLoopback: true,
+      fetch: fetchMock as typeof fetch,
+    });
+    await expect(client.machineStatus()).rejects.toMatchObject({
+      code: "WORKER_MACHINE_DELETED",
+      status: 410,
+      retryable: false,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("validates machine authority status and tolerates future fields", async () => {
     const response = {
       machineId,

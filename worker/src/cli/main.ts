@@ -49,6 +49,7 @@ import {
   runInstallationPreparationCommand,
 } from "../enrollment/cli.js";
 import { createMacUserLayout } from "../platform/macos/user-paths.js";
+import { writeMachineDeletionNotice } from "../platform/macos/deleted-registration.js";
 import { createWindowsServiceLayout } from "../platform/windows/service-definition.js";
 import { windowsOperationPending } from "../platform/windows/user-maintenance.js";
 import { maintainStorageAtStartup } from "../platform/shared/startup-storage.js";
@@ -199,6 +200,7 @@ if (command === "--version" || command === "version" || command === "-v") {
     let nextLogMaintenanceAt = 0;
     let restartAdmitted = false;
     let restartPersistenceFailed = false;
+    let runtimeMachineId: string | null = null;
     const restartBudget = new PersistentRestartBudget(
       join(dirname(configPath), "restart-budget.json"),
     );
@@ -219,6 +221,7 @@ if (command === "--version" || command === "version" || command === "-v") {
       if (logLayout !== null) await maintainWorkerLogs(logLayout);
       await maintainStorageAtStartup(configPath);
       const config = await loadRuntimeConfig(configPath);
+      runtimeMachineId = config.machineId;
       if (
         logLayout !== null &&
         resolve(configPath) === resolve(logLayout.configPath)
@@ -366,6 +369,18 @@ if (command === "--version" || command === "version" || command === "-v") {
         );
         process.exitCode = error.restart ? 1 : 0;
       } else if (!stopping.signal.aborted) {
+        if (
+          process.platform === "darwin" &&
+          logLayout !== null &&
+          resolve(configPath) === resolve(logLayout.configPath) &&
+          runtimeMachineId !== null &&
+          error instanceof ControlPlaneError &&
+          error.code === "WORKER_MACHINE_DELETED" &&
+          error.status === 410
+        )
+          await writeMachineDeletionNotice(logLayout, runtimeMachineId).catch(
+            () => undefined,
+          );
         await restartBudget.recordFailure(error).catch(() => {
           restartPersistenceFailed = true;
         });

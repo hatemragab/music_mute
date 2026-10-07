@@ -10,16 +10,33 @@ const exec = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
 assert.equal(process.platform, "darwin", "UNSUPPORTED_PLATFORM");
 assert.equal(process.arch, "arm64", "UNSUPPORTED_PLATFORM");
-assert.equal(process.argv.length, 2, "INVALID_PREVIEW_ARGUMENTS");
+const fixtures = [
+  ["home", "MusicMute Preview Home"],
+  ["progress-overview", "MusicMute Preview Overview"],
+  ["progress-diagnostics", "MusicMute Preview Busy Diagnostics"],
+  ["diagnostics-alerts", "MusicMute Preview Alerts"],
+  ["worker", "MusicMute Preview Worker"],
+];
+const requested = process.argv.slice(2);
+assert.ok(
+  requested.every((name) => fixtures.some(([fixture]) => fixture === name)),
+  "INVALID_PREVIEW_ARGUMENTS",
+);
 const id = randomUUID();
 const output = join(root, "output/native-ui-proof.noindex", id);
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const source = await readFile(join(root, "macos/MusicMuteLocal.swift"), "utf8");
 const anchor = "    let arguments = ProcessInfo.processInfo.arguments";
+const installGate = "} else if InstalledAppGate.relinquishUninstalledCopy() {";
 assert.equal(
   source.split(anchor).length,
   2,
   "PREVIEW_PROJECTION_ANCHOR_CHANGED",
+);
+assert.equal(
+  source.split(installGate).length,
+  2,
+  "PREVIEW_INSTALL_GATE_CHANGED",
 );
 for (const safetyGuard of [
   "    journal = fixture ? nil : UIJournal()",
@@ -58,26 +75,27 @@ const report = {
   scope: "NATIVE_UI_PREVIEW_BUILD_ONLY",
   source_main_sha256: digest(source),
   unchanged_shared_source_sha256: sources,
-  projection: "EXACT_SINGLE_FIXTURE_ARGUMENT_DEFAULT",
+  projection: "EXACT_FIXTURE_DEFAULT_AND_PREVIEW_BUNDLE_INSTALL_GATE",
   application_launched: false,
   native_processing: false,
   browser_playback: false,
   consumer_or_fleet_state_modified: false,
   previews: [],
 };
-for (const [fixture, name] of [
-  ["home", "MusicMute Preview Home"],
-  ["progress-overview", "MusicMute Preview Overview"],
-  ["progress-diagnostics", "MusicMute Preview Busy Diagnostics"],
-  ["diagnostics-alerts", "MusicMute Preview Alerts"],
-  ["worker", "MusicMute Preview Worker"],
-]) {
+for (const [fixture, name] of fixtures.filter(
+  ([fixture]) => !requested.length || requested.includes(fixture),
+)) {
   const directory = join(output, fixture);
   const app = join(directory, `${name}.app`);
-  const projected = source.replace(
-    anchor,
-    `    let arguments = ["MusicMuteLocal", "--ui-fixture", "${fixture}"]`,
-  );
+  const projected = source
+    .replace(
+      anchor,
+      `    let arguments = ["MusicMuteLocal", "--ui-fixture", "${fixture}"]`,
+    )
+    .replace(
+      installGate,
+      '} else if Bundle.main.bundleIdentifier == "com.hatem.musicmute.local" && InstalledAppGate.relinquishUninstalledCopy() {',
+    );
   assert.equal(projected.split(anchor).length, 1);
   const projectedPath = join(directory, "MusicMuteLocal.swift");
   await mkdir(join(app, "Contents/MacOS"), { recursive: true, mode: 0o700 });
@@ -86,6 +104,13 @@ for (const [fixture, name] of [
     await cp(
       join(root, "macos/Resources", `${language}.lproj`),
       join(app, "Contents/Resources", `${language}.lproj`),
+      { recursive: true },
+    );
+  }
+  for (const directory of ["Fonts", "licenses"]) {
+    await cp(
+      join(root, "macos/Resources", directory),
+      join(app, "Contents/Resources", directory),
       { recursive: true },
     );
   }
@@ -106,6 +131,7 @@ for (const [fixture, name] of [
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSPrincipalClass</key><string>NSApplication</string>
+<key>ATSApplicationFontsPath</key><string>Fonts</string>
 </dict></plist>
 `,
     { mode: 0o600, flag: "wx" },

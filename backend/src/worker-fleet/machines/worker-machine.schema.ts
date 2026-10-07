@@ -171,6 +171,14 @@ export class WorkerMachine {
     match: UUID_V4_PATTERN,
   })
   _id!: string;
+  /** Informational provenance survives sign-out, account changes and deletion. */
+  @Prop({
+    type: String,
+    immutable: true,
+    default: null,
+    match: /^[a-f0-9]{24}$/,
+  })
+  registeredByUserId!: string | null;
   @Prop({ required: true, match: SHA256_HEX_PATTERN })
   credentialDigest!: string;
   @Prop({ type: Number, default: 1, min: 1, validate: Number.isSafeInteger })
@@ -209,6 +217,9 @@ export class WorkerMachine {
   acknowledgedDiagnosticSequence!: number;
   @Prop({ type: Date, default: null }) lastSeenAt!: Date | null;
   @Prop({ type: Date, default: null }) revokedAt!: Date | null;
+  // Keep the credential digest only for authenticated deletion notice/cleanup.
+  // Deleted machines never appear in fleet reads or receive worker authority.
+  @Prop({ type: Date, default: null }) deletedAt!: Date | null;
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
   revision!: number;
   createdAt!: Date;

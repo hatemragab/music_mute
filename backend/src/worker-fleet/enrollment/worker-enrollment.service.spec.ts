@@ -52,6 +52,11 @@ function fixture() {
     },
   );
   const jobs = { updateMany: vi.fn() };
+  const users = {
+    findById: vi.fn(),
+    updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+  };
+  const audit = { record: vi.fn().mockResolvedValue(undefined) };
   const attempts = { updateMany: vi.fn() };
   const operations = {
     run: vi.fn(
@@ -86,6 +91,8 @@ function fixture() {
     attempts as never,
     jobs as never,
     operations as never,
+    users as never,
+    audit as never,
   );
   return {
     service,
@@ -95,12 +102,275 @@ function fixture() {
     MachineModel,
     savedMachine,
     jobs,
+    users,
     attempts,
     operations,
+    audit,
   };
 }
 
 describe('worker enrollment lifecycle', () => {
+  const registeredByUserId = '64b000000000000000000001';
+  const googleIdentity = {
+    uid: 'fixture-user',
+    provider: 'google.com' as const,
+    authTimeSec: 100,
+    tokenEmailVerified: true,
+  };
+
+  const machineId = '71238208-9ab4-4778-905b-58fffd670aa5';
+  const deletion = {
+    operationId: 'c6bb8a76-d11c-4017-af0c-98ea25bf1902',
+    expectedRevision: 3,
+    expectedUserRevision: 2,
+    reason: 'Delete retired machine registration',
+  };
+
+  function deletionFixture(registered: string | null = registeredByUserId) {
+    const f = fixture();
+    f.MachineModel.findById.mockReturnValue(
+      chain({
+        _id: machineId,
+        registeredByUserId: registered,
+        status: 'revoked',
+        revision: 3,
+        deletedAt: null,
+      }),
+    );
+    f.MachineModel.findOneAndUpdate.mockReturnValue(chain({ revision: 4 }));
+    f.users.findById.mockReturnValue(
+      chain({
+        _id: registeredByUserId,
+        adminRevision: 2,
+        workerRegistrationAllowed: true,
+      }),
+    );
+    return f;
+  }
+
+  it('deletes a machine with audited permission removal and the existing lease fence', async () => {
+    const f = deletionFixture();
+    await expect(
+      f.service.deleteMachine(actor, machineId, deletion),
+    ).resolves.toMatchObject({
+      status: 'succeeded',
+      resourceId: machineId,
+      revision: 4,
+    });
+    expect(f.MachineModel.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: machineId, revision: 3, deletedAt: null },
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          status: 'revoked',
+          deletedAt: expect.any(Date),
+          currentSession: null,
+        }),
+      }),
+      expect.objectContaining({ runValidators: true }),
+    );
+    expect(f.users.updateOne).toHaveBeenCalledWith(
+      { _id: registeredByUserId, adminRevision: 2 },
+      {
+        $set: { workerRegistrationAllowed: false },
+        $inc: { adminRevision: 1 },
+      },
+      expect.objectContaining({ runValidators: true }),
+    );
+    expect(f.audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'users.worker_registration.update',
+        resourceId: registeredByUserId,
+        operationId: deletion.operationId,
+        previousRevision: 2,
+        nextRevision: 3,
+      }),
+      expect.anything(),
+    );
+    expect(f.attempts.updateMany).toHaveBeenCalledOnce();
+    expect(f.jobs.updateMany).toHaveBeenCalledOnce();
+    expect(f.operations.run.mock.calls[0][1]).toMatchObject({
+      action: 'workers.machine.delete',
+    });
+  });
+
+  it('requires an explicit account selection for legacy machines without changing provenance', async () => {
+    const f = deletionFixture(null);
+    await expect(
+      f.service.deleteMachine(actor, machineId, deletion),
+    ).rejects.toMatchObject({
+      response: { code: 'INVALID_REQUEST' },
+    });
+    expect(f.users.updateOne).not.toHaveBeenCalled();
+    await f.service.deleteMachine(actor, machineId, {
+      ...deletion,
+      registrationUserId: registeredByUserId,
+    });
+    expect(
+      f.MachineModel.findOneAndUpdate.mock.calls[0][1].$set,
+    ).not.toHaveProperty('registeredByUserId');
+  });
+
+  it('rejects another account or a stale account revision before deleting anything', async () => {
+    const f = deletionFixture();
+    await expect(
+      f.service.deleteMachine(actor, machineId, {
+        ...deletion,
+        registrationUserId: '64b000000000000000000002',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'INVALID_REQUEST' } });
+    await expect(
+      f.service.deleteMachine(actor, machineId, {
+        ...deletion,
+        expectedUserRevision: 1,
+      }),
+    ).rejects.toMatchObject({ response: { code: 'REVISION_CONFLICT' } });
+    expect(f.MachineModel.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(f.users.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('allows deletion when the known registering account no longer exists', async () => {
+    const f = deletionFixture();
+    f.users.findById.mockReturnValue(chain(null));
+    await expect(
+      f.service.deleteMachine(actor, machineId, deletion),
+    ).resolves.toMatchObject({
+      status: 'succeeded',
+    });
+    expect(f.users.updateOne).not.toHaveBeenCalled();
+    expect(f.audit.record).not.toHaveBeenCalled();
+  });
+
+  it('keeps deleted machines inaccessible to other lifecycle commands', async () => {
+    const f = deletionFixture();
+    f.MachineModel.findById.mockReturnValue(
+      chain({
+        _id: machineId,
+        status: 'revoked',
+        revision: 4,
+        deletedAt: new Date(),
+      }),
+    );
+    await expect(
+      f.service.resume(actor, machineId, {
+        ...deletion,
+        expectedRevision: 4,
+      }),
+    ).rejects.toMatchObject({ response: { code: 'RESOURCE_NOT_FOUND' } });
+    expect(f.MachineModel.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('issues an approved Google user a private one-use credential with user provenance', async () => {
+    const f = fixture();
+    const issued = await f.service.createUserInvitation(
+      registeredByUserId,
+      googleIdentity,
+    );
+    expect(issued.credential).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(Date.parse(issued.expiresAt) - Date.now()).toBeGreaterThan(
+      14 * 60_000,
+    );
+    const stored = f.invitations.create.mock.calls[0][0][0];
+    expect(stored).toMatchObject({
+      registeredByUserId,
+      createdByUid: googleIdentity.uid,
+      state: 'active',
+    });
+    expect(stored).not.toHaveProperty('credential');
+    expect(stored.codeDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(f.operations.run).not.toHaveBeenCalled();
+    expect(f.users.updateOne.mock.calls[0][0]).toMatchObject({
+      _id: registeredByUserId,
+      firebaseUid: googleIdentity.uid,
+      status: 'active',
+      workerRegistrationAllowed: true,
+    });
+  });
+
+  it('requires the verified current Google provider and a transactional registration grant', async () => {
+    const f = fixture();
+    await expect(
+      f.service.createUserInvitation(registeredByUserId, {
+        ...googleIdentity,
+        provider: 'password',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'GOOGLE_SIGN_IN_REQUIRED' } });
+    expect(f.users.updateOne).not.toHaveBeenCalled();
+    f.users.updateOne.mockResolvedValue({ modifiedCount: 0 });
+    await expect(
+      f.service.createUserInvitation(registeredByUserId, googleIdentity),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_REGISTRATION_NOT_ALLOWED' },
+    });
+    expect(f.invitations.create).not.toHaveBeenCalled();
+  });
+
+  it('fences a user-originated new exchange and preserves its registering identity', async () => {
+    const f = fixture();
+    const invitationId = '790fb01e-6026-4fd1-8f77-8c584aa10f37';
+    f.invitations.findById.mockReturnValue(
+      chain({
+        _id: invitationId,
+        registeredByUserId,
+        state: 'active',
+        useCount: 0,
+        revision: 0,
+        expiresAt: new Date(Date.now() + 60_000),
+      }),
+    );
+    f.invitations.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    f.installations.create.mockImplementation(async ([value]) => [
+      { toObject: () => value },
+    ]);
+    const principal = {
+      kind: 'enrollment' as const,
+      subjectId: invitationId,
+      credential: Buffer.alloc(32, 3).toString('base64url'),
+    };
+    f.users.updateOne.mockResolvedValueOnce({ modifiedCount: 0 });
+    await expect(
+      f.service.exchange(principal, {
+        requestId: '32410a14-e85a-4a1d-bb99-61fa54b07eaa',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'WORKER_FORBIDDEN' } });
+    expect(f.invitations.updateOne).not.toHaveBeenCalled();
+    await f.service.exchange(principal, {
+      requestId: '32410a14-e85a-4a1d-bb99-61fa54b07eaa',
+    });
+    expect(f.installations.create.mock.calls[0][0][0]).toMatchObject({
+      registeredByUserId,
+    });
+  });
+
+  it('rejects revoked registration permission before new activation without creating a machine', async () => {
+    const f = fixture();
+    const id = 'e3f4f07b-cdf0-42ef-a9aa-7bf8e5532604';
+    f.installations.findById.mockReturnValue(
+      chain({
+        _id: id,
+        registeredByUserId,
+        phase: 'reported',
+        revision: 1,
+        hardwareReport: {},
+        runtimeIdentity: {},
+        qualificationObject: {},
+        capabilities: [{}],
+      }),
+    );
+    f.users.updateOne.mockResolvedValue({ modifiedCount: 0 });
+    await expect(
+      f.service.activate(
+        { kind: 'installation', subjectId: id, credential: 'x'.repeat(43) },
+        id,
+        {
+          requestId: '91e36646-b142-498e-821f-b2fbc07432ad',
+          expectedRevision: 1,
+          credentialDigest: 'b'.repeat(64),
+        },
+      ),
+    ).rejects.toMatchObject({ response: { code: 'WORKER_FORBIDDEN' } });
+    expect(f.MachineModel).not.toHaveBeenCalled();
+    expect(f.installations.updateOne).not.toHaveBeenCalled();
+  });
   it('returns an enrollment secret once while persisting only its digest', async () => {
     const f = fixture();
     f.invitations.create.mockResolvedValue([{}]);
@@ -492,6 +762,7 @@ describe('worker enrollment lifecycle', () => {
       chain({
         _id: id,
         phase: 'activated',
+        registeredByUserId,
         machineId,
         activationRequestId: requestId,
       }),
@@ -509,6 +780,7 @@ describe('worker enrollment lifecycle', () => {
       subjectId: id,
       credential: Buffer.alloc(32, 11).toString('base64url'),
     };
+    f.users.updateOne.mockResolvedValue({ modifiedCount: 0 });
 
     await expect(
       f.service.activate(principal, id, {
@@ -517,6 +789,7 @@ describe('worker enrollment lifecycle', () => {
         credentialDigest,
       }),
     ).resolves.toMatchObject({ machineId, replayed: true });
+    expect(f.users.updateOne).not.toHaveBeenCalled();
     await expect(
       f.service.activate(principal, id, {
         requestId,

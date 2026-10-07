@@ -273,7 +273,11 @@ function ConnectedShell() {
                 <Moon aria-hidden="true" />
               )}
             </Button>
-            <Button variant="outline" onClick={() => void signOut()}>
+            <Button
+              variant="outline"
+              aria-label="Sign out"
+              onClick={() => void signOut()}
+            >
               <LogOut aria-hidden="true" />{" "}
               <span className="hidden sm:inline">Sign out</span>
             </Button>

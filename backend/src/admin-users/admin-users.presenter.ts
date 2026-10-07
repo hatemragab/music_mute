@@ -17,7 +17,7 @@ export type AdminUserView = Pick<
   | 'updatedAt'
 > & {
   _id: Types.ObjectId;
-};
+} & Partial<Pick<User, 'workerRegistrationAllowed' | 'providerIds'>>;
 
 export function presentAdminUser(user: AdminUserView) {
   return {
@@ -38,6 +38,8 @@ export function presentAdminUserDetail(
 ) {
   return {
     ...presentAdminUser(user),
+    workerRegistrationAllowed: user.workerRegistrationAllowed === true,
+    providers: [...(user.providerIds ?? [])],
     processingCounts,
     recentJobIds,
     deletion: user.deletionRequestId
