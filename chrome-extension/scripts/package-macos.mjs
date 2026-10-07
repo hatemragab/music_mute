@@ -745,6 +745,7 @@ async function packageMacos() {
       outputDirectory: join(buildRoot, "runtime-release.noindex"),
       sourceVersion: runtimeSourceVersion,
       signing,
+      downloadConfiguration: runtimeDownload,
     });
   } else if (runtimeReusePackageResult) {
     stage("REUSE_RUNTIME");

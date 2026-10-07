@@ -9,6 +9,7 @@ type Component = {
   file_paths: string[];
 };
 type Manifest = {
+  url: string;
   archive_format: string;
   archive_bytes: number;
   archive_sha256: string;
@@ -21,6 +22,10 @@ const module = (await import(
 )) as {
   runtimeComponentForPath(path: string): string;
   validateRuntimeComponents(runtime: Manifest): void;
+  relocateRuntimeComponents(
+    runtime: Manifest,
+    configuration: { baseURL?: URL; redirectHosts?: string },
+  ): Manifest;
 };
 
 function fixture(): Manifest {
@@ -34,6 +39,7 @@ function fixture(): Manifest {
     archive_sha256: createHash("sha256").update(component.id).digest("hex"),
   }));
   return {
+    url: "https://github.com/ahmed-dev-1/musicmute-downloads/releases/download/v1/runtime-bootstrap.json",
     archive_format: "zip-components",
     archive_bytes: 201,
     archive_sha256: createHash("sha256")
@@ -70,6 +76,66 @@ describe("runtime component distribution", () => {
 
   it("accepts a complete disjoint inventory with exact aggregate sizes and hashes", () => {
     expect(() => module.validateRuntimeComponents(fixture())).not.toThrow();
+  });
+
+  it("relocates every component and the host allowlist without changing payload identity", () => {
+    const original = fixture();
+    const relocated = module.relocateRuntimeComponents(original, {
+      baseURL: new URL("https://downloads.music-mute.com/releases/runtime-v1/"),
+      redirectHosts: "",
+    });
+    expect(relocated.url).toBe(
+      "https://downloads.music-mute.com/releases/runtime-v1/runtime-bootstrap.json",
+    );
+    expect(relocated.download_hosts).toEqual(["downloads.music-mute.com"]);
+    expect(relocated.components.map((item) => item.url)).toEqual([
+      "https://downloads.music-mute.com/releases/runtime-v1/python-ml.zip",
+      "https://downloads.music-mute.com/releases/runtime-v1/node.zip",
+    ]);
+    expect(
+      relocated.components.map(({ url: _url, ...identity }) => identity),
+    ).toEqual(
+      original.components.map(({ url: _url, ...identity }) => identity),
+    );
+    expect(relocated.archive_sha256).toBe(original.archive_sha256);
+    expect(relocated.archive_bytes).toBe(original.archive_bytes);
+    expect(relocated.files).toEqual(original.files);
+    expect(original.download_hosts).toEqual([
+      "github.com",
+      "release-assets.githubusercontent.com",
+    ]);
+    expect(original.components[0]!.url).toContain("github.com");
+  });
+
+  it.each([
+    "http://downloads.music-mute.com/releases/",
+    "https://user:password@downloads.music-mute.com/releases/",
+    "https://downloads.music-mute.com/releases/?token=secret",
+  ])("rejects an unsafe relocation base %s", (url) => {
+    expect(() =>
+      module.relocateRuntimeComponents(fixture(), {
+        baseURL: new URL(url),
+        redirectHosts: "",
+      }),
+    ).toThrow();
+  });
+
+  it("keeps the bootstrap filename when publishing a distinct relocated manifest", () => {
+    const original = fixture();
+    original.url = original.url.replace(
+      "runtime-bootstrap.json",
+      "runtime-bootstrap-r2.json",
+    );
+    expect(
+      module.relocateRuntimeComponents(original, {
+        baseURL: new URL(
+          "https://downloads.music-mute.com/releases/runtime-v1/",
+        ),
+        redirectHosts: "",
+      }).url,
+    ).toBe(
+      "https://downloads.music-mute.com/releases/runtime-v1/runtime-bootstrap-r2.json",
+    );
   });
 
   it.each([

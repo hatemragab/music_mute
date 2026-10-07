@@ -49,6 +49,19 @@ copy the URL and headers supplied by the backend, never construct bucket URLs or
 receive R2 access keys. Do not introduce Cloudflare Workers, an R2 public domain,
 or another paid service for ordinary transfers.
 
+## Public companion release assets
+
+On October 7, 2026, the owner explicitly authorized public download migration to
+R2. The release assets live in a separate Standard bucket, `musicmute-downloads`,
+under `releases/`, with custom domain `downloads.music-mute.com`. Uploads were
+performed through Chrome. This is a release-distribution exception to the ordinary
+private application-transfer architecture above; the `music-mute` media bucket,
+its credentials, grants, CORS and public-access policy remain unchanged. No new
+storage credentials or paid proxy service were added. The approved upstream-only
+model distribution remains unchanged. See
+[the companion migration record](../../chrome-extension/docs/r2-downloads.md) for
+exact artifacts, current Prepare URLs and validation. No benchmarks were run.
+
 ## Backend configuration and deployment
 
 Create the private `music-mute` bucket with **Standard** storage. Keep the `r2.dev`

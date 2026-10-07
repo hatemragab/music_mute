@@ -123,6 +123,33 @@ export function validateRuntimeComponents(runtime) {
   }
 }
 
+// Relocate delivery only: the verified component bytes, inventory, signatures
+// and runtime identity remain unchanged when moving a release to another host.
+export function relocateRuntimeComponents(runtime, configuration) {
+  validateRuntimeComponents(runtime);
+  const original = new URL(runtime.url);
+  const download = runtimeDownloadConfiguration({
+    baseURL: configuration.baseURL?.href ?? new URL(".", original).href,
+    redirectHosts:
+      configuration.redirectHosts ??
+      runtime.download_hosts
+        .filter((host) => host !== original.hostname)
+        .join(","),
+  });
+  const relocated = {
+    ...runtime,
+    url: new URL(basename(original.pathname), download.baseURL).href,
+    download_hosts: download.downloadHosts,
+    components: runtime.components.map((component) => ({
+      ...component,
+      url: new URL(basename(new URL(component.url).pathname), download.baseURL)
+        .href,
+    })),
+  };
+  validateRuntimeComponents(relocated);
+  return relocated;
+}
+
 async function digest(path) {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(path)) hash.update(chunk);
@@ -289,6 +316,7 @@ export async function importRuntimeComponents({
   outputDirectory,
   sourceVersion,
   signing,
+  downloadConfiguration,
 }) {
   const source = await realpath(directory);
   assert.equal(source, resolve(directory), "RUNTIME_COMPONENT_SOURCE_UNSAFE");
@@ -303,7 +331,10 @@ export async function importRuntimeComponents({
   const sourceManifest = join(source, "runtime-bootstrap.json");
   await safeFile(sourceManifest, 16 * 1024 * 1024);
   const document = JSON.parse(await readFile(sourceManifest, "utf8"));
-  const runtime = document.runtime;
+  const runtime = downloadConfiguration
+    ? relocateRuntimeComponents(document.runtime, downloadConfiguration)
+    : document.runtime;
+  document.runtime = runtime;
   assert.ok(
     document.schema_version === 1 &&
       runtime.source_version === sourceVersion &&
@@ -372,7 +403,11 @@ export async function importRuntimeComponents({
     await rm(extraction, { recursive: true, force: true });
   }
   const manifest = join(outputDirectory, "runtime-bootstrap.json");
-  await copyFile(sourceManifest, manifest);
+  if (downloadConfiguration)
+    await writeFile(manifest, JSON.stringify(document, null, 2) + "\n", {
+      mode: 0o600,
+    });
+  else await copyFile(sourceManifest, manifest);
   await chmod(manifest, 0o600);
   return {
     id: runtime.id,

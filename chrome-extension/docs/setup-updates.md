@@ -6,6 +6,17 @@ app-closed extension processing, add explicit account cloud handoff and Sparkle
 updates. Apple account/certificate/notarization work and Chrome Web Store
 packaging/publication/deployment are deferred by the owner.
 
+## R2 download migration — 2026-10-07
+
+The recommended build is now `1791395910`. Its Prepare manifest uses
+`https://downloads.music-mute.com/releases/macos-runtime-2026-10-06/` for all
+seven runtime ZIPs, with the same component hashes, sizes and runtime identity.
+The public download bucket has a dedicated `releases/` folder and does not expose
+the application's private media bucket. Kim Vocal 2 remains upstream-only.
+See [the current migration record](r2-downloads.md) for the app/checksum links,
+packaging configuration and executed checks. Older GitHub sections below are
+historical; already downloaded older apps retain their sealed URLs.
+
 ## Unpacked Chrome extension in app data — 2026-10-07
 
 Prepare installs the packaged extension at

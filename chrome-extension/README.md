@@ -1,10 +1,11 @@
 # MusicMute Local — macOS app and Chrome extension
 
-GitHub download distribution now uses separate runtime component ZIPs from
-`ahmed-dev-1/musicmute-downloads`, with pinned release URLs and hashes. Each
-successful setup stage removes its downloaded ZIP. Kim Vocal 2 stays at its
-approved upstream source. See [staged downloads](docs/setup-updates.md#staged-github-downloads--2026-10-06)
-for the contract and development-release limits.
+Companion downloads now use the separate public R2 release bucket at
+`https://downloads.music-mute.com/releases/`. The recommended
+[Mac app, build 1791395910](https://downloads.music-mute.com/releases/macos-store-companion-2026-10-07/MusicMuteLocal-0.1.1-arm64-development-build-1791395910.dmg), seals R2 URLs for all seven checksum-verified runtime ZIPs. Each successful
+setup stage removes its downloaded ZIP. Kim Vocal 2 stays at its approved
+upstream source. See [R2 downloads](docs/r2-downloads.md) for the uploaded assets,
+packaging command, verification scope and development-release limits.
 
 The 2026-10-04 setup and update work adds bundled Deno, matching yt-dlp/EJS and
 the PO-token provider, offline component health checks, clear extension errors,

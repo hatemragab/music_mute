@@ -8,6 +8,16 @@ The browser archive excludes the companion, model, native runtime, source maps,
 profiles, local reports and credentials. A usable public release also requires
 an independently distributed MusicMute Mac app.
 
+## Companion R2 downloads — October 7, 2026
+
+The recommended companion is now [MusicMute Local 0.1.1, build 1791395910](https://downloads.music-mute.com/releases/macos-store-companion-2026-10-07/MusicMuteLocal-0.1.1-arm64-development-build-1791395910.dmg).
+Its Prepare manifest uses the R2 domain for all seven runtime ZIPs, preserving
+their checksums, bytes and runtime identity. The app-data extension installation
+and Library Filter/Sort fix remain included. This is still an ad-hoc development
+release; it does not change the Store draft or authorize Store publication.
+See [R2 distribution evidence](r2-downloads.md) for uploaded files, checksum links
+and the precise validation scope. Earlier companion checkpoints below are historical.
+
 ## Companion app-data extension update — October 7, 2026
 
 The recommended companion is now
