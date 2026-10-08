@@ -158,6 +158,52 @@ describe('Public account, privacy, and support resources', () => {
     );
   });
 
+  it('describes background-music removal and distinguishes audio processing from YouTube video downloads', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/privacy')
+      .expect(200);
+    for (const disclosure of [
+      'MusicMute removes background music from audio to produce voice-only results',
+      'It processes only the selected audio and does not download the video file',
+      'retrieves an audio-only stream',
+      'The source platform and its media servers receive these requests',
+      'retrieves the audio, removes its background music, and delivers the voice-only result to your Mac for playback',
+    ]) {
+      expect(response.text).toContain(disclosure);
+    }
+    expect(response.text).not.toContain('permission to download');
+    expect(response.text).not.toContain('does not download from YouTube');
+    expect(response.text).not.toContain('vocals are downloaded');
+  });
+
+  it('limits YouTube mentions to the Chrome extension section', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/privacy')
+      .expect(200);
+    const extension = response.text.match(
+      /<section class="card" aria-labelledby="local">[\s\S]*?<\/section>/,
+    )?.[0];
+    expect(extension).toBeDefined();
+    expect(extension).toContain('Chrome extension and Mac companion');
+    expect(extension).toContain('supported YouTube watch video');
+    expect(extension).toContain(
+      'MusicMute is independent of YouTube and Google',
+    );
+    expect(extension?.match(/youtube/gi)).toHaveLength(2);
+    expect(response.text.replace(extension ?? '', '')).not.toMatch(/youtube/i);
+    for (const disclosure of [
+      'Chrome playback and preferences',
+      'selected canonical URL and video identifier',
+      'does not read general browsing history',
+      'Account credentials and guest capabilities are handled by the Mac app',
+      'The source platform and its media servers receive these requests',
+      'upload original audio, vocals, and associated video metadata in the background, even while signed out',
+      'no automatic expiry',
+    ]) {
+      expect(extension).toContain(disclosure);
+    }
+  });
+
   it('distinguishes Chrome and Mac data handling from other client features', async () => {
     const response = await request(app.getHttpServer())
       .get('/privacy')
@@ -168,11 +214,12 @@ describe('Public account, privacy, and support resources', () => {
       'playback position and speed, volume, mute state',
       'player/advertisement state',
       'Playback and language preferences and bounded diagnostics',
-      'does not read general browsing history, browser cookies, your Google password, or precise geolocation',
+      'does not read general browsing history, browser cookies, your Google password, or GPS location',
+      'does not request browser geolocation permission',
       'does not log typed text or general keyboard activity',
       'Account credentials and guest capabilities are handled by the Mac app',
       'are not sent to the Chrome extension',
-      'logged-out YouTube guest',
+      'logged-out guest of the source platform',
       'does not import your Chrome account, profile, or browser cookies',
       'without a per-video confirmation in Chrome',
       'Automatic preparation never submits new cloud processing',
@@ -182,6 +229,85 @@ describe('Public account, privacy, and support resources', () => {
     ]) {
       expect(response.text).toContain(disclosure);
     }
+  });
+
+  it('discloses retained IP-derived device location without claiming GPS access or accuracy', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/privacy')
+      .expect(200);
+    for (const disclosure of [
+      'Cloudflare estimates location from the IP address used for a network request',
+      'country, continent, region and region code, city, postal code, metro code, timezone, and estimated latitude and longitude',
+      'When an authenticated request identifies an account installation',
+      "retains the latest available observation in that account's device record",
+      'IP-derived estimates, not GPS measurements',
+      'may be inaccurate and do not guarantee your exact location',
+      'does not request GPS access or device/browser location permission',
+      'new link-import controls are shown in the Android, iOS, and Mac apps',
+      'does not stop accepted imports or processing work',
+      "associated with the account's device list for account and device management",
+      'supplies the IP-derived location described above',
+      'retained with its account-linked device record and removed during permanent account cleanup',
+      'Hiding a device from account history does not by itself erase',
+    ]) {
+      expect(response.text).toContain(disclosure);
+    }
+    expect(response.text).not.toContain(
+      'These network requests do not give MusicMute GPS or precise-geolocation access',
+    );
+    expect(response.text).not.toContain('or precise geolocation');
+    expect(response.headers['cache-control']).toBe('no-store, no-transform');
+    expect(response.text).not.toContain('<script');
+    expect(response.text).not.toContain('<form');
+  });
+
+  it('identifies provider roles without treating private files as shared media', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/privacy')
+      .expect(200);
+    const providers = response.text.match(
+      /<section class="card" aria-labelledby="providers">[\s\S]*?<\/section>/,
+    )?.[0];
+    expect(providers).toBeDefined();
+    for (const role of [
+      'Firebase/Google:</strong> handles sign-in, account identity, authentication security',
+      'uses MongoDB to retain account, session, processing, and usage records',
+      'Cloudflare R2 stores private input audio, voice-only results, and shared media',
+      'Hosting and network providers:</strong> run MusicMute',
+      'Cloudflare also provides network delivery and protection',
+      'receives privacy-filtered crash and reliability diagnostics to diagnose failures',
+      'reports exclude audio, credentials, and private media URLs',
+      'not personal local file uploads',
+      'private media storage is separate',
+    ]) {
+      expect(providers).toContain(role);
+    }
+    expect(response.text).toContain(
+      'Local file uploads and their results remain private to the owning account',
+    );
+    expect(response.text).not.toContain(
+      'Results are never made available to other users',
+    );
+  });
+
+  it('qualifies optional shared saving and account-specific local cleanup', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/privacy')
+      .expect(200);
+    for (const disclosure of [
+      'If the optional shared service is unavailable, local preparation can continue without shared saving',
+      'Native Mac preparation of audio from the same supported watch-page feature can release its prepared pair for saving when preparation completes',
+      'without waiting for Chrome playback',
+      'On Android, signing out clears the temporary listening-tools cache',
+      'including temporary passage exports',
+      'other retained media and history remain separated by account',
+      'Account deletion clears account-owned private copies when the app receives an accepted deletion response',
+    ]) {
+      expect(response.text).toContain(disclosure);
+    }
+    expect(response.text).not.toContain(
+      'Signing out does not erase retained cloud or local data',
+    );
   });
 
   it('discloses signed-out shared saving, persistence, and the limits of local controls', async () => {
@@ -200,7 +326,7 @@ describe('Public account, privacy, and support resources', () => {
       'local cache clearing, job deletion, or account/guest deletion',
       'does not delete a shared result or cancel an already released background save',
       'Removing the Chrome extension removes its Chrome settings',
-      'does not uninstall the Mac app or delete its files, cloud Library, or accepted shared YouTube results',
+      'does not uninstall the Mac app or delete its files, cloud Library, or accepted shared public-link results',
       'account-scoped records or scoped guest capabilities',
     ]) {
       expect(response.text).toContain(disclosure);
@@ -219,9 +345,11 @@ describe('Public account, privacy, and support resources', () => {
       'Firebase/Google',
       'MongoDB and Cloudflare R2',
       'private audio-acquisition providers',
-      'YouTube and its media servers',
+      'the source platform and its media servers described in the Chrome extension and Mac companion section receive local audio-acquisition requests',
+      "Cloudflare R2's public release bucket delivers current Mac app and native runtime assets",
       'GitHub and its download infrastructure',
       'approved upstream GitHub release',
+      'may deliver runtime assets for older app versions',
       'not destinations for user audio or diagnostic reports',
       'Browser executable code is bundled with the Chrome extension',
       'checksum-verified native runtime components and model data',
@@ -247,7 +375,7 @@ describe('Public account, privacy, and support resources', () => {
       .get('/privacy')
       .expect(200);
     for (const disclosure of [
-      'Last updated 2026-10-07',
+      'Last updated 2026-10-08',
       'Chrome Web Store Limited Use',
       'use and transfer of user data complies with',
       'including its Limited Use requirements',
@@ -262,8 +390,8 @@ describe('Public account, privacy, and support resources', () => {
       expect(response.text).toContain(disclosure);
     }
     expect(response.text).not.toContain('Continued use after');
-    expect(PUBLIC_POLICY_DEFAULTS.policyVersion).toBe('2026-10-07');
-    expect(PUBLIC_POLICY_DEFAULTS.policyUpdatedAt).toBe('2026-10-07T00:00:00Z');
+    expect(PUBLIC_POLICY_DEFAULTS.policyVersion).toBe('2026-10-08');
+    expect(PUBLIC_POLICY_DEFAULTS.policyUpdatedAt).toBe('2026-10-08T00:00:00Z');
   });
 
   it('escapes configured operator and retention text on the unified privacy page', async () => {

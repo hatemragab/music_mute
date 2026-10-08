@@ -3,8 +3,8 @@ export const PUBLIC_POLICY_DEFAULTS = {
   developerName: 'MusicMute',
   publicOrigin: 'https://api.music-mute.com',
   supportEmail: 'hatemragapdev@gmail.com',
-  policyVersion: '2026-10-07',
-  policyUpdatedAt: '2026-10-07T00:00:00Z',
+  policyVersion: '2026-10-08',
+  policyUpdatedAt: '2026-10-08T00:00:00Z',
   recoveryPeriodDays: 15,
   replayFenceHours: 24,
   deletionTimeframe:
