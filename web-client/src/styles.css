@@ -1115,6 +1115,11 @@ html[dir="rtl"] .skip-icon {
   color: var(--muted);
   font-size: 1.3rem;
 }
+.auth-intro .auth-product-copy {
+  font-size: 1rem;
+  line-height: 1.5;
+  margin: 0.75rem 0;
+}
 .auth-card {
   background: var(--surface);
   border: 1px solid var(--border);

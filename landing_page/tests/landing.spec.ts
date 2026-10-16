@@ -201,21 +201,72 @@ test("switches to an addressable persisted Arabic RTL experience", async ({
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
 });
 
-test.describe("automatic browser-language detection", () => {
+test.describe("stable language URLs", () => {
   test.use({ locale: "ar-EG" });
 
-  test("does not turn an automatic Arabic choice into a saved override", async ({
+  test("keeps the English URL English for an Arabic browser", async ({
     page,
   }) => {
     await page.goto("/");
 
-    await expect(page.locator("html")).toHaveAttribute("lang", "ar");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
     expect(
       await page.evaluate(() =>
         localStorage.getItem("musicmute.landing.language.v1"),
       ),
     ).toBeNull();
   });
+});
+
+test("hydrates the pre-rendered page without replacing its content or reporting errors", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  await page.addInitScript(() =>
+    localStorage.setItem("musicmute.landing.language.v1", "ar"),
+  );
+  await page.goto("/");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await page.getByRole("tab", { name: "Voice only" }).click();
+  await expect(page.locator("audio")).toHaveAttribute(
+    "src",
+    "/audio/voice-only.mp3",
+  );
+  expect(errors).toEqual([]);
+});
+
+test.describe("content without JavaScript", () => {
+  test.use({ javaScriptEnabled: false });
+
+  for (const [path, language, heading] of [
+    ["/", "en", "Remove the music. Keep the voice."],
+    ["/ar/", "ar", "أزل الموسيقى. واحتفظ بالصوت."],
+  ]) {
+    test(`renders ${language} product copy, navigation and questions`, async ({
+      page,
+    }) => {
+      await page.goto(path);
+      await expect(
+        page.getByRole("heading", { level: 1, name: heading }),
+      ).toBeVisible();
+      const languageLink = page.locator(".language-button");
+      await expect(languageLink).toHaveAttribute(
+        "href",
+        language === "en" ? "/ar/" : "/",
+      );
+      await page.locator("summary").first().click();
+      await expect(page.locator("details").first()).toHaveAttribute("open", "");
+      await languageLink.click();
+      await expect(page.locator("html")).toHaveAttribute(
+        "lang",
+        language === "en" ? "ar" : "en",
+      );
+    });
+  }
 });
 
 test("fits a phone viewport and provides keyboard bypass navigation", async ({

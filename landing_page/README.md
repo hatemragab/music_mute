@@ -7,14 +7,19 @@ with the currently verified destinations.
 ## What is included
 
 - Responsive one-page React/TypeScript site with English and Arabic RTL.
-- Browser-language detection, saved explicit override, English fallback, and an
-  addressable `/ar/` route with localized metadata.
+- Stable English `/` and Arabic `/ar/` URLs, with crawlable language links and
+  localized metadata. Browser language does not change a URL's language.
+- Complete build-time HTML rendering followed by React hydration, so product copy,
+  links and FAQ remain readable when JavaScript is unavailable.
 - Product explanation, supported-input caveats, three-step journey, features,
   a synchronized original/voice-only listening demo, real-app showcase, privacy
   controls, honest platform statuses, FAQ, and `#downloads` anchor.
 - Centralized public destinations in `src/product-links.ts`.
 - Reciprocal English/Arabic crawl metadata, canonical URLs, and the existing Solo
   Signal favicon.
+- A shared social preview, truthful structured product/FAQ data, and public
+  `llms.txt` guidance for AI readers. Structured data does not guarantee rich results
+  or citations; `llms.txt` supplements the ordinary crawlable pages.
 - Minimal Node static server with `/healthz`, strict security headers, caching rules,
   explicit 404s, and graceful shutdown.
 - Allowlisted CapRover source archive that includes the public site artwork while
@@ -93,13 +98,21 @@ The command prints an absolute path to `landing-page.tar`. For CapRover app `www
 - set the container HTTP port to `3000`;
 - use `/healthz` for the health check.
 
-The canonical public URL is `https://music-mute.com/`, because existing MusicMute
-clients already use `https://music-mute.com/#downloads`. Attach the apex domain to
-the landing app and redirect `www.music-mute.com` to the apex before publication.
-On 2026-10-07, a read-only network check found the CapRover placeholder at `www`
-while the apex did not resolve, so that DNS/redirect step is still required.
+The canonical public URL is `https://music-mute.com/`, matching existing clients'
+Downloads destination. On 2026-10-16, the missing apex DNS record was added and
+the domain was connected to this CapRover app with HTTPS. The known
+`www.music-mute.com` host permanently redirects to the apex, preserving the path
+and query string. Both public language URLs and the sitemap were checked live;
+Google Search Console successfully read the sitemap and discovered both URLs.
+See [search discovery evidence](../docs/seo-discovery/VALIDATION-2026-10-16.md).
 
 No deployment is performed by the package or verification commands.
+
+Optionally set `INDEXNOW_KEY` in the deployment environment to enable IndexNow
+ownership verification. Use 8–128 ASCII letters, digits or hyphens. The server
+serves only `/<configured-key>.txt` with that exact key, no caching and `noindex`;
+invalid configured values fail at startup. Keep the deployed key out of source.
+This endpoint enables verification; URL submission is a separate operation.
 
 ## Content boundaries
 

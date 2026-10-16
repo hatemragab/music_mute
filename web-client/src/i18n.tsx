@@ -10,6 +10,10 @@ import {
 const en = {
   brand: "MusicMute",
   tagline: "Make room for your voice.",
+  webAppDescription:
+    "Remove background music and keep the voice. Upload audio or import a supported link, then listen to completed vocal tracks in your library.",
+  webAppRequirements:
+    "Sign in to get started. Only process audio you have permission to use; results vary with the recording.",
   macosAvailableTitle: "MusicMute for macOS",
   macosAvailableBody:
     "MusicMute runs on Mac. The DMG will be published with our other apps in Downloads.",
@@ -242,6 +246,10 @@ type MessageKey = keyof typeof en;
 const ar: Record<MessageKey, string> = {
   brand: "ميوزك ميوت",
   tagline: "اترك مساحة لصوتك.",
+  webAppDescription:
+    "أزل الموسيقى الخلفية واحتفظ بالصوت. ارفع ملفًا صوتيًا أو استورد رابطًا مدعومًا، ثم استمع إلى المقاطع الصوتية الجاهزة في مكتبتك.",
+  webAppRequirements:
+    "سجّل الدخول للبدء. عالج فقط الصوت الذي تملك الإذن باستخدامه؛ تختلف النتائج حسب التسجيل.",
   macosAvailableTitle: "ميوزك ميوت على macOS",
   macosAvailableBody:
     "يعمل ميوزك ميوت على Mac. سيُنشر ملف DMG مع تطبيقاتنا الأخرى في قسم التنزيلات.",

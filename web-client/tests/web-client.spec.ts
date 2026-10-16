@@ -11,6 +11,11 @@ test("signed-out layout stays usable in English and Arabic at target widths", as
     await page.goto("/");
     await page.getByRole("button", { name: "English", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    await expect(
+      page.getByText("Remove background music and keep the voice.", {
+        exact: false,
+      }),
+    ).toBeVisible();
     const googleButton = page.getByRole("button", {
       name: "Continue with Google",
     });
@@ -34,6 +39,9 @@ test("signed-out layout stays usable in English and Arabic at target widths", as
     await page.getByRole("button", { name: "العربية" }).click();
     await expect(
       page.getByRole("heading", { name: "تسجيل الدخول" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("أزل الموسيقى الخلفية واحتفظ بالصوت.", { exact: false }),
     ).toBeVisible();
     await expect(
       page.getByRole("link", { name: "عرض تنزيلات macOS" }),

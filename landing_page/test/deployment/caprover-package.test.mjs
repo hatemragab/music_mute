@@ -35,6 +35,10 @@ describe("CapRover landing-page package", () => {
       "landing_page/package-lock.json",
       "landing_page/ar/index.html",
       "landing_page/src/main.tsx",
+      "landing_page/src/prerender.tsx",
+      "landing_page/scripts/prerender.mjs",
+      "landing_page/public/llms.txt",
+      "landing_page/public/social-preview.png",
       "landing_page/public/favicon.svg",
       "landing_page/public/audio/original.webm",
       "landing_page/public/audio/voice-only.mp3",
@@ -43,10 +47,13 @@ describe("CapRover landing-page package", () => {
       assert.equal(entries.includes(expected), true, `missing ${expected}`);
 
     assert.deepEqual(
-      entries.filter((entry) =>
-        /(^|\/)(?:\.env(?:\.|$)|node_modules|dist|coverage|test-results|playwright-report|tests?|docs|scripts)|\.(?:test|spec)\.[cm]?[jt]sx?$/.test(
-          entry,
-        ),
+      entries.filter(
+        (entry) =>
+          entry !== "landing_page/scripts" &&
+          entry !== "landing_page/scripts/prerender.mjs" &&
+          /(^|\/)(?:\.env(?:\.|$)|node_modules|dist|coverage|test-results|playwright-report|tests?|docs|scripts)|\.(?:test|spec)\.[cm]?[jt]sx?$/.test(
+            entry,
+          ),
       ),
       [],
     );

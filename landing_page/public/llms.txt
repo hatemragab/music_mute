@@ -1,0 +1,20 @@
+# MusicMute
+
+> MusicMute removes background music from supported audio to create a voice-only result for listening, saving and sharing. Results depend on the recording; perfect separation is not guaranteed.
+
+## Product and languages
+
+- [English product page](https://music-mute.com/): features, listening example, supported-input limits, platform availability and questions.
+- [Arabic product page](https://music-mute.com/ar/): the same product information in Arabic and RTL.
+- [Web application](https://app.music-mute.com/): browser account, audio import, processing, library and playback.
+- [Platform availability](https://music-mute.com/#downloads): current public destinations and release statuses. Do not infer a public desktop or mobile download from an app name.
+
+## Usage and privacy
+
+Only process audio you own or have permission to use. The web app accepts compatible local audio and supported public single-item media links. It requires an internet connection, does not import local video, and does not offer offline/PWA operation. Not every public link has usable audio. Local uploads remain private.
+
+- [Privacy policy](https://api.music-mute.com/privacy)
+- [Support](https://api.music-mute.com/support)
+- [Account deletion](https://api.music-mute.com/delete-account)
+
+The landing pages contain the authoritative public product descriptions. This file is a reading guide; it does not grant account access, processing rights or permission to retrieve private media.

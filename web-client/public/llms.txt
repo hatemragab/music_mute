@@ -1,0 +1,21 @@
+# MusicMute Web App
+
+> MusicMute isolates vocals from audio to reduce background music and keep the voice. The web app is at https://app.music-mute.com/.
+
+## Public pages
+
+- [Web app](https://app.music-mute.com/): public introduction and account sign-in.
+- [MusicMute](https://music-mute.com/): product information and app destinations.
+
+## Web app capabilities
+
+- Sign in or create an account with email or Google.
+- Upload local audio or import a supported source link. The web app does not accept local video files.
+- Follow processing updates, keep completed tracks in the online library, and play vocal audio.
+- Use the English or Arabic interface. JavaScript and an account are required for app features.
+
+## Limits and access
+
+Only process audio you own or have permission to use. Supported links depend on source availability, service policy, and account limits. Separation quality varies with the original recording; perfect removal is not guaranteed.
+
+Account, job, library, player, and settings pages require sign-in and are not public search content. This file describes public product capabilities only; it does not grant access to private audio or account data.

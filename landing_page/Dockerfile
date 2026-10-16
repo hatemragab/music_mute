@@ -6,6 +6,7 @@ COPY landing_page/index.html landing_page/tsconfig.json landing_page/vite.config
 COPY landing_page/ar ./ar
 COPY landing_page/public ./public
 COPY landing_page/src ./src
+COPY landing_page/scripts/prerender.mjs ./scripts/prerender.mjs
 RUN npm run build
 
 FROM node:24-alpine

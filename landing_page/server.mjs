@@ -95,7 +95,18 @@ function sendFileStream(file, response, options) {
   });
 }
 
-export function createLandingServer({ dist = DEFAULT_DIST } = {}) {
+export function createLandingServer({
+  dist = DEFAULT_DIST,
+  indexNowKey = process.env.INDEXNOW_KEY,
+} = {}) {
+  if (
+    indexNowKey !== undefined &&
+    (typeof indexNowKey !== "string" ||
+      !/^[A-Za-z0-9-]{8,128}$/.test(indexNowKey))
+  )
+    throw new Error(
+      "INDEXNOW_KEY must contain 8 to 128 ASCII letters, digits or hyphens.",
+    );
   const root = resolve(dist);
 
   return createServer(async (request, response) => {
@@ -108,12 +119,25 @@ export function createLandingServer({ dist = DEFAULT_DIST } = {}) {
 
     let pathname;
     let search;
+    let requestUrl;
     try {
-      const requestUrl = new URL(request.url || "/", "http://localhost");
+      requestUrl = new URL(request.url || "/", "http://localhost");
       pathname = decodeURIComponent(requestUrl.pathname);
       search = requestUrl.search;
     } catch {
       response.writeHead(400).end();
+      return;
+    }
+
+    if (
+      request.headers.host?.toLowerCase().replace(/:\d+$/, "") ===
+      "www.music-mute.com"
+    ) {
+      response.writeHead(308, {
+        Location: `https://music-mute.com${requestUrl.pathname}${search}`,
+        "Cache-Control": "no-store",
+      });
+      response.end();
       return;
     }
 
@@ -124,6 +148,17 @@ export function createLandingServer({ dist = DEFAULT_DIST } = {}) {
         "Cache-Control": "no-store",
       });
       response.end(request.method === "HEAD" ? undefined : "ok");
+      return;
+    }
+
+    if (indexNowKey && pathname === `/${indexNowKey}.txt`) {
+      response.setHeader("X-Robots-Tag", "noindex");
+      response.writeHead(200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Content-Length": String(indexNowKey.length),
+      });
+      response.end(request.method === "HEAD" ? undefined : indexNowKey);
       return;
     }
 
@@ -140,6 +175,18 @@ export function createLandingServer({ dist = DEFAULT_DIST } = {}) {
       response.end();
       return;
     }
+
+    if (pathname === "/index.html") {
+      response.writeHead(308, {
+        Location: `/${search}`,
+        "Cache-Control": "no-store",
+      });
+      response.end();
+      return;
+    }
+
+    if (pathname === "/" || pathname === "/ar/")
+      response.setHeader("Content-Language", pathname === "/ar/" ? "ar" : "en");
 
     const relativePath =
       pathname === "/"

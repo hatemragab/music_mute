@@ -79,6 +79,8 @@ export function AuthScreen() {
         <SoloSignalMark className="brand-mark" />
         <h1>{t("brand")}</h1>
         <p>{t("tagline")}</p>
+        <p className="auth-product-copy">{t("webAppDescription")}</p>
+        <p className="auth-product-copy">{t("webAppRequirements")}</p>
         <div className="wave-art" aria-hidden="true" />
         <MacDownloadCallout className="auth-platform-callout" />
       </div>

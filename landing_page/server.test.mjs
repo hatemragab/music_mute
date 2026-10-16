@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -72,6 +73,28 @@ describe("MusicMute landing server", () => {
     assert.equal(await response.text(), "ok");
   });
 
+  test("redirects only the known www host to the apex and preserves paths and query strings", async () => {
+    const response = await new Promise((done, reject) => {
+      get(
+        `${baseUrl}/ar/?source=test%20value`,
+        {
+          headers: { Host: "www.music-mute.com" },
+        },
+        done,
+      ).on("error", reject);
+    });
+    response.resume();
+    assert.equal(response.statusCode, 308);
+    assert.equal(
+      response.headers.location,
+      "https://music-mute.com/ar/?source=test%20value",
+    );
+
+    const local = await fetch(`${baseUrl}/`);
+    assert.equal(local.status, 200);
+    assert.equal(local.headers.get("location"), null);
+  });
+
   test("serves the Arabic route and canonicalizes its trailing slash", async () => {
     const redirect = await fetch(`${baseUrl}/ar?source=test`, {
       redirect: "manual",
@@ -84,6 +107,13 @@ describe("MusicMute landing server", () => {
     assert.equal(arabic.status, 200);
     assert.equal(arabic.headers.get("cache-control"), "no-store");
     assert.match(await arabic.text(), /lang="ar"/);
+    assert.equal(arabic.headers.get("content-language"), "ar");
+
+    const english = await fetch(`${baseUrl}/index.html?source=test`, {
+      redirect: "manual",
+    });
+    assert.equal(english.status, 308);
+    assert.equal(english.headers.get("location"), "/?source=test");
   });
 
   test("caches hashed assets immutably and crawl files conservatively", async () => {
@@ -262,5 +292,104 @@ describe("MusicMute landing server", () => {
       const response = await fetch(`${baseUrl}${pathname}`);
       assert.equal(response.status, 404, pathname);
     }
+  });
+});
+
+describe("published search documents", () => {
+  let baseUrl;
+  let server;
+
+  before(async () => {
+    server = createLandingServer();
+    await new Promise((done) => server.listen(0, "127.0.0.1", done));
+    baseUrl = `http://127.0.0.1:${server.address().port}`;
+  });
+
+  after(async () => {
+    await new Promise((done) => server.close(done));
+  });
+
+  test("serves complete localized HTML and JSON-LD before JavaScript executes", async () => {
+    for (const [path, language, heading] of [
+      ["/", "en", "Remove the music."],
+      ["/ar/", "ar", "أزل الموسيقى."],
+    ]) {
+      const response = await fetch(`${baseUrl}${path}`);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-language"), language);
+      const html = await response.text();
+      assert.match(html, /<main id="main-content"/);
+      assert.ok(html.includes(heading));
+      assert.match(html, /<details/);
+      const json = html.match(
+        /<script type="application\/ld\+json">([\s\S]*?)<\/script>/,
+      )?.[1];
+      assert.ok(json);
+      const schema = JSON.parse(json);
+      assert.equal(schema["@context"], "https://schema.org");
+      assert.equal(
+        schema["@graph"].find((entry) => Array.isArray(entry["@type"]))
+          .inLanguage,
+        language,
+      );
+    }
+  });
+
+  test("serves public AI guidance and the social preview with correct MIME types", async () => {
+    for (const [path, contentType] of [
+      ["/llms.txt", "text/plain; charset=utf-8"],
+      ["/social-preview.png", "image/png"],
+    ]) {
+      const response = await fetch(`${baseUrl}${path}`);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-type"), contentType);
+      assert.ok((await response.arrayBuffer()).byteLength > 100);
+    }
+  });
+});
+
+describe("optional IndexNow verification", () => {
+  test("serves only the configured verification key for GET and HEAD", async () => {
+    const key = "synthetic-test-key-12345678";
+    const server = createLandingServer({ indexNowKey: key });
+    await new Promise((done) => server.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const response = await fetch(`${url}/${key}.txt`);
+      assert.equal(response.status, 200);
+      assert.equal(
+        response.headers.get("content-type"),
+        "text/plain; charset=utf-8",
+      );
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      assert.equal(response.headers.get("x-robots-tag"), "noindex");
+      assert.equal(await response.text(), key);
+      const head = await fetch(`${url}/${key}.txt`, { method: "HEAD" });
+      assert.equal(head.status, 200);
+      assert.equal(head.headers.get("content-length"), String(key.length));
+      assert.equal(await head.text(), "");
+      assert.equal(
+        (await fetch(`${url}/unconfigured-verification-key.txt`)).status,
+        404,
+      );
+    } finally {
+      await new Promise((done) => server.close(done));
+    }
+  });
+
+  test("rejects malformed configured keys before listening", () => {
+    for (const indexNowKey of [
+      "",
+      "short",
+      "a".repeat(129),
+      "invalid_key",
+      "path/key123",
+      null,
+      12345678,
+    ])
+      assert.throws(
+        () => createLandingServer({ indexNowKey }),
+        /INDEXNOW_KEY must contain/,
+      );
   });
 });

@@ -4,26 +4,119 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#101115" />
-    <meta
-      name="description"
-      content="Manage vocal-isolation jobs, your audio library, and completed voice-only tracks with MusicMute. Sign in to use the web app."
-    />
-    <link rel="canonical" href="https://app.music-mute.com/" />
+    <link rel="stylesheet" href="/entry.css" />
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/favicon.png" />
+    <!-- public-discovery:start -->
+    <meta
+      name="description"
+      content="Remove background music and keep the voice with MusicMute online. Sign in to upload audio, import a supported link, and listen to your processed vocal tracks."
+    />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <link rel="canonical" href="https://app.music-mute.com/" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="MusicMute" />
-    <meta property="og:title" content="MusicMute | Voice-Only Audio" />
+    <meta
+      property="og:title"
+      content="MusicMute Web App | Remove Background Music Online"
+    />
     <meta
       property="og:description"
-      content="Manage vocal-isolation jobs, your audio library, and completed voice-only tracks with MusicMute."
+      content="Keep the voice from your audio. Sign in to upload audio, import supported links, and play your processed vocal tracks in the browser."
     />
     <meta property="og:url" content="https://app.music-mute.com/" />
-    <meta name="twitter:card" content="summary" />
-    <title>MusicMute | Voice-Only Audio</title>
+    <meta
+      property="og:image"
+      content="https://app.music-mute.com/social-preview.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="MusicMute: remove background music and keep the voice"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="MusicMute Web App | Remove Background Music Online"
+    />
+    <meta
+      name="twitter:description"
+      content="Upload audio or import a supported link to isolate the voice, then listen in your MusicMute library. Account and JavaScript required."
+    />
+    <meta
+      name="twitter:image"
+      content="https://app.music-mute.com/social-preview.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="MusicMute: remove background music and keep the voice"
+    />
+    <title>MusicMute Web App | Remove Background Music Online</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "@id": "https://app.music-mute.com/#application",
+        "name": "MusicMute Web App",
+        "url": "https://app.music-mute.com/",
+        "description": "Remove background music and keep the voice. Sign in to upload audio or import a supported source link, follow processing, and play completed vocal tracks in your online library.",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Web browser",
+        "browserRequirements": "Requires JavaScript and a MusicMute account.",
+        "inLanguage": ["en", "ar"],
+        "image": "https://app.music-mute.com/social-preview.png",
+        "featureList": [
+          "Local audio upload",
+          "Supported source link imports",
+          "Vocal isolation with processing updates",
+          "Online audio library and playback",
+          "English and Arabic interface"
+        ],
+        "publisher": {
+          "@type": "Organization",
+          "@id": "https://music-mute.com/#organization",
+          "name": "MusicMute",
+          "url": "https://music-mute.com/"
+        }
+      }
+    </script>
+    <!-- public-discovery:end -->
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- public-entry:start -->
+      <main class="entry-shell">
+        <img src="/favicon.png" width="72" height="72" alt="" />
+        <p class="entry-brand">MusicMute Web App</p>
+        <h1>Remove background music. Keep the voice.</h1>
+        <p>
+          Use MusicMute in your browser to isolate vocals from audio you own or
+          have permission to process. Sign in or create an account to begin.
+        </p>
+        <section aria-labelledby="entry-workflow">
+          <h2 id="entry-workflow">From audio to your vocal library</h2>
+          <ol>
+            <li>
+              Upload a local audio file or import a supported source link.
+            </li>
+            <li>Follow the processing progress in your account.</li>
+            <li>Listen to completed vocal tracks in your online library.</li>
+          </ol>
+          <p>
+            The interface supports English and Arabic. Source availability,
+            account limits, and the original recording affect processing and
+            results; complete music removal is not guaranteed.
+          </p>
+        </section>
+        <p>
+          The sign-in form opens when the app loads. JavaScript is required for
+          sign-in, uploads, processing updates, and playback.
+        </p>
+        <a href="https://music-mute.com/">Explore MusicMute and its apps</a>
+      </main>
+      <!-- public-entry:end -->
+    </div>
     <script src="/config.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

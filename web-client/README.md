@@ -48,9 +48,10 @@ The production server reads its public runtime values from:
 | `PUBLIC_FIREBASE_APP_ID`      | Firebase web app ID                                                    |
 | `PUBLIC_MEDIA_ORIGIN`         | Required exact HTTPS R2 account origin for storage CSP; no AWS default |
 | `PORT`                        | Listener port, default `3000`                                          |
+| `INDEXNOW_KEY`                | Optional 8-128 letter/digit/dash key for this host's IndexNow proof    |
 
-These values are served through non-cacheable `/config.js`, allowing one image
-to be configured per environment without rebuilding. Do not place private R2
+The `PUBLIC_*` browser values are served through non-cacheable `/config.js`,
+allowing one image to be configured per environment without rebuilding. Do not place private R2
 credentials, Firebase Admin service accounts, backend `.env` values, database
 URLs or bearer tokens in these variables. The client does not store signed R2
 URLs or identity tokens in its own local storage; Firebase manages its own
@@ -114,17 +115,37 @@ runtime configuration must be reviewed for each release. Real Firebase popup,
 signed R2 transfers and authenticated account/job flows remain unverified in
 production.
 
-The public `/` entry page has a descriptive title, canonical URL and share
-metadata. `robots.txt` and `sitemap.xml` list only that URL. Authenticated SPA
-routes carry `X-Robots-Tag: noindex, nofollow`, and unknown paths return 404, so
-private screens are not advertised as search results. The favicon is rendered
+The public `/` entry page has readable HTML before JavaScript runs, a descriptive
+title, its own canonical URL, a shared product preview image, and a truthful
+`WebApplication` structured-data entity. The English and Arabic sign-in screens
+also explain the app's audio workflow and permission requirements. This browser
+entry is distinct from the product landing page at `https://music-mute.com/`.
+`robots.txt` allows crawlers and names the root-only `sitemap.xml`; both use their
+standard text/XML media types. `/index.html` permanently redirects to `/`, preserving
+query parameters used by existing app flows. `llms.txt` provides an optional factual
+product summary for tools that read it; it is not a search-engine requirement or
+an indexing/ranking guarantee.
+
+When `INDEXNOW_KEY` is configured, GET/HEAD `/<key>.txt` returns that exact public
+verification key as uncached plain text with `noindex`. Invalid keys fail startup;
+unset configuration serves no verification file. Supply each host's key in its
+deployment environment rather than committing it. Submit only canonical public
+URLs to IndexNow after live verification. Submission acceptance does not guarantee
+indexing, and does not replace a sitemap or Google Search Console.
+
+Private SPA routes carry `X-Robots-Tag: noindex, nofollow` and matching HTML robots
+metadata. Their server HTML replaces the public introduction with a generic
+account entry and omits public canonical, social metadata, and structured data.
+Keep these paths crawlable so engines can read `noindex`; robots exclusions are
+not an access control. Authentication still protects all account and audio data.
+Unknown paths return 404. The favicon is rendered
 from Android's `ic_vocal.xml` brand mark; update `public/favicon.svg` and its
 192-pixel PNG together if the native mark changes. These measures support branded
 discovery; the signed-in application is not a substitute for a public product
 landing page, and indexing is controlled by search engines.
 
 The signed-out entry and authenticated Settings page advertise the macOS app and
-link to the future public landing page's Downloads section. Keep the stable URL
+link to the public landing page's Downloads section. Keep the stable URL
 centralized in `src/product-links.ts` as `https://music-mute.com/#downloads`;
 do not link browser UI directly to a mutable DMG or to the authenticated web-app
 origin. External product links open in a new tab with `noopener noreferrer`.

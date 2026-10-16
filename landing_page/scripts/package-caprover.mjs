@@ -22,6 +22,7 @@ const files = [
   "landing_page/tsconfig.json",
   "landing_page/vite.config.ts",
   "landing_page/server.mjs",
+  "landing_page/scripts/prerender.mjs",
 ];
 
 function collect(directory) {

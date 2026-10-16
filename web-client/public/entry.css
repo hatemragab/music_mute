@@ -1,0 +1,36 @@
+.entry-shell {
+  box-sizing: border-box;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: clamp(1.5rem, 5vw, 4rem);
+  color: #f2f0f5;
+  background: #101115;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  line-height: 1.65;
+}
+.entry-shell h1 {
+  font-size: clamp(2rem, 6vw, 3.25rem);
+  line-height: 1.15;
+}
+.entry-shell h2 {
+  font-size: 1.25rem;
+}
+.entry-shell p,
+.entry-shell ol {
+  color: #c5c5cd;
+}
+.entry-shell .entry-brand,
+.entry-shell a {
+  color: #ff9b70;
+}
+.entry-shell a {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+html:has(.entry-shell) {
+  color-scheme: dark;
+  background: #101115;
+}
+body:has(.entry-shell) {
+  margin: 0;
+}

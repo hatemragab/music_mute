@@ -17,19 +17,8 @@ import {
   Upload,
   Waves,
 } from "lucide-react";
-import {
-  useEffect,
-  useState,
-  type ComponentType,
-  type ReactNode,
-  type SVGProps,
-} from "react";
-import {
-  LANGUAGE_STORAGE_KEY,
-  messages,
-  resolveInitialLanguage,
-  type Language,
-} from "./i18n";
+import { type ComponentType, type ReactNode, type SVGProps } from "react";
+import { LANGUAGE_STORAGE_KEY, messages, type Language } from "./i18n";
 import { AudioComparison } from "./AudioComparison";
 import { PRODUCT_LINKS } from "./product-links";
 
@@ -73,16 +62,11 @@ function Waveform({
   );
 }
 
-function routedLanguage(): string | null {
-  return document.documentElement.dataset.languageRoute ?? null;
-}
-
-function storedLanguage(): string | null {
-  try {
-    return window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
-  } catch {
-    return null;
-  }
+function routedLanguage(): Language {
+  return typeof document !== "undefined" &&
+    document.documentElement.dataset.languageRoute === "ar"
+    ? "ar"
+    : "en";
 }
 
 function persistLanguage(language: Language) {
@@ -114,27 +98,10 @@ function ExternalLink({
   );
 }
 
-export function App() {
-  const [language] = useState<Language>(() =>
-    resolveInitialLanguage(
-      routedLanguage(),
-      storedLanguage(),
-      navigator.languages,
-    ),
-  );
+export function App({
+  language = routedLanguage(),
+}: { language?: Language } = {}) {
   const t = messages[language];
-
-  useEffect(() => {
-    document.documentElement.lang = language;
-    document.documentElement.dir = language === "ar" ? "rtl" : "ltr";
-    document.title =
-      language === "ar"
-        ? "ميوزك ميوت | احتفظ بالصوت"
-        : "MusicMute | Keep the voice";
-    document
-      .querySelector('meta[name="description"]')
-      ?.setAttribute("content", t.hero.body);
-  }, [language, t.hero.body]);
 
   const nextLanguage: Language = language === "en" ? "ar" : "en";
   const nextLanguagePath = nextLanguage === "ar" ? "/ar/" : "/";
@@ -164,6 +131,8 @@ export function App() {
           <a
             className="language-button"
             href={nextLanguagePath}
+            hrefLang={nextLanguage}
+            lang={nextLanguage}
             onClick={(event) => {
               persistLanguage(nextLanguage);
               event.currentTarget.href = `${nextLanguagePath}${window.location.hash}`;

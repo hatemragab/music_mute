@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0b0c0f"/>
+  <rect x="64" y="64" width="1072" height="502" rx="32" fill="#111c1a" stroke="#264e43" stroke-width="2"/>
+  <rect x="120" y="122" width="108" height="108" rx="20" fill="#123c37"/>
+  <g fill="none" stroke="#96e6c7" stroke-linecap="round">
+    <path d="M144 171v10M204 171v10" stroke-width="6" opacity=".24"/>
+    <path d="M154 165v22M194 165v22" stroke-width="7" opacity=".38"/>
+    <path d="M164 158v36M184 158v36" stroke-width="8" opacity=".56"/>
+    <path d="M174 147v58" stroke-width="12"/>
+  </g>
+  <g font-family="Arial, sans-serif">
+    <text x="252" y="194" fill="#f4f7f5" font-size="53" font-weight="700">MusicMute</text>
+    <text x="120" y="340" fill="#f4f7f5" font-size="70" font-weight="700">Remove background music.</text>
+    <text x="120" y="428" fill="#96e6c7" font-size="70" font-weight="700">Keep the voice.</text>
+    <text x="120" y="510" fill="#b3c7bd" font-size="28">Audio import · Voice isolation · Listen and share</text>
+  </g>
+</svg>

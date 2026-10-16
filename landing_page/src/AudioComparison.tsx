@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useId,
   useRef,
   useState,
@@ -59,6 +60,11 @@ export function AudioComparison({ copy, isRtl }: AudioComparisonProps) {
   const [activeTrack, setActiveTrack] = useState<AudioTrack>("original");
   const [isUnavailable, setIsUnavailable] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const attachAudio = useCallback((element: HTMLAudioElement | null) => {
+    audioRef.current = element;
+    // A prerendered audio element can fail before React attaches onError.
+    if (element?.error) setIsUnavailable(true);
+  }, []);
   const pendingPlaybackRef = useRef<PendingPlayback | null>(null);
   const tabRefs = useRef<Partial<Record<AudioTrack, HTMLButtonElement>>>({});
   const instanceId = useId();
@@ -218,7 +224,7 @@ export function AudioComparison({ copy, isRtl }: AudioComparisonProps) {
                 <audio
                   className="audio-comparison__player"
                   key={track}
-                  ref={audioRef}
+                  ref={attachAudio}
                   controls
                   preload="metadata"
                   src={AUDIO_SOURCES[track]}

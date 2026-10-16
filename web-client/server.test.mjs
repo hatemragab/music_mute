@@ -1,5 +1,6 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
 import { createWebServer, publicConfig } from "./server.mjs";
 
 const env = {
@@ -92,7 +93,10 @@ test("exposes the public entry point and crawl assets without indexing private r
   const home = await fetch(origin);
   const html = await home.text();
   assert.equal(home.headers.get("x-robots-tag"), null);
-  assert.match(html, /<title>MusicMute \| Voice-Only Audio<\/title>/);
+  assert.match(
+    html,
+    /<title>MusicMute Web App \| Remove Background Music Online<\/title>/,
+  );
   assert.match(html, /rel="canonical" href="https:\/\/app\.music-mute\.com\/"/);
   assert.match(html, /name="description"/);
   assert.match(html, /href="\/favicon\.png"/);
@@ -100,17 +104,171 @@ test("exposes the public entry point and crawl assets without indexing private r
   assert.equal(icon.status, 200);
   assert.match(icon.headers.get("content-type"), /image\/png/);
   const robots = await fetch(`${origin}/robots.txt`);
+  assert.match(robots.headers.get("content-type"), /^text\/plain;/);
   assert.match(
     await robots.text(),
     /Sitemap: https:\/\/app\.music-mute\.com\/sitemap\.xml/,
   );
   const sitemap = await fetch(`${origin}/sitemap.xml`);
-  assert.match(
-    await sitemap.text(),
-    /<loc>https:\/\/app\.music-mute\.com\/<\/loc>/,
+  assert.match(sitemap.headers.get("content-type"), /^application\/xml;/);
+  const sitemapBody = await sitemap.text();
+  assert.deepEqual(
+    [...sitemapBody.matchAll(/<loc>(.*?)<\/loc>/g)].map((m) => m[1]),
+    ["https://app.music-mute.com/"],
   );
   const health = await fetch(`${origin}/healthz`);
   assert.equal(health.headers.get("x-robots-tag"), "noindex");
+});
+
+test("public HTML includes useful content and accurate application data before JavaScript runs", async () => {
+  const response = await fetch(origin);
+  const { document } = new JSDOM(await response.text()).window;
+  assert.equal(
+    document.querySelector("h1")?.textContent,
+    "Remove background music. Keep the voice.",
+  );
+  assert.match(
+    document.querySelector("main")?.textContent,
+    /Upload a local audio/,
+  );
+  assert.match(
+    document.querySelector("main")?.textContent,
+    /JavaScript is required/,
+  );
+  assert.ok(document.querySelector('a[href="https://music-mute.com/"]'));
+  const application = JSON.parse(
+    document.querySelector('script[type="application/ld+json"]').textContent,
+  );
+  assert.equal(application["@type"], "WebApplication");
+  assert.equal(application["@id"], "https://app.music-mute.com/#application");
+  assert.deepEqual(application.inLanguage, ["en", "ar"]);
+  assert.match(application.browserRequirements, /account/);
+  assert.equal(application.offers, undefined);
+  assert.equal(application.aggregateRating, undefined);
+  assert.equal(
+    document.querySelector('meta[property="og:image"]')?.content,
+    "https://app.music-mute.com/social-preview.png",
+  );
+  const head = await fetch(origin, { method: "HEAD" });
+  assert.equal(head.status, 200);
+  assert.equal(
+    head.headers.get("content-type"),
+    response.headers.get("content-type"),
+  );
+  assert.equal(head.headers.get("x-robots-tag"), null);
+  assert.equal(await head.text(), "");
+});
+
+test("all private HTML routes omit public discovery content and remain noindex for GET and HEAD", async () => {
+  for (const path of [
+    "/auth",
+    "/jobs",
+    "/jobs/0123456789abcdef01234567",
+    "/library",
+    "/player",
+    "/settings",
+    "/account",
+  ]) {
+    for (const method of ["GET", "HEAD"]) {
+      const response = await fetch(`${origin}${path}`, { method });
+      assert.equal(response.status, 200, `${method} ${path}`);
+      assert.equal(response.headers.get("x-robots-tag"), "noindex, nofollow");
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      const html = await response.text();
+      if (method === "HEAD") {
+        assert.equal(html, "");
+        continue;
+      }
+      const { document } = new JSDOM(html).window;
+      assert.equal(document.title, "MusicMute | Account");
+      assert.equal(
+        document.querySelector('meta[name="robots"]')?.content,
+        "noindex, nofollow",
+      );
+      assert.equal(document.querySelector('link[rel="canonical"]'), null);
+      assert.equal(
+        document.querySelector('script[type="application/ld+json"]'),
+        null,
+      );
+      assert.equal(document.querySelector('meta[property^="og:"]'), null);
+      assert.doesNotMatch(document.body.textContent, /Remove background music/);
+      assert.ok(
+        document.querySelector('script[type="module"][src^="/assets/"]'),
+      );
+    }
+  }
+});
+
+test("duplicate entry URL permanently redirects to the public root and preserves query parameters", async () => {
+  for (const method of ["GET", "HEAD"]) {
+    for (const path of ["/index.html", "/index%2ehtml"]) {
+      const response = await fetch(`${origin}${path}?source=direct`, {
+        method,
+        redirect: "manual",
+      });
+      assert.equal(response.status, 308);
+      assert.equal(response.headers.get("location"), "/?source=direct");
+      assert.equal(await response.text(), "");
+    }
+  }
+});
+
+test("public crawler summary and its assets are available with correct media types", async () => {
+  for (const method of ["GET", "HEAD"]) {
+    const summary = await fetch(`${origin}/llms.txt`, { method });
+    assert.equal(summary.status, 200);
+    assert.match(summary.headers.get("content-type"), /^text\/plain;/);
+    const body = await summary.text();
+    if (method === "GET") {
+      assert.match(body, /JavaScript and an account are required/);
+      assert.match(body, /does not grant access to private audio/);
+    } else assert.equal(body, "");
+  }
+  const stylesheet = await fetch(`${origin}/entry.css`);
+  assert.match(stylesheet.headers.get("content-type"), /^text\/css;/);
+  const image = await fetch(`${origin}/social-preview.png`);
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get("content-type"), "image/png");
+});
+
+test("optional IndexNow verification serves only the configured key for GET and HEAD", async (t) => {
+  const key = "indexnow-fixture-key";
+  const configured = createWebServer({ env: { ...env, INDEXNOW_KEY: key } });
+  await new Promise((resolve) => configured.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => configured.close(resolve)));
+  const configuredOrigin = `http://127.0.0.1:${configured.address().port}`;
+  for (const method of ["GET", "HEAD"]) {
+    const response = await fetch(`${configuredOrigin}/${key}.txt`, { method });
+    assert.equal(response.status, 200);
+    assert.equal(
+      response.headers.get("content-type"),
+      "text/plain; charset=utf-8",
+    );
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("x-robots-tag"), "noindex");
+    assert.equal(await response.text(), method === "HEAD" ? "" : key);
+    assert.equal(
+      (await fetch(`${configuredOrigin}/wrong-fixture-key.txt`, { method }))
+        .status,
+      404,
+    );
+  }
+  assert.equal((await fetch(`${origin}/${key}.txt`)).status, 404);
+});
+
+test("IndexNow startup rejects invalid configured verification keys", () => {
+  for (const key of [
+    "",
+    "short",
+    "a".repeat(129),
+    "../unsafe-key",
+    "invalid_key",
+    "key with spaces",
+  ])
+    assert.throws(
+      () => createWebServer({ env: { ...env, INDEXNOW_KEY: key } }),
+      /INDEXNOW_KEY/,
+    );
 });
 
 test("CSP permits only the explicit storage origin", async () => {

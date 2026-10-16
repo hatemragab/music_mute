@@ -17,7 +17,22 @@ const types = {
   ".woff2": "font/woff2",
   ".ttf": "font/ttf",
   ".wasm": "application/wasm",
+  ".txt": "text/plain; charset=utf-8",
+  ".xml": "application/xml; charset=utf-8",
 };
+
+function accountEntryHtml(body) {
+  return body
+    .toString("utf8")
+    .replace(
+      /<!-- public-discovery:start -->[\s\S]*?<!-- public-discovery:end -->/,
+      '<title>MusicMute | Account</title><meta name="robots" content="noindex, nofollow" /><meta name="description" content="Sign in to access your MusicMute account." />',
+    )
+    .replace(
+      /<!-- public-entry:start -->[\s\S]*?<!-- public-entry:end -->/,
+      '<main class="entry-shell"><h1>MusicMute</h1><p>Sign in to access your account.</p><noscript><p>JavaScript is required to sign in.</p><a href="/">Open MusicMute</a></noscript></main>',
+    );
+}
 
 export function publicConfig(env = process.env) {
   const apiOrigin = env.PUBLIC_API_ORIGIN;
@@ -64,6 +79,11 @@ export function createWebServer({
   dist = DEFAULT_DIST,
 } = {}) {
   const config = publicConfig(env);
+  const indexNowKey = env.INDEXNOW_KEY;
+  if (indexNowKey !== undefined && !/^[A-Za-z0-9-]{8,128}$/.test(indexNowKey))
+    throw new Error(
+      "INDEXNOW_KEY must contain 8-128 letters, digits, or dashes.",
+    );
   const root = resolve(dist);
   const mediaOrigin = env.PUBLIC_MEDIA_ORIGIN;
   let media;
@@ -122,6 +142,24 @@ export function createWebServer({
       response.writeHead(400).end();
       return;
     }
+    if (pathname === "/index.html") {
+      const query = new URL(request.url || "/", "http://localhost").search;
+      response.writeHead(308, {
+        Location: `/${query}`,
+        "Cache-Control": "no-cache",
+      });
+      response.end();
+      return;
+    }
+    if (indexNowKey && pathname === `/${indexNowKey}.txt`) {
+      response.setHeader("X-Robots-Tag", "noindex");
+      response.writeHead(200, {
+        "Content-Type": types[".txt"],
+        "Cache-Control": "no-store",
+      });
+      response.end(request.method === "HEAD" ? undefined : indexNowKey);
+      return;
+    }
     if (pathname === "/healthz") {
       response.setHeader("X-Robots-Tag", "noindex");
       response.writeHead(200, {
@@ -167,7 +205,7 @@ export function createWebServer({
       file = join(root, "index.html");
     }
     try {
-      const body = await readFile(file);
+      let body = await readFile(file);
       const type = types[extname(file)] || "application/octet-stream";
       const cache = file.endsWith("index.html")
         ? "no-store"
@@ -176,6 +214,7 @@ export function createWebServer({
           : "no-cache";
       if (file.endsWith("index.html") && pathname !== "/") {
         response.setHeader("X-Robots-Tag", "noindex, nofollow");
+        body = Buffer.from(accountEntryHtml(body));
       }
       response.writeHead(200, { "Content-Type": type, "Cache-Control": cache });
       response.end(request.method === "HEAD" ? undefined : body);
